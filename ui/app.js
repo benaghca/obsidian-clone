@@ -1,0 +1,1767 @@
+/* Folio — front end. Plain JS, no build step, no network beyond 127.0.0.1. */
+'use strict';
+
+// ============================================================ basics
+
+const $ = (s, el = document) => el.querySelector(s);
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const TOKEN = $('meta[name=folio-token]').content;
+const VAULT = $('meta[name=folio-vault]').content;
+const NATIVE = $('meta[name=folio-mode]').content === 'native';
+const enc = encodeURIComponent;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const isMd = p => /\.md$/i.test(p);
+const basename = p => p.split('/').pop();
+const dirname = p => p.includes('/') ? p.slice(0, p.lastIndexOf('/')) : '';
+const noteName = p => { const b = basename(p); return isMd(b) ? b.slice(0, -3) : b; };
+const join = (d, n) => d ? `${d}/${n}` : n;
+const splitOnce = (s, ch) => { const i = s.indexOf(ch); return i < 0 ? [s, null] : [s.slice(0, i), s.slice(i + 1)]; };
+const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const rawUrl = p => `/api/raw?path=${enc(p)}&t=${TOKEN}`;
+const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+
+function store(key, val) {
+  const k = `folio:${VAULT}:${key}`;
+  try {
+    if (val === undefined) { const v = localStorage.getItem(k); return v == null ? undefined : JSON.parse(v); }
+    localStorage.setItem(k, JSON.stringify(val));
+  } catch { return undefined; }
+}
+
+async function api(path, opts = {}) {
+  const mutating = opts.method && opts.method !== 'GET' && !path.startsWith('/api/read');
+  if (mutating) S.gen++;
+  try { return await apiRaw(path, opts); } finally { if (mutating) S.gen++; }
+}
+
+async function apiRaw(path, opts) {
+  const r = await fetch(path, { ...opts, headers: { 'X-Folio-Token': TOKEN, ...(opts.headers || {}) } });
+  if (!r.ok) {
+    let msg = r.statusText;
+    try { msg = (await r.json()).error || msg; } catch { }
+    const e = new Error(msg); e.status = r.status; throw e;
+  }
+  return (r.headers.get('content-type') || '').includes('json') ? r.json() : r.text();
+}
+
+function toast(msg, ms = 2600) {
+  const t = document.createElement('div');
+  t.className = 'toast'; t.textContent = msg;
+  document.body.append(t);
+  setTimeout(() => t.remove(), ms);
+}
+
+// ============================================================ settings
+
+const DEFAULTS = {
+  newNoteFolder: '',
+  dailyFolder: 'Daily',
+  dailyTemplate: '',
+  templatesFolder: 'Templates',
+  attachFolder: 'attachments',
+  defaultMode: 'edit',
+  livePreview: true,
+  readable: true,
+  mono: false,
+  theme: '',
+};
+const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
+const saveCfg = () => store('settings', cfg);
+
+function applyTheme() {
+  const t = cfg.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+  document.documentElement.dataset.theme = t;
+  document.body.classList.toggle('wide', !cfg.readable);
+  document.body.classList.toggle('mono', cfg.mono);
+  document.body.classList.toggle('source-mode', !cfg.livePreview);
+  if (typeof ed !== 'undefined') ed.setLive(cfg.livePreview);
+  if (window.FolioGraph) FolioGraph.restyle();
+}
+
+// ============================================================ state
+
+const S = {
+  files: new Map(),      // path -> {mtime, size}
+  dirs: new Set(),
+  notes: new Map(),      // md path -> {content, mtime, links, out, tags, headings, aliases, fm, fmLen}
+  byName: new Map(),     // lower name -> [paths]
+  byAlias: new Map(),    // lower alias -> path
+  lowerPath: new Map(),  // lower path -> path
+  cur: null,             // current path (note or file)
+  view: 'empty',
+  mode: cfg.defaultMode,
+  dirty: false,
+  saving: false,
+  hist: [], histIdx: -1,
+  pos: new Map(),        // path -> {sel, scroll, pscroll}
+  expanded: new Set(store('expanded') || []),
+  gen: 0,                // bumped by every write, so stale polls can be discarded
+  version: 0,            // bumped when the index changes, so editor widgets re-render
+  savePromise: null,
+};
+
+const editWrap = $('#edit-wrap');
+// CodeMirror-based editor with live preview (ui/editor/editor.js). Hooks are
+// arrow functions so they can use things defined further down this file.
+const ed = FolioEditor.create($('#editor'), {
+  resolve: name => resolveLink(name, S.cur),
+  rawUrl: p => rawUrl(p),
+  imageUrl: src => { const t = /^[a-z][a-z0-9+.-]*:/i.test(src) ? null : resolveLink(safeDecode(src), S.cur); return t ? rawUrl(t) : null; },
+  follow: (name, sub) => followLink(name, sub, S.cur),
+  openUrl: url => window.open(url, '_blank', 'noopener'),
+  tag: tag => searchFor(`tag:${tag}`),
+  renderEmbed: (el, path, sub) => renderEmbedInto(el, path, sub),
+  renderMarkdown: (el, text) => { el.innerHTML = markdownToHtml(text, S.cur, 1); linkifyTags(el); },
+  version: () => S.version,
+  linkOptions: q => linkOptions(q),
+  tagOptions: () => allTags(),
+  onChange: () => markDirty(),
+  onCursor: () => cursorMoved(),
+  onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
+  focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
+});
+const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+const titleEl = $('#title');
+const preview = $('#preview');
+
+// ============================================================ parsing & index
+
+function blankCode(s) {
+  // Replace fenced + inline code with spaces (same length) so offsets survive.
+  return s
+    .replace(/^([ \t]*)(```+|~~~+)[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))/gm, m => m.replace(/[^\n]/g, ' '))
+    .replace(/(`+)(?!`)[^\n]*?[^`]\1(?!`)|`[^`\n]`/g, m => ' '.repeat(m.length));
+}
+
+function splitFrontmatter(s) {
+  const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(s);
+  if (!m) return { fm: null, fmLen: 0 };
+  return { fm: parseYaml(m[1]), fmLen: m[0].length };
+}
+
+function parseYaml(t) {
+  const unq = s => s.trim().replace(/^(["'])(.*)\1$/, '$2');
+  const o = {}; let key = null;
+  for (const line of t.split(/\r?\n/)) {
+    let m;
+    if ((m = /^([^\s:#][^:]*):[ \t]*(.*)$/.exec(line))) {
+      key = m[1].trim(); const v = m[2].trim();
+      if (v === '') o[key] = [];
+      else if (/^\[.*\]$/.test(v)) o[key] = v.slice(1, -1).split(',').map(unq).filter(Boolean);
+      else o[key] = unq(v);
+    } else if ((m = /^\s+-\s+(.*)$|^-\s+(.*)$/.exec(line)) && key) {
+      if (!Array.isArray(o[key])) o[key] = o[key] ? [o[key]] : [];
+      o[key].push(unq(m[1] ?? m[2]));
+    }
+  }
+  return o;
+}
+
+const asList = v => v == null ? [] : Array.isArray(v) ? v : String(v).split(/[,\s]+/);
+
+function parseNote(content) {
+  const { fm, fmLen } = splitFrontmatter(content);
+  const body = blankCode(content.slice(fmLen));
+  const links = [], headings = [], tags = new Set();
+  let m;
+  const wre = /(!?)\[\[([^\[\]\n]+?)\]\]/g;
+  while ((m = wre.exec(body))) {
+    const [tgt, alias] = splitOnce(m[2], '|');
+    const [name, sub] = splitOnce(tgt, '#');
+    links.push({ embed: !!m[1], name: name.trim(), sub: (sub || '').trim(), alias, index: m.index + fmLen, len: m[0].length });
+  }
+  const mre = /(!?)\[([^\]\n]*)\]\(<?([^)\n>]+?)>?\)/g;
+  while ((m = mre.exec(body))) {
+    let href = m[3].trim();
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) continue;
+    try { href = decodeURIComponent(href); } catch { }
+    const [name, sub] = splitOnce(href, '#');
+    links.push({ embed: !!m[1], md: true, text: m[2], name, sub: sub || '', index: m.index + fmLen, len: m[0].length });
+  }
+  links.sort((a, b) => a.index - b.index);
+  const tre = /(^|[\s(,;])#([\p{L}\p{N}_\-\/]+)/gu;
+  while ((m = tre.exec(body))) if (!/^[\d\/]+$/.test(m[2])) tags.add(m[2].toLowerCase());
+  const hre = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/gm;
+  while ((m = hre.exec(body))) headings.push({ level: m[1].length, text: m[2], index: m.index + fmLen });
+  const aliases = [];
+  if (fm) {
+    for (const t of asList(fm.tags ?? fm.tag)) { const x = String(t).replace(/^#/, '').trim(); if (x) tags.add(x.toLowerCase()); }
+    const al = fm.aliases ?? fm.alias;
+    for (const a of Array.isArray(al) ? al : al ? [al] : []) if (String(a).trim()) aliases.push(String(a).trim());
+  }
+  return { links, headings, tags, aliases, fm, fmLen };
+}
+
+function setNote(path, content, mtime) {
+  const n = { content, mtime, ...parseNote(content) };
+  S.notes.set(path, n);
+  return n;
+}
+
+function rebuildNames() {
+  S.byName.clear(); S.byAlias.clear(); S.lowerPath.clear();
+  for (const p of S.files.keys()) {
+    S.lowerPath.set(p.toLowerCase(), p);
+    const k = noteName(p).toLowerCase();
+    if (!S.byName.has(k)) S.byName.set(k, []);
+    S.byName.get(k).push(p);
+  }
+  for (const [p, n] of S.notes) for (const a of n.aliases) if (!S.byAlias.has(a.toLowerCase())) S.byAlias.set(a.toLowerCase(), p);
+}
+
+function normPath(p) {
+  const out = [];
+  for (const part of p.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') out.pop(); else out.push(part);
+  }
+  return out.join('/');
+}
+
+function resolveLink(name, from) {
+  if (!name) return from;
+  const n = name.replace(/\\/g, '/').trim();
+  if (n.includes('/')) {
+    const dir = from ? dirname(from) : '';
+    const cands = [n, n + '.md'];
+    if (dir) cands.push(`${dir}/${n}`, `${dir}/${n}.md`);
+    for (const c of cands) { const p = S.lowerPath.get(normPath(c).toLowerCase()); if (p) return p; }
+    const low = n.toLowerCase().replace(/^\/+/, '');
+    for (const p of S.files.keys()) { const pl = p.toLowerCase(); if (pl.endsWith('/' + low) || pl.endsWith('/' + low + '.md')) return p; }
+    return null;
+  }
+  let key = n.toLowerCase();
+  if (key.endsWith('.md')) key = key.slice(0, -3);
+  const arr = S.byName.get(key);
+  if (!arr) return S.byAlias.get(n.toLowerCase()) || null;
+  if (arr.length === 1) return arr[0];
+  const dir = from ? dirname(from) : null;
+  return [...arr].sort((a, b) =>
+    (isMd(b) - isMd(a)) || ((dirname(b) === dir) - (dirname(a) === dir)) || (a.length - b.length))[0];
+}
+
+function resolveNote(path) {
+  const n = S.notes.get(path);
+  if (n) n.out = n.links.map(l => resolveLink(l.name, path));
+}
+
+function reindexAll() {
+  rebuildNames();
+  for (const p of S.notes.keys()) resolveNote(p);
+  S.version++;
+  refreshEditorSoon();
+}
+const refreshEditorSoon = debounce(() => { if (S.view === 'note' && S.mode === 'edit') ed.refresh(); }, 50);
+
+// ============================================================ loading & sync
+
+async function loadAll() {
+  const l = await api('/api/list');
+  await applyList(l);
+}
+
+async function readMany(paths) {
+  const out = {};
+  for (let i = 0; i < paths.length; i += 300) Object.assign(out, await api('/api/read', { method: 'POST', body: JSON.stringify(paths.slice(i, i + 300)) }));
+  return out;
+}
+
+async function applyList(l, gen) {
+  const next = new Map(l.files.map(f => [f.path, { mtime: f.mtime, size: f.size }]));
+  const nextDirs = new Set(l.dirs);
+  const changed = [], removed = [];
+  let structural = nextDirs.size !== S.dirs.size || [...nextDirs].some(d => !S.dirs.has(d));
+  for (const [p, f] of next) {
+    const old = S.files.get(p);
+    if (!old) structural = true;
+    if (isMd(p) && (!old || old.mtime !== f.mtime || !S.notes.has(p))) changed.push(p);
+  }
+  for (const p of S.files.keys()) if (!next.has(p)) { removed.push(p); structural = true; }
+  if (!structural && !changed.length) return false;
+  const got = changed.length ? await readMany(changed) : {};
+  if (gen != null && gen !== S.gen) return false; // we wrote something meanwhile; next poll redoes it
+
+  S.files = next; S.dirs = nextDirs;
+  for (const p of removed) S.notes.delete(p);
+  {
+    for (const [p, v] of Object.entries(got)) {
+      if (p === S.cur && S.dirty) continue;
+      const prev = S.notes.get(p);
+      if (prev && prev.content === v.content) { prev.mtime = v.mtime; continue; }
+      setNote(p, v.content, v.mtime);
+      if (p === S.cur && S.view === 'note') reloadEditorFromDisk(v.content);
+    }
+  }
+  if (structural) reindexAll(); else { changed.forEach(resolveNote); if (changed.length) { S.version++; refreshEditorSoon(); } }
+  if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
+  if (structural) renderTree();
+  refreshPanels();
+  return true;
+}
+
+function reloadEditorFromDisk(content) {
+  const st = editWrap.scrollTop;
+  ed.setSilently(content);
+  editWrap.scrollTop = st;
+  if (S.mode === 'read') renderPreview();
+}
+
+async function poll() {
+  if (S.saving || document.hidden) return;
+  const gen = S.gen;
+  try {
+    const l = await api('/api/list');
+    if (gen !== S.gen) return;
+    await applyList(l, gen);
+  } catch { /* server gone; ignore */ }
+}
+
+// ============================================================ saving
+
+const scheduleSave = debounce(() => save(), 700);
+
+function markDirty() {
+  if (!S.cur || S.view !== 'note') return;
+  S.dirty = true;
+  setSaveState('Unsaved');
+  scheduleSave();
+  liveReindex();
+}
+
+const liveReindex = debounce(() => {
+  if (!S.cur || !S.notes.has(S.cur)) return;
+  const n = S.notes.get(S.cur);
+  Object.assign(n, parseNote(ed.value));
+  n.content = ed.value;
+  resolveNote(S.cur);
+  refreshPanels(true);
+}, 400);
+
+async function save(force = false) {
+  while (S.saving) await S.savePromise;
+  if (!S.cur || !S.dirty || S.view !== 'note') return;
+  S.saving = true;
+  S.savePromise = doSave(force).finally(() => { S.saving = false; });
+  return S.savePromise;
+}
+
+async function doSave(force) {
+  const p = S.cur, content = ed.value, note = S.notes.get(p);
+  S.dirty = false; setSaveState('Saving…');
+  let err = null;
+  try {
+    const headers = (!force && note && note.mtime) ? { 'X-Base-Mtime': String(note.mtime) } : {};
+    const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: content, headers });
+    setNote(p, content, r.mtime);
+    S.files.set(p, { mtime: r.mtime, size: new Blob([content]).size });
+    resolveNote(p);
+    if (!S.dirty) setSaveState('Saved');
+    refreshPanels(true);
+  } catch (e) { err = e; S.dirty = true; }
+  if (!err) return;
+  if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
+  const overwrite = confirm(`"${noteName(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
+  if (overwrite) return doSave(true);
+  S.dirty = false;
+  const got = await readMany([p]);
+  if (got[p]) { setNote(p, got[p].content, got[p].mtime); resolveNote(p); if (S.cur === p) reloadEditorFromDisk(got[p].content); }
+  setSaveState('Reloaded from disk');
+}
+
+function setSaveState(t, err = false) {
+  const el = $('#save-state');
+  el.textContent = t; el.classList.toggle('err', err);
+}
+
+async function writeFile(path, content, base) {
+  const headers = base ? { 'X-Base-Mtime': String(base) } : {};
+  const r = await api(`/api/file?path=${enc(path)}`, { method: 'PUT', body: content, headers });
+  S.files.set(path, { mtime: r.mtime, size: typeof content === 'string' ? content.length : content.size });
+  if (isMd(path)) setNote(path, content, r.mtime);
+  return r;
+}
+
+// ============================================================ navigation
+
+function showView(v) {
+  S.view = v;
+  for (const id of ['note', 'file', 'graph', 'empty']) $(`#view-${id}`).hidden = id !== v;
+  $('#mode-btn').hidden = v !== 'note';
+  if (v === 'graph') FolioGraph.show(); else FolioGraph.hide();
+  updateHistButtons();
+}
+
+function showEmpty() {
+  showView('empty');
+  $('#crumbs').textContent = '';
+  setSaveState('');
+  document.title = `${VAULT} — Folio`;
+  renderTreeActive(); refreshPanels(); updateStatus();
+}
+
+function rememberPos() {
+  if (!S.cur || S.view !== 'note') return;
+  S.pos.set(S.cur, { a: ed.selectionStart, b: ed.selectionEnd, scroll: editWrap.scrollTop, pscroll: preview.scrollTop });
+}
+
+async function openPath(p, opts = {}) {
+  if (!p) return;
+  await save();
+  rememberPos();
+  if (!S.files.has(p)) { toast(`Not found: ${p}`); return; }
+  if (opts.push !== false && S.hist[S.histIdx] !== p) {
+    S.hist = S.hist.slice(0, S.histIdx + 1); S.hist.push(p); S.histIdx = S.hist.length - 1;
+  }
+  S.cur = p; S.dirty = false;
+  store('last', p);
+  if (!isMd(p)) return openAttachment(p);
+  const n = S.notes.get(p);
+  showView('note');
+  titleEl.value = noteName(p);
+  ed.load(n ? n.content : '');
+  setSaveState('');
+  const pos = S.pos.get(p);
+  setMode(opts.mode || S.mode, true);
+  if (pos) {
+    ed.setSelectionRange(pos.a, pos.b); editWrap.scrollTop = pos.scroll; preview.scrollTop = pos.pscroll;
+    requestAnimationFrame(() => { editWrap.scrollTop = pos.scroll; });
+  } else { editWrap.scrollTop = 0; preview.scrollTop = 0; }
+  $('#crumbs').innerHTML = crumbsHtml(p);
+  document.title = `${noteName(p)} — ${VAULT} — Folio`;
+  renderTreeActive(true);
+  refreshPanels();
+  updateStatus();
+  if (opts.heading) scrollToHeading(opts.heading);
+  if (opts.select) selectRange(opts.select[0], opts.select[1]);
+  if (opts.focusTitle) { titleEl.focus(); titleEl.select(); }
+  else if (S.mode === 'edit' && opts.focus !== false) ed.focus();
+}
+
+function crumbsHtml(p) {
+  const parts = p.split('/');
+  const last = parts.pop();
+  return parts.map(x => `${esc(x)} / `).join('') + `<b>${esc(isMd(last) ? last.slice(0, -3) : last)}</b>`;
+}
+
+function openAttachment(p) {
+  showView('file');
+  const v = $('#view-file');
+  const f = S.files.get(p);
+  const kb = f ? (f.size / 1024).toFixed(1) + ' KB' : '';
+  v.innerHTML = IMG_EXT.test(p)
+    ? `<img src="${rawUrl(p)}" alt=""><div class="file-info">${esc(p)} · ${kb}</div>`
+    : `<div class="file-info"><p>${esc(p)} · ${kb}</p><p><a class="btn" href="${rawUrl(p)}" target="_blank" rel="noopener">Open in new tab</a></p></div>`;
+  $('#crumbs').innerHTML = crumbsHtml(p);
+  renderTreeActive(true); refreshPanels(); updateStatus();
+}
+
+function goHist(d) {
+  const i = S.histIdx + d;
+  if (i < 0 || i >= S.hist.length) return;
+  S.histIdx = i;
+  openPath(S.hist[i], { push: false });
+}
+function updateHistButtons() {
+  $('[data-cmd=back]').disabled = S.histIdx <= 0;
+  $('[data-cmd=forward]').disabled = S.histIdx >= S.hist.length - 1;
+}
+
+async function followLink(name, sub, from, opts = {}) {
+  const target = resolveLink(name, from);
+  if (target) {
+    if (target === S.cur && sub) return scrollToHeading(sub);
+    return openPath(target, { heading: sub || undefined });
+  }
+  // Unresolved: create it (Obsidian behaviour).
+  const clean = name.replace(/\.md$/i, '');
+  const path = clean.includes('/') ? normPath(clean) + '.md' : join(cfg.newNoteFolder, clean + '.md');
+  await createNote(path, '', { mode: 'edit', ...opts });
+}
+
+function setMode(m, silent = false) {
+  if (S.view !== 'note') return;
+  if (!silent && S.mode === 'edit') rememberPos();
+  S.mode = m;
+  const reading = m === 'read';
+  $('#edit-wrap').hidden = reading;
+  preview.hidden = !reading;
+  $('#mode-btn').innerHTML = reading
+    ? '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>'
+    : '<svg viewBox="0 0 24 24"><path d="M3 5.5h6a3 3 0 0 1 3 3V20a2.5 2.5 0 0 0-2.5-2.5H3zM21 5.5h-6a3 3 0 0 0-3 3V20a2.5 2.5 0 0 1 2.5-2.5H21z"/></svg>';
+  $('#mode-btn').title = reading ? 'Edit (Ctrl+E)' : 'Reading view (Ctrl+E)';
+  if (reading) renderPreview();
+  else { ed.refresh(); if (!silent) ed.focus(); }
+}
+
+function scrollToHeading(h) {
+  const n = S.notes.get(S.cur); if (!n) return;
+  const want = h.replace(/^\^/, '').trim().toLowerCase();
+  const hd = n.headings.find(x => x.text.trim().toLowerCase() === want) || n.headings.find(x => slug(x.text) === slug(want));
+  if (S.mode === 'read') {
+    const el = hd ? preview.querySelector(`#${CSS.escape('h-' + slug(hd.text))}`) : null;
+    if (el) el.scrollIntoView({ block: 'start' });
+  } else if (hd) {
+    selectRange(hd.index, hd.index);
+  }
+}
+
+function selectRange(a, b) {
+  if (S.mode !== 'edit') setMode('edit');
+  ed.focus();
+  ed.setSelectionRange(a, b, true);
+}
+
+// ============================================================ markdown rendering
+
+const slug = s => s.toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-');
+let RC = { from: null, depth: 0 }; // render context for link resolution
+
+marked.use({
+  gfm: true,
+  breaks: true,
+  extensions: [
+    {
+      name: 'wiki', level: 'inline',
+      start(src) { const i = src.search(/!?\[\[/); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        const m = /^(!?)\[\[([^\[\]\n]+?)\]\]/.exec(src);
+        if (m) return { type: 'wiki', raw: m[0], embed: !!m[1], inner: m[2] };
+      },
+      renderer(t) { return renderWiki(t); },
+    },
+    {
+      name: 'hl', level: 'inline',
+      start(src) { const i = src.indexOf('=='); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        const m = /^==(?=\S)([^\n]*?\S)==/.exec(src);
+        if (m) return { type: 'hl', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+      renderer(t) { return `<mark>${this.parser.parseInline(t.tokens)}</mark>`; },
+    },
+  ],
+});
+
+function renderWiki(t) {
+  const [tgt, alias] = splitOnce(t.inner, '|');
+  const [name, sub] = splitOnce(tgt, '#');
+  const target = resolveLink(name.trim(), RC.from);
+  if (t.embed) {
+    if (target && IMG_EXT.test(target)) {
+      const w = alias && /^\d+(x\d+)?$/.test(alias.trim()) ? ` width="${alias.split('x')[0]}"` : '';
+      return `<img src="${rawUrl(target)}" alt="${esc(noteName(target))}"${w}>`;
+    }
+    if (target && isMd(target)) {
+      return `<span class="embed" data-embed="${esc(target)}" data-sub="${esc(sub || '')}"></span>`;
+    }
+    if (target) return `<a class="internal-link" data-href="${esc(target)}" data-path="1">${esc(basename(target))}</a>`;
+  }
+  const label = alias != null ? alias : (sub ? `${name}${name ? ' › ' : ''}${sub.replace(/^\^/, '')}` : name);
+  return `<a class="internal-link${target ? '' : ' unresolved'}" data-href="${esc(name.trim())}" data-sub="${esc(sub || '')}" data-from="${esc(RC.from || '')}">${esc(label)}</a>`;
+}
+
+function markdownToHtml(md, from, depth = 0) {
+  const prev = RC;
+  RC = { from, depth };
+  try {
+    const html = marked.parse(md);
+    return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], FORBID_TAGS: ['style', 'form', 'button', 'iframe', 'object', 'embed'] });
+  } finally { RC = prev; }
+}
+
+// Renders `md` (a note body) into container element `el` and wires up everything.
+function renderInto(el, content, from, depth) {
+  const { fm, fmLen } = splitFrontmatter(content);
+  let html = '';
+  if (fm && depth === 0 && Object.keys(fm).length) {
+    html += '<div class="props">' + Object.entries(fm).map(([k, v]) => {
+      const val = Array.isArray(v) ? v.map(x => /^tags?$/.test(k) ? `<a class="tag" data-tag="${esc(String(x).replace(/^#/, ''))}">#${esc(String(x).replace(/^#/, ''))}</a>` : esc(x)).join(', ') : esc(v);
+      return `<div><span class="k">${esc(k)}</span><span>${val}</span></div>`;
+    }).join('') + '</div>';
+  }
+  html += markdownToHtml(content.slice(fmLen), from, depth);
+  el.innerHTML = html;
+  linkifyTags(el);
+  for (const tb of $$('table', el)) { const w = document.createElement('div'); w.className = 'table-wrap'; tb.replaceWith(w); w.append(tb); }
+  // Headings get ids for [[Note#Heading]] links.
+  for (const h of $$('h1,h2,h3,h4,h5,h6', el)) h.id = 'h-' + slug(h.textContent);
+  // Relative markdown links/images point into the vault.
+  for (const a of $$('a[href]', el)) {
+    const href = a.getAttribute('href');
+    if (/^[a-z][a-z0-9+.-]*:/i.test(href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; continue; }
+    if (href.startsWith('#')) { a.classList.add('internal-link'); a.dataset.href = ''; a.dataset.sub = href.slice(1); a.dataset.from = from; a.removeAttribute('href'); continue; }
+    let h = href; try { h = decodeURIComponent(href); } catch { }
+    const [name, sub] = splitOnce(h, '#');
+    a.classList.add('internal-link'); a.dataset.href = name; a.dataset.sub = sub || ''; a.dataset.from = from;
+    if (!resolveLink(name, from)) a.classList.add('unresolved');
+    a.removeAttribute('href');
+  }
+  for (const img of $$('img', el)) {
+    const src = img.getAttribute('src') || '';
+    if (/^(data:|blob:|\/api\/raw)/.test(src)) continue;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(src)) { img.removeAttribute('src'); img.alt = `[blocked external image: ${src}]`; continue; }
+    let s = src; try { s = decodeURIComponent(src); } catch { }
+    const t = resolveLink(s, from);
+    if (t) img.src = rawUrl(t);
+  }
+  // Task list items (only the top-level note is toggleable).
+  $$('li > input[type=checkbox]', el).forEach((cb, i) => {
+    const li = cb.parentElement;
+    li.classList.add('task'); li.classList.toggle('done', cb.checked);
+    if (depth === 0) { cb.disabled = false; cb.dataset.task = i; } else cb.disabled = true;
+  });
+  // Callouts: > [!note] Title
+  for (const bq of $$('blockquote', el)) {
+    const p = bq.firstElementChild;
+    if (!p || p.tagName !== 'P') continue;
+    const m = /^\[!([\w-]+)\]([+-]?)[ \t]*([^\n<]*)(?:<br>\n?)?/.exec(p.innerHTML);
+    if (!m) continue;
+    const type = m[1].toLowerCase();
+    const box = document.createElement('div');
+    box.className = `callout c-${type}`;
+    const title = document.createElement('div');
+    title.className = 'callout-title';
+    title.textContent = m[3].trim() || type;
+    p.innerHTML = p.innerHTML.slice(m[0].length);
+    if (!p.innerHTML.trim()) p.remove();
+    box.append(title, ...bq.childNodes);
+    bq.replaceWith(box);
+  }
+  // Note embeds (transclusion), limited depth.
+  for (const sp of $$('span.embed[data-embed]', el)) {
+    if (depth >= 2 || sp.dataset.embed === from) { sp.textContent = '(embed depth limit)'; continue; }
+    renderEmbedInto(sp, sp.dataset.embed, sp.dataset.sub, depth + 1);
+  }
+}
+
+function renderEmbedInto(el, target, sub, depth = 1) {
+  const n = S.notes.get(target);
+  el.innerHTML = `<div class="embed-head"><a class="internal-link" data-href="${esc(target)}" data-path="1">${esc(noteName(target))}${sub ? ' › ' + esc(sub) : ''}</a></div>`;
+  const body = document.createElement('div');
+  body.className = 'markdown';
+  if (!n) body.textContent = '(missing)';
+  else renderInto(body, sub ? extractSection(n, sub) : n.content, target, depth);
+  el.append(body);
+}
+
+// Turn #tags in text into tag pills (skipping code, links and existing pills).
+function linkifyTags(el) {
+  const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: n => n.parentElement.closest('code, pre, a') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
+  });
+  const texts = [];
+  while (tw.nextNode()) if (tw.currentNode.data.includes('#')) texts.push(tw.currentNode);
+  const re = /(^|[\s(,;])#([\p{L}\p{N}_\-\/]+)/gu;
+  for (const t of texts) {
+    const frag = document.createDocumentFragment();
+    let last = 0, m, any = false;
+    re.lastIndex = 0;
+    while ((m = re.exec(t.data))) {
+      if (/^[\d\/]+$/.test(m[2])) continue;
+      const at = m.index + m[1].length;
+      frag.append(t.data.slice(last, at));
+      const a = document.createElement('a');
+      a.className = 'tag'; a.dataset.tag = m[2]; a.textContent = '#' + m[2];
+      frag.append(a);
+      last = at + 1 + m[2].length; any = true;
+    }
+    if (any) { frag.append(t.data.slice(last)); t.replaceWith(frag); }
+  }
+}
+
+function extractSection(n, sub) {
+  const want = sub.trim().toLowerCase();
+  const i = n.headings.findIndex(h => h.text.trim().toLowerCase() === want);
+  if (i < 0) return `*Heading "${sub}" not found.*`;
+  const h = n.headings[i];
+  const end = n.headings.slice(i + 1).find(x => x.level <= h.level);
+  return n.content.slice(h.index, end ? end.index : undefined);
+}
+
+function renderPreview() {
+  if (!S.cur) return;
+  const st = preview.scrollTop;
+  renderInto(preview, ed.value, S.cur, 0);
+  // Inline title, unless the note already opens with the same H1.
+  const first = preview.querySelector(':scope > h1:first-child, :scope > .props + h1');
+  if (!first || first.textContent.trim().toLowerCase() !== noteName(S.cur).toLowerCase()) {
+    const t = document.createElement('h1');
+    t.className = 'preview-title'; t.textContent = noteName(S.cur);
+    preview.prepend(t);
+  } else first.classList.add('preview-title');
+  preview.scrollTop = st;
+}
+
+function toggleTask(i) {
+  const body = blankCode(ed.value);
+  const re = /^[ \t]*(?:>[ \t]?)*(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\]/gm;
+  let m, k = 0;
+  while ((m = re.exec(body))) {
+    if (k++ === i) {
+      const pos = m.index + m[0].length - 2;
+      ed.insert(pos, pos + 1, m[1] === ' ' ? 'x' : ' ');
+      renderPreview();
+      return;
+    }
+  }
+}
+
+// Clicks on links anywhere (preview, embeds, panels).
+document.addEventListener('click', e => {
+  const cb = e.target.closest('#preview input[data-task]');
+  if (cb) { toggleTask(+cb.dataset.task); return; }
+  const a = e.target.closest('a.internal-link');
+  if (a) {
+    e.preventDefault();
+    if (a.dataset.path) return openPath(a.dataset.href);
+    return followLink(a.dataset.href, a.dataset.sub, a.dataset.from || S.cur);
+  }
+  const tg = e.target.closest('a.tag');
+  if (tg) { e.preventDefault(); searchFor(`tag:${tg.dataset.tag}`); }
+});
+
+// ============================================================ file tree
+
+function buildTree() {
+  const root = { name: '', path: '', dirs: new Map(), files: [] };
+  const getDir = path => {
+    let node = root;
+    if (!path) return node;
+    let acc = '';
+    for (const part of path.split('/')) {
+      acc = join(acc, part);
+      if (!node.dirs.has(part)) node.dirs.set(part, { name: part, path: acc, dirs: new Map(), files: [] });
+      node = node.dirs.get(part);
+    }
+    return node;
+  };
+  for (const d of S.dirs) getDir(d);
+  for (const p of S.files.keys()) getDir(dirname(p)).files.push(p);
+  return root;
+}
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const CHEV = '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>';
+
+function renderTree() {
+  const root = buildTree();
+  const rows = [];
+  const walk = (node) => {
+    const dirs = [...node.dirs.values()].sort((a, b) => collator.compare(a.name, b.name));
+    for (const d of dirs) {
+      const open = S.expanded.has(d.path);
+      rows.push(`<div class="t-row folder${open ? ' open' : ''}" draggable="true" data-dir="${esc(d.path)}">${CHEV}<span class="name">${esc(d.name)}</span></div>`);
+      if (open) { rows.push('<div class="t-kids">'); walk(d); rows.push('</div>'); }
+    }
+    const files = node.files.sort((a, b) => collator.compare(noteName(a), noteName(b)));
+    for (const f of files) {
+      const ext = isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
+      rows.push(`<div class="t-row file" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, '')))}</span>${ext}</div>`);
+    }
+  };
+  walk(root);
+  $('#tree').innerHTML = rows.join('') + '<div class="tree-root-drop" data-dir=""></div>';
+  renderTreeActive();
+}
+
+function renderTreeActive(reveal = false) {
+  if (reveal && S.cur) {
+    let d = dirname(S.cur), changed = false;
+    while (d) { if (!S.expanded.has(d)) { S.expanded.add(d); changed = true; } d = dirname(d); }
+    if (changed) { store('expanded', [...S.expanded]); return renderTree(); }
+  }
+  for (const r of $$('#tree .t-row.active')) r.classList.remove('active');
+  if (!S.cur) return;
+  const row = $(`#tree .t-row[data-path="${CSS.escape(S.cur)}"]`);
+  if (row) { row.classList.add('active'); if (reveal) row.scrollIntoView({ block: 'nearest' }); }
+}
+
+$('#tree').addEventListener('click', e => {
+  const row = e.target.closest('.t-row');
+  if (!row) return;
+  if (row.dataset.dir != null) {
+    const d = row.dataset.dir;
+    S.expanded.has(d) ? S.expanded.delete(d) : S.expanded.add(d);
+    store('expanded', [...S.expanded]);
+    renderTree();
+  } else openPath(row.dataset.path);
+});
+
+$('#tree').addEventListener('contextmenu', e => {
+  const row = e.target.closest('.t-row, .tree-root-drop');
+  e.preventDefault();
+  const dir = row?.dataset.dir, path = row?.dataset.path;
+  const folder = dir != null ? dir : path ? dirname(path) : '';
+  const items = [
+    ['New note', () => newNote(folder)],
+    ['New folder', () => newFolder(folder)],
+  ];
+  if (path || dir) {
+    const target = path || dir;
+    items.push(null,
+      ['Rename…', () => renameDialog(target)],
+      ['Move to…', () => moveDialog(target)],
+    );
+    if (path && isMd(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
+    items.push(null, ['Delete', () => deletePath(target), 'danger']);
+  }
+  menu(e.clientX, e.clientY, items);
+});
+
+// Drag & drop: move within the vault, or import files from the desktop.
+let dragPath = null;
+$('#tree').addEventListener('dragstart', e => {
+  const row = e.target.closest('.t-row');
+  dragPath = row ? (row.dataset.path ?? row.dataset.dir) : null;
+  if (dragPath) e.dataTransfer.setData('text/plain', dragPath);
+});
+$('#tree').addEventListener('dragover', e => {
+  const row = e.target.closest('.t-row, .tree-root-drop');
+  if (!row) return;
+  e.preventDefault();
+  $$('#tree .drop').forEach(x => x.classList.remove('drop'));
+  row.classList.add('drop');
+});
+$('#tree').addEventListener('dragleave', e => e.target.closest?.('.t-row')?.classList.remove('drop'));
+$('#tree').addEventListener('drop', async e => {
+  e.preventDefault();
+  $$('#tree .drop').forEach(x => x.classList.remove('drop'));
+  const row = e.target.closest('.t-row, .tree-root-drop');
+  if (!row) return;
+  const folder = row.dataset.dir != null ? row.dataset.dir : dirname(row.dataset.path);
+  if (e.dataTransfer.files.length && !dragPath) {
+    for (const f of e.dataTransfer.files) await importFile(f, folder);
+    renderTree(); return;
+  }
+  const src = dragPath; dragPath = null;
+  if (!src || src === folder || dirname(src) === folder) return;
+  if (folder === src || folder.startsWith(src + '/')) return toast("Can't move a folder into itself");
+  await renamePath(src, join(folder, basename(src)));
+});
+$('#tree').addEventListener('dragend', () => { dragPath = null; });
+
+async function importFile(file, folder) {
+  const path = uniquePath(folder, file.name);
+  await writeFile(path, file);
+  reindexAll();
+  return path;
+}
+
+// ============================================================ create / rename / delete
+
+function uniquePath(folder, filename) {
+  const dot = filename.lastIndexOf('.');
+  const stem = dot > 0 ? filename.slice(0, dot) : filename, ext = dot > 0 ? filename.slice(dot) : '';
+  let p = join(folder, filename), i = 1;
+  while (S.lowerPath.has(p.toLowerCase()) || S.files.has(p)) p = join(folder, `${stem} ${i++}${ext}`);
+  return p;
+}
+
+const BAD_NAME = /[\\/:*?"<>|#^\[\]]/;
+
+async function createNote(path, content = '', opts = {}) {
+  if (S.files.has(path)) return openPath(path, opts);
+  try {
+    await writeFile(path, content);
+  } catch (e) { toast('Could not create note: ' + e.message); return; }
+  let d = dirname(path);
+  while (d) { S.dirs.add(d); d = dirname(d); }
+  reindexAll(); renderTree();
+  await openPath(path, opts);
+}
+
+async function newNote(folder) {
+  if (folder == null) folder = cfg.newNoteFolder;
+  const path = uniquePath(folder, 'Untitled.md');
+  await createNote(path, '', { focusTitle: true, mode: 'edit' });
+}
+
+async function newFolder(parent = '') {
+  const name = await promptModal('New folder', 'Folder name', '');
+  if (!name) return;
+  if (/[\\:*?"<>|]/.test(name)) return toast('Folder names can’t contain \\ : * ? " < > |');
+  const path = normPath(join(parent, name));
+  await api('/api/mkdir', { method: 'POST', body: JSON.stringify({ path }) });
+  S.dirs.add(path); S.expanded.add(parent); store('expanded', [...S.expanded]);
+  renderTree();
+}
+
+async function renameDialog(path) {
+  const isDir = S.dirs.has(path);
+  const cur = isDir ? basename(path) : noteName(path);
+  const name = await promptModal(isDir ? 'Rename folder' : 'Rename', 'New name', cur);
+  if (!name || name === cur) return;
+  if (BAD_NAME.test(name)) return toast('Names can’t contain \\ / : * ? " < > | # ^ [ ]');
+  const ext = isDir || isMd(path) ? (isDir ? '' : '.md') : '';
+  await renamePath(path, join(dirname(path), name + ext));
+}
+
+async function moveDialog(path) {
+  const dirs = ['', ...[...S.dirs].sort(collator.compare)].filter(d => d !== path && !d.startsWith(path + '/') && d !== dirname(path));
+  const dest = await picker({
+    placeholder: `Move "${basename(path)}" to folder…`,
+    items: q => rank(dirs, q, d => d || '/').map(d => ({ main: d || '/ (vault root)', value: d })),
+  });
+  if (dest == null) return;
+  await renamePath(path, join(dest, basename(path)));
+}
+
+function relPath(fromDir, to) {
+  const a = fromDir ? fromDir.split('/') : [], b = to.split('/');
+  let i = 0;
+  while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+  return [...Array(a.length - i).fill('..'), ...b.slice(i)].join('/');
+}
+
+function linkNameFor(path, files) {
+  // Shortest form that still resolves uniquely (Obsidian's default).
+  const nm = noteName(path).toLowerCase();
+  let count = 0;
+  for (const p of files) if (noteName(p).toLowerCase() === nm) count++;
+  return count > 1 ? (isMd(path) ? path.slice(0, -3) : path) : noteName(path);
+}
+
+async function renamePath(from, to) {
+  if (from === to) return;
+  await save();
+  const isDir = S.dirs.has(from);
+  if (!isDir && S.files.has(to) && from.toLowerCase() !== to.toLowerCase()) return toast('A file with that name already exists');
+  const moved = new Map(isDir
+    ? [...S.files.keys()].filter(p => p.startsWith(from + '/')).map(p => [p, to + p.slice(from.length)])
+    : [[from, to]]);
+  const afterFiles = [...S.files.keys()].map(p => moved.get(p) || p);
+
+  // Work out link rewrites using the pre-move index.
+  const edits = [];
+  for (const [q, n] of S.notes) {
+    const reps = [];
+    const newQ = moved.get(q) || q;
+    n.links.forEach((l, i) => {
+      const t = n.out?.[i];
+      if (!t) return;
+      // Wiki links only change when their target moves; relative markdown links
+      // also change when the note containing them moves.
+      const relMd = l.md && l.name.includes('/');
+      if (!moved.has(t) && !(relMd && moved.has(q))) return;
+      const np = moved.get(t) || t;
+      const sub = l.sub ? '#' + l.sub : '';
+      let txt;
+      if (l.md) {
+        const href = relPath(dirname(newQ), np).split('/').map(enc).join('/');
+        txt = `${l.embed ? '!' : ''}[${l.text}](${href}${sub})`;
+      } else {
+        txt = `${l.embed ? '!' : ''}[[${linkNameFor(np, afterFiles)}${sub}${l.alias != null ? '|' + l.alias : ''}]]`;
+      }
+      if (txt !== n.content.slice(l.index, l.index + l.len)) reps.push({ l, txt });
+    });
+    if (reps.length) {
+      let s = n.content;
+      for (const { l, txt } of reps.sort((a, b) => b.l.index - a.l.index)) s = s.slice(0, l.index) + txt + s.slice(l.index + l.len);
+      edits.push([moved.get(q) || q, s]);
+    }
+  }
+
+  try {
+    await api('/api/rename', { method: 'POST', body: JSON.stringify({ from, to }) });
+  } catch (e) { toast('Rename failed: ' + e.message); return; }
+
+  // Update local state to the post-move world.
+  for (const [a, b] of moved) {
+    const f = S.files.get(a); S.files.delete(a); if (f) S.files.set(b, f);
+    const n = S.notes.get(a); S.notes.delete(a); if (n) S.notes.set(b, n);
+    const pos = S.pos.get(a); if (pos) S.pos.set(b, pos);
+    S.hist = S.hist.map(h => h === a ? b : h);
+  }
+  if (isDir) {
+    const dirs = [...S.dirs];
+    S.dirs = new Set(dirs.map(d => d === from ? to : d.startsWith(from + '/') ? to + d.slice(from.length) : d));
+    if (S.expanded.has(from)) S.expanded.add(to);
+  }
+  let d = dirname(to);
+  while (d) { S.dirs.add(d); d = dirname(d); }
+  const curMoved = S.cur && moved.has(S.cur);
+  if (curMoved) S.cur = moved.get(S.cur);
+  reindexAll();
+
+  let n = 0;
+  for (const [p, content] of edits) {
+    try { await writeFile(p, content, S.notes.get(p)?.mtime); n++; } catch (e) { toast(`Couldn’t update links in ${p}: ${e.message}`); }
+    if (p === S.cur) reloadEditorFromDisk(content);
+  }
+  reindexAll();
+  renderTree();
+  if (curMoved) { titleEl.value = noteName(S.cur); $('#crumbs').innerHTML = crumbsHtml(S.cur); document.title = `${noteName(S.cur)} — ${VAULT} — Folio`; store('last', S.cur); }
+  renderTreeActive(true);
+  refreshPanels();
+  if (n) toast(`Updated links in ${n} note${n > 1 ? 's' : ''}`);
+}
+
+async function deletePath(path) {
+  const isDir = S.dirs.has(path);
+  const what = isDir ? `folder "${path}" and everything in it` : `"${basename(path)}"`;
+  if (!confirm(`Move ${what} to the vault's .trash folder?`)) return;
+  if (S.cur === path || (isDir && S.cur?.startsWith(path + '/'))) { S.dirty = false; }
+  try { await api('/api/delete', { method: 'POST', body: JSON.stringify({ path }) }); }
+  catch (e) { return toast('Delete failed: ' + e.message); }
+  for (const p of [...S.files.keys()]) if (p === path || p.startsWith(path + '/')) { S.files.delete(p); S.notes.delete(p); }
+  for (const d of [...S.dirs]) if (d === path || d.startsWith(path + '/')) S.dirs.delete(d);
+  S.hist = S.hist.filter(h => S.files.has(h)); S.histIdx = S.hist.length - 1;
+  reindexAll(); renderTree();
+  if (S.cur && !S.files.has(S.cur)) { S.cur = null; showEmpty(); }
+  refreshPanels();
+}
+
+// ============================================================ daily notes & templates
+
+function fmtDate(d, f) {
+  const p = n => String(n).padStart(2, '0');
+  const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const map = {
+    YYYY: d.getFullYear(), MMMM: months[d.getMonth()], MMM: months[d.getMonth()].slice(0, 3), MM: p(d.getMonth() + 1),
+    DD: p(d.getDate()), dddd: days[d.getDay()], ddd: days[d.getDay()].slice(0, 3), HH: p(d.getHours()), mm: p(d.getMinutes()),
+  };
+  return f.replace(/YYYY|MMMM|MMM|MM|DD|dddd|ddd|HH|mm/g, t => map[t]);
+}
+
+function fillTemplate(text, title) {
+  const now = new Date();
+  return text
+    .replace(/\{\{\s*date:([^}]+)\}\}/g, (_, f) => fmtDate(now, f.trim()))
+    .replace(/\{\{\s*time:([^}]+)\}\}/g, (_, f) => fmtDate(now, f.trim()))
+    .replace(/\{\{\s*date\s*\}\}/g, fmtDate(now, 'YYYY-MM-DD'))
+    .replace(/\{\{\s*time\s*\}\}/g, fmtDate(now, 'HH:mm'))
+    .replace(/\{\{\s*title\s*\}\}/g, title);
+}
+
+async function openDaily() {
+  const name = fmtDate(new Date(), 'YYYY-MM-DD');
+  const path = join(cfg.dailyFolder, name + '.md');
+  if (S.files.has(path)) return openPath(path);
+  let content = '';
+  if (cfg.dailyTemplate) {
+    const t = resolveLink(cfg.dailyTemplate, null);
+    if (t && S.notes.has(t)) content = fillTemplate(S.notes.get(t).content, name);
+  }
+  await createNote(path, content, { mode: 'edit' });
+  ed.setSelectionRange(ed.value.length, ed.value.length, true);
+}
+
+async function insertTemplate() {
+  if (S.view !== 'note') return toast('Open a note first');
+  const folder = cfg.templatesFolder;
+  const list = [...S.notes.keys()].filter(p => folder ? p.startsWith(folder + '/') : true);
+  if (!list.length) return toast(`No templates found in "${folder}/"`);
+  const pick = await picker({ placeholder: 'Insert template…', items: q => rank(list, q, noteName).map(p => ({ main: noteName(p), sub: dirname(p), value: p })) });
+  if (!pick) return;
+  const text = fillTemplate(S.notes.get(pick).content, noteName(S.cur));
+  if (S.mode !== 'edit') setMode('edit');
+  insertText(ed.selectionStart, ed.selectionEnd, text);
+}
+
+// ============================================================ editor glue
+
+function insertText(a, b, text, selA, selB) { ed.insert(a, b, text, selA, selB); }
+function toggleCheckbox() { ed.toggleCheckbox(); }
+
+const cursorMoved = debounce(() => updateStatus(), 150);
+
+// [[ completion: notes and attachments, aliases, and headings after '#'.
+function linkOptions(q) {
+  const files = [...S.files.keys()];
+  const [nm, hd] = splitOnce(q, '#');
+  if (hd != null) {
+    const target = nm ? resolveLink(nm, S.cur) : S.cur;
+    const n = target && S.notes.get(target);
+    if (!n) return [];
+    return rank(n.headings.map(h => h.text), hd).slice(0, 30).map(h => ({ label: h, detail: '#', insert: `${nm}#${h}` }));
+  }
+  const out = rank(files, q, p => noteName(p)).slice(0, 30)
+    .map(p => ({ label: noteName(p), detail: dirname(p), insert: linkNameFor(p, files) }));
+  if (q) for (const [a, p] of S.byAlias) {
+    if (out.length >= 40) break;
+    if (a.includes(q.toLowerCase())) out.push({ label: a, detail: '→ ' + noteName(p), insert: `${linkNameFor(p, files)}|${a}` });
+  }
+  return out;
+}
+
+function allTags() {
+  const set = new Set();
+  for (const n of S.notes.values()) for (const t of n.tags) set.add(t);
+  return [...set].sort(collator.compare);
+}
+
+async function attachAndLink(file, pasted) {
+  let name = file.name;
+  if (pasted || !name || name === 'image.png') {
+    const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+    name = `Pasted image ${fmtDate(new Date(), 'YYYYMMDDHHmm')}${String(new Date().getSeconds()).padStart(2, '0')}.${ext}`;
+  }
+  const path = uniquePath(cfg.attachFolder, name);
+  try { await writeFile(path, file); } catch (e) { return toast('Attach failed: ' + e.message); }
+  if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
+  reindexAll(); renderTree();
+  const link = `![[${linkNameFor(path, [...S.files.keys()])}]]`;
+  insertText(ed.selectionStart, ed.selectionEnd, link);
+}
+
+titleEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === 'ArrowDown') { e.preventDefault(); ed.focus(); ed.setSelectionRange(0, 0); }
+  if (e.key === 'Escape') { titleEl.value = noteName(S.cur); ed.focus(); }
+});
+titleEl.addEventListener('blur', async () => {
+  if (!S.cur || !isMd(S.cur)) return;
+  const name = titleEl.value.trim();
+  if (!name || name === noteName(S.cur)) { titleEl.value = noteName(S.cur); return; }
+  if (BAD_NAME.test(name)) { toast('Names can’t contain \\ / : * ? " < > | # ^ [ ]'); titleEl.value = noteName(S.cur); return; }
+  await renamePath(S.cur, join(dirname(S.cur), name + '.md'));
+});
+
+// ============================================================ fuzzy ranking
+
+function score(q, s) {
+  if (!q) return 0;
+  const t = s.toLowerCase(); q = q.toLowerCase();
+  const i = t.indexOf(q);
+  if (i >= 0) return 1000 - i * 3 - t.length * 0.2 + (i === 0 || /[\s\/_\-.]/.test(t[i - 1]) ? 200 : 0) + (t === q ? 500 : 0);
+  let sc = 0, j = 0, last = -2;
+  for (const c of q) {
+    if (c === ' ') continue;
+    j = t.indexOf(c, j);
+    if (j < 0) return -Infinity;
+    sc += j === last + 1 ? 6 : (j === 0 || /[\s\/_\-.]/.test(t[j - 1])) ? 4 : 1;
+    last = j; j++;
+  }
+  return sc - t.length * 0.2;
+}
+function rank(list, q, key = x => x) {
+  if (!q) return [...list].sort((a, b) => collator.compare(key(a), key(b)));
+  return list.map(x => [x, score(q, key(x))]).filter(([, s]) => s > -Infinity).sort((a, b) => b[1] - a[1]).map(([x]) => x);
+}
+
+// ============================================================ modals, pickers, menus
+
+function modal(html) {
+  const back = document.createElement('div');
+  back.className = 'backdrop';
+  back.innerHTML = `<div class="modal">${html}</div>`;
+  $('#modal-root').append(back);
+  return back;
+}
+
+// items(q) -> [{main, sub, value}] ; resolves with value or null
+function picker({ placeholder, items, onCreate, foot }) {
+  return new Promise(resolve => {
+    const back = modal(`<input class="field" placeholder="${esc(placeholder)}" spellcheck="false"><div class="pick-list"></div><div class="pick-foot">${foot || '<span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>'}</div>`);
+    const input = $('input', back), list = $('.pick-list', back);
+    let cur = [], sel = 0;
+    const draw = () => {
+      cur = items(input.value).slice(0, 60);
+      if (onCreate && input.value.trim() && !cur.some(c => c.main.toLowerCase() === input.value.trim().toLowerCase()))
+        cur.push({ main: `Create “${input.value.trim()}”`, sub: '⇧↵', create: true });
+      sel = Math.min(sel, Math.max(0, cur.length - 1));
+      list.innerHTML = cur.map((c, i) => `<div class="pick${i === sel ? ' sel' : ''}" data-i="${i}"><span class="main">${esc(c.main)}</span>${c.sub ? `<span class="sub">${esc(c.sub)}</span>` : ''}</div>`).join('') || '<div class="none">No matches</div>';
+      list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+    };
+    const done = v => { back.remove(); resolve(v); };
+    const choose = (i, create) => {
+      const c = cur[i];
+      if (create || c?.create) { if (onCreate && input.value.trim()) { back.remove(); onCreate(input.value.trim()); resolve(null); } return; }
+      if (c) done(c.value);
+    };
+    input.addEventListener('input', () => { sel = 0; draw(); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, cur.length - 1); draw(); e.preventDefault(); }
+      else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
+      else if (e.key === 'Enter') { e.preventDefault(); choose(sel, e.shiftKey); }
+      else if (e.key === 'Escape') { e.preventDefault(); done(null); }
+    });
+    list.addEventListener('mousemove', e => { const d = e.target.closest('.pick'); if (d && +d.dataset.i !== sel) { sel = +d.dataset.i; draw(); } });
+    list.addEventListener('click', e => { const d = e.target.closest('.pick'); if (d) choose(+d.dataset.i); });
+    back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
+    draw(); input.focus();
+  });
+}
+
+function promptModal(title, label, value) {
+  return new Promise(resolve => {
+    const back = modal(`<form class="form"><h3>${esc(title)}</h3><label>${esc(label)}<input class="field" name="v" spellcheck="false" autocomplete="off"></label><div class="row"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">OK</button></div></form>`);
+    const input = $('input', back); input.value = value; input.focus(); input.select();
+    const done = v => { back.remove(); resolve(v); };
+    $('form', back).addEventListener('submit', e => { e.preventDefault(); done(input.value.trim()); });
+    $('[data-x]', back).onclick = () => done(null);
+    input.addEventListener('keydown', e => { if (e.key === 'Escape') done(null); });
+    back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
+  });
+}
+
+function menu(x, y, items) {
+  const root = $('#menu-root');
+  root.innerHTML = '';
+  const m = document.createElement('div');
+  m.className = 'menu';
+  items.forEach((it, i) => {
+    if (!it) { m.append(document.createElement('hr')); return; }
+    const d = document.createElement('div');
+    d.textContent = it[0]; if (it[2]) d.className = it[2];
+    d.onclick = () => { root.innerHTML = ''; it[1](); };
+    m.append(d);
+  });
+  root.append(m);
+  const r = m.getBoundingClientRect();
+  m.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
+  m.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
+  setTimeout(() => document.addEventListener('mousedown', function h(e) { if (!m.contains(e.target)) { root.innerHTML = ''; document.removeEventListener('mousedown', h); } }), 0);
+}
+
+function openSwitcher() {
+  const files = [...S.files.keys()];
+  picker({
+    placeholder: 'Find or create a note…',
+    foot: '<span>↑↓ navigate</span><span>↵ open</span><span>⇧↵ create</span><span>esc close</span>',
+    items: q => {
+      const r = rank(files, q, p => isMd(p) ? noteName(p) : basename(p)).map(p => ({ main: isMd(p) ? noteName(p) : basename(p), sub: dirname(p), value: p }));
+      if (q) for (const [a, p] of S.byAlias) if (a.includes(q.toLowerCase())) r.push({ main: a, sub: '→ ' + noteName(p), value: p });
+      if (!q) { const recent = [...new Set([...S.hist].reverse())].filter(p => S.files.has(p)); return [...recent.map(p => ({ main: noteName(p), sub: dirname(p) || 'recent', value: p })), ...r.filter(x => !recent.includes(x.value))]; }
+      return r;
+    },
+    onCreate: name => followLink(name, null, null),
+  }).then(p => p && openPath(p));
+}
+
+const COMMANDS = [
+  ['Open quick switcher', 'Ctrl+O', () => openSwitcher()],
+  ['Create new note', 'Ctrl+N', () => newNote()],
+  ['Create new folder', '', () => newFolder(S.cur ? dirname(S.cur) : '')],
+  ["Open today's daily note", '', () => openDaily()],
+  ['Insert template', '', () => insertTemplate()],
+  ['Toggle reading / editing view', 'Ctrl+E', () => setMode(S.mode === 'edit' ? 'read' : 'edit')],
+  ['Search in all notes', 'Ctrl+Shift+F', () => showPanel('search', true)],
+  ['Open graph view', 'Ctrl+G', () => openGraph(false)],
+  ['Open local graph of current note', '', () => openGraph(true)],
+  ['Rename current note', 'F2', () => S.cur && renameDialog(S.cur)],
+  ['Move current note to folder…', '', () => S.cur && moveDialog(S.cur)],
+  ['Delete current note', '', () => S.cur && deletePath(S.cur)],
+  ['Reveal current note in file tree', '', () => { showPanel('files'); renderTreeActive(true); }],
+  ['Toggle left sidebar', '', () => toggleSide('left')],
+  ['Toggle right sidebar', '', () => toggleSide('right')],
+  ['Toggle checkbox on current line', 'Ctrl+Enter', () => S.view === 'note' && toggleCheckbox()],
+  ['Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
+  ['Find in current note', 'Ctrl+F', () => { if (S.view === 'note') { setMode('edit'); ed.openSearch(); } }],
+  ['Toggle light / dark theme', '', () => toggleTheme()],
+  ['Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
+  ['Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
+  ['Open another vault…', '', () => switchVault()],
+  ['Settings', 'Ctrl+,', () => openSettings()],
+];
+
+function openPalette() {
+  picker({
+    placeholder: 'Type a command…',
+    items: q => rank(COMMANDS, q, c => c[0]).map(c => ({ main: c[0], sub: c[1], value: c })),
+  }).then(c => c && c[2]());
+}
+
+function openSettings() {
+  const back = modal(`<form class="form">
+    <h3>Settings</h3>
+    <label>Vault<div style="display:flex;gap:8px"><input class="field" id="vault-path" readonly><button type="button" class="btn" data-x-vault>Change…</button></div></label>
+    <label>Default folder for new notes<input class="field" name="newNoteFolder" placeholder="(vault root)"></label>
+    <label>Daily notes folder<input class="field" name="dailyFolder"></label>
+    <label>Daily note template (note name or path)<input class="field" name="dailyTemplate" placeholder="e.g. Templates/Daily"></label>
+    <label>Templates folder<input class="field" name="templatesFolder"></label>
+    <label>Attachments folder<input class="field" name="attachFolder"></label>
+    <label>Default view for notes<select class="field" name="defaultMode"><option value="edit">Editing</option><option value="read">Reading</option></select></label>
+    <label>Theme<select class="field" name="theme"><option value="">Follow system</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label class="check"><input type="checkbox" name="livePreview"> Live preview (hide Markdown syntax except where you're editing)</label>
+    <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
+    <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
+    <div class="row"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">Save</button></div>
+  </form>`);
+  const f = $('form', back);
+  for (const [k, v] of Object.entries(cfg)) { const el = f.elements[k]; if (!el) continue; if (el.type === 'checkbox') el.checked = v; else el.value = v; }
+  const close = () => back.remove();
+  $('[data-x]', back).onclick = close;
+  api('/api/info').then(i => { $('#vault-path', back).value = i.vault; }).catch(() => { });
+  $('[data-x-vault]', back).onclick = () => { close(); switchVault(); };
+  back.addEventListener('mousedown', e => { if (e.target === back) close(); });
+  f.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  f.addEventListener('submit', e => {
+    e.preventDefault();
+    for (const k of Object.keys(DEFAULTS)) {
+      const el = f.elements[k]; if (!el) continue;
+      cfg[k] = el.type === 'checkbox' ? el.checked : el.value.trim().replace(/^\/+|\/+$/g, '');
+    }
+    saveCfg(); applyTheme(); close();
+  });
+}
+
+async function switchVault() {
+  let info;
+  try { info = await api('/api/info'); } catch (e) { return toast(e.message); }
+  const p = await promptModal('Open another vault', 'Full path to a folder of notes (created if it doesn’t exist)', info.vault);
+  if (!p || p === info.vault) return;
+  await save();
+  try { await api('/api/vault', { method: 'POST', body: JSON.stringify({ path: p }) }); }
+  catch (e) { return toast('Couldn’t open that folder: ' + e.message); }
+  location.reload();
+}
+
+function toggleTheme() {
+  cfg.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  saveCfg(); applyTheme();
+}
+
+// ============================================================ left panels: search & tags
+
+function showPanel(name, focus = false) {
+  const hidden = document.body.classList.contains('app-no-left');
+  const current = $$('#left .panel').find(p => !p.hidden)?.id;
+  if (!focus && !hidden && current === 'panel-' + name) { toggleSide('left'); return; }
+  if (hidden) toggleSide('left');
+  for (const p of $$('#left .panel')) p.hidden = p.id !== 'panel-' + name;
+  for (const b of $$('#ribbon .rb[data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
+  if (name === 'search') { const i = $('#search-input'); i.focus(); i.select(); }
+  if (name === 'tags') renderTags();
+}
+
+function toggleSide(which) {
+  document.body.classList.toggle(`app-no-${which}`);
+  store('layout', { left: !document.body.classList.contains('app-no-left'), right: !document.body.classList.contains('app-no-right') });
+  if (S.view === 'graph') FolioGraph.resize();
+}
+
+function searchFor(q) {
+  showPanel('search', true);
+  $('#search-input').value = q;
+  runSearch();
+}
+
+function parseQuery(q) {
+  const terms = [];
+  const re = /(-?)(?:(tag|path|file|line):)?(?:"([^"]*)"|(\S+))/g; let m;
+  while ((m = re.exec(q))) {
+    const v = (m[3] ?? m[4] ?? '').toLowerCase();
+    if (!v) continue;
+    terms.push({ neg: !!m[1], op: m[2] || 'text', v: m[2] === 'tag' ? v.replace(/^#/, '') : v });
+  }
+  return terms;
+}
+
+function runSearch() {
+  const q = $('#search-input').value.trim();
+  const out = $('#search-results'), meta = $('#search-meta');
+  if (!q) { out.innerHTML = ''; meta.textContent = ''; return; }
+  const terms = parseQuery(q);
+  const texts = terms.filter(t => t.op === 'text' && !t.neg).map(t => t.v);
+  const results = [];
+  for (const [p, n] of S.notes) {
+    const low = n.content.toLowerCase(), pl = p.toLowerCase();
+    let ok = true;
+    for (const t of terms) {
+      let hit;
+      if (t.op === 'tag') hit = [...n.tags].some(x => x === t.v || x.startsWith(t.v + '/'));
+      else if (t.op === 'path') hit = pl.includes(t.v);
+      else if (t.op === 'file') hit = noteName(p).toLowerCase().includes(t.v);
+      else hit = low.includes(t.v) || noteName(p).toLowerCase().includes(t.v);
+      if (hit === t.neg) { ok = false; break; }
+    }
+    if (!ok) continue;
+    const snips = [];
+    let hits = 0;
+    for (const t of texts) {
+      let i = low.indexOf(t);
+      while (i >= 0) {
+        hits++;
+        if (snips.length < 4 && !snips.some(s => Math.abs(s.i - i) < 60)) snips.push({ i, len: t.length });
+        i = low.indexOf(t, i + t.length);
+      }
+    }
+    const titleHit = texts.some(t => noteName(p).toLowerCase().includes(t));
+    results.push({ p, snips, hits, titleHit });
+  }
+  results.sort((a, b) => (b.titleHit - a.titleHit) || (b.hits - a.hits) || collator.compare(a.p, b.p));
+  meta.textContent = `${results.length} note${results.length === 1 ? '' : 's'}`;
+  out.innerHTML = results.slice(0, 300).map(r => {
+    const c = S.notes.get(r.p).content;
+    const sn = r.snips.map(s => {
+      const a = Math.max(0, s.i - 50), b = Math.min(c.length, s.i + s.len + 70);
+      return `<div class="s-snip" data-path="${esc(r.p)}" data-i="${s.i}" data-len="${s.len}">${a > 0 ? '…' : ''}${esc(c.slice(a, s.i))}<mark>${esc(c.slice(s.i, s.i + s.len))}</mark>${esc(c.slice(s.i + s.len, b))}${b < c.length ? '…' : ''}</div>`;
+    }).join('');
+    return `<div class="s-file"><div class="s-file-name" data-path="${esc(r.p)}">${esc(noteName(r.p))}<small>${esc(dirname(r.p))}</small>${r.hits ? `<small>${r.hits}</small>` : ''}</div>${sn}</div>`;
+  }).join('');
+}
+$('#search-input').addEventListener('input', debounce(runSearch, 120));
+$('#search-results').addEventListener('click', e => {
+  const s = e.target.closest('.s-snip');
+  if (s) { const i = +s.dataset.i; return openPath(s.dataset.path, { mode: 'edit', select: [i, i + +s.dataset.len] }); }
+  const f = e.target.closest('.s-file-name');
+  if (f) openPath(f.dataset.path);
+});
+
+function renderTags() {
+  const counts = new Map();
+  for (const n of S.notes.values()) for (const t of n.tags) counts.set(t, (counts.get(t) || 0) + 1);
+  const list = [...counts].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]));
+  $('#tag-list').innerHTML = list.length
+    ? list.map(([t, c]) => `<div class="tag-row" data-tag="${esc(t)}"><span>#${esc(t)}</span><span class="n">${c}</span></div>`).join('')
+    : '<div class="none">No tags yet. Add #tags to notes or a <code>tags:</code> list in frontmatter.</div>';
+}
+$('#tag-list').addEventListener('click', e => { const r = e.target.closest('.tag-row'); if (r) searchFor(`tag:${r.dataset.tag}`); });
+
+// ============================================================ right panel
+
+let rtab = store('rtab') || 'backlinks';
+
+function lineAround(content, index) {
+  const s = content.lastIndexOf('\n', index - 1) + 1;
+  let e = content.indexOf('\n', index); if (e < 0) e = content.length;
+  let line = content.slice(s, e).trim();
+  if (line.length > 220) { const off = Math.max(0, index - s - 80); line = (off ? '…' : '') + content.slice(s + off, s + off + 200).trim() + '…'; }
+  return line;
+}
+
+function backlinksOf(p) {
+  const res = new Map();
+  for (const [q, n] of S.notes) {
+    if (q === p || !n.out) continue;
+    n.out.forEach((t, i) => {
+      if (t !== p) return;
+      if (!res.has(q)) res.set(q, []);
+      res.get(q).push({ index: n.links[i].index, line: lineAround(n.content, n.links[i].index) });
+    });
+  }
+  return res;
+}
+
+function unlinkedMentions(p) {
+  const names = [noteName(p), ...(S.notes.get(p)?.aliases || [])].filter(x => x.length >= 3);
+  if (!names.length) return new Map();
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])(${names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}_])`, 'giu');
+  const res = new Map();
+  for (const [q, n] of S.notes) {
+    if (q === p) continue;
+    const body = blankCode(n.content);
+    let m; re.lastIndex = n.fmLen;
+    while ((m = re.exec(body))) {
+      const i = m.index;
+      if (n.links.some(l => i >= l.index && i < l.index + l.len)) continue;
+      if (!res.has(q)) res.set(q, []);
+      const list = res.get(q);
+      if (list.length < 5) list.push({ index: i, len: m[0].length, line: lineAround(n.content, i) });
+    }
+  }
+  return res;
+}
+
+function refreshPanels(light = false) {
+  const body = $('#right-body');
+  for (const b of $$('#right .tabs button')) b.classList.toggle('active', b.dataset.rtab === rtab);
+  if (!$('#panel-tags').hidden && !light) renderTags();
+  if (!$('#panel-search').hidden && $('#search-input').value && !light) runSearch();
+  if (S.view === 'graph' && !light) FolioGraph.refresh();
+  updateStatus();
+  if (!S.cur) { body.innerHTML = '<div class="none">No file open.</div>'; return; }
+  const n = S.notes.get(S.cur);
+  if (rtab === 'backlinks') {
+    const bl = backlinksOf(S.cur);
+    let html = `<div class="r-sec"><h4>Linked mentions <span>${[...bl.values()].reduce((a, b) => a + b.length, 0)}</span></h4>`;
+    html += bl.size ? [...bl].sort((a, b) => collator.compare(a[0], b[0])).map(([q, items]) =>
+      `<div class="bl-file" data-path="${esc(q)}">${esc(noteName(q))}</div>` +
+      items.map(it => `<div class="bl-ctx" data-path="${esc(q)}" data-i="${it.index}">${esc(it.line)}</div>`).join('')).join('')
+      : '<div class="none">No backlinks.</div>';
+    html += '</div>';
+    if (isMd(S.cur)) {
+      const um = light ? null : unlinkedMentions(S.cur);
+      if (um) {
+        html += `<div class="r-sec"><h4>Unlinked mentions <span>${um.size}</span></h4>`;
+        html += um.size ? [...um].map(([q, items]) =>
+          `<div class="bl-file" data-path="${esc(q)}">${esc(noteName(q))}</div>` +
+          items.map(it => `<div class="bl-ctx" data-path="${esc(q)}" data-i="${it.index}" data-len="${it.len}"><button data-link>Link</button>${esc(it.line)}</div>`).join('')).join('')
+          : '<div class="none">None.</div>';
+        html += '</div>';
+      } else if (body.dataset.tab === 'backlinks' && body.dataset.for === S.cur) {
+        const old = body.querySelectorAll('.r-sec')[1];
+        if (old) html += old.outerHTML;
+      }
+    }
+    body.innerHTML = html;
+  } else if (rtab === 'outgoing') {
+    if (!n) { body.innerHTML = '<div class="none">Not a note.</div>'; }
+    else {
+      const seen = new Set(), res = [], unres = [];
+      n.links.forEach((l, i) => {
+        const t = n.out?.[i];
+        const key = t || l.name.toLowerCase();
+        if (!l.name || seen.has(key) || t === S.cur) return; seen.add(key);
+        (t ? res : unres).push(t ? `<div class="o-item" data-path="${esc(t)}">${esc(isMd(t) ? noteName(t) : basename(t))}</div>` : `<div class="o-item unresolved" data-create="${esc(l.name)}" title="Click to create">${esc(l.name)}</div>`);
+      });
+      const tags = [...n.tags].map(t => `<a class="tag" data-tag="${esc(t)}">#${esc(t)}</a>`).join(' ');
+      body.innerHTML = `<div class="r-sec"><h4>Links <span>${res.length}</span></h4>${res.join('') || '<div class="none">None.</div>'}</div>` +
+        (unres.length ? `<div class="r-sec"><h4>Unresolved <span>${unres.length}</span></h4>${unres.join('')}</div>` : '') +
+        `<div class="r-sec markdown" style="font-size:13px"><h4>Tags</h4>${tags || '<div class="none">None.</div>'}</div>`;
+    }
+  } else {
+    body.innerHTML = n && n.headings.length
+      ? '<div class="r-sec">' + n.headings.map(h => `<div class="o-item" style="padding-left:${6 + (h.level - 1) * 14}px" data-heading="${esc(h.text)}">${esc(h.text)}</div>`).join('') + '</div>'
+      : '<div class="none">No headings.</div>';
+  }
+  body.dataset.tab = rtab; body.dataset.for = S.cur;
+}
+
+$('#right .tabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-rtab]'); if (!b) return;
+  rtab = b.dataset.rtab; store('rtab', rtab); refreshPanels();
+});
+$('#right-body').addEventListener('click', async e => {
+  const link = e.target.closest('[data-link]');
+  if (link) {
+    // Convert an unlinked mention into a [[link]].
+    const ctx = link.closest('.bl-ctx');
+    const q = ctx.dataset.path, i = +ctx.dataset.i, len = +ctx.dataset.len;
+    const n = S.notes.get(q);
+    const word = n.content.slice(i, i + len);
+    const nm = linkNameFor(S.cur, [...S.files.keys()]);
+    const txt = word === nm ? `[[${nm}]]` : `[[${nm}|${word}]]`;
+    await writeFile(q, n.content.slice(0, i) + txt + n.content.slice(i + len), n.mtime);
+    resolveNote(q); refreshPanels();
+    return;
+  }
+  const c = e.target.closest('.bl-ctx');
+  if (c) { const i = +c.dataset.i; return openPath(c.dataset.path, { mode: 'edit', select: [i, i + (+c.dataset.len || 0)] }); }
+  const f = e.target.closest('[data-path]');
+  if (f) return openPath(f.dataset.path);
+  const cr = e.target.closest('[data-create]');
+  if (cr) return followLink(cr.dataset.create, null, S.cur);
+  const h = e.target.closest('[data-heading]');
+  if (h) scrollToHeading(h.dataset.heading);
+});
+
+function updateStatus() {
+  const left = $('#status-left'), right = $('#status-right');
+  if (S.view === 'note' && S.cur) {
+    const text = ed.value.slice(splitFrontmatter(ed.value).fmLen);
+    const words = (text.match(/[\p{L}\p{N}'’_-]+/gu) || []).length;
+    const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
+    left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
+    right.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters`;
+  } else {
+    left.textContent = '';
+    right.textContent = `${S.notes.size.toLocaleString()} notes · ${(S.files.size - S.notes.size).toLocaleString()} attachments`;
+  }
+}
+
+// ============================================================ graph
+
+function graphData({ local, depth, tags, unresolved, orphans, attach, filter }) {
+  const nodes = new Map(), edges = [];
+  const add = (id, label, kind) => { if (!nodes.has(id)) nodes.set(id, { id, label, kind, deg: 0 }); return nodes.get(id); };
+  const f = (filter || '').toLowerCase();
+  const allowFile = p => (isMd(p) || attach) && (!f || p.toLowerCase().includes(f));
+  for (const p of S.files.keys()) if (allowFile(p)) add(p, isMd(p) ? noteName(p) : basename(p), isMd(p) ? 'note' : 'file');
+  for (const [p, n] of S.notes) {
+    if (!nodes.has(p)) continue;
+    const seen = new Set();
+    n.links.forEach((l, i) => {
+      let t = n.out?.[i];
+      if (!t) { if (!unresolved || !l.name) return; t = 'unresolved:' + l.name.toLowerCase(); add(t, l.name, 'unresolved'); }
+      if (!nodes.has(t) || t === p || seen.has(t)) return;
+      seen.add(t); edges.push([p, t]);
+    });
+    if (tags) for (const tg of n.tags) { const id = 'tag:' + tg; add(id, '#' + tg, 'tag'); edges.push([p, id]); }
+  }
+  for (const [a, b] of edges) { nodes.get(a).deg++; nodes.get(b).deg++; }
+  if (local && S.cur && nodes.has(S.cur)) {
+    const adj = new Map();
+    for (const [a, b] of edges) { (adj.get(a) || adj.set(a, []).get(a)).push(b); (adj.get(b) || adj.set(b, []).get(b)).push(a); }
+    const keep = new Set([S.cur]); let frontier = [S.cur];
+    for (let d = 0; d < depth; d++) {
+      const nx = [];
+      for (const x of frontier) for (const y of adj.get(x) || []) if (!keep.has(y)) { keep.add(y); nx.push(y); }
+      frontier = nx;
+    }
+    for (const id of [...nodes.keys()]) if (!keep.has(id)) nodes.delete(id);
+  } else if (!orphans) {
+    for (const [id, nd] of [...nodes]) if (!nd.deg) nodes.delete(id);
+  }
+  return { nodes: [...nodes.values()], edges: edges.filter(([a, b]) => nodes.has(a) && nodes.has(b)), current: S.cur };
+}
+
+function graphOptions() {
+  return {
+    local: $('#g-local').checked, depth: +$('#g-depth').value, tags: $('#g-tags').checked,
+    unresolved: $('#g-unresolved').checked, orphans: $('#g-orphans').checked, attach: $('#g-attach').checked,
+    filter: $('#g-filter').value.trim(),
+  };
+}
+
+async function openGraph(local) {
+  await save();
+  rememberPos();
+  $('#g-local').checked = !!local;
+  showView('graph');
+  setSaveState('');
+  $('#crumbs').innerHTML = `<b>${local && S.cur ? 'Local graph · ' + esc(noteName(S.cur)) : 'Graph view'}</b>`;
+  FolioGraph.refresh(true);
+}
+
+FolioGraph.init($('#graph-canvas'), {
+  data: () => graphData(graphOptions()),
+  open: id => {
+    if (id.startsWith('tag:')) return searchFor('tag:' + id.slice(4));
+    if (id.startsWith('unresolved:')) return;
+    openPath(id);
+  },
+});
+for (const id of ['g-local', 'g-depth', 'g-tags', 'g-unresolved', 'g-orphans', 'g-attach']) $('#' + id).addEventListener('input', () => FolioGraph.refresh(id === 'g-local' || id === 'g-depth'));
+$('#g-filter').addEventListener('input', debounce(() => FolioGraph.refresh(), 200));
+
+// ============================================================ commands & keys
+
+const CMD = {
+  'panel-files': () => showPanel('files'),
+  'panel-search': () => showPanel('search'),
+  'panel-tags': () => showPanel('tags'),
+  switcher: openSwitcher,
+  palette: openPalette,
+  daily: openDaily,
+  graph: () => openGraph(false),
+  theme: toggleTheme,
+  settings: openSettings,
+  'new-note': () => newNote(),
+  'new-folder': () => newFolder(''),
+  'collapse-all': () => { S.expanded.clear(); store('expanded', []); renderTree(); },
+  back: () => goHist(-1),
+  forward: () => goHist(1),
+  'toggle-mode': () => setMode(S.mode === 'edit' ? 'read' : 'edit'),
+  'toggle-right': () => toggleSide('right'),
+  'note-menu': () => {
+    if (!S.cur) return;
+    const r = $('[data-cmd=note-menu]').getBoundingClientRect();
+    menu(r.left - 150, r.bottom + 4, [
+      ['Rename…', () => renameDialog(S.cur)],
+      ['Move to…', () => moveDialog(S.cur)],
+      ['Open local graph', () => openGraph(true)],
+      ['Insert template', () => insertTemplate()],
+      ['Copy path', () => navigator.clipboard?.writeText(S.cur).then(() => toast('Copied'))],
+      null,
+      ['Delete', () => deletePath(S.cur), 'danger'],
+    ]);
+  },
+};
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-cmd]');
+  if (b && CMD[b.dataset.cmd]) { e.preventDefault(); CMD[b.dataset.cmd](); }
+});
+
+window.addEventListener('keydown', e => {
+  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
+  if ($('#modal-root').children.length || e.defaultPrevented) return;
+  if (mod && !e.shiftKey && k === 'o') { e.preventDefault(); openSwitcher(); }
+  else if (mod && !e.shiftKey && k === 'p') { e.preventDefault(); openPalette(); }
+  else if (mod && !e.shiftKey && k === 'n') { e.preventDefault(); newNote(); }
+  else if (mod && !e.shiftKey && k === 'e') { e.preventDefault(); if (S.view === 'note') setMode(S.mode === 'edit' ? 'read' : 'edit'); }
+  else if (mod && !e.shiftKey && k === 's') { e.preventDefault(); save(); }
+  else if (mod && !e.shiftKey && k === 'g') { e.preventDefault(); openGraph(false); }
+  else if (mod && !e.shiftKey && k === ',') { e.preventDefault(); openSettings(); }
+  else if (mod && e.shiftKey && k === 'f') { e.preventDefault(); showPanel('search', true); }
+  else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goHist(-1); }
+  else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goHist(1); }
+  else if (e.key === 'F2' && S.cur) { e.preventDefault(); renameDialog(S.cur); }
+});
+
+// ============================================================ layout: sidebar resizing
+
+function makeResizer(handle, side) {
+  const panel = $('#' + side);
+  const saved = store('w-' + side); if (saved) panel.style.width = saved + 'px';
+  handle.addEventListener('mousedown', e => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = panel.getBoundingClientRect().width;
+    handle.classList.add('drag');
+    const mv = ev => {
+      const w = Math.max(180, Math.min(600, w0 + (side === 'left' ? 1 : -1) * (ev.clientX - x0)));
+      panel.style.width = w + 'px';
+      if (S.view === 'graph') FolioGraph.resize();
+    };
+    const up = () => {
+      handle.classList.remove('drag');
+      store('w-' + side, parseInt(panel.style.width));
+      removeEventListener('mousemove', mv); removeEventListener('mouseup', up);
+    };
+    addEventListener('mousemove', mv); addEventListener('mouseup', up);
+  });
+}
+
+// ============================================================ boot
+
+const WELCOME = `Folio is a local notes app. Your notes are plain Markdown files in this folder, so the same vault opens in Obsidian or any text editor.
+
+## The basics
+- Link notes with double brackets: [[Getting around]]. Clicking a link to a note that doesn't exist creates it.
+- Tag with #hashtags, or with a \`tags:\` list in frontmatter.
+- Paste or drag an image into a note to save it into \`attachments/\` and embed it.
+- Markdown formatting renders as you type. Put the cursor on a line to see its raw syntax.
+- **Ctrl+E** switches between editing and reading view.
+
+## Getting around
+| Keys | Does |
+| --- | --- |
+| Ctrl+O | Quick switcher (Shift+Enter creates) |
+| Ctrl+P | Command palette |
+| Ctrl+N | New note |
+| Ctrl+Shift+F | Search all notes |
+| Ctrl+G | Graph view |
+| Alt+← / Alt+→ | Back / forward |
+| Ctrl+Enter | Toggle a checkbox |
+| Ctrl+click | Follow a [[link]] while editing |
+
+- [ ] Try ticking this box in reading view
+- [ ] Make a daily note from the calendar icon
+
+> [!tip] Nothing leaves this machine
+> Folio only listens on 127.0.0.1 and has no plugin system, so it can't reach the network or run third-party code.
+`;
+
+async function boot() {
+  applyTheme();
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
+  $('#vault-name').textContent = VAULT;
+  $('#vault-name').title = 'Switch vault';
+  $('#vault-name').onclick = () => switchVault();
+  const layout = store('layout');
+  if (layout && !layout.left) document.body.classList.add('app-no-left');
+  if (layout && !layout.right) document.body.classList.add('app-no-right');
+  makeResizer($('#resize-left'), 'left');
+  makeResizer($('#resize-right'), 'right');
+  showPanel('files', true);
+  try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Folio server: ${esc(e.message)}. Is it still running?</p>`; return; }
+  renderTree();
+  setInterval(poll, 2000);
+  if (S.files.size === 0 && !store('welcomed')) {
+    store('welcomed', true);
+    await createNote('Welcome.md', WELCOME, { mode: 'read' });
+    return;
+  }
+  const last = store('last');
+  if (last && S.files.has(last)) openPath(last, { focus: false }); else showEmpty();
+}
+
+document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else poll(); });
+// Native window: Rust asks us to flush edits before it closes.
+window.__folioClose = async () => {
+  window.ipc.postMessage('close-ack');
+  try { await save(); } catch { }
+  if (S.dirty && !confirm('Folio couldn’t save your latest changes.\n\nClose anyway and lose them?')) {
+    window.ipc.postMessage('close-cancel');
+    return;
+  }
+  window.ipc.postMessage('close-ok');
+};
+
+window.addEventListener('beforeunload', e => {
+  if (NATIVE || !S.dirty || !S.cur) return;
+  const note = S.notes.get(S.cur);
+  fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body: ed.value, keepalive: true, headers: { 'X-Folio-Token': TOKEN, ...(note?.mtime ? { 'X-Base-Mtime': String(note.mtime) } : {}) } });
+});
+
+boot();

@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="folio-token" content="{{TOKEN}}">
+<meta name="folio-vault" content="{{VAULT}}">
+<meta name="folio-mode" content="{{MODE}}">
+<title>{{VAULT}} — Folio</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c5cff'/%3E%3Cpath d='M10 8h12v3H13.5v4H20v3h-6.5v6H10z' fill='white'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="app">
+  <nav id="ribbon">
+    <button class="rb" data-cmd="panel-files" title="Files"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></button>
+    <button class="rb" data-cmd="panel-search" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+    <button class="rb" data-cmd="panel-tags" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
+    <div class="rb-sep"></div>
+    <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    <button class="rb" data-cmd="daily" title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+    <button class="rb" data-cmd="graph" title="Graph view (Ctrl+G)"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="m8.3 7.2 7.4.6M7 8.3l1.4 7.3M16.4 10l-5.6 6.3"/></svg></button>
+    <button class="rb" data-cmd="palette" title="Command palette (Ctrl+P)"><svg viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M11 17h8"/></svg></button>
+    <div class="rb-grow"></div>
+    <button class="rb" data-cmd="theme" title="Toggle light/dark"><svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg></button>
+    <button class="rb" data-cmd="settings" title="Settings (Ctrl+,)"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/></svg></button>
+  </nav>
+
+  <aside id="left">
+    <section id="panel-files" class="panel">
+      <header class="panel-head">
+        <span class="panel-title" id="vault-name"></span>
+        <button class="ib" data-cmd="new-note" title="New note (Ctrl+N)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg></button>
+        <button class="ib" data-cmd="new-folder" title="New folder"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10v6M9 13h6"/></svg></button>
+        <button class="ib" data-cmd="collapse-all" title="Collapse all"><svg viewBox="0 0 24 24"><path d="m7 15 5-5 5 5"/></svg></button>
+      </header>
+      <div id="tree" class="panel-body" tabindex="0"></div>
+    </section>
+    <section id="panel-search" class="panel" hidden>
+      <header class="panel-head"><span class="panel-title">Search</span></header>
+      <div class="panel-body">
+        <input id="search-input" class="field" type="search" placeholder="Search…  (tag:x  path:y  &quot;exact phrase&quot;  -exclude)" spellcheck="false">
+        <div id="search-meta" class="meta"></div>
+        <div id="search-results"></div>
+      </div>
+    </section>
+    <section id="panel-tags" class="panel" hidden>
+      <header class="panel-head"><span class="panel-title">Tags</span></header>
+      <div id="tag-list" class="panel-body"></div>
+    </section>
+  </aside>
+  <div class="resizer" id="resize-left"></div>
+
+  <main id="main">
+    <header id="viewbar">
+      <button class="ib" data-cmd="back" title="Back (Alt+←)"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
+      <button class="ib" data-cmd="forward" title="Forward (Alt+→)"><svg viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></svg></button>
+      <div id="crumbs"></div>
+      <span id="save-state"></span>
+      <button class="ib" id="mode-btn" data-cmd="toggle-mode" title="Toggle reading / editing (Ctrl+E)"></button>
+      <button class="ib" data-cmd="note-menu" title="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
+      <button class="ib" data-cmd="toggle-right" title="Toggle right sidebar"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/></svg></button>
+    </header>
+
+    <div id="view-note" class="view" hidden>
+      <div id="edit-wrap">
+        <div class="page">
+          <input id="title" class="inline-title" spellcheck="false" autocomplete="off">
+          <div id="editor"></div>
+        </div>
+      </div>
+      <div id="preview" class="markdown" hidden></div>
+    </div>
+
+    <div id="view-file" class="view" hidden></div>
+
+    <div id="view-graph" class="view" hidden>
+      <canvas id="graph-canvas"></canvas>
+      <div id="graph-controls">
+        <label><input type="checkbox" id="g-local"> Local (current note)</label>
+        <label>Depth <input type="range" id="g-depth" min="1" max="4" value="2"></label>
+        <label><input type="checkbox" id="g-tags"> Tags</label>
+        <label><input type="checkbox" id="g-unresolved"> Unresolved</label>
+        <label><input type="checkbox" id="g-orphans" checked> Orphans</label>
+        <label><input type="checkbox" id="g-attach"> Attachments</label>
+        <input id="g-filter" class="field" type="search" placeholder="Filter…">
+      </div>
+    </div>
+
+    <div id="view-empty" class="view">
+      <div class="empty">
+        <h2>No note open</h2>
+        <p><a data-cmd="new-note">Create a new note</a> <kbd>Ctrl N</kbd></p>
+        <p><a data-cmd="switcher">Open a note</a> <kbd>Ctrl O</kbd></p>
+        <p><a data-cmd="daily">Today's daily note</a></p>
+        <p><a data-cmd="graph">Graph view</a> <kbd>Ctrl G</kbd></p>
+      </div>
+    </div>
+
+    <footer id="statusbar"><span id="status-left"></span><span id="status-right"></span></footer>
+  </main>
+
+  <div class="resizer" id="resize-right"></div>
+  <aside id="right">
+    <div class="tabs">
+      <button data-rtab="backlinks" class="active">Backlinks</button>
+      <button data-rtab="outgoing">Outgoing</button>
+      <button data-rtab="outline">Outline</button>
+    </div>
+    <div id="right-body" class="panel-body"></div>
+  </aside>
+</div>
+
+<div id="modal-root"></div>
+<div id="menu-root"></div>
+
+<script src="/vendor/marked.min.js"></script>
+<script src="/vendor/purify.min.js"></script>
+<script src="/vendor/editor.bundle.js"></script>
+<script src="/graph.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

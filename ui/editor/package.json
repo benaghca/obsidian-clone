@@ -1,0 +1,26 @@
+{
+  "name": "folio-editor",
+  "private": true,
+  "description": "Builds ../vendor/editor.bundle.js (CodeMirror 6 + Folio live preview). Only needed if you change editor.js.",
+  "scripts": {
+    "build": "esbuild editor.js --bundle --format=iife --minify --legal-comments=eof --target=chrome100,edge100 --outfile=../vendor/editor.bundle.js"
+  },
+  "devDependencies": {
+    "@codemirror/autocomplete": "6.20.3",
+    "@codemirror/commands": "6.11.1",
+    "@codemirror/lang-javascript": "6.2.5",
+    "@codemirror/lang-json": "6.0.2",
+    "@codemirror/lang-markdown": "6.5.2",
+    "@codemirror/lang-python": "6.2.1",
+    "@codemirror/lang-rust": "6.0.2",
+    "@codemirror/lang-sql": "6.10.0",
+    "@codemirror/language": "6.12.4",
+    "@codemirror/legacy-modes": "6.5.4",
+    "@codemirror/search": "6.7.2",
+    "@codemirror/state": "6.7.6",
+    "@codemirror/view": "6.43.13",
+    "@lezer/highlight": "1.2.3",
+    "@lezer/markdown": "1.7.2",
+    "esbuild": "0.28.2"
+  }
+}
