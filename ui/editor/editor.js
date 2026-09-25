@@ -274,6 +274,52 @@ class TableWidget extends WidgetType {
   }
 }
 
+// The note's frontmatter as a table of properties (app.js draws it with FolioProps). Edits come
+// back as a function over the whole text, applied as the smallest change so undo stays tidy.
+class PropsWidget extends WidgetType {
+  constructor(text, version, h) { super(); this.text = text; this.version = version; this.h = h; }
+  eq(o) { return o.text === this.text && o.version === this.version; }
+  toDOM(view) {
+    const el = document.createElement('div');
+    el.className = 'cm-embed-block cm-props-block markdown';
+    el.ctl = this.h.renderProperties(el, this.text, {
+      edit: f => applyEdit(view, f),
+      exit: dir => dir === 'up' ? this.h.focusTitle?.() : afterProps(view),
+    });
+    return el;
+  }
+  ignoreEvent() { return true; }
+}
+function applyEdit(view, f) {
+  const doc = view.state.doc.toString(), next = f(doc);
+  if (next === doc) return;
+  let a = 0, b = 0;
+  while (a < doc.length && a < next.length && doc[a] === next[a]) a++;
+  while (b < doc.length - a && b < next.length - a && doc[doc.length - 1 - b] === next[next.length - 1 - b]) b++;
+  view.dispatch({ changes: { from: a, to: doc.length - b, insert: next.slice(a, next.length - b) }, userEvent: 'input.properties' });
+}
+// End of the frontmatter's closing line, or -1.
+function propsEnd(state) {
+  const n = syntaxTree(state).topNode.firstChild;
+  return n && n.name === 'Frontmatter' && n.from === 0 ? state.doc.lineAt(n.to).to : -1;
+}
+const showsProps = state => !!hooksOf(state).propertiesFor?.(state.doc.sliceString(0, Math.max(0, propsEnd(state))));
+// Keyboard back into the text, just below the properties.
+function afterProps(view) {
+  const end = propsEnd(view.state);
+  view.focus();
+  if (end >= 0) view.dispatch({ selection: { anchor: Math.min(end + 1, view.state.doc.length) }, scrollIntoView: true });
+}
+// With properties showing, the cursor never sits inside the frontmatter's hidden text.
+const skipProps = EditorState.transactionFilter.of(tr => {
+  if (!tr.selection) return tr;
+  const st = tr.state, end = propsEnd(st);
+  if (end < 0 || !tr.newSelection.ranges.some(r => r.empty && r.head <= end) || !showsProps(st)) return tr;
+  const extra = end >= st.doc.length ? { changes: { from: st.doc.length, insert: '\n' } } : {};
+  const to = end + 1;
+  return [tr, { ...extra, selection: EditorSelection.create(tr.newSelection.ranges.map(r => r.empty && r.head <= end ? EditorSelection.cursor(to) : r), tr.newSelection.mainIndex), sequential: true }];
+});
+
 // A rendered formula. preview: shown next to the source while it's being edited.
 class MathWidget extends WidgetType {
   constructor(tex, display, h, preview = false) { super(); this.tex = tex; this.display = display; this.h = h; this.preview = preview; }
@@ -540,6 +586,11 @@ function buildBlocks(state) {
   syntaxTree(state).iterate({
     enter(node) {
       const nf = node.from, nt = node.to;
+      if (node.name === 'Frontmatter') {
+        const text = doc.sliceString(nf, doc.lineAt(nt).to);
+        if (nf === 0 && h.propertiesFor?.(text)) out.push(Decoration.replace({ widget: new PropsWidget(text, h.version(), h), block: true }).range(0, doc.lineAt(nt).to));
+        return false;
+      }
       if (node.name === 'BlockMath') {
         const first = doc.lineAt(nf), last = doc.lineAt(nt), tex = mathTex(doc, node.node);
         // Being edited: the source stays, with a live rendering underneath.
@@ -642,7 +693,7 @@ const clickHandler = EditorView.domEventHandlers({
   },
 });
 
-const livePreview = [livePlugin, blockField, clickHandler];
+const livePreview = [livePlugin, blockField, clickHandler, skipProps];
 
 // ------------------------------------------------------------------ commands
 
@@ -744,6 +795,17 @@ const toggleList = kind => view => {
   return true;
 };
 
+// Obsidian's "Add file property": starts the frontmatter if there is none, then asks for a name.
+function addProperty(view) {
+  if (propsEnd(view.state) < 0) view.dispatch({ changes: { from: 0, insert: '---\n---\n' }, userEvent: 'input.properties' });
+  const go = () => {
+    const ctl = view.dom.querySelector('.cm-props-block')?.ctl;
+    if (ctl) ctl.add();
+  };
+  requestAnimationFrame(go);
+  return true;
+}
+
 // Editor commands by name: app.js binds keys to them (Settings → Hotkeys) and runs them from the palette.
 const COMMANDS = {
   bold: { name: 'Bold', run: wrap('**'), key: 'Mod-b' },
@@ -758,6 +820,7 @@ const COMMANDS = {
   'block-math': { name: 'Math block ($$…$$)', run: blockMath, key: 'Mod-Shift-m' },
   ...Object.fromEntries([1, 2, 3, 4, 5, 6].map(n => [`heading-${n}`, { name: `Heading ${n}`, run: setHeading(n), key: `Mod-${n}` }])),
   'heading-0': { name: 'Remove heading', run: setHeading(0), key: '' },
+  'add-property': { name: 'Add file property', run: addProperty, key: 'Mod-;' },
   'bullet-list': { name: 'Bullet list', run: toggleList('bullet'), key: 'Mod-Shift-8' },
   'numbered-list': { name: 'Numbered list', run: toggleList('numbered'), key: 'Mod-Shift-7' },
   'task-list': { name: 'Task list', run: toggleList('task'), key: 'Mod-Shift-9' },
@@ -899,6 +962,12 @@ function create(parent, hooks, opts = {}) {
       {
         key: 'ArrowUp', run(view) {
           const r = view.state.selection.main;
+          // From the first line under the properties, up goes into them.
+          const pe = liveOn && r.empty ? propsEnd(view.state) : -1;
+          if (pe >= 0 && view.state.doc.lineAt(r.head).number === view.state.doc.lineAt(pe).number + 1) {
+            const ctl = view.dom.querySelector('.cm-props-block')?.ctl;
+            if (ctl) { ctl.focus('last'); return true; }
+          }
           if (!r.empty || !hooks.focusTitle) return false;
           const a = view.coordsAtPos(r.head), b = view.coordsAtPos(0);
           if (a && b && a.top - b.top < 2) { hooks.focusTitle(); return true; }
@@ -949,7 +1018,8 @@ function create(parent, hooks, opts = {}) {
     // New document with fresh undo history (opening a note).
     load(text) {
       view.setState(EditorState.create({ doc: text, extensions: extensions() }));
-      view.dispatch({ effects: setFocus.of(view.hasFocus) });
+      // (selecting 0 lets the cursor step below the properties, if any)
+      view.dispatch({ effects: setFocus.of(view.hasFocus), selection: { anchor: 0 }, annotations: [silent.of(true)] });
     },
     // Replace content without marking the note dirty (reload from disk).
     setSilently(text) {

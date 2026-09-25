@@ -19,6 +19,7 @@ const CANVAS_JS: &str = include_str!("../ui/canvas.js");
 const BASES_JS: &str = include_str!("../ui/bases.js");
 const TASKS_JS: &str = include_str!("../ui/tasks.js");
 const IMAGES_JS: &str = include_str!("../ui/images.js");
+const PROPERTIES_JS: &str = include_str!("../ui/properties.js");
 const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
@@ -126,6 +127,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
             "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
             "/images.js" => return out(200, "text/javascript", IMAGES_JS.into()),
+            "/properties.js" => return out(200, "text/javascript", PROPERTIES_JS.into()),
             "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
@@ -173,6 +175,8 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("POST", "/api/delete") => parse(&body).and_then(|v| api_delete(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/mkdir") => parse(&body).and_then(|v| api_mkdir(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/vault") => parse(&body).and_then(|v| api_switch_vault(ctx, &str_field(&v, "path")?)),
+        ("GET", "/api/prop-types") => api_prop_types(&vault, None),
+        ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
         ("POST", "/api/screenshot") => Ok(match crate::screenshot::capture() {
             crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
             crate::screenshot::Shot::Cancelled => out(204, "text/plain", Vec::new()),
@@ -262,6 +266,52 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
     })?;
     let md = fs::metadata(&full).map_err(io_err)?;
     Ok(json_out(200, json!({ "mtime": mtime_ms(&md) })))
+}
+
+/// Obsidian keeps property types (text, number, date…) in .obsidian/types.json. This is the one
+/// file under .obsidian Folio touches: it reads the "types" map, and a PUT merges names into it
+/// (a null type removes one), keeping everything else. Only when the vault already has an
+/// .obsidian folder; otherwise 404 and the page keeps types in its own settings.
+fn api_prop_types(vault: &Path, update: Option<Value>) -> ApiResult {
+    let dir = vault.join(".obsidian");
+    let file = dir.join("types.json");
+    let is_real_dir = fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
+    if !is_real_dir {
+        return match update {
+            None => Ok(json_out(200, json!({ "types": {}, "obsidian": false }))),
+            Some(_) => Err((404, "no .obsidian folder".into())),
+        };
+    }
+    let mut doc: Value = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}));
+    if !doc.is_object() {
+        doc = json!({});
+    }
+    if !doc["types"].is_object() {
+        doc["types"] = json!({});
+    }
+    if let Some(update) = update {
+        let Some(changes) = update.as_object() else { return Err((400, "expected an object".into())) };
+        let types = doc["types"].as_object_mut().expect("types is an object");
+        for (k, v) in changes {
+            match v {
+                Value::Null => {
+                    types.remove(k);
+                }
+                Value::String(t) if !k.is_empty() && t.len() <= 32 => {
+                    types.insert(k.clone(), Value::String(t.clone()));
+                }
+                _ => return Err((400, format!("bad type for {k}"))),
+            }
+        }
+        let text = serde_json::to_string_pretty(&doc).map_err(|e| (500, e.to_string()))?;
+        let tmp = dir.join(".types.json.folio-tmp");
+        fs::write(&tmp, text).map_err(io_err)?;
+        fs::rename(&tmp, &file).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            io_err(e)
+        })?;
+    }
+    Ok(json_out(200, json!({ "types": doc["types"], "obsidian": true })))
 }
 
 fn api_rename(vault: &Path, from_rel: &str, to_rel: &str) -> ApiResult {
@@ -477,13 +527,31 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");
         }
         let page = String::from_utf8(get("/").body).unwrap();
         assert!(page.contains("/draw.js") && page.contains("/draw-render.js") && page.contains("id=\"view-drawing\""));
+    }
+
+    #[test]
+    fn prop_types_merge_into_obsidian_file() {
+        let dir = std::env::temp_dir().join(format!("folio-types-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert!(api_prop_types(&dir, None).is_ok(), "no .obsidian: empty types");
+        assert_eq!(api_prop_types(&dir, Some(json!({ "a": "text" }))).err().map(|e| e.0), Some(404), "and nothing written");
+        assert!(!dir.join(".obsidian").exists());
+        fs::create_dir(dir.join(".obsidian")).unwrap();
+        fs::write(dir.join(".obsidian/types.json"), r#"{"types":{"due":"date","keep":"number"},"other":1}"#).unwrap();
+        api_prop_types(&dir, Some(json!({ "rating": "number", "due": null }))).unwrap();
+        let v: Value = serde_json::from_slice(&fs::read(dir.join(".obsidian/types.json")).unwrap()).unwrap();
+        assert_eq!(v["types"], json!({ "keep": "number", "rating": "number" }));
+        assert_eq!(v["other"], json!(1));
+        assert!(api_prop_types(&dir, Some(json!({ "x": 5 }))).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

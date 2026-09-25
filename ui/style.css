@@ -277,8 +277,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .markdown li.task { list-style: none; margin-left: -1.4em; }
 .markdown li.task > input { margin: 0 .5em 0 0; accent-color: var(--accent); transform: translateY(1px); cursor: pointer; }
 .markdown li.task.done { color: var(--muted); text-decoration: line-through; }
-.markdown .props { font-size: 13px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 1.5em; background: var(--bg2); }
-.markdown .props div { display: flex; gap: 12px; padding: 2px 0; }
+.markdown .props:not(.pp-host) { font-size: 13px; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 1.5em; background: var(--bg2); }
+.markdown .props:not(.pp-host) div { display: flex; gap: 12px; padding: 2px 0; }
 .markdown .props .k { color: var(--muted); min-width: 110px; }
 .embed { display: block; border-left: 2px solid var(--accent); padding: 4px 0 4px 16px; margin: .5em 0 1em; }
 .embed-head { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
@@ -741,3 +741,47 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .shortcuts .keys { display: flex; gap: 4px; flex: none; align-items: center; }
 .shortcuts p { align-items: center; }
 .shortcuts kbd { white-space: nowrap; }
+
+/* ---------------------------------------------------------------- properties (frontmatter) */
+.pp { margin: 0 0 1.2em; font-size: 14px; font-family: var(--font-ui); line-height: 1.4; white-space: normal; }
+.pp-head { display: flex; align-items: center; margin-bottom: 4px; }
+.pp-fold { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 4px 2px 0; color: var(--muted); font: 600 13px var(--font-ui); cursor: pointer; border-radius: 5px; }
+.pp-fold svg { transition: transform .15s; transform: rotate(90deg); }
+.pp-collapsed .pp-fold svg { transform: none; }
+.pp-fold small { font-weight: 400; color: var(--faint); }
+.pp-fold:hover { color: var(--text); }
+.pp-collapsed .pp-rows, .pp-collapsed .pp-add { display: none; }
+.pp-rows { display: grid; grid-template-columns: auto minmax(90px, 160px) 1fr; column-gap: 2px; }
+.pp-row { display: contents; }
+.pp-row > * { min-height: 30px; }
+.pp-type { display: grid; place-items: center; width: 26px; border: 0; background: none; color: var(--faint); border-radius: 5px; cursor: pointer; padding: 0; }
+.pp-type:hover { color: var(--text); background: var(--accent-soft); }
+.pp-key, .pp-input, .pp-display, .pp-chip-input { font: inherit; color: var(--text); background: none; border: 1px solid transparent; border-radius: 5px; padding: 4px 6px; outline: none; min-width: 0; }
+.pp-key { color: var(--muted); text-overflow: ellipsis; }
+.pp-key:hover, .pp-display:hover, .pp-input:hover { background: var(--accent-soft); }
+.pp-key:focus, .pp-input:focus, .pp-display:focus { border-color: var(--accent); background: var(--bg); color: var(--text); }
+.pp-key.pp-bad { border-color: var(--c-red, #e03131); animation: ppshake .3s; }
+@keyframes ppshake { 25% { transform: translateX(-3px); } 75% { transform: translateX(3px); } }
+.pp-value { display: flex; align-items: center; min-width: 0; }
+.pp-value > * { flex: 1; }
+.pp-display { cursor: text; overflow-wrap: anywhere; }
+.pp-display p { margin: 0; }
+.pp-empty { color: var(--faint); }
+.pp-input { width: 100%; }
+.pp-input[type=number] { max-width: 180px; }
+.pp-input[type=date], .pp-input[type=datetime-local] { max-width: 240px; color-scheme: light dark; }
+.pp-check { flex: none; width: 16px; height: 16px; margin-left: 6px; accent-color: var(--accent); }
+.pp-chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 2px; border: 1px solid transparent; border-radius: 5px; cursor: text; }
+.pp-chips:focus-within { border-color: var(--accent); background: var(--bg); }
+.pp-chip { display: inline-flex; align-items: center; gap: 2px; background: var(--accent-soft); border-radius: 12px; padding: 1px 4px 1px 9px; max-width: 100%; }
+.pp .pp-chip .tag { background: none; padding: 0; border: 0; }
+.pp-chip p { margin: 0; display: inline; }
+.pp-chip-x { display: grid; place-items: center; width: 18px; height: 18px; border: 0; padding: 0; background: none; color: var(--faint); border-radius: 50%; cursor: pointer; }
+.pp-chip-x:hover { color: var(--text); background: var(--bg); }
+.pp-chip-x svg { width: 12px; height: 12px; }
+.pp-chip-input { flex: 1; min-width: 80px; padding: 3px 4px; border: 0; }
+.pp-chip-input:hover { background: none; }
+.pp-add { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; border: 0; background: none; color: var(--faint); font: 13px var(--font-ui); padding: 4px 6px; border-radius: 5px; cursor: pointer; }
+.pp-add:hover, .pp-add:focus-visible { color: var(--text); background: var(--accent-soft); outline: none; }
+.pp-new .pp-type { cursor: default; }
+.cm-props-block { padding: 2px 0 6px; border-bottom: 1px solid var(--border); margin-bottom: 10px !important; }

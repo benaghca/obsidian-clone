@@ -196,6 +196,20 @@
     try { const v = parseYaml(m[1]); return v && typeof v === 'object' && !Array.isArray(v) ? v : {}; } catch { return {}; }
   }
 
+  // A top-level "key:" line, bare or quoted.
+  const fmKeyRe = key => new RegExp(`^(${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|"${key.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&')}"|'${key.replace(/[.*+?^${}()|[\]\\']/g, '\\$&')}')\\s*:`);
+
+  // Rename a top-level frontmatter property where it stands, leaving its value's text alone.
+  function renameFrontmatter(content, from, to) {
+    const m = FM_RE.exec(content || '');
+    if (!m || from === to || !to) return content;
+    const lines = m[1].split(/\r?\n/), re = fmKeyRe(from);
+    const at = lines.findIndex(l => re.test(l));
+    if (at < 0) return content;
+    lines[at] = lines[at].replace(re, yamlKey(to) + ':');
+    return `---\n${lines.join('\n')}\n---\n` + content.slice(m[0].length);
+  }
+
   // Set (or with value === undefined, remove) one top-level frontmatter property,
   // leaving the rest of the note's text untouched.
   function setFrontmatter(content, key, value) {
@@ -203,7 +217,7 @@
     const m = FM_RE.exec(content);
     if (!m) return value === undefined ? content : `---\n${entry}\n---\n${content}`;
     const lines = m[1].split(/\r?\n/);
-    const keyRe = new RegExp(`^(${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}|"${key.replace(/[.*+?^${}()|[\]\\"]/g, '\\$&')}"|'${key.replace(/[.*+?^${}()|[\]\\']/g, '\\$&')}')\\s*:`);
+    const keyRe = fmKeyRe(key);
     let at = lines.findIndex(l => keyRe.test(l));
     if (at >= 0) {
       let end = at + 1;
@@ -751,7 +765,7 @@
   }
 
   const pure = {
-    parseYaml, emitYaml, frontmatter, setFrontmatter, parseExpr, evaluate, parseBase, serializeBase, query, valueOf, propKey,
+    parseYaml, emitYaml, frontmatter, setFrontmatter, renameFrontmatter, parseExpr, evaluate, parseBase, serializeBase, query, valueOf, propKey,
     columnName, display, summarize, buildFilter, newNoteDefaults, relative, toDate, isEmpty, FDate, Link, Duration, VIEW_TYPES, BUILTIN,
   };
 

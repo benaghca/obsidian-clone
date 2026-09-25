@@ -73,7 +73,13 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Drag an image's corner in live preview to resize it. That writes `![[img.png|420]]`, or `![alt|420](img.png)` for Markdown images, which reading view also honours.
   - Right-click an image to open, copy, resize, crop, annotate, rename, reveal, remove or delete it. **Crop** saves a cropped copy next to the original and points the embed at it. **Annotate** turns the image into a drawing with the image locked underneath, embeds the drawing in its place and opens it, so you can mark up a screenshot with arrows and text.
 - Tags, both `#inline` and nested (`#area/sub`), and frontmatter `tags:` and `aliases:`
-- A properties box that shows frontmatter in reading view
+- **Properties**, like Obsidian's: the frontmatter at the top of a note shows as a table you can edit, in live preview and reading view.
+  - Each property has a type: text, list, number, checkbox, date, date & time, tags or aliases. Each type gets a matching editor: tag and list chips, a date picker, a checkbox. Links in values stay clickable.
+  - Click a property's icon to change its type (the value converts) or remove it. Edit the name to rename it; it keeps its place and its value exactly as written.
+  - *Add property* (or **Ctrl+;**, which also starts the frontmatter in a note without any) suggests names used in other notes and keeps their types. Values suggest what other notes use.
+  - Types are shared across the vault and saved to `.obsidian/types.json` when the vault has an `.obsidian` folder, so Obsidian sees the same types. Otherwise they're saved in Folio's settings.
+  - Keyboard: **↑** from the first line goes into the properties. **↑/↓** move between rows, **Enter** saves and moves on, and **Esc** goes back to the text. Every edit is a normal change, so **Ctrl+Z** undoes it.
+  - Frontmatter that isn't valid YAML stays as text. **Settings → Properties** can show the YAML instead.
 - Callouts (`> [!warning] Title`), `==highlights==`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing)
 - A backlinks panel with context, including unlinked mentions and a one-click **Link** button, plus outgoing links and an outline
 - A quick switcher (**Ctrl+O**; **Shift+Enter** creates a note) and a command palette (**Ctrl+P**)
@@ -161,8 +167,9 @@ ui/canvas.js       canvas editor and JSON Canvas files
 ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
 ui/images.js       image viewer / lightbox, crop tool, browser screen capture
+ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
-ui/test/           Node tests for the drawing, template, canvas, bases and tasks modules (no packages needed)
+ui/test/           Node tests for the drawing, template, canvas, bases, tasks and properties modules (no packages needed)
 ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
@@ -176,7 +183,7 @@ The editor bundle is already built and checked in, so building Folio doesn't nee
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js` and `node ui/test/tasks.test.js`.
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js` and `node ui/test/properties.test.js`.
 
 ## Ideas for round two
 

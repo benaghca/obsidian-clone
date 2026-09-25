@@ -81,6 +81,7 @@ const DEFAULTS = {
   taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
   drawingFormat: 'excalidraw',
+  properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
 const saveCfg = () => store('settings', cfg);
@@ -169,6 +170,8 @@ function editorHooks(from, extra) {
     renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, from()),
     toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
     renderMath: (el, tex, display) => renderMath(el, tex, display),
+    propertiesFor: text => cfg.properties !== 'source' && propsOf(text) != null,
+    renderProperties: (el, text, ctl) => mountProps(el, text, { ...ctl, from }),
     ...extra,
   };
 }
@@ -316,6 +319,7 @@ const refreshEditorSoon = debounce(() => { if (S.view === 'note' && S.mode === '
 // ============================================================ loading & sync
 
 async function loadAll() {
+  loadPropTypes();
   const l = await api('/api/list');
   await applyList(l);
 }
@@ -1411,7 +1415,9 @@ function markdownToHtml(md, from, depth = 0) {
 function renderInto(el, content, from, depth) {
   const { fm, fmLen } = splitFrontmatter(content);
   let html = '';
-  if (fm && depth === 0 && Object.keys(fm).length) {
+  const liveProps = depth === 0 && el === preview && fmLen && cfg.properties !== 'source' && propsOf(content.slice(0, fmLen)) != null;
+  if (liveProps) html += '<div class="props pp-host"></div>';
+  else if (fm && depth === 0 && Object.keys(fm).length) {
     html += '<div class="props">' + Object.entries(fm).map(([k, v]) => {
       const val = Array.isArray(v) ? v.map(x => /^tags?$/.test(k) ? `<a class="tag" data-tag="${esc(String(x).replace(/^#/, ''))}">#${esc(String(x).replace(/^#/, ''))}</a>` : esc(x)).join(', ') : esc(v);
       return `<div><span class="k">${esc(k)}</span><span>${val}</span></div>`;
@@ -1419,6 +1425,12 @@ function renderInto(el, content, from, depth) {
   }
   html += markdownToHtml(content.slice(fmLen), from, depth);
   el.innerHTML = html;
+  // Reading view edits properties too; changes go through the note's editor, then redraw.
+  if (liveProps) mountProps($('.pp-host', el), content.slice(0, fmLen), {
+    from: () => S.cur,
+    edit: f => { const next = f(ed.value); if (next !== ed.value) { ed.value = next; renderPreview(); } },
+    exit: dir => dir === 'down' ? preview.focus({ preventScroll: true }) : titleEl.focus(),
+  });
   linkifyTags(el);
   renderMathIn(el);
   for (const tb of $$('table', el)) { const w = document.createElement('div'); w.className = 'table-wrap'; tb.replaceWith(w); w.append(tb); }
@@ -2190,6 +2202,84 @@ async function attachAndLink(file, pasted, editor = ed) {
   else editor.insert(editor.selectionStart, editor.selectionEnd, link);
 }
 
+// ============================================================ properties
+
+// Property types by name, shared by the whole vault like Obsidian's: .obsidian/types.json when the
+// vault has an .obsidian folder, otherwise Folio's own settings.
+S.propTypes = { ...(cfg.propTypes || {}) };
+let obsidianTypes = false;
+async function loadPropTypes() {
+  try { const r = await api('/api/prop-types'); S.propTypes = { ...(cfg.propTypes || {}), ...r.types }; obsidianTypes = !!r.obsidian; }
+  catch { obsidianTypes = false; }
+}
+async function savePropType(key, type) {
+  S.propTypes[key] = type;
+  if (obsidianTypes) {
+    try { await api('/api/prop-types', { method: 'PUT', body: JSON.stringify({ [key]: type }) }); return; } catch { obsidianTypes = false; }
+  }
+  cfg.propTypes = { ...(cfg.propTypes || {}), [key]: type }; saveCfg();
+}
+const propType = (key, value) => S.propTypes[key] || FolioProps.inferType(key, value);
+
+// A frontmatter block's properties, or null if it isn't a YAML mapping (then it shows as text).
+function propsOf(fmText) {
+  const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n?---[ \t]*$/.exec(fmText.replace(/\s+$/, ''));
+  if (!m) return null;
+  try { const v = FolioBases.parseYaml(m[1]); return v == null ? {} : typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+}
+
+// Names in use across the vault (commonest first), and the values a property already has.
+function knownProps() {
+  const n = new Map();
+  for (const note of S.notes.values()) for (const k of Object.keys(note.fm || {})) {
+    const e = n.get(k) || { name: k, count: 0, note };
+    e.count++; n.set(k, e);
+  }
+  // Types come from a typed reading of one note that has the property (5, not "5").
+  return [...n.values()].sort((a, b) => b.count - a.count || collator.compare(a.name, b.name))
+    .map(e => ({ name: e.name, get type() { return propType(e.name, FolioBases.frontmatter(e.note.content)[e.name]); } }));
+}
+function knownValues(key) {
+  const c = new Map();
+  for (const note of S.notes.values()) {
+    const v = note.fm?.[key];
+    for (const x of Array.isArray(v) ? v : v == null || v === '' ? [] : [v]) { const s = String(x).replace(key === 'tags' ? /^#/ : /$^/, ''); c.set(s, (c.get(s) || 0) + 1); }
+  }
+  if (key === 'tags') for (const t of allTags()) if (!c.has(t)) c.set(t, 0);
+  return [...c].sort((a, b) => b[1] - a[1]).map(([s]) => s);
+}
+
+// Draw a note's properties. edit(f) applies f(content) -> content to the note; exit(dir) hands
+// the keyboard back (up: the title, down: the text).
+function mountProps(el, fmText, { edit, exit, from }) {
+  const props = propsOf(fmText) || {};
+  const redraw = () => { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); };
+  return FolioProps.render(el, {
+    props,
+    typeOf: (k, v) => propType(k, v),
+    set: (k, v) => edit(c => FolioBases.setFrontmatter(c, k, v)),
+    rename: (a, b) => {
+      if (S.propTypes[a] && !S.propTypes[b]) savePropType(b, S.propTypes[a]);
+      edit(c => FolioBases.renameFrontmatter(c, a, b));
+    },
+    setType: async (k, t) => {
+      await savePropType(k, t);
+      const v = FolioProps.coerce(props[k], t);
+      if (JSON.stringify(v) !== JSON.stringify(props[k] ?? null)) edit(c => FolioBases.setFrontmatter(c, k, v));
+      redraw();
+    },
+    keys: () => knownProps(),
+    adopt: (k, t) => { if (!S.propTypes[k]) savePropType(k, t); },
+    values: k => knownValues(k),
+    inline: (d, text) => { d.innerHTML = markdownToHtml(String(text), from()).replace(/^\s*<p>|<\/p>\s*$/g, ''); renderMathIn(d); },
+    tag: t => searchFor(`tag:${t}`),
+    menu: (x, y, items) => menu(x, y, items),
+    collapsed: !!store('propsCollapsed'),
+    onCollapse: c => { store('propsCollapsed', c); redraw(); },
+    onExit: exit,
+  });
+}
+
 // ============================================================ images: viewer, resize, crop, annotate, screenshots
 
 // Editors by their .cm-editor element, so image clicks and grips know whose text to change.
@@ -2648,7 +2738,7 @@ const APP_COMMANDS = [
   ['settings', 'Settings', 'Mod-,', () => openSettings()],
 ].map(([id, name, key, run]) => ({ id, name, key, run }));
 const EDITOR_COMMANDS = Object.entries(FolioEditor.commands).map(([id, c]) => ({
-  id: 'editor:' + id, name: `Format: ${c.name}`, key: c.key, editor: id,
+  id: 'editor:' + id, name: id === 'add-property' ? c.name : `Format: ${c.name}`, key: c.key, editor: id,
   run: inNote(() => { setMode('edit'); ed.run(id); }),
 }));
 const COMMANDS = [...APP_COMMANDS, ...EDITOR_COMMANDS];
@@ -2819,6 +2909,7 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
+    <label>Properties at the top of notes<select class="field" name="properties"><option value="visible">Show as a table you can edit</option><option value="source">Show the YAML frontmatter as text</option></select></label>
     <div class="row" style="justify-content:flex-start"><button type="button" class="btn" data-x-hotkeys>Hotkeys…</button><button type="button" class="btn" data-x-shortcuts>Keyboard shortcuts</button></div>
     <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
     <label>Code font (empty for JetBrains Mono, which comes with Folio)<input class="field" name="fontMono" list="font-mono-list" placeholder="JetBrains Mono" spellcheck="false"></label>
@@ -2850,6 +2941,7 @@ function openSettings() {
       cfg[k] = el.type === 'checkbox' ? el.checked : el.tagName === 'TEXTAREA' ? el.value.trim() : el.value.trim().replace(/^\/+|\/+$/g, '');
     }
     saveCfg(); applyTheme(); close();
+    S.version++; ed.refresh(); if (S.view === 'note' && S.mode === 'read') renderPreview(); // (properties display)
   });
 }
 
