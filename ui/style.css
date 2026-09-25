@@ -151,18 +151,18 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 /* ---------- CodeMirror editor ---------- */
 #editor .cm-editor { font: 16px/1.7 var(--font-text); color: var(--text); }
 .mono #editor .cm-editor { font: 14.5px/1.65 var(--font-mono); }
-#editor .cm-editor.cm-focused { outline: none; }
+:is(#editor, .cv-cm) .cm-editor.cm-focused { outline: none; }
 #editor .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; min-width: 0; }
 #editor .cm-content { min-width: 0; } /* wide embeds (tables, bases) scroll inside themselves */
 #editor .cm-content { padding: 4px 0; }
 #editor .cm-line { padding: 0; }
-#editor .cm-cursor { border-left: 2px solid var(--accent); }
-#editor .cm-selectionBackground, #editor .cm-focused .cm-selectionBackground, #editor ::selection { background: var(--accent-soft) !important; }
-#editor .cm-focused .cm-selectionBackground { background: rgba(143, 115, 255, .28) !important; }
-#editor .cm-placeholder { color: var(--faint); }
-#editor .cm-selectionMatch { background: var(--mark); }
-#editor .cm-searchMatch { background: var(--mark); outline: 1px solid rgba(255, 208, 0, .6); }
-#editor .cm-searchMatch-selected { background: rgba(255, 150, 0, .55); }
+:is(#editor, .cv-cm) .cm-cursor { border-left: 2px solid var(--accent); }
+:is(#editor, .cv-cm) :is(.cm-selectionBackground, .cm-focused .cm-selectionBackground, ::selection) { background: var(--accent-soft) !important; }
+:is(#editor, .cv-cm) .cm-focused .cm-selectionBackground { background: rgba(143, 115, 255, .28) !important; }
+:is(#editor, .cv-cm) .cm-placeholder { color: var(--faint); }
+:is(#editor, .cv-cm) .cm-selectionMatch { background: var(--mark); }
+:is(#editor, .cv-cm) .cm-searchMatch { background: var(--mark); outline: 1px solid rgba(255, 208, 0, .6); }
+:is(#editor, .cv-cm) .cm-searchMatch-selected { background: rgba(255, 150, 0, .55); }
 
 /* syntax tokens (source mode + code blocks) */
 .tok-heading { font-weight: 700; }
@@ -397,6 +397,13 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cv-label-editor { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; outline: none; min-width: 220px; }
 .cv-link .cv-label-editor, .cv-node.cv-link > .cv-label-editor { position: absolute; left: 12px; right: 12px; top: 12px; }
 .cv-node.editing .cv-content { visibility: hidden; }
+/* In-place Markdown editor for text and note cards */
+.cv-cm { position: absolute; inset: 0; overflow: auto; background: var(--bg); border-radius: 10px; z-index: 2; cursor: text; box-shadow: 0 0 0 2px var(--accent); }
+.cv-cm .cm-editor { font: 15px/1.6 var(--font-text); color: var(--text); min-height: 100%; }
+.mono .cv-cm .cm-editor { font: 14px/1.6 var(--font-mono); }
+.cv-cm .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; }
+.cv-cm .cm-content { padding: 10px 16px; min-width: 0; }
+.cv-cm .cm-line { padding: 0; }
 .cv-side { position: absolute; width: calc(14px * var(--iz, 1)); height: calc(14px * var(--iz, 1)); border-radius: 50%; background: var(--bg); border: calc(2px * var(--iz, 1)) solid var(--accent); transform: translate(-50%, -50%); opacity: 0; cursor: crosshair; z-index: 3; transition: opacity .1s; }
 .cv-node:hover > .cv-side, .cv-node.selected > .cv-side { opacity: 1; }
 .cv-node.editing > .cv-side, .cv-group > .cv-side { display: none; }

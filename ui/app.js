@@ -148,29 +148,37 @@ function renderMathIn(el) {
   for (const m of el.querySelectorAll('[data-tex]')) { renderMath(m, m.dataset.tex, m.classList.contains('math-block') || m.classList.contains('math-display')); m.removeAttribute('data-tex'); }
 }
 
-const ed = FolioEditor.create($('#editor'), {
-  resolve: name => resolveLink(name, S.cur),
-  rawUrl: p => rawUrl(p),
-  imageUrl: src => { const t = /^[a-z][a-z0-9+.-]*:/i.test(src) ? null : resolveLink(safeDecode(src), S.cur); return t ? rawUrl(t) : null; },
-  follow: (name, sub) => followLink(name, sub, S.cur),
-  openUrl: url => window.open(url, '_blank', 'noopener'),
-  tag: tag => searchFor(`tag:${tag}`),
-  renderEmbed: (el, path, sub) => renderEmbedInto(el, path, sub),
-  renderMarkdown: (el, text) => { el.innerHTML = markdownToHtml(text, S.cur, 1); linkifyTags(el); },
-  version: () => S.version,
-  linkOptions: q => linkOptions(q),
-  tagOptions: () => allTags(),
+// Hooks for a Markdown editor whose links resolve from the note `from()` returns: the open
+// note for the main editor, or the note / canvas behind a canvas card's editor.
+function editorHooks(from, extra) {
+  return {
+    resolve: name => resolveLink(name, from()),
+    rawUrl: p => rawUrl(p),
+    imageUrl: src => { const t = /^[a-z][a-z0-9+.-]*:/i.test(src) ? null : resolveLink(safeDecode(src), from()); return t ? rawUrl(t) : null; },
+    follow: (name, sub) => followLink(name, sub, from()),
+    openUrl: url => window.open(url, '_blank', 'noopener'),
+    tag: tag => searchFor(`tag:${tag}`),
+    renderEmbed: (el, path, sub) => renderEmbedInto(el, path, sub),
+    renderMarkdown: (el, text) => { el.innerHTML = markdownToHtml(text, from(), 1); linkifyTags(el); },
+    version: () => S.version,
+    linkOptions: q => linkOptions(q),
+    tagOptions: () => allTags(),
+    visualEmbed: p => visualEmbed(p),
+    renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
+    codeBlock: lang => lang === 'base' || lang === 'tasks',
+    renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, from()),
+    toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
+    renderMath: (el, tex, display) => renderMath(el, tex, display),
+    ...extra,
+  };
+}
+
+const ed = FolioEditor.create($('#editor'), editorHooks(() => S.cur, {
   onChange: () => markDirty(),
   onCursor: () => cursorMoved(),
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
-  visualEmbed: p => visualEmbed(p),
-  renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
-  codeBlock: lang => lang === 'base' || lang === 'tasks',
-  renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, S.cur),
-  toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
-  renderMath: (el, tex, display) => renderMath(el, tex, display),
-}, { vim: cfg.vim });
+}), { vim: cfg.vim });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
 const preview = $('#preview');
@@ -2078,7 +2086,7 @@ function allTags() {
   return [...set].sort(collator.compare);
 }
 
-async function attachAndLink(file, pasted) {
+async function attachAndLink(file, pasted, editor = ed) {
   let name = file.name;
   if (pasted || !name || name === 'image.png') {
     const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
@@ -2089,7 +2097,8 @@ async function attachAndLink(file, pasted) {
   if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
   reindexAll(); renderTree();
   const link = `![[${linkNameFor(path, [...S.files.keys()])}]]`;
-  insertText(ed.selectionStart, ed.selectionEnd, link);
+  if (editor === ed) insertText(ed.selectionStart, ed.selectionEnd, link);
+  else editor.insert(editor.selectionStart, editor.selectionEnd, link);
 }
 
 titleEl.addEventListener('keydown', e => {
@@ -2712,6 +2721,66 @@ FolioGraph.init($('#graph-canvas'), {
     openPath(id);
   },
 });
+// A live-preview editor inside a canvas card. A text card's editor reports its text through
+// onChange; a note card's edits the note itself and saves it as you type, like the main editor.
+function mountCardEditor(host, o) {
+  const note = o.notePath;
+  if (note && !S.notes.has(note)) return null;
+  let mtime = note ? S.notes.get(note).mtime : 0, timer = null, dirty = false, chain = Promise.resolve();
+  const save = () => {
+    clearTimeout(timer); timer = null;
+    if (!dirty) return chain;
+    dirty = false;
+    const body = cm.value;
+    chain = chain.then(async () => {
+      try {
+        const r = await api(`/api/file?path=${enc(note)}`, { method: 'PUT', body, headers: mtime ? { 'X-Base-Mtime': String(mtime) } : {} });
+        mtime = r.mtime;
+        setNote(note, body, r.mtime);
+        S.files.set(note, { ...S.files.get(note), mtime: r.mtime, size: new Blob([body]).size });
+        resolveNote(note);
+        FolioCanvas.refreshFiles();
+      } catch (e) {
+        if (e.status !== 409) { toast('Save failed: ' + e.message); dirty = true; return; }
+        // Changed elsewhere: take the version on disk rather than overwrite it.
+        const got = await readMany([note]);
+        if (got[note]) { setNote(note, got[note].content, got[note].mtime); resolveNote(note); mtime = got[note].mtime; if (alive) cm.setSilently(got[note].content); }
+        toast(`"${noteName(note)}" changed on disk, so the card now shows that version.`, 4000);
+      }
+    });
+    return chain;
+  };
+  let alive = true;
+  const from = () => note || o.from || S.cur;
+  const cm = FolioEditor.create(host, editorHooks(from, {
+    onChange: () => {
+      if (note) { dirty = true; clearTimeout(timer); timer = setTimeout(save, 700); }
+      else o.onChange?.(cm.value);
+    },
+    onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted, cm); })(); },
+    ...(note ? {} : { codeBlock: lang => lang === 'tasks' }), // a base block in a text card has no note to save to
+  }), {
+    vim: cfg.vim,
+    placeholder: o.placeholder || '',
+    extraKeys: [
+      // Tab on a plain line makes a connected card (as on the canvas); in lists it still indents.
+      ...(o.onTab ? [{ key: 'Tab', run: v => /^\s*([-*+]|\d+[.)])\s/.test(v.state.doc.lineAt(v.state.selection.main.head).text) ? false : o.onTab() }] : []),
+    ],
+  });
+  cm.load(note ? S.notes.get(note).content : o.text || '');
+  // Escape finishes editing unless the editor needs it (a popup, search, Vim insert mode). Caught
+  // before the editor sees it, since Vim and the completion keymap claim Escape unconditionally.
+  host.addEventListener('keydown', e => {
+    if (e.key !== 'Escape' || e.ctrlKey || e.altKey || e.metaKey || e.shiftKey || cm.escapeBusy) return;
+    e.preventDefault(); e.stopPropagation();
+    o.onExit?.();
+  }, true);
+  return {
+    focus() { cm.focus(); if (!note) cm.setSelectionRange(cm.value.length); },
+    destroy() { alive = false; const p = save(); cm.destroy(); return p; },
+  };
+}
+
 FolioCanvas.init($('#view-canvas'), {
   onChange: () => canvasChanged(),
   renderMarkdown: (el, text, from) => { renderInto(el, text, from || S.cur, 1); for (const cb of $$('input[type=checkbox]', el)) cb.disabled = false; },
@@ -2732,6 +2801,7 @@ FolioCanvas.init($('#view-canvas'), {
     return path;
   },
   fileExists: p => S.files.has(p),
+  mountEditor: (host, o) => mountCardEditor(host, o),
   createNoteFromText: async text => {
     const first = (text.split('\n').find(l => l.trim()) || 'Untitled').replace(/^#+\s*/, '').replace(/[\\/:*?"<>|#^[\]]/g, '').trim().slice(0, 60) || 'Untitled';
     const name = await promptModal('Convert card to note', 'Note name', first);

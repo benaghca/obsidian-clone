@@ -8,9 +8,9 @@ import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, dr
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab } from '@codemirror/commands';
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion } from '@codemirror/autocomplete';
-import { vim } from '@replit/codemirror-vim';
-import { search, searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus } from '@codemirror/autocomplete';
+import { vim, getCM } from '@replit/codemirror-vim';
+import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, searchPanelOpen } from '@codemirror/search';
 import { classHighlighter, tags as t } from '@lezer/highlight';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
@@ -931,6 +931,12 @@ function create(parent, hooks, opts = {}) {
     refresh() { view.dispatch({ effects: refresh.of(null) }); },
     setLive(on) { liveOn = on; view.dispatch({ effects: liveComp.reconfigure(on ? livePreview : []) }); },
     setKeys(k) { keys = k || {}; view.dispatch({ effects: keysComp.reconfigure(keymap.of(keyBindings(keys))) }); },
+    // True while Escape has a job inside the editor: closing completions or search, or
+    // leaving Vim's insert/visual mode. A host that also uses Escape should wait for false.
+    get escapeBusy() {
+      const st = vimOn && getCM(view)?.state.vim;
+      return completionStatus(view.state) === 'active' || searchPanelOpen(view.state) || (!!st && (st.insertMode || st.visualMode));
+    },
     setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vim() : []) }); },
     run(id) { const c = COMMANDS[id]; if (!c) return false; view.focus(); return c.run(view); },
     toggleCheckbox() { return toggleCheckbox(view); },

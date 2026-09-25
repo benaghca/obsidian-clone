@@ -90,6 +90,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Create drawings from the ribbon, the file tree's context menu or the command palette. *Create new drawing and embed it in the current note* does both in one step.
 - **Canvas**, an infinite board of cards joined by arrows, saved as `.canvas` files in the open JSON Canvas format that Obsidian Canvas uses. The same file opens in both.
   - Cards can be Markdown text (with clickable links and checkboxes), notes from the vault (optionally one `#section`), images, drawings, web links or labelled groups. Cards come in six preset colours or any hex colour.
+  - **Edit in place**: press **Enter** or double-click a text card *or a note card* to edit it right on the canvas, using the same live-preview editor as notes (rendered math, links, autocomplete, checkboxes, pasted images). A note card edits the note itself and saves as you type. **Esc** finishes, and **Shift+Enter** opens the note in full.
   - Connect cards by dragging a side dot onto another card, or drop the connection on empty space to create a new connected card there. Arrows can have labels, colours and arrowheads at either end.
   - Beyond Obsidian:
     - **Tab** adds a connected child card, mind-map style, and **Alt+arrows** jump between cards.

@@ -434,12 +434,42 @@
 
   // ------------------------------------------------------------ editing text / labels
 
+  const isNoteCard = n => n?.type === 'file' && /\.md$/i.test(n.file || '') && !!hooks.mountEditor && hooks.fileExists?.(n.file) !== false;
+
+  // Text and note cards get the live-preview Markdown editor (hooks.mountEditor). A note card
+  // edits the note itself, which saves as you type; a text card saves when editing ends.
+  function startCardEditor(n, rec) {
+    const host = document.createElement('div');
+    host.className = 'cv-cm';
+    host.addEventListener('pointerdown', e => e.stopPropagation());
+    rec.el.append(host);
+    const exit = () => { stopEditing(true); viewport.focus({ preventScroll: true }); return true; };
+    const text = n.type === 'text';
+    const ctl = hooks.mountEditor(host, text
+      ? { text: n.text || '', from: fromPath, placeholder: 'Write… (Esc when done)', onChange: t => { if (editing?.host === host) { editing.value = t; growToFit(n, host); } }, onExit: exit, onTab: () => { stopEditing(true); addChild(); return true; } }
+      : { notePath: n.file, onExit: exit });
+    if (!ctl) { host.remove(); return false; }
+    rec.el.classList.add('editing');
+    editing = { id: n.id, type: n.type, host, ctl, value: n.text || '' };
+    sel = new Set([n.id]);
+    // Focus leaving the card (other than into the editor's own popups) finishes editing.
+    host.addEventListener('focusout', () => setTimeout(() => {
+      const a = document.activeElement;
+      if (editing?.host === host && !host.contains(a) && !a?.closest?.('.cm-tooltip, .modal, .menu, .modal-bg')) stopEditing(true);
+    }, 0));
+    setTimeout(() => ctl.focus(), 0);
+    request();
+    return true;
+  }
+
   function startEditing(id) {
     stopEditing(true);
     const n = byId.get(id);
-    if (!n || (n.type !== 'text' && n.type !== 'group' && n.type !== 'link')) return;
+    if (!n) return;
     const rec = nodeEls.get(id) || (render(), nodeEls.get(id));
     if (!rec) return;
+    if ((n.type === 'text' && hooks.mountEditor) || isNoteCard(n)) { if (startCardEditor(n, rec)) return; }
+    if (n.type !== 'text' && n.type !== 'group' && n.type !== 'link') return;
     const ta = document.createElement(n.type === 'text' ? 'textarea' : 'input');
     ta.className = n.type === 'text' ? 'cv-editor' : 'cv-label-editor';
     ta.spellcheck = n.type === 'text';
@@ -463,26 +493,30 @@
   }
   function stopEditing(save) {
     if (!editing) return;
-    const { id, ta, type } = editing;
+    const { id, ta, type, host, ctl } = editing;
+    const value = ta ? ta.value : editing.value;
     editing = null;
-    ta.remove();
-    nodeEls.get(id)?.el.classList.remove('editing');
+    if (ctl) { ctl.destroy(); host.remove(); } else ta.remove();
+    const rec = nodeEls.get(id);
+    rec?.el.classList.remove('editing');
     const n = byId.get(id);
     if (!n) return;
+    if (type === 'file') { if (rec) rec.key = null; request(); return; } // the note saved itself
     if (save) {
       if (type === 'text') {
-        if (!ta.value.trim() && !n.text) { data.nodes = data.nodes.filter(x => x !== n); data.edges = data.edges.filter(e => e.fromNode !== id && e.toNode !== id); sel.delete(id); }
-        else { n.text = ta.value; }
-      } else if (type === 'group') n.label = ta.value.trim() || undefined;
-      else if (type === 'link') n.url = ta.value.trim();
+        if (!value.trim() && !n.text) { data.nodes = data.nodes.filter(x => x !== n); data.edges = data.edges.filter(e => e.fromNode !== id && e.toNode !== id); sel.delete(id); }
+        else { n.text = value; }
+      } else if (type === 'group') n.label = value.trim() || undefined;
+      else if (type === 'link') n.url = value.trim();
       commit();
       if (type === 'text' && byId.has(id)) requestAnimationFrame(() => fitHeight(byId.get(id)));
     }
     request();
   }
   // Text cards grow to fit what's typed into them (they never shrink on their own).
-  function growToFit(n, ta) {
-    const need = ta.scrollHeight + 4;
+  function growToFit(n, el) {
+    const cm = el.querySelector?.('.cm-content');
+    const need = cm ? cm.offsetHeight + 16 : el.scrollHeight + 4;
     if (need > n.height) { n.height = Math.min(4000, Math.ceil(need)); request(); }
   }
   function fitHeight(n) {
@@ -507,7 +541,7 @@
 
   function onDown(e) {
     if (e.button === 2) return;
-    if (e.target.closest('.cv-editor, .cv-label-editor')) return;
+    if (e.target.closest('.cv-editor, .cv-label-editor, .cv-cm')) return;
     viewport.focus({ preventScroll: true });
     pointerWorld = toWorld(e.clientX, e.clientY);
     const [wx, wy] = pointerWorld;
@@ -651,23 +685,26 @@
   }
 
   function onDouble(e) {
-    if (e.target.closest('.cv-editor, .cv-label-editor')) return;
+    // Pointer capture during the clicks retargets dblclick to the viewport; find what's really there.
+    const target = e.target === viewport ? document.elementFromPoint(e.clientX, e.clientY) || viewport : e.target;
+    if (target.closest('.cv-editor, .cv-label-editor, .cv-cm')) return;
     const [wx, wy] = toWorld(e.clientX, e.clientY);
-    const edgeEl = e.target.closest('[data-edge]');
+    const edgeEl = target.closest('[data-edge]');
     if (edgeEl) { const ed = data.edges.find(x => x.id === edgeEl.dataset.edge); if (ed) editEdgeLabel(ed); return; }
-    const nodeEl = hitNode(e.target);
+    const nodeEl = hitNode(target);
     if (nodeEl) {
       const n = byId.get(nodeEl.dataset.id);
       if (!n) return;
-      if (n.type === 'file') return hooks.openFile?.(n.file, n.subpath);
-      if (n.type === 'group' && !e.target.closest('.cv-label')) return addNode({ type: 'text', text: '' }, [wx, wy], { edit: true });
-      if (n.type === 'link' && !e.target.closest('.cv-label')) return hooks.openUrl?.(n.url);
+      if (n.type === 'file') return isNoteCard(n) ? startEditing(n.id) : hooks.openFile?.(n.file, n.subpath);
+      if (n.type === 'group' && !target.closest('.cv-label')) return addNode({ type: 'text', text: '' }, [wx, wy], { edit: true });
+      if (n.type === 'link' && !target.closest('.cv-label')) return hooks.openUrl?.(n.url);
       return startEditing(n.id);
     }
     addNode({ type: 'text', text: '' }, [wx, wy], { edit: true });
   }
 
   function onWheel(e) {
+    if (e.target.closest('.cv-cm') && !(e.ctrlKey || e.metaKey)) return; // scroll inside the card editor
     const content = e.target.closest('.cv-content');
     if (content && !(e.ctrlKey || e.metaKey) && content.scrollHeight > content.clientHeight + 1) {
       const n = byId.get(content.closest('.cv-node').dataset.id);
@@ -756,7 +793,12 @@
     else if (e.shiftKey && e.code === 'Digit1') fit();
     else if (e.shiftKey && e.code === 'Digit2') fit(true, selectedNodes());
     else if (k === 'Delete' || k === 'Backspace') deleteSelection();
-    else if (k === 'Enter') { const ns = selectedNodes(); if (ns.length === 1) { if (ns[0].type === 'file') hooks.openFile?.(ns[0].file, ns[0].subpath); else startEditing(ns[0].id); } else handled = false; }
+    else if (k === 'Enter') {
+      const ns = selectedNodes(), n = ns[0];
+      if (ns.length !== 1) handled = false;
+      else if (n.type === 'file' && (e.shiftKey || !isNoteCard(n))) hooks.openFile?.(n.file, n.subpath); // Shift+Enter opens the note
+      else startEditing(n.id);
+    }
     else if (k === 'Tab') addChild();
     else if (k === 'Escape') { sel = new Set(); selEdge = null; request(); }
     else if (k.startsWith('Arrow') && sel.size) {
@@ -836,6 +878,7 @@
     if (ns.length) {
       const one = ns.length === 1 ? ns[0] : null;
       if (one?.type === 'text' || one?.type === 'group' || one?.type === 'link') items.push([one.type === 'group' ? 'Rename group' : one.type === 'link' ? 'Edit link' : 'Edit', () => startEditing(one.id)]);
+      if (isNoteCard(one)) items.push(['Edit here', () => startEditing(one.id)]);
       if (one?.type === 'file') items.push(['Open', () => hooks.openFile?.(one.file, one.subpath)]);
       if (one?.type === 'link') items.push(['Open link', () => hooks.openUrl?.(one.url)]);
       if (one?.type === 'text') items.push(['Convert to note…', () => convertToNote()]);
@@ -869,7 +912,7 @@
 
   function showHelp() {
     hooks.help?.(`<div class="dr-help"><h3>Canvas shortcuts</h3><div class="dr-help-cols">
-      <div><h4>Cards</h4><p><span>New card</span>double-click</p><p><span>Edit card</span><kbd>Enter</kbd> or double-click</p><p><span>Finish editing</span><kbd>Esc</kbd> <kbd>Ctrl Enter</kbd></p>
+      <div><h4>Cards</h4><p><span>New card</span>double-click</p><p><span>Edit a card or note in place</span><kbd>Enter</kbd> or double-click</p><p><span>Open a note card</span><kbd>Shift Enter</kbd></p><p><span>Finish editing</span><kbd>Esc</kbd></p>
       <p><span>New connected card</span><kbd>Tab</kbd></p><p><span>Connect cards</span>drag a side dot</p><p><span>Card from a connection</span>drop it on empty space</p>
       <p><span>Add a note or image</span>drag it from the file tree</p><p><span>Group selection</span><kbd>Ctrl G</kbd></p><p><span>Duplicate</span><kbd>Ctrl D</kbd></p></div>
       <div><h4>Selection</h4><p><span>Jump to nearby card</span><kbd>Alt</kbd> + arrows</p><p><span>Move</span>arrows (<kbd>Shift</kbd> = faster)</p><p><span>Add to selection</span><kbd>Shift</kbd>-click</p>
@@ -1025,8 +1068,8 @@
     const b = boundsOf(ns), one = ns.length === 1 ? ns[0] : null;
     const btn = (act, title, p) => `<button class="dr-btn" data-act="${act}" title="${title}">${ICON(p)}</button>`;
     let h = btn('sel-color', 'Colour', '<circle cx="12" cy="12" r="7.5"/><path d="M12 4.5v15" stroke-width="7" stroke-opacity=".35"/>');
-    if (one && (one.type === 'text' || one.type === 'group' || one.type === 'link')) h += btn('sel-edit', 'Edit (Enter)', '<path d="M4 20h4L19 9l-4-4L4 16z"/>');
-    if (one && (one.type === 'file' || one.type === 'link')) h += btn('sel-open', 'Open', '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>');
+    if (one && (one.type === 'text' || one.type === 'group' || one.type === 'link' || isNoteCard(one))) h += btn('sel-edit', one.type === 'file' ? 'Edit the note here (Enter)' : 'Edit (Enter)', '<path d="M4 20h4L19 9l-4-4L4 16z"/>');
+    if (one && (one.type === 'file' || one.type === 'link')) h += btn('sel-open', one.type === 'file' ? 'Open the note (Shift+Enter)' : 'Open', '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>');
     if (one && one.type === 'text') h += btn('sel-note', 'Convert to note', '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>');
     if (one && one.type !== 'group') h += btn('sel-child', 'Add connected card (Tab)', '<rect x="3" y="8" width="8" height="8" rx="1.5"/><rect x="15" y="8" width="6" height="8" rx="1.5"/><path d="M11 12h4"/>');
     if (ns.length > 1) h += btn('sel-group', 'Group (Ctrl+G)', '<rect x="3.5" y="5.5" width="17" height="14" rx="2" stroke-dasharray="3 2.5"/>');
