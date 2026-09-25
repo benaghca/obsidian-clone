@@ -293,14 +293,16 @@
 
   // ============================================================ text
 
+  // Each ends with the Nerd Fonts symbols so icon glyphs render in drawings too.
+  const NERD = ', "Symbols Nerd Font Mono"';
   const FONTS = {
-    1: 'Virgil, "Segoe Print", "Comic Sans MS", cursive',
-    2: 'Helvetica, Arial, "Segoe UI", sans-serif',
-    3: '"Cascadia Code", Cascadia, Consolas, "Courier New", monospace',
-    5: 'Excalifont, Virgil, "Segoe Print", "Comic Sans MS", cursive',
-    6: 'Nunito, "Segoe UI", Helvetica, Arial, sans-serif',
-    7: '"Lilita One", Impact, sans-serif',
-    8: '"Comic Shanns", "Cascadia Code", Consolas, monospace',
+    1: 'Virgil, "Segoe Print", "Comic Sans MS", cursive' + NERD,
+    2: 'Helvetica, Arial, "Segoe UI", sans-serif' + NERD,
+    3: '"Cascadia Code", Cascadia, "JetBrains Mono", Consolas, "Courier New", monospace' + NERD,
+    5: 'Excalifont, Virgil, "Segoe Print", "Comic Sans MS", cursive' + NERD,
+    6: 'Nunito, "Segoe UI", Helvetica, Arial, sans-serif' + NERD,
+    7: '"Lilita One", Impact, sans-serif' + NERD,
+    8: '"Comic Shanns", "Cascadia Code", Consolas, monospace' + NERD,
   };
   const fontCss = f => FONTS[f] || FONTS[1];
   const fontString = el => `${el.fontSize}px ${fontCss(el.fontFamily)}`;

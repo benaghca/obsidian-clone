@@ -41,16 +41,31 @@
   color-scheme: light;
 }
 
+/* Fonts. Every stack ends with the Nerd Fonts symbols, which only cover the private-use
+   code points icons live in, so ordinary text never comes from them. Settings → Fonts
+   puts the chosen font first. */
+@font-face { font-family: "Symbols Nerd Font Mono"; src: url(/vendor/SymbolsNerdFontMono.woff2) format("woff2"); unicode-range: U+E000-F8FF, U+F0000-FFFFD, U+100000-10FFFD; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url(/vendor/JetBrainsMono-Regular.woff2) format("woff2"); font-weight: 400; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url(/vendor/JetBrainsMono-Bold.woff2) format("woff2"); font-weight: 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url(/vendor/JetBrainsMono-Italic.woff2) format("woff2"); font-weight: 400; font-style: italic; font-display: swap; }
+@font-face { font-family: "JetBrains Mono"; src: url(/vendor/JetBrainsMono-BoldItalic.woff2) format("woff2"); font-weight: 700; font-style: italic; font-display: swap; }
+:root {
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif, "Symbols Nerd Font Mono";
+  --font-text: var(--font-ui);
+  --font-mono: "JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, Menlo, monospace, "Symbols Nerd Font Mono";
+}
+.markdown, .inline-title { font-family: var(--font-text); }
+
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); }
 body {
-  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  font: 14px/1.5 var(--font-ui);
   overflow: hidden;
 }
 button { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
-kbd { font: 11px ui-monospace, Consolas, monospace; padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--bg2); }
+kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; color: var(--muted); background: var(--bg2); }
 
 #app { display: flex; height: 100vh; }
 
@@ -129,13 +144,13 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .wide #preview { --col: 100000px; }
 .inline-title {
   display: block; width: 100%; border: 0; outline: none; background: transparent; color: var(--text);
-  font-family: inherit; font-weight: 700; font-size: 30px; line-height: 1.25; padding: 36px 0 8px;
+  font-family: var(--font-text); font-weight: 700; font-size: 30px; line-height: 1.25; padding: 36px 0 8px;
 }
 #preview { height: 100%; overflow: auto; padding-top: 36px; padding-bottom: 40vh; }
 
 /* ---------- CodeMirror editor ---------- */
-#editor .cm-editor { font: 16px/1.7 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: var(--text); }
-.mono #editor .cm-editor { font: 14.5px/1.65 ui-monospace, "Cascadia Code", Consolas, Menlo, monospace; }
+#editor .cm-editor { font: 16px/1.7 var(--font-text); color: var(--text); }
+.mono #editor .cm-editor { font: 14.5px/1.65 var(--font-mono); }
 #editor .cm-editor.cm-focused { outline: none; }
 #editor .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; }
 #editor .cm-content { padding: 4px 0; }
@@ -155,7 +170,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .tok-strikethrough { text-decoration: line-through; }
 .tok-link, .tok-url { color: var(--link); }
 .tok-mark { color: var(--faint); }
-.tok-mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .9em; }
+.tok-mono { font-family: var(--font-mono); font-size: .9em; }
 .tok-keyword { color: var(--syn-keyword, #c678dd); }
 .tok-string, .tok-string2 { color: var(--syn-string, #98c379); }
 .tok-number, .tok-bool, .tok-atom { color: var(--syn-number, #d19a66); }
@@ -181,7 +196,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cm-strong { font-weight: 700; }
 .cm-strike { text-decoration: line-through; color: var(--muted); }
 .cm-hl { background: var(--mark); border-radius: 2px; }
-.cm-icode { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .88em; background: var(--code-bg); padding: .1em .3em; border-radius: 4px; }
+.cm-icode { font-family: var(--font-mono); font-size: .88em; background: var(--code-bg); padding: .1em .3em; border-radius: 4px; }
 .cm-link, .cm-wikilink { color: var(--link); cursor: pointer; }
 .cm-link:hover, .cm-wikilink:hover { text-decoration: underline; }
 .cm-wikilink.cm-unresolved { color: var(--unresolved); text-decoration: underline dotted; }
@@ -200,13 +215,13 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cm-line.c-tip, .cm-line.c-success, .cm-line.c-check, .cm-line.c-done { --c: var(--c-green, #3fb27f); background: color-mix(in srgb, var(--c) 10%, transparent); }
 .cm-line.c-question, .cm-line.c-help, .cm-line.c-faq { --c: var(--c-yellow, #d9a53f); background: color-mix(in srgb, var(--c) 10%, transparent); }
 .cm-line.c-info, .cm-line.c-todo, .cm-line.c-note, .cm-line.c-abstract, .cm-line.c-summary { --c: var(--c-blue, #4a8fe0); background: color-mix(in srgb, var(--c) 10%, transparent); }
-.cm-line.cm-codeblock { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .86em; background: var(--code-bg); padding: 0 14px !important; }
+.cm-line.cm-codeblock { font-family: var(--font-mono); font-size: .86em; background: var(--code-bg); padding: 0 14px !important; }
 .cm-line.cm-codeblock-first { border-radius: 8px 8px 0 0; padding-top: 6px !important; }
 .cm-line.cm-codeblock-last { border-radius: 0 0 8px 8px; padding-bottom: 6px !important; }
 .cm-line.cm-codeblock-first.cm-codeblock-last { border-radius: 8px; }
 .cm-codeinfo { color: var(--faint); }
 .cm-line.cm-hr { background: linear-gradient(var(--border), var(--border)) center / 100% 1px no-repeat; }
-.cm-line.cm-frontmatter { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .85em; color: var(--muted); background: var(--bg2); padding: 0 12px !important; }
+.cm-line.cm-frontmatter { font-family: var(--font-mono); font-size: .85em; color: var(--muted); background: var(--bg2); padding: 0 12px !important; }
 .cm-embed-block { margin: .3em 0; white-space: normal; }
 .cm-image-block img, .cm-image-inline img { max-width: 100%; border-radius: 4px; vertical-align: middle; }
 .cm-note-embed { border-left: 2px solid var(--accent); padding: 4px 0 4px 16px; font-size: .95em; }
@@ -217,7 +232,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cm-table-widget { cursor: text; overflow-x: auto; }
 
 /* source mode shows raw markdown, lightly styled */
-.source-mode #editor .cm-editor { font: 14.5px/1.65 ui-monospace, "Cascadia Code", Consolas, Menlo, monospace; }
+.source-mode #editor .cm-editor { font: 14.5px/1.65 var(--font-mono); }
 
 /* search panel & autocomplete */
 .cm-panels { background: var(--bg2) !important; color: var(--text) !important; border-color: var(--border) !important; }
@@ -248,7 +263,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .markdown a:hover { text-decoration: underline; }
 .markdown a.internal-link.unresolved { color: var(--unresolved); opacity: .8; text-decoration: underline dotted; }
 .markdown a.tag { background: var(--tag-bg); color: var(--tag); padding: 1px 8px; border-radius: 12px; font-size: .88em; }
-.markdown code { font: .88em ui-monospace, "Cascadia Code", Consolas, monospace; background: var(--code-bg); padding: .12em .35em; border-radius: 4px; }
+.markdown code { font: .88em var(--font-mono); background: var(--code-bg); padding: .12em .35em; border-radius: 4px; }
 .markdown pre { background: var(--code-bg); padding: 12px 14px; border-radius: 8px; overflow: auto; }
 .markdown pre code { background: none; padding: 0; font-size: .86em; line-height: 1.55; }
 .markdown blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding: 2px 0 2px 16px; color: var(--muted); }
@@ -326,7 +341,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .dr-row2 { display: flex; gap: 4px; }
 .dr-select { flex: 1; min-width: 0; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 3px 4px; font: inherit; }
 .dr-range { width: 100%; accent-color: var(--accent); }
-.dr-hint { position: absolute; left: 50%; top: 45%; transform: translateX(-50%); color: var(--faint); font: 18px Virgil, "Segoe Print", cursive; pointer-events: none; text-align: center; max-width: 80%; }
+.dr-hint { position: absolute; left: 50%; top: 45%; transform: translateX(-50%); color: var(--faint); font: 18px Virgil, "Segoe Print", cursive, "Symbols Nerd Font Mono"; pointer-events: none; text-align: center; max-width: 80%; }
 .dr-textedit { position: absolute; margin: 0; padding: 0; border: 0; outline: none; resize: none; overflow: hidden; background: transparent; z-index: 5; overflow-wrap: break-word; word-break: normal; caret-color: var(--accent); }
 .dr-help { padding: 16px 20px 18px; font-size: 13px; }
 .dr-help h3 { margin: 0 0 8px; }
@@ -377,7 +392,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cv-link { display: grid; gap: 4px; }
 .cv-link-host { font-weight: 600; }
 .cv-link-url { font-size: 13px; overflow-wrap: anywhere; color: var(--link); }
-.cv-editor { position: absolute; inset: 0; width: 100%; height: 100%; resize: none; border: 0; outline: none; background: var(--bg); color: var(--text); font: 15px/1.6 ui-monospace, "Cascadia Code", Consolas, monospace; padding: 10px 16px; border-radius: 10px; z-index: 2; }
+.cv-editor { position: absolute; inset: 0; width: 100%; height: 100%; resize: none; border: 0; outline: none; background: var(--bg); color: var(--text); font: 15px/1.6 var(--font-mono); padding: 10px 16px; border-radius: 10px; z-index: 2; }
 .cv-label-editor { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; outline: none; min-width: 220px; }
 .cv-link .cv-label-editor, .cv-node.cv-link > .cv-label-editor { position: absolute; left: 12px; right: 12px; top: 12px; }
 .cv-node.editing .cv-content { visibility: hidden; }
@@ -430,7 +445,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .bs-panel { border: 1px solid var(--border); background: var(--bg2); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; display: grid; gap: 6px; }
 .bs-panel h5 { margin: 4px 0 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--faint); }
 .bs-frow { display: flex; align-items: center; gap: 8px; }
-.bs-frow code { flex: 1; font: 12.5px ui-monospace, Consolas, monospace; background: var(--code-bg); padding: 3px 7px; border-radius: 5px; overflow-wrap: anywhere; }
+.bs-frow code { flex: 1; font: 12.5px var(--font-mono); background: var(--code-bg); padding: 3px 7px; border-radius: 5px; overflow-wrap: anywhere; }
 .bs-frow.bs-global span { font-size: 11.5px; color: var(--faint); }
 .bs-x { border: 0; background: none; color: var(--faint); font-size: 16px; cursor: pointer; padding: 0 4px; }
 .bs-x:hover { color: var(--danger); }
@@ -494,7 +509,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .base-embed { display: block; margin: .6em 0 1.2em; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; font-size: 14px; line-height: 1.5; white-space: normal; }
 .base-embed .bs-table { font-size: 13.5px; }
 .cm-codeblock-widget { position: relative; }
-.cm-codeblock-edit { position: absolute; top: 6px; right: 6px; border: 1px solid var(--border); background: var(--bg2); color: var(--faint); border-radius: 5px; font: 11px ui-monospace, monospace; padding: 1px 5px; cursor: pointer; opacity: 0; transition: opacity .1s; }
+.cm-codeblock-edit { position: absolute; top: 6px; right: 6px; border: 1px solid var(--border); background: var(--bg2); color: var(--faint); border-radius: 5px; font: 11px var(--font-mono); padding: 1px 5px; cursor: pointer; opacity: 0; transition: opacity .1s; }
 .cm-codeblock-widget:hover .cm-codeblock-edit { opacity: 1; }
 
 /* tasks */
@@ -536,7 +551,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .tk-text { overflow-wrap: anywhere; }
 .tk-text a { color: var(--link); cursor: pointer; text-decoration: none; }
 .tk-text a.tag { background: var(--tag-bg); color: var(--tag); padding: 0 7px; border-radius: 10px; font-size: .88em; }
-.tk-text code { font: .88em ui-monospace, Consolas, monospace; background: var(--code-bg); padding: .1em .3em; border-radius: 4px; }
+.tk-text code { font: .88em var(--font-mono); background: var(--code-bg); padding: .1em .3em; border-radius: 4px; }
 .tk-row.done .tk-text, .tk-row.cancelled .tk-text { color: var(--faint); text-decoration: line-through; }
 .tk-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--faint); margin-top: 2px; }
 .tk-meta:empty { display: none; }
@@ -616,3 +631,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 ::-webkit-scrollbar-thumb { background: var(--bg3); border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
 ::-webkit-scrollbar-thumb:hover { background-color: var(--faint); }
 ::-webkit-scrollbar-track { background: transparent; }
+.font-preview { font-size: 13px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: baseline; }
+.font-preview .fp-text { color: var(--text); font-size: 15px; }
+.font-preview .fp-mono { font-size: 13px; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; color: var(--text); }
+.font-preview .fp-icons { font-size: 17px; color: var(--accent); letter-spacing: .15em; }

@@ -74,6 +74,8 @@ const DEFAULTS = {
   mono: false,
   theme: '',
   palette: 'default',
+  fontText: '',          // '' = system font
+  fontMono: '',          // '' = JetBrains Mono (bundled)
   folderTemplates: '',
   taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
@@ -82,10 +84,20 @@ const DEFAULTS = {
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
 const saveCfg = () => store('settings', cfg);
 
+// A chosen font goes first; the default stack (with the Nerd Fonts symbols) stays behind it.
+const FONT_MONO_DEFAULT = '"JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, Menlo, monospace, "Symbols Nerd Font Mono"';
+const cssFontName = n => '"' + String(n).replace(/["\\;{}<>]/g, '').trim() + '"';
+function applyFonts() {
+  const root = document.documentElement.style;
+  if (cfg.fontText.trim()) root.setProperty('--font-text', `${cssFontName(cfg.fontText)}, var(--font-ui)`); else root.removeProperty('--font-text');
+  if (cfg.fontMono.trim()) root.setProperty('--font-mono', `${cssFontName(cfg.fontMono)}, ${FONT_MONO_DEFAULT}`); else root.removeProperty('--font-mono');
+}
+
 function applyTheme() {
   const t = cfg.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.documentElement.dataset.theme = t;
   FolioThemes.apply(cfg.palette, t);
+  applyFonts();
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
@@ -2199,6 +2211,7 @@ const COMMANDS = [
   ['Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
   ['Find in current note', 'Ctrl+F', () => { if (S.view === 'note') { setMode('edit'); ed.openSearch(); } }],
   ['Toggle light / dark theme', '', () => toggleTheme()],
+  ['Insert icon (Nerd Fonts)…', '', () => insertIcon()],
   ['Change colour theme…', '', () => chooseTheme()],
   ['Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
   ['Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
@@ -2232,10 +2245,21 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="livePreview"> Live preview (hide Markdown syntax except where you're editing)</label>
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
+    <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
+    <label>Code font (empty for JetBrains Mono, which comes with Folio)<input class="field" name="fontMono" list="font-mono-list" placeholder="JetBrains Mono" spellcheck="false"></label>
+    <datalist id="font-text-list"><option>Inter</option><option>Segoe UI</option><option>Noto Sans</option><option>Ubuntu</option><option>Georgia</option><option>Iowan Old Style</option><option>Literata</option><option>JetBrains Mono</option></datalist>
+    <datalist id="font-mono-list"><option>JetBrains Mono</option><option>JetBrainsMono Nerd Font</option><option>FiraCode Nerd Font</option><option>Hack Nerd Font</option><option>Iosevka</option><option>Fira Code</option><option>Cascadia Code</option><option>Consolas</option><option>Menlo</option><option>Ubuntu Mono</option></datalist>
+    <div class="font-preview">Preview: <span class="fp-text">The quick brown fox — 0O 1lI</span> <code class="fp-mono">fn main() { 0O 1lI =&gt; }</code> <span class="fp-icons">\uf09b \ue7a8 \uf0e7 \uf011 \udb80\ude0c</span></div>
     <div class="row"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">Save</button></div>
   </form>`);
   const f = $('form', back);
   for (const [k, v] of Object.entries(cfg)) { const el = f.elements[k]; if (!el) continue; if (el.type === 'checkbox') el.checked = v; else el.value = v; }
+  // Live font preview while typing a font name.
+  const fp = () => {
+    $('.fp-text', back).style.fontFamily = f.elements.fontText.value.trim() ? `${cssFontName(f.elements.fontText.value)}, var(--font-ui)` : 'var(--font-ui)';
+    $('.fp-mono', back).style.fontFamily = f.elements.fontMono.value.trim() ? `${cssFontName(f.elements.fontMono.value)}, ${FONT_MONO_DEFAULT}` : FONT_MONO_DEFAULT;
+  };
+  f.elements.fontText.addEventListener('input', fp); f.elements.fontMono.addEventListener('input', fp); fp();
   const close = () => back.remove();
   $('[data-x]', back).onclick = close;
   api('/api/info').then(i => { $('#vault-path', back).value = i.vault; }).catch(() => { });
@@ -2261,6 +2285,38 @@ async function switchVault() {
   try { await api('/api/vault', { method: 'POST', body: JSON.stringify({ path: p }) }); }
   catch (e) { return toast('Couldn’t open that folder: ' + e.message); }
   location.reload();
+}
+
+// ============================================================ Nerd Font icons
+
+let nerdIcons = null;
+async function loadNerdIcons() {
+  if (nerdIcons) return nerdIcons;
+  const text = await (await fetch('/vendor/nerd-icons.txt')).text();
+  const SETS = { cod: 'Codicons', dev: 'Devicons', fa: 'Font Awesome', fae: 'Font Awesome ext.', iec: 'Power', linux: 'Logos', md: 'Material', oct: 'Octicons', pl: 'Powerline', ple: 'Powerline ext.', pom: 'Pomicons', seti: 'Seti', custom: 'Nerd Fonts', weather: 'Weather' };
+  nerdIcons = text.split('\n').filter(l => l && !l.startsWith('#')).map(l => {
+    const [name, hex] = l.split(' ');
+    const dash = name.indexOf('-');
+    return { name: name.slice(dash + 1).replace(/_/g, ' '), full: name, set: SETS[name.slice(0, dash)] || name.slice(0, dash), char: String.fromCodePoint(parseInt(hex, 16)) };
+  });
+  return nerdIcons;
+}
+// Search the Nerd Fonts icons by name and insert one (or copy it when no note is open).
+async function insertIcon() {
+  let icons;
+  try { icons = await loadNerdIcons(); } catch (e) { return toast('Couldn’t load the icon list: ' + e.message); }
+  const target = S.view === 'note' ? S.cur : null;
+  const pick = await picker({
+    placeholder: `Search ${icons.length.toLocaleString()} icons… (e.g. github, rust, calendar)`,
+    items: q => (q ? rank(icons, q, x => x.full) : icons.slice(0, 60)).map(x => ({ main: `${x.char}   ${x.name}`, sub: x.set, value: x })),
+  });
+  if (!pick) return;
+  if (target && S.cur === target && S.view === 'note') {
+    if (S.mode !== 'edit') setMode('edit');
+    insertText(ed.selectionStart, ed.selectionEnd, pick.char);
+  } else {
+    try { await navigator.clipboard.writeText(pick.char); toast(`Copied ${pick.full}`); } catch { toast('Open a note to insert icons'); }
+  }
 }
 
 // Pick a colour theme, previewing each one as you move through the list.

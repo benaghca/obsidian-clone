@@ -23,7 +23,16 @@ const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
 const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 const EDITOR_JS: &str = include_str!("../ui/vendor/editor.bundle.js");
-const VIRGIL_WOFF2: &[u8] = include_bytes!("../ui/vendor/Virgil.woff2");
+/// Fonts and data files served as-is from /vendor/.
+const VENDOR_FILES: &[(&str, &str, &[u8])] = &[
+    ("Virgil.woff2", "font/woff2", include_bytes!("../ui/vendor/Virgil.woff2")),
+    ("SymbolsNerdFontMono.woff2", "font/woff2", include_bytes!("../ui/vendor/SymbolsNerdFontMono.woff2")),
+    ("JetBrainsMono-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Regular.woff2")),
+    ("JetBrainsMono-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Bold.woff2")),
+    ("JetBrainsMono-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Italic.woff2")),
+    ("JetBrainsMono-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-BoldItalic.woff2")),
+    ("nerd-icons.txt", "text/plain; charset=utf-8", include_bytes!("../ui/vendor/nerd-icons.txt")),
+];
 
 /// Everything the page may load comes from Folio itself; nothing else is allowed.
 pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
@@ -96,8 +105,12 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
             "/vendor/purify.min.js" => return out(200, "text/javascript", PURIFY_JS.into()),
             "/vendor/editor.bundle.js" => return out(200, "text/javascript", EDITOR_JS.into()),
-            "/vendor/Virgil.woff2" => return out(200, "font/woff2", VIRGIL_WOFF2.to_vec()),
             _ => {}
+        }
+        if let Some(name) = path.strip_prefix("/vendor/") {
+            if let Some((_, ctype, data)) = VENDOR_FILES.iter().find(|(n, _, _)| *n == name) {
+                return out(200, ctype, data.to_vec());
+            }
         }
     }
 
@@ -427,7 +440,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");
