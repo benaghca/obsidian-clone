@@ -707,6 +707,43 @@ function blockMath(view) {
   return true;
 }
 
+// The lines the selection touches, each once (blank lines skipped when there are several).
+function selectedLines(state) {
+  const out = new Map();
+  for (const r of state.selection.ranges) {
+    for (let n = state.doc.lineAt(r.from).number, end = state.doc.lineAt(r.to).number; n <= end; n++) out.set(n, state.doc.line(n));
+  }
+  const lines = [...out.values()];
+  return lines.length > 1 ? lines.filter(l => l.text.trim()) : lines;
+}
+
+// Make the selected lines headings of `level` (0: plain text); the same level again removes it.
+const setHeading = level => view => {
+  const lines = selectedLines(view.state);
+  const same = level && lines.every(l => (/^(#{1,6})\s/.exec(l.text)?.[1].length || 0) === level);
+  view.dispatch({
+    changes: lines.map(l => ({ from: l.from, to: l.from + (/^#{1,6}\s+/.exec(l.text)?.[0].length || 0), insert: same || !level ? '' : '#'.repeat(level) + ' ' })),
+    scrollIntoView: true,
+  });
+  return true;
+};
+
+// Turn the selected lines into a bullet, numbered or task list, or back into text if they all are one.
+const LIST_KIND = t => /^\s*[-*+]\s+\[.\]\s/.test(t) ? 'task' : /^\s*[-*+]\s/.test(t) ? 'bullet' : /^\s*\d+[.)]\s/.test(t) ? 'numbered' : null;
+const toggleList = kind => view => {
+  const lines = selectedLines(view.state);
+  const all = lines.every(l => LIST_KIND(l.text) === kind);
+  let n = 1;
+  view.dispatch({
+    changes: lines.map(l => {
+      const m = /^(\s*)(?:[-*+]\s+\[.\]\s+|[-*+]\s+|\d+[.)]\s+)?/.exec(l.text);
+      const insert = all ? '' : kind === 'bullet' ? '- ' : kind === 'task' ? '- [ ] ' : `${n++}. `;
+      return { from: l.from + m[1].length, to: l.from + m[0].length, insert };
+    }),
+  });
+  return true;
+};
+
 // Editor commands by name: app.js binds keys to them (Settings → Hotkeys) and runs them from the palette.
 const COMMANDS = {
   bold: { name: 'Bold', run: wrap('**'), key: 'Mod-b' },
@@ -719,6 +756,11 @@ const COMMANDS = {
   'toggle-checkbox': { name: 'Toggle checkbox', run: v => toggleCheckbox(v), key: 'Mod-Enter' },
   'inline-math': { name: 'Inline math ($…$)', run: wrap('$'), key: 'Mod-m' },
   'block-math': { name: 'Math block ($$…$$)', run: blockMath, key: 'Mod-Shift-m' },
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6].map(n => [`heading-${n}`, { name: `Heading ${n}`, run: setHeading(n), key: `Mod-${n}` }])),
+  'heading-0': { name: 'Remove heading', run: setHeading(0), key: '' },
+  'bullet-list': { name: 'Bullet list', run: toggleList('bullet'), key: 'Mod-Shift-8' },
+  'numbered-list': { name: 'Numbered list', run: toggleList('numbered'), key: 'Mod-Shift-7' },
+  'task-list': { name: 'Task list', run: toggleList('task'), key: 'Mod-Shift-9' },
 };
 const keyBindings = keys => Object.entries(COMMANDS).flatMap(([id, c]) => {
   const k = keys && id in keys ? keys[id] : c.key;
@@ -867,10 +909,10 @@ function create(parent, hooks, opts = {}) {
     keymap.of([
       ...closeBracketsKeymap,
       ...completionKeymap,
-      // Ctrl+G (graph) and Alt+←/→ (history) belong to the app.
+      // Ctrl+G (graph), Alt+←/→ (history), Ctrl+/ (shortcuts) and Ctrl+Shift+\ (right sidebar) belong to the app.
       ...searchKeymap.filter(k => k.key !== 'Mod-g' && k.key !== 'Mod-Shift-g'),
       ...historyKeymap,
-      ...defaultKeymap.filter(k => !['Alt-ArrowLeft', 'Alt-ArrowRight', 'Mod-Enter'].includes(k.key)),
+      ...defaultKeymap.filter(k => !['Alt-ArrowLeft', 'Alt-ArrowRight', 'Mod-Enter', 'Mod-/', 'Shift-Mod-\\'].includes(k.key)),
     ]),
     EditorView.updateListener.of(u => {
       if (u.docChanged && !u.transactions.some(tr => tr.annotation(silent))) hooks.onChange?.();

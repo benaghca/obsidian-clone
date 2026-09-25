@@ -708,3 +708,36 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cm-math-preview { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--bg2); border: 1px solid var(--border); vertical-align: middle; }
 .cm-math-preview-block { display: block; margin: 0 0 .6em; padding: 8px 12px; text-align: center; overflow-x: auto; }
 .cm-math-info { padding: 4px 8px; }
+
+/* ---------------------------------------------------------------- keyboard focus */
+:is(.ib, .rb, .btn, .dr-btn, .hk-key, .bs-tab, .tk-actions button):focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#tree:focus { outline: none; }
+#tree:focus .t-row.kb { box-shadow: inset 0 0 0 1.5px var(--accent); color: var(--text); }
+:is(.s-file-name, .s-snip, .tag-row, .tk-row):focus { outline: none; background: var(--accent-soft); color: var(--text); }
+.tk-row:focus { box-shadow: inset 0 0 0 1.5px var(--accent); }
+#preview:focus { outline: none; }
+
+/* Settings → Hotkeys */
+.modal.wide { width: min(760px, calc(100vw - 32px)); }
+.hk { display: flex; flex-direction: column; max-height: calc(88vh - 16px); }
+.hk-head { display: flex; gap: 14px; align-items: center; padding: 14px 16px 10px; }
+.hk-head h3 { margin: 0; white-space: nowrap; }
+.hk-head .field { flex: 1; }
+.hk-list { overflow-y: auto; padding: 0 8px; min-height: 120px; }
+.hk-row { display: flex; align-items: center; gap: 10px; padding: 4px 8px; border-radius: 6px; }
+.hk-row:hover { background: var(--bg3, var(--accent-soft)); }
+.hk-name { flex: 1; min-width: 0; font-size: 13.5px; }
+.hk-name small { display: block; color: var(--c-orange, #f08c00); font-size: 11.5px; }
+.hk-row.clash .hk-key { border-color: var(--c-orange, #f08c00); }
+.hk-key { min-width: 110px; padding: 3px 10px; font: 12.5px/1.5 var(--font-mono); background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.hk-key.none { color: var(--faint); font-family: var(--font-ui); }
+.hk-key.rec { border-color: var(--accent); color: var(--accent); animation: hkpulse 1s infinite; }
+@keyframes hkpulse { 50% { box-shadow: 0 0 0 3px var(--accent-soft); } }
+.hk-reset { width: 26px; height: 26px; font-size: 15px; }
+.hk-reset:disabled { opacity: .25; cursor: default; }
+.hk-foot { display: flex; align-items: center; gap: 12px; justify-content: space-between; padding: 10px 16px 14px; border-top: 1px solid var(--border); color: var(--muted); font-size: 12.5px; }
+.shortcuts h4 + p, .shortcuts .dr-help-cols h4 { margin-top: 10px; }
+.shortcuts-foot { display: flex; align-items: center; gap: 12px; margin: 14px 0 0; color: var(--muted); }
+.shortcuts .keys { display: flex; gap: 4px; flex: none; align-items: center; }
+.shortcuts p { align-items: center; }
+.shortcuts kbd { white-space: nowrap; }

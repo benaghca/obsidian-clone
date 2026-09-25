@@ -404,7 +404,7 @@
     if (x.recur) chips.push(`<span class="tk-recur" title="Repeats ${esc(x.recur)}">${ICON('<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>')}${esc(x.recur)}</span>`);
     if (x.done && x.doneDate) chips.push(`<span class="tk-donedate">✓ ${esc(friendly(x.doneDate))}</span>`);
     if (opts.source !== false) chips.push(`<a class="tk-src" data-open="${esc(x.path)}" data-line="${x.line}" title="${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}">${esc(x.path.split('/').pop().replace(/\.md$/, ''))}</a>`);
-    return `<div class="tk-row${x.done ? ' done' : ''}${x.cancelled ? ' cancelled' : ''}${x.priority ? ' p-' + x.priority : ''}" data-path="${esc(x.path)}" data-line="${x.line}" draggable="${opts.drag ? 'true' : 'false'}">
+    return `<div class="tk-row${x.done ? ' done' : ''}${x.cancelled ? ' cancelled' : ''}${x.priority ? ' p-' + x.priority : ''}" data-path="${esc(x.path)}" data-line="${x.line}" tabindex="-1" draggable="${opts.drag ? 'true' : 'false'}">
       <input type="checkbox" class="tk-check"${x.done ? ' checked' : ''} title="${x.done ? 'Mark not done' : 'Complete'}">
       <div class="tk-main"><div class="tk-text">${h.inline(x.text || '(empty task)', x.path)}</div><div class="tk-meta">${x.priority ? `<span class="tk-prio" title="${PRIO_LABEL[x.priority]} priority">${PRIO_LABEL[x.priority]}</span>` : ''}${chips.join('')}</div></div>
       ${opts.actions !== false && !x.done ? `<div class="tk-actions"><button data-act="today" title="Do today">${ICON('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}</button><button data-act="tomorrow" title="Do tomorrow">${ICON('<path d="M5 12h14M13 6l6 6-6 6"/>')}</button><button data-act="date" title="Pick a date">${ICON('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>')}</button><button data-act="more" title="More">${ICON('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>')}</button></div>` : ''}
@@ -448,6 +448,39 @@
         ]);
       }
     });
+    // Keyboard: ↑↓ (j/k) move, Space/X tick, T today, M tomorrow, Enter opens the note. The list
+    // redraws after each change, so focus comes back to the same place in it.
+    let refocus = null;
+    const rowsOf = () => [...el.querySelectorAll('.tk-row')];
+    el.addEventListener('keydown', e => {
+      if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input:not(.tk-check), textarea, select')) return;
+      const cur = e.target.closest('.tk-row');
+      const rows = rowsOf(), i = rows.indexOf(cur);
+      const go = j => { const r = rows[Math.max(0, Math.min(rows.length - 1, j))]; r?.focus(); r?.scrollIntoView({ block: 'nearest' }); };
+      const x = cur && h.find(cur.dataset.path, +cur.dataset.line);
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, t = today();
+      const change = f => { if (!x) return; refocus = i; f(); };
+      if (k === 'ArrowDown' || k === 'j') go(i + 1);
+      else if ((k === 'ArrowUp' || k === 'k') && i <= 0 && el.querySelector('.tk-add')) el.querySelector('.tk-add').focus();
+      else if (k === 'ArrowUp' || k === 'k') go(i - 1);
+      else if (k === 'Home') go(0);
+      else if (k === 'End') go(rows.length - 1);
+      else if (k === ' ' || k === 'x') change(() => h.toggle(x));
+      else if (k === 't') change(() => h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', t));
+      else if (k === 'm') change(() => h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', addDays(t, 1)));
+      else if (k === 'Enter' && x) h.open(x.path, x.line);
+      else return;
+      e.preventDefault(); e.stopPropagation();
+    });
+    new MutationObserver(() => {
+      if (refocus == null) return;
+      const rows = rowsOf();
+      if (!rows.length) return;
+      const r = rows[Math.min(refocus, rows.length - 1)];
+      refocus = null;
+      r.focus({ preventScroll: true }); r.scrollIntoView({ block: 'nearest' });
+    }).observe(el, { childList: true, subtree: true });
+
     // Drag a task onto a section to reschedule it.
     let drag = null;
     el.addEventListener('dragstart', e => { const row = e.target.closest?.('.tk-row'); if (!row) return; drag = h.find(row.dataset.path, +row.dataset.line); e.dataTransfer.setData('text/plain', row.textContent.trim()); e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
@@ -505,6 +538,8 @@
       if (e.target.closest('.tk-showdone')) { showDone = e.target.checked; render(); }
     });
     el.addEventListener('keydown', async e => {
+      // ↓ from the add or search box moves into the list.
+      if (e.key === 'ArrowDown' && e.target.matches('.tk-add, .tk-search') && el.querySelector('.tk-row')) { e.preventDefault(); el.querySelector('.tk-row').focus(); return; }
       if (!e.target.classList.contains('tk-add')) return;
       if (e.key === 'Escape') { e.target.value = ''; preview(); return; }
       if (e.key !== 'Enter') return;

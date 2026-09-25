@@ -126,7 +126,18 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - **Fonts and Nerd Font icons**: JetBrains Mono comes with Folio and is the default code font. **Settings** can set the text and code fonts to any font installed on the computer, with a live preview. All of Nerd Fonts' roughly 11,000 icons (Font Awesome, Material Design, Codicons, Devicons, Octicons and more) work in every font Folio uses, including notes, code, canvases and drawings. The icon font only loads on pages that contain an icon. *Insert icon (Nerd Fonts)…* searches the icons by name. Icons are private-use Unicode characters, so a note that uses them needs a Nerd Font wherever else you open it.
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
-- Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, **Ctrl+M** / **Ctrl+Shift+M** math, and **Tab**/**Shift+Tab** to indent list items
+- Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, **Ctrl+1**…**6** headings (the same level again removes it), **Ctrl+Shift+8/7/9** bullet, numbered and task lists, **Ctrl+M** / **Ctrl+Shift+M** math, and **Tab**/**Shift+Tab** to indent list items
+- **Keyboard first**:
+  - **Ctrl+/** shows every shortcut.
+  - **Settings → Hotkeys** rebinds any command, including the formatting commands above. Click a shortcut, press the new keys, and clashes are flagged. The command palette lists your recent commands first and shows each command's current keys.
+  - **Ctrl+Shift+E** moves to the file tree:
+    - arrows move and expand or collapse folders, and typing a name jumps to it
+    - **Enter** opens the file in the editor, and **Space** opens it while staying in the tree
+    - **F2** renames, **Del** deletes and **Ctrl+N** makes a note in that folder
+    - **Esc** goes back to the page
+  - Search results, tags and task lists work the same way with arrows, **Enter** and **Esc**. In task lists, **Space**/**X** ticks a task, **T** makes it due today and **M** makes it due tomorrow.
+  - **Ctrl+\** and **Ctrl+Shift+\** hide and show the sidebars.
+  - Dialogs return focus to where you were.
 
 UI preferences (theme, panel sizes and so on) are stored in the webview's local storage for each vault. Nothing is written into the vault except your notes and attachments.
 

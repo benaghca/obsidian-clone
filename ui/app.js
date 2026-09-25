@@ -1625,7 +1625,87 @@ function renderTree() {
   walk(root);
   $('#tree').innerHTML = rows.join('') + '<div class="tree-root-drop" data-dir=""></div>';
   renderTreeActive();
+  if (treeCursor) treeRow(treeCursor)?.classList.add('kb');
 }
+
+// ------------------------------------------------------------ file tree keyboard
+
+// The row the keyboard is on ('d:<dir>' or 'f:<file>'), kept across re-renders.
+let treeCursor = null, treeTyped = '', treeTypedAt = 0;
+const rowKey = r => r.dataset.dir != null ? 'd:' + r.dataset.dir : 'f:' + r.dataset.path;
+const treeRow = k => $(k.startsWith('d:') ? `#tree .t-row[data-dir="${CSS.escape(k.slice(2))}"]` : `#tree .t-row[data-path="${CSS.escape(k.slice(2))}"]`);
+function setTreeCursor(r, scroll = true) {
+  for (const x of $$('#tree .t-row.kb')) x.classList.remove('kb');
+  treeCursor = r ? rowKey(r) : null;
+  if (!r) return;
+  r.classList.add('kb');
+  if (scroll) r.scrollIntoView({ block: 'nearest' });
+}
+function focusTree() {
+  showPanel('files', true); // (true: never toggles the sidebar closed)
+  $('#tree').focus({ preventScroll: true });
+  setTreeCursor((treeCursor && treeRow(treeCursor)) || $('#tree .t-row.active') || $('#tree .t-row'));
+}
+// Put the keyboard back on the page that's open.
+function focusMain() {
+  if (S.view === 'note') { if (S.mode === 'edit') ed.focus(); else $('#preview').focus({ preventScroll: true }); }
+  else if (S.view === 'canvas') $('#view-canvas .cv-viewport')?.focus({ preventScroll: true });
+  else if (S.view === 'drawing') $('#view-drawing .dr-canvas')?.focus({ preventScroll: true });
+  else if (S.view === 'file') fileViewer?.focus();
+  else $(`#view-${S.view} [tabindex], #view-${S.view} input, #view-${S.view} button`)?.focus({ preventScroll: true });
+}
+$('#tree').addEventListener('keydown', e => {
+  const rows = $$('#tree .t-row').filter(r => r.offsetParent);
+  let r = treeCursor && treeRow(treeCursor);
+  if (!r || !r.offsetParent) r = null;
+  const i = r ? rows.indexOf(r) : -1;
+  const dir = r?.dataset.dir, path = r?.dataset.path;
+  const target = path || dir;
+  const mod = e.ctrlKey || e.metaKey;
+  let done = true;
+  if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') newNote(dir != null ? dir : path ? dirname(path) : '');
+  else if (mod || e.altKey) done = false;
+  else if (e.key === 'ArrowDown') setTreeCursor(rows[Math.min(rows.length - 1, i + 1)]);
+  else if (e.key === 'ArrowUp') setTreeCursor(rows[Math.max(0, i - 1)] || rows[0]);
+  else if (e.key === 'Home') setTreeCursor(rows[0]);
+  else if (e.key === 'End') setTreeCursor(rows[rows.length - 1]);
+  else if (e.key === 'PageDown' || e.key === 'PageUp') {
+    const step = Math.max(1, Math.floor($('#tree').clientHeight / (r?.offsetHeight || 28)) - 1);
+    setTreeCursor(rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'PageDown' ? step : -step)))]);
+  }
+  else if (e.key === 'ArrowRight' && dir != null) {
+    if (!S.expanded.has(dir)) { S.expanded.add(dir); store('expanded', [...S.expanded]); renderTree(); }
+    else setTreeCursor(rows[i + 1]);
+  }
+  else if (e.key === 'ArrowLeft' && r) {
+    if (dir != null && S.expanded.has(dir)) { S.expanded.delete(dir); store('expanded', [...S.expanded]); renderTree(); }
+    else { const up = dirname(target); if (up) setTreeCursor(treeRow('d:' + up)); }
+  }
+  else if ((e.key === 'Enter' || e.key === ' ') && r) {
+    if (dir != null) { S.expanded.has(dir) ? S.expanded.delete(dir) : S.expanded.add(dir); store('expanded', [...S.expanded]); renderTree(); }
+    else if (e.key === ' ') openPath(path).then(() => $('#tree').focus({ preventScroll: true })); // Space previews, staying in the tree
+    else openPath(path).then(() => focusMain());
+  }
+  else if (e.key === 'F2' && r) renameDialog(target);
+  else if (e.key === 'Delete' && r) deletePath(target);
+  else if (e.key === 'Escape') focusMain();
+  else if ((e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey)) && r) {
+    const b = r.getBoundingClientRect();
+    r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: b.left + 24, clientY: b.bottom }));
+  }
+  else if (e.key.length === 1 && e.key !== ' ') {
+    // Type the start of a name to jump to it.
+    const now = Date.now();
+    treeTyped = (now - treeTypedAt < 800 ? treeTyped : '') + e.key.toLowerCase();
+    treeTypedAt = now;
+    const name = x => x.querySelector('.name')?.textContent.toLowerCase() || '';
+    const from = treeTyped.length > 1 ? i : i + 1;
+    const hit = [...rows.slice(Math.max(0, from)), ...rows.slice(0, Math.max(0, from))].find(x => name(x).startsWith(treeTyped));
+    if (hit) setTreeCursor(hit);
+  }
+  else done = false;
+  if (done) { e.preventDefault(); e.stopPropagation(); }
+});
 
 function renderTreeActive(reveal = false) {
   if (reveal && S.cur) {
@@ -1642,6 +1722,7 @@ function renderTreeActive(reveal = false) {
 $('#tree').addEventListener('click', e => {
   const row = e.target.closest('.t-row');
   if (!row) return;
+  setTreeCursor(row, false);
   if (row.dataset.dir != null) {
     const d = row.dataset.dir;
     S.expanded.has(d) ? S.expanded.delete(d) : S.expanded.add(d);
@@ -2066,7 +2147,6 @@ async function replaceTemplatesInNote() {
 // ============================================================ editor glue
 
 function insertText(a, b, text, selA, selB) { ed.insert(a, b, text, selA, selB); }
-function toggleCheckbox() { ed.toggleCheckbox(); }
 
 const cursorMoved = debounce(() => updateStatus(), 150);
 
@@ -2248,7 +2328,7 @@ function imageWidgetInfo(wrap) {
 }
 
 function revealInTree(p) {
-  showPanel('files');
+  showPanel('files', true);
   for (let d = dirname(p); d; d = dirname(d)) S.expanded.add(d);
   store('expanded', [...S.expanded]);
   renderTree();
@@ -2406,7 +2486,19 @@ function rank(list, q, key = x => x) {
 
 // ============================================================ modals, pickers, menus
 
+// When the last dialog closes, focus goes back where it was (the tree, the editor…), unless
+// the dialog's action already moved it somewhere.
+let focusBeforeModal = null;
+new MutationObserver(() => {
+  if ($('#modal-root').children.length || !focusBeforeModal) return;
+  const f = focusBeforeModal;
+  focusBeforeModal = null;
+  const a = document.activeElement;
+  if (f.isConnected && (!a || a === document.body || !a.isConnected)) f.focus({ preventScroll: true });
+}).observe($('#modal-root'), { childList: true });
+
 function modal(html) {
+  if (!$('#modal-root').children.length && document.activeElement !== document.body) focusBeforeModal = document.activeElement;
   const back = document.createElement('div');
   back.className = 'backdrop';
   back.innerHTML = `<div class="modal">${html}</div>`;
@@ -2503,54 +2595,205 @@ function openSwitcher() {
   }).then(p => p && openPath(p));
 }
 
-const COMMANDS = [
-  ['Open quick switcher', 'Ctrl+O', () => openSwitcher()],
-  ['Create new note', 'Ctrl+N', () => newNote()],
-  ['Create new folder', '', () => newFolder(S.cur ? dirname(S.cur) : '')],
-  ['Create new drawing', '', () => newDrawing()],
-  ['Create new canvas', '', () => newCanvas()],
-  ['Create new base', '', () => newBase()],
-  ['Create new drawing and embed it in the current note', '', () => newDrawingInNote()],
-  ['Export drawing as SVG', '', () => exportDrawing('svg')],
-  ['Export drawing as PNG', '', () => exportDrawing('png')],
-  ['Copy drawing as PNG', '', () => S.view === 'drawing' ? copyDrawing('png', false) : toast('Open a drawing first')],
-  ['Open drawing as Markdown', '', () => S.cur && isMd(S.cur) && isDrawing(S.cur) ? openPath(S.cur, { raw: true }) : toast('Only .excalidraw.md drawings have a Markdown view')],
-  ["Open today's daily note", '', () => openDaily()],
-  ['Insert template', '', () => insertTemplate()],
-  ['Create new note from template', '', () => newNoteFromTemplate()],
-  ['Replace template commands in current note', '', () => replaceTemplatesInNote()],
-  ['Toggle reading / editing view', 'Ctrl+E', () => setMode(S.mode === 'edit' ? 'read' : 'edit')],
-  ['Search in all notes', 'Ctrl+Shift+F', () => showPanel('search', true)],
-  ['Open graph view', 'Ctrl+G', () => openGraph(false)],
-  ['Open local graph of current note', '', () => openGraph(true)],
-  ['Rename current note', 'F2', () => S.cur && renameDialog(S.cur)],
-  ['Move current note to folder…', '', () => S.cur && moveDialog(S.cur)],
-  ['Delete current note', '', () => S.cur && deletePath(S.cur)],
-  ['Reveal current note in file tree', '', () => { showPanel('files'); renderTreeActive(true); }],
-  ['Toggle left sidebar', '', () => toggleSide('left')],
-  ['Toggle right sidebar', '', () => toggleSide('right')],
-  ['Toggle checkbox on current line', 'Ctrl+Enter', () => S.view === 'note' && toggleCheckbox()],
-  ['Open tasks', 'Ctrl+Shift+T', () => openTasks()],
-  ['Add task…', '', () => quickAddTask()],
-  ['Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
-  ['Find in current note', 'Ctrl+F', () => { if (S.view === 'note') { setMode('edit'); ed.openSearch(); } }],
-  ['Toggle light / dark theme', '', () => toggleTheme()],
-  ['Insert icon (Nerd Fonts)…', '', () => insertIcon()],
-  ['Insert screenshot', 'Ctrl+Shift+S', () => insertScreenshot()],
-  ['Insert inline math', 'Ctrl+M', () => S.view === 'note' ? (setMode('edit'), ed.run('inline-math')) : toast('Open a note first')],
-  ['Insert math block', 'Ctrl+Shift+M', () => S.view === 'note' ? (setMode('edit'), ed.run('block-math')) : toast('Open a note first')],
-  ['Change colour theme…', '', () => chooseTheme()],
-  ['Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
-  ['Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
-  ['Open another vault…', '', () => switchVault()],
-  ['Settings', 'Ctrl+,', () => openSettings()],
-];
+// Every command, for the palette, hotkeys and the shortcuts sheet. `key` is the default binding
+// in CodeMirror notation (Mod = Ctrl, or Cmd on a Mac); Settings → Hotkeys overrides it
+// (cfg.hotkeys: id -> key, '' for none). Editor commands come from FolioEditor and are bound in
+// the editor's own keymap, so they work while typing and never leak out of it.
+const MAC = /Mac|iP(hone|ad)/.test(navigator.platform);
+const inNote = f => () => S.view === 'note' ? f() : toast('Open a note first');
+const APP_COMMANDS = [
+  ['switcher', 'Open quick switcher', 'Mod-o', () => openSwitcher()],
+  ['palette', 'Open command palette', 'Mod-p', () => openPalette()],
+  ['shortcuts', 'Show keyboard shortcuts', 'Mod-/', () => showShortcuts()],
+  ['hotkeys', 'Customize hotkeys…', '', () => openHotkeys()],
+  ['new-note', 'Create new note', 'Mod-n', () => newNote()],
+  ['save', 'Save', 'Mod-s', () => save()],
+  ['new-folder', 'Create new folder', '', () => newFolder(S.cur ? dirname(S.cur) : '')],
+  ['new-drawing', 'Create new drawing', '', () => newDrawing()],
+  ['new-canvas', 'Create new canvas', '', () => newCanvas()],
+  ['new-base', 'Create new base', '', () => newBase()],
+  ['drawing-in-note', 'Create new drawing and embed it in the current note', '', () => newDrawingInNote()],
+  ['export-svg', 'Export drawing as SVG', '', () => exportDrawing('svg')],
+  ['export-png', 'Export drawing as PNG', '', () => exportDrawing('png')],
+  ['copy-drawing', 'Copy drawing as PNG', '', () => S.view === 'drawing' ? copyDrawing('png', false) : toast('Open a drawing first')],
+  ['drawing-md', 'Open drawing as Markdown', '', () => S.cur && isMd(S.cur) && isDrawing(S.cur) ? openPath(S.cur, { raw: true }) : toast('Only .excalidraw.md drawings have a Markdown view')],
+  ['daily', "Open today's daily note", '', () => openDaily()],
+  ['insert-template', 'Insert template', '', () => insertTemplate()],
+  ['note-from-template', 'Create new note from template', '', () => newNoteFromTemplate()],
+  ['run-templates', 'Replace template commands in current note', '', () => replaceTemplatesInNote()],
+  ['toggle-mode', 'Toggle reading / editing view', 'Mod-e', () => { if (S.view === 'note') setMode(S.mode === 'edit' ? 'read' : 'edit'); }],
+  ['search', 'Search in all notes', 'Mod-Shift-f', () => showPanel('search', true)],
+  ['files', 'Focus the file tree', 'Mod-Shift-e', () => focusTree()],
+  ['graph', 'Open graph view', 'Mod-g', () => openGraph(false)],
+  ['local-graph', 'Open local graph of current note', '', () => openGraph(true)],
+  ['back', 'Go back', 'Alt-ArrowLeft', () => goHist(-1)],
+  ['forward', 'Go forward', 'Alt-ArrowRight', () => goHist(1)],
+  ['rename', 'Rename current file', 'F2', () => S.cur && renameDialog(S.cur)],
+  ['move', 'Move current file to folder…', '', () => S.cur && moveDialog(S.cur)],
+  ['delete', 'Delete current file', '', () => S.cur && deletePath(S.cur)],
+  ['reveal', 'Reveal current file in file tree', '', () => S.cur && revealInTree(S.cur)],
+  ['toggle-left', 'Toggle left sidebar', 'Mod-\\', () => toggleSide('left')],
+  ['toggle-right', 'Toggle right sidebar', 'Mod-Shift-\\', () => toggleSide('right')],
+  ['tasks', 'Open tasks', 'Mod-Shift-t', () => openTasks()],
+  ['add-task', 'Add task…', '', () => quickAddTask()],
+  ['screenshot', 'Insert screenshot', 'Mod-Shift-s', () => insertScreenshot()],
+  ['live-preview', 'Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
+  ['find', 'Find in current note', 'Mod-f', inNote(() => { setMode('edit'); ed.openSearch(); })],
+  ['toggle-theme', 'Toggle light / dark theme', '', () => toggleTheme()],
+  ['insert-icon', 'Insert icon (Nerd Fonts)…', '', () => insertIcon()],
+  ['choose-theme', 'Change colour theme…', '', () => chooseTheme()],
+  ['random', 'Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
+  ['reload', 'Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
+  ['vault', 'Open another vault…', '', () => switchVault()],
+  ['settings', 'Settings', 'Mod-,', () => openSettings()],
+].map(([id, name, key, run]) => ({ id, name, key, run }));
+const EDITOR_COMMANDS = Object.entries(FolioEditor.commands).map(([id, c]) => ({
+  id: 'editor:' + id, name: `Format: ${c.name}`, key: c.key, editor: id,
+  run: inNote(() => { setMode('edit'); ed.run(id); }),
+}));
+const COMMANDS = [...APP_COMMANDS, ...EDITOR_COMMANDS];
+const CMD_BY_ID = new Map(COMMANDS.map(c => [c.id, c]));
+
+const keyFor = c => (cfg.hotkeys && c.id in cfg.hotkeys ? cfg.hotkeys[c.id] : c.key) || '';
+// Editor key overrides by the editor's own command ids, for FolioEditor.create / setKeys.
+const editorKeys = () => Object.fromEntries(EDITOR_COMMANDS.map(c => [c.editor, keyFor(c)]));
+let HOTKEYS = new Map(); // key -> app command
+function rebuildHotkeys() {
+  HOTKEYS = new Map();
+  for (const c of APP_COMMANDS) { const k = keyFor(c); if (k && !HOTKEYS.has(k)) HOTKEYS.set(k, c); }
+  ed.setKeys(editorKeys());
+  for (const el of $$('[data-cmd][title]')) {
+    const c = CMD_BY_ID.get(el.dataset.hk || el.dataset.cmd);
+    if (!c) continue;
+    const k = keyFor(c), base = el.title.replace(/\s*\([^)]*\)$/, '');
+    el.title = k ? `${base} (${fmtKey(k)})` : base;
+  }
+}
+
+// A keydown as a key string: [Mod-][Ctrl-/Meta-][Alt-][Shift-]key, letters lower case.
+function keyOf(e) {
+  const k = e.key;
+  if (!k || k === 'Dead' || k === 'Unidentified' || ['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'OS'].includes(k)) return null;
+  let name = k.length === 1 ? k.toLowerCase() : k;
+  if (/^Digit\d$/.test(e.code)) name = e.code.slice(5); // Shift+1 is "1", not "!"
+  else if (/^Key[A-Z]$/.test(e.code) && !/^[a-z]$/.test(name)) name = e.code.slice(3).toLowerCase(); // Alt+letter on a Mac
+  if (name === ' ') name = 'Space';
+  const mod = MAC ? e.metaKey : e.ctrlKey, other = MAC ? e.ctrlKey : e.metaKey;
+  return `${mod ? 'Mod-' : ''}${other ? (MAC ? 'Ctrl-' : 'Meta-') : ''}${e.altKey ? 'Alt-' : ''}${e.shiftKey ? 'Shift-' : ''}${name}`;
+}
+const KEY_NAMES = { ArrowLeft: '←', ArrowRight: '→', ArrowUp: '↑', ArrowDown: '↓', Enter: 'Enter', Escape: 'Esc', Space: 'Space', Backspace: 'Backspace', Delete: 'Del' };
+function fmtKey(k) {
+  if (!k) return '';
+  const parts = k.split(/-(?!$)/), key = parts.pop();
+  const mods = parts.map(m => MAC ? { Mod: '⌘', Ctrl: '⌃', Alt: '⌥', Shift: '⇧', Meta: '⌘' }[m] : { Mod: 'Ctrl', Meta: 'Win' }[m] || m);
+  const name = KEY_NAMES[key] || (key.length === 1 ? key.toUpperCase() : key);
+  return MAC ? mods.join('') + name : [...mods, name].join('+');
+}
+
+// Keys belong to text fields while typing unless they use Ctrl/Cmd/Alt or are function keys.
+const typingIn = t => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
+// Registered at boot, after the canvas and drawing views, so their own keys (Ctrl+G to group,
+// Alt+arrows between cards…) win while they're open.
+function onHotkey(e) {
+  if ($('#modal-root').children.length || e.defaultPrevented) return;
+  const k = keyOf(e);
+  const c = k && HOTKEYS.get(k);
+  if (!c) return;
+  if (!/(^|-)(Mod|Ctrl|Meta|Alt)-/.test(k) && !/^(Shift-)?F\d+$/.test(k) && typingIn(e.target)) return;
+  e.preventDefault();
+  c.run();
+}
 
 function openPalette() {
+  const recent = store('recentCmds') || [];
+  const order = c => { const i = recent.indexOf(c.id); return i < 0 ? 1e9 : i; };
   picker({
     placeholder: 'Type a command…',
-    items: q => rank(COMMANDS, q, c => c[0]).map(c => ({ main: c[0], sub: c[1], value: c })),
-  }).then(c => c && c[2]());
+    items: q => (q.trim() ? rank(COMMANDS, q, c => c.name) : [...COMMANDS].sort((a, b) => order(a) - order(b)))
+      .map(c => ({ main: c.name, sub: fmtKey(keyFor(c)), value: c })),
+    foot: '<span>↑↓ navigate</span><span>↵ run</span><span>esc close</span><span>recent commands first</span>',
+  }).then(c => {
+    if (!c) return;
+    store('recentCmds', [c.id, ...recent.filter(x => x !== c.id)].slice(0, 12));
+    c.run();
+  });
+}
+
+rebuildHotkeys();
+
+// ------------------------------------------------------------ Settings → Hotkeys
+
+function openHotkeys(filter = '') {
+  const back = modal(`<div class="hk"><div class="hk-head"><h3>Hotkeys</h3><input class="field hk-q" placeholder="Filter commands or keys…" spellcheck="false"></div>
+    <div class="hk-list" tabindex="-1"></div>
+    <div class="hk-foot"><span>Click a shortcut to change it. Press the new keys, <kbd>Backspace</kbd> to clear, <kbd>Esc</kbd> to cancel.</span><button class="btn" data-x>Done</button></div></div>`);
+  back.querySelector('.modal').classList.add('wide');
+  const q = $('.hk-q', back), list = $('.hk-list', back);
+  let recording = null;
+  const conflictsOf = c => {
+    const k = keyFor(c);
+    if (!k) return [];
+    return COMMANDS.filter(o => o !== c && keyFor(o) === k && (!!o.editor === !!c.editor || !o.editor || !c.editor)).map(o => o.name);
+  };
+  const draw = () => {
+    const f = q.value.trim().toLowerCase();
+    const rows = COMMANDS.filter(c => !f || c.name.toLowerCase().includes(f) || fmtKey(keyFor(c)).toLowerCase().includes(f));
+    list.innerHTML = rows.map(c => {
+      const k = keyFor(c), custom = cfg.hotkeys && c.id in cfg.hotkeys, clash = conflictsOf(c);
+      return `<div class="hk-row${clash.length ? ' clash' : ''}" data-id="${esc(c.id)}"><span class="hk-name">${esc(c.name)}${clash.length ? `<small>Also used by: ${esc(clash.join(', '))}</small>` : ''}</span>
+        <button class="hk-key${recording === c.id ? ' rec' : ''}${k ? '' : ' none'}" data-rec>${recording === c.id ? 'Press keys…' : k ? esc(fmtKey(k)) : 'Blank'}</button>
+        <button class="ib hk-reset" data-reset title="Restore the default${c.key ? ` (${esc(fmtKey(c.key))})` : ' (none)'}" ${custom ? '' : 'disabled'}>↺</button></div>`;
+    }).join('') || '<div class="none">No matching commands</div>';
+  };
+  // Redraw, keeping the keyboard on the row just changed.
+  const redraw = id => { draw(); if (id) $(`.hk-row[data-id="${CSS.escape(id)}"] .hk-key`, list)?.focus(); };
+  const setKey = (id, k) => {
+    cfg.hotkeys = { ...(cfg.hotkeys || {}) };
+    const c = CMD_BY_ID.get(id);
+    if (k === c.key) delete cfg.hotkeys[id]; else cfg.hotkeys[id] = k;
+    saveCfg(); rebuildHotkeys();
+  };
+  list.addEventListener('click', e => {
+    const row = e.target.closest('.hk-row');
+    if (!row) return;
+    if (e.target.closest('[data-rec]')) { recording = recording === row.dataset.id ? null : row.dataset.id; redraw(row.dataset.id); }
+    else if (e.target.closest('[data-reset]')) { setKey(row.dataset.id, CMD_BY_ID.get(row.dataset.id).key); redraw(row.dataset.id); }
+  });
+  back.addEventListener('keydown', e => {
+    if (!recording) { if (e.key === 'Escape') { e.preventDefault(); back.remove(); } return; }
+    e.preventDefault(); e.stopPropagation();
+    const id = recording;
+    if (e.key === 'Escape') { recording = null; redraw(id); return; }
+    if ((e.key === 'Backspace' || e.key === 'Delete') && !e.ctrlKey && !e.metaKey && !e.altKey) { setKey(id, ''); recording = null; redraw(id); return; }
+    const k = keyOf(e);
+    if (!k) return; // a lone modifier: keep waiting
+    setKey(id, k); recording = null; redraw(id);
+  }, true);
+  back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); });
+  $('[data-x]', back).onclick = () => back.remove();
+  q.value = filter;
+  q.addEventListener('input', draw);
+  draw(); q.focus();
+}
+
+// ------------------------------------------------------------ shortcuts sheet
+
+// Everything bound, plus the fixed keys of each view (canvas and drawing keys live in their help).
+function showShortcuts() {
+  const bound = cs => cs.filter(c => keyFor(c)).map(c => `<p><span>${esc(c.name.replace(/^Format: /, ''))}</span><kbd>${esc(fmtKey(keyFor(c)))}</kbd></p>`).join('');
+  const fixed = rows => rows.map(([n, k]) => `<p><span>${esc(n)}</span><span class="keys">${k.split(' / ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</span></p>`).join('');
+  const M = MAC ? '⌘' : 'Ctrl+', A = MAC ? '⌥' : 'Alt+', S_ = MAC ? '⇧' : 'Shift+';
+  const back = modal(`<div class="dr-help shortcuts"><h3>Keyboard shortcuts</h3><div class="dr-help-cols">
+    <div><h4>App</h4>${bound(APP_COMMANDS)}</div>
+    <div><h4>Editing</h4>${bound(EDITOR_COMMANDS)}${fixed([['Move line up / down', `${A}↑ / ${A}↓`], ['Copy line', `${S_}${A}↑ / ${S_}${A}↓`], ['Select next match', `${M}D`], ['Indent / outdent list', `Tab / ${S_}Tab`], ['Follow link under cursor', `${M}click`], ['Undo / redo', `${M}Z / ${M}${S_}Z`]])}</div>
+    <div><h4>File tree</h4>${fixed([['Move', '↑ / ↓'], ['Expand / collapse', '→ / ←'], ['Open', 'Enter'], ['Rename', 'F2'], ['Delete', 'Del'], ['New note here', `${M}N`], ['Back to the page', 'Esc']])}
+      <h4>Lists (search, tasks)</h4>${fixed([['Move', '↑ / ↓'], ['Open', 'Enter'], ['Tick a task', 'Space / X'], ['Due today / tomorrow', 'T / M']])}
+      <h4>Viewer</h4>${fixed([['Previous / next image', '← / →'], ['Zoom', '+ / - / 0 / 1']])}</div>
+  </div><div class="shortcuts-foot"><button class="btn" data-hk>Customize hotkeys…</button><span>Canvas and drawing shortcuts: press <kbd>?</kbd> in those views.</span></div></div>`);
+  back.tabIndex = -1; back.focus();
+  back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); });
+  back.addEventListener('keydown', e => { if (e.key === 'Escape' || keyOf(e) === keyFor(CMD_BY_ID.get('shortcuts'))) { e.preventDefault(); back.remove(); } });
+  $('[data-hk]', back).onclick = () => { back.remove(); openHotkeys(); };
 }
 
 function openSettings() {
@@ -2573,6 +2816,7 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
+    <div class="row" style="justify-content:flex-start"><button type="button" class="btn" data-x-hotkeys>Hotkeys…</button><button type="button" class="btn" data-x-shortcuts>Keyboard shortcuts</button></div>
     <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
     <label>Code font (empty for JetBrains Mono, which comes with Folio)<input class="field" name="fontMono" list="font-mono-list" placeholder="JetBrains Mono" spellcheck="false"></label>
     <datalist id="font-text-list"><option>Inter</option><option>Segoe UI</option><option>Noto Sans</option><option>Ubuntu</option><option>Georgia</option><option>Iowan Old Style</option><option>Literata</option><option>JetBrains Mono</option></datalist>
@@ -2592,6 +2836,8 @@ function openSettings() {
   $('[data-x]', back).onclick = close;
   api('/api/info').then(i => { $('#vault-path', back).value = i.vault; }).catch(() => { });
   $('[data-x-vault]', back).onclick = () => { close(); switchVault(); };
+  $('[data-x-hotkeys]', back).onclick = () => { close(); openHotkeys(); };
+  $('[data-x-shortcuts]', back).onclick = () => { close(); showShortcuts(); };
   back.addEventListener('mousedown', e => { if (e.target === back) close(); });
   f.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
   f.addEventListener('submit', e => {
@@ -2741,9 +2987,9 @@ function runSearch() {
     const c = S.notes.get(r.p).content;
     const sn = r.snips.map(s => {
       const a = Math.max(0, s.i - 50), b = Math.min(c.length, s.i + s.len + 70);
-      return `<div class="s-snip" data-path="${esc(r.p)}" data-i="${s.i}" data-len="${s.len}">${a > 0 ? '…' : ''}${esc(c.slice(a, s.i))}<mark>${esc(c.slice(s.i, s.i + s.len))}</mark>${esc(c.slice(s.i + s.len, b))}${b < c.length ? '…' : ''}</div>`;
+      return `<div class="s-snip" tabindex="-1" data-path="${esc(r.p)}" data-i="${s.i}" data-len="${s.len}">${a > 0 ? '…' : ''}${esc(c.slice(a, s.i))}<mark>${esc(c.slice(s.i, s.i + s.len))}</mark>${esc(c.slice(s.i + s.len, b))}${b < c.length ? '…' : ''}</div>`;
     }).join('');
-    return `<div class="s-file"><div class="s-file-name" data-path="${esc(r.p)}">${esc(noteName(r.p))}<small>${esc(dirname(r.p))}</small>${r.hits ? `<small>${r.hits}</small>` : ''}</div>${sn}</div>`;
+    return `<div class="s-file"><div class="s-file-name" tabindex="-1" data-path="${esc(r.p)}">${esc(noteName(r.p))}<small>${esc(dirname(r.p))}</small>${r.hits ? `<small>${r.hits}</small>` : ''}</div>${sn}</div>`;
   }).join('');
 }
 $('#search-input').addEventListener('input', debounce(runSearch, 120));
@@ -2754,12 +3000,40 @@ $('#search-results').addEventListener('click', e => {
   if (f) openPath(f.dataset.path);
 });
 
+// ↑↓ through a panel's items, Enter opens one, Esc goes back (to the search box, or the page).
+function listKeys(box, sel, back) {
+  box.addEventListener('keydown', e => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    const items = $$(sel, box), i = items.indexOf(document.activeElement);
+    let n = null;
+    if (e.key === 'ArrowDown') n = items[Math.min(items.length - 1, i + 1)];
+    else if (e.key === 'ArrowUp') { if (i <= 0) { e.preventDefault(); return back(); } n = items[i - 1]; }
+    else if (e.key === 'Home') n = items[0];
+    else if (e.key === 'End') n = items[items.length - 1];
+    else if (e.key === 'Enter' && i >= 0) { e.preventDefault(); items[i].click(); return; }
+    else if (e.key === 'Escape') { e.preventDefault(); return back(); }
+    else return;
+    e.preventDefault();
+    n?.focus(); n?.scrollIntoView({ block: 'nearest' });
+  });
+}
+listKeys($('#search-results'), '.s-file-name, .s-snip', () => $('#search-input').focus());
+listKeys($('#tag-list'), '.tag-row', () => focusMain());
+$('#search-input').addEventListener('keydown', e => {
+  if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.isComposing)) {
+    const first = $('#search-results .s-file-name');
+    if (!first) return;
+    e.preventDefault();
+    if (e.key === 'Enter') first.click(); else first.focus();
+  } else if (e.key === 'Escape' && !e.target.value) { e.preventDefault(); focusMain(); }
+});
+
 function renderTags() {
   const counts = new Map();
   for (const n of S.notes.values()) for (const t of n.tags) counts.set(t, (counts.get(t) || 0) + 1);
   const list = [...counts].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]));
   $('#tag-list').innerHTML = list.length
-    ? list.map(([t, c]) => `<div class="tag-row" data-tag="${esc(t)}"><span>#${esc(t)}</span><span class="n">${c}</span></div>`).join('')
+    ? list.map(([t, c]) => `<div class="tag-row" tabindex="-1" data-tag="${esc(t)}"><span>#${esc(t)}</span><span class="n">${c}</span></div>`).join('')
     : '<div class="none">No tags yet. Add #tags to notes or a <code>tags:</code> list in frontmatter.</div>';
 }
 $('#tag-list').addEventListener('click', e => { const r = e.target.closest('.tag-row'); if (r) searchFor(`tag:${r.dataset.tag}`); });
@@ -3031,6 +3305,7 @@ function mountCardEditor(host, o) {
     ...(note ? {} : { codeBlock: lang => lang === 'tasks' }), // a base block in a text card has no note to save to
   }), {
     vim: cfg.vim,
+    keys: editorKeys(),
     placeholder: o.placeholder || '',
     extraKeys: [
       // Tab on a plain line makes a connected card (as on the canvas); in lists it still indents.
@@ -3159,23 +3434,8 @@ document.addEventListener('click', e => {
   if (b && CMD[b.dataset.cmd]) { e.preventDefault(); CMD[b.dataset.cmd](); }
 });
 
-window.addEventListener('keydown', e => {
-  const mod = e.ctrlKey || e.metaKey, k = e.key.toLowerCase();
-  if ($('#modal-root').children.length || e.defaultPrevented) return;
-  if (mod && !e.shiftKey && k === 'o') { e.preventDefault(); openSwitcher(); }
-  else if (mod && !e.shiftKey && k === 'p') { e.preventDefault(); openPalette(); }
-  else if (mod && !e.shiftKey && k === 'n') { e.preventDefault(); newNote(); }
-  else if (mod && !e.shiftKey && k === 'e') { e.preventDefault(); if (S.view === 'note') setMode(S.mode === 'edit' ? 'read' : 'edit'); }
-  else if (mod && !e.shiftKey && k === 's') { e.preventDefault(); save(); }
-  else if (mod && !e.shiftKey && k === 'g') { e.preventDefault(); openGraph(false); }
-  else if (mod && !e.shiftKey && k === ',') { e.preventDefault(); openSettings(); }
-  else if (mod && e.shiftKey && k === 'f') { e.preventDefault(); showPanel('search', true); }
-  else if (mod && e.shiftKey && k === 't') { e.preventDefault(); openTasks(); }
-  else if (mod && e.shiftKey && k === 's') { e.preventDefault(); insertScreenshot(); }
-  else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goHist(-1); }
-  else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goHist(1); }
-  else if (e.key === 'F2' && S.cur) { e.preventDefault(); renameDialog(S.cur); }
-});
+window.addEventListener('keydown', onHotkey);
+
 
 // ============================================================ layout: sidebar resizing
 
@@ -3222,6 +3482,8 @@ const WELCOME = `Folio is a local notes app. Your notes are plain Markdown files
 | Ctrl+G | Graph view |
 | Alt+← / Alt+→ | Back / forward |
 | Ctrl+Enter | Toggle a checkbox |
+| Ctrl+/ | All keyboard shortcuts |
+| Ctrl+Shift+E | File tree (arrows, Enter) |
 | Ctrl+click | Follow a [[link]] while editing |
 
 - [ ] Try ticking this box in reading view
