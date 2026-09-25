@@ -18,6 +18,7 @@
     <button class="rb" data-cmd="panel-tags" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
     <div class="rb-sep"></div>
     <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    <button class="rb" data-cmd="tasks" title="Tasks (Ctrl+Shift+T)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/></svg><span class="rb-badge" hidden></span></button>
     <button class="rb" data-cmd="daily" title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
     <button class="rb" data-cmd="new-drawing" title="New drawing"><svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/></svg></button>
     <button class="rb" data-cmd="new-canvas" title="New canvas"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/><path d="M11 7h3a2 2 0 0 1 2 2v5"/></svg></button>
@@ -83,6 +84,8 @@
 
     <div id="view-base" class="view" hidden></div>
 
+    <div id="view-tasks" class="view" hidden></div>
+
     <div id="view-graph" class="view" hidden>
       <canvas id="graph-canvas"></canvas>
       <div id="graph-controls">
@@ -105,6 +108,7 @@
         <p><a data-cmd="new-canvas">New canvas</a></p>
         <p><a data-cmd="new-base">New base</a></p>
         <p><a data-cmd="daily">Today's daily note</a></p>
+        <p><a data-cmd="tasks">Tasks</a> <kbd>Ctrl Shift T</kbd></p>
         <p><a data-cmd="graph">Graph view</a> <kbd>Ctrl G</kbd></p>
       </div>
     </div>
@@ -136,6 +140,7 @@
 <script src="/draw.js"></script>
 <script src="/canvas.js"></script>
 <script src="/bases.js"></script>
+<script src="/tasks.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

@@ -515,6 +515,8 @@ const clickHandler = EditorView.domEventHandlers({
     if (cb) {
       e.preventDefault();
       const pos = view.posAtDOM(cb);
+      const line = view.state.doc.lineAt(pos), rep = toggledLine(line.text);
+      if (rep != null) { view.dispatch({ changes: { from: line.from, to: line.to, insert: rep } }); return true; }
       const cur = view.state.sliceDoc(pos, pos + 3);
       if (/^\[[ xX]\]$/.test(cur)) view.dispatch({ changes: { from: pos + 1, to: pos + 2, insert: cur[1] === ' ' ? 'x' : ' ' } });
       return true;
@@ -554,6 +556,12 @@ const wrap = (before, after = before) => view => {
   return true;
 };
 
+// app.js decides how a task line toggles (done date, next occurrence of a recurring task).
+function toggledLine(text) {
+  const r = H.toggleTaskLine && H.toggleTaskLine(text);
+  return r ? r.join('\n') : null;
+}
+
 function toggleCheckbox(view) {
   const changes = [];
   const seen = new Set();
@@ -562,6 +570,8 @@ function toggleCheckbox(view) {
     if (seen.has(line.number)) continue; seen.add(line.number);
     let m;
     if ((m = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+)\[([ xX])\]/.exec(line.text))) {
+      const rep = toggledLine(line.text);
+      if (rep != null) { changes.push({ from: line.from, to: line.to, insert: rep }); continue; }
       const p = line.from + m[1].length + 1;
       changes.push({ from: p, to: p + 1, insert: m[2] === ' ' ? 'x' : ' ' });
     } else if ((m = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+)/.exec(line.text))) {

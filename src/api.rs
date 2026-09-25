@@ -17,6 +17,7 @@ const THEMES_JS: &str = include_str!("../ui/themes.js");
 const TEMPLATER_JS: &str = include_str!("../ui/templater.js");
 const CANVAS_JS: &str = include_str!("../ui/canvas.js");
 const BASES_JS: &str = include_str!("../ui/bases.js");
+const TASKS_JS: &str = include_str!("../ui/tasks.js");
 const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
@@ -89,6 +90,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/templater.js" => return out(200, "text/javascript", TEMPLATER_JS.into()),
             "/canvas.js" => return out(200, "text/javascript", CANVAS_JS.into()),
             "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
+            "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
             "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
@@ -425,7 +427,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

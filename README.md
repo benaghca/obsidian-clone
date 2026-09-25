@@ -41,7 +41,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 - **Network:** in its default mode, Folio doesn't open any network port. The UI talks to the program through a private `folio://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Folio.
 - **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 10,300 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 11,300 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
   - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
@@ -106,6 +106,11 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **New note** from a view fills in the view's simple filters (tag, folder, `status == "todo"`), and on a board, the column you clicked it in.
   - Embed a base in a note with `![[Books.base]]` or `![[Books.base#Board]]`. `` ```base `` blocks render live in both live preview and reading view, and view changes you make there are written back into the block.
   - Expressions run in a small built-in interpreter, never as JavaScript.
+- **Tasks** across the whole vault, in the format of Obsidian's Tasks plugin, so existing Tasks vaults work as they are. Tasks use `📅` due, `⏳` scheduled, `🛫` start and `✅` done dates, `🔺⏫🔼🔽⏬` priorities and `🔁` recurrence. Dataview-style `[due:: …]` fields are read too.
+  - **The Tasks view** (**Ctrl+Shift+T**, or the checkbox icon, which shows how many tasks are due) sorts tasks into Overdue, Today, the next six days, Later and No date. It has one-click *today*, *tomorrow* and *pick a date* buttons, drag-to-reschedule onto a day, priority, a filter box and a tag filter, a *Recently done* list, and a link to each task's source note.
+  - **Natural-language quick add**, in the Tasks view or with *Add task…* from anywhere: `Pay rent tomorrow !high every month #home` becomes `- [ ] Pay rent #home ⏫ 🔁 every month 📅 2026-09-25`. A live preview shows how the text was understood. New tasks go to today's daily note or to a note you choose in Settings.
+  - Ticking a task, whether in the editor, reading view, the Tasks view or a query, adds `✅ <date>`. Ticking a recurring task (`every week`, `every weekday`, `every mon, thu`, `every month on the 15th`, `… when done`) adds its next occurrence above it.
+  - `` ```tasks `` query blocks use the Tasks plugin's query language (`not done`, `due before tomorrow`, `tag includes #work`, `path includes Projects`, `priority is above none`, `sort by due`, `group by heading`, `limit 10`, …) and render live lists you can tick.
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, and **Tab**/**Shift+Tab** to indent list items
@@ -129,8 +134,9 @@ ui/templater.js    Templater-syntax template interpreter (tp.date, tp.file, tp.s
 ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
 ui/canvas.js       canvas editor and JSON Canvas files
 ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
+ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
-ui/test/           Node tests for the drawing, template, canvas and bases modules (no packages needed)
+ui/test/           Node tests for the drawing, template, canvas, bases and tasks modules (no packages needed)
 ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, Virgil font
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
@@ -144,7 +150,7 @@ The editor bundle is already built and checked in, so building Folio doesn't nee
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js` and `node ui/test/bases.test.js`.
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js` and `node ui/test/tasks.test.js`.
 
 ## Ideas for round two
 

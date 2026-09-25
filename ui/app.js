@@ -75,6 +75,8 @@ const DEFAULTS = {
   theme: '',
   palette: 'default',
   folderTemplates: '',
+  taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
+  taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
   drawingFormat: 'excalidraw',
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
@@ -141,8 +143,9 @@ const ed = FolioEditor.create($('#editor'), {
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
   visualEmbed: p => visualEmbed(p),
   renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
-  codeBlock: lang => lang === 'base',
-  renderCodeBlock: (el, lang, code) => renderBaseBlock(el, code, S.cur),
+  codeBlock: lang => lang === 'base' || lang === 'tasks',
+  renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, S.cur),
+  toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
 });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
@@ -323,6 +326,7 @@ async function applyList(l, gen) {
   }
   if (S.view === 'canvas' && (changed.length || structural)) FolioCanvas.refreshFiles();
   if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
+  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); }
   {
     for (const [p, v] of Object.entries(got)) {
       if (p === S.cur && S.dirty) continue;
@@ -434,7 +438,7 @@ async function writeFile(path, content, base) {
 
 function showView(v) {
   S.view = v;
-  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'empty']) $(`#view-${id}`).hidden = id !== v;
+  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'tasks', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
   if (v === 'graph') FolioGraph.show(); else FolioGraph.hide();
   if (v === 'drawing') FolioDraw.show(); else FolioDraw.hide();
@@ -1064,6 +1068,156 @@ async function saveBaseBlock(notePath, oldCode, newCode) {
   try { await writeFile(notePath, n.content.slice(0, i) + newCode + n.content.slice(i + oldCode.length), n.mtime); resolveNote(notePath); } catch (e) { toast('Couldn’t save the base block: ' + e.message); }
 }
 
+// ============================================================ tasks
+
+let tasksView = null;
+let tasksCache = { gen: -1, tasks: [] };
+function allTasks() {
+  if (tasksCache.gen === S.dataGen) return tasksCache.tasks;
+  const tasks = [];
+  for (const [p, n] of S.notes) if (!isDrawing(p)) tasks.push(...FolioTasks.parseNote(p, n.content));
+  tasksCache = { gen: S.dataGen, tasks };
+  return tasks;
+}
+const findTask = (path, line) => allTasks().find(x => x.path === path && x.line === line);
+
+// Rewrite one task's line (fn: line -> [lines]) wherever the note is: the editor or disk.
+async function modifyTaskLine(x, fn) {
+  const inEditor = x.path === S.cur && S.view === 'note';
+  const content = inEditor ? ed.value : S.notes.get(x.path)?.content;
+  if (content == null) return;
+  const lines = content.split('\n');
+  let li = x.line;
+  if ((lines[li] || '').replace(/\r$/, '') !== x.raw) li = lines.findIndex(l => l.replace(/\r$/, '') === x.raw);
+  if (li < 0) { toast('That task has changed since the list was drawn'); refreshTasks(); return; }
+  const cr = lines[li].endsWith('\r') ? '\r' : '';
+  const text = fn(lines[li].replace(/\r$/, '')).map(l => l + cr).join('\n');
+  let start = 0;
+  for (let k = 0; k < li; k++) start += lines[k].length + 1;
+  const end = start + lines[li].length;
+  if (inEditor) {
+    const delta = text.length - (end - start), shift = v => v > end ? v + delta : v;
+    ed.insert(start, end, text, shift(ed.selectionStart), shift(ed.selectionEnd));
+  } else {
+    try { await writeFile(x.path, content.slice(0, start) + text + content.slice(end), S.notes.get(x.path).mtime); resolveNote(x.path); }
+    catch (e) { toast(`Couldn’t update ${noteName(x.path)}: ${e.message}`); return; }
+  }
+  refreshTasks();
+}
+const toggleTaskItem = x => modifyTaskLine(x, l => FolioTasks.toggle(l, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }));
+const setTaskField = (x, f, v) => modifyTaskLine(x, l => [FolioTasks.setField(l, f, v)]);
+const cancelTask = x => modifyTaskLine(x, l => [FolioTasks.setStatus(l, '-')]);
+
+function refreshTasks() {
+  if (S.view === 'tasks') tasksView?.refresh();
+  else if (S.view === 'note') { S.version++; refreshEditorSoon(); if (S.mode === 'read') renderPreview(); }
+  updateTaskBadge();
+  updateStatus();
+}
+
+// The ribbon's Tasks button shows how many open tasks are due today or overdue.
+function updateTaskBadge() {
+  const b = $('[data-cmd=tasks] .rb-badge');
+  if (!b) return;
+  const t = FolioTasks.today();
+  const n = allTasks().filter(x => !x.done && !x.cancelled && (x.due || x.scheduled) && (x.due || x.scheduled) <= t).length;
+  b.textContent = n > 99 ? '99+' : String(n);
+  b.hidden = !n;
+}
+
+function taskInboxPath() {
+  const p = String(cfg.taskInbox || '').trim().replace(/^\/+/, '');
+  if (!p) return join(cfg.dailyFolder, FolioTasks.today() + '.md');
+  return isMd(p) ? p : p + '.md';
+}
+
+// Append a task line to the inbox note (creating it if needed).
+async function addTask(line) {
+  const path = taskInboxPath();
+  try {
+    if (path === S.cur && S.view === 'note') {
+      const v = ed.value, pre = v && !v.endsWith('\n') ? '\n' : '';
+      ed.insert(v.length, v.length, pre + line + '\n', ed.selectionStart, ed.selectionEnd);
+      await save();
+    } else if (S.notes.has(path)) {
+      const n = S.notes.get(path), pre = n.content && !n.content.endsWith('\n') ? '\n' : '';
+      await writeFile(path, n.content + pre + line + '\n', n.mtime);
+      resolveNote(path);
+    } else {
+      await writeFile(path, line + '\n');
+      let d = dirname(path);
+      while (d) { S.dirs.add(d); d = dirname(d); }
+      reindexAll(); renderTree();
+    }
+  } catch (e) { toast('Couldn’t add the task: ' + e.message); return; }
+  toast(`Added to ${noteName(path)}`);
+  refreshTasks();
+}
+
+function taskHooks() {
+  return {
+    tasks: allTasks,
+    find: findTask,
+    inline: (text, path) => {
+      const prev = RC;
+      RC = { from: path, depth: 1 };
+      const div = document.createElement('div');
+      try { div.innerHTML = DOMPurify.sanitize(marked.parseInline(text), { FORBID_TAGS: ['style', 'form', 'button', 'iframe', 'object', 'embed', 'img', 'input'] }); } finally { RC = prev; }
+      linkifyTags(div);
+      return div.innerHTML;
+    },
+    toggle: x => toggleTaskItem(x),
+    setField: (x, f, v) => setTaskField(x, f, v),
+    cancel: x => cancelTask(x),
+    open: (path, line) => {
+      const c = S.notes.get(path)?.content || '';
+      let off = 0;
+      for (let k = 0, i = 0; k < line && i >= 0; k++) { i = c.indexOf('\n', off); off = i < 0 ? c.length : i + 1; }
+      const end = c.indexOf('\n', off);
+      openPath(path, { mode: 'edit', select: [off, end < 0 ? c.length : end] });
+    },
+    menu: (x, y, items) => menu(x, y, items),
+    add: line => addTask(line),
+    inboxLabel: () => noteName(taskInboxPath()) + (cfg.taskInbox ? '' : ' (today’s daily note)'),
+  };
+}
+
+async function openTasks() {
+  flushDocViews();
+  await save();
+  rememberPos();
+  showView('tasks');
+  setSaveState('');
+  $('#crumbs').innerHTML = '<b>Tasks</b>';
+  document.title = `Tasks — ${VAULT} — Folio`;
+  if (!tasksView) tasksView = FolioTasks.mountView($('#view-tasks'), taskHooks());
+  else tasksView.refresh();
+  updateStatus();
+  requestAnimationFrame(() => $('#view-tasks .tk-add')?.focus());
+}
+
+// A small quick-add box usable from anywhere.
+function quickAddTask() {
+  const back = modal(`<div class="form tk-quick"><h3>Add a task</h3><input class="field" placeholder="e.g. “Call the dentist friday !high”" spellcheck="false"><div class="tk-preview"></div><div class="tk-inbox">Adds to ${esc(taskHooks().inboxLabel())}</div></div>`);
+  const input = $('input', back), pv = $('.tk-preview', back);
+  input.focus();
+  input.addEventListener('input', () => {
+    const q = FolioTasks.parseQuick(input.value);
+    pv.textContent = input.value.trim() ? [q.text, q.due && FolioTasks.friendly(q.due), q.priority && q.priority + ' priority', q.recur && 'repeats ' + q.recur].filter(Boolean).join(' · ') : '';
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Escape') back.remove();
+    if (e.key === 'Enter' && input.value.trim()) { const q = FolioTasks.parseQuick(input.value); back.remove(); if (q.text) addTask(FolioTasks.formatTask(q)); }
+  });
+  back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); });
+}
+
+// ```tasks blocks: a live query of tasks across the vault.
+function renderTasksBlock(el, code) {
+  el.classList.add('tasks-embed');
+  FolioTasks.mountQuery(el, code, taskHooks());
+}
+
 function goHist(d) {
   const i = S.histIdx + d;
   if (i < 0 || i >= S.hist.length) return;
@@ -1240,6 +1394,11 @@ function renderInto(el, content, from, depth) {
     bq.replaceWith(box);
   }
   for (const sp of $$('span.visual-embed[data-path]', el)) renderVisualEmbed(sp, sp.dataset.path, +sp.dataset.width || null, sp.dataset.sub);
+  for (const code of $$('pre > code.language-tasks', el)) {
+    const div = document.createElement('div');
+    code.parentElement.replaceWith(div);
+    renderTasksBlock(div, code.textContent.replace(/\n$/, ''));
+  }
   // ```base blocks become live views.
   for (const code of $$('pre > code.language-base', el)) {
     const div = document.createElement('div');
@@ -1312,14 +1471,17 @@ function renderPreview() {
   preview.scrollTop = st;
 }
 
+// Tick the i-th checkbox in reading view (adds the done date; recurring tasks roll forward).
 function toggleTask(i) {
   const body = blankCode(ed.value);
   const re = /^[ \t]*(?:>[ \t]?)*(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\]/gm;
   let m, k = 0;
   while ((m = re.exec(body))) {
     if (k++ === i) {
-      const pos = m.index + m[0].length - 2;
-      ed.insert(pos, pos + 1, m[1] === ' ' ? 'x' : ' ');
+      const a = m.index, e = ed.value.indexOf('\n', a) < 0 ? ed.value.length : ed.value.indexOf('\n', a);
+      const next = FolioTasks.toggle(ed.value.slice(a, e).replace(/\r$/, ''), { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }).join('\n');
+      const cr = ed.value[e - 1] === '\r' ? '\r' : '';
+      ed.insert(a, e, next + cr, ed.selectionStart, ed.selectionEnd);
       renderPreview();
       return;
     }
@@ -2032,6 +2194,8 @@ const COMMANDS = [
   ['Toggle left sidebar', '', () => toggleSide('left')],
   ['Toggle right sidebar', '', () => toggleSide('right')],
   ['Toggle checkbox on current line', 'Ctrl+Enter', () => S.view === 'note' && toggleCheckbox()],
+  ['Open tasks', 'Ctrl+Shift+T', () => openTasks()],
+  ['Add task…', '', () => quickAddTask()],
   ['Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
   ['Find in current note', 'Ctrl+F', () => { if (S.view === 'note') { setMode('edit'); ed.openSearch(); } }],
   ['Toggle light / dark theme', '', () => toggleTheme()],
@@ -2059,6 +2223,8 @@ function openSettings() {
     <label>Templates folder<input class="field" name="templatesFolder"></label>
     <label>Folder templates — new notes in a folder start from its template. One per line, e.g. <code>Meetings: Templates/Meeting</code> (<code>/</code> means every folder)<textarea class="field" name="folderTemplates" rows="3" spellcheck="false" placeholder="Meetings: Templates/Meeting"></textarea></label>
     <label>Attachments folder<input class="field" name="attachFolder"></label>
+    <label>New tasks go to (a note path; empty means today's daily note)<input class="field" name="taskInbox" placeholder="(today's daily note)"></label>
+    <label class="check"><input type="checkbox" name="taskDoneDate"> Add a done date (✅) when ticking a task</label>
     <label>New drawings are saved as<select class="field" name="drawingFormat"><option value="excalidraw">.excalidraw (Excalidraw file; also opens on excalidraw.com)</option><option value="md">.excalidraw.md (Obsidian Excalidraw plugin)</option></select></label>
     <label>Default view for notes<select class="field" name="defaultMode"><option value="edit">Editing</option><option value="read">Reading</option></select></label>
     <label>Light or dark<select class="field" name="theme"><option value="">Follow system</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
@@ -2345,7 +2511,11 @@ $('#right-body').addEventListener('click', async e => {
 
 function updateStatus() {
   const left = $('#status-left'), right = $('#status-right');
-  if (S.view === 'base' && S.cur) {
+  if (S.view === 'tasks') {
+    const open = allTasks().filter(x => !x.done && !x.cancelled).length;
+    left.textContent = '';
+    right.textContent = `${open.toLocaleString()} open task${open === 1 ? '' : 's'}`;
+  } else if (S.view === 'base' && S.cur) {
     left.textContent = '';
     right.textContent = 'Base';
   } else if (S.view === 'canvas' && S.cur) {
@@ -2513,6 +2683,7 @@ const CMD = {
   'new-drawing': () => newDrawing(),
   'new-canvas': () => newCanvas(),
   'new-base': () => newBase(),
+  tasks: () => openTasks(),
   'new-folder': () => newFolder(''),
   'collapse-all': () => { S.expanded.clear(); store('expanded', []); renderTree(); },
   back: () => goHist(-1),
@@ -2552,6 +2723,7 @@ window.addEventListener('keydown', e => {
   else if (mod && !e.shiftKey && k === 'g') { e.preventDefault(); openGraph(false); }
   else if (mod && !e.shiftKey && k === ',') { e.preventDefault(); openSettings(); }
   else if (mod && e.shiftKey && k === 'f') { e.preventDefault(); showPanel('search', true); }
+  else if (mod && e.shiftKey && k === 't') { e.preventDefault(); openTasks(); }
   else if (e.altKey && e.key === 'ArrowLeft') { e.preventDefault(); goHist(-1); }
   else if (e.altKey && e.key === 'ArrowRight') { e.preventDefault(); goHist(1); }
   else if (e.key === 'F2' && S.cur) { e.preventDefault(); renameDialog(S.cur); }
@@ -2626,6 +2798,7 @@ async function boot() {
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Folio server: ${esc(e.message)}. Is it still running?</p>`; return; }
   renderTree();
   setInterval(poll, 2000);
+  updateTaskBadge();
   api('/api/info').then(i => { S.vaultPath = i.vault; }).catch(() => { });
   if (S.files.size === 0 && !store('welcomed')) {
     store('welcomed', true);
