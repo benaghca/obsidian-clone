@@ -11,6 +11,7 @@
 mod api;
 mod config;
 mod native;
+mod pickfolder;
 mod screenshot;
 mod server;
 

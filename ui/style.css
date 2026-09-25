@@ -935,3 +935,51 @@ body.presenting #main { border: 0; }
 .cv-pres-count { min-width: 52px; text-align: center; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 #graph-controls .g-row { display: flex; gap: 14px; }
 .g-spin[hidden] { display: none !important; }
+
+/* ---------------------------------------------------------------- vault switcher */
+#vault-name { cursor: pointer; border-radius: 5px; padding: 2px 4px; margin-left: -4px; }
+#vault-name:hover { background: var(--accent-soft); color: var(--text); }
+#vault-name::after { content: ' ⌄'; opacity: .6; }
+.vs { display: flex; flex-direction: column; max-height: calc(88vh - 16px); }
+.vs-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 4px 18px; }
+.vs-head h3 { margin: 0; }
+.vs-list { overflow-y: auto; padding: 6px 10px; min-height: 60px; }
+.vs-row { display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-radius: 8px; cursor: pointer; outline: none; }
+.vs-row:hover, .vs-row:focus { background: var(--accent-soft); }
+.vs-row.missing { opacity: .55; }
+.vs-icon { width: 34px; height: 34px; flex: none; display: grid; place-items: center; border-radius: 8px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 45%, #000)); }
+.vs-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.vs-text small { color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vs-badge { font-size: 11.5px; color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 10px; padding: 1px 8px; white-space: nowrap; }
+.vs-badge.warn { color: var(--c-red, #e03131); border-color: currentColor; }
+.vs-forget { opacity: 0; }
+.vs-row:hover .vs-forget, .vs-row:focus .vs-forget { opacity: 1; }
+.vs-actions { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 18px 16px; border-top: 1px solid var(--border); }
+.vs-typed { margin-left: auto; }
+.vs-panel { border-top: 1px solid var(--border); padding: 12px 18px 16px; }
+.vs-bhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+.vs-roots { display: flex; gap: 4px; flex-wrap: wrap; }
+.vs-root { padding: 2px 8px; font-size: 12px; }
+.vs-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 12.5px; margin-bottom: 6px; color: var(--faint); }
+.vs-crumbs button { border: 0; background: none; color: var(--muted); cursor: pointer; padding: 2px 4px; border-radius: 4px; font: inherit; }
+.vs-crumbs button:hover { background: var(--accent-soft); color: var(--text); }
+.vs-dirs { max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 4px; }
+.vs-dir { display: block; width: 100%; text-align: left; border: 0; background: none; color: var(--text); padding: 4px 8px; border-radius: 5px; cursor: pointer; font: inherit; font-size: 13.5px; }
+.vs-dir:hover, .vs-dir:focus { background: var(--accent-soft); outline: none; }
+.vs-dir.up { color: var(--muted); }
+.vs-bfoot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.vs-note { flex: 1; min-width: 0; color: var(--faint); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-create { display: flex; flex-direction: column; gap: 10px; }
+.vs-create label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--muted); }
+.vs-loc { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.vs-loc span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+
+/* Cinder's own dialog, menu states and field suggestions (instead of the browser's) */
+.modal:has(.confirm) { width: min(460px, calc(100vw - 32px)); }
+.confirm-msg { white-space: pre-line; color: var(--muted); margin: 6px 0 16px; line-height: 1.5; }
+.confirm .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+.menu .disabled { opacity: .4; pointer-events: none; }
+.suggest-pop { position: fixed; z-index: 80; max-height: 260px; overflow-y: auto; padding: 4px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); font-size: 13.5px; }
+.suggest-pop[hidden] { display: none; }
+.suggest-pop > div { padding: 5px 10px; border-radius: 5px; cursor: pointer; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.suggest-pop > div:hover, .suggest-pop > div.sel { background: var(--accent-soft); }

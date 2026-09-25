@@ -48,9 +48,36 @@ pub fn save(v: &Value) {
     }
 }
 
+/// The vault in use now, first in the recent list (at most 16, newest first).
 pub fn remember_vault(vault: &Path) {
     let mut c = load();
-    c["vault"] = json!(vault.display().to_string());
+    let p = vault.display().to_string();
+    let mut recent: Vec<String> = recent_list(&c).into_iter().filter(|x| x != &p).collect();
+    recent.insert(0, p.clone());
+    recent.truncate(16);
+    c["vault"] = json!(p);
+    c["vaults"] = json!(recent);
+    save(&c);
+}
+
+fn recent_list(c: &Value) -> Vec<String> {
+    let mut v: Vec<String> = c["vaults"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
+    if let Some(last) = c["vault"].as_str()
+        && !v.iter().any(|x| x == last)
+    {
+        v.insert(0, last.to_string()); // (configs from before the list existed)
+    }
+    v
+}
+
+pub fn recent_vaults() -> Vec<String> {
+    recent_list(&load())
+}
+
+pub fn forget_vault(path: &str) {
+    let mut c = load();
+    let recent: Vec<String> = recent_list(&c).into_iter().filter(|x| x != path).collect();
+    c["vaults"] = json!(recent);
     save(&c);
 }
 

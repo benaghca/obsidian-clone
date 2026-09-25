@@ -35,6 +35,12 @@ VAULT_DIR   folder of .md notes (default: last vault, else Documents\Cinder)
 
 **The native window** (the default) passes every shortcut to Cinder, including Ctrl+N, Ctrl+W, Ctrl+P and F5, because the webview's own browser shortcuts are switched off. External links open in your normal browser. Closing the window saves any unsaved edits first. Release builds show no console window.
 
+**Vaults**: click the vault's name above the file tree, or run *Switch vault…*, to open the vault switcher.
+- **Recent vaults** are listed with their locations. Click one (or use ↑↓ and Enter) to switch, and × drops it from the list without touching the folder.
+- **Open folder…** uses the system's folder picker: the folder dialog on Windows, the folder chooser on macOS, zenity or kdialog on Linux. Where there's no picker, it uses a built-in folder browser that notices folders that already hold notes.
+- **Create new vault…** asks for a name and a location.
+- Typing a path still works, and it no longer creates a folder by mistake when the path is mistyped.
+
 **Window frame**: by default the desktop app draws its own title bar in the app's theme (except on macOS). Drag the tab bar or a sidebar's top row to move the window, and double-click it to maximize. Minimize, maximize and close sit at the top right, and the edges resize. **Settings → Window frame** switches to the system's title bar, which then follows Cinder's light or dark theme too.
 
 **Browser mode** (`--browser`) is a fallback if the window won't start, for example because WebView2 is blocked. In a browser tab, the browser keeps some shortcuts for itself, such as Ctrl+N and Ctrl+W.
