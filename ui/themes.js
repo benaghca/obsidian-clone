@@ -10,7 +10,12 @@ window.CinderThemes = (() => {
 
   const latte = P('#eff1f5', '#e6e9ef', '#dce0e8', '#ccd0da', '#ccd0da', '#4c4f69', '#6c6f85', '#9ca0b0', '#8839ef', '#d20f39', '#fe640b', '#df8e1d', '#40a02b', '#1e66f5', '#8839ef', '#179299');
   const THEMES = [
-    { id: 'default', name: 'Cinder (default)' },
+    { id: 'default', name: 'Volcanic (default)' }, // the stylesheet's own colours: obsidian, basalt and lava
+    {
+      id: 'violet', name: 'Violet',
+      light: P('#ffffff', '#f6f6f7', '#ececee', '#e6e6e9', '#e0e0e3', '#222325', '#62646a', '#a0a2a8', '#6b4ce6', '#d63b3b', '#d9480f', '#b08800', '#2f9e44', '#1971c2', '#7048e8', '#0c8599'),
+      dark: P('#1e1e1e', '#252525', '#2e2e2e', '#333333', '#363636', '#dadada', '#9a9a9a', '#6a6a6a', '#8f73ff', '#ff6b6b', '#f08c00', '#e0b000', '#3fb27f', '#4a8fe0', '#b07bd8', '#0c8599'),
+    },
     {
       id: 'catppuccin-mocha', name: 'Catppuccin Mocha', light: latte,
       dark: P('#1e1e2e', '#181825', '#313244', '#45475a', '#313244', '#cdd6f4', '#a6adc8', '#6c7086', '#cba6f7', '#f38ba8', '#fab387', '#f9e2af', '#a6e3a1', '#89b4fa', '#cba6f7', '#94e2d5'),
@@ -69,7 +74,7 @@ window.CinderThemes = (() => {
     return `rgba(${n >> 16}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
   };
 
-  // Set (or clear, for the default theme) the CSS variables on <html>.
+  // Set (or clear, for the default Volcanic theme, which is the stylesheet's own) the CSS variables on <html>.
   function apply(id, mode) {
     const root = document.documentElement;
     const t = THEMES.find(x => x.id === id);

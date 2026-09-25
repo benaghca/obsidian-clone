@@ -860,6 +860,18 @@ function openDrawingLink(link) {
   followLink(name.trim(), sub, S.cur);
 }
 
+// ============================================================ presenting a canvas
+
+// Everything but the canvas goes, and the window (or the page, in a browser) goes full screen.
+function presentMode(on) {
+  document.body.classList.toggle('presenting', on);
+  if (NATIVE && window.ipc) window.ipc.postMessage('win:fullscreen:' + (on ? 'on' : 'off'));
+  else if (on) document.documentElement.requestFullscreen?.().catch(() => { });
+  else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });
+}
+// Leaving the browser's full screen (its own Esc) ends the presentation too.
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && document.body.classList.contains('presenting')) CinderCanvas.endPresent(); });
+
 // ============================================================ window frame (desktop app)
 
 // Cinder can draw its own title bar: the tab bar (and the sidebars' header rows) move the window,
@@ -2979,9 +2991,13 @@ document.addEventListener('contextmenu', e => {
 // ------------------------------------------------------------ hover previews
 
 // Hover a note link to see the note (in the editor, hold Ctrl/Cmd, as in Obsidian); Ctrl/Cmd+hover
-// a web link to see the live page. The preview stays while the pointer is over it; Esc closes it.
+// a web link to see the live page. Previews stack: a link inside a preview opens another beside it,
+// and each stays while the pointer is on it, on its link, or on a preview it opened. Esc closes
+// the top one.
 const PREVIEW_TARGETS = 'a.internal-link, a[href^="http"], .cm-editor :is(.cm-wikilink, .cm-link, .cm-url), .cv-link-url';
-let hoverTimer = null, hoverHide = null, hoverPop = null, hoverFor = null, lastPointer = { x: 0, y: 0 };
+const MAX_PREVIEWS = 6;
+const pops = []; // [{ pop, anchor }], outermost first
+let hoverTimer = null, hoverHide = null, lastPointer = { x: 0, y: 0 };
 function hoverTarget(a) {
   const url = a.dataset.url || (a.matches('a[href^="http"]') ? a.getAttribute('href') : null);
   if (url && WEB_URL_RE.test(url)) return { web: url };
@@ -2991,13 +3007,21 @@ function hoverTarget(a) {
   const path = a.dataset.path ? name : name === '' ? from : resolveLink(name, from);
   return path && S.files.has(path) ? { path, sub: a.dataset.sub || '' } : null;
 }
+const popIndex = el => pops.findIndex(p => p.pop.contains(el));
+function closePops(keep = 0) {
+  clearTimeout(hoverHide);
+  while (pops.length > keep) pops.pop().pop.remove();
+}
+function hideHover() { clearTimeout(hoverTimer); closePops(0); }
 function showHover(a) {
   const t = hoverTarget(a);
-  if (!t) return;
-  hideHover(true);
-  hoverFor = a;
-  const pop = hoverPop = document.createElement('div');
+  if (!t || !a.isConnected) return;
+  const level = popIndex(a) + 1; // 0: a link on the page; n: a link inside preview n
+  closePops(level);
+  if (level >= MAX_PREVIEWS) return;
+  const pop = document.createElement('div');
   pop.className = 'hover-pop' + (t.web ? ' hp-web' : '');
+  pop.style.zIndex = 55 + level;
   if (t.web) renderWebEmbed(pop, t.web, { height: 380 }, { fixed: true });
   else {
     pop.innerHTML = `<div class="hp-head"><b>${esc(displayName(t.path))}${t.sub ? ` › ${esc(t.sub.replace(/^\^/, ''))}` : ''}</b><button class="ib hp-open" title="Open (Ctrl-click: new tab)"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button></div><div class="hp-body markdown"></div>`;
@@ -3006,52 +3030,57 @@ function showHover(a) {
     else if (IMG_EXT.test(t.path)) body.innerHTML = `<img src="${rawUrl(t.path)}" alt="">`;
     else if (visualEmbed(t.path)) renderVisualEmbed(body, t.path);
     else body.innerHTML = `<p class="none">${esc(basename(t.path))}</p>`;
-    $('.hp-open', pop).onclick = e => { hideHover(true); (e.ctrlKey || e.metaKey ? openInNewTab : openPath)(t.path, t.sub ? { heading: t.sub } : {}); };
+    $('.hp-open', pop).onclick = e => { hideHover(); (e.ctrlKey || e.metaKey ? openInNewTab : openPath)(t.path, t.sub ? { heading: t.sub } : {}); };
   }
   document.body.append(pop);
+  pops.push({ pop, anchor: a });
+  // Beside the link: below it if there's room, else above; a nested one is nudged so it doesn't
+  // sit exactly over its parent's text.
   const r = a.getBoundingClientRect(), W = pop.offsetWidth, H = pop.offsetHeight;
   const below = r.bottom + 6 + H < innerHeight || r.top < H + 12;
-  pop.style.left = Math.max(8, Math.min(innerWidth - W - 8, r.left)) + 'px';
+  const x = r.left + (level ? 24 : 0);
+  pop.style.left = Math.max(8, Math.min(innerWidth - W - 8, x)) + 'px';
   pop.style.top = (below ? Math.min(innerHeight - H - 8, r.bottom + 6) : Math.max(8, r.top - H - 6)) + 'px';
-  pop.addEventListener('mouseenter', () => clearTimeout(hoverHide));
-  pop.addEventListener('mouseleave', () => scheduleHideHover());
 }
-function hideHover(now) {
-  clearTimeout(hoverTimer); clearTimeout(hoverHide);
-  if (!hoverPop) return;
-  if (now) { hoverPop.remove(); hoverPop = null; hoverFor = null; }
-  else scheduleHideHover();
+// Keep the previews the pointer is in (and those under it), or the one whose link it's on; the
+// rest close after a moment, so moving across a gap doesn't lose them.
+function settleHover(target) {
+  let keep = 0;
+  for (let i = pops.length - 1; i >= 0; i--) {
+    if (pops[i].pop.contains(target)) { keep = i + 1; break; }
+    if (pops[i].anchor === target || pops[i].anchor.contains(target)) { keep = i + 1; break; }
+  }
+  clearTimeout(hoverHide);
+  if (keep < pops.length) hoverHide = setTimeout(() => closePops(keep), 280);
 }
-const scheduleHideHover = () => { clearTimeout(hoverHide); hoverHide = setTimeout(() => hideHover(true), 280); };
 function maybeHover(a, mod) {
-  if (!cfg.hoverPreview || !a || a.closest('.hover-pop') && a === hoverFor) return;
+  if (!cfg.hoverPreview || !a || pops.some(p => p.anchor === a)) return;
   const t = hoverTarget(a);
   if (!t) return;
-  const needMod = !!t.web || !!a.closest('.cm-editor, .cv-node');
+  const needMod = !!t.web || (!!a.closest('.cm-editor, .cv-node') && !a.closest('.hover-pop'));
   if (needMod && !mod) return;
-  if (a === hoverFor && hoverPop) { clearTimeout(hoverHide); return; }
   clearTimeout(hoverTimer);
   hoverTimer = setTimeout(() => showHover(a), needMod ? 120 : 450);
 }
 document.addEventListener('mouseover', e => {
   lastPointer = { x: e.clientX, y: e.clientY };
+  if (pops.length) settleHover(e.target);
   const a = e.target.closest?.(PREVIEW_TARGETS);
-  if (a) { if (hoverFor === a) clearTimeout(hoverHide); maybeHover(a, e.ctrlKey || e.metaKey); }
+  if (a) maybeHover(a, e.ctrlKey || e.metaKey);
   else clearTimeout(hoverTimer);
 });
 document.addEventListener('mouseout', e => {
-  const a = e.target.closest?.(PREVIEW_TARGETS);
-  if (!a) return;
-  clearTimeout(hoverTimer);
-  if (hoverFor === a && !e.relatedTarget?.closest?.('.hover-pop')) scheduleHideHover();
+  if (e.target.closest?.(PREVIEW_TARGETS)) clearTimeout(hoverTimer);
+  if (!e.relatedTarget && pops.length) { clearTimeout(hoverHide); hoverHide = setTimeout(() => closePops(0), 280); } // left the window
 });
 document.addEventListener('mousemove', e => { lastPointer = { x: e.clientX, y: e.clientY }; }, { passive: true });
-// Pressing Ctrl/Cmd while already over a link shows its preview.
+// Pressing Ctrl/Cmd while already over a link shows its preview; Esc closes the top preview.
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && hoverPop) { hideHover(true); return; }
+  if (e.key === 'Escape' && pops.length) { e.stopPropagation(); closePops(pops.length - 1); return; }
   if ((e.key === 'Control' || e.key === 'Meta') && !e.repeat) maybeHover(document.elementFromPoint(lastPointer.x, lastPointer.y)?.closest?.(PREVIEW_TARGETS), true);
 });
-document.addEventListener('mousedown', e => { if (hoverPop && !e.target.closest('.hover-pop')) hideHover(true); });
+// A click outside closes them all; a click inside one closes only those it opened.
+document.addEventListener('mousedown', e => { if (pops.length) closePops(popIndex(e.target) + 1); });
 
 // ============================================================ images: viewer, resize, crop, annotate, screenshots
 
@@ -3538,6 +3567,7 @@ const APP_COMMANDS = [
   ['toggle-left', 'Toggle left sidebar', 'Mod-\\', () => toggleSide('left')],
   ['backlinks', 'Show backlinks', 'Mod-Shift-b', () => showRight('backlinks')],
   ['all-properties', 'Show all properties', '', () => showPanel('props', true)],
+  ['present', 'Present canvas', 'F5', () => S.view === 'canvas' ? CinderCanvas.present() : toast('Open a canvas to present it')],
   ['toggle-embed', 'Embed the link under the cursor (or show an embed as a link)', '', inNote(() => { setMode('edit'); toggleEmbed(ed, ed.selectionStart); })],
   ['outline', 'Show outline', 'Mod-Shift-o', () => showRight('outline')],
   ['outgoing', 'Show outgoing links', '', () => showRight('outgoing')],
@@ -4312,6 +4342,17 @@ function showGraphInfo(i) {
   box.ondblclick = e => { const it = e.target.closest('.gi-item'); if (it) openGraphNode(it.dataset.id); };
 }
 try { $('#g-clickopen').checked = !!store('graphClickOpens'); } catch { }
+// 2D or 3D (remembered), and a slow turn in 3D.
+const apply3d = () => {
+  const on = $('#g-3d').checked;
+  $('.g-spin').hidden = !on;
+  CinderGraph.set3d(on);
+  CinderGraph.setSpin(on && $('#g-spin').checked);
+};
+$('#g-3d').checked = !!store('graph3d'); $('#g-spin').checked = !!store('graphSpin');
+$('#g-3d').addEventListener('change', e => { store('graph3d', e.target.checked); apply3d(); });
+$('#g-spin').addEventListener('change', e => { store('graphSpin', e.target.checked); apply3d(); });
+apply3d();
 $('#g-clickopen').addEventListener('change', e => store('graphClickOpens', e.target.checked));
 // A live-preview editor inside a canvas card. A text card's editor reports its text through
 // onChange; a note card's edits the note itself and saves it as you type, like the main editor.
@@ -4396,6 +4437,7 @@ CinderCanvas.init($('#view-canvas'), {
   },
   fileExists: p => S.files.has(p),
   mountEditor: (host, o) => mountCardEditor(host, o),
+  present: on => presentMode(on),
   renderLink: (el, url) => { if (!isWebPage(url) || cfg.webEmbeds === 'off') return false; renderWebEmbed(el, url, '', { fill: true }); return true; },
   viewImage: (p, all) => viewImages(p, all.map(q => ({ src: rawUrl(q), name: basename(q), path: q }))),
   createNoteFromText: async text => {

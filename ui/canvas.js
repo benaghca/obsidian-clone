@@ -220,7 +220,10 @@
         <button class="dr-btn" data-act="add-media" title="Add image or file from vault">${ICON('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="M20.5 16l-5-5L5 19.5"/>')}</button>
         <button class="dr-btn" data-act="add-link" title="Add web link card">${ICON('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>')}</button>
         <button class="dr-btn" data-act="add-group" title="Add group (Ctrl+G groups the selection)">${ICON('<rect x="3.5" y="5.5" width="17" height="14" rx="2" stroke-dasharray="3 2.5"/><path d="M3.5 5.5h7"/>')}</button>
+        <span class="cv-tsep"></span>
+        <button class="dr-btn" data-act="present" title="Present (F5): each group is a slide">${ICON('<path d="M8 5.5v13l10.5-6.5z"/>')}</button>
       </div>
+      <div class="cv-pres" hidden><button class="dr-btn" data-act="pres-prev" title="Previous (←)">${ICON('<path d="M15 5l-7 7 7 7"/>')}</button><span class="cv-pres-count"></span><button class="dr-btn" data-act="pres-next" title="Next (→ or Space)">${ICON('<path d="M9 5l7 7-7 7"/>')}</button><button class="dr-btn" data-act="pres-end" title="End (Esc)">${ICON('<path d="M6 6l12 12M18 6L6 18"/>')}</button></div>
       <div class="dr-bottom cv-bottom">
         <div class="dr-island dr-row"><button class="dr-btn" data-act="zoom-out" title="Zoom out (Ctrl+-)">${ICON('<path d="M6 12h12"/>')}</button><button class="dr-btn dr-zoom" data-act="zoom-reset" title="Reset zoom (Ctrl+0)">100%</button><button class="dr-btn" data-act="zoom-in" title="Zoom in (Ctrl+=)">${ICON('<path d="M6 12h12M12 6v12"/>')}</button><button class="dr-btn" data-act="fit" title="Zoom to fit (Shift+1)">${ICON('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>')}</button></div>
         <div class="dr-island dr-row"><button class="dr-btn" data-act="undo" title="Undo (Ctrl+Z)">${ICON('<path d="M9 14L4.5 9.5 9 5"/><path d="M4.5 9.5H14a5.5 5.5 0 0 1 0 11h-3"/>')}</button><button class="dr-btn" data-act="redo" title="Redo (Ctrl+Y)">${ICON('<path d="M15 14l4.5-4.5L15 5"/><path d="M19.5 9.5H10a5.5 5.5 0 0 0 0 11h3"/>')}</button></div>
@@ -249,7 +252,9 @@
     document.addEventListener('copy', e => onClip(e, false));
     document.addEventListener('cut', e => onClip(e, true));
     document.addEventListener('paste', onPaste);
-    new ResizeObserver(() => request()).observe(viewport);
+    new ResizeObserver(() => { if (pres) goSlide(pres.i, false); else request(); }).observe(viewport);
+    viewport.addEventListener('mousemove', () => { if (pres) presUi(); });
+    viewport.addEventListener('contextmenu', e => { if (pres) { e.preventDefault(); e.stopImmediatePropagation(); goSlide(pres.i - 1); } }, true);
   }
 
   // ------------------------------------------------------------ state
@@ -540,6 +545,11 @@
   const hitNode = target => target.closest?.('.cv-node');
 
   function onDown(e) {
+    if (pres) {
+      // Presenting: links, buttons and embedded pages work; a click anywhere else moves on.
+      if (e.button === 0 && !e.target.closest('a, button, input, iframe, .we-bar, .cv-pres')) { e.preventDefault(); goSlide(pres.i + 1); }
+      return;
+    }
     if (e.button === 2) return;
     if (e.target.closest('.cv-editor, .cv-label-editor, .cv-cm')) return;
     viewport.focus({ preventScroll: true });
@@ -685,6 +695,7 @@
   }
 
   function onDouble(e) {
+    if (pres) return;
     // Pointer capture during the clicks retargets dblclick to the viewport; find what's really there.
     const target = e.target === viewport ? document.elementFromPoint(e.clientX, e.clientY) || viewport : e.target;
     if (target.closest('.cv-editor, .cv-label-editor, .cv-cm')) return;
@@ -704,6 +715,7 @@
   }
 
   function onWheel(e) {
+    if (pres) { presWheel(e); return; }
     if (e.target.closest('.cv-cm') && !(e.ctrlKey || e.metaKey)) return; // scroll inside the card editor
     const content = e.target.closest('.cv-content');
     if (content && !(e.ctrlKey || e.metaKey) && content.scrollHeight > content.clientHeight + 1) {
@@ -786,6 +798,7 @@
   const activeFor = e => visible && !editing && !e.target.closest?.('input, textarea, select, [contenteditable], #left, #right, #ribbon') && !hooks.modalOpen?.();
 
   function onKey(e) {
+    if (pres && visible && !hooks.modalOpen?.()) return presKey(e);
     if (!activeFor(e)) return;
     const mod = e.ctrlKey || e.metaKey, k = e.key;
     let handled = true;
@@ -924,7 +937,7 @@
 
   function showHelp() {
     hooks.help?.(`<div class="dr-help"><h3>Canvas shortcuts</h3><div class="dr-help-cols">
-      <div><h4>Cards</h4><p><span>New card</span>double-click</p><p><span>Edit a card or note in place</span><kbd>Enter</kbd> or double-click</p><p><span>Open a note card</span><kbd>Shift Enter</kbd></p><p><span>Finish editing</span><kbd>Esc</kbd></p>
+      <div><h4>Cards</h4><p><span>New card</span>double-click</p><p><span>Edit a card or note in place</span><kbd>Enter</kbd> or double-click</p><p><span>Open a note card</span><kbd>Shift Enter</kbd></p><p><span>Finish editing</span><kbd>Esc</kbd></p><p><span>Present (groups are slides)</span><kbd>F5</kbd></p>
       <p><span>New connected card</span><kbd>Tab</kbd></p><p><span>Connect cards</span>drag a side dot</p><p><span>Card from a connection</span>drop it on empty space</p>
       <p><span>Add a note or image</span>drag it from the file tree</p><p><span>Group selection</span><kbd>Ctrl G</kbd></p><p><span>Duplicate</span><kbd>Ctrl D</kbd></p></div>
       <div><h4>Selection</h4><p><span>Jump to nearby card</span><kbd>Alt</kbd> + arrows</p><p><span>Move</span>arrows (<kbd>Shift</kbd> = faster)</p><p><span>Add to selection</span><kbd>Shift</kbd>-click</p>
@@ -952,8 +965,126 @@
       'sel-note': () => convertToNote(), 'sel-child': () => addChild(), 'sel-group': () => groupSelection(),
       'sel-delete': () => deleteSelection(), 'sel-fit': () => fit(true, selectedNodes()),
       'sel-color': () => { const r = b.getBoundingClientRect(); hooks.menu?.(r.left, r.bottom + 6, colorItems()); },
+      present: () => present(), 'pres-prev': () => goSlide(pres.i - 1), 'pres-next': () => goSlide(pres.i + 1), 'pres-end': () => endPresent(),
     })[b.dataset.act]?.();
     if (!editing && !hooks.modalOpen?.()) viewport.focus({ preventScroll: true }); // not away from a dialog it opened
+  }
+
+  // ------------------------------------------------------------ presentation
+
+  // Slides are the groups (or, with none, the cards). Arrows between them give the order, starting
+  // from one nothing points into; the rest follow in reading order (rows, then left to right).
+  function slideOrder() {
+    const groups = data.nodes.filter(n => n.type === 'group');
+    const items = groups.length ? groups : data.nodes;
+    const byY = [...items].sort((a, b) => a.y - b.y);
+    const rows = [];
+    for (const n of byY) {
+      const row = rows[rows.length - 1];
+      if (row && n.y < row.top + row.h * 0.5) row.items.push(n); else rows.push({ top: n.y, h: n.height, items: [n] });
+    }
+    const reading = rows.flatMap(r => r.items.sort((a, b) => a.x - b.x));
+    const ids = new Set(items.map(n => n.id));
+    const next = new Map(), hasIn = new Set();
+    for (const e of data.edges) {
+      if (!ids.has(e.fromNode) || !ids.has(e.toNode) || e.fromNode === e.toNode) continue;
+      if (!next.has(e.fromNode)) next.set(e.fromNode, []);
+      next.get(e.fromNode).push(e.toNode);
+      hasIn.add(e.toNode);
+    }
+    if (!next.size) return reading;
+    const rank = new Map(reading.map((n, i) => [n.id, i])), out = [], seen = new Set();
+    const walk = id => {
+      while (id && !seen.has(id)) {
+        seen.add(id); out.push(byId.get(id));
+        id = (next.get(id) || []).filter(x => !seen.has(x)).sort((a, b) => rank.get(a) - rank.get(b))[0];
+      }
+    };
+    walk(reading.find(n => next.has(n.id) && !hasIn.has(n.id))?.id ?? reading[0].id);
+    for (const n of reading) if (!seen.has(n.id)) walk(n.id);
+    return out;
+  }
+
+  let pres = null; // { list, i, saved (the view to go back to) }
+  let presAnim = 0, presWheelAt = 0, presUiTimer = 0;
+  function present(fromId) {
+    if (!data.nodes.length) return hooks.toast?.('Add some cards to present');
+    stopEditing(true);
+    const list = slideOrder();
+    const from = fromId || [...sel].find(id => list.some(n => n.id === id));
+    pres = { list, i: Math.max(0, list.findIndex(n => n.id === from)), saved: { ...view } };
+    sel = new Set(); selEdge = null;
+    rootEl.classList.add('cv-presenting');
+    $('.cv-pres').hidden = false;
+    hooks.present?.(true);
+    viewport.focus({ preventScroll: true });
+    // after the app's chrome is gone and the viewport has its new size
+    setTimeout(() => { if (pres) goSlide(pres.i, false); }, 120);
+    presUi();
+  }
+  function endPresent() {
+    if (!pres) return;
+    const back = pres.saved;
+    pres = null;
+    rootEl.classList.remove('cv-presenting');
+    $('.cv-pres').hidden = true;
+    hooks.present?.(false);
+    animateView(back, 0);
+    request();
+  }
+  function goSlide(i, animate = true) {
+    if (!pres) return;
+    pres.i = Math.max(0, Math.min(pres.list.length - 1, i));
+    const n = pres.list[pres.i], b = boundsOf([n]);
+    if (n.type === 'group' && n.label) b.y1 -= 44; // the title sits above the group's box
+    const w = Math.max(1, b.x2 - b.x1), h = Math.max(1, b.y2 - b.y1);
+    const z = Math.max(0.05, Math.min(4, (vw() * 0.94) / w, (vh() * 0.92) / h));
+    animateView({ z, x: vw() / 2 - (b.x1 + w / 2) * z, y: vh() / 2 - (b.y1 + h / 2) * z }, animate ? 520 : 0);
+    $('.cv-pres-count').textContent = `${pres.i + 1} / ${pres.list.length}`;
+    presUi();
+  }
+  // Glide: the centre moves in a straight line while the zoom changes smoothly (geometrically).
+  function animateView(to, ms) {
+    cancelAnimationFrame(presAnim);
+    if (!ms || !vw()) { view = to; request(); return; }
+    const from = { ...view }, t0 = performance.now();
+    const c0 = [(vw() / 2 - from.x) / from.z, (vh() / 2 - from.y) / from.z], c1 = [(vw() / 2 - to.x) / to.z, (vh() / 2 - to.y) / to.z];
+    const step = t => {
+      const p = Math.min(1, (t - t0) / ms), e = p < .5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+      const z = from.z * Math.pow(to.z / from.z, e), cx = c0[0] + (c1[0] - c0[0]) * e, cy = c0[1] + (c1[1] - c0[1]) * e;
+      view = { z, x: vw() / 2 - cx * z, y: vh() / 2 - cy * z };
+      render();
+      if (p < 1) presAnim = requestAnimationFrame(step);
+    };
+    presAnim = requestAnimationFrame(step);
+  }
+  function presKey(e) {
+    const k = e.key;
+    let done = true;
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter', 'n'].includes(k)) goSlide(pres.i + 1);
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace', 'p'].includes(k)) goSlide(pres.i - 1);
+    else if (k === 'Home') goSlide(0);
+    else if (k === 'End') goSlide(pres.list.length - 1);
+    else if (k === 'Escape') endPresent();
+    else if (k === 'F5' || k.startsWith('F')) done = k === 'F5';
+    else done = !(e.ctrlKey || e.metaKey || e.altKey); // other keys do nothing while presenting
+    if (done) { e.preventDefault(); e.stopPropagation(); }
+  }
+  function presWheel(e) {
+    const content = e.target.closest('.cv-content');
+    if (content && content.scrollHeight > content.clientHeight + 1) return; // scroll a long card
+    e.preventDefault();
+    const now = Date.now();
+    if (now - presWheelAt < 650 || Math.abs(e.deltaY) < 4) return;
+    presWheelAt = now;
+    goSlide(pres.i + (e.deltaY > 0 ? 1 : -1));
+  }
+  // The slide controls show while the pointer moves, then fade.
+  function presUi() {
+    const ui = $('.cv-pres');
+    ui.classList.add('on');
+    clearTimeout(presUiTimer);
+    presUiTimer = setTimeout(() => ui.classList.remove('on'), 2200);
   }
 
   // ------------------------------------------------------------ rendering
@@ -1128,11 +1259,15 @@
     init, load, getData,
     // Opening a canvas takes the keyboard, so card shortcuts work straight away.
     show() { visible = true; request(); if (!hooks.modalOpen?.()) viewport.focus({ preventScroll: true }); },
-    hide() { visible = false; stopEditing(true); action = null; },
+    hide() { endPresent(); visible = false; stopEditing(true); action = null; },
     getView: () => ({ ...view }),
     count: () => data.nodes.length,
     flush() { stopEditing(true); },
     addFile: path => addFileNode(path),
+    present: from => present(from),
+    endPresent: () => endPresent(),
+    presenting: () => !!pres && { index: pres.i, count: pres.list.length, id: pres.list[pres.i].id },
+    slides: () => slideOrder().map(n => n.id),
     // Point a file card at another file (an image swapped for its annotated drawing).
     setFile(id, path) { const n = byId.get(id); if (n?.type !== 'file') return; n.file = path; commit(); },
     refreshFiles,
