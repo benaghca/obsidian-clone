@@ -41,10 +41,12 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 - **Network:** in its default mode, Folio doesn't open any network port. The UI talks to the program through a private `folio://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Folio.
 - **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 3,000 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 6,500 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
   - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
+  - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
+  - The drawing editor is Folio's own code (`ui/draw.js`, `ui/draw-render.js`). It reads and writes Excalidraw's file format, but none of Excalidraw's code is included. Its sketchy-line maths is adapted from rough.js and its decompression from lz-string, both MIT-licensed (see `ui/vendor/draw-ports.LICENSE`).
 - **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Folio`, which holds `config.json` (last vault and window size) and the WebView2 profile.
 - **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. Their source is all in `vendor-crates/`. Dev tools are disabled in release builds.
 
@@ -70,6 +72,14 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - Daily notes with an optional template, and an *Insert template* command. Templates support `{{date}}`, `{{time}}`, `{{title}}` and `{{date:dddd, MMMM DD}}`.
 - A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag
 - Detection of edits made outside Folio. If a note changed on disk while you also had unsaved edits, Folio asks which version to keep.
+- **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images and an eraser. Features:
+  - Arrows attach to shapes and follow them when they move. Shapes and arrows can have labels (double-click or **Enter**).
+  - Stroke and fill colours, hachure, cross-hatch and solid fills, stroke width and style, sloppiness, sharp or round edges, arrowheads, fonts, opacity and layer order.
+  - Grouping, aligning, locking, element links (`[[Note]]` or a web address), a snap grid, zoom and pan, undo and redo, copy and paste, and a shortcut sheet (**?**).
+  - Drawings are saved as `.excalidraw` files, the same format excalidraw.com uses, so you can open them there too. In **Settings**, you can switch to `.excalidraw.md`, the format of Obsidian's Excalidraw plugin. Folio reads and writes that format, including compressed drawings, and keeps its text and images in step with the plugin.
+  - Embed a drawing in a note with `![[Drawing.excalidraw]]` or `![[Drawing.excalidraw|400]]`. It renders in live preview and reading view, and clicking it opens the drawing. Renaming a drawing updates those embeds.
+  - Export to SVG or PNG next to the drawing, or copy the drawing to the clipboard.
+  - Create drawings from the ribbon, the file tree's context menu or the command palette. *Create new drawing and embed it in the current note* does both in one step.
 - Autosave, back and forward history (**Alt+←/→**), light and dark themes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, and **Tab**/**Shift+Tab** to indent list items
 
@@ -87,8 +97,11 @@ ui/index.html      shell
 ui/app.js          index, preview, panels, search, commands
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
 ui/graph.js        graph view (canvas + force layout)
+ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
+ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
+ui/test/           draw-render.test.js (run with `node ui/test/draw-render.test.js`, no packages needed)
 ui/style.css       themes and layout
-ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify
+ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, Virgil font
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
 ```
 
@@ -99,6 +112,8 @@ The editor bundle is already built and checked in, so building Folio doesn't nee
 ```sh
 cd ui/editor && npm install && npm run build
 ```
+
+`cargo test` runs the Rust tests. The drawing format and renderer tests run under plain Node: `node ui/test/draw-render.test.js`.
 
 ## Ideas for round two
 

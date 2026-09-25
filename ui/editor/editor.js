@@ -170,6 +170,18 @@ class EmbedWidget extends WidgetType {
   }
 }
 
+// A drawing (.excalidraw) embed, rendered by app.js as an image of the drawing.
+class DrawingWidget extends WidgetType {
+  constructor(path, width, version) { super(); this.path = path; this.width = width; this.version = version; }
+  eq(o) { return o.path === this.path && o.width === this.width && o.version === this.version; }
+  toDOM() {
+    const el = document.createElement('div');
+    el.className = 'cm-embed-block cm-drawing-embed';
+    H.renderDrawing(el, this.path, this.width);
+    return el;
+  }
+}
+
 class TableWidget extends WidgetType {
   constructor(text, version) { super(); this.text = text; this.version = version; }
   eq(o) { return o.text === this.text && o.version === this.version; }
@@ -428,8 +440,10 @@ function buildBlocks(state) {
         if (node.name === 'Embed') {
           const w = parseWiki(doc.sliceString(nf + 3, nt - 2));
           const target = H.resolve(w.name);
-          if (target && IMG_EXT.test(target)) {
-            const width = w.alias && /^\d+/.test(w.alias) ? parseInt(w.alias) : null;
+          const width = w.alias && /^\d+/.test(w.alias) ? parseInt(w.alias) : null;
+          if (target && H.isDrawing && H.isDrawing(target)) {
+            widget = new DrawingWidget(target, width, H.version());
+          } else if (target && IMG_EXT.test(target)) {
             widget = new ImageWidget(H.rawUrl(target), w.name, width, true);
           } else if (target && /\.md$/i.test(target)) {
             widget = new EmbedWidget(target, w.sub, H.version());

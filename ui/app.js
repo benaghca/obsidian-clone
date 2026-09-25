@@ -17,6 +17,10 @@ const noteName = p => { const b = basename(p); return isMd(b) ? b.slice(0, -3) :
 const join = (d, n) => d ? `${d}/${n}` : n;
 const splitOnce = (s, ch) => { const i = s.indexOf(ch); return i < 0 ? [s, null] : [s.slice(0, i), s.slice(i + 1)]; };
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const DRAWING_EXT = /\.excalidraw(\.md)?$/i;
+// Drawings: .excalidraw (Excalidraw JSON) or Obsidian Excalidraw plugin notes (.excalidraw.md / frontmatter flag).
+const isDrawing = p => !!p && (DRAWING_EXT.test(p) || (isMd(p) && S.notes.get(p)?.fm?.['excalidraw-plugin'] != null));
+const drawingName = p => basename(p).replace(DRAWING_EXT, '').replace(/\.md$/i, '');
 const rawUrl = p => `/api/raw?path=${enc(p)}&t=${TOKEN}`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
@@ -64,6 +68,7 @@ const DEFAULTS = {
   readable: true,
   mono: false,
   theme: '',
+  drawingFormat: 'excalidraw',
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
 const saveCfg = () => store('settings', cfg);
@@ -76,6 +81,8 @@ function applyTheme() {
   document.body.classList.toggle('source-mode', !cfg.livePreview);
   if (typeof ed !== 'undefined') ed.setLive(cfg.livePreview);
   if (window.FolioGraph) FolioGraph.restyle();
+  if (window.FolioDraw) FolioDraw.restyle();
+  if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
 }
 
 // ============================================================ state
@@ -98,6 +105,7 @@ const S = {
   gen: 0,                // bumped by every write, so stale polls can be discarded
   version: 0,            // bumped when the index changes, so editor widgets re-render
   savePromise: null,
+  drawing: null,         // open drawing: {mtime, info: {format, source, embedded}}
 };
 
 const editWrap = $('#edit-wrap');
@@ -119,6 +127,8 @@ const ed = FolioEditor.create($('#editor'), {
   onCursor: () => cursorMoved(),
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
+  isDrawing: p => isDrawing(p),
+  renderDrawing: (el, p, width) => renderDrawingEmbed(el, p, width),
 });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
@@ -277,7 +287,9 @@ async function applyList(l, gen) {
     if (isMd(p) && (!old || old.mtime !== f.mtime || !S.notes.has(p))) changed.push(p);
   }
   for (const p of S.files.keys()) if (!next.has(p)) { removed.push(p); structural = true; }
-  if (!structural && !changed.length) return false;
+  // .excalidraw files aren't indexed like notes, but embeds and the open drawing follow their changes.
+  const drawingsChanged = [...next].filter(([p, f]) => !isMd(p) && DRAWING_EXT.test(p) && S.files.get(p) && S.files.get(p).mtime !== f.mtime).map(([p]) => p);
+  if (!structural && !changed.length && !drawingsChanged.length) return false;
   const got = changed.length ? await readMany(changed) : {};
   if (gen != null && gen !== S.gen) return false; // we wrote something meanwhile; next poll redoes it
 
@@ -290,7 +302,14 @@ async function applyList(l, gen) {
       if (prev && prev.content === v.content) { prev.mtime = v.mtime; continue; }
       setNote(p, v.content, v.mtime);
       if (p === S.cur && S.view === 'note') reloadEditorFromDisk(v.content);
+      else if (p === S.cur && S.view === 'drawing') reloadDrawingFromDisk(v.content, v.mtime);
     }
+  }
+  if (drawingsChanged.length) {
+    S.version++; refreshEditorSoon();
+    if (S.view === 'note' && S.mode === 'read') renderPreview();
+    const f = next.get(S.cur);
+    if (S.view === 'drawing' && S.drawing && drawingsChanged.includes(S.cur) && !S.dirty && f.mtime !== S.drawing.mtime) reloadDrawingFromDisk();
   }
   if (structural) reindexAll(); else { changed.forEach(resolveNote); if (changed.length) { S.version++; refreshEditorSoon(); } }
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
@@ -339,9 +358,10 @@ const liveReindex = debounce(() => {
 
 async function save(force = false) {
   while (S.saving) await S.savePromise;
-  if (!S.cur || !S.dirty || S.view !== 'note') return;
+  if (!S.cur || !S.dirty) return;
+  if (S.view !== 'note' && !(S.view === 'drawing' && S.drawing)) return;
   S.saving = true;
-  S.savePromise = doSave(force).finally(() => { S.saving = false; });
+  S.savePromise = (S.view === 'drawing' ? doSaveDrawing(force) : doSave(force)).finally(() => { S.saving = false; });
   return S.savePromise;
 }
 
@@ -385,9 +405,10 @@ async function writeFile(path, content, base) {
 
 function showView(v) {
   S.view = v;
-  for (const id of ['note', 'file', 'graph', 'empty']) $(`#view-${id}`).hidden = id !== v;
+  for (const id of ['note', 'file', 'graph', 'drawing', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
   if (v === 'graph') FolioGraph.show(); else FolioGraph.hide();
+  if (v === 'drawing') FolioDraw.show(); else FolioDraw.hide();
   updateHistButtons();
 }
 
@@ -400,20 +421,23 @@ function showEmpty() {
 }
 
 function rememberPos() {
+  if (S.cur && S.view === 'drawing') { S.pos.set(S.cur, { draw: FolioDraw.getView() }); return; }
   if (!S.cur || S.view !== 'note') return;
   S.pos.set(S.cur, { a: ed.selectionStart, b: ed.selectionEnd, scroll: editWrap.scrollTop, pscroll: preview.scrollTop });
 }
 
 async function openPath(p, opts = {}) {
   if (!p) return;
+  if (S.view === 'drawing') FolioDraw.flush();
   await save();
   rememberPos();
   if (!S.files.has(p)) { toast(`Not found: ${p}`); return; }
   if (opts.push !== false && S.hist[S.histIdx] !== p) {
     S.hist = S.hist.slice(0, S.histIdx + 1); S.hist.push(p); S.histIdx = S.hist.length - 1;
   }
-  S.cur = p; S.dirty = false;
+  S.cur = p; S.dirty = false; S.drawing = null;
   store('last', p);
+  if (isDrawing(p) && !opts.raw) return openDrawing(p);
   if (!isMd(p)) return openAttachment(p);
   const n = S.notes.get(p);
   showView('note');
@@ -422,7 +446,7 @@ async function openPath(p, opts = {}) {
   setSaveState('');
   const pos = S.pos.get(p);
   setMode(opts.mode || S.mode, true);
-  if (pos) {
+  if (pos && pos.a != null) {
     ed.setSelectionRange(pos.a, pos.b); editWrap.scrollTop = pos.scroll; preview.scrollTop = pos.pscroll;
     requestAnimationFrame(() => { editWrap.scrollTop = pos.scroll; });
   } else { editWrap.scrollTop = 0; preview.scrollTop = 0; }
@@ -453,6 +477,244 @@ function openAttachment(p) {
     : `<div class="file-info"><p>${esc(p)} · ${kb}</p><p><a class="btn" href="${rawUrl(p)}" target="_blank" rel="noopener">Open in new tab</a></p></div>`;
   $('#crumbs').innerHTML = crumbsHtml(p);
   renderTreeActive(true); refreshPanels(); updateStatus();
+}
+
+// ============================================================ drawings
+
+async function openDrawing(p) {
+  showView('drawing');
+  $('#crumbs').innerHTML = crumbsHtml(p);
+  document.title = `${drawingName(p)} — ${VAULT} — Folio`;
+  setSaveState('');
+  renderTreeActive(true);
+  refreshPanels();
+  let content, mtime;
+  try {
+    if (isMd(p) && S.notes.has(p)) ({ content, mtime } = S.notes.get(p));
+    else {
+      const got = await readMany([p]);
+      if (!got[p]) throw new Error('the file couldn’t be read');
+      ({ content, mtime } = got[p]);
+    }
+  } catch (e) { if (S.cur === p) showDrawingError(p, e); return; }
+  if (S.cur !== p) return; // navigated away while reading
+  loadDrawing(p, content, mtime, S.pos.get(p)?.draw);
+}
+
+// Parse and show a drawing; returns false (and shows why) if it can't be read.
+function loadDrawing(p, content, mtime, view) {
+  let parsed;
+  try { parsed = FolioSketch.parseDrawing(content, p); } catch (e) { showDrawingError(p, e); return false; }
+  S.drawing = { mtime, info: { format: parsed.format, source: content, embedded: parsed.embedded || {} } };
+  if (S.view !== 'drawing') showView('drawing');
+  FolioDraw.load(parsed.scene, { fileUrls: drawingFileUrls(parsed.embedded, p), view, relayout: parsed.relayout });
+  updateStatus();
+  return true;
+}
+
+async function reloadDrawingFromDisk(content, mtime) {
+  const p = S.cur;
+  if (content == null) {
+    const got = await readMany([p]).catch(() => ({}));
+    if (!got[p] || S.cur !== p || S.dirty) return;
+    ({ content, mtime } = got[p]);
+  }
+  loadDrawing(p, content, mtime, FolioDraw.getView());
+}
+
+function showDrawingError(p, e) {
+  S.drawing = null;
+  showView('file');
+  $('#view-file').innerHTML = `<div class="file-info"><p>Couldn’t open “${esc(basename(p))}” as a drawing: ${esc(e.message)}</p>` +
+    (isMd(p) ? `<p><a class="btn" data-open-raw="${esc(p)}">Open as Markdown</a></p>` : '') + '</div>';
+}
+
+// Images in .excalidraw.md drawings are vault files listed under "Embedded Files".
+function drawingFileUrls(embedded, from) {
+  const out = {};
+  for (const [id, link] of Object.entries(embedded || {})) { const t = resolveLink(link, from); if (t) out[id] = rawUrl(t); }
+  return out;
+}
+
+function drawingChanged() {
+  if (S.view !== 'drawing' || !S.drawing) return;
+  S.dirty = true;
+  setSaveState('Unsaved');
+  scheduleSave();
+  updateStatus();
+}
+
+function dataURLToBlob(u) {
+  const [head, data] = u.split(',');
+  const mime = /^data:([^;,]+)/.exec(head)?.[1] || 'application/octet-stream';
+  const bin = /;base64/.test(head) ? atob(data) : decodeURIComponent(data);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
+}
+
+// .excalidraw.md drawings keep images as vault attachments, like the Obsidian plugin does.
+async function storeDrawingImages(d) {
+  let added = false;
+  for (const [id, f] of Object.entries(FolioDraw.getScene().files)) {
+    if (d.info.embedded[id] || !f.dataURL) continue;
+    const ext = ((f.mimeType || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
+    const now = new Date();
+    const path = uniquePath(cfg.attachFolder, `Pasted image ${fmtDate(now, 'YYYYMMDDHHmm')}${String(now.getSeconds()).padStart(2, '0')}.${ext}`);
+    await writeFile(path, dataURLToBlob(f.dataURL));
+    if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
+    reindexAll();
+    d.info.embedded[id] = linkNameFor(path, [...S.files.keys()]);
+    added = true;
+  }
+  if (added) renderTree();
+}
+
+function drawingContent(d) {
+  return FolioSketch.serializeDrawing(FolioDraw.getScene(), d.info);
+}
+
+async function doSaveDrawing(force) {
+  const p = S.cur, d = S.drawing;
+  S.dirty = false; setSaveState('Saving…');
+  let err = null;
+  try {
+    if (d.info.format === 'md') await storeDrawingImages(d);
+    const content = drawingContent(d);
+    const headers = (!force && d.mtime) ? { 'X-Base-Mtime': String(d.mtime) } : {};
+    const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: content, headers });
+    d.mtime = r.mtime; d.info.source = content;
+    S.files.set(p, { mtime: r.mtime, size: new Blob([content]).size });
+    if (isMd(p)) { setNote(p, content, r.mtime); resolveNote(p); }
+    S.version++;
+    if (!S.dirty) setSaveState('Saved');
+    refreshPanels(true);
+  } catch (e) { err = e; S.dirty = true; }
+  if (!err) return;
+  if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
+  const overwrite = confirm(`"${basename(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
+  if (overwrite) return doSaveDrawing(true);
+  S.dirty = false;
+  await reloadDrawingFromDisk();
+  setSaveState('Reloaded from disk');
+}
+
+// A new, empty drawing file in `folder`; returns its path.
+async function makeDrawingFile(folder) {
+  const md = cfg.drawingFormat === 'md';
+  const ext = md ? '.excalidraw.md' : '.excalidraw';
+  const now = new Date();
+  const stem = `Drawing ${fmtDate(now, 'YYYY-MM-DD HH.mm')}.${String(now.getSeconds()).padStart(2, '0')}`;
+  let path = join(folder, stem + ext), i = 1;
+  while (S.lowerPath.has(path.toLowerCase()) || S.files.has(path)) path = join(folder, `${stem} ${i++}${ext}`);
+  const content = FolioSketch.serializeDrawing(FolioSketch.emptyScene(), md ? { format: 'md', source: '' } : { format: 'json' });
+  await writeFile(path, content);
+  let d = dirname(path);
+  while (d) { S.dirs.add(d); d = dirname(d); }
+  reindexAll(); renderTree();
+  return path;
+}
+
+async function newDrawing(folder) {
+  if (folder == null) folder = cfg.newNoteFolder;
+  try { await openPath(await makeDrawingFile(folder)); } catch (e) { toast('Could not create drawing: ' + e.message); }
+}
+
+// Obsidian Excalidraw's "create new drawing and embed it into the active note".
+async function newDrawingInNote() {
+  if (S.view !== 'note' || !S.cur) return toast('Open a note first');
+  if (S.mode !== 'edit') setMode('edit');
+  const a = ed.selectionStart, b = ed.selectionEnd;
+  let path;
+  try { path = await makeDrawingFile(dirname(S.cur)); } catch (e) { return toast('Could not create drawing: ' + e.message); }
+  const before = ed.value.slice(0, a);
+  const link = `![[${linkNameFor(path, [...S.files.keys()])}]]`;
+  insertText(a, b, (before && !before.endsWith('\n') ? '\n' : '') + link + '\n');
+  await openPath(path);
+}
+
+// SVG of a drawing for embeds, cached by file version and theme.
+const drawingSvgCache = new Map();
+let virgilPromise = null;
+function virgilData() {
+  virgilPromise ||= fetch('/vendor/Virgil.woff2').then(r => r.arrayBuffer()).then(buf => {
+    const b = new Uint8Array(buf);
+    let s = '';
+    for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode.apply(null, b.subarray(i, i + 0x8000));
+    return btoa(s);
+  }).catch(() => null);
+  return virgilPromise;
+}
+const blobToDataURL = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
+
+function drawingSvgUrl(path) {
+  const dark = document.documentElement.dataset.theme === 'dark';
+  const key = `${S.files.get(path)?.mtime}|${S.notes.get(path)?.mtime}|${dark}`;
+  const hit = drawingSvgCache.get(path);
+  if (hit && hit.key === key) return hit.promise;
+  const promise = (async () => {
+    const content = isMd(path) ? S.notes.get(path)?.content : (await readMany([path]))[path]?.content;
+    if (content == null) throw new Error('file not found');
+    const { scene, embedded } = FolioSketch.parseDrawing(content, path);
+    const data = {};
+    for (const el of scene.elements) {
+      if (el.type !== 'image' || !el.fileId || data[el.fileId]) continue;
+      if (scene.files[el.fileId]?.dataURL) { data[el.fileId] = scene.files[el.fileId].dataURL; continue; }
+      const t = embedded?.[el.fileId] && resolveLink(embedded[el.fileId], path);
+      if (t) try { data[el.fileId] = await blobToDataURL(await (await fetch(rawUrl(t))).blob()); } catch { }
+    }
+    const svg = FolioSketch.toSVG(scene.elements, { dark, fontData: await virgilData(), fileData: id => data[id] });
+    return URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  })();
+  drawingSvgCache.set(path, { key, promise });
+  if (hit) hit.promise.then(u => setTimeout(() => URL.revokeObjectURL(u), 10000), () => { });
+  promise.catch(() => { if (drawingSvgCache.get(path)?.promise === promise) drawingSvgCache.delete(path); });
+  return promise;
+}
+
+// Render ![[Drawing.excalidraw]] into `el` (reading view, live preview and note embeds).
+function renderDrawingEmbed(el, path, width) {
+  el.classList.add('drawing-embed');
+  el.dataset.drawing = path;
+  el.title = `${drawingName(path)} — click to edit`;
+  const img = document.createElement('img');
+  img.alt = drawingName(path);
+  if (width) img.width = width;
+  el.replaceChildren(img);
+  drawingSvgUrl(path).then(u => { img.src = u; }, e => { el.textContent = `(couldn’t show drawing “${drawingName(path)}”: ${e.message})`; });
+}
+
+async function exportDrawing(kind) {
+  if (S.view !== 'drawing' || !S.cur) return toast('Open a drawing first');
+  const path = S.cur.replace(DRAWING_EXT, '').replace(/\.md$/i, '') + '.' + kind;
+  if (S.files.has(path) && !confirm(`Replace the existing "${basename(path)}"?`)) return;
+  try {
+    const content = kind === 'svg' ? await FolioDraw.exportSVG({ fontData: await virgilData() }) : await FolioDraw.exportPNG();
+    await writeFile(path, content, S.files.get(path)?.mtime);
+    reindexAll(); renderTree();
+    toast(`Saved ${basename(path)}`);
+  } catch (e) { toast('Export failed: ' + e.message); }
+}
+
+async function copyDrawing(kind, onlySelected) {
+  try {
+    if (kind === 'png') await navigator.clipboard.write([new ClipboardItem({ 'image/png': FolioDraw.exportPNG({ onlySelected }) })]);
+    else await navigator.clipboard.writeText(await FolioDraw.exportSVG({ onlySelected, fontData: await virgilData() }));
+    toast(kind === 'png' ? 'Copied as PNG' : 'Copied as SVG');
+  } catch (e) { toast('Couldn’t copy: ' + e.message); }
+}
+
+// Element links in drawings: [[Note]], a note name, or a web address.
+function openDrawingLink(link) {
+  const t = String(link).trim();
+  const m = /^\[\[([^\]]+)\]\]$/.exec(t);
+  if (!m && /^[a-z][a-z0-9+.-]*:/i.test(t)) {
+    if (/^(https?:|mailto:)/i.test(t)) window.open(t, '_blank', 'noopener');
+    return;
+  }
+  const [tgt] = splitOnce(m ? m[1] : t, '|');
+  const [name, sub] = splitOnce(tgt, '#');
+  followLink(name.trim(), sub, S.cur);
 }
 
 function goHist(d) {
@@ -546,6 +808,10 @@ function renderWiki(t) {
   const [name, sub] = splitOnce(tgt, '#');
   const target = resolveLink(name.trim(), RC.from);
   if (t.embed) {
+    if (target && isDrawing(target)) {
+      const w = alias && /^\d+/.test(alias.trim()) ? parseInt(alias) : '';
+      return `<span class="drawing-embed" data-drawing="${esc(target)}" data-width="${w}"></span>`;
+    }
     if (target && IMG_EXT.test(target)) {
       const w = alias && /^\d+(x\d+)?$/.test(alias.trim()) ? ` width="${alias.split('x')[0]}"` : '';
       return `<img src="${rawUrl(target)}" alt="${esc(noteName(target))}"${w}>`;
@@ -626,6 +892,7 @@ function renderInto(el, content, from, depth) {
     box.append(title, ...bq.childNodes);
     bq.replaceWith(box);
   }
+  for (const sp of $$('span.drawing-embed[data-drawing]', el)) renderDrawingEmbed(sp, sp.dataset.drawing, +sp.dataset.width || null);
   // Note embeds (transclusion), limited depth.
   for (const sp of $$('span.embed[data-embed]', el)) {
     if (depth >= 2 || sp.dataset.embed === from) { sp.textContent = '(embed depth limit)'; continue; }
@@ -634,6 +901,7 @@ function renderInto(el, content, from, depth) {
 }
 
 function renderEmbedInto(el, target, sub, depth = 1) {
+  if (isDrawing(target)) return renderDrawingEmbed(el, target);
   const n = S.notes.get(target);
   el.innerHTML = `<div class="embed-head"><a class="internal-link" data-href="${esc(target)}" data-path="1">${esc(noteName(target))}${sub ? ' › ' + esc(sub) : ''}</a></div>`;
   const body = document.createElement('div');
@@ -709,6 +977,10 @@ function toggleTask(i) {
 document.addEventListener('click', e => {
   const cb = e.target.closest('#preview input[data-task]');
   if (cb) { toggleTask(+cb.dataset.task); return; }
+  const de = e.target.closest('.drawing-embed[data-drawing]');
+  if (de && !e.target.closest('a')) { e.preventDefault(); return openPath(de.dataset.drawing); }
+  const raw = e.target.closest('[data-open-raw]');
+  if (raw) { e.preventDefault(); return openPath(raw.dataset.openRaw, { raw: true }); }
   const a = e.target.closest('a.internal-link');
   if (a) {
     e.preventDefault();
@@ -754,8 +1026,10 @@ function renderTree() {
     }
     const files = node.files.sort((a, b) => collator.compare(noteName(a), noteName(b)));
     for (const f of files) {
-      const ext = isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
-      rows.push(`<div class="t-row file" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, '')))}</span>${ext}</div>`);
+      const drawing = isDrawing(f);
+      const ext = drawing ? '<span class="ext">draw</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
+      const name = drawing ? drawingName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
+      rows.push(`<div class="t-row file" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(name)}</span>${ext}</div>`);
     }
   };
   walk(root);
@@ -793,6 +1067,7 @@ $('#tree').addEventListener('contextmenu', e => {
   const folder = dir != null ? dir : path ? dirname(path) : '';
   const items = [
     ['New note', () => newNote(folder)],
+    ['New drawing', () => newDrawing(folder)],
     ['New folder', () => newFolder(folder)],
   ];
   if (path || dir) {
@@ -801,7 +1076,8 @@ $('#tree').addEventListener('contextmenu', e => {
       ['Rename…', () => renameDialog(target)],
       ['Move to…', () => moveDialog(target)],
     );
-    if (path && isMd(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
+    if (path && isMd(path) && !isDrawing(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
+    if (path && isMd(path) && isDrawing(path)) items.push(['Open as Markdown', () => openPath(path, { raw: true })]);
     items.push(null, ['Delete', () => deletePath(target), 'danger']);
   }
   menu(e.clientX, e.clientY, items);
@@ -985,7 +1261,8 @@ async function renamePath(from, to) {
   let n = 0;
   for (const [p, content] of edits) {
     try { await writeFile(p, content, S.notes.get(p)?.mtime); n++; } catch (e) { toast(`Couldn’t update links in ${p}: ${e.message}`); }
-    if (p === S.cur) reloadEditorFromDisk(content);
+    if (p === S.cur && S.view === 'drawing') reloadDrawingFromDisk(content, S.notes.get(p)?.mtime);
+    else if (p === S.cur) reloadEditorFromDisk(content);
   }
   reindexAll();
   renderTree();
@@ -1232,6 +1509,12 @@ const COMMANDS = [
   ['Open quick switcher', 'Ctrl+O', () => openSwitcher()],
   ['Create new note', 'Ctrl+N', () => newNote()],
   ['Create new folder', '', () => newFolder(S.cur ? dirname(S.cur) : '')],
+  ['Create new drawing', '', () => newDrawing()],
+  ['Create new drawing and embed it in the current note', '', () => newDrawingInNote()],
+  ['Export drawing as SVG', '', () => exportDrawing('svg')],
+  ['Export drawing as PNG', '', () => exportDrawing('png')],
+  ['Copy drawing as PNG', '', () => S.view === 'drawing' ? copyDrawing('png', false) : toast('Open a drawing first')],
+  ['Open drawing as Markdown', '', () => S.cur && isMd(S.cur) && isDrawing(S.cur) ? openPath(S.cur, { raw: true }) : toast('Only .excalidraw.md drawings have a Markdown view')],
   ["Open today's daily note", '', () => openDaily()],
   ['Insert template', '', () => insertTemplate()],
   ['Toggle reading / editing view', 'Ctrl+E', () => setMode(S.mode === 'edit' ? 'read' : 'edit')],
@@ -1270,6 +1553,7 @@ function openSettings() {
     <label>Daily note template (note name or path)<input class="field" name="dailyTemplate" placeholder="e.g. Templates/Daily"></label>
     <label>Templates folder<input class="field" name="templatesFolder"></label>
     <label>Attachments folder<input class="field" name="attachFolder"></label>
+    <label>New drawings are saved as<select class="field" name="drawingFormat"><option value="excalidraw">.excalidraw (Excalidraw file; also opens on excalidraw.com)</option><option value="md">.excalidraw.md (Obsidian Excalidraw plugin)</option></select></label>
     <label>Default view for notes<select class="field" name="defaultMode"><option value="edit">Editing</option><option value="read">Reading</option></select></label>
     <label>Theme<select class="field" name="theme"><option value="">Follow system</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
     <label class="check"><input type="checkbox" name="livePreview"> Live preview (hide Markdown syntax except where you're editing)</label>
@@ -1355,7 +1639,9 @@ function runSearch() {
   const texts = terms.filter(t => t.op === 'text' && !t.neg).map(t => t.v);
   const results = [];
   for (const [p, n] of S.notes) {
-    const low = n.content.toLowerCase(), pl = p.toLowerCase();
+    // Leave out a drawing note's hidden %% data %% (its JSON), as Obsidian hides it too.
+    const text = isDrawing(p) ? n.content.replace(/%%[\s\S]*?(?:%%|$)/g, m => ' '.repeat(m.length)) : n.content;
+    const low = text.toLowerCase(), pl = p.toLowerCase();
     let ok = true;
     for (const t of terms) {
       let hit;
@@ -1538,7 +1824,12 @@ $('#right-body').addEventListener('click', async e => {
 
 function updateStatus() {
   const left = $('#status-left'), right = $('#status-right');
-  if (S.view === 'note' && S.cur) {
+  if (S.view === 'drawing' && S.cur) {
+    const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
+    const n = FolioDraw.count();
+    left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
+    right.textContent = `Drawing · ${n.toLocaleString()} element${n === 1 ? '' : 's'}`;
+  } else if (S.view === 'note' && S.cur) {
     const text = ed.value.slice(splitFrontmatter(ed.value).fmLen);
     const words = (text.match(/[\p{L}\p{N}'’_-]+/gu) || []).length;
     const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
@@ -1556,8 +1847,8 @@ function graphData({ local, depth, tags, unresolved, orphans, attach, filter }) 
   const nodes = new Map(), edges = [];
   const add = (id, label, kind) => { if (!nodes.has(id)) nodes.set(id, { id, label, kind, deg: 0 }); return nodes.get(id); };
   const f = (filter || '').toLowerCase();
-  const allowFile = p => (isMd(p) || attach) && (!f || p.toLowerCase().includes(f));
-  for (const p of S.files.keys()) if (allowFile(p)) add(p, isMd(p) ? noteName(p) : basename(p), isMd(p) ? 'note' : 'file');
+  const allowFile = p => (isMd(p) || attach || DRAWING_EXT.test(p)) && (!f || p.toLowerCase().includes(f));
+  for (const p of S.files.keys()) if (allowFile(p)) add(p, isDrawing(p) ? drawingName(p) : isMd(p) ? noteName(p) : basename(p), isDrawing(p) ? 'drawing' : isMd(p) ? 'note' : 'file');
   for (const [p, n] of S.notes) {
     if (!nodes.has(p)) continue;
     const seen = new Set();
@@ -1595,6 +1886,7 @@ function graphOptions() {
 }
 
 async function openGraph(local) {
+  if (S.view === 'drawing') FolioDraw.flush();
   await save();
   rememberPos();
   $('#g-local').checked = !!local;
@@ -1612,6 +1904,25 @@ FolioGraph.init($('#graph-canvas'), {
     openPath(id);
   },
 });
+FolioDraw.init($('#view-drawing'), {
+  onChange: () => drawingChanged(),
+  openLink: link => openDrawingLink(link),
+  menu: (x, y, items) => menu(x, y, items),
+  prompt: (title, label, value) => promptModal(title, label, value),
+  help: html => { const back = modal(html); back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); }); back.tabIndex = -1; back.focus(); back.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') back.remove(); }); },
+  toast: msg => toast(msg),
+  store: (k, v) => store(k, v),
+  modalOpen: () => $('#modal-root').children.length > 0,
+  exportFile: kind => exportDrawing(kind),
+  copyPNG: onlySelected => copyDrawing('png', onlySelected),
+  copySVG: onlySelected => copyDrawing('svg', onlySelected),
+  fetchVaultImage: async p => {
+    if (!IMG_EXT.test(p) || !S.files.has(p)) return null;
+    const blob = await (await fetch(rawUrl(p))).blob();
+    return new File([blob], basename(p), { type: blob.type });
+  },
+});
+
 for (const id of ['g-local', 'g-depth', 'g-tags', 'g-unresolved', 'g-orphans', 'g-attach']) $('#' + id).addEventListener('input', () => FolioGraph.refresh(id === 'g-local' || id === 'g-depth'));
 $('#g-filter').addEventListener('input', debounce(() => FolioGraph.refresh(), 200));
 
@@ -1628,6 +1939,7 @@ const CMD = {
   theme: toggleTheme,
   settings: openSettings,
   'new-note': () => newNote(),
+  'new-drawing': () => newDrawing(),
   'new-folder': () => newFolder(''),
   'collapse-all': () => { S.expanded.clear(); store('expanded', []); renderTree(); },
   back: () => goHist(-1),
@@ -1637,11 +1949,14 @@ const CMD = {
   'note-menu': () => {
     if (!S.cur) return;
     const r = $('[data-cmd=note-menu]').getBoundingClientRect();
+    const drawing = S.view === 'drawing';
     menu(r.left - 150, r.bottom + 4, [
       ['Rename…', () => renameDialog(S.cur)],
       ['Move to…', () => moveDialog(S.cur)],
       ['Open local graph', () => openGraph(true)],
-      ['Insert template', () => insertTemplate()],
+      ...(drawing ? [['Export as SVG', () => exportDrawing('svg')], ['Export as PNG', () => exportDrawing('png')]] : [['Insert template', () => insertTemplate()]]),
+      ...(drawing && isMd(S.cur) ? [['Open as Markdown', () => openPath(S.cur, { raw: true })]] : []),
+      ...(S.view === 'note' ? [['New drawing embedded here', () => newDrawingInNote()]] : []),
       ['Copy path', () => navigator.clipboard?.writeText(S.cur).then(() => toast('Copied'))],
       null,
       ['Delete', () => deletePath(S.cur), 'danger'],
@@ -1700,6 +2015,7 @@ const WELCOME = `Folio is a local notes app. Your notes are plain Markdown files
 - Link notes with double brackets: [[Getting around]]. Clicking a link to a note that doesn't exist creates it.
 - Tag with #hashtags, or with a \`tags:\` list in frontmatter.
 - Paste or drag an image into a note to save it into \`attachments/\` and embed it.
+- Sketch diagrams with the drawing tool (the shapes icon on the left). Embed one in a note with \`![[Drawing name.excalidraw]]\`.
 - Markdown formatting renders as you type. Put the cursor on a line to see its raw syntax.
 - **Ctrl+E** switches between editing and reading view.
 
@@ -1750,6 +2066,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) save(
 // Native window: Rust asks us to flush edits before it closes.
 window.__folioClose = async () => {
   window.ipc.postMessage('close-ack');
+  if (S.view === 'drawing') FolioDraw.flush();
   try { await save(); } catch { }
   if (S.dirty && !confirm('Folio couldn’t save your latest changes.\n\nClose anyway and lose them?')) {
     window.ipc.postMessage('close-cancel');
@@ -1760,8 +2077,11 @@ window.__folioClose = async () => {
 
 window.addEventListener('beforeunload', e => {
   if (NATIVE || !S.dirty || !S.cur) return;
-  const note = S.notes.get(S.cur);
-  fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body: ed.value, keepalive: true, headers: { 'X-Folio-Token': TOKEN, ...(note?.mtime ? { 'X-Base-Mtime': String(note.mtime) } : {}) } });
+  let body, base;
+  if (S.view === 'drawing' && S.drawing) { FolioDraw.flush(); body = drawingContent(S.drawing); base = S.drawing.mtime; }
+  else if (S.view === 'note') { body = ed.value; base = S.notes.get(S.cur)?.mtime; }
+  else return;
+  fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body, keepalive: true, headers: { 'X-Folio-Token': TOKEN, ...(base ? { 'X-Base-Mtime': String(base) } : {}) } });
 });
 
 boot();

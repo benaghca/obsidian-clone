@@ -12,10 +12,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const GRAPH_JS: &str = include_str!("../ui/graph.js");
+const DRAW_JS: &str = include_str!("../ui/draw.js");
+const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
 const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 const EDITOR_JS: &str = include_str!("../ui/vendor/editor.bundle.js");
+const VIRGIL_WOFF2: &[u8] = include_bytes!("../ui/vendor/Virgil.woff2");
 
 /// Everything the page may load comes from Folio itself; nothing else is allowed.
 pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
@@ -77,10 +80,13 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             }
             "/app.js" => return out(200, "text/javascript", APP_JS.into()),
             "/graph.js" => return out(200, "text/javascript", GRAPH_JS.into()),
+            "/draw.js" => return out(200, "text/javascript", DRAW_JS.into()),
+            "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
             "/vendor/purify.min.js" => return out(200, "text/javascript", PURIFY_JS.into()),
             "/vendor/editor.bundle.js" => return out(200, "text/javascript", EDITOR_JS.into()),
+            "/vendor/Virgil.woff2" => return out(200, "font/woff2", VIRGIL_WOFF2.to_vec()),
             _ => {}
         }
     }
@@ -381,7 +387,7 @@ fn mime_for(p: &str) -> &'static str {
         "wav" => "audio/wav",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
-        "md" | "txt" | "csv" | "json" => "text/plain; charset=utf-8",
+        "md" | "txt" | "csv" | "json" | "excalidraw" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -396,6 +402,19 @@ mod tests {
         assert_eq!(percent_decode("%E2%9C%93"), "✓");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%4"), "%4");
+    }
+
+    #[test]
+    fn serves_drawing_assets() {
+        let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
+        let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
+        for (p, ctype) in [("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2")] {
+            let o = get(p);
+            assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
+            assert!(!o.body.is_empty(), "{p}");
+        }
+        let page = String::from_utf8(get("/").body).unwrap();
+        assert!(page.contains("/draw.js") && page.contains("/draw-render.js") && page.contains("id=\"view-drawing\""));
     }
 
     #[test]

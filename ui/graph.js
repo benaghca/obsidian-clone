@@ -16,7 +16,7 @@ window.FolioGraph = (() => {
     colors = {
       bg: v('--bg'), text: v('--text'), muted: v('--muted'), faint: v('--faint'),
       accent: v('--accent'), border: v('--border'),
-      note: v('--muted'), tag: '#3fb27f', file: '#d9a53f', unresolved: v('--faint'),
+      note: v('--muted'), tag: '#3fb27f', file: '#d9a53f', drawing: '#4a8fe0', unresolved: v('--faint'),
     };
     dirty = true;
   }
