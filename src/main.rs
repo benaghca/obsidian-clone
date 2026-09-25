@@ -11,6 +11,7 @@
 mod api;
 mod config;
 mod native;
+mod screenshot;
 mod server;
 
 use std::collections::hash_map::RandomState;

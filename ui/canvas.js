@@ -695,7 +695,7 @@
     if (nodeEl) {
       const n = byId.get(nodeEl.dataset.id);
       if (!n) return;
-      if (n.type === 'file') return isNoteCard(n) ? startEditing(n.id) : hooks.openFile?.(n.file, n.subpath);
+      if (n.type === 'file') return isNoteCard(n) ? startEditing(n.id) : openFileCard(n);
       if (n.type === 'group' && !target.closest('.cv-label')) return addNode({ type: 'text', text: '' }, [wx, wy], { edit: true });
       if (n.type === 'link' && !target.closest('.cv-label')) return hooks.openUrl?.(n.url);
       return startEditing(n.id);
@@ -748,8 +748,18 @@
     const path = e.dataTransfer?.getData('text/plain');
     if (path && hooks.fileExists?.(path)) addFileNode(path, at);
   }
+  // Images open in the viewer (← → through the canvas's other images); other files open as pages.
+  function openFileCard(n) {
+    if (IMG_RE.test(n.file) && hooks.viewImage) {
+      const imgs = [...new Set(data.nodes.filter(x => x.type === 'file' && IMG_RE.test(x.file) && hooks.fileExists?.(x.file) !== false).sort((a, b) => a.y - b.y || a.x - b.x).map(x => x.file))];
+      return hooks.viewImage(n.file, imgs);
+    }
+    hooks.openFile?.(n.file, n.subpath);
+  }
+  const IMG_RE = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+
   function addFileNode(path, at) {
-    const img = /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(path);
+    const img = IMG_RE.test(path);
     const note = /\.md$/i.test(path);
     return addNode({ type: 'file', file: path, width: note ? 400 : img ? 360 : 300, height: note ? 400 : img ? 260 : 80 }, at || viewCenter());
   }
@@ -796,7 +806,8 @@
     else if (k === 'Enter') {
       const ns = selectedNodes(), n = ns[0];
       if (ns.length !== 1) handled = false;
-      else if (n.type === 'file' && (e.shiftKey || !isNoteCard(n))) hooks.openFile?.(n.file, n.subpath); // Shift+Enter opens the note
+      else if (n.type === 'file' && e.shiftKey) hooks.openFile?.(n.file, n.subpath); // Shift+Enter opens the note
+      else if (n.type === 'file' && !isNoteCard(n)) openFileCard(n);
       else startEditing(n.id);
     }
     else if (k === 'Tab') addChild();
@@ -879,6 +890,7 @@
       const one = ns.length === 1 ? ns[0] : null;
       if (one?.type === 'text' || one?.type === 'group' || one?.type === 'link') items.push([one.type === 'group' ? 'Rename group' : one.type === 'link' ? 'Edit link' : 'Edit', () => startEditing(one.id)]);
       if (isNoteCard(one)) items.push(['Edit here', () => startEditing(one.id)]);
+      if (one?.type === 'file' && IMG_RE.test(one.file)) items.push(['View image', () => openFileCard(one)]);
       if (one?.type === 'file') items.push(['Open', () => hooks.openFile?.(one.file, one.subpath)]);
       if (one?.type === 'link') items.push(['Open link', () => hooks.openUrl?.(one.url)]);
       if (one?.type === 'text') items.push(['Convert to note…', () => convertToNote()]);
@@ -1069,7 +1081,7 @@
     const btn = (act, title, p) => `<button class="dr-btn" data-act="${act}" title="${title}">${ICON(p)}</button>`;
     let h = btn('sel-color', 'Colour', '<circle cx="12" cy="12" r="7.5"/><path d="M12 4.5v15" stroke-width="7" stroke-opacity=".35"/>');
     if (one && (one.type === 'text' || one.type === 'group' || one.type === 'link' || isNoteCard(one))) h += btn('sel-edit', one.type === 'file' ? 'Edit the note here (Enter)' : 'Edit (Enter)', '<path d="M4 20h4L19 9l-4-4L4 16z"/>');
-    if (one && (one.type === 'file' || one.type === 'link')) h += btn('sel-open', one.type === 'file' ? 'Open the note (Shift+Enter)' : 'Open', '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>');
+    if (one && (one.type === 'file' || one.type === 'link')) h += btn('sel-open', isNoteCard(one) ? 'Open the note (Shift+Enter)' : 'Open', '<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>');
     if (one && one.type === 'text') h += btn('sel-note', 'Convert to note', '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>');
     if (one && one.type !== 'group') h += btn('sel-child', 'Add connected card (Tab)', '<rect x="3" y="8" width="8" height="8" rx="1.5"/><rect x="15" y="8" width="6" height="8" rx="1.5"/><path d="M11 12h4"/>');
     if (ns.length > 1) h += btn('sel-group', 'Group (Ctrl+G)', '<rect x="3.5" y="5.5" width="17" height="14" rx="2" stroke-dasharray="3 2.5"/>');
@@ -1117,6 +1129,7 @@
     getView: () => ({ ...view }),
     count: () => data.nodes.length,
     flush() { stopEditing(true); },
+    addFile: path => addFileNode(path),
     refreshFiles,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

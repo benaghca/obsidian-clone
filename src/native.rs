@@ -52,7 +52,15 @@ pub fn run(ctx: Ctx) -> ! {
     let p_ipc = proxy.clone();
     let p_title = proxy.clone();
     let builder = WebViewBuilder::new_with_web_context(&mut web_context)
-        .with_custom_protocol("folio".into(), move |_id, req| handle(&handler_ctx, req))
+        .with_asynchronous_custom_protocol("folio".into(), move |_id, req, responder| {
+            // Slow requests (a screenshot waits on the user) mustn't freeze the window.
+            if api::is_slow(req.uri().path()) {
+                let ctx = handler_ctx.clone();
+                std::thread::spawn(move || responder.respond(handle(&ctx, req)));
+            } else {
+                responder.respond(handle(&handler_ctx, req));
+            }
+        })
         .with_url("folio://localhost/")
         .with_ipc_handler(move |req: Request<String>| {
             let ev = match req.body().as_str() {

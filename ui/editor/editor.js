@@ -191,19 +191,26 @@ class TextWidget extends WidgetType {
   toDOM() { const s = document.createElement('span'); s.className = this.cls; s.textContent = this.text; return s; }
 }
 
+// Images. app.js handles clicks (viewer), right-clicks (menu) and the resize grip, finding the
+// link through posAtDOM; the widget ignores events so the editor leaves them alone.
 class ImageWidget extends WidgetType {
   constructor(src, alt, width, block) { super(); this.src = src; this.alt = alt; this.width = width; this.block = block; }
   eq(o) { return o.src === this.src && o.width === this.width && o.block === this.block; }
   toDOM() {
     const wrap = document.createElement(this.block ? 'div' : 'span');
-    wrap.className = this.block ? 'cm-embed-block cm-image-block' : 'cm-image-inline';
+    wrap.className = (this.block ? 'cm-embed-block cm-image-block' : 'cm-image-inline') + ' cm-image';
     const img = document.createElement('img');
     img.src = this.src; img.alt = this.alt || '';
     if (this.width) img.width = this.width;
-    wrap.append(img);
+    const grip = document.createElement('span');
+    grip.className = 'cm-img-grip'; grip.title = 'Drag to resize';
+    wrap.append(img, grip);
     return wrap;
   }
 }
+
+// ![alt|300](src) sizes a Markdown image the way ![[img.png|300]] does.
+const altWidth = alt => { const m = /^(.*?)\|(\d+)(?:x\d+)?$/.exec(alt || ''); return m ? [m[1], parseInt(m[2])] : [alt || '', null]; };
 
 // app.js hooks, per editor (the note editor and canvas card editors have their own).
 const hooksFacet = Facet.define({ combine: v => v[0] || {} });
@@ -437,9 +444,9 @@ function buildInline(view) {
           case 'Image': {
             if (A.touches(nf, nt) || aloneOnLine(doc, nf, nt)) return false;
             const src = /\]\(\s*<?([^)\s>]+)/.exec(doc.sliceString(nf, nt))?.[1];
-            const alt = /^!\[([^\]]*)\]/.exec(doc.sliceString(nf, nt))?.[1] || '';
+            const [alt, width] = altWidth(/^!\[([^\]]*)\]/.exec(doc.sliceString(nf, nt))?.[1]);
             const url = src && h.imageUrl(src);
-            if (url) out.push(Decoration.replace({ widget: new ImageWidget(url, alt, null, false) }).range(nf, nt));
+            if (url) out.push(Decoration.replace({ widget: new ImageWidget(url, alt, width, false) }).range(nf, nt));
             return false;
           }
           case 'URL': {
@@ -580,7 +587,8 @@ function buildBlocks(state) {
           const text = doc.sliceString(nf, nt);
           const src = /\]\(\s*<?([^)\s>]+)/.exec(text)?.[1];
           const url = src && h.imageUrl(src);
-          if (url) widget = new ImageWidget(url, /^!\[([^\]]*)\]/.exec(text)?.[1] || '', null, true);
+          const [alt, width] = altWidth(/^!\[([^\]]*)\]/.exec(text)?.[1]);
+          if (url) widget = new ImageWidget(url, alt, width, true);
         }
         if (widget) out.push(Decoration.replace({ widget, block: true }).range(line.from, line.to));
         return false;

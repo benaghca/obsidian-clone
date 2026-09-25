@@ -18,6 +18,7 @@ const TEMPLATER_JS: &str = include_str!("../ui/templater.js");
 const CANVAS_JS: &str = include_str!("../ui/canvas.js");
 const BASES_JS: &str = include_str!("../ui/bases.js");
 const TASKS_JS: &str = include_str!("../ui/tasks.js");
+const IMAGES_JS: &str = include_str!("../ui/images.js");
 const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
@@ -124,6 +125,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/canvas.js" => return out(200, "text/javascript", CANVAS_JS.into()),
             "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
             "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
+            "/images.js" => return out(200, "text/javascript", IMAGES_JS.into()),
             "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
@@ -171,9 +173,20 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("POST", "/api/delete") => parse(&body).and_then(|v| api_delete(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/mkdir") => parse(&body).and_then(|v| api_mkdir(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/vault") => parse(&body).and_then(|v| api_switch_vault(ctx, &str_field(&v, "path")?)),
+        ("POST", "/api/screenshot") => Ok(match crate::screenshot::capture() {
+            crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
+            crate::screenshot::Shot::Cancelled => out(204, "text/plain", Vec::new()),
+            crate::screenshot::Shot::NoTool(msg) => json_out(501, json!({ "error": msg })),
+        }),
         _ => Err((404, "no such endpoint".into())),
     };
     result.unwrap_or_else(|(code, msg)| json_out(code, json!({ "error": msg })))
+}
+
+/// Requests that can take a long time (waiting on the user), which transports should answer
+/// off their main thread.
+pub fn is_slow(path: &str) -> bool {
+    path == "/api/screenshot"
 }
 
 fn str_field(v: &Value, k: &str) -> Result<String, (u16, String)> {
@@ -464,7 +477,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

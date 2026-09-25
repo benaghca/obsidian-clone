@@ -67,6 +67,11 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - Renaming or moving a note rewrites the links that point to it across the vault
 - Embeds: `![[image.png|300]]`, `![[Other note]]` and `![[Other note#Section]]`
 - Pasting or dropping an image into a note saves it to `attachments/` and embeds it
+- **Images and screenshots**:
+  - **Ctrl+Shift+S** (*Insert screenshot*) lets you drag out an area of the screen and embeds it in the note, or adds it to the canvas, as `Screenshot <date> <time>.png`. It uses the system's own region picker: grim + slurp on Wayland, then gnome-screenshot, spectacle, xfce4-screenshooter, maim, scrot, ImageMagick or flameshot; `screencapture` on macOS. Without one of those (and on Windows), it falls back to the browser's screen capture followed by a crop step. To use a different tool, set `FOLIO_SCREENSHOT_CMD` to a command that prints a PNG to stdout.
+  - Click an image, in live preview, reading view or a canvas, to open it in a viewer. The viewer zooms with the wheel, **+**/**-**/**0**/**1** or a double-click, pans by dragging, and moves through the note's other images with **←**/**→**. Image files open in the same viewer, and the arrows go through the folder.
+  - Drag an image's corner in live preview to resize it. That writes `![[img.png|420]]`, or `![alt|420](img.png)` for Markdown images, which reading view also honours.
+  - Right-click an image to open, copy, resize, crop, annotate, rename, reveal, remove or delete it. **Crop** saves a cropped copy next to the original and points the embed at it. **Annotate** turns the image into a drawing with the image locked underneath, embeds the drawing in its place and opens it, so you can mark up a screenshot with arrows and text.
 - Tags, both `#inline` and nested (`#area/sub`), and frontmatter `tags:` and `aliases:`
 - A properties box that shows frontmatter in reading view
 - Callouts (`> [!warning] Title`), `==highlights==`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing)
@@ -133,6 +138,7 @@ src/api.rs         file API, path safety, embedded UI (shared by both modes)
 src/native.rs      the desktop window (wry/tao), folio:// protocol, close-to-save
 src/server.rs      --browser mode: the 127.0.0.1 server
 src/config.rs      %LOCALAPPDATA%\Folio\config.json
+src/screenshot.rs  Insert screenshot: runs the platform region-capture tool
 ui/index.html      shell
 ui/app.js          index, preview, panels, search, commands
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
@@ -143,6 +149,7 @@ ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, pane
 ui/canvas.js       canvas editor and JSON Canvas files
 ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
+ui/images.js       image viewer / lightbox, crop tool, browser screen capture
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
 ui/test/           Node tests for the drawing, template, canvas, bases and tasks modules (no packages needed)
 ui/style.css       themes and layout
