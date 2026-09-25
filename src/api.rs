@@ -179,7 +179,18 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("POST", "/api/rename") => parse(&body).and_then(|v| api_rename(&vault, &str_field(&v, "from")?, &str_field(&v, "to")?)),
         ("POST", "/api/delete") => parse(&body).and_then(|v| api_delete(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/mkdir") => parse(&body).and_then(|v| api_mkdir(&vault, &str_field(&v, "path")?)),
-        ("POST", "/api/vault") => parse(&body).and_then(|v| api_switch_vault(ctx, &str_field(&v, "path")?)),
+        ("POST", "/api/vault") => parse(&body).and_then(|v| api_switch_vault(ctx, &str_field(&v, "path")?, v["create"].as_bool().unwrap_or(false))),
+        ("GET", "/api/vaults") => Ok(api_vaults(&vault)),
+        ("POST", "/api/vaults/forget") => parse(&body).map(|v| {
+            crate::config::forget_vault(v["path"].as_str().unwrap_or(""));
+            api_vaults(&vault)
+        }),
+        ("GET", "/api/dirs") => api_dirs(&q("path").unwrap_or_default()),
+        ("POST", "/api/pick-folder") => Ok(match crate::pickfolder::pick(&q("start").unwrap_or_default()) {
+            crate::pickfolder::Picked::Path(p) => json_out(200, json!({ "path": p })),
+            crate::pickfolder::Picked::Cancelled => out(204, "text/plain", Vec::new()),
+            crate::pickfolder::Picked::NoTool => json_out(200, json!({ "path": null, "noPicker": true })), // the page browses instead
+        }),
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
         ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
         ("POST", "/api/screenshot") => Ok(match screenshot(ctx, q("mode").as_deref() == Some("screen"), q("hide").as_deref() == Some("1"), q("delay").and_then(|d| d.parse().ok()).unwrap_or(0)) {
@@ -213,7 +224,7 @@ fn screenshot(ctx: &Ctx, screen: bool, hide: bool, delay_s: u64) -> crate::scree
 /// Requests that can take a long time (waiting on the user), which transports should answer
 /// off their main thread.
 pub fn is_slow(path: &str) -> bool {
-    path == "/api/screenshot"
+    path == "/api/screenshot" || path == "/api/pick-folder"
 }
 
 fn str_field(v: &Value, k: &str) -> Result<String, (u16, String)> {
@@ -382,12 +393,20 @@ fn api_mkdir(vault: &Path, p: &str) -> ApiResult {
     Ok(json_out(200, json!({ "ok": true })))
 }
 
-fn api_switch_vault(ctx: &Ctx, path: &str) -> ApiResult {
+/// Switch to the folder at `path` (made first when `create`; otherwise it has to exist).
+fn api_switch_vault(ctx: &Ctx, path: &str, create: bool) -> ApiResult {
     let p = PathBuf::from(path.trim().trim_matches('"'));
     if !p.is_absolute() {
         return Err((400, "use a full path, e.g. C:\\Users\\you\\Documents\\Notes".into()));
     }
-    fs::create_dir_all(&p).map_err(io_err)?;
+    if create {
+        if p.exists() && fs::read_dir(&p).map(|mut d| d.next().is_some()).unwrap_or(false) {
+            return Err((409, format!("{} already exists and isn't empty", p.display())));
+        }
+        fs::create_dir_all(&p).map_err(io_err)?;
+    } else if !p.is_dir() {
+        return Err((404, format!("there's no folder at {}", p.display())));
+    }
     let p = canonical(&p).map_err(io_err)?;
     if !p.is_dir() {
         return Err((400, "not a folder".into()));
@@ -395,6 +414,51 @@ fn api_switch_vault(ctx: &Ctx, path: &str) -> ApiResult {
     *ctx.vault.write().unwrap() = p.clone();
     crate::config::remember_vault(&p);
     Ok(json_out(200, json!({ "vault": p.display().to_string() })))
+}
+
+/// The vault in use and the recent ones, for the switcher.
+fn api_vaults(current: &Path) -> Out {
+    let cur = current.display().to_string();
+    let name = |p: &str| Path::new(p).file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| p.to_string());
+    let recent: Vec<Value> = crate::config::recent_vaults()
+        .iter()
+        .map(|p| json!({ "path": p, "name": name(p), "exists": Path::new(p).is_dir(), "current": p == &cur }))
+        .collect();
+    json_out(200, json!({ "current": cur, "name": name(&cur), "recent": recent, "sep": std::path::MAIN_SEPARATOR.to_string(), "home": home_dir().display().to_string() }))
+}
+
+fn home_dir() -> PathBuf {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// The folders inside `path` (the home folder when empty), for the switcher's own folder browser
+/// when the system has no picker. Names only, hidden ones left out.
+fn api_dirs(path: &str) -> ApiResult {
+    let p = if path.trim().is_empty() { home_dir() } else { PathBuf::from(path.trim()) };
+    if !p.is_absolute() {
+        return Err((400, "use a full path".into()));
+    }
+    let rd = fs::read_dir(&p).map_err(|e| (404, format!("can't open {}: {e}", p.display())))?;
+    let mut dirs: Vec<String> = rd
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir() || (t.is_symlink() && e.path().is_dir())))
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .filter(|n| !n.starts_with('.') && !n.starts_with('$'))
+        .take(3000)
+        .collect();
+    dirs.sort_by_key(|a| a.to_lowercase());
+    let roots: Vec<String> = if cfg!(windows) {
+        (b'A'..=b'Z').map(|c| format!("{}:\\", c as char)).filter(|d| Path::new(d).is_dir()).collect()
+    } else {
+        vec!["/".into()]
+    };
+    let has_notes = fs::read_dir(&p).map(|d| d.flatten().any(|e| e.path().extension().is_some_and(|x| x == "md"))).unwrap_or(false);
+    Ok(json_out(200, json!({
+        "path": p.display().to_string(),
+        "parent": p.parent().map(|x| x.display().to_string()),
+        "dirs": dirs, "roots": roots, "home": home_dir().display().to_string(), "hasNotes": has_notes,
+        "isVault": p.join(".obsidian").is_dir() || has_notes,
+    })))
 }
 
 // ---------------------------------------------------------------- path safety
