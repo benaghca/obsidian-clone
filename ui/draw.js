@@ -1161,8 +1161,10 @@ window.CinderDraw = (() => {
     for (const el of sel) K.mutate(el, { link: v.trim() || null });
     commit(); requestRender();
   }
-  function clearCanvas() {
-    if (!els.length || !confirm('Clear the whole drawing? (Undo can bring it back.)')) return;
+  async function clearCanvas() {
+    if (!els.length) return;
+    const ok = hooks.confirm ? await hooks.confirm('Clear the whole drawing?', 'Undo can bring it back.', { ok: 'Clear', danger: true }) : confirm('Clear the whole drawing?');
+    if (!ok) return;
     deleteIds(els.map(e => e.id));
     commit(); renderProps(); requestRender();
   }

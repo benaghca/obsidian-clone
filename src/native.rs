@@ -127,7 +127,9 @@ pub fn run(ctx: Ctx) -> ! {
                 false
             }
         })
-        .with_background_color((30, 30, 30, 255));
+        .with_background_color((23, 17, 15, 255))
+        // No browser form suggestions over Cinder's own fields.
+        .with_general_autofill_enabled(false);
 
     #[cfg(windows)]
     let builder = {

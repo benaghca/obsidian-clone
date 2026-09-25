@@ -498,7 +498,7 @@ async function doSave(force) {
   } catch (e) { err = e; S.dirty = true; }
   if (!err) return;
   if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
-  const overwrite = confirm(`"${noteName(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
+  const overwrite = await conflictAsk(noteName(p));
   if (overwrite) return doSave(true);
   S.dirty = false;
   const got = await readMany([p]);
@@ -729,7 +729,7 @@ async function doSaveDrawing(force) {
   } catch (e) { err = e; S.dirty = true; }
   if (!err) return;
   if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
-  const overwrite = confirm(`"${basename(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
+  const overwrite = await conflictAsk(basename(p));
   if (overwrite) return doSaveDrawing(true);
   S.dirty = false;
   await reloadDrawingFromDisk();
@@ -830,7 +830,7 @@ function renderDrawingEmbed(el, path, width) {
 async function exportDrawing(kind) {
   if (S.view !== 'drawing' || !S.cur) return toast('Open a drawing first');
   const path = S.cur.replace(DRAWING_EXT, '').replace(/\.md$/i, '') + '.' + kind;
-  if (S.files.has(path) && !confirm(`Replace the existing "${basename(path)}"?`)) return;
+  if (S.files.has(path) && !(await confirmModal(`Replace “${basename(path)}”?`, 'A file with that name is already there.', { ok: 'Replace', danger: true }))) return;
   try {
     const content = kind === 'svg' ? await CinderDraw.exportSVG({ fontData: await virgilData() }) : await CinderDraw.exportPNG();
     await writeFile(path, content, S.files.get(path)?.mtime);
@@ -1149,7 +1149,7 @@ async function doSaveCanvas(force) {
     S.dirty = true;
     if (e.status !== 409) { setSaveState('Save failed: ' + e.message, true); return; }
   }
-  if (confirm(`"${basename(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveCanvas(true);
+  if (await conflictAsk(basename(p))) return doSaveCanvas(true);
   S.dirty = false;
   const got = (await readMany([p]).catch(() => ({})))[p];
   if (got && S.cur === p) loadCanvas(p, got.content, got.mtime, CinderCanvas.getView());
@@ -1317,7 +1317,7 @@ async function doSaveBase(force) {
     S.dirty = true;
     if (e.status !== 409) { setSaveState('Save failed: ' + e.message, true); return; }
   }
-  if (confirm(`"${basename(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveBase(true);
+  if (await conflictAsk(basename(p))) return doSaveBase(true);
   S.dirty = false;
   await reloadBase();
   setSaveState('Reloaded from disk');
@@ -2214,7 +2214,7 @@ async function deleteMany(paths) {
   const top = topLevel(paths);
   if (!top.length) return;
   if (top.length === 1) return deletePath(top[0]);
-  if (!confirm(`Move ${top.length} items to the vault's .trash folder?\n\n${top.slice(0, 12).map(p => '• ' + p).join('\n')}${top.length > 12 ? '\n…' : ''}`)) return;
+  if (!(await confirmModal(`Delete ${top.length} items?`, `They go to the vault's .trash folder.\n\n${top.slice(0, 12).map(p => '• ' + p).join('\n')}${top.length > 12 ? '\n…' : ''}`, { ok: 'Delete', danger: true }))) return;
   for (const p of top) await deletePath(p, { confirm: false });
   setTreeSel([]);
 }
@@ -2417,8 +2417,8 @@ async function renamePath(from, to) {
 
 async function deletePath(path, opts = {}) {
   const isDir = S.dirs.has(path);
-  const what = isDir ? `folder "${path}" and everything in it` : `"${basename(path)}"`;
-  if (opts.confirm !== false && !confirm(`Move ${what} to the vault's .trash folder?`)) return;
+  const what = isDir ? `the folder “${path}” and everything in it` : `“${basename(path)}”`;
+  if (opts.confirm !== false && !(await confirmModal(`Delete ${what}?`, "It goes to the vault's .trash folder.", { ok: 'Delete', danger: true }))) return;
   if (S.cur === path || (isDir && S.cur?.startsWith(path + '/'))) { S.dirty = false; }
   try { await api('/api/delete', { method: 'POST', body: JSON.stringify({ path }) }); }
   catch (e) { return toast('Delete failed: ' + e.message); }
@@ -2811,7 +2811,7 @@ async function renamePropEverywhere(k) {
 }
 async function removePropEverywhere(k) {
   const count = [...S.notes.values()].filter(n => n.fm && k in n.fm).length;
-  if (!confirm(`Remove the property “${k}” from ${count} note${count === 1 ? '' : 's'}?`)) return;
+  if (!(await confirmModal(`Remove “${k}” from ${count} note${count === 1 ? '' : 's'}?`, 'The property and its values are taken out of each note’s frontmatter.', { ok: 'Remove', danger: true }))) return;
   const { n } = await editPropEverywhere(k, text => CinderBases.setFrontmatter(text, k, undefined));
   toast(`Removed from ${n} note${n === 1 ? '' : 's'}`);
 }
@@ -3477,6 +3477,20 @@ function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
 }
 
 // opts.multiline: a text box (Ctrl+Enter submits); opts.raw: don't trim the answer.
+// Cinder's own yes/no dialog, in place of the browser's confirm(): resolves true or false.
+// o: { ok, cancel (button labels), danger (the OK button is destructive) }
+function confirmModal(title, message, o = {}) {
+  return new Promise(resolve => {
+    const back = modal(`<div class="form confirm"><h3>${esc(title)}</h3>${message ? `<p class="confirm-msg">${esc(message)}</p>` : ''}<div class="row"><button type="button" class="btn" data-c="0">${esc(o.cancel || 'Cancel')}</button><button type="button" class="btn ${o.danger ? 'danger' : 'primary'}" data-c="1">${esc(o.ok || 'OK')}</button></div></div>`);
+    const done = v => { back.remove(); resolve(v); };
+    back.addEventListener('click', e => { const b = e.target.closest('[data-c]'); if (b) done(b.dataset.c === '1'); });
+    back.addEventListener('mousedown', e => { if (e.target === back) done(false); });
+    back.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); } });
+    $('[data-c="1"]', back).focus();
+  });
+}
+const conflictAsk = name => confirmModal(`“${name}” was changed outside Cinder`, 'Keep your version (overwriting the one on disk), or load the version on disk (losing your changes here)?', { ok: 'Keep my version', cancel: 'Load the version on disk' });
+
 function promptModal(title, label, value, opts = {}) {
   return new Promise(resolve => {
     const field = opts.multiline ? '<textarea class="field" name="v" rows="6" spellcheck="false"></textarea>' : '<input class="field" name="v" spellcheck="false" autocomplete="off">';
@@ -3498,6 +3512,7 @@ function menu(x, y, items) {
   root.innerHTML = '';
   const m = document.createElement('div');
   m.className = 'menu';
+  m.addEventListener('mousedown', e => e.preventDefault()); // (focus and selection stay where they were)
   items.forEach((it, i) => {
     if (!it) { m.append(document.createElement('hr')); return; }
     const d = document.createElement('div');
@@ -4600,6 +4615,7 @@ CinderCanvas.init($('#view-canvas'), {
 });
 
 CinderDraw.init($('#view-drawing'), {
+  confirm: (title, message, o) => confirmModal(title, message, o),
   onChange: () => drawingChanged(),
   openLink: link => openDrawingLink(link),
   menu: (x, y, items) => menu(x, y, items),
@@ -4668,6 +4684,110 @@ document.addEventListener('click', e => {
 });
 
 window.addEventListener('keydown', onHotkey);
+
+// ============================================================ native-looking bits, replaced
+
+// Right-click anywhere that has no menu of its own: Cinder's menu for text (cut, copy, paste,
+// select all, and formatting in the editor), never the browser's. Shift+right-click still gives
+// the browser's, for its spelling suggestions.
+document.addEventListener('contextmenu', e => {
+  if (e.defaultPrevented || e.shiftKey) return;
+  e.preventDefault();
+  const t = e.target;
+  const field = t.closest?.('input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=color]), textarea');
+  const reg = EDITORS.get(t.closest?.('.cm-editor'));
+  const selText = String(window.getSelection() || '');
+  if (!field && !reg && !selText) return; // nothing to offer here
+  const editable = (!!field && !field.readOnly && !field.disabled) || !!reg;
+  const hasSel = field ? field.selectionStart !== field.selectionEnd : reg ? reg.ed.selectionStart !== reg.ed.selectionEnd : !!selText;
+  const off = on => on ? '' : 'disabled';
+  const items = [];
+  if (editable) items.push(['Cut', () => document.execCommand('cut'), off(hasSel)]);
+  items.push(['Copy', () => document.execCommand('copy'), off(hasSel)]);
+  if (editable) items.push(['Paste', () => pasteInto(field, reg)]);
+  items.push(null, ['Select all', () => {
+    if (field) field.select();
+    else if (reg) reg.ed.setSelectionRange(0, reg.ed.value.length);
+    else getSelection().selectAllChildren(t.closest('#preview, .hp-body, .markdown, .modal') || document.body);
+  }]);
+  if (reg) items.push(null, ...['bold', 'italic', 'highlight', 'code', 'wikilink', 'inline-math'].filter(id => CinderEditor.commands[id]).map(id => [CinderEditor.commands[id].name, () => { reg.ed.focus(); reg.ed.run(id); }]));
+  menu(e.clientX, e.clientY, items);
+});
+async function pasteInto(field, reg) {
+  let text;
+  try { text = await navigator.clipboard.readText(); }
+  catch { return toast('Press Ctrl+V to paste here (a menu can’t read the clipboard)'); }
+  if (field) { field.focus(); field.setRangeText(text, field.selectionStart, field.selectionEnd, 'end'); field.dispatchEvent(new Event('input', { bubbles: true })); }
+  else if (reg) { reg.ed.focus(); reg.ed.insert(reg.ed.selectionStart, reg.ed.selectionEnd, text); }
+}
+
+// Fields: no browser autofill, and suggestion lists (<datalist>) shown as Cinder's own dropdown.
+// The first time a field is focused its list moves to data-suggest, which turns the native one off.
+const suggest = { el: null, input: null, items: [], i: -1 };
+function suggestionsFor(input) {
+  const dl = document.getElementById(input.dataset.suggest);
+  if (!dl) return [];
+  const q = input.value.trim().toLowerCase();
+  const all = [...dl.options].map(o => o.value).filter(Boolean);
+  return all.filter(v => v.toLowerCase() !== q && (!q || v.toLowerCase().includes(q)))
+    .sort((a, b) => (b.toLowerCase().startsWith(q) - a.toLowerCase().startsWith(q))).slice(0, 8);
+}
+function showSuggest(input) {
+  suggest.input = input;
+  suggest.items = suggestionsFor(input);
+  suggest.i = -1;
+  if (!suggest.items.length) return hideSuggest();
+  if (!suggest.el) {
+    suggest.el = document.createElement('div');
+    suggest.el.className = 'suggest-pop';
+    suggest.el.addEventListener('mousedown', e => {
+      e.preventDefault(); // keep the field focused
+      const it = e.target.closest('[data-i]');
+      if (it) pickSuggest(+it.dataset.i);
+    });
+    document.body.append(suggest.el);
+  }
+  suggest.el.innerHTML = suggest.items.map((v, i) => `<div data-i="${i}">${esc(v)}</div>`).join('');
+  const r = input.getBoundingClientRect();
+  suggest.el.hidden = false;
+  suggest.el.style.minWidth = Math.max(160, r.width) + 'px';
+  suggest.el.style.left = Math.min(r.left, innerWidth - suggest.el.offsetWidth - 8) + 'px';
+  const below = r.bottom + 4 + suggest.el.offsetHeight < innerHeight;
+  suggest.el.style.top = (below ? r.bottom + 4 : r.top - suggest.el.offsetHeight - 4) + 'px';
+}
+function hideSuggest() { if (suggest.el) suggest.el.hidden = true; suggest.i = -1; }
+function pickSuggest(i) {
+  const input = suggest.input, v = suggest.items[i];
+  if (!input || v == null) return;
+  input.value = v;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  hideSuggest();
+}
+document.addEventListener('focusin', e => {
+  const t = e.target;
+  if (!(t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)) return;
+  if (!t.hasAttribute('autocomplete')) t.setAttribute('autocomplete', 'off');
+  if (t.hasAttribute('list')) { t.dataset.suggest = t.getAttribute('list'); t.removeAttribute('list'); }
+  if (t.dataset.suggest) showSuggest(t);
+}, true);
+document.addEventListener('input', e => { if (e.target.dataset?.suggest && e.target === document.activeElement) showSuggest(e.target); }, true);
+document.addEventListener('focusout', e => { if (e.target === suggest.input) setTimeout(() => { if (document.activeElement !== suggest.input) hideSuggest(); }, 0); }, true);
+// ↑↓ choose, Enter or Tab takes it (and Enter still reaches the field, so it commits), Esc closes.
+document.addEventListener('keydown', e => {
+  if (!suggest.el || suggest.el.hidden || e.target !== suggest.input) return;
+  const n = suggest.items.length;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); e.stopPropagation();
+    suggest.i = (suggest.i + (e.key === 'ArrowDown' ? 1 : -1) + n + 1) % (n + 1) - (0);
+    if (suggest.i >= n) suggest.i = -1;
+    [...suggest.el.children].forEach((c, i) => c.classList.toggle('sel', i === suggest.i));
+  } else if ((e.key === 'Enter' || e.key === 'Tab') && suggest.i >= 0) {
+    pickSuggest(suggest.i);
+    if (e.key === 'Tab') e.preventDefault();
+  } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); hideSuggest(); }
+}, true);
+addEventListener('resize', hideSuggest);
+document.addEventListener('scroll', e => { if (suggest.input && !suggest.el?.contains(e.target)) hideSuggest(); }, true);
 
 
 // ============================================================ layout: sidebar resizing
@@ -4757,7 +4877,7 @@ window.__cinderClose = async () => {
   window.ipc.postMessage('close-ack');
   flushDocViews();
   try { await save(); } catch { }
-  if (S.dirty && !confirm('Cinder couldn’t save your latest changes.\n\nClose anyway and lose them?')) {
+  if (S.dirty && !(await confirmModal('Your latest changes aren’t saved', 'Cinder couldn’t save them. Close anyway and lose them?', { ok: 'Close anyway', cancel: 'Stay', danger: true }))) {
     window.ipc.postMessage('close-cancel');
     return;
   }
