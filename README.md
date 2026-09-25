@@ -124,6 +124,11 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
     - Notes placed on a canvas show it as a backlink and appear connected to it in the graph. Renaming or moving a note updates every canvas that uses it.
   - Add notes and images by dragging them from the file tree, pasting, or using the toolbar. *Convert to note* turns a text card into a real note.
   - `![[Board.canvas]]` embeds a preview of the canvas in a note. Clicking the preview opens the canvas.
+  - **Presentation mode** (**F5**, the ▶ button, or *Present canvas*):
+    - Each group is a slide, or each card if there are no groups. Arrows between groups set the order; otherwise it's reading order.
+    - It goes full screen with everything else hidden and glides from slide to slide. Links and embedded pages still work.
+    - **→**/**Space**/click moves forward, **←**/right-click moves back, **Home**/**End** jump to the first or last slide, and **Esc** ends it.
+    - If a group is selected, the presentation starts there.
 - **Bases**: database views of your notes and their frontmatter properties, in the format of Obsidian Bases (`.base` files, or `` ```base `` blocks inside a note).
   - Views: **table**, **cards** (with a cover image property), **list** and **board**. The board is a kanban view: dragging a card to another column changes that note's property, and columns stay put even when they empty.
   - Filters and formulas use Bases' expression syntax, for example `file.hasTag("book")`, `status != "done"`, `file.mtime > now() - "7d"` or `price / pages`. Filters can apply to the whole base or to one view. Views also sort, group and limit.

@@ -913,3 +913,17 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .gi-item i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
 .gi-tag i { background: var(--c-green, #3fb27f); } .gi-drawing i { background: var(--c-blue, #4a8fe0); } .gi-canvas i { background: var(--c-purple, #b07bd8); }
 .gi-file i { background: var(--c-yellow, #d9a53f); } .gi-unresolved i { background: var(--faint); }
+
+/* ---------------------------------------------------------------- presenting a canvas */
+body.presenting :is(#ribbon, #left, #right, #tabbar, #viewbar, #statusbar, .resizer, #win-controls, .win-edge) { display: none !important; }
+body.presenting #main { border: 0; }
+.cv-tsep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; align-self: center; }
+.cv-presenting :is(.cv-toolbar, .cv-bottom, .cv-minimap, .cv-selbar, .cv-hint) { display: none !important; }
+.cv-presenting .cv-viewport { cursor: default; }
+.cv-presenting .cv-bg { opacity: 0; }
+.cv-presenting :is(.cv-side, .cv-resize) { display: none !important; }
+.cv-presenting .cv-web iframe { pointer-events: auto; }
+.cv-pres { position: absolute; right: 16px; bottom: 16px; z-index: 5; display: flex; align-items: center; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg2) 88%, transparent); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 2px 10px rgba(0, 0, 0, .12); opacity: 0; transition: opacity .3s; }
+.cv-pres.on, .cv-pres:hover { opacity: 1; }
+.cv-pres[hidden] { display: none; }
+.cv-pres-count { min-width: 52px; text-align: center; font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }

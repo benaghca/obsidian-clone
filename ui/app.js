@@ -860,6 +860,18 @@ function openDrawingLink(link) {
   followLink(name.trim(), sub, S.cur);
 }
 
+// ============================================================ presenting a canvas
+
+// Everything but the canvas goes, and the window (or the page, in a browser) goes full screen.
+function presentMode(on) {
+  document.body.classList.toggle('presenting', on);
+  if (NATIVE && window.ipc) window.ipc.postMessage('win:fullscreen:' + (on ? 'on' : 'off'));
+  else if (on) document.documentElement.requestFullscreen?.().catch(() => { });
+  else if (document.fullscreenElement) document.exitFullscreen?.().catch(() => { });
+}
+// Leaving the browser's full screen (its own Esc) ends the presentation too.
+document.addEventListener('fullscreenchange', () => { if (!document.fullscreenElement && document.body.classList.contains('presenting')) CinderCanvas.endPresent(); });
+
 // ============================================================ window frame (desktop app)
 
 // Cinder can draw its own title bar: the tab bar (and the sidebars' header rows) move the window,
@@ -3538,6 +3550,7 @@ const APP_COMMANDS = [
   ['toggle-left', 'Toggle left sidebar', 'Mod-\\', () => toggleSide('left')],
   ['backlinks', 'Show backlinks', 'Mod-Shift-b', () => showRight('backlinks')],
   ['all-properties', 'Show all properties', '', () => showPanel('props', true)],
+  ['present', 'Present canvas', 'F5', () => S.view === 'canvas' ? CinderCanvas.present() : toast('Open a canvas to present it')],
   ['toggle-embed', 'Embed the link under the cursor (or show an embed as a link)', '', inNote(() => { setMode('edit'); toggleEmbed(ed, ed.selectionStart); })],
   ['outline', 'Show outline', 'Mod-Shift-o', () => showRight('outline')],
   ['outgoing', 'Show outgoing links', '', () => showRight('outgoing')],
@@ -4396,6 +4409,7 @@ CinderCanvas.init($('#view-canvas'), {
   },
   fileExists: p => S.files.has(p),
   mountEditor: (host, o) => mountCardEditor(host, o),
+  present: on => presentMode(on),
   renderLink: (el, url) => { if (!isWebPage(url) || cfg.webEmbeds === 'off') return false; renderWebEmbed(el, url, '', { fill: true }); return true; },
   viewImage: (p, all) => viewImages(p, all.map(q => ({ src: rawUrl(q), name: basename(q), path: q }))),
   createNoteFromText: async text => {

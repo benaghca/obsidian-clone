@@ -192,6 +192,8 @@ pub fn run(ctx: Ctx) -> ! {
                         c["window"]["frame"] = json!(if native { "native" } else { "custom" });
                         crate::config::save(&c);
                     }
+                    "fullscreen:on" => window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None))),
+                    "fullscreen:off" => window.set_fullscreen(None),
                     "theme:dark" => window.set_theme(Some(Theme::Dark)),
                     "theme:light" => window.set_theme(Some(Theme::Light)),
                     c => {
