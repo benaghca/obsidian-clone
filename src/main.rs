@@ -1,4 +1,4 @@
-//! Folio — a local, plugin-free, Obsidian-compatible notes app.
+//! Cinder — a local, plugin-free, Obsidian-compatible notes app.
 //!
 //! By default it opens its own desktop window (WebView2 on Windows) and serves
 //! the embedded UI to it through an in-process `folio://` protocol, so nothing
@@ -11,6 +11,7 @@
 mod api;
 mod config;
 mod native;
+mod screenshot;
 mod server;
 
 use std::collections::hash_map::RandomState;
@@ -19,12 +20,12 @@ use std::path::PathBuf;
 use std::sync::RwLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const HELP: &str = "folio [VAULT_DIR] [--browser [--port N] [--no-open] [--app]]
+const HELP: &str = "cinder [VAULT_DIR] [--browser [--port N] [--no-open] [--app]]
 
 VAULT_DIR   folder of .md notes. Default: the last vault you opened,
-            or Documents\\Folio (created if missing).
+            or Documents\\Cinder (created if missing).
 --browser   serve the UI to a browser tab on 127.0.0.1 instead of
-            opening Folio's own window
+            opening Cinder's own window
   --port N    port for --browser (default 43117)
   --no-open   don't open a browser automatically
   --app       open a chromeless Edge/Chrome window";
@@ -65,7 +66,7 @@ fn main() {
     }
     config::remember_vault(&vault);
 
-    let ctx = api::Ctx { vault: RwLock::new(vault), token: random_token(), native: !browser };
+    let ctx = api::Ctx { vault: RwLock::new(vault), token: random_token(), native: !browser, hide_window: Default::default() };
     if browser {
         server::run(ctx, port, open, app_window)
     } else {
@@ -74,7 +75,7 @@ fn main() {
 }
 
 pub fn die(msg: &str) -> ! {
-    eprintln!("folio: {msg}");
+    eprintln!("cinder: {msg}");
     #[cfg(windows)]
     message_box(msg);
     std::process::exit(1);
@@ -84,7 +85,7 @@ pub fn die(msg: &str) -> ! {
 fn message_box(msg: &str) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
     let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-    let (text, title) = (wide(msg), wide("Folio"));
+    let (text, title) = (wide(msg), wide("Cinder"));
     unsafe {
         MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
     }

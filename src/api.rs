@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ---------------------------------------------------------------- embedded UI
@@ -12,15 +12,59 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const GRAPH_JS: &str = include_str!("../ui/graph.js");
+const DRAW_JS: &str = include_str!("../ui/draw.js");
+const THEMES_JS: &str = include_str!("../ui/themes.js");
+const TEMPLATER_JS: &str = include_str!("../ui/templater.js");
+const CANVAS_JS: &str = include_str!("../ui/canvas.js");
+const BASES_JS: &str = include_str!("../ui/bases.js");
+const TASKS_JS: &str = include_str!("../ui/tasks.js");
+const IMAGES_JS: &str = include_str!("../ui/images.js");
+const PROPERTIES_JS: &str = include_str!("../ui/properties.js");
+const LOGO_SVG: &str = include_str!("../ui/logo.svg");
+const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
 const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 const EDITOR_JS: &str = include_str!("../ui/vendor/editor.bundle.js");
+/// Fonts and data files served as-is from /vendor/.
+const VENDOR_FILES: &[(&str, &str, &[u8])] = &[
+    ("Virgil.woff2", "font/woff2", include_bytes!("../ui/vendor/Virgil.woff2")),
+    ("SymbolsNerdFontMono.woff2", "font/woff2", include_bytes!("../ui/vendor/SymbolsNerdFontMono.woff2")),
+    ("JetBrainsMono-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Regular.woff2")),
+    ("JetBrainsMono-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Bold.woff2")),
+    ("JetBrainsMono-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Italic.woff2")),
+    ("JetBrainsMono-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-BoldItalic.woff2")),
+    ("nerd-icons.txt", "text/plain; charset=utf-8", include_bytes!("../ui/vendor/nerd-icons.txt")),
+    // KaTeX (math), its mhchem extension, and its fonts
+    ("katex/katex.min.js", "text/javascript", include_bytes!("../ui/vendor/katex/katex.min.js")),
+    ("katex/mhchem.min.js", "text/javascript", include_bytes!("../ui/vendor/katex/mhchem.min.js")),
+    ("katex/katex.min.css", "text/css", include_bytes!("../ui/vendor/katex/katex.min.css")),
+    ("katex/fonts/KaTeX_AMS-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_AMS-Regular.woff2")),
+    ("katex/fonts/KaTeX_Caligraphic-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2")),
+    ("katex/fonts/KaTeX_Caligraphic-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2")),
+    ("katex/fonts/KaTeX_Fraktur-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2")),
+    ("katex/fonts/KaTeX_Fraktur-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2")),
+    ("katex/fonts/KaTeX_Main-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-Bold.woff2")),
+    ("katex/fonts/KaTeX_Main-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2")),
+    ("katex/fonts/KaTeX_Main-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-Italic.woff2")),
+    ("katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-Regular.woff2")),
+    ("katex/fonts/KaTeX_Math-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2")),
+    ("katex/fonts/KaTeX_Math-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Math-Italic.woff2")),
+    ("katex/fonts/KaTeX_SansSerif-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2")),
+    ("katex/fonts/KaTeX_SansSerif-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2")),
+    ("katex/fonts/KaTeX_SansSerif-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2")),
+    ("katex/fonts/KaTeX_Script-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Script-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size1-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size1-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size2-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size2-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size3-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size3-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size4-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size4-Regular.woff2")),
+    ("katex/fonts/KaTeX_Typewriter-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2")),
+];
 
-/// Everything the page may load comes from Folio itself; nothing else is allowed.
+/// Everything the page may load comes from Cinder itself; nothing else is allowed.
 pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
                        img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; \
-                       object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+                       object-src 'none'; frame-src http: https:; base-uri 'none'; form-action 'none'";
 
 pub const MAX_BODY: u64 = 64 * 1024 * 1024;
 
@@ -28,6 +72,8 @@ pub struct Ctx {
     pub vault: RwLock<PathBuf>,
     pub token: String,
     pub native: bool,
+    /// Hide (true) or show again (false) the app window; set by the desktop window.
+    pub hide_window: OnceLock<Box<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Ctx {
@@ -70,18 +116,34 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
                 let html = INDEX_HTML
                     .replace("{{TOKEN}}", &ctx.token)
                     .replace("{{VAULT}}", &html_escape(&name))
-                    .replace("{{MODE}}", if ctx.native { "native" } else { "browser" });
+                    .replace("{{MODE}}", if ctx.native { "native" } else { "browser" })
+                    .replace("{{FRAME}}", if ctx.native && crate::native::custom_frame() { "custom" } else { "native" });
                 let mut o = out(200, "text/html; charset=utf-8", html.into_bytes());
                 o.csp = true;
                 return o;
             }
             "/app.js" => return out(200, "text/javascript", APP_JS.into()),
             "/graph.js" => return out(200, "text/javascript", GRAPH_JS.into()),
+            "/draw.js" => return out(200, "text/javascript", DRAW_JS.into()),
+            "/themes.js" => return out(200, "text/javascript", THEMES_JS.into()),
+            "/templater.js" => return out(200, "text/javascript", TEMPLATER_JS.into()),
+            "/canvas.js" => return out(200, "text/javascript", CANVAS_JS.into()),
+            "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
+            "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
+            "/images.js" => return out(200, "text/javascript", IMAGES_JS.into()),
+            "/properties.js" => return out(200, "text/javascript", PROPERTIES_JS.into()),
+            "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
+            "/logo.svg" => return out(200, "image/svg+xml", LOGO_SVG.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
             "/vendor/purify.min.js" => return out(200, "text/javascript", PURIFY_JS.into()),
             "/vendor/editor.bundle.js" => return out(200, "text/javascript", EDITOR_JS.into()),
             _ => {}
+        }
+        if let Some(name) = path.strip_prefix("/vendor/") {
+            if let Some((_, ctype, data)) = VENDOR_FILES.iter().find(|(n, _, _)| *n == name) {
+                return out(200, ctype, data.to_vec());
+            }
         }
     }
 
@@ -91,7 +153,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
 
     // A per-launch token only the served page knows. Custom header for fetch();
     // query param only for /api/raw (used by <img src>).
-    let tok_ok = header("X-Folio-Token").as_deref() == Some(ctx.token.as_str())
+    let tok_ok = header("X-Cinder-Token").as_deref() == Some(ctx.token.as_str())
         || (path == "/api/raw" && q("t").as_deref() == Some(ctx.token.as_str()));
     if !tok_ok {
         return text(401, "bad token");
@@ -118,9 +180,40 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("POST", "/api/delete") => parse(&body).and_then(|v| api_delete(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/mkdir") => parse(&body).and_then(|v| api_mkdir(&vault, &str_field(&v, "path")?)),
         ("POST", "/api/vault") => parse(&body).and_then(|v| api_switch_vault(ctx, &str_field(&v, "path")?)),
+        ("GET", "/api/prop-types") => api_prop_types(&vault, None),
+        ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
+        ("POST", "/api/screenshot") => Ok(match screenshot(ctx, q("mode").as_deref() == Some("screen"), q("hide").as_deref() == Some("1"), q("delay").and_then(|d| d.parse().ok()).unwrap_or(0)) {
+            crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
+            crate::screenshot::Shot::Cancelled => out(204, "text/plain", Vec::new()),
+            crate::screenshot::Shot::NoTool(msg) => json_out(501, json!({ "error": msg })),
+        }),
         _ => Err((404, "no such endpoint".into())),
     };
     result.unwrap_or_else(|(code, msg)| json_out(code, json!({ "error": msg })))
+}
+
+/// Capture the screen, optionally with the app window out of the way and after a few seconds
+/// (to set up a menu or hover state).
+fn screenshot(ctx: &Ctx, screen: bool, hide: bool, delay_s: u64) -> crate::screenshot::Shot {
+    let hider = if hide { ctx.hide_window.get() } else { None };
+    if let Some(h) = hider {
+        h(true);
+        std::thread::sleep(std::time::Duration::from_millis(350)); // let the compositor catch up
+    }
+    if delay_s > 0 {
+        std::thread::sleep(std::time::Duration::from_secs(delay_s.min(10)));
+    }
+    let shot = crate::screenshot::capture(screen);
+    if let Some(h) = hider {
+        h(false);
+    }
+    shot
+}
+
+/// Requests that can take a long time (waiting on the user), which transports should answer
+/// off their main thread.
+pub fn is_slow(path: &str) -> bool {
+    path == "/api/screenshot"
 }
 
 fn str_field(v: &Value, k: &str) -> Result<String, (u16, String)> {
@@ -153,7 +246,7 @@ fn walk(root: &Path, dir: &Path, files: &mut Vec<Value>, dirs: &mut Vec<String>)
             dirs.push(rel);
             walk(root, &p, files, dirs);
         } else if md.is_file() {
-            files.push(json!({ "path": rel, "mtime": mtime_ms(&md), "size": md.len() }));
+            files.push(json!({ "path": rel, "mtime": mtime_ms(&md), "ctime": ctime_ms(&md), "size": md.len() }));
         }
     }
 }
@@ -188,7 +281,7 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
     }
     // Atomic write: temp file in the same folder, then rename over the target.
     let name = full.file_name().unwrap().to_string_lossy().to_string();
-    let tmp = full.with_file_name(format!(".{name}.folio-tmp"));
+    let tmp = full.with_file_name(format!(".{name}.cinder-tmp"));
     fs::write(&tmp, body).map_err(io_err)?;
     fs::rename(&tmp, &full).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -196,6 +289,52 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
     })?;
     let md = fs::metadata(&full).map_err(io_err)?;
     Ok(json_out(200, json!({ "mtime": mtime_ms(&md) })))
+}
+
+/// Obsidian keeps property types (text, number, date…) in .obsidian/types.json. This is the one
+/// file under .obsidian Cinder touches: it reads the "types" map, and a PUT merges names into it
+/// (a null type removes one), keeping everything else. Only when the vault already has an
+/// .obsidian folder; otherwise 404 and the page keeps types in its own settings.
+fn api_prop_types(vault: &Path, update: Option<Value>) -> ApiResult {
+    let dir = vault.join(".obsidian");
+    let file = dir.join("types.json");
+    let is_real_dir = fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
+    if !is_real_dir {
+        return match update {
+            None => Ok(json_out(200, json!({ "types": {}, "obsidian": false }))),
+            Some(_) => Err((404, "no .obsidian folder".into())),
+        };
+    }
+    let mut doc: Value = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}));
+    if !doc.is_object() {
+        doc = json!({});
+    }
+    if !doc["types"].is_object() {
+        doc["types"] = json!({});
+    }
+    if let Some(update) = update {
+        let Some(changes) = update.as_object() else { return Err((400, "expected an object".into())) };
+        let types = doc["types"].as_object_mut().expect("types is an object");
+        for (k, v) in changes {
+            match v {
+                Value::Null => {
+                    types.remove(k);
+                }
+                Value::String(t) if !k.is_empty() && t.len() <= 32 => {
+                    types.insert(k.clone(), Value::String(t.clone()));
+                }
+                _ => return Err((400, format!("bad type for {k}"))),
+            }
+        }
+        let text = serde_json::to_string_pretty(&doc).map_err(|e| (500, e.to_string()))?;
+        let tmp = dir.join(".types.json.cinder-tmp");
+        fs::write(&tmp, text).map_err(io_err)?;
+        fs::rename(&tmp, &file).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            io_err(e)
+        })?;
+    }
+    Ok(json_out(200, json!({ "types": doc["types"], "obsidian": true })))
 }
 
 fn api_rename(vault: &Path, from_rel: &str, to_rel: &str) -> ApiResult {
@@ -329,6 +468,15 @@ fn mtime_ms(md: &fs::Metadata) -> u64 {
         .unwrap_or(0)
 }
 
+/// Creation time where the filesystem records one, else the modification time.
+fn ctime_ms(md: &fs::Metadata) -> u64 {
+    md.created()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or_else(|| mtime_ms(md))
+}
+
 fn io_err(e: std::io::Error) -> (u16, String) {
     (500, e.to_string())
 }
@@ -381,7 +529,7 @@ fn mime_for(p: &str) -> &'static str {
         "wav" => "audio/wav",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
-        "md" | "txt" | "csv" | "json" => "text/plain; charset=utf-8",
+        "md" | "txt" | "csv" | "json" | "excalidraw" | "canvas" | "base" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
 }
@@ -396,6 +544,37 @@ mod tests {
         assert_eq!(percent_decode("%E2%9C%93"), "✓");
         assert_eq!(percent_decode("100%"), "100%");
         assert_eq!(percent_decode("%4"), "%4");
+    }
+
+    #[test]
+    fn serves_drawing_assets() {
+        let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
+        let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+            let o = get(p);
+            assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
+            assert!(!o.body.is_empty(), "{p}");
+        }
+        let page = String::from_utf8(get("/").body).unwrap();
+        assert!(page.contains("/draw.js") && page.contains("/draw-render.js") && page.contains("id=\"view-drawing\""));
+    }
+
+    #[test]
+    fn prop_types_merge_into_obsidian_file() {
+        let dir = std::env::temp_dir().join(format!("cinder-types-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert!(api_prop_types(&dir, None).is_ok(), "no .obsidian: empty types");
+        assert_eq!(api_prop_types(&dir, Some(json!({ "a": "text" }))).err().map(|e| e.0), Some(404), "and nothing written");
+        assert!(!dir.join(".obsidian").exists());
+        fs::create_dir(dir.join(".obsidian")).unwrap();
+        fs::write(dir.join(".obsidian/types.json"), r#"{"types":{"due":"date","keep":"number"},"other":1}"#).unwrap();
+        api_prop_types(&dir, Some(json!({ "rating": "number", "due": null }))).unwrap();
+        let v: Value = serde_json::from_slice(&fs::read(dir.join(".obsidian/types.json")).unwrap()).unwrap();
+        assert_eq!(v["types"], json!({ "keep": "number", "rating": "number" }));
+        assert_eq!(v["other"], json!(1));
+        assert!(api_prop_types(&dir, Some(json!({ "x": 5 }))).is_err());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

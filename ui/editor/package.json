@@ -1,7 +1,7 @@
 {
-  "name": "folio-editor",
+  "name": "cinder-editor",
   "private": true,
-  "description": "Builds ../vendor/editor.bundle.js (CodeMirror 6 + Folio live preview). Only needed if you change editor.js.",
+  "description": "Builds ../vendor/editor.bundle.js (CodeMirror 6 + Cinder live preview). Only needed if you change editor.js.",
   "scripts": {
     "build": "esbuild editor.js --bundle --format=iife --minify --legal-comments=eof --target=chrome100,edge100 --outfile=../vendor/editor.bundle.js"
   },
@@ -21,6 +21,7 @@
     "@codemirror/view": "6.43.13",
     "@lezer/highlight": "1.2.3",
     "@lezer/markdown": "1.7.2",
+    "@replit/codemirror-vim": "6.4.0",
     "esbuild": "0.28.2"
   }
 }
