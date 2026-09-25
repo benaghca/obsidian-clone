@@ -1250,7 +1250,8 @@ window.FolioDraw = (() => {
 
   // ============================================================ clipboard
 
-  const activeFor = e => visible && !editing && !(e.target && (e.target.closest?.('input, textarea, select, [contenteditable]'))) && !hooks.modalOpen?.();
+  // Keys belong to the drawing unless focus is in a field, a dialog or another pane (file tree, sidebars).
+  const activeFor = e => visible && !editing && !(e.target && (e.target.closest?.('input, textarea, select, [contenteditable], #left, #right, #ribbon'))) && !hooks.modalOpen?.();
 
   function clipboardPayload() {
     const list = withBound(selectedEls());
@@ -1747,7 +1748,8 @@ window.FolioDraw = (() => {
 
   return {
     init, restyle, resize, load, getScene, exportSVG, exportPNG,
-    show() { visible = true; resize(); renderProps(); requestRender(); },
+    // Opening a drawing takes the keyboard, so tool keys work straight away.
+    show() { visible = true; resize(); renderProps(); requestRender(); if (!hooks.modalOpen?.()) canvas.focus({ preventScroll: true }); },
     hide() { visible = false; commitText(); finishMulti(); action = null; },
     getView: () => ({ ...view }),
     count: () => els.length,

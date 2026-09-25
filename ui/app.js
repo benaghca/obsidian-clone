@@ -1087,7 +1087,9 @@ let tasksCache = { gen: -1, tasks: [] };
 function allTasks() {
   if (tasksCache.gen === S.dataGen) return tasksCache.tasks;
   const tasks = [];
-  for (const [p, n] of S.notes) if (!isDrawing(p)) tasks.push(...FolioTasks.parseNote(p, n.content));
+  // Template notes hold example tasks, not real ones.
+  const tpl = cfg.templatesFolder ? cfg.templatesFolder + '/' : null;
+  for (const [p, n] of S.notes) if (!isDrawing(p) && !(tpl && p.startsWith(tpl))) tasks.push(...FolioTasks.parseNote(p, n.content));
   tasksCache = { gen: S.dataGen, tasks };
   return tasks;
 }
@@ -2234,7 +2236,7 @@ function openSettings() {
     <label>Daily notes folder<input class="field" name="dailyFolder"></label>
     <label>Daily note template (note name or path)<input class="field" name="dailyTemplate" placeholder="e.g. Templates/Daily"></label>
     <label>Templates folder<input class="field" name="templatesFolder"></label>
-    <label>Folder templates — new notes in a folder start from its template. One per line, e.g. <code>Meetings: Templates/Meeting</code> (<code>/</code> means every folder)<textarea class="field" name="folderTemplates" rows="3" spellcheck="false" placeholder="Meetings: Templates/Meeting"></textarea></label>
+    <label><span>Folder templates — new notes in a folder start from its template. One per line, e.g. <code>Meetings: Templates/Meeting</code> (<code>/</code> means every folder)</span><textarea class="field" name="folderTemplates" rows="3" spellcheck="false" placeholder="Meetings: Templates/Meeting"></textarea></label>
     <label>Attachments folder<input class="field" name="attachFolder"></label>
     <label>New tasks go to (a note path; empty means today's daily note)<input class="field" name="taskInbox" placeholder="(today's daily note)"></label>
     <label class="check"><input type="checkbox" name="taskDoneDate"> Add a done date (✅) when ticking a task</label>

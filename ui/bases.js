@@ -787,7 +787,7 @@
       try { r = query(base, vi, h.rows(), { search, thisRow: h.thisRow?.(), backlinks: h.backlinks }); }
       catch (e) { el.innerHTML = `<div class="bs-error">${esc(e.message)}</div>`; return; }
       const v = view();
-      el.innerHTML = toolbar(r) + (panel ? panelHtml(r) : '') + `<div class="bs-body bs-${v.type}">${body(r)}</div>` +
+      el.innerHTML = toolbar(r) + (panel ? panelHtml(r) : '') + `<div class="bs-body bs-view-${v.type}">${body(r)}</div>` +
         (r.errors.length ? `<div class="bs-error">${r.errors.map(esc).join('<br>')}</div>` : '');
       el.querySelectorAll('.bs-scroll').forEach((s, k) => { if (scrollers[k]) [s.scrollLeft, s.scrollTop] = scrollers[k]; });
       const si = el.querySelector('.bs-search');

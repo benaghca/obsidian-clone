@@ -735,7 +735,8 @@
 
   // ------------------------------------------------------------ keyboard, clipboard, menus
 
-  const activeFor = e => visible && !editing && !e.target.closest?.('input, textarea, select, [contenteditable]') && !hooks.modalOpen?.();
+  // Keys belong to the canvas unless focus is in a field, a dialog or another pane (file tree, sidebars).
+  const activeFor = e => visible && !editing && !e.target.closest?.('input, textarea, select, [contenteditable], #left, #right, #ribbon') && !hooks.modalOpen?.();
 
   function onKey(e) {
     if (!activeFor(e)) return;
@@ -1067,7 +1068,8 @@
   root.FolioCanvas = {
     ...pure,
     init, load, getData,
-    show() { visible = true; request(); },
+    // Opening a canvas takes the keyboard, so card shortcuts work straight away.
+    show() { visible = true; request(); if (!hooks.modalOpen?.()) viewport.focus({ preventScroll: true }); },
     hide() { visible = false; stopEditing(true); action = null; },
     getView: () => ({ ...view }),
     count: () => data.nodes.length,
