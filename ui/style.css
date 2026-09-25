@@ -157,8 +157,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 #editor .cm-content { padding: 4px 0; }
 #editor .cm-line { padding: 0; }
 :is(#editor, .cv-cm) .cm-cursor { border-left: 2px solid var(--accent); }
-:is(#editor, .cv-cm) :is(.cm-selectionBackground, .cm-focused .cm-selectionBackground, ::selection) { background: var(--accent-soft) !important; }
-:is(#editor, .cv-cm) .cm-focused .cm-selectionBackground { background: rgba(143, 115, 255, .28) !important; }
+/* The selection is a translucent layer *over* the text, in the theme's accent: drawn underneath
+   (CodeMirror's default), inline code, highlights, tags and code blocks would hide it. */
+:is(#editor, .cv-cm) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; }
+:is(#editor, .cv-cm) :is(.cm-selectionBackground, ::selection) { background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
+:is(#editor, .cv-cm) .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 32%, transparent) !important; }
 :is(#editor, .cv-cm) .cm-placeholder { color: var(--faint); }
 :is(#editor, .cv-cm) .cm-selectionMatch { background: var(--mark); }
 :is(#editor, .cv-cm) .cm-searchMatch { background: var(--mark); outline: 1px solid rgba(255, 208, 0, .6); }
