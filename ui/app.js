@@ -4278,14 +4278,41 @@ async function openGraph(local) {
   CinderGraph.refresh(true);
 }
 
+const openGraphNode = (id, e) => {
+  if (id.startsWith('tag:')) return searchFor('tag:' + id.slice(4));
+  if (id.startsWith('unresolved:')) return followLink(id.slice(11), null, null);
+  return e?.ctrlKey || e?.metaKey || e?.button === 1 ? openInNewTab(id) : openPath(id);
+};
 CinderGraph.init($('#graph-canvas'), {
   data: () => graphData(graphOptions()),
-  open: id => {
-    if (id.startsWith('tag:')) return searchFor('tag:' + id.slice(4));
-    if (id.startsWith('unresolved:')) return;
-    openPath(id);
-  },
+  open: (id, e) => openGraphNode(id, e),
+  clickOpens: () => $('#g-clickopen').checked,
+  onSelect: i => showGraphInfo(i),
 });
+// The selected node's card: what it links to and what links to it; click one to move there.
+function showGraphInfo(i) {
+  const box = $('#graph-info');
+  if (!i) { box.hidden = true; return; }
+  const kindName = { note: 'Note', drawing: 'Drawing', canvas: 'Canvas', file: 'File', tag: 'Tag', unresolved: 'Not created yet' }[i.kind] || '';
+  const list = (title, items) => `<h4>${title} <span>${items.length}</span></h4>${items.length ? items.map(x => `<button class="gi-item gi-${esc(x.kind)}" data-id="${esc(x.id)}" title="${esc(x.id)}"><i></i>${esc(x.label)}</button>`).join('') : '<div class="none">None</div>'}`;
+  const file = !/^(tag|unresolved):/.test(i.id);
+  box.innerHTML = `<div class="gi-head"><div><b>${esc(i.label)}</b><small>${kindName}</small></div><button class="ib" data-gi="close" title="Clear selection (Esc)">×</button></div>
+    <div class="gi-actions"><button class="btn" data-gi="open">${i.kind === 'tag' ? 'Search' : i.kind === 'unresolved' ? 'Create' : 'Open'}</button>${file ? '<button class="btn" data-gi="tab">New tab</button><button class="btn" data-gi="local">Local graph</button>' : ''}</div>
+    <div class="gi-lists">${list('Links to', i.out)}${list('Linked from', i.in)}</div>`;
+  box.hidden = false;
+  box.onclick = e => {
+    const it = e.target.closest('.gi-item');
+    if (it) return CinderGraph.select(it.dataset.id, { center: true });
+    const a = e.target.closest('[data-gi]')?.dataset.gi;
+    if (a === 'close') CinderGraph.select(null);
+    else if (a === 'open') openGraphNode(i.id);
+    else if (a === 'tab') openInNewTab(i.id);
+    else if (a === 'local') { S.cur = i.id; openPath(i.id, { focus: false }).then(() => openGraph(true)); }
+  };
+  box.ondblclick = e => { const it = e.target.closest('.gi-item'); if (it) openGraphNode(it.dataset.id); };
+}
+try { $('#g-clickopen').checked = !!store('graphClickOpens'); } catch { }
+$('#g-clickopen').addEventListener('change', e => store('graphClickOpens', e.target.checked));
 // A live-preview editor inside a canvas card. A text card's editor reports its text through
 // onChange; a note card's edits the note itself and saves it as you type, like the main editor.
 function mountCardEditor(host, o) {

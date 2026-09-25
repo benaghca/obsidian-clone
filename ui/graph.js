@@ -7,6 +7,8 @@ window.CinderGraph = (() => {
   let current = null, visible = false, raf = 0, alpha = 0, dirty = true, fitted = false;
   let view = { x: 0, y: 0, k: 1 };
   let hover = null, drag = null, pan = null, moved = false;
+  // A clicked node stays selected: it and its links stay lit (opts.onSelect gets its details).
+  let selected = null;
   let colors = {};
   const dpr = () => window.devicePixelRatio || 1;
 
@@ -61,17 +63,41 @@ window.CinderGraph = (() => {
         if (h !== hover) { hover = h; canvas.style.cursor = h ? 'pointer' : ''; dirty = true; kick(); }
       }
     });
-    window.addEventListener('mouseup', () => {
+    window.addEventListener('mouseup', e => {
       if (!visible) return;
       canvas.classList.remove('dragging');
       if (drag) {
         const n = drag; drag = null;
         n.fx = n.fy = null;
-        if (!moved) opts.open(n.id);
-      }
+        // A click selects (again: clears); with "click opens" on, or Ctrl/Cmd-click, it opens.
+        if (!moved) { if (opts.clickOpens?.() || e.ctrlKey || e.metaKey) opts.open(n.id, e); else select(selected === n ? null : n); }
+      } else if (pan && !moved && selected) select(null); // a click on empty space
       pan = null;
     });
-    canvas.addEventListener('dblclick', e => { if (!pick(...mouse(e))) { fit(); kick(); } });
+    canvas.addEventListener('dblclick', e => {
+      const n = pick(...mouse(e));
+      if (n) opts.open(n.id, e); else { fit(); kick(); }
+    });
+    canvas.tabIndex = 0;
+    canvas.addEventListener('keydown', e => {
+      if (e.key === 'Escape' && selected) { e.preventDefault(); select(null); }
+      else if (e.key === 'Enter' && selected) { e.preventDefault(); opts.open(selected.id, e); }
+    });
+  }
+
+  // What a node links to and what links to it, for the selection card.
+  function info(n) {
+    const out = [], inn = [];
+    for (const [a, b] of edges) { if (a === n) out.push(b); else if (b === n) inn.push(a); }
+    const brief = m => ({ id: m.id, label: m.label, kind: m.kind });
+    const byName = (x, y) => x.label.localeCompare(y.label, undefined, { numeric: true });
+    return { ...brief(n), out: out.map(brief).sort(byName), in: inn.map(brief).sort(byName) };
+  }
+  function select(n, o = {}) {
+    selected = n || null;
+    if (selected && o.center) { view.x = -selected.x * view.k; view.y = -selected.y * view.k; }
+    dirty = true; kick();
+    opts.onSelect?.(selected ? info(selected) : null);
   }
 
   const cw = () => canvas.clientWidth, ch = () => canvas.clientHeight;
@@ -120,6 +146,7 @@ window.CinderGraph = (() => {
     }
     current = d.current ? byId.get(d.current) : null;
     if (hover && !byId.has(hover.id)) hover = null;
+    if (selected) { const again = byId.get(selected.id); selected = null; if (again) select(again); else opts.onSelect?.(null); }
     const fresh = refit || !fitted || old.size === 0;
     alpha = 1;
     if (fresh) {
@@ -204,7 +231,7 @@ window.CinderGraph = (() => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = colors.bg; ctx.fillRect(0, 0, W, H);
     ctx.setTransform(r * view.k, 0, 0, r * view.k, r * (cw() / 2 + view.x), r * (ch() / 2 + view.y));
-    const focus = hover || drag;
+    const focus = drag || selected || hover;
     const near = focus ? adj.get(focus) : null;
     const dim = n => focus && n !== focus && !near.has(n);
 
@@ -224,6 +251,7 @@ window.CinderGraph = (() => {
       ctx.globalAlpha = dim(n) ? 0.2 : 1;
       ctx.fillStyle = n === current ? colors.accent : n === focus ? colors.accent : colors[n.kind] || colors.note;
       ctx.beginPath(); ctx.arc(n.x, n.y, radius(n), 0, Math.PI * 2); ctx.fill();
+      if (n === selected) { ctx.strokeStyle = colors.text; ctx.lineWidth = 1.5 / view.k; ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 5 / view.k, 0, Math.PI * 2); ctx.stroke(); }
       if (n === current) { ctx.strokeStyle = colors.accent; ctx.lineWidth = 2 / view.k; ctx.beginPath(); ctx.arc(n.x, n.y, radius(n) + 3 / view.k, 0, Math.PI * 2); ctx.stroke(); }
     }
 
@@ -259,6 +287,10 @@ window.CinderGraph = (() => {
 
   return {
     init, restyle, resize, refresh,
+    select: (id, o) => select(byId.get(id) || null, o),
+    selected: () => selected?.id ?? null,
+    // Where a node is on the canvas (CSS px from its top-left), e.g. to point at it.
+    screenPos: id => { const n = byId.get(id); return n ? [cw() / 2 + view.x + n.x * view.k, ch() / 2 + view.y + n.y * view.k] : null; },
     show() { visible = true; resize(); },
     hide() { visible = false; hover = null; },
   };

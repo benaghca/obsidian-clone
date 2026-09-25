@@ -102,7 +102,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - *Create new note from template* and *Replace template commands in current note* commands.
   - **Folder templates** (Settings): new notes in a folder start from that folder's template.
   - Templates run in a small built-in interpreter, not as JavaScript, so a template can't reach anything outside the note and the vault. Arbitrary JavaScript, `tp.web` (network), `app` and user scripts aren't supported; using them gives a clear error.
-- A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag
+- A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag. **Click a node** to select it: its links light up and everything else dims, and a card lists what it links to and what links to it. Click an entry in the card to hop there. Click the node again, click empty space or press **Esc** to clear. **Double-click** (or **Enter**) opens a note, and **Ctrl+click** opens it in a new tab. *Click opens notes* in the graph controls brings back one-click opening.
 - Detection of edits made outside Cinder. If a note changed on disk while you also had unsaved edits, Cinder asks which version to keep.
 - **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images and an eraser. Features:
   - Arrows attach to shapes and follow them when they move. Shapes and arrows can have labels (double-click or **Enter**).

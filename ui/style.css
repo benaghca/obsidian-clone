@@ -891,3 +891,22 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .we-grip[data-size]::after { content: attr(data-size); position: absolute; right: 18px; bottom: 4px; font: 12px/1.5 var(--font-ui); color: var(--text); background: var(--bg2); border: 1px solid var(--border); padding: 0 6px; border-radius: 4px; white-space: nowrap; }
 .we-resizing iframe { pointer-events: none; }
 .we-resizing { cursor: nwse-resize; user-select: none; }
+
+/* Graph: the selected node's card */
+#graph-canvas:focus { outline: none; }
+#graph-info { position: absolute; left: 10px; top: 10px; width: 260px; max-height: calc(100% - 20px); display: flex; flex-direction: column; font-size: 13px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); overflow: hidden; }
+#graph-info[hidden] { display: none; }
+.gi-head { display: flex; align-items: flex-start; gap: 6px; padding: 10px 8px 6px 12px; }
+.gi-head > div { flex: 1; min-width: 0; }
+.gi-head b { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.gi-head small { color: var(--faint); }
+.gi-actions { display: flex; gap: 6px; padding: 0 12px 8px; flex-wrap: wrap; }
+.gi-actions .btn { padding: 3px 10px; font-size: 12.5px; }
+.gi-lists { overflow-y: auto; padding: 0 6px 8px; border-top: 1px solid var(--border); }
+.gi-lists h4 { margin: 10px 6px 4px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.gi-lists h4 span { color: var(--faint); font-weight: 400; }
+.gi-item { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none; color: var(--text); padding: 3px 6px; border-radius: 5px; cursor: pointer; font: inherit; }
+.gi-item:hover, .gi-item:focus-visible { background: var(--accent-soft); outline: none; }
+.gi-item i { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--muted); }
+.gi-tag i { background: var(--c-green, #3fb27f); } .gi-drawing i { background: var(--c-blue, #4a8fe0); } .gi-canvas i { background: var(--c-purple, #b07bd8); }
+.gi-file i { background: var(--c-yellow, #d9a53f); } .gi-unresolved i { background: var(--faint); }
