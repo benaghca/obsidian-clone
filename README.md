@@ -136,6 +136,14 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, **Ctrl+1**…**6** headings (the same level again removes it), **Ctrl+Shift+8/7/9** bullet, numbered and task lists, **Ctrl+M** / **Ctrl+Shift+M** math, and **Tab**/**Shift+Tab** to indent list items
+- **Tabs**:
+  - Clicking a file opens it in the current tab. Middle-click, **Ctrl+Enter** in the quick switcher or file tree, or *Open in new tab* opens it in a new one, and middle-clicking a link does too.
+  - **Ctrl+T** new tab, **Ctrl+W** close, **Ctrl+PageUp/PageDown** previous and next, **Alt+1…8** a tab and **Alt+9** the last one. *Reopen closed tab* is in the command palette.
+  - Each tab keeps its own back and forward history, and a note keeps its cursor and undo history while its tab is open.
+  - Drag tabs to reorder them. Right-click for close others, close to the right, duplicate and reveal.
+  - Tabs come back when you reopen Folio, and they follow renames and moves.
+  - In a browser tab the browser keeps Ctrl+T and Ctrl+W for itself, so rebind them in Hotkeys.
+- **Select several files in the tree** with **Ctrl/Cmd-click**, **Shift-click** or **Shift+↑/↓**, then drag them onto a folder or right-click to *Move N items to…*, group them into a *New folder with N items…*, open them in tabs or delete them. Links are updated for every move.
 - **Keyboard first**:
   - **Ctrl+/** shows every shortcut.
   - **Settings → Hotkeys** rebinds any command, including the formatting commands above. Click a shortcut, press the new keys, and clashes are flagged. The command palette lists your recent commands first and shows each command's current keys.

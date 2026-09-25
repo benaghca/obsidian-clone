@@ -485,6 +485,7 @@ function showView(v) {
   if (v === 'drawing') FolioDraw.show(); else FolioDraw.hide();
   if (v === 'canvas') FolioCanvas.show(); else FolioCanvas.hide();
   updateHistButtons();
+  if (S.tabs) syncTab();
 }
 
 function showEmpty() {
@@ -500,6 +501,7 @@ function rememberPos() {
   if (S.cur && S.view === 'canvas') { S.pos.set(S.cur, { canvas: FolioCanvas.getView() }); return; }
   if (S.cur && S.view === 'base') { if (baseView) S.pos.set(S.cur, { baseView: baseView.viewName() }); return; }
   if (!S.cur || S.view !== 'note') return;
+  if (S.tabs.some(t => t.key === S.cur)) edStates.set(S.cur, ed.getState()); // (undo history, per tab)
   S.pos.set(S.cur, { a: ed.selectionStart, b: ed.selectionEnd, scroll: editWrap.scrollTop, pscroll: preview.scrollTop });
 }
 
@@ -522,7 +524,8 @@ async function openPath(p, opts = {}) {
   const n = S.notes.get(p);
   showView('note');
   titleEl.value = noteName(p);
-  ed.load(n ? n.content : '');
+  const kept = edStates.get(p);
+  if (kept && n && kept.doc.toString() === n.content) ed.setState(kept); else ed.load(n ? n.content : '');
   setSaveState('');
   const pos = S.pos.get(p);
   setMode(opts.mode || S.mode, true);
@@ -808,6 +811,172 @@ function openDrawingLink(link) {
   const [tgt] = splitOnce(m ? m[1] : t, '|');
   const [name, sub] = splitOnce(tgt, '#');
   followLink(name.trim(), sub, S.cur);
+}
+
+// ============================================================ tabs
+
+// Each tab shows one thing: a file, the graph (':graph'), tasks (':tasks'), or nothing (null).
+// A tab has its own back/forward history (swapped in and out of S.hist), and a note keeps its
+// editor state, undo history included, while it's open in a tab.
+S.tabs = []; S.tab = -1;
+const edStates = new Map(); // note path -> editor state
+const closedTabs = [];      // keys, for "Reopen closed tab"
+let tabSeq = 0;
+const newTabObj = key => ({ id: ++tabSeq, key, hist: key ? [key] : [], histIdx: key ? 0 : -1 });
+const curTab = () => S.tabs[S.tab];
+const viewKey = () => S.view === 'graph' ? ':graph' : S.view === 'tasks' ? ':tasks' : S.view === 'empty' ? null : S.cur;
+const tabName = k => k == null ? 'New tab' : k === ':graph' ? 'Graph' : k === ':tasks' ? 'Tasks' : displayName(k);
+
+// The page changed what it shows (see showView): the current tab follows.
+function syncTab() {
+  if (!S.tabs.length) { S.tabs.push(newTabObj(null)); S.tab = 0; }
+  const t = curTab();
+  t.key = viewKey(); t.hist = S.hist; t.histIdx = S.histIdx;
+  pruneEdStates();
+  saveTabs(); renderTabs();
+}
+function pruneEdStates() { const open = new Set(S.tabs.map(t => t.key)); for (const k of edStates.keys()) if (!open.has(k)) edStates.delete(k); }
+function saveTabs() { store('tabs', { keys: S.tabs.map(t => t.key), active: S.tab }); }
+
+// Show tab i: its history comes back and its thing reopens.
+async function activateTab(i, opts = {}) {
+  if (i < 0 || i >= S.tabs.length) return;
+  if (i === S.tab && !opts.force) return focusMain();
+  const t = S.tabs[i];
+  const old = curTab();
+  if (old) { old.hist = S.hist; old.histIdx = S.histIdx; }
+  S.tab = i; S.hist = t.hist; S.histIdx = t.histIdx;
+  await openKey(t.key, opts);
+}
+async function openKey(k, opts = {}) {
+  if (k === ':graph') return openGraph(false);
+  if (k === ':tasks') return openTasks();
+  if (k && S.files.has(k)) return openPath(k, { push: false, ...opts });
+  flushDocViews(); await save(); rememberPos();
+  S.cur = null; showEmpty();
+}
+
+// Open something in a new tab next to the current one (or at the end).
+async function openInNewTab(k, opts = {}) {
+  const old = curTab();
+  if (old) { old.hist = S.hist; old.histIdx = S.histIdx; }
+  const t = newTabObj(null);
+  S.tabs.splice(S.tab + 1, 0, t);
+  S.tab = S.tab + 1; S.hist = []; S.histIdx = -1;
+  if (k == null) { await openKey(null); if (opts.switcher) openSwitcher(); return; }
+  if (k.startsWith(':')) return openKey(k);
+  await openPath(k, opts);
+}
+
+async function closeTab(i = S.tab) {
+  const t = S.tabs[i];
+  if (!t) return;
+  if (i === S.tab) await save();
+  if (t.key) closedTabs.push(t.key);
+  if (S.tabs.length === 1) { S.tabs[0] = newTabObj(null); S.tab = 0; S.hist = []; S.histIdx = -1; return openKey(null); }
+  S.tabs.splice(i, 1);
+  if (i === S.tab) { S.tab = -1; await activateTab(Math.min(i, S.tabs.length - 1), { force: true }); }
+  else { if (i < S.tab) S.tab--; saveTabs(); renderTabs(); }
+  pruneEdStates();
+}
+async function closeTabs(keep) {
+  const keepTabs = S.tabs.filter((t, i) => keep(t, i));
+  if (!keepTabs.length) return;
+  const cur = curTab();
+  for (const t of S.tabs) if (!keepTabs.includes(t) && t.key) closedTabs.push(t.key);
+  S.tabs = keepTabs;
+  const i = S.tabs.indexOf(cur);
+  if (i >= 0) { S.tab = i; saveTabs(); renderTabs(); pruneEdStates(); }
+  else { S.tab = -1; await activateTab(0, { force: true }); }
+}
+function reopenClosedTab() {
+  while (closedTabs.length) {
+    const k = closedTabs.pop();
+    if (k.startsWith(':') || S.files.has(k)) return openInNewTab(k);
+  }
+  toast('No closed tabs to reopen');
+}
+const cycleTab = d => S.tabs.length > 1 && activateTab((S.tab + d + S.tabs.length) % S.tabs.length);
+
+// Files renamed or deleted: tabs follow, or close.
+function tabsAfterRename(moved) {
+  for (const t of S.tabs) { if (moved.has(t.key)) t.key = moved.get(t.key); t.hist = t.hist.map(h => moved.get(h) || h); }
+  for (const [a, b] of moved) if (edStates.has(a)) { edStates.set(b, edStates.get(a)); edStates.delete(a); }
+  saveTabs(); renderTabs();
+}
+function tabsAfterDelete() {
+  const gone = k => k && !k.startsWith(':') && !S.files.has(k);
+  for (const t of S.tabs) { t.hist = t.hist.filter(h => !gone(h)); t.histIdx = Math.min(t.histIdx, t.hist.length - 1); }
+  const cur = curTab();
+  S.tabs = S.tabs.filter(t => t === cur || !gone(t.key));
+  S.tab = S.tabs.indexOf(cur);
+  if (gone(cur?.key)) cur.key = null;
+  pruneEdStates(); saveTabs(); renderTabs();
+}
+
+function renderTabs() {
+  const bar = $('#tabbar .tabs-list');
+  bar.innerHTML = S.tabs.map((t, i) => `<div class="tab${i === S.tab ? ' active' : ''}" data-i="${i}" draggable="true" title="${esc(t.key && !t.key.startsWith(':') ? t.key : tabName(t.key))}" role="tab" aria-selected="${i === S.tab}"><span class="tab-name">${esc(tabName(t.key))}</span><button class="tab-x" tabindex="-1" title="Close (Ctrl+W)">×</button></div>`).join('');
+  bar.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+let dragTab = null;
+$('#tabbar').addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest('.tab')) e.preventDefault(); }); // no autoscroll
+$('#tabbar').addEventListener('click', e => {
+  if (e.target.closest('.tab-new')) return openInNewTab(null, { switcher: true });
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  if (e.target.closest('.tab-x')) return closeTab(+tab.dataset.i);
+  activateTab(+tab.dataset.i);
+});
+$('#tabbar').addEventListener('auxclick', e => { const tab = e.target.closest('.tab'); if (tab && e.button === 1) closeTab(+tab.dataset.i); });
+$('#tabbar').addEventListener('dblclick', e => { if (!e.target.closest('.tab, button')) openInNewTab(null, { switcher: true }); });
+$('#tabbar').addEventListener('contextmenu', e => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  e.preventDefault();
+  const i = +tab.dataset.i, t = S.tabs[i];
+  menu(e.clientX, e.clientY, [
+    ['Close', () => closeTab(i)],
+    ['Close other tabs', () => closeTabs(x => x === t)],
+    ['Close tabs to the right', () => closeTabs((x, j) => j <= i)],
+    null,
+    ['Duplicate tab', () => { activateTab(i).then(() => openInNewTab(t.key)); }],
+    ...(t.key && !t.key.startsWith(':') ? [['Reveal in file tree', () => revealInTree(t.key)], ['Copy path', () => navigator.clipboard?.writeText(t.key).then(() => toast('Path copied'))]] : []),
+  ]);
+});
+$('#tabbar').addEventListener('dragstart', e => { const tab = e.target.closest('.tab'); if (!tab) return; dragTab = S.tabs[+tab.dataset.i]; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', tabName(dragTab.key)); });
+$('#tabbar').addEventListener('dragover', e => {
+  if (!dragTab) return;
+  const tab = e.target.closest('.tab');
+  e.preventDefault();
+  $$('#tabbar .tab.drop-before, #tabbar .tab.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+  if (tab) { const r = tab.getBoundingClientRect(); tab.classList.add(e.clientX < r.left + r.width / 2 ? 'drop-before' : 'drop-after'); }
+});
+$('#tabbar').addEventListener('drop', e => {
+  if (!dragTab) return;
+  e.preventDefault();
+  const tab = e.target.closest('.tab'), cur = curTab(), moving = dragTab;
+  let to = S.tabs.length;
+  if (tab) { const r = tab.getBoundingClientRect(); to = +tab.dataset.i + (e.clientX < r.left + r.width / 2 ? 0 : 1); }
+  const from = S.tabs.indexOf(moving);
+  S.tabs.splice(from, 1);
+  S.tabs.splice(to > from ? to - 1 : to, 0, moving);
+  S.tab = S.tabs.indexOf(cur);
+  dragTab = null; saveTabs(); renderTabs();
+});
+$('#tabbar').addEventListener('dragend', () => { dragTab = null; $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); });
+
+// Start with the tabs from last time (or the last file, in one tab).
+async function restoreTabs() {
+  const saved = store('tabs');
+  const keys = (saved?.keys || []).filter(k => k == null || k.startsWith(':') || S.files.has(k));
+  if (!keys.length) {
+    const last = store('last');
+    S.tabs = [newTabObj(last && S.files.has(last) ? last : null)];
+  } else S.tabs = keys.map(newTabObj);
+  S.tab = -1;
+  await activateTab(Math.max(0, Math.min(saved?.active ?? 0, S.tabs.length - 1)), { force: true, focus: false });
 }
 
 // ============================================================ canvases
@@ -1598,6 +1767,18 @@ document.addEventListener('click', e => {
   if (tg) { e.preventDefault(); searchFor(`tag:${tg.dataset.tag}`); }
 });
 
+// Middle-click a link (reading view, live preview, panels) to open it in a new tab.
+document.addEventListener('mousedown', e => { if (e.button === 1 && e.target.closest('a.internal-link, .cm-editor [data-link]')) e.preventDefault(); });
+document.addEventListener('auxclick', e => {
+  if (e.button !== 1) return;
+  const a = e.target.closest('a.internal-link, .cm-editor [data-link]');
+  if (!a) return;
+  e.preventDefault();
+  const name = a.dataset.href ?? a.dataset.link;
+  const target = a.dataset.path ? name : resolveLink(name, a.dataset.from || S.cur);
+  if (target) openInNewTab(target, { heading: a.dataset.sub || undefined });
+});
+
 // ============================================================ file tree
 
 function buildTree() {
@@ -1643,12 +1824,30 @@ function renderTree() {
   $('#tree').innerHTML = rows.join('') + '<div class="tree-root-drop" data-dir=""></div>';
   renderTreeActive();
   if (treeCursor) treeRow(treeCursor)?.classList.add('kb');
+  for (const k of [...treeSel]) { const r = treeRow(k); if (r) r.classList.add('sel'); else treeSel.delete(k); }
 }
 
 // ------------------------------------------------------------ file tree keyboard
 
 // The row the keyboard is on ('d:<dir>' or 'f:<file>'), kept across re-renders.
 let treeCursor = null, treeTyped = '', treeTypedAt = 0;
+// Rows picked with Ctrl/Cmd-click, Shift-click or Shift+arrows, to move, group or delete together.
+const treeSel = new Set();
+const selPaths = () => [...treeSel].map(k => k.slice(2));
+function setTreeSel(keys) {
+  treeSel.clear();
+  for (const k of keys) treeSel.add(k);
+  for (const r of $$('#tree .t-row')) r.classList.toggle('sel', treeSel.has(rowKey(r)));
+}
+// Rows from a to b (in the order shown).
+function rowRange(a, b) {
+  const rows = $$('#tree .t-row').filter(r => r.offsetParent);
+  let i = rows.indexOf(a), j = rows.indexOf(b);
+  if (i < 0) i = j;
+  if (i > j) [i, j] = [j, i];
+  return rows.slice(i, j + 1).map(rowKey);
+}
+let treeAnchor = null; // where a Shift-selection started
 const rowKey = r => r.dataset.dir != null ? 'd:' + r.dataset.dir : 'f:' + r.dataset.path;
 const treeRow = k => $(k.startsWith('d:') ? `#tree .t-row[data-dir="${CSS.escape(k.slice(2))}"]` : `#tree .t-row[data-path="${CSS.escape(k.slice(2))}"]`);
 function setTreeCursor(r, scroll = true) {
@@ -1681,6 +1880,16 @@ $('#tree').addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
   let done = true;
   if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'n') newNote(dir != null ? dir : path ? dirname(path) : '');
+  else if (mod && e.key === 'Enter' && path) openInNewTab(path);
+  else if (mod && !e.shiftKey && e.key.toLowerCase() === 'a') { setTreeSel(rows.map(rowKey)); }
+  else if (e.shiftKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp') && r) {
+    // Shift+↑/↓ extends the selection from where it started.
+    const next = rows[Math.max(0, Math.min(rows.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+    if (!treeAnchor || !treeRow(treeAnchor) || !treeSel.size) treeAnchor = rowKey(r);
+    setTreeSel(rowRange(treeRow(treeAnchor), next)); setTreeCursor(next);
+  }
+  else if (e.key === 'Escape' && treeSel.size) setTreeSel([]);
+  else if (e.key === 'Delete' && treeSel.size > 1) deleteMany(selPaths());
   else if (mod || e.altKey) done = false;
   else if (e.key === 'ArrowDown') setTreeCursor(rows[Math.min(rows.length - 1, i + 1)]);
   else if (e.key === 'ArrowUp') setTreeCursor(rows[Math.max(0, i - 1)] || rows[0]);
@@ -1739,6 +1948,21 @@ function renderTreeActive(reveal = false) {
 $('#tree').addEventListener('click', e => {
   const row = e.target.closest('.t-row');
   if (!row) return;
+  if (e.ctrlKey || e.metaKey) {
+    // Ctrl/Cmd-click picks rows (the open file joins the first time, like a file manager).
+    if (!treeSel.size && S.cur && S.files.has(S.cur) && rowKey(row) !== 'f:' + S.cur && treeRow('f:' + S.cur)) treeSel.add('f:' + S.cur);
+    const k = rowKey(row);
+    treeSel.has(k) ? treeSel.delete(k) : treeSel.add(k);
+    setTreeSel([...treeSel]); setTreeCursor(row, false); treeAnchor = k;
+    return;
+  }
+  if (e.shiftKey) {
+    const from = (treeAnchor && treeRow(treeAnchor)) || (treeCursor && treeRow(treeCursor)) || $('#tree .t-row.active') || row;
+    setTreeSel(rowRange(from, row)); treeAnchor = rowKey(from); setTreeCursor(row, false);
+    return;
+  }
+  if (treeSel.size) setTreeSel([]);
+  treeAnchor = rowKey(row);
   setTreeCursor(row, false);
   if (row.dataset.dir != null) {
     const d = row.dataset.dir;
@@ -1748,9 +1972,21 @@ $('#tree').addEventListener('click', e => {
   } else openPath(row.dataset.path);
 });
 
+$('#tree').addEventListener('auxclick', e => { const row = e.target.closest('.t-row[data-path]'); if (row && e.button === 1) { e.preventDefault(); openInNewTab(row.dataset.path); } });
 $('#tree').addEventListener('contextmenu', e => {
   const row = e.target.closest('.t-row, .tree-root-drop');
   e.preventDefault();
+  if (row && treeSel.has(rowKey(row)) && treeSel.size > 1) {
+    const paths = selPaths(), n = paths.length, files = paths.filter(p => S.files.has(p));
+    return menu(e.clientX, e.clientY, [
+      [`Move ${n} items to…`, () => moveManyDialog(paths)],
+      [`New folder with ${n} items…`, () => groupIntoFolder(paths)],
+      ...(files.length ? [[`Open ${files.length} in new tabs`, async () => { for (const p of files) await openInNewTab(p); }]] : []),
+      null,
+      [`Delete ${n} items`, () => deleteMany(paths), 'danger'],
+    ]);
+  }
+  if (row && !treeSel.has(rowKey(row)) && treeSel.size) setTreeSel([]);
   const dir = row?.dataset.dir, path = row?.dataset.path;
   const folder = dir != null ? dir : path ? dirname(path) : '';
   const items = [
@@ -1766,6 +2002,7 @@ $('#tree').addEventListener('contextmenu', e => {
       ['Rename…', () => renameDialog(target)],
       ['Move to…', () => moveDialog(target)],
     );
+    if (path) items.unshift(['Open in new tab', () => openInNewTab(path)], null);
     if (path && isMd(path) && !isDrawing(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
     if (path && isMd(path) && isDrawing(path)) items.push(['Open as Markdown', () => openPath(path, { raw: true })]);
     items.push(null, ['Delete', () => deletePath(target), 'danger']);
@@ -1775,10 +2012,12 @@ $('#tree').addEventListener('contextmenu', e => {
 
 // Drag & drop: move within the vault, or import files from the desktop.
 let dragPath = null;
+let dragMany = null; // paths when a multi-selection is dragged
 $('#tree').addEventListener('dragstart', e => {
   const row = e.target.closest('.t-row');
   dragPath = row ? (row.dataset.path ?? row.dataset.dir) : null;
-  if (dragPath) e.dataTransfer.setData('text/plain', dragPath);
+  dragMany = row && treeSel.has(rowKey(row)) && treeSel.size > 1 ? selPaths() : null;
+  if (dragPath) e.dataTransfer.setData('text/plain', dragMany ? dragMany.join('\n') : dragPath);
 });
 $('#tree').addEventListener('dragover', e => {
   const row = e.target.closest('.t-row, .tree-root-drop');
@@ -1799,11 +2038,67 @@ $('#tree').addEventListener('drop', async e => {
     renderTree(); return;
   }
   const src = dragPath; dragPath = null;
+  if (dragMany) { const many = dragMany; dragMany = null; return moveMany(many, folder); }
   if (!src || src === folder || dirname(src) === folder) return;
   if (folder === src || folder.startsWith(src + '/')) return toast("Can't move a folder into itself");
   await renamePath(src, join(folder, basename(src)));
 });
-$('#tree').addEventListener('dragend', () => { dragPath = null; });
+$('#tree').addEventListener('dragend', () => { dragPath = null; dragMany = null; });
+
+// ------------------------------------------------------------ several files at once
+
+// Leave out anything inside a folder that's also in the list (moving the folder takes it along).
+const topLevel = paths => paths.filter(p => !paths.some(q => q !== p && S.dirs.has(q) && p.startsWith(q + '/')));
+
+async function moveMany(paths, folder) {
+  const todo = topLevel(paths).filter(p => dirname(p) !== folder);
+  const bad = todo.find(p => folder === p || folder.startsWith(p + '/'));
+  if (bad) return toast(`Can't move "${basename(bad)}" into itself`);
+  const clash = todo.find(p => S.files.has(join(folder, basename(p))) || S.dirs.has(join(folder, basename(p))));
+  if (clash) return toast(`"${folder || 'the vault root'}" already has something called "${basename(clash)}"`);
+  let n = 0;
+  for (const p of todo) { await renamePath(p, join(folder, basename(p))); n++; }
+  S.expanded.add(folder); store('expanded', [...S.expanded]);
+  setTreeSel(todo.map(p => (S.dirs.has(join(folder, basename(p))) ? 'd:' : 'f:') + join(folder, basename(p))));
+  renderTree();
+  if (n) toast(`Moved ${n} item${n === 1 ? '' : 's'} to ${folder || 'the vault root'}`);
+}
+
+async function moveManyDialog(paths) {
+  const top = topLevel(paths);
+  const dirs = ['', ...[...S.dirs].sort(collator.compare)].filter(d => !top.some(p => d === p || d.startsWith(p + '/')));
+  const dest = await picker({
+    placeholder: `Move ${top.length} items to folder…`,
+    items: q => rank(dirs, q, d => d || '/').map(d => ({ main: d || '/ (vault root)', value: d })),
+  });
+  if (dest != null) await moveMany(paths, dest);
+}
+
+// Put the selection into a new folder, next to where the items are.
+async function groupIntoFolder(paths) {
+  const top = topLevel(paths);
+  const parents = [...new Set(top.map(dirname))];
+  const parent = parents.length === 1 ? parents[0] : '';
+  const name = await promptModal(`New folder with ${top.length} items`, `Folder name (in ${parent || 'the vault root'})`, 'New folder');
+  if (!name || !name.trim()) return;
+  if (/[\\:*?"<>|]/.test(name)) return toast('Folder names can’t contain \\ : * ? " < > |');
+  const folder = normPath(join(parent, name.trim()));
+  if (S.files.has(folder)) return toast('A file with that name already exists');
+  if (!S.dirs.has(folder)) {
+    try { await api('/api/mkdir', { method: 'POST', body: JSON.stringify({ path: folder }) }); } catch (e) { return toast('Couldn’t create the folder: ' + e.message); }
+    S.dirs.add(folder);
+  }
+  await moveMany(top, folder);
+}
+
+async function deleteMany(paths) {
+  const top = topLevel(paths);
+  if (!top.length) return;
+  if (top.length === 1) return deletePath(top[0]);
+  if (!confirm(`Move ${top.length} items to the vault's .trash folder?\n\n${top.slice(0, 12).map(p => '• ' + p).join('\n')}${top.length > 12 ? '\n…' : ''}`)) return;
+  for (const p of top) await deletePath(p, { confirm: false });
+  setTreeSel([]);
+}
 
 async function importFile(file, folder) {
   const path = uniquePath(folder, file.name);
@@ -1956,6 +2251,7 @@ async function renamePath(from, to) {
     S.hist = S.hist.map(h => h === a ? b : h);
     S.recent = S.recent.map(h => h === a ? b : h);
   }
+  tabsAfterRename(moved);
   if (isDir) {
     const dirs = [...S.dirs];
     S.dirs = new Set(dirs.map(d => d === from ? to : d.startsWith(from + '/') ? to + d.slice(from.length) : d));
@@ -2000,10 +2296,10 @@ async function renamePath(from, to) {
   if (n) toast(`Updated links in ${n} file${n > 1 ? 's' : ''}`);
 }
 
-async function deletePath(path) {
+async function deletePath(path, opts = {}) {
   const isDir = S.dirs.has(path);
   const what = isDir ? `folder "${path}" and everything in it` : `"${basename(path)}"`;
-  if (!confirm(`Move ${what} to the vault's .trash folder?`)) return;
+  if (opts.confirm !== false && !confirm(`Move ${what} to the vault's .trash folder?`)) return;
   if (S.cur === path || (isDir && S.cur?.startsWith(path + '/'))) { S.dirty = false; }
   try { await api('/api/delete', { method: 'POST', body: JSON.stringify({ path }) }); }
   catch (e) { return toast('Delete failed: ' + e.message); }
@@ -2011,6 +2307,7 @@ async function deletePath(path) {
   for (const d of [...S.dirs]) if (d === path || d.startsWith(path + '/')) S.dirs.delete(d);
   S.hist = S.hist.filter(h => S.files.has(h)); S.histIdx = S.hist.length - 1;
   reindexAll(); renderTree();
+  tabsAfterDelete();
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; showEmpty(); }
   refreshPanels();
 }
@@ -2642,7 +2939,10 @@ function modal(html) {
 
 // items(q) -> [{main, sub, value}] ; resolves with value or null.
 // onHighlight(value) is called as the selection moves (for live previews); `initial` preselects a value.
+// Whether the last picker choice was made with Ctrl/Cmd held (the quick switcher opens a new tab).
+let pickedWithMod = false;
 function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
+  pickedWithMod = false;
   return new Promise(resolve => {
     const back = modal(`<input class="field" placeholder="${esc(placeholder)}" spellcheck="false"><div class="pick-list"></div><div class="pick-foot">${foot || '<span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>'}</div>`);
     const input = $('input', back), list = $('.pick-list', back);
@@ -2668,11 +2968,11 @@ function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
     input.addEventListener('keydown', e => {
       if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, cur.length - 1); draw(); e.preventDefault(); }
       else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); draw(); e.preventDefault(); }
-      else if (e.key === 'Enter') { e.preventDefault(); choose(sel, e.shiftKey); }
+      else if (e.key === 'Enter') { e.preventDefault(); pickedWithMod = e.ctrlKey || e.metaKey; choose(sel, e.shiftKey); }
       else if (e.key === 'Escape') { e.preventDefault(); done(null); }
     });
     list.addEventListener('mousemove', e => { const d = e.target.closest('.pick'); if (d && +d.dataset.i !== sel) { sel = +d.dataset.i; draw(); } });
-    list.addEventListener('click', e => { const d = e.target.closest('.pick'); if (d) choose(+d.dataset.i); });
+    list.addEventListener('click', e => { const d = e.target.closest('.pick'); if (d) { pickedWithMod = e.ctrlKey || e.metaKey; choose(+d.dataset.i); } });
     back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
     draw(); input.focus();
   });
@@ -2718,7 +3018,7 @@ function openSwitcher() {
   const files = [...S.files.keys()];
   picker({
     placeholder: 'Find or create a note…',
-    foot: '<span>↑↓ navigate</span><span>↵ open</span><span>⇧↵ create</span><span>esc close</span>',
+    foot: '<span>↑↓ navigate</span><span>↵ open</span><span>ctrl ↵ new tab</span><span>⇧↵ create</span><span>esc close</span>',
     items: q => {
       const r = rank(files, q, p => isMd(p) ? noteName(p) : basename(p)).map(p => ({ main: isMd(p) ? noteName(p) : basename(p), sub: dirname(p), value: p }));
       if (q) for (const [a, p] of S.byAlias) if (a.includes(q.toLowerCase())) r.push({ main: a, sub: '→ ' + noteName(p), value: p });
@@ -2726,7 +3026,7 @@ function openSwitcher() {
       return r;
     },
     onCreate: name => followLink(name, null, null),
-  }).then(p => p && openPath(p));
+  }).then(p => p && (pickedWithMod ? openInNewTab(p) : openPath(p)));
 }
 
 // Every command, for the palette, hotkeys and the shortcuts sheet. `key` is the default binding
@@ -2770,6 +3070,14 @@ const APP_COMMANDS = [
   ['backlinks', 'Show backlinks', 'Mod-Shift-b', () => showRight('backlinks')],
   ['outline', 'Show outline', 'Mod-Shift-o', () => showRight('outline')],
   ['outgoing', 'Show outgoing links', '', () => showRight('outgoing')],
+  ['new-tab', 'New tab', 'Mod-t', () => openInNewTab(null, { switcher: true })],
+  ['close-tab', 'Close tab', 'Mod-w', () => closeTab()],
+  ['reopen-tab', 'Reopen closed tab', '', () => reopenClosedTab()],
+  ['next-tab', 'Next tab', 'Mod-PageDown', () => cycleTab(1)],
+  ['prev-tab', 'Previous tab', 'Mod-PageUp', () => cycleTab(-1)],
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map(n => [`tab-${n}`, `Go to tab ${n}`, `Alt-${n}`, () => activateTab(n - 1)]),
+  ['tab-last', 'Go to the last tab', 'Alt-9', () => activateTab(S.tabs.length - 1)],
+  ['open-new-tab', 'Open current file in a new tab', '', () => openInNewTab(viewKey())],
   ['recent', 'Switch to a recent file', MAC ? 'Ctrl-Tab' : 'Mod-Tab', () => recentSwitcher(1)],
   ['recent-back', 'Switch to a recent file (backwards)', MAC ? 'Ctrl-Shift-Tab' : 'Mod-Shift-Tab', () => recentSwitcher(-1)],
   ['toggle-right', 'Toggle right sidebar', 'Mod-Shift-\\', () => toggleSide('right')],
@@ -2928,9 +3236,9 @@ function showShortcuts() {
   const fixed = rows => rows.map(([n, k]) => `<p><span>${esc(n)}</span><span class="keys">${k.split(' / ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</span></p>`).join('');
   const M = MAC ? '⌘' : 'Ctrl+', A = MAC ? '⌥' : 'Alt+', S_ = MAC ? '⇧' : 'Shift+';
   const back = modal(`<div class="dr-help shortcuts"><h3>Keyboard shortcuts</h3><div class="dr-help-cols">
-    <div><h4>App</h4>${bound(APP_COMMANDS)}</div>
+    <div><h4>App</h4>${bound(APP_COMMANDS.filter(c => !/^tab-(\d|last)$/.test(c.id)))}${fixed([['Go to tab 1–8 / the last', `${A}1…${A}8 / ${A}9`]])}</div>
     <div><h4>Editing</h4>${bound(EDITOR_COMMANDS)}${fixed([['Move line up / down', `${A}↑ / ${A}↓`], ['Copy line', `${S_}${A}↑ / ${S_}${A}↓`], ['Select next match', `${M}D`], ['Indent / outdent list', `Tab / ${S_}Tab`], ['Follow link under cursor', `${M}click`], ['Undo / redo', `${M}Z / ${M}${S_}Z`]])}</div>
-    <div><h4>File tree</h4>${fixed([['Move', '↑ / ↓'], ['Expand / collapse', '→ / ←'], ['Open', 'Enter'], ['Rename', 'F2'], ['Delete', 'Del'], ['New note here', `${M}N`], ['Back to the page', 'Esc']])}
+    <div><h4>File tree</h4>${fixed([['Move', '↑ / ↓'], ['Expand / collapse', '→ / ←'], ['Open', 'Enter'], ['Open in a new tab', `${M}Enter / middle-click`], ['Select several', `${S_}↑↓ / ${M}click / ${S_}click`], ['Rename', 'F2'], ['Delete', 'Del'], ['New note here', `${M}N`], ['Back to the page', 'Esc']])}
       <h4>Lists (search, tasks)</h4>${fixed([['Move', '↑ / ↓'], ['Open', 'Enter'], ['Tick a task', 'Space / X'], ['Due today / tomorrow', 'T / M']])}
       <h4>Backlinks / outline pane</h4>${fixed([['Switch tab', '← / →'], ['Preview a heading', 'Space'], ['Link an unlinked mention', 'L']])}
       <h4>Recent files</h4>${fixed([['Step through (hold Ctrl)', 'Tab / Shift+Tab'], ['Open', 'release Ctrl']])}
@@ -3735,8 +4043,7 @@ async function boot() {
     await createNote('Welcome.md', WELCOME, { mode: 'read' });
     return;
   }
-  const last = store('last');
-  if (last && S.files.has(last)) openPath(last, { focus: false }); else showEmpty();
+  await restoreTabs();
 }
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else poll(); });

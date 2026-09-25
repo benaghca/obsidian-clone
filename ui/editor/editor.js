@@ -1021,6 +1021,13 @@ function create(parent, hooks, opts = {}) {
       // (selecting 0 lets the cursor step below the properties, if any)
       view.dispatch({ effects: setFocus.of(view.hasFocus), selection: { anchor: 0 }, annotations: [silent.of(true)] });
     },
+    // A note's whole editor state (text, selection, undo history), for tabs to keep and bring
+    // back; current settings (keys, Vim, live preview) are re-applied when it returns.
+    getState() { return view.state; },
+    setState(st) {
+      view.setState(st);
+      view.dispatch({ effects: [setFocus.of(view.hasFocus), liveComp.reconfigure(liveOn ? livePreview : []), keysComp.reconfigure(keymap.of(keyBindings(keys))), vimComp.reconfigure(vimOn ? vim() : [])] });
+    },
     // Replace content without marking the note dirty (reload from disk).
     setSilently(text) {
       const { anchor, head } = view.state.selection.main;
