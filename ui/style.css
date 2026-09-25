@@ -937,9 +937,13 @@ body.presenting #main { border: 0; }
 .g-spin[hidden] { display: none !important; }
 
 /* ---------------------------------------------------------------- vault switcher */
-#vault-name { cursor: pointer; border-radius: 5px; padding: 2px 4px; margin-left: -4px; }
-#vault-name:hover { background: var(--accent-soft); color: var(--text); }
-#vault-name::after { content: ' ⌄'; opacity: .6; }
+/* The vault's name above the file tree: a button that opens the vault switcher. */
+.vault-btn { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; margin: 0 4px 0 -6px; padding: 4px 6px; border: 0; border-radius: 7px; background: none; color: var(--text); font: 600 13.5px var(--font-ui); cursor: pointer; text-align: left; }
+.vault-btn img { flex: none; border-radius: 4px; }
+.vault-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-chev { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; color: var(--faint); transition: color .12s; }
+.vault-btn:hover, .vault-btn:focus-visible { background: var(--bg-hover); outline: none; }
+.vault-btn:hover .vault-chev { color: var(--text); }
 .vs { display: flex; flex-direction: column; max-height: calc(88vh - 16px); }
 .vs-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 4px 18px; }
 .vs-head h3 { margin: 0; }

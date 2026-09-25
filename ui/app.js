@@ -3610,6 +3610,7 @@ const APP_COMMANDS = [
   ['random', 'Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
   ['reload', 'Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
   ['vault', 'Switch vault…', '', () => switchVault()],
+  ['welcome', 'Open the welcome note', '', () => showWelcome()],
   ['settings', 'Settings', 'Mod-,', () => openSettings()],
 ].map(([id, name, key, run]) => ({ id, name, key, run }));
 const EDITOR_COMMANDS = Object.entries(CinderEditor.commands).map(([id, c]) => ({
@@ -4815,42 +4816,66 @@ function makeResizer(handle, side) {
 
 // ============================================================ boot
 
-const WELCOME = `Cinder is a local notes app. Your notes are plain Markdown files in this folder, so the same vault opens in Obsidian or any text editor.
+const WELCOME = `---
+tags:
+  - welcome
+---
+Cinder is a local notes app. Your notes are plain Markdown files in this folder, so the same vault opens in Obsidian or any text editor.
 
 ## The basics
-- Link notes with double brackets: [[Getting around]]. Clicking a link to a note that doesn't exist creates it.
-- Tag with #hashtags, or with a \`tags:\` list in frontmatter.
-- Paste or drag an image into a note to save it into \`attachments/\` and embed it.
-- Sketch diagrams with the drawing tool (the shapes icon on the left). Embed one in a note with \`![[Drawing name.excalidraw]]\`.
-- Markdown formatting renders as you type. Put the cursor on a line to see its raw syntax.
-- **Ctrl+E** switches between editing and reading view.
+- Link notes with double brackets: [[My first note]]. Clicking a link to a note that doesn't exist creates it, and hovering one previews it.
+- Tag with #hashtags or the **Properties** above this line. Click a property to edit it; **Ctrl+;** adds one.
+- Paste or drag in an image to save it into \`attachments/\`, or press **Ctrl+Shift+S** for a screenshot.
+- Formatting renders as you type. Put the cursor on a line to see its Markdown, and press **Ctrl+E** for reading view.
+- Math works too: $E = mc^2$. Inside math, \`//\` makes a fraction and \`@a\` makes α.
+
+## More than notes
+The icons down the left make:
+- **Drawings**: a hand-drawn whiteboard. Embed one in a note with \`![[Drawing name.excalidraw]]\`.
+- **Canvases**: cards and arrows on an endless board. Press **F5** to present one, with each group as a slide.
+- **Bases**: tables, cards and kanban boards made from your notes' properties.
+- **Tasks**: every \`- [ ]\` in the vault in one place (**Ctrl+Shift+T**), with due dates, repeats and quick add.
+- **The graph** (**Ctrl+G**): click a note to light up its links, or tick **3D** and fly around it.
 
 ## Getting around
 | Keys | Does |
 | --- | --- |
 | Ctrl+O | Quick switcher (Shift+Enter creates) |
 | Ctrl+P | Command palette |
-| Ctrl+N | New note |
-| Ctrl+Shift+F | Search all notes |
-| Ctrl+G | Graph view |
-| Alt+← / Alt+→ | Back / forward |
-| Ctrl+Enter | Toggle a checkbox |
 | Ctrl+/ | All keyboard shortcuts |
-| Ctrl+Shift+E | File tree (arrows, Enter) |
-| Ctrl+click | Follow a [[link]] while editing |
+| Ctrl+N | New note |
+| Ctrl+T / Ctrl+W | New tab / close tab |
+| Ctrl+Tab | Recent files |
+| Ctrl+Shift+F | Search all notes (\`tag:x\`, \`[status:done]\`, \`"exact phrase"\`) |
+| Ctrl+Shift+E | File tree (arrows, Enter; Ctrl-click to pick several) |
+| Alt+← / Alt+→ | Back / forward |
 
-- [ ] Try ticking this box in reading view
-- [ ] Make a daily note from the calendar icon
+Every shortcut can be changed in **Settings → Hotkeys**. Click the vault's name above the file tree to switch vaults.
+
+- [ ] Tick this box (or put the cursor on it and press Ctrl+Enter)
+- [ ] Open today's daily note from the calendar icon
+- [ ] Try another colour theme in Settings (Volcanic is the default)
 
 > [!tip] Nothing leaves this machine
-> Cinder only listens on 127.0.0.1 and has no plugin system, so it doesn't reach the network or run third-party code. The one exception is a web page you embed yourself, like \`![](https://example.com)\`.
+> Cinder has no accounts, no telemetry and no plugins, and it doesn't reach the network. The one exception is a web page you embed yourself, like \`![](https://example.com)\`.
 `;
+
+// The welcome note, made again (or brought up to date, if it's an older one).
+async function showWelcome() {
+  const p = 'Welcome.md';
+  if (!S.files.has(p)) return createNote(p, WELCOME, { mode: 'read' });
+  if (S.notes.get(p)?.content !== WELCOME && await confirmModal('Update the welcome note?', 'Welcome.md is from an older version of Cinder, or you’ve changed it. Replace it with the latest one?', { ok: 'Replace it', cancel: 'Just open it' })) {
+    try { await writeFile(p, WELCOME, S.notes.get(p)?.mtime); } catch (e) { toast('Couldn’t update it: ' + e.message); }
+    reindexAll();
+  }
+  await openPath(p, { mode: 'read' });
+}
 
 async function boot() {
   applyTheme();
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
-  $('#vault-name').textContent = VAULT;
-  $('#vault-name').title = 'Switch vault';
+  $('#vault-name .vault-label').textContent = VAULT;
+  $('#vault-name').title = `${VAULT}: switch vault`;
   $('#vault-name').onclick = () => switchVault();
   const layout = store('layout');
   if (layout && !layout.left) document.body.classList.add('app-no-left');
