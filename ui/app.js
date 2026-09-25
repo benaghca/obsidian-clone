@@ -2670,12 +2670,15 @@ function rebuildHotkeys() {
   }
 }
 
+// Punctuation keys by position, so Shift+key names the key rather than the shifted character.
+const PUNCT_CODES = { Backslash: '\\', Slash: '/', Minus: '-', Equal: '=', BracketLeft: '[', BracketRight: ']', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Backquote: '`' };
 // A keydown as a key string: [Mod-][Ctrl-/Meta-][Alt-][Shift-]key, letters lower case.
 function keyOf(e) {
   const k = e.key;
   if (!k || k === 'Dead' || k === 'Unidentified' || ['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'OS'].includes(k)) return null;
   let name = k.length === 1 ? k.toLowerCase() : k;
   if (/^Digit\d$/.test(e.code)) name = e.code.slice(5); // Shift+1 is "1", not "!"
+  else if (e.shiftKey && PUNCT_CODES[e.code]) name = PUNCT_CODES[e.code]; // Shift+\ is "\", not "|"
   else if (/^Key[A-Z]$/.test(e.code) && !/^[a-z]$/.test(name)) name = e.code.slice(3).toLowerCase(); // Alt+letter on a Mac
   if (name === ' ') name = 'Space';
   const mod = MAC ? e.metaKey : e.ctrlKey, other = MAC ? e.ctrlKey : e.metaKey;
