@@ -15,6 +15,10 @@ window.CinderDraw = (() => {
   let view = { sx: 0, sy: 0, zoom: 1 }; // screen = (world + s) * zoom
   let selected = new Set();
   let tool = 'selection', locked = false;
+  // Laser pointer: strokes of [x, y, time] in scene coordinates, fading out; nothing is saved.
+  const laser = [];
+  let laserAt = null; // the pointer on screen, for the laser's dot
+  const LASER_FADE = 1100;
   let action = null;           // the pointer interaction in progress
   let multi = null;            // a line/arrow being placed click by click
   let editing = null;          // {el, ta, container, isNew}
@@ -42,9 +46,10 @@ window.CinderDraw = (() => {
     ['text', 'Text', 'T or 8', '<path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6"/>'],
     ['image', 'Insert image', '9', '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="M20.5 16l-5-5L5 19.5"/>'],
     ['eraser', 'Eraser', 'E or 0', '<path d="M8.5 19.5H20M5.6 14.6l8.2-8.2a2 2 0 0 1 2.8 0l2.5 2.5a2 2 0 0 1 0 2.8l-7.6 7.8H9z"/><path d="M9.5 10.5l5 5"/>'],
+    ['laser', 'Laser pointer', 'K', '<circle cx="17.5" cy="6.5" r="2.5"/><path d="M15.7 8.3L4 20"/><path d="M17.5 1.5v1.5M22.5 6.5H21M20.9 3.1l-1 1M20.9 9.9l-1-1"/>'],
     ['hand', 'Hand (pan)', 'H or Space', '<path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 10.5V4.5a1.5 1.5 0 0 1 3 0v6M14 10.5V6a1.5 1.5 0 0 1 3 0v5.5M17 9.5a1.5 1.5 0 0 1 3 0V14a6.5 6.5 0 0 1-6.5 6.5H12a6 6 0 0 1-4.9-2.6l-3-4.5a1.5 1.5 0 0 1 2.4-1.8L8 13.5"/>'],
   ];
-  const TOOL_KEYS = { v: 'selection', 1: 'selection', r: 'rectangle', 2: 'rectangle', d: 'diamond', 3: 'diamond', o: 'ellipse', 4: 'ellipse', a: 'arrow', 5: 'arrow', l: 'line', 6: 'line', p: 'freedraw', x: 'freedraw', 7: 'freedraw', t: 'text', 8: 'text', 9: 'image', e: 'eraser', 0: 'eraser', h: 'hand' };
+  const TOOL_KEYS = { v: 'selection', 1: 'selection', r: 'rectangle', 2: 'rectangle', d: 'diamond', 3: 'diamond', o: 'ellipse', 4: 'ellipse', a: 'arrow', 5: 'arrow', l: 'line', 6: 'line', p: 'freedraw', x: 'freedraw', 7: 'freedraw', t: 'text', 8: 'text', 9: 'image', e: 'eraser', 0: 'eraser', k: 'laser', h: 'hand' };
   const ICON = p => `<svg viewBox="0 0 24 24">${p}</svg>`;
 
   // ============================================================ setup
@@ -79,6 +84,7 @@ window.CinderDraw = (() => {
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('mousedown', e => e.preventDefault()); // onDown manages focus (the text editor keeps it)
     canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerleave', () => { if (laserAt) { laserAt = null; requestRender(); } });
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
     canvas.addEventListener('dblclick', onDouble);
@@ -346,12 +352,12 @@ window.CinderDraw = (() => {
     finishMulti();
     commitText();
     tool = t;
-    if (t !== 'selection' && t !== 'hand') { if (t !== 'eraser') selected = new Set(); }
+    if (t !== 'selection' && t !== 'hand') { if (t !== 'eraser' && t !== 'laser') selected = new Set(); }
     for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
     renderProps(); updateCursor(); requestRender();
   }
   function toolDone(el) {
-    if (!locked && tool !== 'freedraw' && tool !== 'eraser') {
+    if (!locked && tool !== 'freedraw' && tool !== 'eraser' && tool !== 'laser') {
       tool = 'selection';
       for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === 'selection');
     }
@@ -364,6 +370,7 @@ window.CinderDraw = (() => {
     if (spaceDown || tool === 'hand') c = action?.type === 'pan' ? 'grabbing' : 'grab';
     else if (tool === 'text') c = 'text';
     else if (tool === 'eraser') c = 'cell';
+    else if (tool === 'laser') c = 'none'; // the laser's own dot is the pointer
     else if (tool !== 'selection') c = 'crosshair';
     canvas.style.cursor = c;
   }
@@ -387,6 +394,7 @@ window.CinderDraw = (() => {
     switch (tool) {
       case 'selection': return downSelect(e, wx, wy, mx, my);
       case 'eraser': action = { type: 'erase' }; eraseAt(wx, wy); return;
+      case 'laser': action = { type: 'laser' }; laser.push({ pts: [[wx, wy, performance.now()]] }); requestRender(); return;
       case 'rectangle': case 'diamond': case 'ellipse': return startShape(tool, wx, wy, e);
       case 'arrow': case 'line': return startLinear(tool, wx, wy, e);
       case 'freedraw': return startFreedraw(wx, wy, e);
@@ -406,7 +414,8 @@ window.CinderDraw = (() => {
       requestRender();
       return;
     }
-    if (!action) { hoverCursor(mx, my, wx, wy); return; }
+    if (!action) { hoverCursor(mx, my, wx, wy); if (tool === 'laser') { laserAt = [mx, my]; requestRender(); } return; }
+    if (action.type === 'laser') laserAt = [mx, my];
     switch (action.type) {
       case 'pan':
         view.sx = action.sx + (mx - action.mx) / view.zoom; view.sy = action.sy + (my - action.my) / view.zoom;
@@ -441,6 +450,11 @@ window.CinderDraw = (() => {
         break;
       }
       case 'erase': eraseAt(wx, wy); break;
+      case 'laser': {
+        const stroke = laser[laser.length - 1], evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+        for (const ev of evs.length ? evs : [e]) { const [cx, cy] = toWorld(...mouse(ev)); stroke.pts.push([cx, cy, performance.now()]); }
+        break;
+      }
     }
     requestRender();
   }
@@ -1618,10 +1632,42 @@ window.CinderDraw = (() => {
     ctx.globalAlpha = 1;
     ctx.setTransform(r, 0, 0, r, 0, 0);
     drawOverlay();
+    if (laser.length || tool === 'laser') drawLaser();
     hintEl.textContent = els.length || editing ? '' : 'Pick a tool above and start drawing — double-click anywhere to write text';
     zoomLabel.textContent = Math.round(z * 100) + '%';
     root.querySelector('[data-act=undo]').disabled = !hist.undo.length;
     root.querySelector('[data-act=redo]').disabled = !hist.redo.length;
+  }
+
+  // The laser: a glowing red line whose tail fades, plus a dot at the pointer. Keeps redrawing
+  // until the trail has faded.
+  function drawLaser() {
+    const now = performance.now();
+    for (let i = laser.length - 1; i >= 0; i--) {
+      const pts = laser[i].pts;
+      while (pts.length > 1 && now - pts[0][2] > LASER_FADE) pts.shift();
+      if (now - pts[pts.length - 1][2] > LASER_FADE && !(i === laser.length - 1 && action?.type === 'laser')) laser.splice(i, 1);
+    }
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    for (const { pts } of laser) {
+      for (let j = 1; j < pts.length; j++) {
+        const a = 1 - Math.min(1, (now - pts[j][2]) / LASER_FADE);
+        if (a <= 0) continue;
+        const [x1, y1] = toScreen(pts[j - 1][0], pts[j - 1][1]), [x2, y2] = toScreen(pts[j][0], pts[j][1]);
+        ctx.globalAlpha = a * 0.35; ctx.strokeStyle = '#ff2d2d'; ctx.lineWidth = 9;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+        ctx.globalAlpha = a; ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 3;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+    }
+    if (tool === 'laser' && laserAt) {
+      ctx.globalAlpha = 0.35; ctx.fillStyle = '#ff2d2d';
+      ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 8, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1; ctx.fillStyle = '#ff4040';
+      ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 3.5, 0, TAU); ctx.fill();
+    }
+    ctx.globalAlpha = 1; ctx.lineCap = 'butt';
+    if (laser.length) requestRender();
   }
 
   function drawGrid(g) {
