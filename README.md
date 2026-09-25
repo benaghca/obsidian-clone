@@ -41,7 +41,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 - **Network:** in its default mode, Folio doesn't open any network port. The UI talks to the program through a private `folio://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Folio.
 - **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 6,700 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 7,500 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
   - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
@@ -70,6 +70,10 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - A quick switcher (**Ctrl+O**; **Shift+Enter** creates a note) and a command palette (**Ctrl+P**)
 - Vault search (**Ctrl+Shift+F**) with `tag:`, `path:`, `file:`, `"exact phrase"` and `-exclude`
 - Daily notes with an optional template, and an *Insert template* command. Templates support `{{date}}`, `{{time}}`, `{{title}}` and `{{date:dddd, MMMM DD}}`.
+- **Templater-style templates**, the syntax of Obsidian's Templater plugin: `<% tp.date.now("dddd, MMMM Do") %>`, `<% tp.file.title %>`, `<% tp.frontmatter.status %>`, `<%* let who = await tp.system.prompt("Who?") %>`, `if`/`else`, `for…of`, `tR +=`, `tp.file.cursor()`, `tp.file.rename()` / `move()` / `include()` / `create_new()`, `tp.system.suggester()` and whitespace control (`<%-` `-%>` `<%_` `_%>`). Dates use moment.js formats and ISO durations (`"P1W"`).
+  - *Create new note from template* and *Replace template commands in current note* commands.
+  - **Folder templates** (Settings): new notes in a folder start from that folder's template.
+  - Templates run in a small built-in interpreter, not as JavaScript, so a template can't reach anything outside the note and the vault. Arbitrary JavaScript, `tp.web` (network), `app` and user scripts aren't supported; using them gives a clear error.
 - A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag
 - Detection of edits made outside Folio. If a note changed on disk while you also had unsaved edits, Folio asks which version to keep.
 - **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images and an eraser. Features:
@@ -99,9 +103,10 @@ ui/app.js          index, preview, panels, search, commands
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
 ui/graph.js        graph view (canvas + force layout)
 ui/themes.js       colour themes (Catppuccin, Everforest, …)
+ui/templater.js    Templater-syntax template interpreter (tp.date, tp.file, tp.system, …)
 ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
-ui/test/           draw-render.test.js (run with `node ui/test/draw-render.test.js`, no packages needed)
+ui/test/           Node tests for draw-render.js and templater.js (no packages needed)
 ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, Virgil font
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
@@ -115,7 +120,7 @@ The editor bundle is already built and checked in, so building Folio doesn't nee
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The drawing format and renderer tests run under plain Node: `node ui/test/draw-render.test.js`.
+`cargo test` runs the Rust tests. The drawing and template tests run under plain Node: `node ui/test/draw-render.test.js` and `node ui/test/templater.test.js`.
 
 ## Ideas for round two
 

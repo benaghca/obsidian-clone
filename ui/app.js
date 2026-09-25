@@ -69,6 +69,7 @@ const DEFAULTS = {
   mono: false,
   theme: '',
   palette: 'default',
+  folderTemplates: '',
   drawingFormat: 'excalidraw',
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
@@ -279,7 +280,7 @@ async function readMany(paths) {
 }
 
 async function applyList(l, gen) {
-  const next = new Map(l.files.map(f => [f.path, { mtime: f.mtime, size: f.size }]));
+  const next = new Map(l.files.map(f => [f.path, { mtime: f.mtime, ctime: f.ctime, size: f.size }]));
   const nextDirs = new Set(l.dirs);
   const changed = [], removed = [];
   let structural = nextDirs.size !== S.dirs.size || [...nextDirs].some(d => !S.dirs.has(d));
@@ -1136,15 +1137,32 @@ function uniquePath(folder, filename) {
 
 const BAD_NAME = /[\\/:*?"<>|#^\[\]]/;
 
+// Create and open a note. opts.template = {text, from} fills it from a template; otherwise
+// an empty new note gets its folder's template (Settings → Folder templates), if any.
+// Returns {cursor} (-1 if the template didn't place one), or undefined if nothing was created.
 async function createNote(path, content = '', opts = {}) {
   if (S.files.has(path)) return openPath(path, opts);
+  let tpl = opts.template;
+  if (!tpl && !content && isMd(path) && !DRAWING_EXT.test(path)) {
+    const t = folderTemplateFor(path);
+    if (t) tpl = { text: S.notes.get(t).content, from: t, optional: true };
+  }
+  let cursor = -1, actions = [];
+  if (tpl) {
+    const r = await applyTemplate(tpl.text, path, { templatePath: tpl.from });
+    if (!r && !tpl.optional) return;
+    if (r) ({ text: content, cursor, actions } = r);
+  }
   try {
     await writeFile(path, content);
   } catch (e) { toast('Could not create note: ' + e.message); return; }
   let d = dirname(path);
   while (d) { S.dirs.add(d); d = dirname(d); }
   reindexAll(); renderTree();
-  await openPath(path, opts);
+  await openPath(path, cursor >= 0 ? { ...opts, focusTitle: false } : opts);
+  if (cursor >= 0 && S.cur === path) { if (S.mode !== 'edit') setMode('edit'); ed.focus(); ed.setSelectionRange(cursor, cursor, true); }
+  await runTemplateActions(path, actions);
+  return { cursor };
 }
 
 async function newNote(folder) {
@@ -1316,25 +1334,124 @@ async function openDaily() {
   const name = fmtDate(new Date(), 'YYYY-MM-DD');
   const path = join(cfg.dailyFolder, name + '.md');
   if (S.files.has(path)) return openPath(path);
-  let content = '';
-  if (cfg.dailyTemplate) {
-    const t = resolveLink(cfg.dailyTemplate, null);
-    if (t && S.notes.has(t)) content = fillTemplate(S.notes.get(t).content, name);
+  const t = cfg.dailyTemplate && resolveLink(cfg.dailyTemplate, null);
+  const template = t && S.notes.has(t) ? { text: S.notes.get(t).content, from: t, optional: true } : undefined;
+  const r = await createNote(path, '', { mode: 'edit', template });
+  if (r && r.cursor < 0 && S.cur === path) ed.setSelectionRange(ed.value.length, ed.value.length, true);
+}
+
+// ============================================================ templates (core {{date}} syntax + Templater's <% %>)
+
+function templateList() {
+  const folder = cfg.templatesFolder;
+  return [...S.notes.keys()].filter(p => (folder ? p.startsWith(folder + '/') : true) && !isDrawing(p));
+}
+async function pickTemplate(placeholder) {
+  const list = templateList();
+  if (!list.length) { toast(`No templates found in "${cfg.templatesFolder}/"`); return null; }
+  return picker({ placeholder, items: q => rank(list, q, noteName).map(p => ({ main: noteName(p), sub: dirname(p), value: p })) });
+}
+
+// What tp.* sees when a template is applied to the note at `path`.
+function templateEnv(path, selection, templatePath) {
+  const n = S.notes.get(path), f = S.files.get(path);
+  return {
+    path, title: noteName(path), folder: dirname(path), content: n?.content ?? '', selection,
+    frontmatter: n?.fm || {}, tags: n ? [...n.tags] : [], vaultPath: S.vaultPath || '',
+    ctime: f?.ctime || f?.mtime || Date.now(), mtime: f?.mtime || Date.now(), templatePath,
+    prompt: (text, def, multiline) => promptModal('Template', text || 'Value', def, { multiline, raw: true }),
+    suggest: async (labels, values, placeholder) => {
+      const i = await picker({ placeholder: placeholder || 'Choose…', items: q => rank(labels.map((l, k) => ({ l, k })), q, x => x.l).map(x => ({ main: x.l, value: x.k })) });
+      return i == null ? null : values[i];
+    },
+    clipboard: async () => { try { return await navigator.clipboard.readText(); } catch { return ''; } },
+    read: link => { const t = resolveLink(splitOnce(splitOnce(link, '|')[0], '#')[0].trim(), path); return t && S.notes.has(t) ? S.notes.get(t).content : null; },
+    exists: link => !!resolveLink(link.trim(), path),
+  };
+}
+
+// Fill a template for the note at `path`. Returns {text, cursor, actions}, or null if it
+// failed or was cancelled (the reason is shown as a toast).
+async function applyTemplate(text, path, { selection = '', templatePath = '' } = {}) {
+  text = fillTemplate(text, noteName(path));
+  if (!FolioTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
+  try {
+    const r = await FolioTemplater.render(text, templateEnv(path, selection, templatePath));
+    if (r.aborted) { toast('Template cancelled'); return null; }
+    return r;
+  } catch (e) { toast(`Template error${templatePath ? ` in ${noteName(templatePath)}` : ''}: ${e.message}`, 6000); return null; }
+}
+
+// tp.file.rename / move / create_new run after the text is in place.
+async function runTemplateActions(path, actions) {
+  let cur = path;
+  for (const a of actions || []) {
+    try {
+      if (a.type === 'rename' || a.type === 'move') {
+        const name = a.type === 'rename' ? a.name : basename(a.path);
+        if (!name.trim() || BAD_NAME.test(name)) throw new Error(`"${name}" isn't a valid note name`);
+        const to = a.type === 'rename' ? join(dirname(cur), name + '.md') : normPath(a.path) + '.md';
+        if (to !== cur) { await renamePath(cur, to); if (S.files.has(to)) cur = to; }
+      } else if (a.type === 'create') {
+        const p = uniquePath(dirname(a.path), basename(a.path));
+        const r = await applyTemplate(a.content, p);
+        await writeFile(p, r ? r.text : a.content);
+        let d = dirname(p);
+        while (d) { S.dirs.add(d); d = dirname(d); }
+        reindexAll(); renderTree();
+        if (a.open) await openPath(p);
+      }
+    } catch (e) { toast('Template: ' + e.message, 5000); }
   }
-  await createNote(path, content, { mode: 'edit' });
-  ed.setSelectionRange(ed.value.length, ed.value.length, true);
+  return cur;
+}
+
+// The template for new notes in `path`'s folder: the most specific "folder: template" line wins.
+function folderTemplateFor(path) {
+  const dir = dirname(path);
+  let best = null, bestLen = -1;
+  for (const line of String(cfg.folderTemplates || '').split('\n')) {
+    const m = /^\s*([^:→]*?)\s*(?::|→)\s*(.+?)\s*$/.exec(line);
+    if (!m) continue;
+    const folder = m[1].replace(/^\/+|\/+$/g, '');
+    if ((folder === '' || dir === folder || dir.startsWith(folder + '/')) && folder.length > bestLen) { best = m[2]; bestLen = folder.length; }
+  }
+  if (!best) return null;
+  const t = resolveLink(best.replace(/^\[\[|\]\]$/g, ''), null);
+  return t && S.notes.has(t) ? t : null;
 }
 
 async function insertTemplate() {
   if (S.view !== 'note') return toast('Open a note first');
-  const folder = cfg.templatesFolder;
-  const list = [...S.notes.keys()].filter(p => folder ? p.startsWith(folder + '/') : true);
-  if (!list.length) return toast(`No templates found in "${folder}/"`);
-  const pick = await picker({ placeholder: 'Insert template…', items: q => rank(list, q, noteName).map(p => ({ main: noteName(p), sub: dirname(p), value: p })) });
+  const pick = await pickTemplate('Insert template…');
   if (!pick) return;
-  const text = fillTemplate(S.notes.get(pick).content, noteName(S.cur));
   if (S.mode !== 'edit') setMode('edit');
-  insertText(ed.selectionStart, ed.selectionEnd, text);
+  const target = S.cur, a = ed.selectionStart, b = ed.selectionEnd;
+  const r = await applyTemplate(S.notes.get(pick).content, target, { selection: ed.value.slice(a, b), templatePath: pick });
+  if (!r || S.cur !== target) return;
+  insertText(a, b, r.text);
+  if (r.cursor >= 0) ed.setSelectionRange(a + r.cursor, a + r.cursor, true);
+  await runTemplateActions(target, r.actions);
+}
+
+async function newNoteFromTemplate() {
+  const pick = await pickTemplate('New note from template…');
+  if (!pick) return;
+  const path = uniquePath(cfg.newNoteFolder, 'Untitled.md');
+  await createNote(path, '', { mode: 'edit', template: { text: S.notes.get(pick).content, from: pick } });
+}
+
+// Run the template commands written in the current note itself.
+async function replaceTemplatesInNote() {
+  if (S.view !== 'note') return toast('Open a note first');
+  const target = S.cur, src = ed.value;
+  if (!FolioTemplater.hasTemplaterSyntax(src) && !/\{\{\s*(date|time|title)/.test(src)) return toast('This note has no template commands');
+  const r = await applyTemplate(src, target);
+  if (!r || S.cur !== target || ed.value !== src) return;
+  if (S.mode !== 'edit') setMode('edit');
+  insertText(0, src.length, r.text);
+  if (r.cursor >= 0) ed.setSelectionRange(r.cursor, r.cursor, true);
+  await runTemplateActions(target, r.actions);
 }
 
 // ============================================================ editor glue
@@ -1465,14 +1582,19 @@ function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
   });
 }
 
-function promptModal(title, label, value) {
+// opts.multiline: a text box (Ctrl+Enter submits); opts.raw: don't trim the answer.
+function promptModal(title, label, value, opts = {}) {
   return new Promise(resolve => {
-    const back = modal(`<form class="form"><h3>${esc(title)}</h3><label>${esc(label)}<input class="field" name="v" spellcheck="false" autocomplete="off"></label><div class="row"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">OK</button></div></form>`);
-    const input = $('input', back); input.value = value; input.focus(); input.select();
+    const field = opts.multiline ? '<textarea class="field" name="v" rows="6" spellcheck="false"></textarea>' : '<input class="field" name="v" spellcheck="false" autocomplete="off">';
+    const back = modal(`<form class="form"><h3>${esc(title)}</h3><label>${esc(label)}${field}</label><div class="row"><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">OK</button></div></form>`);
+    const input = $('[name=v]', back); input.value = value ?? ''; input.focus(); input.select();
     const done = v => { back.remove(); resolve(v); };
-    $('form', back).addEventListener('submit', e => { e.preventDefault(); done(input.value.trim()); });
+    $('form', back).addEventListener('submit', e => { e.preventDefault(); done(opts.raw ? input.value : input.value.trim()); });
     $('[data-x]', back).onclick = () => done(null);
-    input.addEventListener('keydown', e => { if (e.key === 'Escape') done(null); });
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') done(null);
+      if (opts.multiline && e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); done(opts.raw ? input.value : input.value.trim()); }
+    });
     back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
   });
 }
@@ -1523,6 +1645,8 @@ const COMMANDS = [
   ['Open drawing as Markdown', '', () => S.cur && isMd(S.cur) && isDrawing(S.cur) ? openPath(S.cur, { raw: true }) : toast('Only .excalidraw.md drawings have a Markdown view')],
   ["Open today's daily note", '', () => openDaily()],
   ['Insert template', '', () => insertTemplate()],
+  ['Create new note from template', '', () => newNoteFromTemplate()],
+  ['Replace template commands in current note', '', () => replaceTemplatesInNote()],
   ['Toggle reading / editing view', 'Ctrl+E', () => setMode(S.mode === 'edit' ? 'read' : 'edit')],
   ['Search in all notes', 'Ctrl+Shift+F', () => showPanel('search', true)],
   ['Open graph view', 'Ctrl+G', () => openGraph(false)],
@@ -1559,6 +1683,7 @@ function openSettings() {
     <label>Daily notes folder<input class="field" name="dailyFolder"></label>
     <label>Daily note template (note name or path)<input class="field" name="dailyTemplate" placeholder="e.g. Templates/Daily"></label>
     <label>Templates folder<input class="field" name="templatesFolder"></label>
+    <label>Folder templates — new notes in a folder start from its template. One per line, e.g. <code>Meetings: Templates/Meeting</code> (<code>/</code> means every folder)<textarea class="field" name="folderTemplates" rows="3" spellcheck="false" placeholder="Meetings: Templates/Meeting"></textarea></label>
     <label>Attachments folder<input class="field" name="attachFolder"></label>
     <label>New drawings are saved as<select class="field" name="drawingFormat"><option value="excalidraw">.excalidraw (Excalidraw file; also opens on excalidraw.com)</option><option value="md">.excalidraw.md (Obsidian Excalidraw plugin)</option></select></label>
     <label>Default view for notes<select class="field" name="defaultMode"><option value="edit">Editing</option><option value="read">Reading</option></select></label>
@@ -1581,7 +1706,7 @@ function openSettings() {
     e.preventDefault();
     for (const k of Object.keys(DEFAULTS)) {
       const el = f.elements[k]; if (!el) continue;
-      cfg[k] = el.type === 'checkbox' ? el.checked : el.value.trim().replace(/^\/+|\/+$/g, '');
+      cfg[k] = el.type === 'checkbox' ? el.checked : el.tagName === 'TEXTAREA' ? el.value.trim() : el.value.trim().replace(/^\/+|\/+$/g, '');
     }
     saveCfg(); applyTheme(); close();
   });
@@ -2074,6 +2199,7 @@ async function boot() {
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Folio server: ${esc(e.message)}. Is it still running?</p>`; return; }
   renderTree();
   setInterval(poll, 2000);
+  api('/api/info').then(i => { S.vaultPath = i.vault; }).catch(() => { });
   if (S.files.size === 0 && !store('welcomed')) {
     store('welcomed', true);
     await createNote('Welcome.md', WELCOME, { mode: 'read' });
