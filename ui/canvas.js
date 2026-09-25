@@ -1130,6 +1130,8 @@
     count: () => data.nodes.length,
     flush() { stopEditing(true); },
     addFile: path => addFileNode(path),
+    // Point a file card at another file (an image swapped for its annotated drawing).
+    setFile(id, path) { const n = byId.get(id); if (n?.type !== 'file') return; n.file = path; commit(); },
     refreshFiles,
   };
 })(typeof window !== 'undefined' ? window : globalThis);

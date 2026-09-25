@@ -66,7 +66,7 @@ fn main() {
     }
     config::remember_vault(&vault);
 
-    let ctx = api::Ctx { vault: RwLock::new(vault), token: random_token(), native: !browser };
+    let ctx = api::Ctx { vault: RwLock::new(vault), token: random_token(), native: !browser, hide_window: Default::default() };
     if browser {
         server::run(ctx, port, open, app_window)
     } else {

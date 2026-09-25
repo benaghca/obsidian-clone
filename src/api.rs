@@ -4,7 +4,7 @@
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 // ---------------------------------------------------------------- embedded UI
@@ -71,6 +71,8 @@ pub struct Ctx {
     pub vault: RwLock<PathBuf>,
     pub token: String,
     pub native: bool,
+    /// Hide (true) or show again (false) the app window; set by the desktop window.
+    pub hide_window: OnceLock<Box<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl Ctx {
@@ -177,7 +179,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("POST", "/api/vault") => parse(&body).and_then(|v| api_switch_vault(ctx, &str_field(&v, "path")?)),
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
         ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
-        ("POST", "/api/screenshot") => Ok(match crate::screenshot::capture() {
+        ("POST", "/api/screenshot") => Ok(match screenshot(ctx, q("mode").as_deref() == Some("screen"), q("hide").as_deref() == Some("1"), q("delay").and_then(|d| d.parse().ok()).unwrap_or(0)) {
             crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
             crate::screenshot::Shot::Cancelled => out(204, "text/plain", Vec::new()),
             crate::screenshot::Shot::NoTool(msg) => json_out(501, json!({ "error": msg })),
@@ -185,6 +187,24 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         _ => Err((404, "no such endpoint".into())),
     };
     result.unwrap_or_else(|(code, msg)| json_out(code, json!({ "error": msg })))
+}
+
+/// Capture the screen, optionally with the app window out of the way and after a few seconds
+/// (to set up a menu or hover state).
+fn screenshot(ctx: &Ctx, screen: bool, hide: bool, delay_s: u64) -> crate::screenshot::Shot {
+    let hider = if hide { ctx.hide_window.get() } else { None };
+    if let Some(h) = hider {
+        h(true);
+        std::thread::sleep(std::time::Duration::from_millis(350)); // let the compositor catch up
+    }
+    if delay_s > 0 {
+        std::thread::sleep(std::time::Duration::from_secs(delay_s.min(10)));
+    }
+    let shot = crate::screenshot::capture(screen);
+    if let Some(h) = hider {
+        h(false);
+    }
+    shot
 }
 
 /// Requests that can take a long time (waiting on the user), which transports should answer
@@ -525,7 +545,7 @@ mod tests {
 
     #[test]
     fn serves_drawing_assets() {
-        let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
+        let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
         for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);

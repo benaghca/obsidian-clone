@@ -1,9 +1,10 @@
-//! Screen capture for "Insert screenshot": runs the platform's own region-capture tool and
-//! returns the PNG. The call blocks until the user finishes selecting, so the transports run
-//! it off their main thread (see `api::is_slow`).
+//! Screen capture for "Insert screenshot": runs the platform's own capture tool (a region the
+//! user drags out, or the whole screen) and returns the PNG. The call blocks until the user
+//! finishes selecting, so the transports run it off their main thread (see `api::is_slow`).
 //!
 //! FOLIO_SCREENSHOT_CMD overrides the tool: a shell command that prints a PNG to stdout
-//! (exit non-zero or print nothing to mean "cancelled").
+//! (exit non-zero or print nothing to mean "cancelled"). It gets FOLIO_SCREENSHOT_MODE set to
+//! "region" or "screen".
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -15,13 +16,16 @@ pub enum Shot {
     NoTool(String),
 }
 
-pub fn capture() -> Shot {
+/// `screen`: the whole screen instead of a region.
+pub fn capture(screen: bool) -> Shot {
     if let Ok(cmd) = std::env::var("FOLIO_SCREENSHOT_CMD")
         && !cmd.trim().is_empty()
     {
-        return from_stdout(shell(&cmd));
+        let mut c = shell(&cmd);
+        c.env("FOLIO_SCREENSHOT_MODE", if screen { "screen" } else { "region" });
+        return from_stdout(c);
     }
-    platform_capture()
+    platform_capture(screen)
 }
 
 #[cfg(unix)]
@@ -80,18 +84,44 @@ fn to_file(prog: &str, args: &[&str], file: &Path) -> Option<Shot> {
 }
 
 #[cfg(target_os = "macos")]
-fn platform_capture() -> Shot {
+fn platform_capture(screen: bool) -> Shot {
     let f = temp_png();
     let fs = f.to_string_lossy().to_string();
     // -i: drag a region (Space switches to a window); -x: no shutter sound.
-    to_file("screencapture", &["-i", "-x", &fs], &f)
-        .unwrap_or_else(|| Shot::NoTool("screencapture not found".into()))
+    let args: &[&str] = if screen { &["-x", &fs] } else { &["-i", "-x", &fs] };
+    to_file("screencapture", args, &f).unwrap_or_else(|| Shot::NoTool("screencapture not found".into()))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-fn platform_capture() -> Shot {
+fn platform_capture(screen: bool) -> Shot {
     let f = temp_png();
     let fs = f.to_string_lossy().to_string();
+    if screen {
+        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+        let tools: [(&str, &[&str]); 7] = [
+            ("grim", if wayland { &[&fs] } else { &[] }),
+            ("gnome-screenshot", &["-f", &fs]),
+            ("spectacle", &["-b", "-n", "-f", "-o", &fs]),
+            ("xfce4-screenshooter", &["-f", "-s", &fs]),
+            ("maim", &[&fs]),
+            ("scrot", &["-o", &fs]),
+            ("import", &["-window", "root", &fs]),
+        ];
+        for (prog, args) in tools {
+            if args.is_empty() {
+                continue;
+            }
+            if let Some(s) = to_file(prog, args, &f) {
+                return s;
+            }
+        }
+        let mut flameshot = Command::new("flameshot");
+        flameshot.args(["full", "--raw"]);
+        return match from_stdout(flameshot) {
+            Shot::NoTool(_) => Shot::NoTool("no screenshot tool found; install grim (Wayland), gnome-screenshot, spectacle, flameshot or maim".into()),
+            s => s,
+        };
+    }
     // Wayland: slurp picks the region, grim captures it.
     if std::env::var_os("WAYLAND_DISPLAY").is_some() {
         match Command::new("slurp")
@@ -134,7 +164,7 @@ fn platform_capture() -> Shot {
 }
 
 #[cfg(windows)]
-fn platform_capture() -> Shot {
+fn platform_capture(_screen: bool) -> Shot {
     // No command-line region picker ships with Windows; the page uses the WebView's screen capture.
     Shot::NoTool("no screenshot tool on Windows".into())
 }
@@ -154,5 +184,11 @@ mod tests {
         assert_eq!(png(r"printf '\211PNG\r\n\032\nxyz'"), Some(11));
         assert_eq!(png("printf 'not a png'"), None);
         assert_eq!(png("exit 1"), None);
+        // the custom command is told which kind of capture
+        // SAFETY: no other test reads or writes this variable.
+        unsafe { std::env::set_var("FOLIO_SCREENSHOT_CMD", r#"[ "$FOLIO_SCREENSHOT_MODE" = screen ] && printf '\211PNG\r\n\032\nS'"#) };
+        assert!(matches!(capture(true), Shot::Png(_)));
+        assert!(matches!(capture(false), Shot::Cancelled));
+        unsafe { std::env::remove_var("FOLIO_SCREENSHOT_CMD") };
     }
 }

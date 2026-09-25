@@ -257,9 +257,9 @@
 
   const canCaptureScreen = () => !!navigator.mediaDevices?.getDisplayMedia;
 
-  // Ask the browser for a screen, window or tab, grab one frame, then let the user crop it.
-  // Resolves with a PNG Blob, or null if the user cancelled.
-  async function captureScreen() {
+  // Ask the browser for a screen, window or tab, grab one frame, then let the user crop it
+  // (o.crop: false keeps the whole frame). Resolves with a PNG Blob, or null if cancelled.
+  async function captureScreen(o = {}) {
     if (!canCaptureScreen()) throw new Error('screen capture isn’t available in this window');
     let stream;
     try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never' }, audio: false }); }
@@ -276,7 +276,7 @@
       c.getContext('2d').drawImage(video, 0, 0);
       blob = await new Promise(r => c.toBlob(r, 'image/png'));
     } finally { stream.getTracks().forEach(t => t.stop()); }
-    if (!blob) return null;
+    if (!blob || o.crop === false) return blob || null;
     const url = URL.createObjectURL(blob);
     try { return await crop(url, { title: 'Screenshot', whole: true, okLabel: 'Use selection' }); }
     finally { URL.revokeObjectURL(url); }

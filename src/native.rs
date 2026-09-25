@@ -24,12 +24,20 @@ enum UserEvent {
     CloseOk,
     CloseCancel,
     AckTimeout,
+    /// Hide the window while a screenshot is taken (true), then bring it back (false).
+    Hide(bool),
 }
 
 pub fn run(ctx: Ctx) -> ! {
     let ctx = Arc::new(ctx);
     let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
     let proxy = event_loop.create_proxy();
+    let p_hide = std::sync::Mutex::new(proxy.clone());
+    let _ = ctx.hide_window.set(Box::new(move |hide| {
+        if let Ok(p) = p_hide.lock() {
+            let _ = p.send_event(UserEvent::Hide(hide));
+        }
+    }));
 
     // Restore the last window size and position.
     let cfg = crate::config::load();
@@ -141,6 +149,12 @@ pub fn run(ctx: Ctx) -> ! {
             }
             Event::UserEvent(UserEvent::Title(t)) => window.set_title(&t),
             Event::UserEvent(UserEvent::CloseAck) => acked = true,
+            Event::UserEvent(UserEvent::Hide(hide)) => {
+                window.set_visible(!hide);
+                if !hide {
+                    window.set_focus();
+                }
+            }
             Event::UserEvent(UserEvent::CloseCancel) => closing = false,
             Event::UserEvent(UserEvent::AckTimeout) => {
                 // Page never answered (hung or crashed): close anyway.

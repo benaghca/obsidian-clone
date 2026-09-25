@@ -82,6 +82,9 @@ const DEFAULTS = {
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
   drawingFormat: 'excalidraw',
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
+  screenshotHide: true,   // the desktop window steps aside while you capture
+  screenshotDelay: '0',   // seconds before capturing
+  screenshotAfter: 'insert', // or 'annotate': open the screenshot in a drawing
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
 const saveCfg = () => store('settings', cfg);
@@ -2197,9 +2200,10 @@ async function attachAndLink(file, pasted, editor = ed) {
   try { await writeFile(path, file); } catch (e) { return toast('Attach failed: ' + e.message); }
   if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
   reindexAll(); renderTree();
-  const link = `![[${linkNameFor(path, [...S.files.keys()])}]]`;
+  const link = `![[${linkNameFor(path, [...S.files.keys()])}]]`, at = editor.selectionStart;
   if (editor === ed) insertText(ed.selectionStart, ed.selectionEnd, link);
   else editor.insert(editor.selectionStart, editor.selectionEnd, link);
+  return { path, from: at, to: at + link.length };
 }
 
 // ============================================================ properties
@@ -2376,11 +2380,20 @@ async function annotateImage(p, ctx = {}) {
   await openPath(path);
 }
 
+// The embed on `line` that overlaps [from, to] (or starts at `from` when it's a point); an embed
+// that merely ends where the range starts doesn't count.
+function embedAt(line, from, to) {
+  return parseNote(line.text).links.find(k => {
+    const s = line.from + k.index, e = s + k.len;
+    return k.embed && s < Math.max(to, from + 1) && e > from;
+  });
+}
+
 // Rewrite the image embed covering [from, to] in editor `e`: a new target and/or width.
 // width: a number, null to remove it, undefined to keep it.
 function editImageEmbed(e, from, to, { target, width } = {}) {
   const doc = e.view.state.doc, line = doc.lineAt(from), text = line.text;
-  const l = parseNote(text).links.find(k => k.embed && line.from + k.index <= to && line.from + k.index + k.len >= from);
+  const l = embedAt(line, from, to);
   if (!l) return false;
   const raw = text.slice(l.index, l.index + l.len);
   let out;
@@ -2455,7 +2468,7 @@ function editorImageCtx(info) {
     view: () => viewImages(info.path, imagesIn(e.value, info.note), editorImageCtx(info)),
     resize: w => { const i = at(); editImageEmbed(e, i.from, i.to, { width: w }); },
     retarget: np => { const i = at(); editImageEmbed(e, i.from, i.to, { target: np }); },
-    remove: () => { const i = at(); const doc = e.view.state.doc, line = doc.lineAt(i.from); const l = parseNote(line.text).links.find(k => k.embed && line.from + k.index <= i.to && line.from + k.index + k.len >= i.from); if (l) e.view.dispatch({ changes: { from: line.from + l.index, to: line.from + l.index + l.len, insert: '' } }); },
+    remove: () => { const i = at(); const doc = e.view.state.doc, line = doc.lineAt(i.from); const l = embedAt(line, i.from, i.to); if (l) e.view.dispatch({ changes: { from: line.from + l.index, to: line.from + l.index + l.len, insert: '' } }); },
   };
 }
 
@@ -2514,30 +2527,58 @@ document.addEventListener('click', e => {
 });
 
 // Insert screenshot: the system's region picker (via the app), else the browser's screen capture.
-async function insertScreenshot() {
+// o.screen: the whole screen rather than a region; o.annotate: open it in a drawing right away
+// (also Settings → "After a screenshot"). The desktop app can step out of the way first, and
+// Settings can add a delay for catching menus.
+let shooting = false;
+async function insertScreenshot(o = {}) {
   if (S.view !== 'note' && S.view !== 'canvas') return toast('Open a note or canvas first');
+  if (shooting) return;
   const into = S.view, cur = S.cur;
+  const annotate = o.annotate ?? cfg.screenshotAfter === 'annotate';
+  const delay = Math.max(0, Math.min(10, +cfg.screenshotDelay || 0));
   let blob = null;
+  shooting = true;
+  if (delay) countdown(delay);
   try {
-    const r = await fetch('/api/screenshot', { method: 'POST', headers: { 'X-Folio-Token': TOKEN } });
+    const q = new URLSearchParams({ mode: o.screen ? 'screen' : 'region', hide: cfg.screenshotHide ? '1' : '0', delay: String(delay) });
+    const r = await fetch(`/api/screenshot?${q}`, { method: 'POST', headers: { 'X-Folio-Token': TOKEN } });
     if (r.status === 204) return;
     if (r.ok) blob = await r.blob();
     else {
       const msg = (await r.json().catch(() => ({}))).error || r.statusText;
       if (r.status !== 501 || !FolioImages.canCaptureScreen()) return toast('Screenshot failed: ' + msg, 5000);
-      blob = await FolioImages.captureScreen();
+      blob = await FolioImages.captureScreen({ crop: !o.screen });
     }
   } catch (e) { return toast('Screenshot failed: ' + e.message, 5000); }
+  finally { shooting = false; }
   if (!blob) return;
   if (S.cur !== cur || S.view !== into) return toast('The screenshot wasn’t inserted because another file was opened');
   const d = new Date(), pad = n => String(n).padStart(2, '0');
   const file = new File([blob], `Screenshot ${fmtDate(d, 'YYYY-MM-DD')} ${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`, { type: 'image/png' });
-  if (into === 'note') { setMode('edit'); await attachAndLink(file, false); ed.focus(); return; }
+  if (into === 'note') {
+    setMode('edit');
+    const got = await attachAndLink(file, false);
+    if (!got) return;
+    if (annotate) return annotateImage(got.path, { retarget: np => editImageEmbed(ed, got.from, got.to, { target: np }) });
+    ed.focus();
+    return;
+  }
   const path = uniquePath(cfg.attachFolder, file.name);
   try { await writeFile(path, file); } catch (e) { return toast('Couldn’t save the screenshot: ' + e.message); }
   if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
   reindexAll(); renderTree();
-  FolioCanvas.addFile(path);
+  const card = FolioCanvas.addFile(path);
+  if (annotate && card) annotateImage(path, { retarget: np => FolioCanvas.setFile(card.id, np) });
+}
+
+// "3… 2… 1…" while a delayed screenshot waits.
+function countdown(n) {
+  const t = document.createElement('div');
+  t.className = 'toast shot-countdown';
+  document.body.append(t);
+  const tick = () => { if (n <= 0) return t.remove(); t.textContent = `Screenshot in ${n}…`; n--; setTimeout(tick, 1000); };
+  tick();
 }
 
 titleEl.addEventListener('keydown', e => {
@@ -2727,6 +2768,8 @@ const APP_COMMANDS = [
   ['tasks', 'Open tasks', 'Mod-Shift-t', () => openTasks()],
   ['add-task', 'Add task…', '', () => quickAddTask()],
   ['screenshot', 'Insert screenshot', 'Mod-Shift-s', () => insertScreenshot()],
+  ['screenshot-annotate', 'Insert screenshot and annotate it', 'Mod-Alt-s', () => insertScreenshot({ annotate: true })],
+  ['screenshot-screen', 'Insert screenshot of the whole screen', '', () => insertScreenshot({ screen: true })],
   ['live-preview', 'Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
   ['find', 'Find in current note', 'Mod-f', inNote(() => { setMode('edit'); ed.openSearch(); })],
   ['toggle-theme', 'Toggle light / dark theme', '', () => toggleTheme()],
@@ -2909,6 +2952,9 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
+    <label class="check"><input type="checkbox" name="screenshotHide"> Hide Folio while taking a screenshot (desktop app)</label>
+    <div class="row" style="justify-content:flex-start;gap:12px"><label>Screenshot delay<select class="field" name="screenshotDelay"><option value="0">None</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select></label>
+    <label>After a screenshot<select class="field" name="screenshotAfter"><option value="insert">Insert it</option><option value="annotate">Open it in a drawing to annotate</option></select></label></div>
     <label>Properties at the top of notes<select class="field" name="properties"><option value="visible">Show as a table you can edit</option><option value="source">Show the YAML frontmatter as text</option></select></label>
     <div class="row" style="justify-content:flex-start"><button type="button" class="btn" data-x-hotkeys>Hotkeys…</button><button type="button" class="btn" data-x-shortcuts>Keyboard shortcuts</button></div>
     <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
