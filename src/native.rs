@@ -13,7 +13,7 @@ use std::time::Duration;
 use tao::dpi::{LogicalSize, PhysicalPosition};
 use tao::event::{Event, WindowEvent};
 use tao::event_loop::{ControlFlow, EventLoopBuilder};
-use tao::window::{Icon, WindowBuilder};
+use tao::window::{Icon, ResizeDirection, Theme, WindowBuilder};
 use wry::http::{Request, Response};
 use wry::{NewWindowResponse, WebContext, WebViewBuilder};
 
@@ -26,6 +26,20 @@ enum UserEvent {
     AckTimeout,
     /// Hide the window while a screenshot is taken (true), then bring it back (false).
     Hide(bool),
+    /// The page's own close button (same as the window manager's).
+    CloseRequest,
+    /// Window commands from the page's own title bar: drag, min, max, resize:<dir>,
+    /// frame:native|custom, theme:dark|light.
+    Win(String),
+}
+
+/// Whether Folio draws its own title bar (the default, except on macOS) or uses the system's.
+pub fn custom_frame() -> bool {
+    match crate::config::load()["window"]["frame"].as_str() {
+        Some("native") => false,
+        Some("custom") => true,
+        _ => !cfg!(target_os = "macos"),
+    }
 }
 
 pub fn run(ctx: Ctx) -> ! {
@@ -49,6 +63,7 @@ pub fn run(ctx: Ctx) -> ! {
         .with_inner_size(LogicalSize::new(w, h))
         .with_min_inner_size(LogicalSize::new(480.0, 360.0))
         .with_maximized(win["maximized"].as_bool().unwrap_or(false))
+        .with_decorations(!custom_frame())
         .with_window_icon(Some(icon()));
     if let (Some(x), Some(y)) = (win["x"].as_i64(), win["y"].as_i64()) {
         wb = wb.with_position(PhysicalPosition::new(x as i32, y as i32));
@@ -71,10 +86,13 @@ pub fn run(ctx: Ctx) -> ! {
         })
         .with_url("folio://localhost/")
         .with_ipc_handler(move |req: Request<String>| {
-            let ev = match req.body().as_str() {
+            let body = req.body().as_str();
+            let ev = match body {
                 "close-ack" => UserEvent::CloseAck,
                 "close-ok" => UserEvent::CloseOk,
                 "close-cancel" => UserEvent::CloseCancel,
+                "win:close" => UserEvent::CloseRequest,
+                _ if body.starts_with("win:") && body.len() < 40 => UserEvent::Win(body[4..].to_string()),
                 _ => return,
             };
             let _ = p_ipc.send_event(ev);
@@ -131,7 +149,7 @@ pub fn run(ctx: Ctx) -> ! {
         }
         let _keep = &web_context;
         match event {
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } | Event::UserEvent(UserEvent::CloseRequest) => {
                 if closing {
                     return;
                 }
@@ -148,6 +166,40 @@ pub fn run(ctx: Ctx) -> ! {
                 });
             }
             Event::UserEvent(UserEvent::Title(t)) => window.set_title(&t),
+            Event::UserEvent(UserEvent::Win(cmd)) => {
+                match cmd.as_str() {
+                    "drag" => drop(window.drag_window()),
+                    "min" => window.set_minimized(true),
+                    "max" => window.set_maximized(!window.is_maximized()),
+                    "frame:native" | "frame:custom" => {
+                        let native = cmd == "frame:native";
+                        window.set_decorations(native);
+                        let mut c = crate::config::load();
+                        c["window"]["frame"] = json!(if native { "native" } else { "custom" });
+                        crate::config::save(&c);
+                    }
+                    "theme:dark" => window.set_theme(Some(Theme::Dark)),
+                    "theme:light" => window.set_theme(Some(Theme::Light)),
+                    c => {
+                        let dir = match c.strip_prefix("resize:") {
+                            Some("n") => Some(ResizeDirection::North),
+                            Some("s") => Some(ResizeDirection::South),
+                            Some("e") => Some(ResizeDirection::East),
+                            Some("w") => Some(ResizeDirection::West),
+                            Some("ne") => Some(ResizeDirection::NorthEast),
+                            Some("nw") => Some(ResizeDirection::NorthWest),
+                            Some("se") => Some(ResizeDirection::SouthEast),
+                            Some("sw") => Some(ResizeDirection::SouthWest),
+                            _ => None,
+                        };
+                        if let Some(d) = dir {
+                            let _ = window.drag_resize_window(d);
+                        }
+                    }
+                }
+                tell_maximized(&webview, &window);
+            }
+            Event::WindowEvent { event: WindowEvent::Resized(_), .. } => tell_maximized(&webview, &window),
             Event::UserEvent(UserEvent::CloseAck) => acked = true,
             Event::UserEvent(UserEvent::Hide(hide)) => {
                 window.set_visible(!hide);
@@ -170,6 +222,11 @@ pub fn run(ctx: Ctx) -> ! {
             _ => {}
         }
     })
+}
+
+/// The page's title bar shows maximize or restore.
+fn tell_maximized(webview: &wry::WebView, window: &tao::window::Window) {
+    let _ = webview.evaluate_script(&format!("window.__folioWinState && window.__folioWinState({})", window.is_maximized()));
 }
 
 fn title_for(ctx: &Ctx) -> String {

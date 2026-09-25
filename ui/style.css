@@ -837,3 +837,26 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 #view-note.serif #editor .cm-editor, #view-note.serif #preview, #view-note.serif .inline-title { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
 #view-note.no-title .inline-title, #view-note.no-title .preview-title { display: none; }
 #view-note.center-images #preview img, #view-note.center-images .cm-image-block { display: block; margin-left: auto; margin-right: auto; }
+
+/* ---------------------------------------------------------------- Folio's own window frame (desktop) */
+#win-controls { position: fixed; top: 0; right: 0; z-index: 40; display: flex; height: 36px; }
+#win-controls button { width: 38px; height: 100%; display: grid; place-items: center; border: 0; background: none; color: var(--muted); cursor: default; }
+#win-controls button:hover { background: var(--accent-soft); color: var(--text); }
+#win-controls button.close:hover { background: #e81123; color: #fff; }
+#win-controls svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; }
+/* keep the bars under the buttons clear of them */
+.frame-custom.app-no-right #tabbar { padding-right: 120px; }
+.win-edge { position: fixed; z-index: 45; }
+.win-max .win-edge, body:not(.frame-custom) .win-edge { display: none; }
+.win-n, .win-s { left: 8px; right: 8px; height: 4px; cursor: ns-resize; } .win-n { top: 0; } .win-s { bottom: 0; }
+.win-e, .win-w { top: 8px; bottom: 8px; width: 4px; cursor: ew-resize; } .win-e { right: 0; } .win-w { left: 0; }
+.win-ne, .win-nw, .win-se, .win-sw { width: 8px; height: 8px; } .win-ne { top: 0; right: 0; cursor: nesw-resize; } .win-nw { top: 0; left: 0; cursor: nwse-resize; }
+.win-se { bottom: 0; right: 0; cursor: nwse-resize; } .win-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.tabs button svg { display: none; }
+/* Folio's frame: the top rows line up at 36px, the right sidebar's tabs become icons, and the
+   window buttons sit at the top right. */
+.frame-custom #right .tabs { height: 36px; padding: 0 116px 0 8px; align-items: stretch; background: var(--bg2); }
+.frame-custom #right .tabs button { display: grid; place-items: center; padding: 0 9px; }
+.frame-custom #right .tabs button svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.frame-custom #right .tabs button span { display: none; }
+.frame-custom #left .panel-head { height: 36px; padding-top: 0; padding-bottom: 0; }

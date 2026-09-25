@@ -6,6 +6,7 @@
 <meta name="folio-token" content="{{TOKEN}}">
 <meta name="folio-vault" content="{{VAULT}}">
 <meta name="folio-mode" content="{{MODE}}">
+<meta name="folio-frame" content="{{FRAME}}">
 <title>{{VAULT}} — Folio</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c5cff'/%3E%3Cpath d='M10 8h12v3H13.5v4H20v3h-6.5v6H10z' fill='white'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/vendor/katex/katex.min.css">
@@ -129,9 +130,9 @@
   <div class="resizer" id="resize-right"></div>
   <aside id="right">
     <div class="tabs">
-      <button data-rtab="backlinks" class="active">Backlinks</button>
-      <button data-rtab="outgoing">Outgoing</button>
-      <button data-rtab="outline">Outline</button>
+      <button data-rtab="backlinks" class="active" title="Backlinks"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Backlinks</span></button>
+      <button data-rtab="outgoing" title="Outgoing links"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Outgoing</span></button>
+      <button data-rtab="outline" title="Outline"><svg viewBox="0 0 24 24"><path d="M4 6h16M8 12h12M12 18h8"/></svg><span>Outline</span></button>
     </div>
     <div id="right-body" class="panel-body"></div>
   </aside>

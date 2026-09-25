@@ -115,7 +115,8 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
                 let html = INDEX_HTML
                     .replace("{{TOKEN}}", &ctx.token)
                     .replace("{{VAULT}}", &html_escape(&name))
-                    .replace("{{MODE}}", if ctx.native { "native" } else { "browser" });
+                    .replace("{{MODE}}", if ctx.native { "native" } else { "browser" })
+                    .replace("{{FRAME}}", if ctx.native && crate::native::custom_frame() { "custom" } else { "native" });
                 let mut o = out(200, "text/html; charset=utf-8", html.into_bytes());
                 o.csp = true;
                 return o;
