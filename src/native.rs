@@ -77,6 +77,8 @@ pub fn run(ctx: Ctx) -> ! {
     let mut web_context = WebContext::new(Some(crate::config::data_dir().join("webview")));
     let handler_ctx = ctx.clone();
     let p_ipc = proxy.clone();
+    let frames = Arc::new(std::sync::Mutex::new(std::collections::HashSet::<String>::new()));
+    let (ipc_frames, nav_frames) = (frames.clone(), frames);
     let p_title = proxy.clone();
     let builder = WebViewBuilder::new_with_web_context(&mut web_context)
         .with_asynchronous_custom_protocol(PROTOCOL.into(), move |_id, req, responder| {
@@ -91,6 +93,12 @@ pub fn run(ctx: Ctx) -> ! {
         .with_url(&format!("{PROTOCOL}://localhost/"))
         .with_ipc_handler(move |req: Request<String>| {
             let body = req.body().as_str();
+            if let Some(url) = body.strip_prefix("frame:") {
+                if let (Some(o), Ok(mut set)) = (origin_of(url), ipc_frames.lock()) {
+                    set.insert(o);
+                }
+                return;
+            }
             let ev = match body {
                 "close-ack" => UserEvent::CloseAck,
                 "close-ok" => UserEvent::CloseOk,
@@ -109,8 +117,10 @@ pub fn run(ctx: Ctx) -> ! {
             open_external(&url);
             NewWindowResponse::Deny
         })
-        .with_navigation_handler(|url| {
-            if is_app_url(&url) {
+        .with_navigation_handler(move |url| {
+            // Web pages embedded in notes load in sandboxed frames; the page registers each one's
+            // origin first. Anything else leaves for the user's browser.
+            if is_app_url(&url) || origin_of(&url).is_some_and(|o| nav_frames.lock().is_ok_and(|s| s.contains(&o))) {
                 true
             } else {
                 open_external(&url);
@@ -239,6 +249,19 @@ fn title_for(ctx: &Ctx) -> String {
     format!("{name} — Cinder")
 }
 
+/// "https://host[:port]" of an http(s) URL.
+fn origin_of(url: &str) -> Option<String> {
+    let (scheme, rest) = url.split_once("://")?;
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let host = rest.split(['/', '?', '#']).next()?;
+    if host.is_empty() || host.contains('@') {
+        return None;
+    }
+    Some(format!("{scheme}://{}", host.to_ascii_lowercase()))
+}
+
 fn is_app_url(url: &str) -> bool {
     url.starts_with(&format!("{PROTOCOL}://")) || url.starts_with(&format!("http://{PROTOCOL}.localhost")) || url.starts_with(&format!("https://{PROTOCOL}.localhost")) || url == "about:blank"
 }
@@ -298,4 +321,18 @@ fn save_window_state(window: &tao::window::Window) {
 fn icon() -> Icon {
     const RGBA: &[u8] = include_bytes!("icon-64.rgba");
     Icon::from_rgba(RGBA.to_vec(), 64, 64).expect("icon")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::origin_of;
+
+    #[test]
+    fn origins() {
+        assert_eq!(origin_of("https://Example.com/a?b#c").as_deref(), Some("https://example.com"));
+        assert_eq!(origin_of("http://localhost:8080/x").as_deref(), Some("http://localhost:8080"));
+        assert_eq!(origin_of("https://user@evil.com/").as_deref(), None);
+        assert_eq!(origin_of("folio://localhost/").as_deref(), None);
+        assert_eq!(origin_of("javascript:alert(1)").as_deref(), None);
+    }
 }

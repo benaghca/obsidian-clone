@@ -209,6 +209,20 @@ class ImageWidget extends WidgetType {
   }
 }
 
+// ![](https://…) of a web page (not an image): the live page, drawn by app.js.
+class WebEmbedWidget extends WidgetType {
+  constructor(url, alt, h) { super(); this.url = url; this.alt = alt; this.h = h; }
+  eq(o) { return o.url === this.url && o.alt === this.alt; }
+  toDOM() {
+    const el = document.createElement('div');
+    el.className = 'cm-embed-block cm-web-embed';
+    this.h.renderWebEmbed(el, this.url, this.alt);
+    return el;
+  }
+  ignoreEvent() { return true; }
+}
+const WEB_URL = /^https?:\/\/\S+$/i, IMAGE_URL = /\.(png|jpe?g|gif|webp|svg|avif|bmp)([?#]|$)/i;
+
 // ![alt|300](src) sizes a Markdown image the way ![[img.png|300]] does.
 const altWidth = alt => { const m = /^(.*?)\|(\d+)(?:x\d+)?$/.exec(alt || ''); return m ? [m[1], parseInt(m[2])] : [alt || '', null]; };
 
@@ -638,8 +652,10 @@ function buildBlocks(state) {
           const text = doc.sliceString(nf, nt);
           const src = /\]\(\s*<?([^)\s>]+)/.exec(text)?.[1];
           const url = src && h.imageUrl(src);
-          const [alt, width] = altWidth(/^!\[([^\]]*)\]/.exec(text)?.[1]);
+          const rawAlt = /^!\[([^\]]*)\]/.exec(text)?.[1] || '';
+          const [alt, width] = altWidth(rawAlt);
           if (url) widget = new ImageWidget(url, alt, width, true);
+          else if (src && WEB_URL.test(src) && !IMAGE_URL.test(src) && h.renderWebEmbed) widget = new WebEmbedWidget(src, rawAlt, h);
         }
         if (widget) out.push(Decoration.replace({ widget, block: true }).range(line.from, line.to));
         return false;

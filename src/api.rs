@@ -64,7 +64,7 @@ const VENDOR_FILES: &[(&str, &str, &[u8])] = &[
 /// Everything the page may load comes from Cinder itself; nothing else is allowed.
 pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
                        img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; \
-                       object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
+                       object-src 'none'; frame-src http: https:; base-uri 'none'; form-action 'none'";
 
 pub const MAX_BODY: u64 = 64 * 1024 * 1024;
 

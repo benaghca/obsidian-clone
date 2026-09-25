@@ -985,7 +985,10 @@
       label.textContent = 'Link';
       let host = n.url || '';
       try { host = new URL(n.url).host; } catch { }
-      content.innerHTML = `<div class="cv-link"><div class="cv-link-host">${esc(host)}</div><a class="cv-link-url" href="${esc(/^https?:/i.test(n.url || '') ? n.url : '#')}" target="_blank" rel="noopener noreferrer">${esc(n.url || '(no address)')}</a></div>`;
+      label.textContent = host || 'Link';
+      // The live page when the app can show it (selected cards take the pointer; others move).
+      if (!n.url || !hooks.renderLink?.(content, n.url)) content.innerHTML = `<div class="cv-link"><div class="cv-link-host">${esc(host)}</div><a class="cv-link-url" href="${esc(/^https?:/i.test(n.url || '') ? n.url : '#')}" target="_blank" rel="noopener noreferrer">${esc(n.url || '(no address)')}</a></div>`;
+      else content.classList.add('cv-web');
     } else if (n.type === 'file') {
       label.textContent = hooks.fileName?.(n.file) || n.file;
       label.title = n.file + (n.subpath || '');

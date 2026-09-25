@@ -84,6 +84,8 @@ const DEFAULTS = {
   windowFrame: 'custom',  // desktop app: Cinder's own title bar, or the system's ('native'); lives in the app config
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
   mathSnippets: true,     // LaTeX Suite-style shortcuts while typing math
+  webEmbeds: 'auto',      // ![](https://…) pages: 'auto' load, 'click' to load, 'off' (show the link)
+  hoverPreview: true,     // hover a link to preview the note (Ctrl in the editor; Ctrl for web pages)
   cssFolder: '',          // a vault folder of .css snippets to apply ('' = none)
   screenshotHide: true,   // the desktop window steps aside while you capture
   screenshotDelay: '0',   // seconds before capturing
@@ -180,6 +182,7 @@ function editorHooks(from, extra) {
     toggleTaskLine: text => CinderTasks.parseLine(text) ? CinderTasks.toggle(text, { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }) : null,
     renderMath: (el, tex, display) => renderMath(el, tex, display),
     mathSnippets: () => cfg.mathSnippets,
+    renderWebEmbed: (el, url, alt) => cfg.webEmbeds === 'off' ? (el.innerHTML = `<a class="cm-url" data-url="${esc(url)}">${esc(url)}</a>`) : renderWebEmbed(el, url, alt),
     propertiesFor: text => cfg.properties !== 'source' && propsOf(text) != null,
     renderProperties: (el, text, ctl) => mountProps(el, text, { ...ctl, from }),
     ...extra,
@@ -1599,6 +1602,14 @@ let RC = { from: null, depth: 0 }; // render context for link resolution
 marked.use({
   gfm: true,
   breaks: true,
+  // ![](https://page) is an embedded web page: a placeholder renderInto fills, never an <img>.
+  renderer: {
+    image(t) {
+      const href = typeof t === 'object' ? t.href : t, alt = typeof t === 'object' ? t.text : arguments[2];
+      if (isWebPage(href) && cfg.webEmbeds !== 'off') return `<div class="web-embed-ph" data-url="${esc(href)}" data-alt="${esc(alt || '')}"></div>`;
+      return false; // marked's own <img>
+    },
+  },
   extensions: [
     {
       // $$ … $$ on their own lines
@@ -1710,6 +1721,7 @@ function renderInto(el, content, from, depth) {
     if (!resolveLink(name, from)) a.classList.add('unresolved');
     a.removeAttribute('href');
   }
+  for (const ph of $$('.web-embed-ph', el)) { ph.className = ''; renderWebEmbed(ph, ph.dataset.url, ph.dataset.alt); }
   for (const img of $$('img', el)) {
     const src = img.getAttribute('src') || '';
     if (/^(data:|blob:|\/api\/raw)/.test(src)) continue;
@@ -2786,6 +2798,182 @@ async function removePropEverywhere(k) {
   toast(`Removed from ${n} note${n === 1 ? '' : 's'}`);
 }
 
+// ============================================================ embedded links: web pages, previews
+
+const WEB_URL_RE = /^https?:\/\/[^\s<>"]+$/i, IMAGE_URL_RE = /\.(png|jpe?g|gif|webp|svg|avif|bmp)([?#]|$)/i;
+const isWebPage = u => WEB_URL_RE.test(u || '') && !IMAGE_URL_RE.test(u);
+
+// Video pages become their players (which are made to be embedded); anything else loads as it is.
+function framedUrl(u) {
+  try {
+    const x = new URL(u), h = x.hostname.replace(/^(www|m)\./, '');
+    const yt = h === 'youtube.com' && x.pathname === '/watch' ? x.searchParams.get('v') : h === 'youtu.be' ? x.pathname.slice(1) : h === 'youtube.com' && x.pathname.startsWith('/shorts/') ? x.pathname.split('/')[2] : null;
+    if (yt && /^[\w-]{6,}$/.test(yt)) return `https://www.youtube-nocookie.com/embed/${yt}`;
+    if (h === 'vimeo.com' && /^\/\d+/.test(x.pathname)) return `https://player.vimeo.com/video/${x.pathname.split('/')[1]}`;
+  } catch { }
+  return u;
+}
+
+// A live web page in a sandboxed frame, with its address, reload and open-in-browser. size is the
+// alt text of ![alt|W x H](url) (or {height}); fill: take the container's height (canvas cards).
+function renderWebEmbed(el, url, size = '', o = {}) {
+  const m = typeof size === 'string' ? /(?:^|\|)\s*(\d+)?\s*(?:x\s*(\d+))?\s*$/.exec(size) : null;
+  const w = m?.[1] ? +m[1] : null, hgt = o.fill ? null : Math.max(120, Math.min(2400, (m?.[2] ? +m[2] : size?.height) || 460));
+  let host = url;
+  try { host = new URL(url).host; } catch { }
+  const src = framedUrl(url);
+  el.classList.add('web-embed');
+  if (o.fill) el.classList.add('we-fill');
+  el.innerHTML = `<div class="we-bar"><span class="we-host">${esc(host)}</span><span class="we-url" title="${esc(url)}">${esc(url.replace(/^https?:\/\//, ''))}</span>
+    <button class="ib we-reload" title="Reload"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button><button class="ib we-open" title="Open in browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button></div>
+    <div class="we-frame"${hgt ? ` style="height:${hgt}px"` : ''}></div>`;
+  if (w) el.style.maxWidth = w + 'px';
+  const frame = $('.we-frame', el);
+  const load = () => {
+    if (NATIVE && window.ipc) window.ipc.postMessage('frame:' + src); // the desktop window lets this origin load in place
+    const f = document.createElement('iframe');
+    f.src = src;
+    // Its own origin, so it can't reach Cinder; it can't navigate the app either.
+    f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox allow-presentation');
+    f.setAttribute('allow', 'fullscreen; picture-in-picture; encrypted-media; clipboard-write');
+    f.referrerPolicy = 'no-referrer';
+    f.loading = 'lazy';
+    f.title = host;
+    frame.replaceChildren(f);
+  };
+  if (cfg.webEmbeds === 'click') {
+    frame.innerHTML = `<div class="we-ask"><button class="btn">Load ${esc(host)}</button><small>Embedded pages come from the web. Settings can load them without asking.</small></div>`;
+    $('.we-ask button', frame).onclick = e => { e.preventDefault(); e.stopPropagation(); load(); };
+  } else load();
+  $('.we-open', el).onclick = e => { e.preventDefault(); e.stopPropagation(); window.open(url, '_blank', 'noopener'); };
+  $('.we-reload', el).onclick = e => { e.preventDefault(); e.stopPropagation(); load(); };
+}
+
+// ------------------------------------------------------------ embed / show as link
+
+// The link covering (or, failing that, first on the line of) doc offset pos in editor e.
+function linkAt(e, pos, loose = false) {
+  const line = e.view.state.doc.lineAt(pos), t = line.text, o = pos - line.from;
+  const found = [];
+  for (const m of t.matchAll(/(!?)\[\[[^\[\]\n]+?\]\]/g)) found.push({ s: m.index, e: m.index + m[0].length, kind: 'wiki', embed: !!m[1] });
+  for (const m of t.matchAll(/(!?)\[([^\]\n]*)\]\(\s*<?([^)\s>]+)>?\s*\)/g)) found.push({ s: m.index, e: m.index + m[0].length, kind: 'md', embed: !!m[1], href: m[3] });
+  for (const m of t.matchAll(/https?:\/\/[^\s<>()\[\]]+/g)) {
+    if (!found.some(f => m.index >= f.s && m.index < f.e)) found.push({ s: m.index, e: m.index + m[0].length, kind: 'url', embed: false, href: m[0] });
+  }
+  const l = found.find(f => o >= f.s && o <= f.e) || (loose ? found.sort((a, b) => a.s - b.s)[0] : null);
+  return l && { ...l, from: line.from + l.s, to: line.from + l.e, text: t.slice(l.s, l.e) };
+}
+function toggleEmbed(e, pos, loose) {
+  const l = linkAt(e, pos, loose);
+  if (!l) return toast('Put the cursor on a link first');
+  let out;
+  if (l.kind === 'url') out = `![](${l.text})`;
+  else if (!l.embed) out = '!' + l.text;
+  else if (l.kind === 'md' && /^!\[\]\(/.test(l.text) && WEB_URL_RE.test(l.href)) out = l.href; // ![](url) → the bare address
+  else out = l.text.slice(1);
+  e.view.dispatch({ changes: { from: l.from, to: l.to, insert: out } });
+  return true;
+}
+
+// Right-click a link (or an embed) in the editor: embed it, or turn it back into a link.
+document.addEventListener('contextmenu', e => {
+  const t = e.target.closest?.('.cm-editor :is(.cm-wikilink, .cm-link, .cm-url, .cm-note-embed, .cm-web-embed, .cm-visual-embed)');
+  if (!t || e.defaultPrevented) return;
+  const reg = EDITORS.get(t.closest('.cm-editor'));
+  if (!reg) return;
+  let pos;
+  try { pos = reg.ed.view.posAtDOM(t); } catch { return; }
+  const block = t.matches('.cm-note-embed, .cm-web-embed, .cm-visual-embed');
+  const l = linkAt(reg.ed, pos, block);
+  if (!l) return;
+  e.preventDefault();
+  const url = l.kind === 'wiki' ? null : l.href;
+  const name = l.kind === 'wiki' ? splitOnce(splitOnce(l.text.replace(/^!?\[\[|\]\]$/g, ''), '|')[0], '#')[0] : null;
+  const target = name != null ? resolveLink(name, reg.from()) : url && !/^[a-z][a-z0-9+.-]*:/i.test(url) ? resolveLink(safeDecode(url.split('#')[0]), reg.from()) : null;
+  const items = [[l.embed ? 'Show as a link' : 'Embed (show it here)', () => toggleEmbed(reg.ed, l.from + 1)]];
+  if (target) items.push(['Open', () => openPath(target)], ['Open in new tab', () => openInNewTab(target)]);
+  else if (url && WEB_URL_RE.test(url)) items.push(['Open in browser', () => window.open(url, '_blank', 'noopener')]);
+  items.push(['Copy link', () => navigator.clipboard?.writeText(l.text.replace(/^!/, '')).then(() => toast('Copied'))]);
+  menu(e.clientX, e.clientY, items);
+});
+
+// ------------------------------------------------------------ hover previews
+
+// Hover a note link to see the note (in the editor, hold Ctrl/Cmd, as in Obsidian); Ctrl/Cmd+hover
+// a web link to see the live page. The preview stays while the pointer is over it; Esc closes it.
+const PREVIEW_TARGETS = 'a.internal-link, a[href^="http"], .cm-editor :is(.cm-wikilink, .cm-link, .cm-url), .cv-link-url';
+let hoverTimer = null, hoverHide = null, hoverPop = null, hoverFor = null, lastPointer = { x: 0, y: 0 };
+function hoverTarget(a) {
+  const url = a.dataset.url || (a.matches('a[href^="http"]') ? a.getAttribute('href') : null);
+  if (url && WEB_URL_RE.test(url)) return { web: url };
+  const name = a.dataset.link ?? a.dataset.href;
+  if (name == null) return null;
+  const from = a.dataset.from || EDITORS.get(a.closest('.cm-editor'))?.from() || S.cur;
+  const path = a.dataset.path ? name : name === '' ? from : resolveLink(name, from);
+  return path && S.files.has(path) ? { path, sub: a.dataset.sub || '' } : null;
+}
+function showHover(a) {
+  const t = hoverTarget(a);
+  if (!t) return;
+  hideHover(true);
+  hoverFor = a;
+  const pop = hoverPop = document.createElement('div');
+  pop.className = 'hover-pop' + (t.web ? ' hp-web' : '');
+  if (t.web) renderWebEmbed(pop, t.web, { height: 380 });
+  else {
+    pop.innerHTML = `<div class="hp-head"><b>${esc(displayName(t.path))}${t.sub ? ` › ${esc(t.sub.replace(/^\^/, ''))}` : ''}</b><button class="ib hp-open" title="Open (Ctrl-click: new tab)"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button></div><div class="hp-body markdown"></div>`;
+    const body = $('.hp-body', pop), n = S.notes.get(t.path);
+    if (n && !isDrawing(t.path)) renderInto(body, t.sub ? extractSection(n, t.sub.replace(/^#/, '')) : n.content, t.path, 1);
+    else if (IMG_EXT.test(t.path)) body.innerHTML = `<img src="${rawUrl(t.path)}" alt="">`;
+    else if (visualEmbed(t.path)) renderVisualEmbed(body, t.path);
+    else body.innerHTML = `<p class="none">${esc(basename(t.path))}</p>`;
+    $('.hp-open', pop).onclick = e => { hideHover(true); (e.ctrlKey || e.metaKey ? openInNewTab : openPath)(t.path, t.sub ? { heading: t.sub } : {}); };
+  }
+  document.body.append(pop);
+  const r = a.getBoundingClientRect(), W = pop.offsetWidth, H = pop.offsetHeight;
+  const below = r.bottom + 6 + H < innerHeight || r.top < H + 12;
+  pop.style.left = Math.max(8, Math.min(innerWidth - W - 8, r.left)) + 'px';
+  pop.style.top = (below ? Math.min(innerHeight - H - 8, r.bottom + 6) : Math.max(8, r.top - H - 6)) + 'px';
+  pop.addEventListener('mouseenter', () => clearTimeout(hoverHide));
+  pop.addEventListener('mouseleave', () => scheduleHideHover());
+}
+function hideHover(now) {
+  clearTimeout(hoverTimer); clearTimeout(hoverHide);
+  if (!hoverPop) return;
+  if (now) { hoverPop.remove(); hoverPop = null; hoverFor = null; }
+  else scheduleHideHover();
+}
+const scheduleHideHover = () => { clearTimeout(hoverHide); hoverHide = setTimeout(() => hideHover(true), 280); };
+function maybeHover(a, mod) {
+  if (!cfg.hoverPreview || !a || a.closest('.hover-pop') && a === hoverFor) return;
+  const t = hoverTarget(a);
+  if (!t) return;
+  const needMod = !!t.web || !!a.closest('.cm-editor, .cv-node');
+  if (needMod && !mod) return;
+  if (a === hoverFor && hoverPop) { clearTimeout(hoverHide); return; }
+  clearTimeout(hoverTimer);
+  hoverTimer = setTimeout(() => showHover(a), needMod ? 120 : 450);
+}
+document.addEventListener('mouseover', e => {
+  lastPointer = { x: e.clientX, y: e.clientY };
+  const a = e.target.closest?.(PREVIEW_TARGETS);
+  if (a) { if (hoverFor === a) clearTimeout(hoverHide); maybeHover(a, e.ctrlKey || e.metaKey); }
+  else clearTimeout(hoverTimer);
+});
+document.addEventListener('mouseout', e => {
+  const a = e.target.closest?.(PREVIEW_TARGETS);
+  if (!a) return;
+  clearTimeout(hoverTimer);
+  if (hoverFor === a && !e.relatedTarget?.closest?.('.hover-pop')) scheduleHideHover();
+});
+document.addEventListener('mousemove', e => { lastPointer = { x: e.clientX, y: e.clientY }; }, { passive: true });
+// Pressing Ctrl/Cmd while already over a link shows its preview.
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && hoverPop) { hideHover(true); return; }
+  if ((e.key === 'Control' || e.key === 'Meta') && !e.repeat) maybeHover(document.elementFromPoint(lastPointer.x, lastPointer.y)?.closest?.(PREVIEW_TARGETS), true);
+});
+document.addEventListener('mousedown', e => { if (hoverPop && !e.target.closest('.hover-pop')) hideHover(true); });
+
 // ============================================================ images: viewer, resize, crop, annotate, screenshots
 
 // Editors by their .cm-editor element, so image clicks and grips know whose text to change.
@@ -3271,6 +3459,7 @@ const APP_COMMANDS = [
   ['toggle-left', 'Toggle left sidebar', 'Mod-\\', () => toggleSide('left')],
   ['backlinks', 'Show backlinks', 'Mod-Shift-b', () => showRight('backlinks')],
   ['all-properties', 'Show all properties', '', () => showPanel('props', true)],
+  ['toggle-embed', 'Embed the link under the cursor (or show an embed as a link)', '', inNote(() => { setMode('edit'); toggleEmbed(ed, ed.selectionStart); })],
   ['outline', 'Show outline', 'Mod-Shift-o', () => showRight('outline')],
   ['outgoing', 'Show outgoing links', '', () => showRight('outgoing')],
   ['new-tab', 'New tab', 'Mod-t', () => openInNewTab(null, { switcher: true })],
@@ -3473,6 +3662,8 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
+    <label>Embedded web pages (<code>![](https://…)</code> and canvas link cards)<select class="field" name="webEmbeds"><option value="auto">Load them</option><option value="click">Load when clicked</option><option value="off">Show just the link</option></select></label>
+    <label class="check"><input type="checkbox" name="hoverPreview"> Preview links on hover (hold Ctrl in the editor and for web pages)</label>
     <label class="check"><input type="checkbox" name="mathSnippets"> Math shortcuts while typing equations (<code>//</code> fraction, <code>@a</code> α, <code>mk</code>+Tab inline math…)</label>
     <label class="check"><input type="checkbox" name="screenshotHide"> Hide Cinder while taking a screenshot (desktop app)</label>
     <div class="row" style="justify-content:flex-start;gap:12px"><label>Screenshot delay<select class="field" name="screenshotDelay"><option value="0">None</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select></label>
@@ -4099,6 +4290,7 @@ CinderCanvas.init($('#view-canvas'), {
   },
   fileExists: p => S.files.has(p),
   mountEditor: (host, o) => mountCardEditor(host, o),
+  renderLink: (el, url) => { if (!isWebPage(url) || cfg.webEmbeds === 'off') return false; renderWebEmbed(el, url, '', { fill: true }); return true; },
   viewImage: (p, all) => viewImages(p, all.map(q => ({ src: rawUrl(q), name: basename(q), path: q }))),
   createNoteFromText: async text => {
     const first = (text.split('\n').find(l => l.trim()) || 'Untitled').replace(/^#+\s*/, '').replace(/[\\/:*?"<>|#^[\]]/g, '').trim().slice(0, 60) || 'Untitled';
@@ -4242,7 +4434,7 @@ const WELCOME = `Cinder is a local notes app. Your notes are plain Markdown file
 - [ ] Make a daily note from the calendar icon
 
 > [!tip] Nothing leaves this machine
-> Cinder only listens on 127.0.0.1 and has no plugin system, so it can't reach the network or run third-party code.
+> Cinder only listens on 127.0.0.1 and has no plugin system, so it doesn't reach the network or run third-party code. The one exception is a web page you embed yourself, like \`![](https://example.com)\`.
 `;
 
 async function boot() {
