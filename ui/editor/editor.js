@@ -3,12 +3,13 @@
 // Bundled into ui/vendor/editor.bundle.js with `npm install && npm run build` in ui/editor/.
 // app.js talks to it only through FolioEditor.create(parent, hooks).
 
-import { EditorState, EditorSelection, StateField, StateEffect, Compartment, Prec, Annotation } from '@codemirror/state';
+import { EditorState, EditorSelection, StateField, StateEffect, Compartment, Prec, Annotation, Facet } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, drawSelection, dropCursor, rectangularSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab } from '@codemirror/commands';
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion } from '@codemirror/autocomplete';
+import { vim } from '@replit/codemirror-vim';
 import { search, searchKeymap, highlightSelectionMatches, openSearchPanel } from '@codemirror/search';
 import { classHighlighter, tags as t } from '@lezer/highlight';
 import { javascript } from '@codemirror/lang-javascript';
@@ -24,10 +25,26 @@ import { powerShell } from '@codemirror/legacy-modes/mode/powershell';
 const Punct = /[!"#$%&'()*+,\-.\/:;<=>?@\[\\\]^_`{|}~\p{P}\p{S}]/u;
 const HighlightDelim = { resolve: 'Highlight', mark: 'HighlightMark' };
 
-// Obsidian extras on top of GFM: [[wikilinks]], ![[embeds]], ==highlights==, #tags, frontmatter.
+// Obsidian extras on top of GFM: [[wikilinks]], ![[embeds]], ==highlights==, #tags, frontmatter, $math$.
+const BLOCK_MATH_START = /^(\s{0,3})\$\$/;
 const ObsidianMarkdown = {
-  defineNodes: ['WikiLink', 'Embed', 'WikiMark', 'Highlight', 'HighlightMark', 'Tag', { name: 'Frontmatter', block: true }, 'FrontmatterMark'],
+  defineNodes: ['WikiLink', 'Embed', 'WikiMark', 'Highlight', 'HighlightMark', 'Tag', { name: 'Frontmatter', block: true }, 'FrontmatterMark',
+    'InlineMath', 'InlineMathMark', { name: 'BlockMath', block: true }, 'BlockMathMark'],
   parseInline: [
+    {
+      // $x^2$ (not "$5 and $10": the opening $ can't be followed by a space, nor the closing one
+      // preceded by a space or followed by a digit) and $$display$$ inside a paragraph.
+      name: 'InlineMath', before: 'Emphasis',
+      parse(cx, next, pos) {
+        if (next !== 36) return -1;
+        const display = cx.char(pos + 1) === 36, open = display ? 2 : 1;
+        const rest = cx.slice(pos + open, cx.end);
+        const m = display ? /^(?:\\.|[^\\$])+?\$\$/.exec(rest) : /^(?![\s$])(?:\\.|[^\\$\n])*?[^\s\\]\$(?!\d)/.exec(rest);
+        if (!m) return -1;
+        const end = pos + open + m[0].length;
+        return cx.addElement(cx.elt('InlineMath', pos, end, [cx.elt('InlineMathMark', pos, pos + open), cx.elt('InlineMathMark', end - open, end)]));
+      },
+    },
     {
       name: 'WikiLink', before: 'Link',
       parse(cx, next, pos) {
@@ -64,6 +81,37 @@ const ObsidianMarkdown = {
     },
   ],
   parseBlock: [{
+    // $$ … $$ on their own lines (the closing $$ may end a line of the formula).
+    name: 'BlockMath', before: 'FencedCode',
+    parse(cx, line) {
+      const m = BLOCK_MATH_START.exec(line.text);
+      if (!m) return false;
+      const start = cx.lineStart + m[1].length;
+      const marks = [cx.elt('BlockMathMark', start, start + 2)];
+      const first = line.text.slice(m[0].length).trimEnd();
+      if (first.length >= 2 && first.endsWith('$$')) { // $$ on one line $$
+        const end = cx.lineStart + m[0].length + first.length;
+        marks.push(cx.elt('BlockMathMark', end - 2, end));
+        cx.nextLine();
+        cx.addElement(cx.elt('BlockMath', start, end, marks));
+        return true;
+      }
+      let end = cx.lineStart + line.text.length;
+      while (cx.nextLine()) {
+        const t = line.text.trimEnd();
+        if (t.endsWith('$$')) {
+          end = cx.lineStart + t.length;
+          marks.push(cx.elt('BlockMathMark', end - 2, end));
+          cx.nextLine();
+          break;
+        }
+        end = cx.lineStart + line.text.length;
+      }
+      cx.addElement(cx.elt('BlockMath', start, end, marks));
+      return true;
+    },
+    endLeaf: (cx, line) => BLOCK_MATH_START.test(line.text),
+  }, {
     name: 'Frontmatter', before: 'HorizontalRule',
     parse(cx, line) {
       if (cx.lineStart !== 0 || !/^---\s*$/.test(line.text)) return false;
@@ -157,34 +205,36 @@ class ImageWidget extends WidgetType {
   }
 }
 
-let H = null; // hooks from app.js
+// app.js hooks, per editor (the note editor and canvas card editors have their own).
+const hooksFacet = Facet.define({ combine: v => v[0] || {} });
+const hooksOf = state => state.facet(hooksFacet);
 
 class EmbedWidget extends WidgetType {
-  constructor(path, sub, version) { super(); this.path = path; this.sub = sub; this.version = version; }
+  constructor(path, sub, version, h) { super(); this.path = path; this.sub = sub; this.version = version; this.h = h; }
   eq(o) { return o.path === this.path && o.sub === this.sub && o.version === this.version; }
   toDOM() {
     const el = document.createElement('div');
     el.className = 'cm-embed-block cm-note-embed';
-    H.renderEmbed(el, this.path, this.sub);
+    this.h.renderEmbed(el, this.path, this.sub);
     return el;
   }
 }
 
-// Embeds app.js renders itself (drawings, canvases, bases): H.visualEmbed(path) says which.
+// Embeds app.js renders itself (drawings, canvases, bases): hooks.visualEmbed(path) says which.
 class VisualEmbedWidget extends WidgetType {
-  constructor(path, width, sub, version) { super(); this.path = path; this.width = width; this.sub = sub; this.version = version; }
+  constructor(path, width, sub, version, h) { super(); this.path = path; this.width = width; this.sub = sub; this.version = version; this.h = h; }
   eq(o) { return o.path === this.path && o.width === this.width && o.sub === this.sub && o.version === this.version; }
   toDOM() {
     const el = document.createElement('div');
     el.className = 'cm-embed-block cm-visual-embed';
-    H.renderVisualEmbed(el, this.path, this.width, this.sub);
+    this.h.renderVisualEmbed(el, this.path, this.width, this.sub);
     return el;
   }
 }
 
 // Fenced code blocks app.js renders itself (```base, ```tasks …), with a button to edit the source.
 class CodeBlockWidget extends WidgetType {
-  constructor(lang, code, version) { super(); this.lang = lang; this.code = code; this.version = version; }
+  constructor(lang, code, version, h) { super(); this.lang = lang; this.code = code; this.version = version; this.h = h; }
   eq(o) { return o.lang === this.lang && o.code === this.code && o.version === this.version; }
   toDOM(view) {
     const el = document.createElement('div');
@@ -201,20 +251,43 @@ class CodeBlockWidget extends WidgetType {
       view.focus();
     });
     el.append(body, edit);
-    H.renderCodeBlock(body, this.lang, this.code);
+    this.h.renderCodeBlock(body, this.lang, this.code);
     return el;
   }
 }
 
 class TableWidget extends WidgetType {
-  constructor(text, version) { super(); this.text = text; this.version = version; }
+  constructor(text, version, h) { super(); this.text = text; this.version = version; this.h = h; }
   eq(o) { return o.text === this.text && o.version === this.version; }
   toDOM() {
     const el = document.createElement('div');
     el.className = 'cm-embed-block cm-table-widget markdown';
-    H.renderMarkdown(el, this.text);
+    this.h.renderMarkdown(el, this.text);
     return el;
   }
+}
+
+// A rendered formula. preview: shown next to the source while it's being edited.
+class MathWidget extends WidgetType {
+  constructor(tex, display, h, preview = false) { super(); this.tex = tex; this.display = display; this.h = h; this.preview = preview; }
+  eq(o) { return o.tex === this.tex && o.display === this.display && o.preview === this.preview; }
+  toDOM() {
+    const el = document.createElement(this.display && !this.preview ? 'div' : this.display ? 'div' : 'span');
+    el.className = this.preview ? (this.display ? 'cm-math-preview cm-math-preview-block' : 'cm-math-preview') : this.display ? 'cm-embed-block cm-math-block' : 'cm-math-inline';
+    if (this.h.renderMath) this.h.renderMath(el, this.tex, this.display);
+    else el.textContent = this.tex;
+    return el;
+  }
+  // Clicking a formula puts the cursor there, which reveals its source.
+  ignoreEvent() { return false; }
+}
+
+// The TeX between a math node's delimiters.
+function mathTex(doc, node) {
+  const marks = [];
+  for (let c = node.firstChild; c; c = c.nextSibling) if (/MathMark$/.test(c.name)) marks.push(c);
+  const from = marks[0] ? marks[0].to : node.from, to = marks.length > 1 ? marks[marks.length - 1].from : node.to;
+  return doc.sliceString(from, Math.max(from, to));
 }
 
 // ------------------------------------------------------------------ live preview: inline
@@ -240,7 +313,7 @@ function aloneOnLine(doc, from, to) {
 
 function buildInline(view) {
   const { state } = view, doc = state.doc;
-  const A = activity(state);
+  const A = activity(state), h = hooksOf(state);
   const out = [];
   const hide = (from, to) => { if (to > from) out.push(hideDeco.range(from, to)); };
   const lineDeco = (pos, cls) => out.push(lineCls(cls).range(doc.lineAt(pos).from));
@@ -365,7 +438,7 @@ function buildInline(view) {
             if (A.touches(nf, nt) || aloneOnLine(doc, nf, nt)) return false;
             const src = /\]\(\s*<?([^)\s>]+)/.exec(doc.sliceString(nf, nt))?.[1];
             const alt = /^!\[([^\]]*)\]/.exec(doc.sliceString(nf, nt))?.[1] || '';
-            const url = src && H.imageUrl(src);
+            const url = src && h.imageUrl(src);
             if (url) out.push(Decoration.replace({ widget: new ImageWidget(url, alt, null, false) }).range(nf, nt));
             return false;
           }
@@ -378,7 +451,7 @@ function buildInline(view) {
           case 'WikiLink': {
             const inner = doc.sliceString(nf + 2, nt - 2);
             const w = parseWiki(inner);
-            const target = H.resolve(w.name);
+            const target = h.resolve(w.name);
             const attrs = { 'data-link': w.name, 'data-sub': w.sub };
             const cls = 'cm-wikilink' + (target || !w.name ? '' : ' cm-unresolved');
             if (A.touches(nf, nt)) {
@@ -407,15 +480,27 @@ function buildInline(view) {
             }
             if (aloneOnLine(doc, nf, nt)) return false; // block widget handles it
             const w = parseWiki(doc.sliceString(nf + 3, nt - 2));
-            const target = H.resolve(w.name);
+            const target = h.resolve(w.name);
             if (target && IMG_EXT.test(target)) {
               const width = w.alias && /^\d+/.test(w.alias) ? parseInt(w.alias) : null;
-              out.push(Decoration.replace({ widget: new ImageWidget(H.rawUrl(target), w.name, width, false) }).range(nf, nt));
+              out.push(Decoration.replace({ widget: new ImageWidget(h.rawUrl(target), w.name, width, false) }).range(nf, nt));
             } else {
               hide(nf, nf + 3);
               out.push(markCls('cm-wikilink' + (target ? '' : ' cm-unresolved'), { 'data-link': w.name, 'data-sub': w.sub, 'data-live': '1' }).range(nf + 3, nt - 2));
               hide(nt - 2, nt);
             }
+            return false;
+          }
+          case 'InlineMath': {
+            const tex = mathTex(doc, node.node), display = doc.sliceString(nf, nf + 2) === '$$';
+            if (A.touches(nf, nt)) {
+              out.push(markCls('cm-math-src').range(nf, nt));
+              if (tex.trim()) out.push(Decoration.widget({ widget: new MathWidget(tex, false, h, true), side: 1 }).range(nt));
+            } else out.push(Decoration.replace({ widget: new MathWidget(tex, display, h) }).range(nf, nt));
+            return false;
+          }
+          case 'BlockMath': {
+            if (A.lines(nf, nt)) eachLine(nf, nt, l => out.push(lineCls('cm-math-src-line').range(l.from)));
             return false;
           }
           case 'Tag': {
@@ -444,27 +529,34 @@ const livePlugin = ViewPlugin.fromClass(class {
 // ------------------------------------------------------------------ live preview: blocks (tables, full-line embeds)
 
 function buildBlocks(state) {
-  const A = activity(state), doc = state.doc, out = [];
+  const A = activity(state), doc = state.doc, out = [], h = hooksOf(state);
   syntaxTree(state).iterate({
     enter(node) {
       const nf = node.from, nt = node.to;
-      if (node.name === 'FencedCode' && H.codeBlock) {
+      if (node.name === 'BlockMath') {
+        const first = doc.lineAt(nf), last = doc.lineAt(nt), tex = mathTex(doc, node.node);
+        // Being edited: the source stays, with a live rendering underneath.
+        if (A.lines(first.from, last.to)) { if (tex.trim()) out.push(Decoration.widget({ widget: new MathWidget(tex, true, h, true), block: true, side: 1 }).range(last.to)); }
+        else out.push(Decoration.replace({ widget: new MathWidget(tex, true, h), block: true }).range(first.from, last.to));
+        return false;
+      }
+      if (node.name === 'FencedCode' && h.codeBlock) {
         const info = node.node.getChild('CodeInfo');
         const lang = info ? doc.sliceString(info.from, info.to).trim().toLowerCase() : '';
-        if (!lang || !H.codeBlock(lang)) return false;
+        if (!lang || !h.codeBlock(lang)) return false;
         const first = doc.lineAt(nf), last = doc.lineAt(nt);
         if (A.lines(first.from, last.to)) return false;
         const closed = last.number > first.number && /^\s*(```|~~~)/.test(doc.sliceString(last.from, last.to));
         const end = closed ? last.from - 1 : last.to;
         const code = end > first.to ? doc.sliceString(first.to + 1, end) : '';
-        out.push(Decoration.replace({ widget: new CodeBlockWidget(lang, code, H.version()), block: true }).range(first.from, last.to));
+        out.push(Decoration.replace({ widget: new CodeBlockWidget(lang, code, h.version(), h), block: true }).range(first.from, last.to));
         return false;
       }
       if (node.name === 'Table') {
         const from = doc.lineAt(nf).from, to = doc.lineAt(nt).to;
         if (!A.lines(from, to)) {
           const text = doc.sliceString(from, to);
-          out.push(Decoration.replace({ widget: new TableWidget(text, H.version()), block: true }).range(from, to));
+          out.push(Decoration.replace({ widget: new TableWidget(text, h.version(), h), block: true }).range(from, to));
         }
         return false;
       }
@@ -475,19 +567,19 @@ function buildBlocks(state) {
         let widget = null;
         if (node.name === 'Embed') {
           const w = parseWiki(doc.sliceString(nf + 3, nt - 2));
-          const target = H.resolve(w.name);
+          const target = h.resolve(w.name);
           const width = w.alias && /^\d+/.test(w.alias) ? parseInt(w.alias) : null;
-          if (target && H.visualEmbed && H.visualEmbed(target)) {
-            widget = new VisualEmbedWidget(target, width, w.sub, H.version());
+          if (target && h.visualEmbed && h.visualEmbed(target)) {
+            widget = new VisualEmbedWidget(target, width, w.sub, h.version(), h);
           } else if (target && IMG_EXT.test(target)) {
-            widget = new ImageWidget(H.rawUrl(target), w.name, width, true);
+            widget = new ImageWidget(h.rawUrl(target), w.name, width, true);
           } else if (target && /\.md$/i.test(target)) {
-            widget = new EmbedWidget(target, w.sub, H.version());
+            widget = new EmbedWidget(target, w.sub, h.version(), h);
           }
         } else {
           const text = doc.sliceString(nf, nt);
           const src = /\]\(\s*<?([^)\s>]+)/.exec(text)?.[1];
-          const url = src && H.imageUrl(src);
+          const url = src && h.imageUrl(src);
           if (url) widget = new ImageWidget(url, /^!\[([^\]]*)\]/.exec(text)?.[1] || '', null, true);
         }
         if (widget) out.push(Decoration.replace({ widget, block: true }).range(line.from, line.to));
@@ -515,7 +607,7 @@ const clickHandler = EditorView.domEventHandlers({
     if (cb) {
       e.preventDefault();
       const pos = view.posAtDOM(cb);
-      const line = view.state.doc.lineAt(pos), rep = toggledLine(line.text);
+      const line = view.state.doc.lineAt(pos), rep = toggledLine(hooksOf(view.state), line.text);
       if (rep != null) { view.dispatch({ changes: { from: line.from, to: line.to, insert: rep } }); return true; }
       const cur = view.state.sliceDoc(pos, pos + 3);
       if (/^\[[ xX]\]$/.test(cur)) view.dispatch({ changes: { from: pos + 1, to: pos + 2, insert: cur[1] === ' ' ? 'x' : ' ' } });
@@ -534,9 +626,10 @@ const clickHandler = EditorView.domEventHandlers({
     if (!el || e.button !== 0) return false;
     if (!el.dataset.live && !(e.ctrlKey || e.metaKey)) return false;
     e.preventDefault();
-    if (el.dataset.link != null) H.follow(el.dataset.link, el.dataset.sub || '');
-    else if (el.dataset.url) H.openUrl(el.dataset.url);
-    else if (el.dataset.tag) H.tag(el.dataset.tag);
+    const h = hooksOf(view.state);
+    if (el.dataset.link != null) h.follow(el.dataset.link, el.dataset.sub || '');
+    else if (el.dataset.url) h.openUrl(el.dataset.url);
+    else if (el.dataset.tag) h.tag(el.dataset.tag);
     return true;
   },
 });
@@ -557,8 +650,8 @@ const wrap = (before, after = before) => view => {
 };
 
 // app.js decides how a task line toggles (done date, next occurrence of a recurring task).
-function toggledLine(text) {
-  const r = H.toggleTaskLine && H.toggleTaskLine(text);
+function toggledLine(h, text) {
+  const r = h.toggleTaskLine && h.toggleTaskLine(text);
   return r ? r.join('\n') : null;
 }
 
@@ -570,7 +663,7 @@ function toggleCheckbox(view) {
     if (seen.has(line.number)) continue; seen.add(line.number);
     let m;
     if ((m = /^(\s*(?:>\s*)*(?:[-*+]|\d+[.)])\s+)\[([ xX])\]/.exec(line.text))) {
-      const rep = toggledLine(line.text);
+      const rep = toggledLine(hooksOf(view.state), line.text);
       if (rep != null) { changes.push({ from: line.from, to: line.to, insert: rep }); continue; }
       const p = line.from + m[1].length + 1;
       changes.push({ from: p, to: p + 1, insert: m[2] === ' ' ? 'x' : ' ' });
@@ -593,15 +686,99 @@ function smartTab(view) {
   return insertTab(view);
 }
 
+// Insert a $$ … $$ block around the selection (or an empty one), cursor inside.
+function blockMath(view) {
+  view.dispatch(view.state.changeByRange(r => {
+    const text = view.state.sliceDoc(r.from, r.to);
+    const line = view.state.doc.lineAt(r.from);
+    const pre = r.from === line.from ? '' : '\n';
+    const insert = `${pre}$$\n${text}\n$$\n`;
+    const at = r.from + pre.length + 3;
+    return { changes: { from: r.from, to: r.to, insert }, range: EditorSelection.range(at, at + text.length) };
+  }));
+  return true;
+}
+
+// Editor commands by name: app.js binds keys to them (Settings → Hotkeys) and runs them from the palette.
+const COMMANDS = {
+  bold: { name: 'Bold', run: wrap('**'), key: 'Mod-b' },
+  italic: { name: 'Italic', run: wrap('*'), key: 'Mod-i' },
+  highlight: { name: 'Highlight', run: wrap('=='), key: 'Mod-Shift-h' },
+  strikethrough: { name: 'Strikethrough', run: wrap('~~'), key: '' },
+  code: { name: 'Inline code', run: wrap('`'), key: '' },
+  wikilink: { name: 'Wrap in [[link]]', run: wrap('[[', ']]'), key: 'Mod-k' },
+  comment: { name: 'Hidden comment (%% %%)', run: wrap('%%'), key: '' },
+  'toggle-checkbox': { name: 'Toggle checkbox', run: v => toggleCheckbox(v), key: 'Mod-Enter' },
+  'inline-math': { name: 'Inline math ($…$)', run: wrap('$'), key: 'Mod-m' },
+  'block-math': { name: 'Math block ($$…$$)', run: blockMath, key: 'Mod-Shift-m' },
+};
+const keyBindings = keys => Object.entries(COMMANDS).flatMap(([id, c]) => {
+  const k = keys && id in keys ? keys[id] : c.key;
+  return k ? [{ key: k, run: c.run, preventDefault: true }] : [];
+});
+
+// ------------------------------------------------------------------ LaTeX completion
+
+// [command, snippet (${} marks where the cursor goes; tab moves on), example rendered in the list]
+const LATEX = [
+  ...'alpha beta gamma delta epsilon varepsilon zeta eta theta vartheta iota kappa lambda mu nu xi pi varpi rho varrho sigma varsigma tau upsilon phi varphi chi psi omega Gamma Delta Theta Lambda Xi Pi Sigma Upsilon Phi Psi Omega'.split(' ').map(g => [g]),
+  ['frac', 'frac{${num}}{${den}}', 'frac{a}{b}'], ['dfrac', 'dfrac{${num}}{${den}}', 'dfrac{a}{b}'], ['tfrac', 'tfrac{${num}}{${den}}', 'tfrac{a}{b}'],
+  ['sqrt', 'sqrt{${x}}', 'sqrt{x}'], ['sqrt[n]', 'sqrt[${n}]{${x}}', 'sqrt[3]{x}'], ['binom', 'binom{${n}}{${k}}', 'binom{n}{k}'],
+  ['sum', 'sum_{${i=1}}^{${n}} ', 'sum_{i=1}^{n}'], ['prod', 'prod_{${i=1}}^{${n}} ', 'prod_{i=1}^{n}'], ['int', 'int_{${a}}^{${b}} ${f(x)}\\,dx', 'int_a^b f(x)\\,dx'],
+  ['iint', 'iint'], ['oint', 'oint'], ['lim', 'lim_{${x \\to \\infty}} ', 'lim_{x \\to \\infty}'], ['infty', 'infty'], ['partial', 'partial'], ['nabla', 'nabla'],
+  ['pm', 'pm'], ['mp', 'mp'], ['times', 'times'], ['div', 'div'], ['cdot', 'cdot'], ['circ', 'circ'], ['bullet', 'bullet'], ['star', 'star'],
+  ['leq', 'leq'], ['geq', 'geq'], ['neq', 'neq'], ['approx', 'approx'], ['equiv', 'equiv'], ['sim', 'sim'], ['simeq', 'simeq'], ['cong', 'cong'], ['propto', 'propto'], ['ll', 'll'], ['gg', 'gg'],
+  ['in', 'in'], ['notin', 'notin'], ['subset', 'subset'], ['subseteq', 'subseteq'], ['supset', 'supset'], ['supseteq', 'supseteq'], ['cup', 'cup'], ['cap', 'cap'], ['setminus', 'setminus'], ['emptyset', 'emptyset'],
+  ['forall', 'forall'], ['exists', 'exists'], ['neg', 'neg'], ['land', 'land'], ['lor', 'lor'], ['implies', 'implies'], ['iff', 'iff'],
+  ['to', 'to'], ['gets', 'gets'], ['mapsto', 'mapsto'], ['rightarrow', 'rightarrow'], ['leftarrow', 'leftarrow'], ['Rightarrow', 'Rightarrow'], ['Leftarrow', 'Leftarrow'], ['Leftrightarrow', 'Leftrightarrow'], ['uparrow', 'uparrow'], ['downarrow', 'downarrow'],
+  ['xrightarrow', 'xrightarrow{${text}}', 'xrightarrow{f}'],
+  ['sin'], ['cos'], ['tan'], ['log'], ['ln'], ['exp'], ['max'], ['min'], ['det'], ['arg'], ['gcd'], ['operatorname', 'operatorname{${name}}', 'operatorname{rank}'],
+  ['hat', 'hat{${x}}', 'hat{x}'], ['bar', 'bar{${x}}', 'bar{x}'], ['vec', 'vec{${v}}', 'vec{v}'], ['dot', 'dot{${x}}', 'dot{x}'], ['ddot', 'ddot{${x}}', 'ddot{x}'], ['tilde', 'tilde{${x}}', 'tilde{x}'],
+  ['overline', 'overline{${x}}', 'overline{AB}'], ['underline', 'underline{${x}}', 'underline{x}'], ['overbrace', 'overbrace{${x}}^{${label}}', 'overbrace{a+b}^{n}'], ['underbrace', 'underbrace{${x}}_{${label}}', 'underbrace{a+b}_{n}'],
+  ['mathbb', 'mathbb{${R}}', 'mathbb{R}'], ['mathcal', 'mathcal{${L}}', 'mathcal{L}'], ['mathbf', 'mathbf{${x}}', 'mathbf{x}'], ['mathrm', 'mathrm{${d}}', 'mathrm{d}'], ['mathfrak', 'mathfrak{${g}}', 'mathfrak{g}'], ['text', 'text{${words}}', 'text{if }x'],
+  ['left(', 'left( ${} \\right)', 'left( x \\right)'], ['left[', 'left[ ${} \\right]', 'left[ x \\right]'], ['left\\{', 'left\\\\{ ${} \\right\\\\}', 'left\\{ x \\right\\}'], ['left|', 'left| ${} \\right|', 'left| x \\right|'],
+  ['langle', 'langle ${} \\rangle', 'langle x \\rangle'], ['lfloor', 'lfloor ${} \\rfloor', 'lfloor x \\rfloor'], ['lceil', 'lceil ${} \\rceil', 'lceil x \\rceil'],
+  ['ldots'], ['cdots'], ['vdots'], ['ddots'], ['quad'], ['qquad'], ['boxed', 'boxed{${x}}', 'boxed{x=1}'], ['cancel', 'cancel{${x}}', 'cancel{x}'], ['color', 'color{${red}}{${x}}', 'color{red}{x}'], ['tag', 'tag{${1}}', null],
+  ['ce', 'ce{${H2O}}', 'ce{2H2 + O2 -> 2H2O}'], ['pu', 'pu{${9.81 m/s^2}}', 'pu{9.81 m/s^2}'],
+  ...['matrix', 'pmatrix', 'bmatrix', 'vmatrix', 'Bmatrix'].map(e => [`begin{${e}}`, `begin{${e}}\n\t\${a} & \${b} \\\\\n\t\${c} & \${d}\n\\end{${e}}`, `begin{${e}} a & b \\\\ c & d \\end{${e}}`]),
+  ['begin{cases}', 'begin{cases}\n\t${x} & \\text{if } ${cond} \\\\\n\t${y} & \\text{otherwise}\n\\end{cases}', 'begin{cases} x & \\text{if } c \\\\ y & \\text{else} \\end{cases}'],
+  ['begin{aligned}', 'begin{aligned}\n\t${a} &= ${b} \\\\\n\t&= ${c}\n\\end{aligned}', 'begin{aligned} a &= b \\\\ &= c \\end{aligned}'],
+];
+
+// Is the cursor inside $…$ or $$…$$ (also while the closing $ isn't typed yet)?
+function inMath(state, pos) {
+  for (let n = syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) if (n.name === 'InlineMath' || n.name === 'BlockMath') return true;
+  const line = state.doc.lineAt(pos), before = line.text.slice(0, pos - line.from).replace(/\\\$/g, '');
+  return (before.match(/\$/g) || []).length % 2 === 1;
+}
+
+function latexCompletions(context) {
+  if (!inMath(context.state, context.pos)) return null;
+  const m = context.matchBefore(/\\[a-zA-Z]*[{(\[|]?/);
+  if (!m || (m.text.length < 2 && !context.explicit)) return null;
+  const h = hooksOf(context.state);
+  return {
+    from: m.from,
+    validFor: /^\\[a-zA-Z]*$/,
+    options: LATEX.map(([cmd, snip, example]) => snippetCompletion('\\' + (snip || cmd), {
+      label: '\\' + cmd,
+      type: 'function',
+      info: example === null || !h.renderMath ? undefined : () => { const el = document.createElement('div'); el.className = 'cm-math-info'; h.renderMath(el, '\\' + (example || cmd), false); return el; },
+    })),
+  };
+}
+
 // ------------------------------------------------------------------ completion
 
 function completions(context) {
+  const latex = latexCompletions(context);
+  if (latex) return latex;
   let m = context.matchBefore(/!?\[\[[^\[\]\n|]*/);
   if (m) {
     const at = m.text.indexOf('[[') + 2;
     const q = m.text.slice(at);
     const from = m.from + at;
-    const opts = H.linkOptions(q);
+    const opts = hooksOf(context.state).linkOptions(q);
     if (!opts.length) return null;
     return {
       from, filter: false,
@@ -618,7 +795,7 @@ function completions(context) {
   m = context.matchBefore(/(?:^|[\s(,;])#[\p{L}\p{N}_\-\/]+/u);
   if (m) {
     const at = m.text.indexOf('#') + 1;
-    const tags = H.tagOptions();
+    const tags = hooksOf(context.state).tagOptions();
     if (!tags.length) return null;
     return { from: m.from + at, options: tags.map(tg => ({ label: tg, type: 'keyword' })), validFor: /^[\p{L}\p{N}_\-\/]*$/u };
   }
@@ -632,13 +809,17 @@ const theme = EditorView.theme({
   '.cm-content': { caretColor: 'var(--accent)' },
 });
 
-function create(parent, hooks) {
-  H = hooks;
+// opts: {keys: {command: key}, extraKeys: [{key, run}], placeholder, vim, live}
+function create(parent, hooks, opts = {}) {
   const liveComp = new Compartment();
   const spellComp = new Compartment();
+  const keysComp = new Compartment();
+  const vimComp = new Compartment();
 
-  let liveOn = true;
+  let liveOn = opts.live ?? true, keys = opts.keys || {}, vimOn = !!opts.vim;
   const extensions = () => [
+    vimComp.of(vimOn ? vim() : []),
+    hooksFacet.of(hooks),
     focusField,
     EditorView.focusChangeEffect.of((_s, focusing) => setFocus.of(focusing)),
     history(),
@@ -657,23 +838,20 @@ function create(parent, hooks) {
     highlightSelectionMatches(),
     syntaxHighlighting(classHighlighter),
     syntaxHighlighting(markStyle),
-    placeholder('Start writing…'),
+    placeholder(opts.placeholder ?? 'Start writing…'),
     theme,
     spellComp.of(EditorView.contentAttributes.of({ spellcheck: 'true', autocorrect: 'on', autocapitalize: 'sentences' })),
     liveComp.of(liveOn ? livePreview : []),
+    Prec.highest(keymap.of(opts.extraKeys || [])),
+    Prec.high(keysComp.of(keymap.of(keyBindings(keys)))),
     Prec.high(keymap.of([
-      { key: 'Mod-b', run: wrap('**') },
-      { key: 'Mod-i', run: wrap('*') },
-      { key: 'Mod-Shift-h', run: wrap('==') },
-      { key: 'Mod-k', run: wrap('[[', ']]') },
-      { key: 'Mod-Enter', run: toggleCheckbox },
       { key: 'Tab', run: smartTab, shift: indentLess },
       {
         key: 'ArrowUp', run(view) {
           const r = view.state.selection.main;
-          if (!r.empty || !H.focusTitle) return false;
+          if (!r.empty || !hooks.focusTitle) return false;
           const a = view.coordsAtPos(r.head), b = view.coordsAtPos(0);
-          if (a && b && a.top - b.top < 2) { H.focusTitle(); return true; }
+          if (a && b && a.top - b.top < 2) { hooks.focusTitle(); return true; }
           return false;
         },
       },
@@ -687,24 +865,25 @@ function create(parent, hooks) {
       ...defaultKeymap.filter(k => !['Alt-ArrowLeft', 'Alt-ArrowRight', 'Mod-Enter'].includes(k.key)),
     ]),
     EditorView.updateListener.of(u => {
-      if (u.docChanged && !u.transactions.some(tr => tr.annotation(silent))) H.onChange();
-      if (u.docChanged || u.selectionSet) H.onCursor?.();
+      if (u.docChanged && !u.transactions.some(tr => tr.annotation(silent))) hooks.onChange?.();
+      if (u.docChanged || u.selectionSet) hooks.onCursor?.();
     }),
     EditorView.domEventHandlers({
       paste(e, view) {
         const files = [...(e.clipboardData?.files || [])];
         if (!files.length) return false;
         e.preventDefault();
-        H.onFiles(files, true);
+        if (!hooks.onFiles) return false;
+        hooks.onFiles(files, true);
         return true;
       },
       drop(e, view) {
         const files = [...(e.dataTransfer?.files || [])];
-        if (!files.length) return false;
+        if (!files.length || !hooks.onFiles) return false;
         e.preventDefault();
         const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
         if (pos != null) view.dispatch({ selection: { anchor: pos } });
-        H.onFiles(files, false);
+        hooks.onFiles(files, false);
         return true;
       },
     }),
@@ -751,9 +930,13 @@ function create(parent, hooks) {
     hasFocus() { return view.hasFocus; },
     refresh() { view.dispatch({ effects: refresh.of(null) }); },
     setLive(on) { liveOn = on; view.dispatch({ effects: liveComp.reconfigure(on ? livePreview : []) }); },
+    setKeys(k) { keys = k || {}; view.dispatch({ effects: keysComp.reconfigure(keymap.of(keyBindings(keys))) }); },
+    setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vim() : []) }); },
+    run(id) { const c = COMMANDS[id]; if (!c) return false; view.focus(); return c.run(view); },
     toggleCheckbox() { return toggleCheckbox(view); },
     openSearch() { view.focus(); openSearchPanel(view); },
+    destroy() { view.destroy(); },
   };
 }
 
-window.FolioEditor = { create };
+window.FolioEditor = { create, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };

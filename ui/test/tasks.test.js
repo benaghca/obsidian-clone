@@ -60,6 +60,9 @@ t('recurring tasks create the next occurrence above', () => {
   assert.equal(T.nextDate('2024-02-29', T.parseRecur('every year')), '2025-02-28');
   assert.equal(T.nextDate('2024-03-06', T.parseRecur('daily')), '2024-03-07');
   assert.equal(T.parseRecur('whenever'), null);
+  // "every week on …" means those days, not simply weekly
+  assert.equal(T.nextDate('2026-09-28', T.parseRecur('every week on monday, wednesday')), '2026-09-30');
+  assert.equal(T.parseRecur('every 2 weeks when done').n, 2);
 });
 
 t('natural-language quick add', () => {

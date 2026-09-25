@@ -45,6 +45,8 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
+  - `KaTeX` 0.18.9 with its mhchem extension and fonts (math rendering, MIT, `ui/vendor/katex/`). It doesn't use `eval`, and "trusted" commands such as `\href` are off.
+  - `@replit/codemirror-vim` 6.4.0 (Vim mode, MIT), bundled into `editor.bundle.js` and pinned in `ui/editor/package.json`.
   - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
   - `JetBrains Mono` 2.304, the default code font, in regular, bold, italic and bold italic (`ui/vendor/JetBrainsMono-*.woff2`, SIL Open Font License 1.1, see `ui/vendor/jetbrains-mono.LICENSE`).
   - `Symbols Nerd Font Mono` from Nerd Fonts 3.5.1 (`ui/vendor/SymbolsNerdFontMono.woff2`) and its list of icon names (`ui/vendor/nerd-icons.txt`). Its icons come from Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0), and Octicons, Devicons and others (MIT and SIL OFL). See `ui/vendor/nerd-fonts.LICENSE` for the full list and attributions.
@@ -113,10 +115,12 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **Natural-language quick add**, in the Tasks view or with *Add task…* from anywhere: `Pay rent tomorrow !high every month #home` becomes `- [ ] Pay rent #home ⏫ 🔁 every month 📅 2026-09-25`. A live preview shows how the text was understood. New tasks go to today's daily note or to a note you choose in Settings.
   - Ticking a task, whether in the editor, reading view, the Tasks view or a query, adds `✅ <date>`. Ticking a recurring task (`every week`, `every weekday`, `every mon, thu`, `every month on the 15th`, `… when done`) adds its next occurrence above it.
   - `` ```tasks `` query blocks use the Tasks plugin's query language (`not done`, `due before tomorrow`, `tag includes #work`, `path includes Projects`, `priority is above none`, `sort by due`, `group by heading`, `limit 10`, …) and render live lists you can tick.
+- **Math** with KaTeX: `$E=mc^2$` inline and `$$ … $$` blocks, in the editor, reading view, canvas cards, tasks and embeds, including chemistry with `\ce{2H2 + O2 -> 2H2O}` (mhchem). In live preview, a formula renders until you click into it; while you edit it, a rendered preview sits beside the source. Typing `\` inside math suggests LaTeX commands with a preview of each. Structures like `\frac`, `\sum`, matrices, `cases` and `aligned` insert as snippets, and **Tab** moves between their fields. **Ctrl+M** wraps the selection in `$…$`, and **Ctrl+Shift+M** makes a math block. `$5 and $10` stays plain text.
+- **Vim key bindings** in the editor, available as a setting.
 - **Fonts and Nerd Font icons**: JetBrains Mono comes with Folio and is the default code font. **Settings** can set the text and code fonts to any font installed on the computer, with a live preview. All of Nerd Fonts' roughly 11,000 icons (Font Awesome, Material Design, Codicons, Devicons, Octicons and more) work in every font Folio uses, including notes, code, canvases and drawings. The icon font only loads on pages that contain an icon. *Insert icon (Nerd Fonts)…* searches the icons by name. Icons are private-use Unicode characters, so a note that uses them needs a Nerd Font wherever else you open it.
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
-- Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, and **Tab**/**Shift+Tab** to indent list items
+- Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, **Ctrl+M** / **Ctrl+Shift+M** math, and **Tab**/**Shift+Tab** to indent list items
 
 UI preferences (theme, panel sizes and so on) are stored in the webview's local storage for each vault. Nothing is written into the vault except your notes and attachments.
 
@@ -141,7 +145,7 @@ ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
 ui/test/           Node tests for the drawing, template, canvas, bases and tasks modules (no packages needed)
 ui/style.css       themes and layout
-ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
+ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
 ```
 

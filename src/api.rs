@@ -32,6 +32,30 @@ const VENDOR_FILES: &[(&str, &str, &[u8])] = &[
     ("JetBrainsMono-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Italic.woff2")),
     ("JetBrainsMono-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-BoldItalic.woff2")),
     ("nerd-icons.txt", "text/plain; charset=utf-8", include_bytes!("../ui/vendor/nerd-icons.txt")),
+    // KaTeX (math), its mhchem extension, and its fonts
+    ("katex/katex.min.js", "text/javascript", include_bytes!("../ui/vendor/katex/katex.min.js")),
+    ("katex/mhchem.min.js", "text/javascript", include_bytes!("../ui/vendor/katex/mhchem.min.js")),
+    ("katex/katex.min.css", "text/css", include_bytes!("../ui/vendor/katex/katex.min.css")),
+    ("katex/fonts/KaTeX_AMS-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_AMS-Regular.woff2")),
+    ("katex/fonts/KaTeX_Caligraphic-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Caligraphic-Bold.woff2")),
+    ("katex/fonts/KaTeX_Caligraphic-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Caligraphic-Regular.woff2")),
+    ("katex/fonts/KaTeX_Fraktur-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Fraktur-Bold.woff2")),
+    ("katex/fonts/KaTeX_Fraktur-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Fraktur-Regular.woff2")),
+    ("katex/fonts/KaTeX_Main-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-Bold.woff2")),
+    ("katex/fonts/KaTeX_Main-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-BoldItalic.woff2")),
+    ("katex/fonts/KaTeX_Main-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-Italic.woff2")),
+    ("katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Main-Regular.woff2")),
+    ("katex/fonts/KaTeX_Math-BoldItalic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Math-BoldItalic.woff2")),
+    ("katex/fonts/KaTeX_Math-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Math-Italic.woff2")),
+    ("katex/fonts/KaTeX_SansSerif-Bold.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_SansSerif-Bold.woff2")),
+    ("katex/fonts/KaTeX_SansSerif-Italic.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_SansSerif-Italic.woff2")),
+    ("katex/fonts/KaTeX_SansSerif-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_SansSerif-Regular.woff2")),
+    ("katex/fonts/KaTeX_Script-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Script-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size1-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size1-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size2-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size2-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size3-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size3-Regular.woff2")),
+    ("katex/fonts/KaTeX_Size4-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Size4-Regular.woff2")),
+    ("katex/fonts/KaTeX_Typewriter-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2")),
 ];
 
 /// Everything the page may load comes from Folio itself; nothing else is allowed.
@@ -440,7 +464,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

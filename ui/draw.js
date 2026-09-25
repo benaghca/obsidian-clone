@@ -156,12 +156,13 @@ window.FolioDraw = (() => {
   }
 
   // The scene to write to disk: only files that elements still use.
+  // The scene to write: only the image data that elements use. scene.files itself keeps
+  // everything, so undoing the deletion of an image brings its data back too.
   function getScene() {
     const used = new Set(els.filter(e => e.type === 'image' && e.fileId).map(e => e.fileId));
     const files = {};
     for (const [id, f] of Object.entries(scene.files || {})) if (used.has(id)) files[id] = f;
-    scene.files = files;
-    return scene;
+    return { ...scene, elements: els, files };
   }
 
   function changed() { hooks.onChange?.(); }

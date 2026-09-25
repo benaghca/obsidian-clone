@@ -640,3 +640,16 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .font-preview .fp-text { color: var(--text); font-size: 15px; }
 .font-preview .fp-mono { font-size: 13px; background: var(--code-bg); padding: 1px 6px; border-radius: 4px; color: var(--text); }
 .font-preview .fp-icons { font-size: 17px; color: var(--accent); letter-spacing: .15em; }
+
+/* math (KaTeX) */
+.math-block, .cm-math-block { display: block; margin: .6em 0; overflow-x: auto; overflow-y: hidden; text-align: center; }
+.cm-math-block { cursor: text; padding: .2em 0; }
+.cm-math-inline, .math:not(.math-block) { cursor: text; }
+.katex { font-size: 1.12em; }
+.math-error, .katex .katex-error { color: var(--danger) !important; font-family: var(--font-mono); font-size: .9em; }
+.cm-line.cm-math-src-line { font-family: var(--font-mono); font-size: .9em; background: var(--code-bg); padding: 0 12px !important; }
+.cm-math-src { font-family: var(--font-mono); font-size: .9em; color: var(--muted); }
+/* live preview of the formula being typed */
+.cm-math-preview { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 6px; background: var(--bg2); border: 1px solid var(--border); vertical-align: middle; }
+.cm-math-preview-block { display: block; margin: 0 0 .6em; padding: 8px 12px; text-align: center; overflow-x: auto; }
+.cm-math-info { padding: 4px 8px; }

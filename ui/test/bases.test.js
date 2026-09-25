@@ -121,6 +121,10 @@ t('expressions', () => {
   assert.equal(ev('(file.mtime - file.ctime).days'), 152);
   assert.equal(ev('date("2024-01-31") + "1M" == date("2024-03-02")'), true);
   assert.equal(ev('today() - "1d" < today()'), true);
+  // a date written as text minus a date is a duration, not NaN
+  assert.equal(B.evaluate('("2024-03-10" - date("2024-03-01")).days', r), 9);
+  assert.equal(B.evaluate('(due - date("2024-03-01")).days', row('x.md', { due: '2024-03-05' })), 4);
+  assert.throws(() => ev('"soon" - today()'), /can't subtract/);
   assert.equal(ev('status == "done" ? 1 : 2'), 2);
   assert.equal(ev('formula.ppd * 2', { formulas: { ppd: 'pages / 7' } }), 200);
   assert.throws(() => ev('formula.a', { formulas: { a: 'formula.b', b: 'formula.a' } }), /refers to itself/);

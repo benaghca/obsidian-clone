@@ -76,6 +76,7 @@ const DEFAULTS = {
   palette: 'default',
   fontText: '',          // '' = system font
   fontMono: '',          // '' = JetBrains Mono (bundled)
+  vim: false,            // Vim key bindings in the editor
   folderTemplates: '',
   taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
@@ -101,7 +102,7 @@ function applyTheme() {
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
-  if (typeof ed !== 'undefined') ed.setLive(cfg.livePreview);
+  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); }
   if (window.FolioGraph) FolioGraph.restyle();
   if (window.FolioDraw) FolioDraw.restyle();
   if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
@@ -137,6 +138,16 @@ const S = {
 const editWrap = $('#edit-wrap');
 // CodeMirror-based editor with live preview (ui/editor/editor.js). Hooks are
 // arrow functions so they can use things defined further down this file.
+// Render TeX into el with KaTeX (errors show inline, in red; no \href or other "trusted" commands).
+function renderMath(el, tex, display) {
+  try { katex.render(tex, el, { displayMode: !!display, throwOnError: false, strict: 'ignore', trust: false, maxSize: 50, maxExpand: 1000, output: 'htmlAndMathml' }); }
+  catch (e) { el.textContent = tex; el.classList.add('math-error'); el.title = e.message; }
+}
+// Fill every math placeholder ([data-tex]) inside el.
+function renderMathIn(el) {
+  for (const m of el.querySelectorAll('[data-tex]')) { renderMath(m, m.dataset.tex, m.classList.contains('math-block') || m.classList.contains('math-display')); m.removeAttribute('data-tex'); }
+}
+
 const ed = FolioEditor.create($('#editor'), {
   resolve: name => resolveLink(name, S.cur),
   rawUrl: p => rawUrl(p),
@@ -158,7 +169,8 @@ const ed = FolioEditor.create($('#editor'), {
   codeBlock: lang => lang === 'base' || lang === 'tasks',
   renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, S.cur),
   toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
-});
+  renderMath: (el, tex, display) => renderMath(el, tex, display),
+}, { vim: cfg.vim });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
 const preview = $('#preview');
@@ -336,9 +348,6 @@ async function applyList(l, gen) {
     indexCanvas(p, v.content, v.mtime);
     if (p === S.cur && S.view === 'canvas' && !S.dirty && S.canvasDoc && v.mtime !== S.canvasDoc.mtime) loadCanvas(p, v.content, v.mtime, FolioCanvas.getView());
   }
-  if (S.view === 'canvas' && (changed.length || structural)) FolioCanvas.refreshFiles();
-  if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
-  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); }
   {
     for (const [p, v] of Object.entries(got)) {
       if (p === S.cur && S.dirty) continue;
@@ -356,6 +365,10 @@ async function applyList(l, gen) {
     if (S.view === 'drawing' && S.drawing && drawingsChanged.includes(S.cur) && !S.dirty && f.mtime !== S.drawing.mtime) reloadDrawingFromDisk();
   }
   if (structural) reindexAll(); else { changed.forEach(resolveNote); if (changed.length) { S.version++; refreshEditorSoon(); } }
+  // Views built from the notes redraw now that S.notes holds the new contents.
+  if (S.view === 'canvas' && (changed.length || structural)) FolioCanvas.refreshFiles();
+  if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
+  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); }
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
   if (structural) renderTree();
   refreshPanels();
@@ -417,7 +430,7 @@ async function doSave(force) {
     const headers = (!force && note && note.mtime) ? { 'X-Base-Mtime': String(note.mtime) } : {};
     const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: content, headers });
     setNote(p, content, r.mtime);
-    S.files.set(p, { mtime: r.mtime, size: new Blob([content]).size });
+    S.files.set(p, { ...S.files.get(p), mtime: r.mtime, size: new Blob([content]).size });
     resolveNote(p);
     if (!S.dirty) setSaveState('Saved');
     refreshPanels(true);
@@ -634,7 +647,7 @@ async function doSaveDrawing(force) {
     const headers = (!force && d.mtime) ? { 'X-Base-Mtime': String(d.mtime) } : {};
     const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: content, headers });
     d.mtime = r.mtime; d.info.source = content;
-    S.files.set(p, { mtime: r.mtime, size: new Blob([content]).size });
+    S.files.set(p, { ...S.files.get(p), mtime: r.mtime, size: new Blob([content]).size });
     if (isMd(p)) { setNote(p, content, r.mtime); resolveNote(p); }
     S.version++;
     if (!S.dirty) setSaveState('Saved');
@@ -1050,7 +1063,7 @@ function renderBaseEmbed(el, path, sub) {
   readMany([path]).then(got => {
     if (!got[path]) throw new Error('file not found');
     const base = FolioBases.parseBase(got[path].content);
-    FolioBases.mount(host, { base, path, editable: true, embedded: true, view: sub || undefined, hooks: baseHooks(path, thisPath) });
+    FolioBases.mount(host, { base, path, editable: true, embedded: true, view: sub || undefined, stateKey: `${thisPath}|${path}|${sub || ''}`, hooks: baseHooks(path, thisPath) });
   }).catch(e => { host.innerHTML = `<div class="bs-error">Couldn’t show ${esc(displayName(path))}: ${esc(e.message)}</div>`; });
 }
 
@@ -1061,12 +1074,16 @@ function renderBaseBlock(el, code, notePath) {
   try { base = FolioBases.parseBase(code); } catch (e) { el.innerHTML = `<div class="bs-error">This base block has a problem: ${esc(e.message)}</div>`; return; }
   let current = code;
   FolioBases.mount(el, {
-    base, path: notePath, editable: true, embedded: true,
+    // The UI state follows the block by its view names (they survive sorting and filtering).
+    base, path: notePath, editable: true, embedded: true, stateKey: `${notePath}|block|${base.views.map(v => v.name).join('|')}`,
     hooks: { ...baseHooks(notePath, notePath), save: b => { const next = FolioBases.serializeBase(b).replace(/\n$/, ''); saveBaseBlock(notePath, current, next); current = next; } },
   });
 }
 async function saveBaseBlock(notePath, oldCode, newCode) {
-  const find = src => { const m = src.indexOf('```base\n' + oldCode + (oldCode ? '\n' : '') + '```'); return m < 0 ? -1 : m + 8; };
+  // Find the block's code after any fence the editor treats as "base": ``` or ~~~, any length and case.
+  const escRe = x => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`(^|\\n)([ \\t]*(\`{3,}|~{3,})[ \\t]*base[ \\t]*\\r?\\n)${escRe(oldCode)}${oldCode ? '\\r?\\n' : ''}[ \\t]*\\3`, 'i');
+  const find = src => { const m = re.exec(src); return m ? m.index + m[1].length + m[2].length : -1; };
   if (S.cur === notePath && S.view === 'note') {
     const i = find(ed.value);
     if (i < 0) return toast('Couldn’t find that base block to update');
@@ -1112,6 +1129,9 @@ async function modifyTaskLine(x, fn) {
   if (inEditor) {
     const delta = text.length - (end - start), shift = v => v > end ? v + delta : v;
     ed.insert(start, end, text, shift(ed.selectionStart), shift(ed.selectionEnd));
+    // The editor holds the newest text; index it now so task lists redraw from it (saving follows).
+    const n = S.notes.get(x.path);
+    if (n) { setNote(x.path, ed.value, n.mtime); resolveNote(x.path); }
   } else {
     try { await writeFile(x.path, content.slice(0, start) + text + content.slice(end), S.notes.get(x.path).mtime); resolveNote(x.path); }
     catch (e) { toast(`Couldn’t update ${noteName(x.path)}: ${e.message}`); return; }
@@ -1178,6 +1198,7 @@ function taskHooks() {
       const div = document.createElement('div');
       try { div.innerHTML = DOMPurify.sanitize(marked.parseInline(text), { FORBID_TAGS: ['style', 'form', 'button', 'iframe', 'object', 'embed', 'img', 'input'] }); } finally { RC = prev; }
       linkifyTags(div);
+      renderMathIn(div);
       return div.innerHTML;
     },
     toggle: x => toggleTaskItem(x),
@@ -1298,6 +1319,28 @@ marked.use({
   breaks: true,
   extensions: [
     {
+      // $$ … $$ on their own lines
+      name: 'blockMath', level: 'block',
+      start(src) { const i = src.search(/^ {0,3}\$\$/m); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        const m = /^ {0,3}\$\$([\s\S]*?)\$\$[ \t]*(?:\n|$)/.exec(src);
+        if (m) return { type: 'blockMath', raw: m[0], tex: m[1].trim() };
+      },
+      renderer(t) { return `<div class="math math-block" data-tex="${esc(t.tex)}"></div>\n`; },
+    },
+    {
+      // $x$ (not "$5 and $10") and $$display$$ inside text
+      name: 'inlineMath', level: 'inline',
+      start(src) { const i = src.indexOf('$'); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        let m = /^\$\$((?:\\.|[^\\$])+?)\$\$/.exec(src);
+        if (m) return { type: 'inlineMath', raw: m[0], tex: m[1], display: true };
+        m = /^\$(?![\s$])((?:\\.|[^\\$\n])*?[^\s\\])\$(?!\d)/.exec(src);
+        if (m) return { type: 'inlineMath', raw: m[0], tex: m[1] };
+      },
+      renderer(t) { return `<span class="math${t.display ? ' math-display' : ''}" data-tex="${esc(t.tex)}"></span>`; },
+    },
+    {
       name: 'wiki', level: 'inline',
       start(src) { const i = src.search(/!?\[\[/); return i < 0 ? undefined : i; },
       tokenizer(src) {
@@ -1362,6 +1405,7 @@ function renderInto(el, content, from, depth) {
   html += markdownToHtml(content.slice(fmLen), from, depth);
   el.innerHTML = html;
   linkifyTags(el);
+  renderMathIn(el);
   for (const tb of $$('table', el)) { const w = document.createElement('div'); w.className = 'table-wrap'; tb.replaceWith(w); w.append(tb); }
   // Headings get ids for [[Note#Heading]] links.
   for (const h of $$('h1,h2,h3,h4,h5,h6', el)) h.id = 'h-' + slug(h.textContent);
@@ -2214,6 +2258,8 @@ const COMMANDS = [
   ['Find in current note', 'Ctrl+F', () => { if (S.view === 'note') { setMode('edit'); ed.openSearch(); } }],
   ['Toggle light / dark theme', '', () => toggleTheme()],
   ['Insert icon (Nerd Fonts)…', '', () => insertIcon()],
+  ['Insert inline math', 'Ctrl+M', () => S.view === 'note' ? (setMode('edit'), ed.run('inline-math')) : toast('Open a note first')],
+  ['Insert math block', 'Ctrl+Shift+M', () => S.view === 'note' ? (setMode('edit'), ed.run('block-math')) : toast('Open a note first')],
   ['Change colour theme…', '', () => chooseTheme()],
   ['Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
   ['Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
@@ -2247,6 +2293,7 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="livePreview"> Live preview (hide Markdown syntax except where you're editing)</label>
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
+    <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
     <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
     <label>Code font (empty for JetBrains Mono, which comes with Folio)<input class="field" name="fontMono" list="font-mono-list" placeholder="JetBrains Mono" spellcheck="false"></label>
     <datalist id="font-text-list"><option>Inter</option><option>Segoe UI</option><option>Noto Sans</option><option>Ubuntu</option><option>Georgia</option><option>Iowan Old Style</option><option>Literata</option><option>JetBrains Mono</option></datalist>

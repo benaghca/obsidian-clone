@@ -576,7 +576,12 @@
             case '<=': return cmp(a, b) <= 0; case '>=': return cmp(a, b) >= 0;
             case '+': case '-': {
               if (a instanceof FDate || (e.op === '-' && b instanceof FDate)) {
-                if (b instanceof FDate || (e.op === '-' && toDate(b) && typeof b === 'string' && DATE_RE.test(b))) return new Duration(wallDiff(a, toDate(b)));
+                if (b instanceof FDate || (e.op === '-' && toDate(b) && typeof b === 'string' && DATE_RE.test(b))) {
+                  const da = toDate(a), db = toDate(b);
+                  if (!da || !db) throw new Error(`can't subtract "${display(b)}" from "${display(a)}"`);
+                  return new Duration(wallDiff(da, db));
+                }
+                if (!(a instanceof FDate)) throw new Error(`can't subtract a date from "${display(a)}"`);
                 const d = b instanceof Duration ? { ms: b.ms, months: 0 } : parseDuration(b);
                 if (!d) throw new Error(`can't add "${display(b)}" to a date (use something like "1d" or "2 weeks")`);
                 return addDuration(a, d, e.op === '+' ? 1 : -1);
@@ -769,11 +774,15 @@
   // Mount a base into `el`. o: {base, text, path, view (name), editable (config can be saved),
   // hooks: {rows(), thisRow, backlinks, openFile, setProperty, createNote, save(base), menu, prompt, toast, renderValueLink}}
   // Returns {refresh(), setBase(base), destroy()}.
+  // Per-embed UI state (view, search, open panel), so a rebuilt embed looks the same.
+  const uiState = new Map();
   function mount(el, o) {
     let base = o.base;
     let vi = Math.max(0, base.views.findIndex(v => v.name === o.view));
     let search = '', searchFocus = false;
     let panel = null; // open popover: 'filter' | 'props' | 'sort'
+    const kept = o.stateKey && uiState.get(o.stateKey);
+    if (kept) { vi = Math.min(kept.vi, base.views.length - 1); search = kept.search; panel = kept.panel; }
     const h = o.hooks;
     el.classList.add('bs-root');
     if (o.embedded) el.classList.add('bs-embedded');
@@ -782,6 +791,7 @@
     function save() { if (o.editable) h.save?.(base); render(); }
 
     function render() {
+      if (o.stateKey) uiState.set(o.stateKey, { vi, search, panel });
       const scrollers = [...el.querySelectorAll('.bs-scroll')].map(s => [s.scrollLeft, s.scrollTop]);
       let r;
       try { r = query(base, vi, h.rows(), { search, thisRow: h.thisRow?.(), backlinks: h.backlinks }); }
@@ -889,7 +899,7 @@
       if (v.type === 'board') return board(r);
       const sections = r.groups ? r.groups.map(g => ({ title: g.value == null ? 'None' : valueHtml(g.value), rows: g.rows })) : [{ title: null, rows: r.rows }];
       if (v.type === 'cards') return `<div class="bs-scroll">` + sections.map(s => (s.title != null ? `<h4 class="bs-group">${s.title} <span>${s.rows.length}</span></h4>` : '') + `<div class="bs-cards">${s.rows.map(rr => card(r, rr)).join('')}</div>`).join('') + '</div>';
-      if (v.type === 'list') return `<div class="bs-scroll">` + sections.map(s => (s.title != null ? `<h4 class="bs-group">${s.title} <span>${s.rows.length}</span></h4>` : '') + `<ul class="bs-list">${s.rows.map(rr => `<li data-row="${esc(rr.path)}">${cell(r, 'file.name', rr)}${r.columns.filter(c => c !== 'file.name').map(c => { const x = cell(r, c, rr); return x.includes('bs-empty') ? '' : `<span class="bs-li-prop"><small>${esc(columnName(base, c))}</small> ${x}</span>`; }).join('')}</li>`).join('')}</ul>`).join('') + '</div>';
+      if (v.type === 'list') return `<div class="bs-scroll">` + sections.map(s => (s.title != null ? `<h4 class="bs-group">${s.title} <span>${s.rows.length}</span></h4>` : '') + `<ul class="bs-list">${s.rows.map(rr => `<li data-row="${esc(rr.path)}">${cell(r, 'file.name', rr)}${r.columns.filter(c => c !== 'file.name').map(c => { const x = cell(r, c, rr); return x.includes('bs-empty') ? '' : `<span class="bs-li-prop" data-col="${esc(c)}"><small>${esc(columnName(base, c))}</small> ${x}</span>`; }).join('')}</li>`).join('')}</ul>`).join('') + '</div>';
       // table
       const sorts = [].concat(v.sort || []);
       const head = r.columns.map((c, k) => {
@@ -917,7 +927,7 @@
         cover = src ? `<div class="bs-cover"><img src="${esc(src)}" alt="" loading="lazy"></div>` : '<div class="bs-cover bs-nocover"></div>';
       }
       const gp = v.type === 'board' && v.groupBy && (typeof v.groupBy === 'string' ? v.groupBy : v.groupBy.property);
-      const props = r.columns.filter(c => c !== 'file.name' && c !== v.image && c !== gp).map(c => { const x = cell(r, c, rr); return x.includes('bs-empty') ? '' : `<div class="bs-cprop"><small>${esc(columnName(base, c))}</small><div>${x}</div></div>`; }).join('');
+      const props = r.columns.filter(c => c !== 'file.name' && c !== v.image && c !== gp).map(c => { const x = cell(r, c, rr); return x.includes('bs-empty') ? '' : `<div class="bs-cprop" data-col="${esc(c)}"><small>${esc(columnName(base, c))}</small><div>${x}</div></div>`; }).join('');
       return `<div class="bs-card" data-row="${esc(rr.path)}" draggable="${v.type === 'board'}">${cover}<div class="bs-ctitle">${cell(r, 'file.name', rr)}</div>${props}</div>`;
     }
 
@@ -945,10 +955,10 @@
       if (link) { e.preventDefault(); return h.openLink(link.dataset.link); }
       const chk = t.closest('.bs-check');
       if (chk) {
-        const td = chk.closest('td[data-col], .bs-cprop'), row = chk.closest('[data-row]');
-        const col = td?.dataset.col || td?.closest('[data-col]')?.dataset.col;
-        if (row && col && propKey(col)) { await h.setProperty(row.dataset.row, propKey(col), chk.checked); }
-        return;
+        const td = chk.closest('[data-col]'), row = chk.closest('[data-row]');
+        const col = td?.dataset.col;
+        if (row && col && propKey(col)) await h.setProperty(row.dataset.row, propKey(col), chk.checked);
+        return render(); // redraw from the stored value, whatever happened
       }
       const th = t.closest('th[data-col]');
       if (th) {
@@ -1114,6 +1124,7 @@
         else if (isDate || typeof cur === 'string') val = raw; // text stays text
         else val = scalar(raw); // an empty cell: "5" becomes a number, "true" a checkbox
         await h.setProperty(path, key, val);
+        render(); // closes the editor even when nothing changed or the row isn't a note
       };
       input.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') finish(true); if (ev.key === 'Escape') finish(false); });
       input.addEventListener('blur', () => finish(true));

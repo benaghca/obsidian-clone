@@ -156,7 +156,7 @@
     const aliases = { daily: 'every day', weekly: 'every week', monthly: 'every month', yearly: 'every year', annually: 'every year' };
     r = aliases[r] || r;
     let m;
-    if ((m = /^every\s+(\d+)?\s*(day|days|week|weeks|month|months|year|years)\b(?:\s+on\s+the\s+(\d+)(?:st|nd|rd|th)?)?/.exec(r))) {
+    if ((m = /^every\s+(\d+)?\s*(day|days|week|weeks|month|months|year|years)(?:\s+on\s+the\s+(\d+)(?:st|nd|rd|th)?)?\s*$/.exec(r))) {
       const kind = m[2].replace(/s$/, '');
       return { kind, n: +(m[1] || 1), dom: m[3] ? +m[3] : null, whenDone };
     }
