@@ -82,6 +82,8 @@ const DEFAULTS = {
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
   drawingFormat: 'excalidraw',
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
+  mathSnippets: true,     // LaTeX Suite-style shortcuts while typing math
+  cssFolder: '',          // a vault folder of .css snippets to apply ('' = none)
   screenshotHide: true,   // the desktop window steps aside while you capture
   screenshotDelay: '0',   // seconds before capturing
   screenshotAfter: 'insert', // or 'annotate': open the screenshot in a drawing
@@ -174,6 +176,7 @@ function editorHooks(from, extra) {
     renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, from()),
     toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
     renderMath: (el, tex, display) => renderMath(el, tex, display),
+    mathSnippets: () => cfg.mathSnippets,
     propertiesFor: text => cfg.properties !== 'source' && propsOf(text) != null,
     renderProperties: (el, text, ctl) => mountProps(el, text, { ...ctl, from }),
     ...extra,
@@ -336,6 +339,7 @@ async function readMany(paths) {
 
 async function applyList(l, gen) {
   const next = new Map(l.files.map(f => [f.path, { mtime: f.mtime, ctime: f.ctime, size: f.size }]));
+  loadUserCss(next);
   const nextDirs = new Set(l.dirs);
   const changed = [], removed = [];
   let structural = nextDirs.size !== S.dirs.size || [...nextDirs].some(d => !S.dirs.has(d));
@@ -418,6 +422,40 @@ function markDirty() {
   setSaveState('Unsaved');
   scheduleSave();
   liveReindex();
+  noteClassesSoon();
+}
+
+// ------------------------------------------------------------ cssclasses and CSS snippets
+
+// A note's `cssclasses` property (Obsidian's) goes on its view, for the built-in classes (wide,
+// narrow, small, large, serif, no-title, center-images) and for the user's own CSS snippets.
+let noteClassList = [];
+function applyNoteClasses() {
+  const v = $('#view-note');
+  for (const c of noteClassList) v.classList.remove(c);
+  noteClassList = [];
+  if (S.view !== 'note' || !S.cur) return;
+  const fm = splitFrontmatter(ed.value).fm || {};
+  const raw = fm.cssclasses ?? fm.cssclass ?? fm.cssClasses;
+  noteClassList = [...new Set([raw].flat().flatMap(x => String(x ?? '').split(/[\s,]+/)).filter(c => /^[A-Za-z_][\w-]*$/.test(c) && !['view', 'hidden'].includes(c)))];
+  for (const c of noteClassList) v.classList.add(c);
+}
+const noteClassesSoon = debounce(applyNoteClasses, 250);
+
+// Every .css file in the snippets folder (Settings) is applied, and re-read when it changes.
+let userCssKey = '';
+async function loadUserCss(files = S.files) {
+  const dir = (cfg.cssFolder || '').replace(/^\/+|\/+$/g, '');
+  const paths = dir ? [...files.keys()].filter(p => dirname(p) === dir && /\.css$/i.test(p)).sort(collator.compare) : [];
+  const key = paths.map(p => `${p}@${files.get(p)?.mtime}`).join('|');
+  if (key === userCssKey) return;
+  userCssKey = key;
+  let el = document.getElementById('user-css');
+  if (!paths.length) { el?.remove(); return; }
+  let got = {};
+  try { got = await readMany(paths); } catch (e) { toast('Couldn’t read the CSS snippets: ' + e.message); return; }
+  if (!el) { el = document.createElement('style'); el.id = 'user-css'; document.head.append(el); }
+  el.textContent = paths.map(p => `/* ${p.replace(/\*\//g, '')} */\n${got[p]?.content || ''}`).join('\n\n');
 }
 
 const liveReindex = debounce(() => {
@@ -486,6 +524,7 @@ function showView(v) {
   if (v === 'canvas') FolioCanvas.show(); else FolioCanvas.hide();
   updateHistButtons();
   if (S.tabs) syncTab();
+  applyNoteClasses();
 }
 
 function showEmpty() {
@@ -526,6 +565,7 @@ async function openPath(p, opts = {}) {
   titleEl.value = noteName(p);
   const kept = edStates.get(p);
   if (kept && n && kept.doc.toString() === n.content) ed.setState(kept); else ed.load(n ? n.content : '');
+  applyNoteClasses();
   setSaveState('');
   const pos = S.pos.get(p);
   setMode(opts.mode || S.mode, true);
@@ -3384,9 +3424,11 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
+    <label class="check"><input type="checkbox" name="mathSnippets"> Math shortcuts while typing equations (<code>//</code> fraction, <code>@a</code> α, <code>mk</code>+Tab inline math…)</label>
     <label class="check"><input type="checkbox" name="screenshotHide"> Hide Folio while taking a screenshot (desktop app)</label>
     <div class="row" style="justify-content:flex-start;gap:12px"><label>Screenshot delay<select class="field" name="screenshotDelay"><option value="0">None</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select></label>
     <label>After a screenshot<select class="field" name="screenshotAfter"><option value="insert">Insert it</option><option value="annotate">Open it in a drawing to annotate</option></select></label></div>
+    <label>CSS snippets folder (every <code>.css</code> file in it styles Folio; pair with a note's <code>cssclasses</code>)<input class="field" name="cssFolder" placeholder="e.g. Snippets (empty: none)"></label>
     <label>Properties at the top of notes<select class="field" name="properties"><option value="visible">Show as a table you can edit</option><option value="source">Show the YAML frontmatter as text</option></select></label>
     <div class="row" style="justify-content:flex-start"><button type="button" class="btn" data-x-hotkeys>Hotkeys…</button><button type="button" class="btn" data-x-shortcuts>Keyboard shortcuts</button></div>
     <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
@@ -3420,6 +3462,7 @@ function openSettings() {
     }
     saveCfg(); applyTheme(); close();
     S.version++; ed.refresh(); if (S.view === 'note' && S.mode === 'read') renderPreview(); // (properties display)
+    userCssKey = null; loadUserCss();
   });
 }
 

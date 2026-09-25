@@ -8,7 +8,7 @@ import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, dr
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab } from '@codemirror/commands';
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField } from '@codemirror/autocomplete';
 import { vim, getCM } from '@replit/codemirror-vim';
 import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, searchPanelOpen } from '@codemirror/search';
 import { classHighlighter, tags as t } from '@lezer/highlight';
@@ -865,6 +865,76 @@ function inMath(state, pos) {
   return (before.match(/\$/g) || []).length % 2 === 1;
 }
 
+// ------------------------------------------------------------------ math snippets (LaTeX Suite style)
+
+// Typed inside $…$ or $$…$$, these expand at once. [trigger, template (${} = a Tab stop), word]:
+// word triggers only fire at the start of a word, so "\\sum" stays as typed; the others (xsr → x^{2})
+// work straight after a name.
+const MATH_AUTO = [
+  ['//', '\\frac{${}}{${}}${}'], ['sq', '\\sqrt{${}}${}', 1], ['td', '^{${}}${}'], ['__', '_{${}}${}'],
+  ['sr', '^{2}'], ['cb', '^{3}'], ['invs', '^{-1}'], ['ooo', '\\infty', 1], ['...', '\\dots'],
+  ['<=', '\\le '], ['>=', '\\ge '], ['!=', '\\neq '], ['->', '\\to '], ['<->', '\\leftrightarrow '], ['=>', '\\implies '], ['=<', '\\impliedby '],
+  ['~~', '\\approx '], ['xx', '\\times ', 1], ['**', '\\cdot '], ['+-', '\\pm '], ['-+', '\\mp '],
+  ['inn', '\\in ', 1], ['notin', '\\notin ', 1], ['sub=', '\\subseteq '], ['AA', '\\forall ', 1], ['EE', '\\exists ', 1],
+  ['RR', '\\mathbb{R}', 1], ['NN', '\\mathbb{N}', 1], ['ZZ', '\\mathbb{Z}', 1], ['QQ', '\\mathbb{Q}', 1], ['CC', '\\mathbb{C}', 1],
+  ['hat', '\\hat{${}}${}', 1], ['bar', '\\overline{${}}${}', 1], ['vec', '\\vec{${}}${}', 1], ['dot', '\\dot{${}}${}', 1], ['tilde', '\\tilde{${}}${}', 1],
+  ['bf', '\\mathbf{${}}${}', 1], ['cal', '\\mathcal{${}}${}', 1], ['text', '\\text{${}}${}', 1],
+  ['sum', '\\sum_{${i=1}}^{${n}} ${}', 1], ['prod', '\\prod_{${i=1}}^{${n}} ${}', 1], ['lim', '\\lim_{${n} \\to ${\\infty}} ${}', 1],
+  ['dint', '\\int_{${a}}^{${b}} ${} \\, d${x}', 1], ['par', '\\frac{\\partial ${y}}{\\partial ${x}} ${}', 1],
+  ['lr(', '\\left( ${} \\right)${}', 1], ['lr[', '\\left[ ${} \\right]${}', 1], ['lr|', '\\left| ${} \\right|${}', 1],
+  ['pmat', '\\begin{pmatrix} ${} \\end{pmatrix}${}', 1], ['case', '\\begin{cases} ${} \\end{cases}${}', 1],
+  ...[['a', 'alpha'], ['b', 'beta'], ['g', 'gamma'], ['G', 'Gamma'], ['d', 'delta'], ['D', 'Delta'], ['e', 'epsilon'], ['z', 'zeta'], ['h', 'eta'],
+    ['t', 'theta'], ['T', 'Theta'], ['i', 'iota'], ['k', 'kappa'], ['l', 'lambda'], ['L', 'Lambda'], ['m', 'mu'], ['n', 'nu'], ['x', 'xi'],
+    ['p', 'pi'], ['P', 'Pi'], ['r', 'rho'], ['s', 'sigma'], ['S', 'Sigma'], ['u', 'upsilon'], ['f', 'phi'], ['F', 'Phi'], ['c', 'chi'],
+    ['y', 'psi'], ['Y', 'Psi'], ['o', 'omega'], ['O', 'Omega']].map(([k, g]) => ['@' + k, '\\' + g]),
+  [':e', '\\varepsilon'], [':f', '\\varphi'], [':t', '\\vartheta'],
+].sort((a, b) => b[0].length - a[0].length);
+// Outside math, a word followed by Tab: mk → $…$, dm → a $$ block.
+const MATH_TAB = [['mk', '$${}$${}'], ['dm', '$$\n${}\n$$${}']];
+
+let lastSpaced = -1; // where the last space-ended expansion left the cursor
+function mathSnippetInput(view, from, to, text) {
+  if (from !== to || text.length !== 1 || !hooksOf(view.state).mathSnippets?.()) return false;
+  const st = view.state;
+  if (!inMath(st, from)) return false;
+  // "\\le " already ends in a space: a space typed straight after it isn't doubled.
+  if (text === ' ' && from === lastSpaced) { lastSpaced = -1; return true; }
+  const line = st.doc.lineAt(from);
+  const typed = st.sliceDoc(Math.max(line.from, from - 10), from) + text;
+  for (const [trig, tpl, word] of MATH_AUTO) {
+    if (!typed.endsWith(trig)) continue;
+    const start = from + 1 - trig.length;
+    if (start < line.from) continue;
+    if (word && /[\\a-zA-Z]/.test(st.sliceDoc(start - 1, start))) continue;
+    snippet(tpl)(view, null, start, from);
+    lastSpaced = tpl.endsWith(' ') ? view.state.selection.main.head : -1;
+    return true;
+  }
+  // x1 → x_1 (a single-letter name followed by a digit)
+  if (/\d/.test(text) && /(^|[^\\a-zA-Z])[a-zA-Z]$/.test(st.sliceDoc(Math.max(line.from, from - 2), from))) {
+    view.dispatch({ changes: { from, insert: '_' + text }, selection: { anchor: from + 2 }, userEvent: 'input.type' });
+    return true;
+  }
+  return false;
+}
+
+// Tab: expand mk / dm, or inside math step over a closing bracket or $.
+function mathTab(view) {
+  const st = view.state, r = st.selection.main;
+  if (!r.empty || !hooksOf(st).mathSnippets?.() || hasNextSnippetField(st)) return false;
+  const line = st.doc.lineAt(r.head), before = line.text.slice(0, r.head - line.from);
+  if (!inMath(st, r.head)) {
+    for (const [trig, tpl] of MATH_TAB) {
+      if (new RegExp(`(^|[\\s(\\[])${trig}$`).test(before)) { snippet(tpl)(view, null, r.head - trig.length, r.head); return true; }
+    }
+    return false;
+  }
+  const next = st.sliceDoc(r.head, r.head + 2);
+  const m = /^(\$\$|[})\]$|])/.exec(next);
+  if (m) { view.dispatch({ selection: { anchor: r.head + m[1].length } }); return true; }
+  return false;
+}
+
 function latexCompletions(context) {
   if (!inMath(context.state, context.pos)) return null;
   const m = context.matchBefore(/\\[a-zA-Z]*[{(\[|]?/);
@@ -941,6 +1011,7 @@ function create(parent, hooks, opts = {}) {
     rectangularSelection(),
     EditorState.allowMultipleSelections.of(true),
     EditorView.lineWrapping,
+    EditorView.inputHandler.of(mathSnippetInput),
     indentUnit.of('\t'),
     EditorState.tabSize.of(4),
     markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown] }),
@@ -958,7 +1029,7 @@ function create(parent, hooks, opts = {}) {
     Prec.highest(keymap.of(opts.extraKeys || [])),
     Prec.high(keysComp.of(keymap.of(keyBindings(keys)))),
     Prec.high(keymap.of([
-      { key: 'Tab', run: smartTab, shift: indentLess },
+      { key: 'Tab', run: v => mathTab(v) || smartTab(v), shift: indentLess },
       {
         key: 'ArrowUp', run(view) {
           const r = view.state.selection.main;

@@ -829,3 +829,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .pr-vals { margin: 0 0 4px 26px; border-left: 1px solid var(--border); padding-left: 4px; }
 .pr-val span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bs-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+
+/* Built-in cssclasses (put them in a note's cssclasses property) */
+#view-note.narrow .page, #view-note.narrow #preview { --col: 560px; }
+#view-note.small #editor .cm-editor, #view-note.small #preview { font-size: 14px; }
+#view-note.large #editor .cm-editor, #view-note.large #preview { font-size: 19px; }
+#view-note.serif #editor .cm-editor, #view-note.serif #preview, #view-note.serif .inline-title { font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; }
+#view-note.no-title .inline-title, #view-note.no-title .preview-title { display: none; }
+#view-note.center-images #preview img, #view-note.center-images .cm-image-block { display: block; margin-left: auto; margin-right: auto; }

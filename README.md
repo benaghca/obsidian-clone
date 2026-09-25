@@ -84,6 +84,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Keyboard: **↑** from the first line goes into the properties. **↑/↓** move between rows, **Enter** saves and moves on, and **Esc** goes back to the text. Every edit is a normal change, so **Ctrl+Z** undoes it.
   - **All properties** (a sidebar panel) lists every property in the vault with its type and how many notes use it. Open one to see its values, and click a name or value to find the notes. Right-click to **rename it in every note**, change its type or remove it everywhere.
   - Search understands Obsidian's property syntax: `[status]`, `[status:done]`, `[status:"in progress"]` and `-[status]`.
+  - `cssclasses` works as in Obsidian: the note's classes go on its view. Built in: `wide`, `narrow`, `small`, `large`, `serif`, `no-title` and `center-images`. **Settings → CSS snippets folder** applies every `.css` file in a vault folder of your choice, reloading as you edit them, so your own classes can do anything.
   - Frontmatter that isn't valid YAML stays as text. **Settings → Properties** can show the YAML instead.
 - Callouts (`> [!warning] Title`), `==highlights==`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing)
 - A backlinks panel with context, including unlinked mentions and a one-click **Link** button, plus outgoing links and an outline
@@ -133,6 +134,13 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Ticking a task, whether in the editor, reading view, the Tasks view or a query, adds `✅ <date>`. Ticking a recurring task (`every week`, `every weekday`, `every mon, thu`, `every month on the 15th`, `… when done`) adds its next occurrence above it.
   - `` ```tasks `` query blocks use the Tasks plugin's query language (`not done`, `due before tomorrow`, `tag includes #work`, `path includes Projects`, `priority is above none`, `sort by due`, `group by heading`, `limit 10`, …) and render live lists you can tick.
 - **Math** with KaTeX: `$E=mc^2$` inline and `$$ … $$` blocks, in the editor, reading view, canvas cards, tasks and embeds, including chemistry with `\ce{2H2 + O2 -> 2H2O}` (mhchem). In live preview, a formula renders until you click into it; while you edit it, a rendered preview sits beside the source. Typing `\` inside math suggests LaTeX commands with a preview of each. Structures like `\frac`, `\sum`, matrices, `cases` and `aligned` insert as snippets, and **Tab** moves between their fields. **Ctrl+M** wraps the selection in `$…$`, and **Ctrl+Shift+M** makes a math block. `$5 and $10` stays plain text.
+  - **Math shortcuts**, in the style of the LaTeX Suite plugin (a setting, on by default):
+    - `mk`+**Tab** starts inline math and `dm`+**Tab** a math block.
+    - Inside math, `//` makes a fraction (**Tab** moves between its parts, then out of the braces and the closing `$`). `sq` makes a square root.
+    - `x1` → `x_1`, `sr`/`cb` → squared and cubed, `td` → a superscript, `__` → a subscript.
+    - `@a @b @g…` → Greek letters (`@G` for capitals), and `sum`, `prod`, `lim`, `dint`, `par`.
+    - Also `<=`, `>=`, `!=`, `->`, `=>`, `~~`, `xx`, `**`, `inn`, `RR`, `NN`, `ZZ`, `hat`, `bar`, `vec`, `bf`, `cal`, `lr(`, `pmat` and `case`.
+    - Commands you type out yourself, such as `\sqrt`, are left alone.
 - **Vim key bindings** in the editor, available as a setting.
 - **Fonts and Nerd Font icons**: JetBrains Mono comes with Folio and is the default code font. **Settings** can set the text and code fonts to any font installed on the computer, with a live preview. All of Nerd Fonts' roughly 11,000 icons (Font Awesome, Material Design, Codicons, Devicons, Octicons and more) work in every font Folio uses, including notes, code, canvases and drawings. The icon font only loads on pages that contain an icon. *Insert icon (Nerd Fonts)…* searches the icons by name. Icons are private-use Unicode characters, so a note that uses them needs a Nerd Font wherever else you open it.
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
