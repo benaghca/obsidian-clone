@@ -41,7 +41,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 - **Network:** in its default mode, Folio doesn't open any network port. The UI talks to the program through a private `folio://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Folio.
 - **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 8,700 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 10,300 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
   - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
@@ -95,6 +95,17 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
     - Notes placed on a canvas show it as a backlink and appear connected to it in the graph. Renaming or moving a note updates every canvas that uses it.
   - Add notes and images by dragging them from the file tree, pasting, or using the toolbar. *Convert to note* turns a text card into a real note.
   - `![[Board.canvas]]` embeds a preview of the canvas in a note. Clicking the preview opens the canvas.
+- **Bases**: database views of your notes and their frontmatter properties, in the format of Obsidian Bases (`.base` files, or `` ```base `` blocks inside a note).
+  - Views: **table**, **cards** (with a cover image property), **list** and **board**. The board is a kanban view: dragging a card to another column changes that note's property, and columns stay put even when they empty.
+  - Filters and formulas use Bases' expression syntax, for example `file.hasTag("book")`, `status != "done"`, `file.mtime > now() - "7d"` or `price / pages`. Filters can apply to the whole base or to one view. Views also sort, group and limit.
+  - Most changes happen without writing YAML:
+    - Click a column header to sort; right-click it to group, rename, move or hide the column.
+    - The filter builder, the property picker and formulas are all in the toolbar.
+    - Double-click a cell to edit a note's property, and click a checkbox to toggle a true/false property. Edits go into the note's frontmatter and leave the rest of the note untouched.
+  - A quick search box, a summary row (counts, and sums and averages for numbers), relative dates on hover and sensible default columns.
+  - **New note** from a view fills in the view's simple filters (tag, folder, `status == "todo"`), and on a board, the column you clicked it in.
+  - Embed a base in a note with `![[Books.base]]` or `![[Books.base#Board]]`. `` ```base `` blocks render live in both live preview and reading view, and view changes you make there are written back into the block.
+  - Expressions run in a small built-in interpreter, never as JavaScript.
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, and **Tab**/**Shift+Tab** to indent list items
@@ -117,8 +128,9 @@ ui/themes.js       colour themes (Catppuccin, Everforest, …)
 ui/templater.js    Templater-syntax template interpreter (tp.date, tp.file, tp.system, …)
 ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
 ui/canvas.js       canvas editor and JSON Canvas files
+ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
-ui/test/           Node tests for draw-render.js, templater.js and canvas.js (no packages needed)
+ui/test/           Node tests for the drawing, template, canvas and bases modules (no packages needed)
 ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, Virgil font
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
@@ -132,7 +144,7 @@ The editor bundle is already built and checked in, so building Folio doesn't nee
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js` and `node ui/test/canvas.test.js`.
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js` and `node ui/test/bases.test.js`.
 
 ## Ideas for round two
 

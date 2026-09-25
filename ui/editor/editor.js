@@ -182,6 +182,30 @@ class VisualEmbedWidget extends WidgetType {
   }
 }
 
+// Fenced code blocks app.js renders itself (```base, ```tasks …), with a button to edit the source.
+class CodeBlockWidget extends WidgetType {
+  constructor(lang, code, version) { super(); this.lang = lang; this.code = code; this.version = version; }
+  eq(o) { return o.lang === this.lang && o.code === this.code && o.version === this.version; }
+  toDOM(view) {
+    const el = document.createElement('div');
+    el.className = 'cm-embed-block cm-codeblock-widget';
+    const body = document.createElement('div');
+    const edit = document.createElement('button');
+    edit.className = 'cm-codeblock-edit';
+    edit.title = 'Edit the source';
+    edit.textContent = '</>';
+    edit.addEventListener('mousedown', e => {
+      e.preventDefault();
+      const line = view.state.doc.lineAt(view.posAtDOM(el));
+      view.dispatch({ selection: { anchor: line.to } });
+      view.focus();
+    });
+    el.append(body, edit);
+    H.renderCodeBlock(body, this.lang, this.code);
+    return el;
+  }
+}
+
 class TableWidget extends WidgetType {
   constructor(text, version) { super(); this.text = text; this.version = version; }
   eq(o) { return o.text === this.text && o.version === this.version; }
@@ -424,6 +448,18 @@ function buildBlocks(state) {
   syntaxTree(state).iterate({
     enter(node) {
       const nf = node.from, nt = node.to;
+      if (node.name === 'FencedCode' && H.codeBlock) {
+        const info = node.node.getChild('CodeInfo');
+        const lang = info ? doc.sliceString(info.from, info.to).trim().toLowerCase() : '';
+        if (!lang || !H.codeBlock(lang)) return false;
+        const first = doc.lineAt(nf), last = doc.lineAt(nt);
+        if (A.lines(first.from, last.to)) return false;
+        const closed = last.number > first.number && /^\s*(```|~~~)/.test(doc.sliceString(last.from, last.to));
+        const end = closed ? last.from - 1 : last.to;
+        const code = end > first.to ? doc.sliceString(first.to + 1, end) : '';
+        out.push(Decoration.replace({ widget: new CodeBlockWidget(lang, code, H.version()), block: true }).range(first.from, last.to));
+        return false;
+      }
       if (node.name === 'Table') {
         const from = doc.lineAt(nf).from, to = doc.lineAt(nt).to;
         if (!A.lines(from, to)) {

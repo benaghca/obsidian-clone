@@ -22,9 +22,10 @@ const DRAWING_EXT = /\.excalidraw(\.md)?$/i;
 const isDrawing = p => !!p && (DRAWING_EXT.test(p) || (isMd(p) && S.notes.get(p)?.fm?.['excalidraw-plugin'] != null));
 const drawingName = p => basename(p).replace(DRAWING_EXT, '').replace(/\.md$/i, '');
 const isCanvas = p => !!p && /\.canvas$/i.test(p);
+const isBase = p => !!p && /\.base$/i.test(p);
 // Files whose ![[embeds]] app.js draws itself rather than as Markdown or an image.
-const visualEmbed = p => isDrawing(p) || isCanvas(p);
-const displayName = p => isDrawing(p) ? drawingName(p) : isCanvas(p) ? basename(p).replace(/\.canvas$/i, '') : isMd(p) ? noteName(p) : basename(p);
+const visualEmbed = p => isDrawing(p) || isCanvas(p) || isBase(p);
+const displayName = p => isDrawing(p) ? drawingName(p) : isCanvas(p) || isBase(p) ? basename(p).replace(/\.(canvas|base)$/i, '') : isMd(p) ? noteName(p) : basename(p);
 const rawUrl = p => `/api/raw?path=${enc(p)}&t=${TOKEN}`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
@@ -114,6 +115,8 @@ const S = {
   savePromise: null,
   drawing: null,         // open drawing: {mtime, info: {format, source, embedded}}
   canvasDoc: null,       // open canvas: {mtime}
+  baseDoc: null,         // open base: {mtime, text}
+  dataGen: 0,            // bumped whenever notes or files change, so base rows are rebuilt
   canvases: new Map(),   // canvas path -> {mtime, refs: [vault paths of its file cards]}
 };
 
@@ -138,6 +141,8 @@ const ed = FolioEditor.create($('#editor'), {
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
   visualEmbed: p => visualEmbed(p),
   renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
+  codeBlock: lang => lang === 'base',
+  renderCodeBlock: (el, lang, code) => renderBaseBlock(el, code, S.cur),
 });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
@@ -212,6 +217,7 @@ function parseNote(content) {
 }
 
 function setNote(path, content, mtime) {
+  S.dataGen++;
   const n = { content, mtime, ...parseNote(content) };
   S.notes.set(path, n);
   return n;
@@ -300,12 +306,14 @@ async function applyList(l, gen) {
   const drawingsChanged = [...next].filter(([p, f]) => !isMd(p) && DRAWING_EXT.test(p) && S.files.get(p) && S.files.get(p).mtime !== f.mtime).map(([p]) => p);
   // Canvases are read too, so the notes on them get backlinks and follow renames.
   const canvasesChanged = [...next].filter(([p, f]) => isCanvas(p) && S.canvases.get(p)?.mtime !== f.mtime).map(([p]) => p);
-  if (!structural && !changed.length && !drawingsChanged.length && !canvasesChanged.length) return false;
+  const baseChanged = S.view === 'base' && S.baseDoc && !S.dirty && next.get(S.cur) && next.get(S.cur).mtime !== S.baseDoc.mtime;
+  if (!structural && !changed.length && !drawingsChanged.length && !canvasesChanged.length && !baseChanged) return false;
   const got = changed.length || canvasesChanged.length ? await readMany([...changed, ...canvasesChanged]) : {};
   if (gen != null && gen !== S.gen) return false; // we wrote something meanwhile; next poll redoes it
 
-  S.files = next; S.dirs = nextDirs;
+  S.files = next; S.dirs = nextDirs; S.dataGen++;
   for (const p of removed) { S.notes.delete(p); S.canvases.delete(p); }
+  if (baseChanged) reloadBase();
   for (const p of canvasesChanged) {
     const v = got[p];
     delete got[p];
@@ -314,6 +322,7 @@ async function applyList(l, gen) {
     if (p === S.cur && S.view === 'canvas' && !S.dirty && S.canvasDoc && v.mtime !== S.canvasDoc.mtime) loadCanvas(p, v.content, v.mtime, FolioCanvas.getView());
   }
   if (S.view === 'canvas' && (changed.length || structural)) FolioCanvas.refreshFiles();
+  if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
   {
     for (const [p, v] of Object.entries(got)) {
       if (p === S.cur && S.dirty) continue;
@@ -378,9 +387,9 @@ const liveReindex = debounce(() => {
 async function save(force = false) {
   while (S.saving) await S.savePromise;
   if (!S.cur || !S.dirty) return;
-  if (S.view !== 'note' && !(S.view === 'drawing' && S.drawing) && !(S.view === 'canvas' && S.canvasDoc)) return;
+  if (S.view !== 'note' && !(S.view === 'drawing' && S.drawing) && !(S.view === 'canvas' && S.canvasDoc) && !(S.view === 'base' && S.baseDoc)) return;
   S.saving = true;
-  S.savePromise = (S.view === 'drawing' ? doSaveDrawing(force) : S.view === 'canvas' ? doSaveCanvas(force) : doSave(force)).finally(() => { S.saving = false; });
+  S.savePromise = (S.view === 'drawing' ? doSaveDrawing(force) : S.view === 'canvas' ? doSaveCanvas(force) : S.view === 'base' ? doSaveBase(force) : doSave(force)).finally(() => { S.saving = false; });
   return S.savePromise;
 }
 
@@ -415,7 +424,8 @@ function setSaveState(t, err = false) {
 async function writeFile(path, content, base) {
   const headers = base ? { 'X-Base-Mtime': String(base) } : {};
   const r = await api(`/api/file?path=${enc(path)}`, { method: 'PUT', body: content, headers });
-  S.files.set(path, { mtime: r.mtime, size: typeof content === 'string' ? content.length : content.size });
+  S.files.set(path, { ...S.files.get(path), mtime: r.mtime, size: typeof content === 'string' ? content.length : content.size });
+  S.dataGen++;
   if (isMd(path)) setNote(path, content, r.mtime);
   return r;
 }
@@ -424,7 +434,7 @@ async function writeFile(path, content, base) {
 
 function showView(v) {
   S.view = v;
-  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'empty']) $(`#view-${id}`).hidden = id !== v;
+  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
   if (v === 'graph') FolioGraph.show(); else FolioGraph.hide();
   if (v === 'drawing') FolioDraw.show(); else FolioDraw.hide();
@@ -443,6 +453,7 @@ function showEmpty() {
 function rememberPos() {
   if (S.cur && S.view === 'drawing') { S.pos.set(S.cur, { draw: FolioDraw.getView() }); return; }
   if (S.cur && S.view === 'canvas') { S.pos.set(S.cur, { canvas: FolioCanvas.getView() }); return; }
+  if (S.cur && S.view === 'base') { if (baseView) S.pos.set(S.cur, { baseView: baseView.viewName() }); return; }
   if (!S.cur || S.view !== 'note') return;
   S.pos.set(S.cur, { a: ed.selectionStart, b: ed.selectionEnd, scroll: editWrap.scrollTop, pscroll: preview.scrollTop });
 }
@@ -456,10 +467,11 @@ async function openPath(p, opts = {}) {
   if (opts.push !== false && S.hist[S.histIdx] !== p) {
     S.hist = S.hist.slice(0, S.histIdx + 1); S.hist.push(p); S.histIdx = S.hist.length - 1;
   }
-  S.cur = p; S.dirty = false; S.drawing = null; S.canvasDoc = null;
+  S.cur = p; S.dirty = false; S.drawing = null; S.canvasDoc = null; S.baseDoc = null;
   store('last', p);
   if (isDrawing(p) && !opts.raw) return openDrawing(p);
   if (isCanvas(p)) return openCanvas(p);
+  if (isBase(p)) return openBase(p);
   if (!isMd(p)) return openAttachment(p);
   const n = S.notes.get(p);
   showView('note');
@@ -696,6 +708,7 @@ function drawingSvgUrl(path) {
 
 function renderVisualEmbed(el, path, width, sub) {
   if (isCanvas(path)) return renderCanvasEmbed(el, path, width);
+  if (isBase(path)) return renderBaseEmbed(el, path, sub);
   return renderDrawingEmbed(el, path, width);
 }
 
@@ -871,6 +884,184 @@ function renderCanvasEmbed(el, path, width) {
   if (width) img.width = width;
   el.replaceChildren(img);
   canvasSvgUrl(path).then(u => { img.src = u; }, e => { el.textContent = `(couldn’t show canvas “${displayName(path)}”: ${e.message})`; });
+}
+
+// ============================================================ bases
+
+let baseView = null;
+let rowsCache = { gen: -1, rows: [] };
+const propsCache = new WeakMap();
+function noteProps(n) {
+  let p = propsCache.get(n);
+  if (!p) { p = FolioBases.frontmatter(n.content); propsCache.set(n, p); }
+  return p;
+}
+// Every file in the vault as a base row: file.* fields plus the note's properties.
+function baseRows() {
+  if (rowsCache.gen === S.dataGen) return rowsCache.rows;
+  const rows = [];
+  for (const [p, f] of S.files) {
+    const n = S.notes.get(p), name = basename(p);
+    rows.push({
+      path: p, name, basename: isMd(name) ? name.slice(0, -3) : name.replace(/\.[^.]+$/, ''), folder: dirname(p),
+      ext: name.includes('.') ? name.split('.').pop().toLowerCase() : '', size: f.size || 0, ctime: f.ctime || f.mtime || 0, mtime: f.mtime || 0,
+      tags: n ? [...n.tags] : [], links: n ? [...new Set((n.out || []).filter(Boolean))] : [], props: n ? noteProps(n) : {},
+    });
+  }
+  rowsCache = { gen: S.dataGen, rows };
+  return rows;
+}
+
+function baseHooks(basePath, thisPath) {
+  return {
+    rows: baseRows,
+    thisRow: () => baseRows().find(r => r.path === thisPath) || null,
+    backlinks: p => [...backlinksOf(p).keys()],
+    openFile: p => openPath(p),
+    openLink: name => followLink(name, null, thisPath),
+    imageUrl: (v, from) => {
+      const s = String(v).replace(/^!?\[\[|\]\]$/g, '').split('|')[0].trim();
+      if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s)) return null; // Folio never loads images from the web
+      const t = resolveLink(s, from);
+      return t && IMG_EXT.test(t) ? rawUrl(t) : null;
+    },
+    setProperty: (p, k, v) => setNoteProperty(p, k, v),
+    createNote: (folder, props) => createNoteWithProps(folder, props),
+    save: b => saveBaseFile(basePath, b),
+    menu: (x, y, items) => menu(x, y, items),
+    prompt: (title, label, value) => promptModal(title, label, value),
+    toast: msg => toast(msg),
+  };
+}
+
+async function openBase(p) {
+  showView('base');
+  $('#view-base').replaceChildren();
+  $('#crumbs').innerHTML = crumbsHtml(p);
+  document.title = `${displayName(p)} — ${VAULT} — Folio`;
+  setSaveState('');
+  renderTreeActive(true);
+  refreshPanels();
+  const got = await readMany([p]).catch(e => ({ error: e }));
+  if (S.cur !== p) return;
+  if (!got[p]) return showDrawingError(p, got.error || new Error('the file couldn’t be read'), 'a base');
+  loadBase(p, got[p].content, got[p].mtime);
+}
+function loadBase(p, text, mtime) {
+  let base;
+  try { base = FolioBases.parseBase(text); } catch (e) { showDrawingError(p, e, 'a base'); return; }
+  S.baseDoc = { mtime, text };
+  if (S.view !== 'base') showView('base');
+  const el = document.createElement('div');
+  $('#view-base').replaceChildren(el);
+  baseView = FolioBases.mount(el, { base, path: p, editable: true, view: S.pos.get(p)?.baseView, hooks: baseHooks(p, p) });
+  updateStatus();
+}
+async function reloadBase() {
+  const p = S.cur;
+  const got = (await readMany([p]).catch(() => ({})))[p];
+  if (got && S.cur === p && S.view === 'base' && !S.dirty) {
+    const name = baseView?.viewName();
+    S.pos.set(p, { baseView: name });
+    loadBase(p, got.content, got.mtime);
+  }
+}
+
+// A base's view settings changed in the UI: save the .base file.
+async function saveBaseFile(path, base) {
+  const text = FolioBases.serializeBase(base);
+  if (S.view === 'base' && S.cur === path && S.baseDoc) {
+    S.baseDoc.text = text;
+    S.dirty = true; setSaveState('Unsaved'); scheduleSave();
+    return;
+  }
+  try { await writeFile(path, text, S.files.get(path)?.mtime); } catch (e) { toast('Couldn’t save the base: ' + e.message); }
+}
+async function doSaveBase(force) {
+  const p = S.cur, d = S.baseDoc;
+  S.dirty = false; setSaveState('Saving…');
+  try {
+    const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: d.text, headers: (!force && d.mtime) ? { 'X-Base-Mtime': String(d.mtime) } : {} });
+    d.mtime = r.mtime;
+    S.files.set(p, { ...S.files.get(p), mtime: r.mtime, size: new Blob([d.text]).size });
+    if (!S.dirty) setSaveState('Saved');
+    return;
+  } catch (e) {
+    S.dirty = true;
+    if (e.status !== 409) { setSaveState('Save failed: ' + e.message, true); return; }
+  }
+  if (confirm(`"${basename(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveBase(true);
+  S.dirty = false;
+  await reloadBase();
+  setSaveState('Reloaded from disk');
+}
+
+// Change one frontmatter property of a note (from a base's table, board or checkbox).
+async function setNoteProperty(path, key, value) {
+  if (!S.notes.has(path)) return toast('Only notes have properties');
+  if (path === S.cur && S.view === 'note') await save();
+  const n = S.notes.get(path);
+  const text = FolioBases.setFrontmatter(n.content, key, value);
+  if (text === n.content) return;
+  try { await writeFile(path, text, n.mtime); } catch (e) { toast(`Couldn’t update ${noteName(path)}: ${e.message}`); return; }
+  resolveNote(path);
+  if (path === S.cur && S.view === 'note') reloadEditorFromDisk(text);
+  refreshBases();
+  refreshPanels(true);
+}
+function refreshBases() {
+  if (S.view === 'base') baseView?.refresh();
+  else if (S.view === 'note') { S.version++; refreshEditorSoon(); if (S.mode === 'read') renderPreview(); }
+}
+
+async function createNoteWithProps(folder, props) {
+  let text = '';
+  for (const [k, v] of Object.entries(props || {})) text = FolioBases.setFrontmatter(text, k, v);
+  await createNote(uniquePath(folder ?? cfg.newNoteFolder, 'Untitled.md'), text, { focusTitle: true, mode: 'edit' });
+}
+
+async function newBase(folder) {
+  if (folder == null) folder = cfg.newNoteFolder;
+  await createNote(uniquePath(folder, 'Untitled.base'), 'views:\n  - type: table\n    name: Table\n');
+}
+
+// ![[Books.base]] or ![[Books.base#View name]]: a live base inside a note.
+function renderBaseEmbed(el, path, sub) {
+  el.classList.add('base-embed');
+  const host = document.createElement('div');
+  el.replaceChildren(host);
+  const thisPath = S.cur;
+  readMany([path]).then(got => {
+    if (!got[path]) throw new Error('file not found');
+    const base = FolioBases.parseBase(got[path].content);
+    FolioBases.mount(host, { base, path, editable: true, embedded: true, view: sub || undefined, hooks: baseHooks(path, thisPath) });
+  }).catch(e => { host.innerHTML = `<div class="bs-error">Couldn’t show ${esc(displayName(path))}: ${esc(e.message)}</div>`; });
+}
+
+// ```base blocks inside a note: view changes are written back into the block.
+function renderBaseBlock(el, code, notePath) {
+  el.classList.add('base-embed');
+  let base;
+  try { base = FolioBases.parseBase(code); } catch (e) { el.innerHTML = `<div class="bs-error">This base block has a problem: ${esc(e.message)}</div>`; return; }
+  let current = code;
+  FolioBases.mount(el, {
+    base, path: notePath, editable: true, embedded: true,
+    hooks: { ...baseHooks(notePath, notePath), save: b => { const next = FolioBases.serializeBase(b).replace(/\n$/, ''); saveBaseBlock(notePath, current, next); current = next; } },
+  });
+}
+async function saveBaseBlock(notePath, oldCode, newCode) {
+  const find = src => { const m = src.indexOf('```base\n' + oldCode + (oldCode ? '\n' : '') + '```'); return m < 0 ? -1 : m + 8; };
+  if (S.cur === notePath && S.view === 'note') {
+    const i = find(ed.value);
+    if (i < 0) return toast('Couldn’t find that base block to update');
+    // Keep the cursor where it was (outside the block), shifted by the change in length.
+    const delta = newCode.length - oldCode.length, shift = x => x >= i + oldCode.length ? x + delta : x;
+    ed.insert(i, i + oldCode.length, newCode, shift(ed.selectionStart), shift(ed.selectionEnd));
+    return;
+  }
+  const n = S.notes.get(notePath), i = n ? find(n.content) : -1;
+  if (i < 0) return toast('Couldn’t find that base block to update');
+  try { await writeFile(notePath, n.content.slice(0, i) + newCode + n.content.slice(i + oldCode.length), n.mtime); resolveNote(notePath); } catch (e) { toast('Couldn’t save the base block: ' + e.message); }
 }
 
 function goHist(d) {
@@ -1049,6 +1240,12 @@ function renderInto(el, content, from, depth) {
     bq.replaceWith(box);
   }
   for (const sp of $$('span.visual-embed[data-path]', el)) renderVisualEmbed(sp, sp.dataset.path, +sp.dataset.width || null, sp.dataset.sub);
+  // ```base blocks become live views.
+  for (const code of $$('pre > code.language-base', el)) {
+    const div = document.createElement('div');
+    code.parentElement.replaceWith(div);
+    renderBaseBlock(div, code.textContent.replace(/\n$/, ''), from);
+  }
   // Note embeds (transclusion), limited depth.
   for (const sp of $$('span.embed[data-embed]', el)) {
     if (depth >= 2 || sp.dataset.embed === from) { sp.textContent = '(embed depth limit)'; continue; }
@@ -1182,9 +1379,9 @@ function renderTree() {
     }
     const files = node.files.sort((a, b) => collator.compare(noteName(a), noteName(b)));
     for (const f of files) {
-      const drawing = isDrawing(f), canvas = isCanvas(f);
-      const ext = drawing ? '<span class="ext">draw</span>' : canvas ? '<span class="ext">canvas</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
-      const name = drawing || canvas ? displayName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
+      const drawing = isDrawing(f), canvas = isCanvas(f), base = isBase(f);
+      const ext = drawing ? '<span class="ext">draw</span>' : canvas ? '<span class="ext">canvas</span>' : base ? '<span class="ext">base</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
+      const name = drawing || canvas || base ? displayName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
       rows.push(`<div class="t-row file" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(name)}</span>${ext}</div>`);
     }
   };
@@ -1225,6 +1422,7 @@ $('#tree').addEventListener('contextmenu', e => {
     ['New note', () => newNote(folder)],
     ['New drawing', () => newDrawing(folder)],
     ['New canvas', () => newCanvas(folder)],
+    ['New base', () => newBase(folder)],
     ['New folder', () => newFolder(folder)],
   ];
   if (path || dir) {
@@ -1813,6 +2011,7 @@ const COMMANDS = [
   ['Create new folder', '', () => newFolder(S.cur ? dirname(S.cur) : '')],
   ['Create new drawing', '', () => newDrawing()],
   ['Create new canvas', '', () => newCanvas()],
+  ['Create new base', '', () => newBase()],
   ['Create new drawing and embed it in the current note', '', () => newDrawingInNote()],
   ['Export drawing as SVG', '', () => exportDrawing('svg')],
   ['Export drawing as PNG', '', () => exportDrawing('png')],
@@ -2146,7 +2345,10 @@ $('#right-body').addEventListener('click', async e => {
 
 function updateStatus() {
   const left = $('#status-left'), right = $('#status-right');
-  if (S.view === 'canvas' && S.cur) {
+  if (S.view === 'base' && S.cur) {
+    left.textContent = '';
+    right.textContent = 'Base';
+  } else if (S.view === 'canvas' && S.cur) {
     const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
     const n = FolioCanvas.count();
     left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
@@ -2310,6 +2512,7 @@ const CMD = {
   'new-note': () => newNote(),
   'new-drawing': () => newDrawing(),
   'new-canvas': () => newCanvas(),
+  'new-base': () => newBase(),
   'new-folder': () => newFolder(''),
   'collapse-all': () => { S.expanded.clear(); store('expanded', []); renderTree(); },
   back: () => goHist(-1),
@@ -2451,6 +2654,7 @@ window.addEventListener('beforeunload', e => {
   let body, base;
   if (S.view === 'drawing' && S.drawing) { FolioDraw.flush(); body = drawingContent(S.drawing); base = S.drawing.mtime; }
   else if (S.view === 'canvas' && S.canvasDoc) { FolioCanvas.flush(); body = FolioCanvas.serializeCanvas(FolioCanvas.getData()); base = S.canvasDoc.mtime; }
+  else if (S.view === 'base' && S.baseDoc) { body = S.baseDoc.text; base = S.baseDoc.mtime; }
   else if (S.view === 'note') { body = ed.value; base = S.notes.get(S.cur)?.mtime; }
   else return;
   fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body, keepalive: true, headers: { 'X-Folio-Token': TOKEN, ...(base ? { 'X-Base-Mtime': String(base) } : {}) } });
