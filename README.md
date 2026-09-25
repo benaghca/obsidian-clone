@@ -82,6 +82,8 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - *Add property* (or **Ctrl+;**, which also starts the frontmatter in a note without any) suggests names used in other notes and keeps their types. Values suggest what other notes use.
   - Types are shared across the vault and saved to `.obsidian/types.json` when the vault has an `.obsidian` folder, so Obsidian sees the same types. Otherwise they're saved in Folio's settings.
   - Keyboard: **↑** from the first line goes into the properties. **↑/↓** move between rows, **Enter** saves and moves on, and **Esc** goes back to the text. Every edit is a normal change, so **Ctrl+Z** undoes it.
+  - **All properties** (a sidebar panel) lists every property in the vault with its type and how many notes use it. Open one to see its values, and click a name or value to find the notes. Right-click to **rename it in every note**, change its type or remove it everywhere.
+  - Search understands Obsidian's property syntax: `[status]`, `[status:done]`, `[status:"in progress"]` and `-[status]`.
   - Frontmatter that isn't valid YAML stays as text. **Settings → Properties** can show the YAML instead.
 - Callouts (`> [!warning] Title`), `==highlights==`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing)
 - A backlinks panel with context, including unlinked mentions and a one-click **Link** button, plus outgoing links and an outline

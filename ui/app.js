@@ -2584,6 +2584,119 @@ function mountProps(el, fmText, { edit, exit, from }) {
   });
 }
 
+// ------------------------------------------------------------ All properties panel
+
+// Every property in the vault: its type, how many notes use it and, opened, its values. Click
+// a name or value to search for it; right-click to rename, retype or remove it everywhere.
+const propsOpen = new Set();
+function renderPropsPanel() {
+  const box = $('#props-list'), f = ($('#props-filter').value || '').trim().toLowerCase();
+  const had = box.contains(document.activeElement) ? document.activeElement.dataset.k + '|' + (document.activeElement.dataset.v ?? '') : null;
+  const all = knownPropsCounted().filter(p => !f || p.name.toLowerCase().includes(f));
+  box.innerHTML = all.length ? all.map(p => {
+    const open = propsOpen.has(p.name);
+    const vals = open ? knownValueCounts(p.name) : [];
+    return `<div class="pr-name${open ? ' open' : ''}" tabindex="-1" data-k="${esc(p.name)}" title="${esc(p.type)}">${CHEV}<span class="pr-icon">${PROP_ICON[p.type] || PROP_ICON.text}</span><span class="pr-label">${esc(p.name)}</span><span class="n">${p.count}</span></div>` +
+      (open ? `<div class="pr-vals">${vals.slice(0, 100).map(([v, c]) => `<div class="pr-val" tabindex="-1" data-k="${esc(p.name)}" data-v="${esc(v)}"><span>${esc(v === '' ? '(empty)' : v)}</span><span class="n">${c}</span></div>`).join('')}${vals.length > 100 ? `<div class="none">${vals.length - 100} more…</div>` : ''}</div>` : '');
+  }).join('') : `<div class="none">${f ? 'No matching properties.' : 'No properties yet. Add them at the top of a note (Ctrl+;).'}</div>`;
+  if (had) $$('.pr-name, .pr-val', box).find(x => x.dataset.k + '|' + (x.dataset.v ?? '') === had)?.focus({ preventScroll: true });
+}
+const PROP_ICON = Object.fromEntries(['text', 'multitext', 'number', 'checkbox', 'date', 'datetime', 'tags', 'aliases'].map(t => [t, `<svg viewBox="0 0 24 24">${{
+  text: '<path d="M5 7h14M5 12h14M5 17h9"/>', multitext: '<path d="M9 7h11M9 12h11M9 17h11M4.5 7h.01M4.5 12h.01M4.5 17h.01"/>',
+  number: '<path d="M9 4 7 20M17 4l-2 16M4 9h16M3 15h16"/>', checkbox: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="m8 12 3 3 5-6"/>',
+  date: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>', datetime: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/>',
+  tags: '<path d="M3.5 12.5V4.5a1 1 0 0 1 1-1h8l8 8-9 9z"/>', aliases: '<path d="M15 4l4 4-4 4M19 8H9a5 5 0 0 0 0 10h2"/>',
+}[t]}</svg>`]));
+function knownPropsCounted() {
+  const n = new Map();
+  for (const note of S.notes.values()) for (const k of Object.keys(note.fm || {})) {
+    const e = n.get(k) || { name: k, count: 0, note };
+    e.count++; n.set(k, e);
+  }
+  return [...n.values()].sort((a, b) => collator.compare(a.name, b.name)).map(e => ({ name: e.name, count: e.count, type: propType(e.name, FolioBases.frontmatter(e.note.content)[e.name]) }));
+}
+function knownValueCounts(key) {
+  const c = new Map();
+  for (const note of S.notes.values()) {
+    if (!note.fm || !(key in note.fm)) continue;
+    const v = note.fm[key];
+    const list = Array.isArray(v) ? v : [v ?? ''];
+    for (const x of list.length ? list : ['']) { const s = String(x ?? ''); c.set(s, (c.get(s) || 0) + 1); }
+  }
+  return [...c].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]));
+}
+const quoteProp = s => /[\s\]"]/.test(s) ? `"${s.replace(/"/g, '')}"` : s;
+
+$('#props-filter').addEventListener('input', () => renderPropsPanel());
+$('#props-list').addEventListener('click', e => {
+  const val = e.target.closest('.pr-val');
+  if (val) return searchFor(`[${quoteProp(val.dataset.k)}:${quoteProp(val.dataset.v)}]`);
+  const nm = e.target.closest('.pr-name');
+  if (!nm) return;
+  if (e.target.closest('.chev')) { togglePropOpen(nm.dataset.k); return; }
+  searchFor(`[${quoteProp(nm.dataset.k)}]`);
+});
+function togglePropOpen(k, open) {
+  if (open ?? !propsOpen.has(k)) propsOpen.add(k); else propsOpen.delete(k);
+  renderPropsPanel();
+  $(`#props-list .pr-name[data-k="${CSS.escape(k)}"]`)?.focus({ preventScroll: true });
+}
+$('#props-list').addEventListener('keydown', e => {
+  const nm = e.target.closest?.('.pr-name');
+  if (nm && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { e.preventDefault(); e.stopPropagation(); togglePropOpen(nm.dataset.k, e.key === 'ArrowRight'); }
+  else if (nm && (e.key === 'F2' || e.key === 'ContextMenu')) { e.preventDefault(); const b = nm.getBoundingClientRect(); propMenu(nm.dataset.k, b.left + 20, b.bottom); }
+});
+$('#props-list').addEventListener('contextmenu', e => {
+  const nm = e.target.closest('.pr-name, .pr-val');
+  if (!nm) return;
+  e.preventDefault();
+  propMenu(nm.dataset.k, e.clientX, e.clientY);
+});
+function propMenu(k, x, y) {
+  const cur = knownPropsCounted().find(p => p.name === k)?.type;
+  menu(x, y, [
+    [`Show notes with “${k}”`, () => searchFor(`[${quoteProp(k)}]`)],
+    ['Rename everywhere…', () => renamePropEverywhere(k)],
+    null,
+    ...FolioProps.TYPES.map(([t, name]) => [`Type: ${name}${t === cur ? '  ✓' : ''}`, async () => { await savePropType(k, t); S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); renderPropsPanel(); }]),
+    null,
+    ['Remove from every note…', () => removePropEverywhere(k), 'danger'],
+  ]);
+}
+
+// Change the text of every note that has property k (the open note through its editor, so undo works).
+async function editPropEverywhere(k, f) {
+  let n = 0, skipped = [];
+  for (const [p, note] of S.notes) {
+    if (!note.fm || !(k in note.fm)) continue;
+    const open = p === S.cur && S.view === 'note';
+    const before = open ? ed.value : note.content, after = f(before, p);
+    if (after == null) { skipped.push(p); continue; }
+    if (after === before) continue;
+    if (open) ed.value = after;
+    else { try { await writeFile(p, after, note.mtime); } catch (e) { toast(`Couldn’t update ${noteName(p)}: ${e.message}`); continue; } }
+    n++;
+  }
+  reindexAll(); refreshPanels(); renderPropsPanel();
+  if (S.view === 'note' && S.mode === 'read') renderPreview();
+  return { n, skipped };
+}
+async function renamePropEverywhere(k) {
+  const to = (await promptModal(`Rename “${k}” in every note`, 'New name', k))?.trim();
+  if (!to || to === k) return;
+  const { n, skipped } = await editPropEverywhere(k, (text, p) => S.notes.get(p)?.fm && to in S.notes.get(p).fm ? null : FolioBases.renameFrontmatter(text, k, to));
+  if (S.propTypes[k] && !S.propTypes[to]) await savePropType(to, S.propTypes[k]);
+  propsOpen.delete(k);
+  renderPropsPanel();
+  toast(`Renamed in ${n} note${n === 1 ? '' : 's'}${skipped.length ? ` · skipped ${skipped.length} that already have “${to}”` : ''}`, 4000);
+}
+async function removePropEverywhere(k) {
+  const count = [...S.notes.values()].filter(n => n.fm && k in n.fm).length;
+  if (!confirm(`Remove the property “${k}” from ${count} note${count === 1 ? '' : 's'}?`)) return;
+  const { n } = await editPropEverywhere(k, text => FolioBases.setFrontmatter(text, k, undefined));
+  toast(`Removed from ${n} note${n === 1 ? '' : 's'}`);
+}
+
 // ============================================================ images: viewer, resize, crop, annotate, screenshots
 
 // Editors by their .cm-editor element, so image clicks and grips know whose text to change.
@@ -3068,6 +3181,7 @@ const APP_COMMANDS = [
   ['reveal', 'Reveal current file in file tree', '', () => S.cur && revealInTree(S.cur)],
   ['toggle-left', 'Toggle left sidebar', 'Mod-\\', () => toggleSide('left')],
   ['backlinks', 'Show backlinks', 'Mod-Shift-b', () => showRight('backlinks')],
+  ['all-properties', 'Show all properties', '', () => showPanel('props', true)],
   ['outline', 'Show outline', 'Mod-Shift-o', () => showRight('outline')],
   ['outgoing', 'Show outgoing links', '', () => showRight('outgoing')],
   ['new-tab', 'New tab', 'Mod-t', () => openInNewTab(null, { switcher: true })],
@@ -3381,6 +3495,7 @@ function showPanel(name, focus = false) {
   for (const b of $$('#ribbon .rb[data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
   if (name === 'search') { const i = $('#search-input'); i.focus(); i.select(); }
   if (name === 'tags') renderTags();
+  if (name === 'props') { renderPropsPanel(); if (focus) $('#props-filter').focus(); }
 }
 
 function toggleSide(which) {
@@ -3395,10 +3510,20 @@ function searchFor(q) {
   runSearch();
 }
 
+// Does frontmatter `fm` have property k (any case), with a value containing v (or any value if v is empty)?
+function propMatches(fm, k, v) {
+  const key = Object.keys(fm || {}).find(x => x.toLowerCase() === k);
+  if (key == null) return false;
+  const vals = [fm[key]].flat().filter(x => x != null && x !== '').map(x => String(x).toLowerCase());
+  return v ? vals.some(x => x.includes(v) || x.replace(/^#/, '') === v.replace(/^#/, '')) : true;
+}
 function parseQuery(q) {
   const terms = [];
-  const re = /(-?)(?:(tag|path|file|line):)?(?:"([^"]*)"|(\S+))/g; let m;
+  // [key] or [key:value] (Obsidian's property search), or op:"text" / op:text / plain words.
+  const re = /(-?)(?:\[([^\]:]+)(?::\s*(?:"([^"]*)"|([^\]]*)))?\]|(?:(tag|path|file|line):)?(?:"([^"]*)"|(\S+)))/g; let m;
   while ((m = re.exec(q))) {
+    if (m[2] != null) { terms.push({ neg: !!m[1], op: 'prop', k: m[2].trim().toLowerCase(), v: (m[3] ?? m[4] ?? '').trim().toLowerCase() }); continue; }
+    m = [m[0], m[1], m[5], m[6], m[7]];
     const v = (m[3] ?? m[4] ?? '').toLowerCase();
     if (!v) continue;
     terms.push({ neg: !!m[1], op: m[2] || 'text', v: m[2] === 'tag' ? v.replace(/^#/, '') : v });
@@ -3423,6 +3548,7 @@ function runSearch() {
       if (t.op === 'tag') hit = [...n.tags].some(x => x === t.v || x.startsWith(t.v + '/'));
       else if (t.op === 'path') hit = pl.includes(t.v);
       else if (t.op === 'file') hit = noteName(p).toLowerCase().includes(t.v);
+      else if (t.op === 'prop') hit = propMatches(n.fm, t.k, t.v);
       else hit = low.includes(t.v) || noteName(p).toLowerCase().includes(t.v);
       if (hit === t.neg) { ok = false; break; }
     }
@@ -3509,6 +3635,8 @@ $('#right').addEventListener('keydown', e => {
   } else if (e.key === 'Escape' && e.target.matches?.('.tabs button')) { e.preventDefault(); focusMain(); }
 });
 listKeys($('#tag-list'), '.tag-row', () => focusMain());
+listKeys($('#props-list'), '.pr-name, .pr-val', () => $('#props-filter').focus());
+$('#props-filter').addEventListener('keydown', e => { if (e.key === 'ArrowDown') { e.preventDefault(); $('#props-list :is(.pr-name, .pr-val)')?.focus(); } else if (e.key === 'Escape') { e.preventDefault(); focusMain(); } });
 $('#search-input').addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.isComposing)) {
     const first = $('#search-results .s-file-name');
@@ -3616,6 +3744,7 @@ function refreshPanels(light = false) {
 function drawRight(body, light) {
   for (const b of $$('#right .tabs button')) b.classList.toggle('active', b.dataset.rtab === rtab);
   if (!$('#panel-tags').hidden && !light) renderTags();
+  if (!$('#panel-props').hidden && !light) renderPropsPanel();
   if (!$('#panel-search').hidden && $('#search-input').value && !light) runSearch();
   if (S.view === 'graph' && !light) FolioGraph.refresh();
   updateStatus();
@@ -3923,6 +4052,7 @@ const CMD = {
   'panel-files': () => showPanel('files'),
   'panel-search': () => showPanel('search'),
   'panel-tags': () => showPanel('tags'),
+  'panel-props': () => showPanel('props'),
   switcher: openSwitcher,
   palette: openPalette,
   daily: openDaily,

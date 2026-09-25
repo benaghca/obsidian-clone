@@ -813,3 +813,16 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .tab-new:hover { background: var(--accent-soft); color: var(--text); }
 .tab-new svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 #tree .t-row.sel { background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--text); box-shadow: inset 3px 0 0 var(--accent); }
+
+/* All properties panel */
+#props-filter { margin-bottom: 6px; }
+.pr-name, .pr-val { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border-radius: 5px; cursor: pointer; color: var(--muted); font-size: 13.5px; }
+.pr-name:hover, .pr-val:hover, .pr-name:focus, .pr-val:focus { background: var(--accent-soft); color: var(--text); outline: none; }
+.pr-name .chev { width: 14px; height: 14px; flex: none; fill: none; stroke: currentColor; stroke-width: 2; transition: transform .12s; }
+.pr-name.open .chev { transform: rotate(90deg); }
+.pr-icon svg { width: 14px; height: 14px; display: block; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.pr-icon { color: var(--faint); }
+.pr-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pr-name .n, .pr-val .n { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pr-vals { margin: 0 0 4px 26px; border-left: 1px solid var(--border); padding-left: 4px; }
+.pr-val span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

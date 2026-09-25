@@ -16,6 +16,7 @@
   <nav id="ribbon">
     <button class="rb" data-cmd="panel-files" title="Files"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></button>
     <button class="rb" data-cmd="panel-search" data-hk="search" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+    <button class="rb" data-cmd="panel-props" data-hk="all-properties" title="All properties"><svg viewBox="0 0 24 24"><path d="M4 6.5h4M4 12h4M4 17.5h4M11 6.5h9M11 12h9M11 17.5h9"/></svg></button>
     <button class="rb" data-cmd="panel-tags" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
     <div class="rb-sep"></div>
     <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
@@ -44,9 +45,16 @@
     <section id="panel-search" class="panel" hidden>
       <header class="panel-head"><span class="panel-title">Search</span></header>
       <div class="panel-body">
-        <input id="search-input" class="field" type="search" placeholder="Search…  (tag:x  path:y  &quot;exact phrase&quot;  -exclude)" spellcheck="false">
+        <input id="search-input" class="field" type="search" placeholder="Search…  (tag:x  path:y  [prop:value]  &quot;exact phrase&quot;  -exclude)" spellcheck="false">
         <div id="search-meta" class="meta"></div>
         <div id="search-results"></div>
+      </div>
+    </section>
+    <section id="panel-props" class="panel" hidden>
+      <header class="panel-head"><span class="panel-title">All properties</span></header>
+      <div class="panel-body">
+        <input id="props-filter" class="field" type="search" placeholder="Filter properties…" spellcheck="false">
+        <div id="props-list"></div>
       </div>
     </section>
     <section id="panel-tags" class="panel" hidden>
