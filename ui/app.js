@@ -183,6 +183,7 @@ function editorHooks(from, extra) {
     renderMath: (el, tex, display) => renderMath(el, tex, display),
     mathSnippets: () => cfg.mathSnippets,
     renderWebEmbed: (el, url, alt) => cfg.webEmbeds === 'off' ? (el.innerHTML = `<a class="cm-url" data-url="${esc(url)}">${esc(url)}</a>`) : renderWebEmbed(el, url, alt),
+    sizeWebEmbed: (el, alt) => sizeWebEmbed(el, alt),
     propertiesFor: text => cfg.properties !== 'source' && propsOf(text) != null,
     renderProperties: (el, text, ctl) => mountProps(el, text, { ...ctl, from }),
     ...extra,
@@ -1721,7 +1722,12 @@ function renderInto(el, content, from, depth) {
     if (!resolveLink(name, from)) a.classList.add('unresolved');
     a.removeAttribute('href');
   }
-  for (const ph of $$('.web-embed-ph', el)) { ph.className = ''; renderWebEmbed(ph, ph.dataset.url, ph.dataset.alt); }
+  const seenUrl = new Map();
+  for (const ph of $$('.web-embed-ph', el)) {
+    const n = seenUrl.get(ph.dataset.url) || 0; seenUrl.set(ph.dataset.url, n + 1);
+    ph.className = ''; ph.dataset.nth = n; ph.dataset.from = from;
+    renderWebEmbed(ph, ph.dataset.url, ph.dataset.alt);
+  }
   for (const img of $$('img', el)) {
     const src = img.getAttribute('src') || '';
     if (/^(data:|blob:|\/api\/raw)/.test(src)) continue;
@@ -2816,9 +2822,19 @@ function framedUrl(u) {
 
 // A live web page in a sandboxed frame, with its address, reload and open-in-browser. size is the
 // alt text of ![alt|W x H](url) (or {height}); fill: take the container's height (canvas cards).
-function renderWebEmbed(el, url, size = '', o = {}) {
+// The size in "alt|W x H" (either part may be missing); height defaults to 460.
+function embedSize(size) {
   const m = typeof size === 'string' ? /(?:^|\|)\s*(\d+)?\s*(?:x\s*(\d+))?\s*$/.exec(size) : null;
-  const w = m?.[1] ? +m[1] : null, hgt = o.fill ? null : Math.max(120, Math.min(2400, (m?.[2] ? +m[2] : size?.height) || 460));
+  return { w: m?.[1] ? +m[1] : null, h: Math.max(120, Math.min(2400, (m?.[2] ? +m[2] : size?.height) || 460)) };
+}
+function sizeWebEmbed(el, size) {
+  const { w, h } = embedSize(size);
+  el.style.maxWidth = w ? w + 'px' : '';
+  const f = $('.we-frame', el);
+  if (f) f.style.height = h + 'px';
+}
+function renderWebEmbed(el, url, size = '', o = {}) {
+  const { w } = embedSize(size), hgt = o.fill ? null : embedSize(size).h;
   let host = url;
   try { host = new URL(url).host; } catch { }
   const src = framedUrl(url);
@@ -2826,7 +2842,7 @@ function renderWebEmbed(el, url, size = '', o = {}) {
   if (o.fill) el.classList.add('we-fill');
   el.innerHTML = `<div class="we-bar"><span class="we-host">${esc(host)}</span><span class="we-url" title="${esc(url)}">${esc(url.replace(/^https?:\/\//, ''))}</span>
     <button class="ib we-reload" title="Reload"><svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6M20 4v5h-5"/></svg></button><button class="ib we-open" title="Open in browser"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button></div>
-    <div class="we-frame"${hgt ? ` style="height:${hgt}px"` : ''}></div>`;
+    <div class="we-frame"${hgt ? ` style="height:${hgt}px"` : ''}></div>${o.fill || o.fixed ? '' : '<span class="we-grip" title="Drag to resize (double-click: default size)"></span>'}`;
   if (w) el.style.maxWidth = w + 'px';
   const frame = $('.we-frame', el);
   const load = () => {
@@ -2875,6 +2891,69 @@ function toggleEmbed(e, pos, loose) {
   return true;
 }
 
+// Write a size into ![alt|W x H](url): the nth embed of url in text (null size: the default).
+function setEmbedSizeIn(text, url, nth, w, h) {
+  const esc_ = url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`!\\[([^\\]\\n]*)\\]\\(\\s*<?${esc_}>?\\s*\\)`, 'g');
+  let i = 0;
+  return text.replace(re, (m, alt) => {
+    if (i++ !== nth) return m;
+    const base = alt.replace(/\|\s*\d*\s*(x\s*\d+)?\s*$/, ''); // only a "|size" suffix
+    const size = h ? `|${w ? w : ''}x${h}` : '';
+    return `![${base}${size}](${url})`;
+  });
+}
+
+// Drag an embedded page's corner to resize it; the size goes into the note. The page stays loaded.
+document.addEventListener('pointerdown', e => {
+  const grip = e.target.closest?.('.we-grip');
+  if (!grip || e.button !== 0) return;
+  e.preventDefault(); e.stopPropagation();
+  const box = grip.closest('.web-embed'), frame = $('.we-frame', box);
+  const x0 = e.clientX, y0 = e.clientY, w0 = box.getBoundingClientRect().width, h0 = frame.getBoundingClientRect().height;
+  const pcs = getComputedStyle(box.parentElement);
+  const full = box.parentElement.clientWidth - parseFloat(pcs.paddingLeft) - parseFloat(pcs.paddingRight); // its content width
+  let w = w0, h = h0;
+  document.body.classList.add('we-resizing'); // (the page underneath mustn't swallow the drag)
+  grip.setPointerCapture(e.pointerId);
+  const move = ev => {
+    w = Math.round(Math.max(240, Math.min(full, w0 + ev.clientX - x0)));
+    h = Math.round(Math.max(120, Math.min(2400, h0 + ev.clientY - y0)));
+    box.style.maxWidth = w >= full - 2 ? '' : w + 'px';
+    frame.style.height = h + 'px';
+    grip.dataset.size = `${w >= full - 2 ? 'full width' : w} × ${h}`;
+  };
+  const up = () => {
+    grip.removeEventListener('pointermove', move); grip.removeEventListener('pointerup', up); grip.removeEventListener('pointercancel', up);
+    document.body.classList.remove('we-resizing'); delete grip.dataset.size;
+    if (Math.abs(w - w0) < 2 && Math.abs(h - h0) < 2) return;
+    saveEmbedSize(box, w >= full - 2 ? null : w, h);
+  };
+  grip.addEventListener('pointermove', move); grip.addEventListener('pointerup', up); grip.addEventListener('pointercancel', up);
+}, true);
+document.addEventListener('dblclick', e => {
+  const grip = e.target.closest?.('.we-grip');
+  if (!grip) return;
+  e.preventDefault(); e.stopPropagation();
+  const box = grip.closest('.web-embed');
+  sizeWebEmbed(box, '');
+  saveEmbedSize(box, null, null);
+}, true);
+function saveEmbedSize(box, w, h) {
+  const cmBlock = box.closest('.cm-web-embed');
+  if (cmBlock) {
+    // Live preview: rewrite the ![…](url) on the widget's line (the widget resizes in place).
+    const reg = EDITORS.get(cmBlock.closest('.cm-editor'));
+    if (!reg) return;
+    const view = reg.ed.view, line = view.state.doc.lineAt(view.posAtDOM(cmBlock));
+    const next = setEmbedSizeIn(line.text, cmBlock.dataset.url, 0, w, h);
+    if (next !== line.text) view.dispatch({ changes: { from: line.from, to: line.to, insert: next } });
+  } else if (box.closest('#preview') && S.view === 'note') {
+    const next = setEmbedSizeIn(ed.value, box.dataset.url, +box.dataset.nth || 0, w, h);
+    if (next !== ed.value) ed.value = next; // (reading view keeps showing the resized page)
+  }
+}
+
 // Right-click a link (or an embed) in the editor: embed it, or turn it back into a link.
 document.addEventListener('contextmenu', e => {
   const t = e.target.closest?.('.cm-editor :is(.cm-wikilink, .cm-link, .cm-url, .cm-note-embed, .cm-web-embed, .cm-visual-embed)');
@@ -2919,7 +2998,7 @@ function showHover(a) {
   hoverFor = a;
   const pop = hoverPop = document.createElement('div');
   pop.className = 'hover-pop' + (t.web ? ' hp-web' : '');
-  if (t.web) renderWebEmbed(pop, t.web, { height: 380 });
+  if (t.web) renderWebEmbed(pop, t.web, { height: 380 }, { fixed: true });
   else {
     pop.innerHTML = `<div class="hp-head"><b>${esc(displayName(t.path))}${t.sub ? ` › ${esc(t.sub.replace(/^\^/, ''))}` : ''}</b><button class="ib hp-open" title="Open (Ctrl-click: new tab)"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button></div><div class="hp-body markdown"></div>`;
     const body = $('.hp-body', pop), n = S.notes.get(t.path);

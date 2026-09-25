@@ -884,3 +884,10 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .hp-head svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.8; }
 .hp-body { overflow: auto; padding: 4px 16px 14px; font-size: 14.5px; }
 .hp-body > :first-child { margin-top: .6em; }
+.web-embed { position: relative; }
+.we-grip { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; cursor: nwse-resize; z-index: 2; opacity: 0; transition: opacity .12s;
+  background: linear-gradient(135deg, transparent 45%, var(--muted) 45% 52%, transparent 52% 65%, var(--muted) 65% 72%, transparent 72%); }
+.web-embed:hover .we-grip, .we-resizing .we-grip { opacity: 1; }
+.we-grip[data-size]::after { content: attr(data-size); position: absolute; right: 18px; bottom: 4px; font: 12px/1.5 var(--font-ui); color: var(--text); background: var(--bg2); border: 1px solid var(--border); padding: 0 6px; border-radius: 4px; white-space: nowrap; }
+.we-resizing iframe { pointer-events: none; }
+.we-resizing { cursor: nwse-resize; user-select: none; }

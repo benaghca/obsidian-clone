@@ -216,8 +216,15 @@ class WebEmbedWidget extends WidgetType {
   toDOM() {
     const el = document.createElement('div');
     el.className = 'cm-embed-block cm-web-embed';
+    el.dataset.url = this.url;
     this.h.renderWebEmbed(el, this.url, this.alt);
     return el;
+  }
+  // A new size for the same page resizes in place, so the page doesn't reload.
+  updateDOM(dom) {
+    if (dom.dataset.url !== this.url || !this.h.sizeWebEmbed) return false;
+    this.h.sizeWebEmbed(dom, this.alt);
+    return true;
   }
   ignoreEvent() { return true; }
 }
