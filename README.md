@@ -145,6 +145,12 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
     - **F2** renames, **Del** deletes and **Ctrl+N** makes a note in that folder
     - **Esc** goes back to the page
   - Search results, tags and task lists work the same way with arrows, **Enter** and **Esc**. In task lists, **Space**/**X** ticks a task, **T** makes it due today and **M** makes it due tomorrow.
+  - **Ctrl+Shift+B** and **Ctrl+Shift+O** jump into Backlinks and Outline:
+    - arrows move, and **←/→** switch between Backlinks, Outgoing and Outline
+    - **Enter** opens the item or goes to the heading
+    - **Space** previews a heading without leaving the pane
+    - **L** turns an unlinked mention into a link
+  - **Ctrl+Tab** switches between recent files, like an editor's tab switcher: hold Ctrl, tap Tab (Shift+Tab goes back), and let go to open. A quick Ctrl+Tab flips back to the previous file. The quick switcher also lists recent files first. (In browser mode the browser keeps Ctrl+Tab, so rebind it in Hotkeys.)
   - **Ctrl+\** and **Ctrl+Shift+\** hide and show the sidebars.
   - Dialogs return focus to where you were.
 

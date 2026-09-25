@@ -127,6 +127,7 @@ const S = {
   dirty: false,
   saving: false,
   hist: [], histIdx: -1,
+  recent: store('recentFiles') || [], // files by when they were last opened, newest first (Ctrl+Tab, quick switcher)
   pos: new Map(),        // path -> {sel, scroll, pscroll}
   expanded: new Set(store('expanded') || []),
   gen: 0,                // bumped by every write, so stale polls can be discarded
@@ -513,6 +514,7 @@ async function openPath(p, opts = {}) {
   }
   S.cur = p; S.dirty = false; S.drawing = null; S.canvasDoc = null; S.baseDoc = null;
   store('last', p);
+  S.recent = [p, ...S.recent.filter(x => x !== p)].slice(0, 40); store('recentFiles', S.recent);
   if (isDrawing(p) && !opts.raw) return openDrawing(p);
   if (isCanvas(p)) return openCanvas(p);
   if (isBase(p)) return openBase(p);
@@ -1952,6 +1954,7 @@ async function renamePath(from, to) {
     const pos = S.pos.get(a); if (pos) S.pos.set(b, pos);
     const cv = S.canvases.get(a); S.canvases.delete(a); if (cv) S.canvases.set(b, cv);
     S.hist = S.hist.map(h => h === a ? b : h);
+    S.recent = S.recent.map(h => h === a ? b : h);
   }
   if (isDir) {
     const dirs = [...S.dirs];
@@ -2719,7 +2722,7 @@ function openSwitcher() {
     items: q => {
       const r = rank(files, q, p => isMd(p) ? noteName(p) : basename(p)).map(p => ({ main: isMd(p) ? noteName(p) : basename(p), sub: dirname(p), value: p }));
       if (q) for (const [a, p] of S.byAlias) if (a.includes(q.toLowerCase())) r.push({ main: a, sub: '→ ' + noteName(p), value: p });
-      if (!q) { const recent = [...new Set([...S.hist].reverse())].filter(p => S.files.has(p)); return [...recent.map(p => ({ main: noteName(p), sub: dirname(p) || 'recent', value: p })), ...r.filter(x => !recent.includes(x.value))]; }
+      if (!q) { const recent = S.recent.filter(p => S.files.has(p)); return [...recent.map(p => ({ main: noteName(p), sub: dirname(p) || 'recent', value: p })), ...r.filter(x => !recent.includes(x.value))]; }
       return r;
     },
     onCreate: name => followLink(name, null, null),
@@ -2764,6 +2767,11 @@ const APP_COMMANDS = [
   ['delete', 'Delete current file', '', () => S.cur && deletePath(S.cur)],
   ['reveal', 'Reveal current file in file tree', '', () => S.cur && revealInTree(S.cur)],
   ['toggle-left', 'Toggle left sidebar', 'Mod-\\', () => toggleSide('left')],
+  ['backlinks', 'Show backlinks', 'Mod-Shift-b', () => showRight('backlinks')],
+  ['outline', 'Show outline', 'Mod-Shift-o', () => showRight('outline')],
+  ['outgoing', 'Show outgoing links', '', () => showRight('outgoing')],
+  ['recent', 'Switch to a recent file', MAC ? 'Ctrl-Tab' : 'Mod-Tab', () => recentSwitcher(1)],
+  ['recent-back', 'Switch to a recent file (backwards)', MAC ? 'Ctrl-Shift-Tab' : 'Mod-Shift-Tab', () => recentSwitcher(-1)],
   ['toggle-right', 'Toggle right sidebar', 'Mod-Shift-\\', () => toggleSide('right')],
   ['tasks', 'Open tasks', 'Mod-Shift-t', () => openTasks()],
   ['add-task', 'Add task…', '', () => quickAddTask()],
@@ -2924,6 +2932,8 @@ function showShortcuts() {
     <div><h4>Editing</h4>${bound(EDITOR_COMMANDS)}${fixed([['Move line up / down', `${A}↑ / ${A}↓`], ['Copy line', `${S_}${A}↑ / ${S_}${A}↓`], ['Select next match', `${M}D`], ['Indent / outdent list', `Tab / ${S_}Tab`], ['Follow link under cursor', `${M}click`], ['Undo / redo', `${M}Z / ${M}${S_}Z`]])}</div>
     <div><h4>File tree</h4>${fixed([['Move', '↑ / ↓'], ['Expand / collapse', '→ / ←'], ['Open', 'Enter'], ['Rename', 'F2'], ['Delete', 'Del'], ['New note here', `${M}N`], ['Back to the page', 'Esc']])}
       <h4>Lists (search, tasks)</h4>${fixed([['Move', '↑ / ↓'], ['Open', 'Enter'], ['Tick a task', 'Space / X'], ['Due today / tomorrow', 'T / M']])}
+      <h4>Backlinks / outline pane</h4>${fixed([['Switch tab', '← / →'], ['Preview a heading', 'Space'], ['Link an unlinked mention', 'L']])}
+      <h4>Recent files</h4>${fixed([['Step through (hold Ctrl)', 'Tab / Shift+Tab'], ['Open', 'release Ctrl']])}
       <h4>Viewer</h4>${fixed([['Previous / next image', '← / →'], ['Zoom', '+ / - / 0 / 1']])}</div>
   </div><div class="shortcuts-foot"><button class="btn" data-hk>Customize hotkeys…</button><span>Canvas and drawing shortcuts: press <kbd>?</kbd> in those views.</span></div></div>`);
   back.tabIndex = -1; back.focus();
@@ -3141,6 +3151,9 @@ $('#search-results').addEventListener('click', e => {
   if (f) openPath(f.dataset.path);
 });
 
+// Focusable items in the right pane (backlinks, outgoing links, outline).
+const RIGHT_ITEMS = '.bl-file, .bl-ctx, .o-item, a.tag';
+
 // ↑↓ through a panel's items, Enter opens one, Esc goes back (to the search box, or the page).
 function listKeys(box, sel, back) {
   box.addEventListener('keydown', e => {
@@ -3159,6 +3172,34 @@ function listKeys(box, sel, back) {
   });
 }
 listKeys($('#search-results'), '.s-file-name, .s-snip', () => $('#search-input').focus());
+listKeys($('#right-body'), RIGHT_ITEMS, () => focusMain());
+// In the right pane: ←/→ switch between Backlinks, Outgoing and Outline; Space previews a
+// heading; L links an unlinked mention.
+const RTABS = ['backlinks', 'outgoing', 'outline'];
+function showRight(tab) {
+  if (document.body.classList.contains('app-no-right')) toggleSide('right');
+  rtab = tab; store('rtab', rtab); refreshPanels();
+  const first = $(`#right-body :is(${RIGHT_ITEMS})`);
+  if (first) first.focus(); else $(`#right .tabs [data-rtab="${tab}"]`).focus();
+}
+$('#right').addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typingIn(e.target)) {
+    e.preventDefault();
+    showRight(RTABS[(RTABS.indexOf(rtab) + (e.key === 'ArrowRight' ? 1 : 2)) % 3]);
+  } else if (e.key === ' ' && e.target.matches?.('.o-item[data-heading]')) {
+    // Space scrolls the page to a heading without leaving the outline (Enter goes there).
+    e.preventDefault();
+    const it = e.target;
+    scrollToHeading(it.dataset.heading);
+    it.focus({ preventScroll: true });
+  } else if (e.key.toLowerCase() === 'l' && e.target.matches?.('.bl-ctx')) {
+    const b = e.target.querySelector('[data-link]');
+    if (b) { e.preventDefault(); b.click(); }
+  } else if (e.key === 'ArrowDown' && e.target.matches?.('.tabs button')) {
+    e.preventDefault(); $(`#right-body :is(${RIGHT_ITEMS})`)?.focus();
+  } else if (e.key === 'Escape' && e.target.matches?.('.tabs button')) { e.preventDefault(); focusMain(); }
+});
 listKeys($('#tag-list'), '.tag-row', () => focusMain());
 $('#search-input').addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' || (e.key === 'Enter' && !e.isComposing)) {
@@ -3168,6 +3209,36 @@ $('#search-input').addEventListener('keydown', e => {
     if (e.key === 'Enter') first.click(); else first.focus();
   } else if (e.key === 'Escape' && !e.target.value) { e.preventDefault(); focusMain(); }
 });
+
+// Ctrl+Tab: hold Ctrl and press Tab to step through recently opened files (Shift+Tab goes back);
+// letting go of Ctrl opens the one selected. Enter or a click opens too; Esc cancels.
+let recentBox = null;
+function recentSwitcher(step) {
+  if (recentBox) return recentBox.move(step);
+  const list = S.recent.filter(p => S.files.has(p));
+  if (list.length < 2 && !(list.length === 1 && list[0] !== S.cur)) return toast('No other recent files');
+  let i = list[0] === S.cur ? (step > 0 ? 1 : list.length - 1) : 0;
+  const back = modal(`<div class="rs"><div class="rs-head">Recent files</div><div class="rs-list">${list.map((p, j) => `<div class="rs-item" data-i="${j}"><span>${esc(displayName(p))}</span><small>${esc(dirname(p))}</small></div>`).join('')}</div><div class="pick-foot"><span>hold Ctrl, Tab to move</span><span>release to open</span><span>esc cancel</span></div></div>`);
+  back.classList.add('rs-back');
+  back.tabIndex = -1; back.focus();
+  const draw = () => $$('.rs-item', back).forEach((x, j) => { x.classList.toggle('sel', j === i); if (j === i) x.scrollIntoView({ block: 'nearest' }); });
+  const close = open => {
+    window.removeEventListener('keyup', up, true);
+    back.remove(); recentBox = null;
+    if (open) openPath(list[i]).then(() => focusMain());
+  };
+  const up = e => { if (e.key === 'Control' || e.key === 'Meta' || e.key === 'Alt') close(true); };
+  window.addEventListener('keyup', up, true);
+  back.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Tab' || e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); recentBox.move(e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey) ? -1 : 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); close(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(false); }
+  });
+  back.addEventListener('mousedown', e => { const it = e.target.closest('.rs-item'); if (it) { i = +it.dataset.i; close(true); } else if (e.target === back) close(false); });
+  recentBox = { move(d) { i = (i + d + list.length) % list.length; draw(); } };
+  draw();
+}
 
 function renderTags() {
   const counts = new Map();
@@ -3227,6 +3298,14 @@ function unlinkedMentions(p) {
 
 function refreshPanels(light = false) {
   const body = $('#right-body');
+  // Redrawing the pane shouldn't throw the keyboard out of it.
+  const had = body.contains(document.activeElement) ? $$(RIGHT_ITEMS, body).indexOf(document.activeElement) : -1;
+  try { drawRight(body, light); } finally {
+    for (const x of $$(RIGHT_ITEMS, body)) x.tabIndex = -1;
+    if (had >= 0) { const items = $$(RIGHT_ITEMS, body); items[Math.min(had, items.length - 1)]?.focus({ preventScroll: true }); }
+  }
+}
+function drawRight(body, light) {
   for (const b of $$('#right .tabs button')) b.classList.toggle('active', b.dataset.rtab === rtab);
   if (!$('#panel-tags').hidden && !light) renderTags();
   if (!$('#panel-search').hidden && $('#search-input').value && !light) runSearch();
