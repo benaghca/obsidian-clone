@@ -20,6 +20,7 @@
     <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
     <button class="rb" data-cmd="daily" title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
     <button class="rb" data-cmd="new-drawing" title="New drawing"><svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/></svg></button>
+    <button class="rb" data-cmd="new-canvas" title="New canvas"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/><path d="M11 7h3a2 2 0 0 1 2 2v5"/></svg></button>
     <button class="rb" data-cmd="graph" title="Graph view (Ctrl+G)"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="m8.3 7.2 7.4.6M7 8.3l1.4 7.3M16.4 10l-5.6 6.3"/></svg></button>
     <button class="rb" data-cmd="palette" title="Command palette (Ctrl+P)"><svg viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M11 17h8"/></svg></button>
     <div class="rb-grow"></div>
@@ -77,6 +78,8 @@
 
     <div id="view-drawing" class="view" hidden></div>
 
+    <div id="view-canvas" class="view" hidden></div>
+
     <div id="view-graph" class="view" hidden>
       <canvas id="graph-canvas"></canvas>
       <div id="graph-controls">
@@ -96,6 +99,7 @@
         <p><a data-cmd="new-note">Create a new note</a> <kbd>Ctrl N</kbd></p>
         <p><a data-cmd="switcher">Open a note</a> <kbd>Ctrl O</kbd></p>
         <p><a data-cmd="new-drawing">New drawing</a></p>
+        <p><a data-cmd="new-canvas">New canvas</a></p>
         <p><a data-cmd="daily">Today's daily note</a></p>
         <p><a data-cmd="graph">Graph view</a> <kbd>Ctrl G</kbd></p>
       </div>
@@ -126,6 +130,7 @@
 <script src="/templater.js"></script>
 <script src="/draw-render.js"></script>
 <script src="/draw.js"></script>
+<script src="/canvas.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

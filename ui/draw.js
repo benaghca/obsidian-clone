@@ -1431,7 +1431,7 @@ window.FolioDraw = (() => {
 
   function onUiClick(e) {
     const t = e.target.closest('[data-tool]');
-    if (t) { setTool(t.dataset.tool); canvas.focus(); return; }
+    if (t) { setTool(t.dataset.tool); if (!hooks.modalOpen?.()) canvas.focus(); return; }
     const b = e.target.closest('[data-act]');
     if (b) {
       const act = b.dataset.act;
@@ -1443,7 +1443,7 @@ window.FolioDraw = (() => {
         'al-left': () => align('left'), 'al-hcenter': () => align('hcenter'), 'al-right': () => align('right'),
         'al-top': () => align('top'), 'al-vcenter': () => align('vcenter'), 'al-bottom': () => align('bottom'),
       })[act]?.();
-      if (!editing) canvas.focus();
+      if (!editing && !hooks.modalOpen?.()) canvas.focus(); // not away from a dialog it opened
       return;
     }
     const p = e.target.closest('[data-prop]');

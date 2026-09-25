@@ -170,14 +170,14 @@ class EmbedWidget extends WidgetType {
   }
 }
 
-// A drawing (.excalidraw) embed, rendered by app.js as an image of the drawing.
-class DrawingWidget extends WidgetType {
-  constructor(path, width, version) { super(); this.path = path; this.width = width; this.version = version; }
-  eq(o) { return o.path === this.path && o.width === this.width && o.version === this.version; }
+// Embeds app.js renders itself (drawings, canvases, bases): H.visualEmbed(path) says which.
+class VisualEmbedWidget extends WidgetType {
+  constructor(path, width, sub, version) { super(); this.path = path; this.width = width; this.sub = sub; this.version = version; }
+  eq(o) { return o.path === this.path && o.width === this.width && o.sub === this.sub && o.version === this.version; }
   toDOM() {
     const el = document.createElement('div');
-    el.className = 'cm-embed-block cm-drawing-embed';
-    H.renderDrawing(el, this.path, this.width);
+    el.className = 'cm-embed-block cm-visual-embed';
+    H.renderVisualEmbed(el, this.path, this.width, this.sub);
     return el;
   }
 }
@@ -441,8 +441,8 @@ function buildBlocks(state) {
           const w = parseWiki(doc.sliceString(nf + 3, nt - 2));
           const target = H.resolve(w.name);
           const width = w.alias && /^\d+/.test(w.alias) ? parseInt(w.alias) : null;
-          if (target && H.isDrawing && H.isDrawing(target)) {
-            widget = new DrawingWidget(target, width, H.version());
+          if (target && H.visualEmbed && H.visualEmbed(target)) {
+            widget = new VisualEmbedWidget(target, width, w.sub, H.version());
           } else if (target && IMG_EXT.test(target)) {
             widget = new ImageWidget(H.rawUrl(target), w.name, width, true);
           } else if (target && /\.md$/i.test(target)) {

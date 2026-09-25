@@ -21,6 +21,10 @@ const DRAWING_EXT = /\.excalidraw(\.md)?$/i;
 // Drawings: .excalidraw (Excalidraw JSON) or Obsidian Excalidraw plugin notes (.excalidraw.md / frontmatter flag).
 const isDrawing = p => !!p && (DRAWING_EXT.test(p) || (isMd(p) && S.notes.get(p)?.fm?.['excalidraw-plugin'] != null));
 const drawingName = p => basename(p).replace(DRAWING_EXT, '').replace(/\.md$/i, '');
+const isCanvas = p => !!p && /\.canvas$/i.test(p);
+// Files whose ![[embeds]] app.js draws itself rather than as Markdown or an image.
+const visualEmbed = p => isDrawing(p) || isCanvas(p);
+const displayName = p => isDrawing(p) ? drawingName(p) : isCanvas(p) ? basename(p).replace(/\.canvas$/i, '') : isMd(p) ? noteName(p) : basename(p);
 const rawUrl = p => `/api/raw?path=${enc(p)}&t=${TOKEN}`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
@@ -109,6 +113,8 @@ const S = {
   version: 0,            // bumped when the index changes, so editor widgets re-render
   savePromise: null,
   drawing: null,         // open drawing: {mtime, info: {format, source, embedded}}
+  canvasDoc: null,       // open canvas: {mtime}
+  canvases: new Map(),   // canvas path -> {mtime, refs: [vault paths of its file cards]}
 };
 
 const editWrap = $('#edit-wrap');
@@ -130,8 +136,8 @@ const ed = FolioEditor.create($('#editor'), {
   onCursor: () => cursorMoved(),
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
-  isDrawing: p => isDrawing(p),
-  renderDrawing: (el, p, width) => renderDrawingEmbed(el, p, width),
+  visualEmbed: p => visualEmbed(p),
+  renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
 });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
@@ -292,12 +298,22 @@ async function applyList(l, gen) {
   for (const p of S.files.keys()) if (!next.has(p)) { removed.push(p); structural = true; }
   // .excalidraw files aren't indexed like notes, but embeds and the open drawing follow their changes.
   const drawingsChanged = [...next].filter(([p, f]) => !isMd(p) && DRAWING_EXT.test(p) && S.files.get(p) && S.files.get(p).mtime !== f.mtime).map(([p]) => p);
-  if (!structural && !changed.length && !drawingsChanged.length) return false;
-  const got = changed.length ? await readMany(changed) : {};
+  // Canvases are read too, so the notes on them get backlinks and follow renames.
+  const canvasesChanged = [...next].filter(([p, f]) => isCanvas(p) && S.canvases.get(p)?.mtime !== f.mtime).map(([p]) => p);
+  if (!structural && !changed.length && !drawingsChanged.length && !canvasesChanged.length) return false;
+  const got = changed.length || canvasesChanged.length ? await readMany([...changed, ...canvasesChanged]) : {};
   if (gen != null && gen !== S.gen) return false; // we wrote something meanwhile; next poll redoes it
 
   S.files = next; S.dirs = nextDirs;
-  for (const p of removed) S.notes.delete(p);
+  for (const p of removed) { S.notes.delete(p); S.canvases.delete(p); }
+  for (const p of canvasesChanged) {
+    const v = got[p];
+    delete got[p];
+    if (!v) continue;
+    indexCanvas(p, v.content, v.mtime);
+    if (p === S.cur && S.view === 'canvas' && !S.dirty && S.canvasDoc && v.mtime !== S.canvasDoc.mtime) loadCanvas(p, v.content, v.mtime, FolioCanvas.getView());
+  }
+  if (S.view === 'canvas' && (changed.length || structural)) FolioCanvas.refreshFiles();
   {
     for (const [p, v] of Object.entries(got)) {
       if (p === S.cur && S.dirty) continue;
@@ -362,9 +378,9 @@ const liveReindex = debounce(() => {
 async function save(force = false) {
   while (S.saving) await S.savePromise;
   if (!S.cur || !S.dirty) return;
-  if (S.view !== 'note' && !(S.view === 'drawing' && S.drawing)) return;
+  if (S.view !== 'note' && !(S.view === 'drawing' && S.drawing) && !(S.view === 'canvas' && S.canvasDoc)) return;
   S.saving = true;
-  S.savePromise = (S.view === 'drawing' ? doSaveDrawing(force) : doSave(force)).finally(() => { S.saving = false; });
+  S.savePromise = (S.view === 'drawing' ? doSaveDrawing(force) : S.view === 'canvas' ? doSaveCanvas(force) : doSave(force)).finally(() => { S.saving = false; });
   return S.savePromise;
 }
 
@@ -408,10 +424,11 @@ async function writeFile(path, content, base) {
 
 function showView(v) {
   S.view = v;
-  for (const id of ['note', 'file', 'graph', 'drawing', 'empty']) $(`#view-${id}`).hidden = id !== v;
+  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
   if (v === 'graph') FolioGraph.show(); else FolioGraph.hide();
   if (v === 'drawing') FolioDraw.show(); else FolioDraw.hide();
+  if (v === 'canvas') FolioCanvas.show(); else FolioCanvas.hide();
   updateHistButtons();
 }
 
@@ -425,22 +442,24 @@ function showEmpty() {
 
 function rememberPos() {
   if (S.cur && S.view === 'drawing') { S.pos.set(S.cur, { draw: FolioDraw.getView() }); return; }
+  if (S.cur && S.view === 'canvas') { S.pos.set(S.cur, { canvas: FolioCanvas.getView() }); return; }
   if (!S.cur || S.view !== 'note') return;
   S.pos.set(S.cur, { a: ed.selectionStart, b: ed.selectionEnd, scroll: editWrap.scrollTop, pscroll: preview.scrollTop });
 }
 
 async function openPath(p, opts = {}) {
   if (!p) return;
-  if (S.view === 'drawing') FolioDraw.flush();
+  flushDocViews();
   await save();
   rememberPos();
   if (!S.files.has(p)) { toast(`Not found: ${p}`); return; }
   if (opts.push !== false && S.hist[S.histIdx] !== p) {
     S.hist = S.hist.slice(0, S.histIdx + 1); S.hist.push(p); S.histIdx = S.hist.length - 1;
   }
-  S.cur = p; S.dirty = false; S.drawing = null;
+  S.cur = p; S.dirty = false; S.drawing = null; S.canvasDoc = null;
   store('last', p);
   if (isDrawing(p) && !opts.raw) return openDrawing(p);
+  if (isCanvas(p)) return openCanvas(p);
   if (!isMd(p)) return openAttachment(p);
   const n = S.notes.get(p);
   showView('note');
@@ -525,10 +544,10 @@ async function reloadDrawingFromDisk(content, mtime) {
   loadDrawing(p, content, mtime, FolioDraw.getView());
 }
 
-function showDrawingError(p, e) {
-  S.drawing = null;
+function showDrawingError(p, e, what = 'a drawing') {
+  S.drawing = null; S.canvasDoc = null;
   showView('file');
-  $('#view-file').innerHTML = `<div class="file-info"><p>Couldn’t open “${esc(basename(p))}” as a drawing: ${esc(e.message)}</p>` +
+  $('#view-file').innerHTML = `<div class="file-info"><p>Couldn’t open “${esc(basename(p))}” as ${what}: ${esc(e.message)}</p>` +
     (isMd(p) ? `<p><a class="btn" data-open-raw="${esc(p)}">Open as Markdown</a></p>` : '') + '</div>';
 }
 
@@ -675,6 +694,11 @@ function drawingSvgUrl(path) {
   return promise;
 }
 
+function renderVisualEmbed(el, path, width, sub) {
+  if (isCanvas(path)) return renderCanvasEmbed(el, path, width);
+  return renderDrawingEmbed(el, path, width);
+}
+
 // Render ![[Drawing.excalidraw]] into `el` (reading view, live preview and note embeds).
 function renderDrawingEmbed(el, path, width) {
   el.classList.add('drawing-embed');
@@ -718,6 +742,135 @@ function openDrawingLink(link) {
   const [tgt] = splitOnce(m ? m[1] : t, '|');
   const [name, sub] = splitOnce(tgt, '#');
   followLink(name.trim(), sub, S.cur);
+}
+
+// ============================================================ canvases
+
+// Leave a drawing or canvas cleanly: finish any text being typed.
+function flushDocViews() {
+  if (S.view === 'drawing') FolioDraw.flush();
+  if (S.view === 'canvas') FolioCanvas.flush();
+}
+
+function indexCanvas(p, content, mtime) {
+  let refs = [];
+  try { refs = FolioCanvas.fileRefs(FolioCanvas.parseCanvas(content)); } catch { }
+  S.canvases.set(p, { mtime, refs });
+}
+
+async function openCanvas(p) {
+  FolioCanvas.load({ nodes: [], edges: [] }, { path: p }); // don't show the previous canvas while this one loads
+  showView('canvas');
+  $('#crumbs').innerHTML = crumbsHtml(p);
+  document.title = `${displayName(p)} — ${VAULT} — Folio`;
+  setSaveState('');
+  renderTreeActive(true);
+  refreshPanels();
+  const got = await readMany([p]).catch(e => ({ error: e }));
+  if (S.cur !== p) return;
+  if (!got[p]) return showDrawingError(p, got.error || new Error('the file couldn’t be read'), 'a canvas');
+  loadCanvas(p, got[p].content, got[p].mtime, S.pos.get(p)?.canvas);
+}
+
+function loadCanvas(p, content, mtime, view) {
+  let data;
+  try { data = FolioCanvas.parseCanvas(content); } catch (e) { showDrawingError(p, e, 'a canvas'); return false; }
+  S.canvasDoc = { mtime };
+  if (S.view !== 'canvas') showView('canvas');
+  FolioCanvas.load(data, { view, path: p });
+  indexCanvas(p, content, mtime);
+  updateStatus();
+  return true;
+}
+
+function canvasChanged() {
+  if (S.view !== 'canvas' || !S.canvasDoc) return;
+  S.dirty = true;
+  setSaveState('Unsaved');
+  scheduleSave();
+  updateStatus();
+}
+
+async function doSaveCanvas(force) {
+  const p = S.cur, d = S.canvasDoc;
+  S.dirty = false; setSaveState('Saving…');
+  const content = FolioCanvas.serializeCanvas(FolioCanvas.getData());
+  try {
+    const headers = (!force && d.mtime) ? { 'X-Base-Mtime': String(d.mtime) } : {};
+    const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: content, headers });
+    d.mtime = r.mtime;
+    S.files.set(p, { ...S.files.get(p), mtime: r.mtime, size: new Blob([content]).size });
+    indexCanvas(p, content, r.mtime);
+    S.version++;
+    if (!S.dirty) setSaveState('Saved');
+    refreshPanels(true);
+    return;
+  } catch (e) {
+    S.dirty = true;
+    if (e.status !== 409) { setSaveState('Save failed: ' + e.message, true); return; }
+  }
+  if (confirm(`"${basename(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveCanvas(true);
+  S.dirty = false;
+  const got = (await readMany([p]).catch(() => ({})))[p];
+  if (got && S.cur === p) loadCanvas(p, got.content, got.mtime, FolioCanvas.getView());
+  setSaveState('Reloaded from disk');
+}
+
+async function newCanvas(folder) {
+  if (folder == null) folder = cfg.newNoteFolder;
+  const path = uniquePath(folder, 'Untitled.canvas');
+  await createNote(path, FolioCanvas.serializeCanvas({ nodes: [], edges: [] }));
+}
+
+// What a file card on a canvas shows.
+function renderCanvasFile(el, path, sub) {
+  if (!S.files.has(path)) { el.innerHTML = `<p class="cv-empty">Missing: ${esc(path)}</p>`; return; }
+  if (IMG_EXT.test(path)) { el.classList.add('cv-image'); el.innerHTML = `<img src="${rawUrl(path)}" alt="" draggable="false">`; return; }
+  if (visualEmbed(path)) { const d = document.createElement('div'); el.append(d); renderVisualEmbed(d, path); return; }
+  if (isMd(path)) {
+    const n = S.notes.get(path);
+    el.classList.add('markdown');
+    const h = sub ? sub.replace(/^#/, '') : '';
+    renderInto(el, n ? (h ? extractSection(n, h) : n.content) : '', path, 1);
+    return;
+  }
+  const f = S.files.get(path);
+  el.innerHTML = `<div class="cv-link"><div class="cv-link-host">${esc(basename(path))}</div><div class="cv-empty">${f ? (f.size / 1024).toFixed(1) + ' KB' : ''}</div></div>`;
+}
+
+// A picture of the canvas for ![[Board.canvas]] embeds, cached by file version and theme.
+const canvasSvgCache = new Map();
+function canvasSvgUrl(path) {
+  const cs = getComputedStyle(document.documentElement), v = n => cs.getPropertyValue(n).trim();
+  const theme = `${document.documentElement.dataset.theme}|${document.documentElement.dataset.palette}`;
+  const key = `${S.files.get(path)?.mtime}|${theme}|${S.version}`;
+  const hit = canvasSvgCache.get(path);
+  if (hit && hit.key === key) return hit.promise;
+  const promise = (async () => {
+    const content = (await readMany([path]))[path]?.content;
+    if (content == null) throw new Error('file not found');
+    const data = FolioCanvas.parseCanvas(content);
+    const colors = { 1: v('--cv-red'), 2: v('--cv-orange'), 3: v('--cv-yellow'), 4: v('--cv-green'), 5: v('--cv-cyan'), 6: v('--cv-purple') };
+    const svg = FolioCanvas.toSVG(data, {
+      colors, text: v('--text'), muted: v('--muted'), bg: v('--bg'), border: v('--border'),
+      noteText: p => S.notes.get(p)?.content ?? null, name: p => displayName(p),
+    });
+    return URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
+  })();
+  canvasSvgCache.set(path, { key, promise });
+  if (hit) hit.promise.then(u => setTimeout(() => URL.revokeObjectURL(u), 10000), () => { });
+  promise.catch(() => { if (canvasSvgCache.get(path)?.promise === promise) canvasSvgCache.delete(path); });
+  return promise;
+}
+function renderCanvasEmbed(el, path, width) {
+  el.classList.add('canvas-embed');
+  el.dataset.canvas = path;
+  el.title = `${displayName(path)} — click to open the canvas`;
+  const img = document.createElement('img');
+  img.alt = displayName(path);
+  if (width) img.width = width;
+  el.replaceChildren(img);
+  canvasSvgUrl(path).then(u => { img.src = u; }, e => { el.textContent = `(couldn’t show canvas “${displayName(path)}”: ${e.message})`; });
 }
 
 function goHist(d) {
@@ -811,9 +964,9 @@ function renderWiki(t) {
   const [name, sub] = splitOnce(tgt, '#');
   const target = resolveLink(name.trim(), RC.from);
   if (t.embed) {
-    if (target && isDrawing(target)) {
+    if (target && visualEmbed(target)) {
       const w = alias && /^\d+/.test(alias.trim()) ? parseInt(alias) : '';
-      return `<span class="drawing-embed" data-drawing="${esc(target)}" data-width="${w}"></span>`;
+      return `<span class="visual-embed" data-path="${esc(target)}" data-width="${w}" data-sub="${esc(sub || '')}"></span>`;
     }
     if (target && IMG_EXT.test(target)) {
       const w = alias && /^\d+(x\d+)?$/.test(alias.trim()) ? ` width="${alias.split('x')[0]}"` : '';
@@ -895,7 +1048,7 @@ function renderInto(el, content, from, depth) {
     box.append(title, ...bq.childNodes);
     bq.replaceWith(box);
   }
-  for (const sp of $$('span.drawing-embed[data-drawing]', el)) renderDrawingEmbed(sp, sp.dataset.drawing, +sp.dataset.width || null);
+  for (const sp of $$('span.visual-embed[data-path]', el)) renderVisualEmbed(sp, sp.dataset.path, +sp.dataset.width || null, sp.dataset.sub);
   // Note embeds (transclusion), limited depth.
   for (const sp of $$('span.embed[data-embed]', el)) {
     if (depth >= 2 || sp.dataset.embed === from) { sp.textContent = '(embed depth limit)'; continue; }
@@ -904,7 +1057,7 @@ function renderInto(el, content, from, depth) {
 }
 
 function renderEmbedInto(el, target, sub, depth = 1) {
-  if (isDrawing(target)) return renderDrawingEmbed(el, target);
+  if (visualEmbed(target)) return renderVisualEmbed(el, target, null, sub);
   const n = S.notes.get(target);
   el.innerHTML = `<div class="embed-head"><a class="internal-link" data-href="${esc(target)}" data-path="1">${esc(noteName(target))}${sub ? ' › ' + esc(sub) : ''}</a></div>`;
   const body = document.createElement('div');
@@ -980,8 +1133,8 @@ function toggleTask(i) {
 document.addEventListener('click', e => {
   const cb = e.target.closest('#preview input[data-task]');
   if (cb) { toggleTask(+cb.dataset.task); return; }
-  const de = e.target.closest('.drawing-embed[data-drawing]');
-  if (de && !e.target.closest('a')) { e.preventDefault(); return openPath(de.dataset.drawing); }
+  const de = e.target.closest('.drawing-embed[data-drawing], .canvas-embed[data-canvas]');
+  if (de && !e.target.closest('a') && !e.target.closest('.cv-node')) { e.preventDefault(); return openPath(de.dataset.drawing || de.dataset.canvas); }
   const raw = e.target.closest('[data-open-raw]');
   if (raw) { e.preventDefault(); return openPath(raw.dataset.openRaw, { raw: true }); }
   const a = e.target.closest('a.internal-link');
@@ -1029,9 +1182,9 @@ function renderTree() {
     }
     const files = node.files.sort((a, b) => collator.compare(noteName(a), noteName(b)));
     for (const f of files) {
-      const drawing = isDrawing(f);
-      const ext = drawing ? '<span class="ext">draw</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
-      const name = drawing ? drawingName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
+      const drawing = isDrawing(f), canvas = isCanvas(f);
+      const ext = drawing ? '<span class="ext">draw</span>' : canvas ? '<span class="ext">canvas</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
+      const name = drawing || canvas ? displayName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
       rows.push(`<div class="t-row file" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(name)}</span>${ext}</div>`);
     }
   };
@@ -1071,6 +1224,7 @@ $('#tree').addEventListener('contextmenu', e => {
   const items = [
     ['New note', () => newNote(folder)],
     ['New drawing', () => newDrawing(folder)],
+    ['New canvas', () => newCanvas(folder)],
     ['New folder', () => newFolder(folder)],
   ];
   if (path || dir) {
@@ -1265,6 +1419,7 @@ async function renamePath(from, to) {
     const f = S.files.get(a); S.files.delete(a); if (f) S.files.set(b, f);
     const n = S.notes.get(a); S.notes.delete(a); if (n) S.notes.set(b, n);
     const pos = S.pos.get(a); if (pos) S.pos.set(b, pos);
+    const cv = S.canvases.get(a); S.canvases.delete(a); if (cv) S.canvases.set(b, cv);
     S.hist = S.hist.map(h => h === a ? b : h);
   }
   if (isDir) {
@@ -1284,12 +1439,31 @@ async function renamePath(from, to) {
     if (p === S.cur && S.view === 'drawing') reloadDrawingFromDisk(content, S.notes.get(p)?.mtime);
     else if (p === S.cur) reloadEditorFromDisk(content);
   }
+  // Canvases point at files by path, so their cards follow the move too.
+  for (const [cp, c] of S.canvases) {
+    if (!c.refs.some(r => moved.has(r))) continue;
+    try {
+      if (cp === S.cur && S.view === 'canvas' && S.canvasDoc) {
+        FolioCanvas.renameRefs(FolioCanvas.getData(), moved);
+        indexCanvas(cp, FolioCanvas.serializeCanvas(FolioCanvas.getData()), c.mtime);
+        canvasChanged(); FolioCanvas.refreshFiles();
+      } else {
+        const got = (await readMany([cp]))[cp];
+        const data = FolioCanvas.parseCanvas(got.content);
+        if (!FolioCanvas.renameRefs(data, moved)) continue;
+        const text = FolioCanvas.serializeCanvas(data);
+        await writeFile(cp, text, got.mtime);
+        indexCanvas(cp, text, S.files.get(cp).mtime);
+      }
+      n++;
+    } catch (e) { toast(`Couldn’t update canvas ${cp}: ${e.message}`); }
+  }
   reindexAll();
   renderTree();
   if (curMoved) { titleEl.value = noteName(S.cur); $('#crumbs').innerHTML = crumbsHtml(S.cur); document.title = `${noteName(S.cur)} — ${VAULT} — Folio`; store('last', S.cur); }
   renderTreeActive(true);
   refreshPanels();
-  if (n) toast(`Updated links in ${n} note${n > 1 ? 's' : ''}`);
+  if (n) toast(`Updated links in ${n} file${n > 1 ? 's' : ''}`);
 }
 
 async function deletePath(path) {
@@ -1638,6 +1812,7 @@ const COMMANDS = [
   ['Create new note', 'Ctrl+N', () => newNote()],
   ['Create new folder', '', () => newFolder(S.cur ? dirname(S.cur) : '')],
   ['Create new drawing', '', () => newDrawing()],
+  ['Create new canvas', '', () => newCanvas()],
   ['Create new drawing and embed it in the current note', '', () => newDrawingInNote()],
   ['Export drawing as SVG', '', () => exportDrawing('svg')],
   ['Export drawing as PNG', '', () => exportDrawing('png')],
@@ -1854,6 +2029,7 @@ function lineAround(content, index) {
 
 function backlinksOf(p) {
   const res = new Map();
+  for (const [q, c] of S.canvases) if (q !== p && c.refs.includes(p)) res.set(q, [{ index: 0, line: `A card on the canvas “${displayName(q)}”` }]);
   for (const [q, n] of S.notes) {
     if (q === p || !n.out) continue;
     n.out.forEach((t, i) => {
@@ -1970,7 +2146,12 @@ $('#right-body').addEventListener('click', async e => {
 
 function updateStatus() {
   const left = $('#status-left'), right = $('#status-right');
-  if (S.view === 'drawing' && S.cur) {
+  if (S.view === 'canvas' && S.cur) {
+    const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
+    const n = FolioCanvas.count();
+    left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
+    right.textContent = `Canvas · ${n.toLocaleString()} card${n === 1 ? '' : 's'}`;
+  } else if (S.view === 'drawing' && S.cur) {
     const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
     const n = FolioDraw.count();
     left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
@@ -1993,8 +2174,12 @@ function graphData({ local, depth, tags, unresolved, orphans, attach, filter }) 
   const nodes = new Map(), edges = [];
   const add = (id, label, kind) => { if (!nodes.has(id)) nodes.set(id, { id, label, kind, deg: 0 }); return nodes.get(id); };
   const f = (filter || '').toLowerCase();
-  const allowFile = p => (isMd(p) || attach || DRAWING_EXT.test(p)) && (!f || p.toLowerCase().includes(f));
-  for (const p of S.files.keys()) if (allowFile(p)) add(p, isDrawing(p) ? drawingName(p) : isMd(p) ? noteName(p) : basename(p), isDrawing(p) ? 'drawing' : isMd(p) ? 'note' : 'file');
+  const allowFile = p => (isMd(p) || attach || DRAWING_EXT.test(p) || isCanvas(p)) && (!f || p.toLowerCase().includes(f));
+  for (const p of S.files.keys()) if (allowFile(p)) add(p, displayName(p), isDrawing(p) ? 'drawing' : isCanvas(p) ? 'canvas' : isMd(p) ? 'note' : 'file');
+  for (const [p, c] of S.canvases) {
+    if (!nodes.has(p)) continue;
+    for (const t of c.refs) if (nodes.has(t) && t !== p) edges.push([p, t]);
+  }
   for (const [p, n] of S.notes) {
     if (!nodes.has(p)) continue;
     const seen = new Set();
@@ -2032,7 +2217,7 @@ function graphOptions() {
 }
 
 async function openGraph(local) {
-  if (S.view === 'drawing') FolioDraw.flush();
+  flushDocViews();
   await save();
   rememberPos();
   $('#g-local').checked = !!local;
@@ -2050,6 +2235,44 @@ FolioGraph.init($('#graph-canvas'), {
     openPath(id);
   },
 });
+FolioCanvas.init($('#view-canvas'), {
+  onChange: () => canvasChanged(),
+  renderMarkdown: (el, text, from) => { renderInto(el, text, from || S.cur, 1); for (const cb of $$('input[type=checkbox]', el)) cb.disabled = false; },
+  renderFile: (el, p, sub) => renderCanvasFile(el, p, sub),
+  fileVersion: p => `${S.files.get(p)?.mtime}|${S.notes.get(p)?.mtime}`,
+  fileName: p => displayName(p),
+  openFile: (p, sub) => S.files.has(p) ? openPath(p, { heading: sub ? sub.replace(/^#/, '') : undefined }) : toast(`Not found: ${p}`),
+  openUrl: url => { if (/^(https?:|mailto:)/i.test(url || '')) window.open(url, '_blank', 'noopener'); },
+  pickFile: kind => {
+    const files = [...S.files.keys()].filter(p => kind === 'note' ? isMd(p) && !isDrawing(p) : !isMd(p) || isDrawing(p));
+    return picker({ placeholder: kind === 'note' ? 'Add a note to the canvas…' : 'Add an image or file to the canvas…', items: q => rank(files, q, displayName).map(p => ({ main: displayName(p), sub: dirname(p), value: p })) });
+  },
+  importFile: async f => {
+    const path = uniquePath(cfg.attachFolder, f.name || `Pasted image ${Date.now()}.png`);
+    try { await writeFile(path, f); } catch (e) { toast('Import failed: ' + e.message); return null; }
+    if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
+    reindexAll(); renderTree();
+    return path;
+  },
+  fileExists: p => S.files.has(p),
+  createNoteFromText: async text => {
+    const first = (text.split('\n').find(l => l.trim()) || 'Untitled').replace(/^#+\s*/, '').replace(/[\\/:*?"<>|#^[\]]/g, '').trim().slice(0, 60) || 'Untitled';
+    const name = await promptModal('Convert card to note', 'Note name', first);
+    if (!name) return null;
+    if (BAD_NAME.test(name)) { toast('Names can’t contain \\ / : * ? " < > | # ^ [ ]'); return null; }
+    const path = uniquePath(cfg.newNoteFolder, name + '.md');
+    try { await writeFile(path, text); } catch (e) { toast('Could not create note: ' + e.message); return null; }
+    reindexAll(); renderTree();
+    return path;
+  },
+  prompt: (title, label, value) => promptModal(title, label, value),
+  menu: (x, y, items) => menu(x, y, items),
+  help: html => { const back = modal(html); back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); }); back.tabIndex = -1; back.focus(); back.addEventListener('keydown', e => { if (e.key === 'Escape' || e.key === '?') back.remove(); }); },
+  toast: msg => toast(msg),
+  store: (k, v) => store(k, v),
+  modalOpen: () => $('#modal-root').children.length > 0,
+});
+
 FolioDraw.init($('#view-drawing'), {
   onChange: () => drawingChanged(),
   openLink: link => openDrawingLink(link),
@@ -2086,6 +2309,7 @@ const CMD = {
   settings: openSettings,
   'new-note': () => newNote(),
   'new-drawing': () => newDrawing(),
+  'new-canvas': () => newCanvas(),
   'new-folder': () => newFolder(''),
   'collapse-all': () => { S.expanded.clear(); store('expanded', []); renderTree(); },
   back: () => goHist(-1),
@@ -2213,7 +2437,7 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) save(
 // Native window: Rust asks us to flush edits before it closes.
 window.__folioClose = async () => {
   window.ipc.postMessage('close-ack');
-  if (S.view === 'drawing') FolioDraw.flush();
+  flushDocViews();
   try { await save(); } catch { }
   if (S.dirty && !confirm('Folio couldn’t save your latest changes.\n\nClose anyway and lose them?')) {
     window.ipc.postMessage('close-cancel');
@@ -2226,6 +2450,7 @@ window.addEventListener('beforeunload', e => {
   if (NATIVE || !S.dirty || !S.cur) return;
   let body, base;
   if (S.view === 'drawing' && S.drawing) { FolioDraw.flush(); body = drawingContent(S.drawing); base = S.drawing.mtime; }
+  else if (S.view === 'canvas' && S.canvasDoc) { FolioCanvas.flush(); body = FolioCanvas.serializeCanvas(FolioCanvas.getData()); base = S.canvasDoc.mtime; }
   else if (S.view === 'note') { body = ed.value; base = S.notes.get(S.cur)?.mtime; }
   else return;
   fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body, keepalive: true, headers: { 'X-Folio-Token': TOKEN, ...(base ? { 'X-Base-Mtime': String(base) } : {}) } });
