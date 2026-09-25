@@ -13,6 +13,7 @@ const INDEX_HTML: &str = include_str!("../ui/index.html");
 const APP_JS: &str = include_str!("../ui/app.js");
 const GRAPH_JS: &str = include_str!("../ui/graph.js");
 const DRAW_JS: &str = include_str!("../ui/draw.js");
+const THEMES_JS: &str = include_str!("../ui/themes.js");
 const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
@@ -81,6 +82,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/app.js" => return out(200, "text/javascript", APP_JS.into()),
             "/graph.js" => return out(200, "text/javascript", GRAPH_JS.into()),
             "/draw.js" => return out(200, "text/javascript", DRAW_JS.into()),
+            "/themes.js" => return out(200, "text/javascript", THEMES_JS.into()),
             "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
@@ -408,7 +410,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

@@ -156,17 +156,17 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .tok-link, .tok-url { color: var(--link); }
 .tok-mark { color: var(--faint); }
 .tok-mono { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .9em; }
-.tok-keyword { color: #c678dd; }
-.tok-string, .tok-string2 { color: #98c379; }
-.tok-number, .tok-bool, .tok-atom { color: #d19a66; }
+.tok-keyword { color: var(--syn-keyword, #c678dd); }
+.tok-string, .tok-string2 { color: var(--syn-string, #98c379); }
+.tok-number, .tok-bool, .tok-atom { color: var(--syn-number, #d19a66); }
 .tok-comment { color: var(--faint); font-style: italic; }
-.tok-typeName, .tok-className { color: #e5c07b; }
-.tok-propertyName, .tok-definition { color: #61afef; }
-:root[data-theme="light"] .tok-keyword { color: #a626a4; }
-:root[data-theme="light"] .tok-string, :root[data-theme="light"] .tok-string2 { color: #50a14f; }
-:root[data-theme="light"] .tok-number, :root[data-theme="light"] .tok-bool { color: #986801; }
-:root[data-theme="light"] .tok-typeName, :root[data-theme="light"] .tok-className { color: #c18401; }
-:root[data-theme="light"] .tok-propertyName, :root[data-theme="light"] .tok-definition { color: #4078f2; }
+.tok-typeName, .tok-className { color: var(--syn-type, #e5c07b); }
+.tok-propertyName, .tok-definition { color: var(--syn-prop, #61afef); }
+:root[data-theme="light"] .tok-keyword { color: var(--syn-keyword, #a626a4); }
+:root[data-theme="light"] .tok-string, :root[data-theme="light"] .tok-string2 { color: var(--syn-string, #50a14f); }
+:root[data-theme="light"] .tok-number, :root[data-theme="light"] .tok-bool { color: var(--syn-number, #986801); }
+:root[data-theme="light"] .tok-typeName, :root[data-theme="light"] .tok-className { color: var(--syn-type, #c18401); }
+:root[data-theme="light"] .tok-propertyName, :root[data-theme="light"] .tok-definition { color: var(--syn-prop, #4078f2); }
 
 /* live preview */
 .cm-faint { color: var(--faint); }
@@ -195,11 +195,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cm-line.cm-callout { background: var(--accent-soft); border-left: 3px solid var(--c, var(--accent)); padding-left: 14px !important; padding-right: 10px !important; }
 .cm-line.cm-callout-title { font-weight: 600; color: var(--c, var(--accent)); padding-top: 6px !important; }
 .cm-callout-label { text-transform: capitalize; }
-.cm-line.c-warning, .cm-line.c-caution, .cm-line.c-attention { --c: #e0a030; background: rgba(224, 160, 48, .1); }
-.cm-line.c-danger, .cm-line.c-error, .cm-line.c-bug, .cm-line.c-failure { --c: #e05555; background: rgba(224, 85, 85, .1); }
-.cm-line.c-tip, .cm-line.c-success, .cm-line.c-check, .cm-line.c-done { --c: #3fb27f; background: rgba(63, 178, 127, .1); }
-.cm-line.c-question, .cm-line.c-help, .cm-line.c-faq { --c: #d9a53f; background: rgba(217, 165, 63, .1); }
-.cm-line.c-info, .cm-line.c-todo, .cm-line.c-note, .cm-line.c-abstract, .cm-line.c-summary { --c: #4a8fe0; background: rgba(74, 143, 224, .1); }
+.cm-line.c-warning, .cm-line.c-caution, .cm-line.c-attention { --c: var(--c-orange, #e0a030); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.cm-line.c-danger, .cm-line.c-error, .cm-line.c-bug, .cm-line.c-failure { --c: var(--c-red, #e05555); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.cm-line.c-tip, .cm-line.c-success, .cm-line.c-check, .cm-line.c-done { --c: var(--c-green, #3fb27f); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.cm-line.c-question, .cm-line.c-help, .cm-line.c-faq { --c: var(--c-yellow, #d9a53f); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.cm-line.c-info, .cm-line.c-todo, .cm-line.c-note, .cm-line.c-abstract, .cm-line.c-summary { --c: var(--c-blue, #4a8fe0); background: color-mix(in srgb, var(--c) 10%, transparent); }
 .cm-line.cm-codeblock { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: .86em; background: var(--code-bg); padding: 0 14px !important; }
 .cm-line.cm-codeblock-first { border-radius: 8px 8px 0 0; padding-top: 6px !important; }
 .cm-line.cm-codeblock-last { border-radius: 0 0 8px 8px; padding-bottom: 6px !important; }
@@ -270,11 +270,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .callout { border-radius: 8px; padding: 10px 14px; margin: 0 0 1em; background: var(--accent-soft); border-left: 3px solid var(--c, var(--accent)); color: var(--text); }
 .callout-title { font-weight: 600; color: var(--c, var(--accent)); margin-bottom: 4px; text-transform: capitalize; }
 .callout > :last-child { margin-bottom: 0; }
-.callout.c-warning, .callout.c-caution, .callout.c-attention { --c: #e0a030; background: rgba(224, 160, 48, .1); }
-.callout.c-danger, .callout.c-error, .callout.c-bug, .callout.c-failure { --c: #e05555; background: rgba(224, 85, 85, .1); }
-.callout.c-tip, .callout.c-success, .callout.c-check, .callout.c-done { --c: #3fb27f; background: rgba(63, 178, 127, .1); }
-.callout.c-question, .callout.c-help, .callout.c-faq { --c: #d9a53f; background: rgba(217, 165, 63, .1); }
-.callout.c-info, .callout.c-todo, .callout.c-note, .callout.c-abstract, .callout.c-summary { --c: #4a8fe0; background: rgba(74, 143, 224, .1); }
+.callout.c-warning, .callout.c-caution, .callout.c-attention { --c: var(--c-orange, #e0a030); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.callout.c-danger, .callout.c-error, .callout.c-bug, .callout.c-failure { --c: var(--c-red, #e05555); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.callout.c-tip, .callout.c-success, .callout.c-check, .callout.c-done { --c: var(--c-green, #3fb27f); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.callout.c-question, .callout.c-help, .callout.c-faq { --c: var(--c-yellow, #d9a53f); background: color-mix(in srgb, var(--c) 10%, transparent); }
+.callout.c-info, .callout.c-todo, .callout.c-note, .callout.c-abstract, .callout.c-summary { --c: var(--c-blue, #4a8fe0); background: color-mix(in srgb, var(--c) 10%, transparent); }
 .callout.c-quote, .callout.c-cite, .callout.c-example { --c: var(--muted); background: var(--bg2); }
 
 /* file view */

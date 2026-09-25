@@ -68,6 +68,7 @@ const DEFAULTS = {
   readable: true,
   mono: false,
   theme: '',
+  palette: 'default',
   drawingFormat: 'excalidraw',
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
@@ -76,6 +77,7 @@ const saveCfg = () => store('settings', cfg);
 function applyTheme() {
   const t = cfg.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.documentElement.dataset.theme = t;
+  FolioThemes.apply(cfg.palette, t);
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
@@ -1425,19 +1427,23 @@ function modal(html) {
   return back;
 }
 
-// items(q) -> [{main, sub, value}] ; resolves with value or null
-function picker({ placeholder, items, onCreate, foot }) {
+// items(q) -> [{main, sub, value}] ; resolves with value or null.
+// onHighlight(value) is called as the selection moves (for live previews); `initial` preselects a value.
+function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
   return new Promise(resolve => {
     const back = modal(`<input class="field" placeholder="${esc(placeholder)}" spellcheck="false"><div class="pick-list"></div><div class="pick-foot">${foot || '<span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>'}</div>`);
     const input = $('input', back), list = $('.pick-list', back);
-    let cur = [], sel = 0;
+    let cur = [], sel = 0, first = true;
     const draw = () => {
       cur = items(input.value).slice(0, 60);
+      if (first && initial !== undefined) { const i = cur.findIndex(c => c.value === initial); if (i >= 0) sel = i; }
+      first = false;
       if (onCreate && input.value.trim() && !cur.some(c => c.main.toLowerCase() === input.value.trim().toLowerCase()))
         cur.push({ main: `Create “${input.value.trim()}”`, sub: '⇧↵', create: true });
       sel = Math.min(sel, Math.max(0, cur.length - 1));
       list.innerHTML = cur.map((c, i) => `<div class="pick${i === sel ? ' sel' : ''}" data-i="${i}"><span class="main">${esc(c.main)}</span>${c.sub ? `<span class="sub">${esc(c.sub)}</span>` : ''}</div>`).join('') || '<div class="none">No matches</div>';
       list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
+      if (onHighlight && cur[sel] && !cur[sel].create) onHighlight(cur[sel].value);
     };
     const done = v => { back.remove(); resolve(v); };
     const choose = (i, create) => {
@@ -1531,6 +1537,7 @@ const COMMANDS = [
   ['Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
   ['Find in current note', 'Ctrl+F', () => { if (S.view === 'note') { setMode('edit'); ed.openSearch(); } }],
   ['Toggle light / dark theme', '', () => toggleTheme()],
+  ['Change colour theme…', '', () => chooseTheme()],
   ['Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
   ['Reload vault from disk', '', () => loadAll().then(() => toast('Reloaded'))],
   ['Open another vault…', '', () => switchVault()],
@@ -1555,7 +1562,8 @@ function openSettings() {
     <label>Attachments folder<input class="field" name="attachFolder"></label>
     <label>New drawings are saved as<select class="field" name="drawingFormat"><option value="excalidraw">.excalidraw (Excalidraw file; also opens on excalidraw.com)</option><option value="md">.excalidraw.md (Obsidian Excalidraw plugin)</option></select></label>
     <label>Default view for notes<select class="field" name="defaultMode"><option value="edit">Editing</option><option value="read">Reading</option></select></label>
-    <label>Theme<select class="field" name="theme"><option value="">Follow system</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label>Light or dark<select class="field" name="theme"><option value="">Follow system</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+    <label>Colour theme<select class="field" name="palette">${FolioThemes.list.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
     <label class="check"><input type="checkbox" name="livePreview"> Live preview (hide Markdown syntax except where you're editing)</label>
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
@@ -1588,6 +1596,19 @@ async function switchVault() {
   try { await api('/api/vault', { method: 'POST', body: JSON.stringify({ path: p }) }); }
   catch (e) { return toast('Couldn’t open that folder: ' + e.message); }
   location.reload();
+}
+
+// Pick a colour theme, previewing each one as you move through the list.
+async function chooseTheme() {
+  const orig = cfg.palette;
+  const v = await picker({
+    placeholder: 'Choose a colour theme…',
+    items: q => rank(FolioThemes.list, q, t => t.name).map(t => ({ main: t.name, sub: t.id === orig ? 'current' : '', value: t.id })),
+    initial: orig,
+    onHighlight: id => { if (cfg.palette !== id) { cfg.palette = id; applyTheme(); } },
+  });
+  cfg.palette = v || orig;
+  saveCfg(); applyTheme();
 }
 
 function toggleTheme() {

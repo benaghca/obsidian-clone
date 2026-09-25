@@ -41,7 +41,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 - **Network:** in its default mode, Folio doesn't open any network port. The UI talks to the program through a private `folio://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Folio.
 - **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 6,500 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 6,700 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
   - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
@@ -80,7 +80,8 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Embed a drawing in a note with `![[Drawing.excalidraw]]` or `![[Drawing.excalidraw|400]]`. It renders in live preview and reading view, and clicking it opens the drawing. Renaming a drawing updates those embeds.
   - Export to SVG or PNG next to the drawing, or copy the drawing to the clipboard.
   - Create drawings from the ribbon, the file tree's context menu or the command palette. *Create new drawing and embed it in the current note* does both in one step.
-- Autosave, back and forward history (**Alt+←/→**), light and dark themes, readable line length, and resizable sidebars
+- Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
+- Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, and **Tab**/**Shift+Tab** to indent list items
 
 UI preferences (theme, panel sizes and so on) are stored in the webview's local storage for each vault. Nothing is written into the vault except your notes and attachments.
@@ -97,6 +98,7 @@ ui/index.html      shell
 ui/app.js          index, preview, panels, search, commands
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
 ui/graph.js        graph view (canvas + force layout)
+ui/themes.js       colour themes (Catppuccin, Everforest, …)
 ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
 ui/test/           draw-render.test.js (run with `node ui/test/draw-render.test.js`, no packages needed)

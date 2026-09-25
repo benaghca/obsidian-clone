@@ -11,7 +11,7 @@ window.FolioDraw = (() => {
   let els = scene.elements;
   let fileUrls = {};           // fileId -> URL for images stored in the vault (.excalidraw.md)
   const images = new Map();    // fileId -> {img, ok}
-  let visible = false, raf = 0, dark = false, accent = '#8f73ff';
+  let visible = false, raf = 0, dark = false, accent = '#8f73ff', pageBg = '#ffffff';
   let view = { sx: 0, sy: 0, zoom: 1 }; // screen = (world + s) * zoom
   let selected = new Set();
   let tool = 'selection', locked = false;
@@ -121,7 +121,9 @@ window.FolioDraw = (() => {
 
   function restyle() {
     dark = document.documentElement.dataset.theme === 'dark';
-    accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#8f73ff';
+    const cs = getComputedStyle(document.documentElement);
+    accent = cs.getPropertyValue('--accent').trim() || '#8f73ff';
+    pageBg = cs.getPropertyValue('--bg').trim() || (dark ? '#121212' : '#ffffff');
     renderProps();
     requestRender();
   }
@@ -1593,8 +1595,9 @@ window.FolioDraw = (() => {
     const r = dpr(), z = view.zoom;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalAlpha = 1;
-    ctx.fillStyle = K.themeColor(scene.appState.viewBackgroundColor || '#ffffff', dark);
-    if (K.isTransparent(scene.appState.viewBackgroundColor)) ctx.fillStyle = dark ? '#121212' : '#ffffff';
+    // A plain white (default) or transparent background follows the app theme's page colour.
+    const vbg = (scene.appState.viewBackgroundColor || '#ffffff').toLowerCase();
+    ctx.fillStyle = vbg === '#ffffff' || vbg === '#fff' || K.isTransparent(vbg) ? pageBg : K.themeColor(vbg, dark);
     ctx.fillRect(0, 0, canvas.width, canvas.height);
     const g = gridSize();
     if (g && g * z >= 6) drawGrid(g);
