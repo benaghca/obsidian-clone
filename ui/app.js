@@ -4325,6 +4325,17 @@ function showGraphInfo(i) {
   box.ondblclick = e => { const it = e.target.closest('.gi-item'); if (it) openGraphNode(it.dataset.id); };
 }
 try { $('#g-clickopen').checked = !!store('graphClickOpens'); } catch { }
+// 2D or 3D (remembered), and a slow turn in 3D.
+const apply3d = () => {
+  const on = $('#g-3d').checked;
+  $('.g-spin').hidden = !on;
+  CinderGraph.set3d(on);
+  CinderGraph.setSpin(on && $('#g-spin').checked);
+};
+$('#g-3d').checked = !!store('graph3d'); $('#g-spin').checked = !!store('graphSpin');
+$('#g-3d').addEventListener('change', e => { store('graph3d', e.target.checked); apply3d(); });
+$('#g-spin').addEventListener('change', e => { store('graphSpin', e.target.checked); apply3d(); });
+apply3d();
 $('#g-clickopen').addEventListener('change', e => store('graphClickOpens', e.target.checked));
 // A live-preview editor inside a canvas card. A text card's editor reports its text through
 // onChange; a note card's edits the note itself and saves it as you type, like the main editor.
