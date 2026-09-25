@@ -557,7 +557,9 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .bs-col { flex: 0 0 260px; background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 8px; max-height: 75vh; }
 .bs-col.drop { border-color: var(--accent); background: var(--accent-soft); }
 .bs-col h4 { margin: 2px 4px; font-size: 13.5px; }
-.bs-colbody { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 30px; }
+.bs-colbody { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 30px; flex: 0 1 auto; }
+/* Cards keep their height (overflow: hidden would let them shrink to slivers); a full column scrolls. */
+.bs-colbody > .bs-card { flex: none; }
 .bs-board .bs-card { background: var(--bg); cursor: grab; }
 .bs-board .bs-card.dragging { opacity: .4; }
 .bs-addcard { border: 0; background: none; color: var(--faint); text-align: left; padding: 4px 6px; border-radius: 6px; cursor: pointer; }
@@ -826,3 +828,4 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .pr-name .n, .pr-val .n { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
 .pr-vals { margin: 0 0 4px 26px; border-left: 1px solid var(--border); padding-left: 4px; }
 .pr-val span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bs-hint { color: var(--muted); font-size: 13px; margin: 0 0 10px; }

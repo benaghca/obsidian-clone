@@ -954,7 +954,10 @@
       const listed = [].concat(v.columns || []).map(String);
       for (const extra of listed) if (!cols.some(c => c.key === extra)) cols.push({ key: extra, value: extra, rows: [] });
       if (listed.length) cols.sort((a, b) => (listed.includes(a.key) ? listed.indexOf(a.key) : 1e6) - (listed.includes(b.key) ? listed.indexOf(b.key) : 1e6));
-      return `<div class="bs-scroll bs-board">${cols.map(c => `<div class="bs-col" data-value="${esc(c.key)}"><h4>${c.value == null ? '<span class="bs-faint">No value</span>' : valueHtml(c.value)} <span>${c.rows.length}</span></h4><div class="bs-colbody">${c.rows.map(rr => card(r, rr)).join('')}</div><button class="bs-addcard" data-act="new-in" data-value="${esc(c.key)}">+ New</button></div>`).join('')}
+      // Nothing has the property yet (a new board): say how the columns come about.
+      const hint = cols.length && cols.every(c => c.value == null) && propKey(gp)
+        ? `<div class="bs-hint">No notes have <code>${esc(columnName(base, gp))}</code> yet. Add a column, then drag cards into it to set the property, or set it in a note’s properties.</div>` : '';
+      return `${hint}<div class="bs-scroll bs-board">${cols.map(c => `<div class="bs-col" data-value="${esc(c.key)}"><h4>${c.value == null ? '<span class="bs-faint">No value</span>' : valueHtml(c.value)} <span>${c.rows.length}</span></h4><div class="bs-colbody">${c.rows.map(rr => card(r, rr)).join('')}</div><button class="bs-addcard" data-act="new-in" data-value="${esc(c.key)}">+ New</button></div>`).join('')}
         ${propKey(gp) ? `<button class="bs-col bs-newcol" data-act="add-col" title="Add a column">+ Column</button>` : ''}</div>`;
     }
 
