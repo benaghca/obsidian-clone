@@ -202,7 +202,9 @@ src/server.rs      --browser mode: the 127.0.0.1 server
 src/config.rs      %LOCALAPPDATA%\Cinder\config.json
 src/screenshot.rs  Insert screenshot: runs the platform region-capture tool
 ui/index.html      shell
-ui/app.js          index, preview, panels, search, commands
+ui/app/*.js        the app itself, one file per concern (core, vault index, navigation, tabs,
+                   file tree, markdown, properties, commands, panels, graph, boot…); src/api.rs
+                   joins them in order into /app.js, so they share one scope with no build step
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
 ui/graph.js        graph view (canvas + force layout)
 ui/themes.js       colour themes (Catppuccin, Everforest, …)

@@ -10,7 +10,38 @@ use std::time::{SystemTime, UNIX_EPOCH};
 // ---------------------------------------------------------------- embedded UI
 
 const INDEX_HTML: &str = include_str!("../ui/index.html");
-const APP_JS: &str = include_str!("../ui/app.js");
+// The front end's own code lives in pieces (ui/app/*.js, one per concern) that are joined here,
+// in this order, into one script. They share one scope exactly as a single file would, so
+// there's no module loader and no build step: add a piece by adding it to this list.
+const APP_JS: &str = concat!(
+    include_str!("../ui/app/core.js"),
+    include_str!("../ui/app/vault-index.js"),
+    include_str!("../ui/app/navigation.js"),
+    include_str!("../ui/app/drawings.js"),
+    include_str!("../ui/app/window.js"),
+    include_str!("../ui/app/tabs.js"),
+    include_str!("../ui/app/canvases.js"),
+    include_str!("../ui/app/bases.js"),
+    include_str!("../ui/app/tasks.js"),
+    include_str!("../ui/app/markdown.js"),
+    include_str!("../ui/app/file-tree.js"),
+    include_str!("../ui/app/files.js"),
+    include_str!("../ui/app/templates.js"),
+    include_str!("../ui/app/editor.js"),
+    include_str!("../ui/app/properties.js"),
+    include_str!("../ui/app/link-embeds.js"),
+    include_str!("../ui/app/images.js"),
+    include_str!("../ui/app/dialogs.js"),
+    include_str!("../ui/app/commands.js"),
+    include_str!("../ui/app/settings.js"),
+    include_str!("../ui/app/vaults.js"),
+    include_str!("../ui/app/appearance.js"),
+    include_str!("../ui/app/panels.js"),
+    include_str!("../ui/app/graph.js"),
+    include_str!("../ui/app/actions.js"),
+    include_str!("../ui/app/native-ui.js"),
+    include_str!("../ui/app/boot.js"),
+);
 const GRAPH_JS: &str = include_str!("../ui/graph.js");
 const DRAW_JS: &str = include_str!("../ui/draw.js");
 const THEMES_JS: &str = include_str!("../ui/themes.js");
@@ -621,6 +652,24 @@ mod tests {
         }
         let page = String::from_utf8(get("/").body).unwrap();
         assert!(page.contains("/draw.js") && page.contains("/draw-render.js") && page.contains("id=\"view-drawing\""));
+    }
+
+    #[test]
+    fn app_js_includes_every_piece() {
+        // Each ui/app/*.js must be in the concat! list (or the app would silently lose it).
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/app");
+        let mut n = 0;
+        for e in fs::read_dir(&dir).unwrap().flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            if !name.ends_with(".js") {
+                continue;
+            }
+            let text = fs::read_to_string(e.path()).unwrap();
+            assert!(APP_JS.contains(&text), "ui/app/{name} isn't joined into /app.js (add it to APP_JS in src/api.rs)");
+            n += 1;
+        }
+        assert!(n > 20);
+        assert!(APP_JS.trim_start().starts_with("/* Cinder") && APP_JS.contains("'use strict';"));
     }
 
     #[test]
