@@ -2,8 +2,8 @@
 //! user drags out, or the whole screen) and returns the PNG. The call blocks until the user
 //! finishes selecting, so the transports run it off their main thread (see `api::is_slow`).
 //!
-//! FOLIO_SCREENSHOT_CMD overrides the tool: a shell command that prints a PNG to stdout
-//! (exit non-zero or print nothing to mean "cancelled"). It gets FOLIO_SCREENSHOT_MODE set to
+//! CINDER_SCREENSHOT_CMD overrides the tool: a shell command that prints a PNG to stdout
+//! (exit non-zero or print nothing to mean "cancelled"). It gets CINDER_SCREENSHOT_MODE set to
 //! "region" or "screen".
 
 use std::path::{Path, PathBuf};
@@ -18,11 +18,11 @@ pub enum Shot {
 
 /// `screen`: the whole screen instead of a region.
 pub fn capture(screen: bool) -> Shot {
-    if let Ok(cmd) = std::env::var("FOLIO_SCREENSHOT_CMD")
+    if let Ok(cmd) = std::env::var("CINDER_SCREENSHOT_CMD")
         && !cmd.trim().is_empty()
     {
         let mut c = shell(&cmd);
-        c.env("FOLIO_SCREENSHOT_MODE", if screen { "screen" } else { "region" });
+        c.env("CINDER_SCREENSHOT_MODE", if screen { "screen" } else { "region" });
         return from_stdout(c);
     }
     platform_capture(screen)
@@ -60,7 +60,7 @@ fn temp_png() -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos())
         .unwrap_or(0);
-    std::env::temp_dir().join(format!("folio-shot-{}-{n}.png", std::process::id()))
+    std::env::temp_dir().join(format!("cinder-shot-{}-{n}.png", std::process::id()))
 }
 
 /// Run a tool that writes the PNG to `file`. None if the tool isn't installed.
@@ -186,9 +186,9 @@ mod tests {
         assert_eq!(png("exit 1"), None);
         // the custom command is told which kind of capture
         // SAFETY: no other test reads or writes this variable.
-        unsafe { std::env::set_var("FOLIO_SCREENSHOT_CMD", r#"[ "$FOLIO_SCREENSHOT_MODE" = screen ] && printf '\211PNG\r\n\032\nS'"#) };
+        unsafe { std::env::set_var("CINDER_SCREENSHOT_CMD", r#"[ "$CINDER_SCREENSHOT_MODE" = screen ] && printf '\211PNG\r\n\032\nS'"#) };
         assert!(matches!(capture(true), Shot::Png(_)));
         assert!(matches!(capture(false), Shot::Cancelled));
-        unsafe { std::env::remove_var("FOLIO_SCREENSHOT_CMD") };
+        unsafe { std::env::remove_var("CINDER_SCREENSHOT_CMD") };
     }
 }

@@ -3,7 +3,7 @@
 //! The UI is served through a private `folio://` protocol handled in-process,
 //! so nothing listens on a network port, and the webview's own browser
 //! shortcuts (Ctrl+N, Ctrl+W, Ctrl+P, F5, ...) are switched off so every key
-//! reaches Folio.
+//! reaches Cinder.
 
 use crate::api::{self, Ctx};
 use serde_json::json;
@@ -16,6 +16,10 @@ use tao::event_loop::{ControlFlow, EventLoopBuilder};
 use tao::window::{Icon, ResizeDirection, Theme, WindowBuilder};
 use wry::http::{Request, Response};
 use wry::{NewWindowResponse, WebContext, WebViewBuilder};
+
+/// The page's private scheme. It keeps the app's old name: the webview files its local storage
+/// (every saved UI setting) under this origin, so renaming it would reset them all.
+const PROTOCOL: &str = "folio";
 
 #[derive(Debug)]
 enum UserEvent {
@@ -33,7 +37,7 @@ enum UserEvent {
     Win(String),
 }
 
-/// Whether Folio draws its own title bar (the default, except on macOS) or uses the system's.
+/// Whether Cinder draws its own title bar (the default, except on macOS) or uses the system's.
 pub fn custom_frame() -> bool {
     match crate::config::load()["window"]["frame"].as_str() {
         Some("native") => false,
@@ -75,7 +79,7 @@ pub fn run(ctx: Ctx) -> ! {
     let p_ipc = proxy.clone();
     let p_title = proxy.clone();
     let builder = WebViewBuilder::new_with_web_context(&mut web_context)
-        .with_asynchronous_custom_protocol("folio".into(), move |_id, req, responder| {
+        .with_asynchronous_custom_protocol(PROTOCOL.into(), move |_id, req, responder| {
             // Slow requests (a screenshot waits on the user) mustn't freeze the window.
             if api::is_slow(req.uri().path()) {
                 let ctx = handler_ctx.clone();
@@ -84,7 +88,7 @@ pub fn run(ctx: Ctx) -> ! {
                 responder.respond(handle(&handler_ctx, req));
             }
         })
-        .with_url("folio://localhost/")
+        .with_url(&format!("{PROTOCOL}://localhost/"))
         .with_ipc_handler(move |req: Request<String>| {
             let body = req.body().as_str();
             let ev = match body {
@@ -100,7 +104,7 @@ pub fn run(ctx: Ctx) -> ! {
         .with_document_title_changed_handler(move |t| {
             let _ = p_title.send_event(UserEvent::Title(t));
         })
-        // External links open in the user's normal browser, never inside Folio.
+        // External links open in the user's normal browser, never inside Cinder.
         .with_new_window_req_handler(|url, _features| {
             open_external(&url);
             NewWindowResponse::Deny
@@ -132,13 +136,13 @@ pub fn run(ctx: Ctx) -> ! {
     let webview = webview.unwrap_or_else(|e| {
         crate::die(&format!(
             "couldn't start the web view: {e}\n\nOn Windows this needs the Microsoft Edge WebView2 Runtime, \
-             which ships with Windows 10/11. Run `folio --browser` to use a browser tab instead."
+             which ships with Windows 10/11. Run `cinder --browser` to use a browser tab instead."
         ))
     });
 
     let mut closing = false;
     let mut acked = false;
-    let debug = std::env::var_os("FOLIO_DEBUG").is_some();
+    let debug = std::env::var_os("CINDER_DEBUG").is_some();
     event_loop.run(move |event, _, control_flow| {
         *control_flow = ControlFlow::Wait;
         if debug {
@@ -157,7 +161,7 @@ pub fn run(ctx: Ctx) -> ! {
                 acked = false;
                 // Ask the page to flush unsaved edits; it answers over IPC.
                 let _ = webview.evaluate_script(
-                    "window.__folioClose ? window.__folioClose() : window.ipc.postMessage('close-ok')",
+                    "window.__cinderClose ? window.__cinderClose() : window.ipc.postMessage('close-ok')",
                 );
                 let p = proxy.clone();
                 std::thread::spawn(move || {
@@ -226,17 +230,17 @@ pub fn run(ctx: Ctx) -> ! {
 
 /// The page's title bar shows maximize or restore.
 fn tell_maximized(webview: &wry::WebView, window: &tao::window::Window) {
-    let _ = webview.evaluate_script(&format!("window.__folioWinState && window.__folioWinState({})", window.is_maximized()));
+    let _ = webview.evaluate_script(&format!("window.__cinderWinState && window.__cinderWinState({})", window.is_maximized()));
 }
 
 fn title_for(ctx: &Ctx) -> String {
     let v = ctx.vault();
     let name = v.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-    format!("{name} — Folio")
+    format!("{name} — Cinder")
 }
 
 fn is_app_url(url: &str) -> bool {
-    url.starts_with("folio://") || url.starts_with("http://folio.localhost") || url.starts_with("https://folio.localhost") || url == "about:blank"
+    url.starts_with(&format!("{PROTOCOL}://")) || url.starts_with(&format!("http://{PROTOCOL}.localhost")) || url.starts_with(&format!("https://{PROTOCOL}.localhost")) || url == "about:blank"
 }
 
 /// Serve a request from the page (the whole app runs through this).
@@ -290,25 +294,8 @@ fn save_window_state(window: &tao::window::Window) {
     crate::config::save(&c);
 }
 
-/// The purple "F" app icon, drawn at 64×64.
+/// The volcano app icon: ui/logo.svg rendered at 64×64 as straight RGBA.
 fn icon() -> Icon {
-    const N: usize = 64;
-    let s = N as f32 / 32.0;
-    let mut rgba = vec![0u8; N * N * 4];
-    for y in 0..N {
-        for x in 0..N {
-            let (fx, fy) = ((x as f32 + 0.5) / s, (y as f32 + 0.5) / s); // 0..32 space
-            // rounded square, radius 7, with 1px anti-aliased edge
-            let (cx, cy) = (fx.clamp(7.0, 25.0), fy.clamp(7.0, 25.0));
-            let d = ((fx - cx).powi(2) + (fy - cy).powi(2)).sqrt();
-            let a = (7.0 - d + 0.5).clamp(0.0, 1.0);
-            let letter = (10.0..22.0).contains(&fx) && (8.0..11.0).contains(&fy)
-                || (10.0..13.5).contains(&fx) && (8.0..24.0).contains(&fy)
-                || (13.5..20.0).contains(&fx) && (15.0..18.0).contains(&fy);
-            let (r, g, b) = if letter { (255, 255, 255) } else { (0x7c, 0x5c, 0xff) };
-            let i = (y * N + x) * 4;
-            rgba[i..i + 4].copy_from_slice(&[r, g, b, (a * 255.0) as u8]);
-        }
-    }
-    Icon::from_rgba(rgba, N as u32, N as u32).expect("icon")
+    const RGBA: &[u8] = include_bytes!("icon-64.rgba");
+    Icon::from_rgba(RGBA.to_vec(), 64, 64).expect("icon")
 }

@@ -1,4 +1,4 @@
-/* Folio canvas: an infinite board of cards (text, notes, images, links, groups) joined by
+/* Cinder canvas: an infinite board of cards (text, notes, images, links, groups) joined by
  * arrows. Files are JSON Canvas (https://jsoncanvas.org), the format Obsidian's Canvas
  * uses, so the same .canvas file opens in both. Cards are DOM elements in a transformed
  * "world" layer; arrows are SVG. Pure helpers (parse/serialize/geometry/toSVG) don't
@@ -826,7 +826,7 @@
   let clip = null;
   function clipPayload() {
     const ns = selectedNodes();
-    return { type: 'folio/canvas', nodes: ns, edges: data.edges.filter(e => sel.has(e.fromNode) && sel.has(e.toNode)) };
+    return { type: 'cinder/canvas', nodes: ns, edges: data.edges.filter(e => sel.has(e.fromNode) && sel.has(e.toNode)) };
   }
   function onClip(e, cut) {
     if (!activeFor(e) || !sel.size) return;
@@ -1120,7 +1120,7 @@
   // Note/image cards re-render when their files change.
   function refreshFiles() { for (const rec of nodeEls.values()) rec.key = null; request(); }
 
-  root.FolioCanvas = {
+  root.CinderCanvas = {
     ...pure,
     init, load, getData,
     // Opening a canvas takes the keyboard, so card shortcuts work straight away.

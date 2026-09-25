@@ -1,7 +1,7 @@
-// Folio editor: CodeMirror 6 + an Obsidian-style live preview layer.
+// Cinder editor: CodeMirror 6 + an Obsidian-style live preview layer.
 //
 // Bundled into ui/vendor/editor.bundle.js with `npm install && npm run build` in ui/editor/.
-// app.js talks to it only through FolioEditor.create(parent, hooks).
+// app.js talks to it only through CinderEditor.create(parent, hooks).
 
 import { EditorState, EditorSelection, StateField, StateEffect, Compartment, Prec, Annotation, Facet } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, drawSelection, dropCursor, rectangularSelection } from '@codemirror/view';
@@ -274,7 +274,7 @@ class TableWidget extends WidgetType {
   }
 }
 
-// The note's frontmatter as a table of properties (app.js draws it with FolioProps). Edits come
+// The note's frontmatter as a table of properties (app.js draws it with CinderProps). Edits come
 // back as a function over the whole text, applied as the smallest change so undo stays tidy.
 class PropsWidget extends WidgetType {
   constructor(text, version, h) { super(); this.text = text; this.version = version; this.h = h; }
@@ -1143,4 +1143,4 @@ function create(parent, hooks, opts = {}) {
   };
 }
 
-window.FolioEditor = { create, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
+window.CinderEditor = { create, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };

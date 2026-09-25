@@ -1,8 +1,8 @@
-/* Folio colour themes. Each palette has a light and a dark variant; the light/dark
+/* Cinder colour themes. Each palette has a light and a dark variant; the light/dark
  * mode setting picks which one applies. Colours are the palettes' published values. */
 'use strict';
 
-window.FolioThemes = (() => {
+window.CinderThemes = (() => {
   // bg: note area, bg2: sidebars/panels, bg3: raised controls, hover, border,
   // text, muted, faint, accent, then the palette's named hues.
   const P = (bg, bg2, bg3, hover, border, text, muted, faint, accent, red, orange, yellow, green, blue, purple, cyan) =>
@@ -10,7 +10,7 @@ window.FolioThemes = (() => {
 
   const latte = P('#eff1f5', '#e6e9ef', '#dce0e8', '#ccd0da', '#ccd0da', '#4c4f69', '#6c6f85', '#9ca0b0', '#8839ef', '#d20f39', '#fe640b', '#df8e1d', '#40a02b', '#1e66f5', '#8839ef', '#179299');
   const THEMES = [
-    { id: 'default', name: 'Folio (default)' },
+    { id: 'default', name: 'Cinder (default)' },
     {
       id: 'catppuccin-mocha', name: 'Catppuccin Mocha', light: latte,
       dark: P('#1e1e2e', '#181825', '#313244', '#45475a', '#313244', '#cdd6f4', '#a6adc8', '#6c7086', '#cba6f7', '#f38ba8', '#fab387', '#f9e2af', '#a6e3a1', '#89b4fa', '#cba6f7', '#94e2d5'),

@@ -1,4 +1,4 @@
-/* Folio properties: the table of a note's frontmatter at the top of the page, like Obsidian's
+/* Cinder properties: the table of a note's frontmatter at the top of the page, like Obsidian's
  * Properties. Each property has a type (text, list, number, checkbox, date, date & time, tags,
  * aliases), stored the way Obsidian does in .obsidian/types.json, with an editor to match. The
  * host owns the text: this module only reports edits (set/rename) and redraws when told. */
@@ -311,5 +311,5 @@
     t?.focus();
   }
 
-  root.FolioProps = { ...pure, render };
+  root.CinderProps = { ...pure, render };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -7,7 +7,7 @@ const C = require('../canvas.js');
 let n = 0;
 const t = (name, fn) => { try { fn(); n++; } catch (e) { console.error(`FAIL ${name}`); throw e; } };
 
-// A file as Obsidian writes it (JSON Canvas 1.0), with fields Folio doesn't use.
+// A file as Obsidian writes it (JSON Canvas 1.0), with fields Cinder doesn't use.
 const OBSIDIAN = `{
 	"nodes":[
 		{"id":"g1","type":"group","x":-40,"y":-60,"width":700,"height":400,"label":"Ideas","color":"4"},

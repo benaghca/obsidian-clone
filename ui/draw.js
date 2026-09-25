@@ -1,9 +1,9 @@
-/* Folio drawing view: an Excalidraw-style whiteboard on a canvas.
- * Scene model, rendering and file formats live in draw-render.js (FolioSketch). */
+/* Cinder drawing view: an Excalidraw-style whiteboard on a canvas.
+ * Scene model, rendering and file formats live in draw-render.js (CinderSketch). */
 'use strict';
 
-window.FolioDraw = (() => {
-  const K = FolioSketch;
+window.CinderDraw = (() => {
+  const K = CinderSketch;
   const TAU = Math.PI * 2;
 
   let root, canvas, ctx, hooks, hintEl, toolsEl, propsEl, zoomLabel, fileInput, lockBtn;
@@ -1305,7 +1305,7 @@ window.FolioDraw = (() => {
   // ============================================================ keyboard
 
   function onKey(e) {
-    if (!visible || editing || e.altKey || !activeFor(e)) return; // Alt+←/→ is Folio's back/forward
+    if (!visible || editing || e.altKey || !activeFor(e)) return; // Alt+←/→ is Cinder's back/forward
     const mod = e.ctrlKey || e.metaKey, k = e.key.length === 1 ? e.key.toLowerCase() : e.key;
     let handled = true;
     if (mod && k === 'z' && !e.shiftKey) undo();

@@ -1,4 +1,4 @@
-/* Folio bases: database-style views of notes and their properties, in the format of
+/* Cinder bases: database-style views of notes and their properties, in the format of
  * Obsidian Bases (.base YAML files, or ```base blocks in notes): global and per-view
  * filters, formulas, sorting, grouping, and table / cards / list views, plus a board
  * (kanban) view where dragging a card changes the note's property.
@@ -246,7 +246,7 @@
   const pad2 = n => String(n).padStart(2, '0');
   function fmtDate(d, fmt) {
     const x = new Date(d.t);
-    if (fmt) return root.FolioTemplater ? root.FolioTemplater.formatDate(x, fmt) : fmtDate(d);
+    if (fmt) return root.CinderTemplater ? root.CinderTemplater.formatDate(x, fmt) : fmtDate(d);
     const ymd = `${x.getFullYear()}-${pad2(x.getMonth() + 1)}-${pad2(x.getDate())}`;
     return d.dateOnly || (x.getHours() === 0 && x.getMinutes() === 0) ? ymd : `${ymd} ${pad2(x.getHours())}:${pad2(x.getMinutes())}`;
   }
@@ -1175,5 +1175,5 @@
     };
   }
 
-  root.FolioBases = { ...pure, mount };
+  root.CinderBases = { ...pure, mount };
 })(typeof window !== 'undefined' ? window : globalThis);

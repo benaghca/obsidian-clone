@@ -1,8 +1,10 @@
-# Folio
+<img src="ui/logo.svg" alt="" width="96" height="96">
+
+# Cinder
 
 A local, plugin-free notes app that works like Obsidian and uses the same vault format.
 
-Your notes are plain `.md` files in one folder. Folio is a single `.exe` that opens its own desktop window and reads and writes that one folder. You can open the same vault in Obsidian at home and nothing needs converting.
+Your notes are plain `.md` files in one folder. Cinder is a single `.exe` that opens its own desktop window and reads and writes that one folder. You can open the same vault in Obsidian at home and nothing needs converting.
 
 ## Build and run (Windows)
 
@@ -13,25 +15,27 @@ You need:
 
 ```bat
 cargo build --release
-target\release\folio.exe
+target\release\cinder.exe
 ```
 
-The first build takes a couple of minutes. After that, copy `folio.exe` wherever you like and pin it to the taskbar. It's the only file you need.
+The first build takes a couple of minutes. After that, copy `cinder.exe` wherever you like and pin it to the taskbar. It's the only file you need.
 
-- **Where your notes go:** the first launch uses `Documents\Folio` (created if missing). To use a different folder, pass it once, as in `folio.exe "C:\Users\you\Documents\Notes"`, or pick it in the app with **Settings → Vault → Change…**. Folio remembers the last vault and your window size.
+- **Where your notes go:** the first launch uses `Documents\Cinder` (created if missing). To use a different folder, pass it once, as in `cinder.exe "C:\Users\you\Documents\Notes"`, or pick it in the app with **Settings → Vault → Change…**. Cinder remembers the last vault and your window size.
 - **Offline build:** the build needs no network. The source of every Rust dependency needed for 64-bit Windows and Linux is in `vendor-crates/`, and `.cargo/config.toml` points cargo at it. To build from crates.io instead, delete `.cargo/config.toml`.
 
 ```
-folio [VAULT_DIR] [--browser [--port N] [--no-open] [--app]]
+cinder [VAULT_DIR] [--browser [--port N] [--no-open] [--app]]
 
-VAULT_DIR   folder of .md notes (default: last vault, else Documents\Folio)
---browser   serve the UI to a browser tab on 127.0.0.1 instead of Folio's own window
+VAULT_DIR   folder of .md notes (default: last vault, else Documents\Cinder)
+--browser   serve the UI to a browser tab on 127.0.0.1 instead of Cinder's own window
   --port N    port for --browser (default 43117)
   --no-open   don't open a browser automatically
   --app       open a chromeless Edge/Chrome window
 ```
 
-**The native window** (the default) passes every shortcut to Folio, including Ctrl+N, Ctrl+W, Ctrl+P and F5, because the webview's own browser shortcuts are switched off. External links open in your normal browser. Closing the window saves any unsaved edits first. Release builds show no console window.
+**The native window** (the default) passes every shortcut to Cinder, including Ctrl+N, Ctrl+W, Ctrl+P and F5, because the webview's own browser shortcuts are switched off. External links open in your normal browser. Closing the window saves any unsaved edits first. Release builds show no console window.
+
+**Window frame**: by default the desktop app draws its own title bar in the app's theme (except on macOS). Drag the tab bar or a sidebar's top row to move the window, and double-click it to maximize. Minimize, maximize and close sit at the top right, and the edges resize. **Settings → Window frame** switches to the system's title bar, which then follows Cinder's light or dark theme too.
 
 **Browser mode** (`--browser`) is a fallback if the window won't start, for example because WebView2 is blocked. In a browser tab, the browser keeps some shortcuts for itself, such as Ctrl+N and Ctrl+W.
 
@@ -39,10 +43,10 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 ## For IT: what this program does and doesn't do
 
-- **Network:** in its default mode, Folio doesn't open any network port. The UI talks to the program through a private `folio://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Folio.
+- **Network:** in its default mode, Cinder doesn't open any network port. The UI talks to the program through a private `cinder://` protocol that is handled inside the process. It never makes outbound connections: no telemetry, no update checks, no CDN assets. The page has a Content-Security-Policy of `default-src 'self'`, and a navigation guard sends any external link to the system browser instead of loading it inside Cinder.
 - **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Folio's own UI is about 11,300 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
-  - `CodeMirror` 6 (the editor, MIT license), bundled with Folio's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Cinder's own UI is about 11,300 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+  - `CodeMirror` 6 (the editor, MIT license), bundled with Cinder's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
   - `KaTeX` 0.18.9 with its mhchem extension and fonts (math rendering, MIT, `ui/vendor/katex/`). It doesn't use `eval`, and "trusted" commands such as `\href` are off.
@@ -50,8 +54,8 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
   - `JetBrains Mono` 2.304, the default code font, in regular, bold, italic and bold italic (`ui/vendor/JetBrainsMono-*.woff2`, SIL Open Font License 1.1, see `ui/vendor/jetbrains-mono.LICENSE`).
   - `Symbols Nerd Font Mono` from Nerd Fonts 3.5.1 (`ui/vendor/SymbolsNerdFontMono.woff2`) and its list of icon names (`ui/vendor/nerd-icons.txt`). Its icons come from Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0), and Octicons, Devicons and others (MIT and SIL OFL). See `ui/vendor/nerd-fonts.LICENSE` for the full list and attributions.
-  - The drawing editor is Folio's own code (`ui/draw.js`, `ui/draw-render.js`). It reads and writes Excalidraw's file format, but none of Excalidraw's code is included. Its sketchy-line maths is adapted from rough.js and its decompression from lz-string, both MIT-licensed (see `ui/vendor/draw-ports.LICENSE`).
-- **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Folio`, which holds `config.json` (last vault and window size) and the WebView2 profile.
+  - The drawing editor is Cinder's own code (`ui/draw.js`, `ui/draw-render.js`). It reads and writes Excalidraw's file format, but none of Excalidraw's code is included. Its sketchy-line maths is adapted from rough.js and its decompression from lz-string, both MIT-licensed (see `ui/vendor/draw-ports.LICENSE`).
+- **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Cinder`, which holds `config.json` (last vault and window size) and the WebView2 profile.
 - **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. Their source is all in `vendor-crates/`. Dev tools are disabled in release builds.
 
 ## Features
@@ -68,7 +72,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - Embeds: `![[image.png|300]]`, `![[Other note]]` and `![[Other note#Section]]`
 - Pasting or dropping an image into a note saves it to `attachments/` and embeds it
 - **Images and screenshots**:
-  - **Ctrl+Shift+S** (*Insert screenshot*) lets you drag out an area of the screen and embeds it in the note, or adds it to the canvas, as `Screenshot <date> <time>.png`. It uses the system's own region picker: grim + slurp on Wayland, then gnome-screenshot, spectacle, xfce4-screenshooter, maim, scrot, ImageMagick or flameshot; `screencapture` on macOS. Without one of those (and on Windows), it falls back to the browser's screen capture followed by a crop step. To use a different tool, set `FOLIO_SCREENSHOT_CMD` to a command that prints a PNG to stdout (it gets `FOLIO_SCREENSHOT_MODE=region` or `screen`).
+  - **Ctrl+Shift+S** (*Insert screenshot*) lets you drag out an area of the screen and embeds it in the note, or adds it to the canvas, as `Screenshot <date> <time>.png`. It uses the system's own region picker: grim + slurp on Wayland, then gnome-screenshot, spectacle, xfce4-screenshooter, maim, scrot, ImageMagick or flameshot; `screencapture` on macOS. Without one of those (and on Windows), it falls back to the browser's screen capture followed by a crop step. To use a different tool, set `CINDER_SCREENSHOT_CMD` to a command that prints a PNG to stdout (it gets `CINDER_SCREENSHOT_MODE=region` or `screen`).
     - **Ctrl+Alt+S** takes a screenshot and opens it straight in a drawing to mark up. The note (or canvas) gets the drawing. **Settings → After a screenshot** can make that the default for Ctrl+Shift+S.
     - *Insert screenshot of the whole screen* skips the region picker.
     - The desktop app hides its window while you capture, so you can grab what's behind it (**Settings** can turn that off). **Settings → Screenshot delay** waits 3, 5 or 10 seconds first, with a countdown, for catching menus and hover states.
@@ -80,7 +84,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Each property has a type: text, list, number, checkbox, date, date & time, tags or aliases. Each type gets a matching editor: tag and list chips, a date picker, a checkbox. Links in values stay clickable.
   - Click a property's icon to change its type (the value converts) or remove it. Edit the name to rename it; it keeps its place and its value exactly as written.
   - *Add property* (or **Ctrl+;**, which also starts the frontmatter in a note without any) suggests names used in other notes and keeps their types. Values suggest what other notes use.
-  - Types are shared across the vault and saved to `.obsidian/types.json` when the vault has an `.obsidian` folder, so Obsidian sees the same types. Otherwise they're saved in Folio's settings.
+  - Types are shared across the vault and saved to `.obsidian/types.json` when the vault has an `.obsidian` folder, so Obsidian sees the same types. Otherwise they're saved in Cinder's settings.
   - Keyboard: **↑** from the first line goes into the properties. **↑/↓** move between rows, **Enter** saves and moves on, and **Esc** goes back to the text. Every edit is a normal change, so **Ctrl+Z** undoes it.
   - **All properties** (a sidebar panel) lists every property in the vault with its type and how many notes use it. Open one to see its values, and click a name or value to find the notes. Right-click to **rename it in every note**, change its type or remove it everywhere.
   - Search understands Obsidian's property syntax: `[status]`, `[status:done]`, `[status:"in progress"]` and `-[status]`.
@@ -96,12 +100,12 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **Folder templates** (Settings): new notes in a folder start from that folder's template.
   - Templates run in a small built-in interpreter, not as JavaScript, so a template can't reach anything outside the note and the vault. Arbitrary JavaScript, `tp.web` (network), `app` and user scripts aren't supported; using them gives a clear error.
 - A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag
-- Detection of edits made outside Folio. If a note changed on disk while you also had unsaved edits, Folio asks which version to keep.
+- Detection of edits made outside Cinder. If a note changed on disk while you also had unsaved edits, Cinder asks which version to keep.
 - **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images and an eraser. Features:
   - Arrows attach to shapes and follow them when they move. Shapes and arrows can have labels (double-click or **Enter**).
   - Stroke and fill colours, hachure, cross-hatch and solid fills, stroke width and style, sloppiness, sharp or round edges, arrowheads, fonts, opacity and layer order.
   - Grouping, aligning, locking, element links (`[[Note]]` or a web address), a snap grid, zoom and pan, undo and redo, copy and paste, and a shortcut sheet (**?**).
-  - Drawings are saved as `.excalidraw` files, the same format excalidraw.com uses, so you can open them there too. In **Settings**, you can switch to `.excalidraw.md`, the format of Obsidian's Excalidraw plugin. Folio reads and writes that format, including compressed drawings, and keeps its text and images in step with the plugin.
+  - Drawings are saved as `.excalidraw` files, the same format excalidraw.com uses, so you can open them there too. In **Settings**, you can switch to `.excalidraw.md`, the format of Obsidian's Excalidraw plugin. Cinder reads and writes that format, including compressed drawings, and keeps its text and images in step with the plugin.
   - Embed a drawing in a note with `![[Drawing.excalidraw]]` or `![[Drawing.excalidraw|400]]`. It renders in live preview and reading view, and clicking it opens the drawing. Renaming a drawing updates those embeds.
   - Export to SVG or PNG next to the drawing, or copy the drawing to the clipboard.
   - Create drawings from the ribbon, the file tree's context menu or the command palette. *Create new drawing and embed it in the current note* does both in one step.
@@ -142,7 +146,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
     - Also `<=`, `>=`, `!=`, `->`, `=>`, `~~`, `xx`, `**`, `inn`, `RR`, `NN`, `ZZ`, `hat`, `bar`, `vec`, `bf`, `cal`, `lr(`, `pmat` and `case`.
     - Commands you type out yourself, such as `\sqrt`, are left alone.
 - **Vim key bindings** in the editor, available as a setting.
-- **Fonts and Nerd Font icons**: JetBrains Mono comes with Folio and is the default code font. **Settings** can set the text and code fonts to any font installed on the computer, with a live preview. All of Nerd Fonts' roughly 11,000 icons (Font Awesome, Material Design, Codicons, Devicons, Octicons and more) work in every font Folio uses, including notes, code, canvases and drawings. The icon font only loads on pages that contain an icon. *Insert icon (Nerd Fonts)…* searches the icons by name. Icons are private-use Unicode characters, so a note that uses them needs a Nerd Font wherever else you open it.
+- **Fonts and Nerd Font icons**: JetBrains Mono comes with Cinder and is the default code font. **Settings** can set the text and code fonts to any font installed on the computer, with a live preview. All of Nerd Fonts' roughly 11,000 icons (Font Awesome, Material Design, Codicons, Devicons, Octicons and more) work in every font Cinder uses, including notes, code, canvases and drawings. The icon font only loads on pages that contain an icon. *Insert icon (Nerd Fonts)…* searches the icons by name. Icons are private-use Unicode characters, so a note that uses them needs a Nerd Font wherever else you open it.
 - Colour themes, each with a light and a dark variant: Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, **Ctrl+1**…**6** headings (the same level again removes it), **Ctrl+Shift+8/7/9** bullet, numbered and task lists, **Ctrl+M** / **Ctrl+Shift+M** math, and **Tab**/**Shift+Tab** to indent list items
@@ -151,7 +155,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **Ctrl+T** new tab, **Ctrl+W** close, **Ctrl+PageUp/PageDown** previous and next, **Alt+1…8** a tab and **Alt+9** the last one. *Reopen closed tab* is in the command palette.
   - Each tab keeps its own back and forward history, and a note keeps its cursor and undo history while its tab is open.
   - Drag tabs to reorder them. Right-click for close others, close to the right, duplicate and reveal.
-  - Tabs come back when you reopen Folio, and they follow renames and moves.
+  - Tabs come back when you reopen Cinder, and they follow renames and moves.
   - In a browser tab the browser keeps Ctrl+T and Ctrl+W for itself, so rebind them in Hotkeys.
 - **Select several files in the tree** with **Ctrl/Cmd-click**, **Shift-click** or **Shift+↑/↓**, then drag them onto a folder or right-click to *Move N items to…*, group them into a *New folder with N items…*, open them in tabs or delete them. Links are updated for every move.
 - **Keyboard first**:
@@ -179,9 +183,9 @@ UI preferences (theme, panel sizes and so on) are stored in the webview's local 
 ```
 src/main.rs        startup, arguments, mode selection
 src/api.rs         file API, path safety, embedded UI (shared by both modes)
-src/native.rs      the desktop window (wry/tao), folio:// protocol, close-to-save
+src/native.rs      the desktop window (wry/tao), cinder:// protocol, close-to-save
 src/server.rs      --browser mode: the 127.0.0.1 server
-src/config.rs      %LOCALAPPDATA%\Folio\config.json
+src/config.rs      %LOCALAPPDATA%\Cinder\config.json
 src/screenshot.rs  Insert screenshot: runs the platform region-capture tool
 ui/index.html      shell
 ui/app.js          index, preview, panels, search, commands
@@ -204,7 +208,7 @@ vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline 
 
 The UI files are embedded with `include_str!`, so the binary is self-contained. After changing anything in `ui/`, run `cargo build` again.
 
-The editor bundle is already built and checked in, so building Folio doesn't need Node. If you change `ui/editor/editor.js`, rebuild the bundle with Node 18 or newer (this step needs npm access), then run `cargo build`:
+The editor bundle is already built and checked in, so building Cinder doesn't need Node. If you change `ui/editor/editor.js`, rebuild the bundle with Node 18 or newer (this step needs npm access), then run `cargo build`:
 
 ```sh
 cd ui/editor && npm install && npm run build

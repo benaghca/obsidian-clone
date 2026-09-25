@@ -1,4 +1,4 @@
-/* Folio drawings: the scene model, the hand-drawn renderer, hit testing, SVG
+/* Cinder drawings: the scene model, the hand-drawn renderer, hit testing, SVG
  * export and file formats. Scenes use Excalidraw's own element schema, so
  * `.excalidraw` files open in excalidraw.com, and `.excalidraw.md` files are
  * read and written in the layout used by Obsidian's Excalidraw plugin.
@@ -962,7 +962,7 @@
   }
 
   function sceneJSON(scene, files = scene.files, indent = 2) {
-    return JSON.stringify({ ...scene.rest, type: 'excalidraw', version: 2, source: 'folio', elements: scene.elements, appState: scene.appState, files }, null, indent);
+    return JSON.stringify({ ...scene.rest, type: 'excalidraw', version: 2, source: 'cinder', elements: scene.elements, appState: scene.appState, files }, null, indent);
   }
 
   // `.excalidraw.md` (Obsidian Excalidraw plugin): JSON lives in a fenced block under a "Drawing" heading.
@@ -1164,6 +1164,6 @@ tags: [excalidraw]
     shapeOf, buildShape, hatchLines, themeColor, parseColor, drawElement, toSVG,
     emptyScene, restore, sceneJSON, parseDrawing, serializeDrawing, serializeMd, lzDecompressFromBase64,
   };
-  root.FolioSketch = api;
+  root.CinderSketch = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

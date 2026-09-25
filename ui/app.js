@@ -1,13 +1,13 @@
-/* Folio — front end. Plain JS, no build step, no network beyond 127.0.0.1. */
+/* Cinder — front end. Plain JS, no build step, no network beyond 127.0.0.1. */
 'use strict';
 
 // ============================================================ basics
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
-const TOKEN = $('meta[name=folio-token]').content;
-const VAULT = $('meta[name=folio-vault]').content;
-const NATIVE = $('meta[name=folio-mode]').content === 'native';
+const TOKEN = $('meta[name=cinder-token]').content;
+const VAULT = $('meta[name=cinder-vault]').content;
+const NATIVE = $('meta[name=cinder-mode]').content === 'native';
 const enc = encodeURIComponent;
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const isMd = p => /\.md$/i.test(p);
@@ -30,7 +30,7 @@ const rawUrl = p => `/api/raw?path=${enc(p)}&t=${TOKEN}`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 function store(key, val) {
-  const k = `folio:${VAULT}:${key}`;
+  const k = `folio:${VAULT}:${key}`; // (the app's old name: kept so saved settings survive the rename)
   try {
     if (val === undefined) { const v = localStorage.getItem(k); return v == null ? undefined : JSON.parse(v); }
     localStorage.setItem(k, JSON.stringify(val));
@@ -44,7 +44,7 @@ async function api(path, opts = {}) {
 }
 
 async function apiRaw(path, opts) {
-  const r = await fetch(path, { ...opts, headers: { 'X-Folio-Token': TOKEN, ...(opts.headers || {}) } });
+  const r = await fetch(path, { ...opts, headers: { 'X-Cinder-Token': TOKEN, ...(opts.headers || {}) } });
   if (!r.ok) {
     let msg = r.statusText;
     try { msg = (await r.json()).error || msg; } catch { }
@@ -81,7 +81,7 @@ const DEFAULTS = {
   taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
   drawingFormat: 'excalidraw',
-  windowFrame: 'custom',  // desktop app: Folio's own title bar, or the system's ('native'); lives in the app config
+  windowFrame: 'custom',  // desktop app: Cinder's own title bar, or the system's ('native'); lives in the app config
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
   mathSnippets: true,     // LaTeX Suite-style shortcuts while typing math
   cssFolder: '',          // a vault folder of .css snippets to apply ('' = none)
@@ -104,17 +104,17 @@ function applyFonts() {
 function applyTheme() {
   const t = cfg.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.documentElement.dataset.theme = t;
-  FolioThemes.apply(cfg.palette, t);
+  CinderThemes.apply(cfg.palette, t);
   applyFonts();
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
   if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); }
-  if (window.FolioGraph) FolioGraph.restyle();
-  if (window.FolioDraw) FolioDraw.restyle();
+  if (window.CinderGraph) CinderGraph.restyle();
+  if (window.CinderDraw) CinderDraw.restyle();
   if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
   // The desktop window's own frame (when the system draws it) follows light / dark too.
-  if (window.ipc && document.querySelector('meta[name=folio-mode]')?.content === 'native') window.ipc.postMessage('win:theme:' + t);
+  if (window.ipc && document.querySelector('meta[name=cinder-mode]')?.content === 'native') window.ipc.postMessage('win:theme:' + t);
 }
 
 // ============================================================ state
@@ -177,7 +177,7 @@ function editorHooks(from, extra) {
     renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
     codeBlock: lang => lang === 'base' || lang === 'tasks',
     renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, from()),
-    toggleTaskLine: text => FolioTasks.parseLine(text) ? FolioTasks.toggle(text, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }) : null,
+    toggleTaskLine: text => CinderTasks.parseLine(text) ? CinderTasks.toggle(text, { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }) : null,
     renderMath: (el, tex, display) => renderMath(el, tex, display),
     mathSnippets: () => cfg.mathSnippets,
     propertiesFor: text => cfg.properties !== 'source' && propsOf(text) != null,
@@ -186,7 +186,7 @@ function editorHooks(from, extra) {
   };
 }
 
-const ed = FolioEditor.create($('#editor'), editorHooks(() => S.cur, {
+const ed = CinderEditor.create($('#editor'), editorHooks(() => S.cur, {
   onChange: () => markDirty(),
   onCursor: () => cursorMoved(),
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
@@ -369,7 +369,7 @@ async function applyList(l, gen) {
     delete got[p];
     if (!v) continue;
     indexCanvas(p, v.content, v.mtime);
-    if (p === S.cur && S.view === 'canvas' && !S.dirty && S.canvasDoc && v.mtime !== S.canvasDoc.mtime) loadCanvas(p, v.content, v.mtime, FolioCanvas.getView());
+    if (p === S.cur && S.view === 'canvas' && !S.dirty && S.canvasDoc && v.mtime !== S.canvasDoc.mtime) loadCanvas(p, v.content, v.mtime, CinderCanvas.getView());
   }
   {
     for (const [p, v] of Object.entries(got)) {
@@ -389,7 +389,7 @@ async function applyList(l, gen) {
   }
   if (structural) reindexAll(); else { changed.forEach(resolveNote); if (changed.length) { S.version++; refreshEditorSoon(); } }
   // Views built from the notes redraw now that S.notes holds the new contents.
-  if (S.view === 'canvas' && (changed.length || structural)) FolioCanvas.refreshFiles();
+  if (S.view === 'canvas' && (changed.length || structural)) CinderCanvas.refreshFiles();
   if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
   if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); }
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
@@ -494,7 +494,7 @@ async function doSave(force) {
   } catch (e) { err = e; S.dirty = true; }
   if (!err) return;
   if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
-  const overwrite = confirm(`"${noteName(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
+  const overwrite = confirm(`"${noteName(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
   if (overwrite) return doSave(true);
   S.dirty = false;
   const got = await readMany([p]);
@@ -522,9 +522,9 @@ function showView(v) {
   S.view = v;
   for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'tasks', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
-  if (v === 'graph') FolioGraph.show(); else FolioGraph.hide();
-  if (v === 'drawing') FolioDraw.show(); else FolioDraw.hide();
-  if (v === 'canvas') FolioCanvas.show(); else FolioCanvas.hide();
+  if (v === 'graph') CinderGraph.show(); else CinderGraph.hide();
+  if (v === 'drawing') CinderDraw.show(); else CinderDraw.hide();
+  if (v === 'canvas') CinderCanvas.show(); else CinderCanvas.hide();
   updateHistButtons();
   if (S.tabs) syncTab();
   applyNoteClasses();
@@ -534,13 +534,13 @@ function showEmpty() {
   showView('empty');
   $('#crumbs').textContent = '';
   setSaveState('');
-  document.title = `${VAULT} — Folio`;
+  document.title = `${VAULT} — Cinder`;
   renderTreeActive(); refreshPanels(); updateStatus();
 }
 
 function rememberPos() {
-  if (S.cur && S.view === 'drawing') { S.pos.set(S.cur, { draw: FolioDraw.getView() }); return; }
-  if (S.cur && S.view === 'canvas') { S.pos.set(S.cur, { canvas: FolioCanvas.getView() }); return; }
+  if (S.cur && S.view === 'drawing') { S.pos.set(S.cur, { draw: CinderDraw.getView() }); return; }
+  if (S.cur && S.view === 'canvas') { S.pos.set(S.cur, { canvas: CinderCanvas.getView() }); return; }
   if (S.cur && S.view === 'base') { if (baseView) S.pos.set(S.cur, { baseView: baseView.viewName() }); return; }
   if (!S.cur || S.view !== 'note') return;
   if (S.tabs.some(t => t.key === S.cur)) edStates.set(S.cur, ed.getState()); // (undo history, per tab)
@@ -577,7 +577,7 @@ async function openPath(p, opts = {}) {
     requestAnimationFrame(() => { editWrap.scrollTop = pos.scroll; });
   } else { editWrap.scrollTop = 0; preview.scrollTop = 0; }
   $('#crumbs').innerHTML = crumbsHtml(p);
-  document.title = `${noteName(p)} — ${VAULT} — Folio`;
+  document.title = `${noteName(p)} — ${VAULT} — Cinder`;
   renderTreeActive(true);
   refreshPanels();
   updateStatus();
@@ -605,7 +605,7 @@ function openAttachment(p) {
     const dir = dirname(p);
     const items = [...S.files.keys()].filter(q => dirname(q) === dir && IMG_EXT.test(q)).sort(collator.compare).map(q => ({ src: rawUrl(q), name: `${basename(q)} · ${((S.files.get(q)?.size || 0) / 1024).toFixed(1)} KB`, path: q }));
     const { onCopy, onCrop, onAnnotate } = imageActions();
-    fileViewer = FolioImages.viewer(v, items, items.findIndex(it => it.path === p), { onCopy, onCrop, onAnnotate });
+    fileViewer = CinderImages.viewer(v, items, items.findIndex(it => it.path === p), { onCopy, onCrop, onAnnotate });
     fileViewer.focus();
   } else v.innerHTML = `<div class="file-info"><p>${esc(p)} · ${kb}</p><p><a class="btn" href="${rawUrl(p)}" target="_blank" rel="noopener">Open in new tab</a></p></div>`;
   $('#crumbs').innerHTML = crumbsHtml(p);
@@ -617,7 +617,7 @@ function openAttachment(p) {
 async function openDrawing(p) {
   showView('drawing');
   $('#crumbs').innerHTML = crumbsHtml(p);
-  document.title = `${drawingName(p)} — ${VAULT} — Folio`;
+  document.title = `${drawingName(p)} — ${VAULT} — Cinder`;
   setSaveState('');
   renderTreeActive(true);
   refreshPanels();
@@ -637,10 +637,10 @@ async function openDrawing(p) {
 // Parse and show a drawing; returns false (and shows why) if it can't be read.
 function loadDrawing(p, content, mtime, view) {
   let parsed;
-  try { parsed = FolioSketch.parseDrawing(content, p); } catch (e) { showDrawingError(p, e); return false; }
+  try { parsed = CinderSketch.parseDrawing(content, p); } catch (e) { showDrawingError(p, e); return false; }
   S.drawing = { mtime, info: { format: parsed.format, source: content, embedded: parsed.embedded || {} } };
   if (S.view !== 'drawing') showView('drawing');
-  FolioDraw.load(parsed.scene, { fileUrls: drawingFileUrls(parsed.embedded, p), view, relayout: parsed.relayout });
+  CinderDraw.load(parsed.scene, { fileUrls: drawingFileUrls(parsed.embedded, p), view, relayout: parsed.relayout });
   updateStatus();
   return true;
 }
@@ -652,7 +652,7 @@ async function reloadDrawingFromDisk(content, mtime) {
     if (!got[p] || S.cur !== p || S.dirty) return;
     ({ content, mtime } = got[p]);
   }
-  loadDrawing(p, content, mtime, FolioDraw.getView());
+  loadDrawing(p, content, mtime, CinderDraw.getView());
 }
 
 function showDrawingError(p, e, what = 'a drawing') {
@@ -689,7 +689,7 @@ function dataURLToBlob(u) {
 // .excalidraw.md drawings keep images as vault attachments, like the Obsidian plugin does.
 async function storeDrawingImages(d) {
   let added = false;
-  for (const [id, f] of Object.entries(FolioDraw.getScene().files)) {
+  for (const [id, f] of Object.entries(CinderDraw.getScene().files)) {
     if (d.info.embedded[id] || !f.dataURL) continue;
     const ext = ((f.mimeType || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
     const now = new Date();
@@ -704,7 +704,7 @@ async function storeDrawingImages(d) {
 }
 
 function drawingContent(d) {
-  return FolioSketch.serializeDrawing(FolioDraw.getScene(), d.info);
+  return CinderSketch.serializeDrawing(CinderDraw.getScene(), d.info);
 }
 
 async function doSaveDrawing(force) {
@@ -725,7 +725,7 @@ async function doSaveDrawing(force) {
   } catch (e) { err = e; S.dirty = true; }
   if (!err) return;
   if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
-  const overwrite = confirm(`"${basename(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
+  const overwrite = confirm(`"${basename(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`);
   if (overwrite) return doSaveDrawing(true);
   S.dirty = false;
   await reloadDrawingFromDisk();
@@ -740,7 +740,7 @@ async function makeDrawingFile(folder) {
   const stem = `Drawing ${fmtDate(now, 'YYYY-MM-DD HH.mm')}.${String(now.getSeconds()).padStart(2, '0')}`;
   let path = join(folder, stem + ext), i = 1;
   while (S.lowerPath.has(path.toLowerCase()) || S.files.has(path)) path = join(folder, `${stem} ${i++}${ext}`);
-  const content = FolioSketch.serializeDrawing(FolioSketch.emptyScene(), md ? { format: 'md', source: '' } : { format: 'json' });
+  const content = CinderSketch.serializeDrawing(CinderSketch.emptyScene(), md ? { format: 'md', source: '' } : { format: 'json' });
   await writeFile(path, content);
   let d = dirname(path);
   while (d) { S.dirs.add(d); d = dirname(d); }
@@ -788,7 +788,7 @@ function drawingSvgUrl(path) {
   const promise = (async () => {
     const content = isMd(path) ? S.notes.get(path)?.content : (await readMany([path]))[path]?.content;
     if (content == null) throw new Error('file not found');
-    const { scene, embedded } = FolioSketch.parseDrawing(content, path);
+    const { scene, embedded } = CinderSketch.parseDrawing(content, path);
     const data = {};
     for (const el of scene.elements) {
       if (el.type !== 'image' || !el.fileId || data[el.fileId]) continue;
@@ -796,7 +796,7 @@ function drawingSvgUrl(path) {
       const t = embedded?.[el.fileId] && resolveLink(embedded[el.fileId], path);
       if (t) try { data[el.fileId] = await blobToDataURL(await (await fetch(rawUrl(t))).blob()); } catch { }
     }
-    const svg = FolioSketch.toSVG(scene.elements, { dark, fontData: await virgilData(), fileData: id => data[id] });
+    const svg = CinderSketch.toSVG(scene.elements, { dark, fontData: await virgilData(), fileData: id => data[id] });
     return URL.createObjectURL(new Blob([svg], { type: 'image/svg+xml' }));
   })();
   drawingSvgCache.set(path, { key, promise });
@@ -828,7 +828,7 @@ async function exportDrawing(kind) {
   const path = S.cur.replace(DRAWING_EXT, '').replace(/\.md$/i, '') + '.' + kind;
   if (S.files.has(path) && !confirm(`Replace the existing "${basename(path)}"?`)) return;
   try {
-    const content = kind === 'svg' ? await FolioDraw.exportSVG({ fontData: await virgilData() }) : await FolioDraw.exportPNG();
+    const content = kind === 'svg' ? await CinderDraw.exportSVG({ fontData: await virgilData() }) : await CinderDraw.exportPNG();
     await writeFile(path, content, S.files.get(path)?.mtime);
     reindexAll(); renderTree();
     toast(`Saved ${basename(path)}`);
@@ -837,8 +837,8 @@ async function exportDrawing(kind) {
 
 async function copyDrawing(kind, onlySelected) {
   try {
-    if (kind === 'png') await navigator.clipboard.write([new ClipboardItem({ 'image/png': FolioDraw.exportPNG({ onlySelected }) })]);
-    else await navigator.clipboard.writeText(await FolioDraw.exportSVG({ onlySelected, fontData: await virgilData() }));
+    if (kind === 'png') await navigator.clipboard.write([new ClipboardItem({ 'image/png': CinderDraw.exportPNG({ onlySelected }) })]);
+    else await navigator.clipboard.writeText(await CinderDraw.exportSVG({ onlySelected, fontData: await virgilData() }));
     toast(kind === 'png' ? 'Copied as PNG' : 'Copied as SVG');
   } catch (e) { toast('Couldn’t copy: ' + e.message); }
 }
@@ -858,11 +858,11 @@ function openDrawingLink(link) {
 
 // ============================================================ window frame (desktop app)
 
-// Folio can draw its own title bar: the tab bar (and the sidebars' header rows) move the window,
+// Cinder can draw its own title bar: the tab bar (and the sidebars' header rows) move the window,
 // double-click maximizes, and buttons at the top right minimize, maximize and close. The frame
 // choice lives in the app's config, since the window is made before the page loads.
 const winCmd = c => { if (NATIVE && window.ipc) window.ipc.postMessage('win:' + c); };
-if (NATIVE) cfg.windowFrame = document.querySelector('meta[name=folio-frame]')?.content === 'custom' ? 'custom' : 'native';
+if (NATIVE) cfg.windowFrame = document.querySelector('meta[name=cinder-frame]')?.content === 'custom' ? 'custom' : 'native';
 
 let frameNow = cfg.windowFrame; // what the window was made with
 function setFrame(kind) {
@@ -883,7 +883,7 @@ function setFrame(kind) {
     }
   }
 }
-window.__folioWinState = max => {
+window.__cinderWinState = max => {
   document.body.classList.toggle('win-max', !!max);
   const b = $('#win-controls [data-win=max]');
   if (b) { b.title = max ? 'Restore' : 'Maximize'; b.innerHTML = max ? '<svg viewBox="0 0 24 24"><rect x="5.5" y="8.5" width="10" height="10" rx="1"/><path d="M8.5 8.5v-3h10v10h-3"/></svg>' : '<svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1"/></svg>'; }
@@ -1072,21 +1072,21 @@ async function restoreTabs() {
 
 // Leave a drawing or canvas cleanly: finish any text being typed.
 function flushDocViews() {
-  if (S.view === 'drawing') FolioDraw.flush();
-  if (S.view === 'canvas') FolioCanvas.flush();
+  if (S.view === 'drawing') CinderDraw.flush();
+  if (S.view === 'canvas') CinderCanvas.flush();
 }
 
 function indexCanvas(p, content, mtime) {
   let refs = [];
-  try { refs = FolioCanvas.fileRefs(FolioCanvas.parseCanvas(content)); } catch { }
+  try { refs = CinderCanvas.fileRefs(CinderCanvas.parseCanvas(content)); } catch { }
   S.canvases.set(p, { mtime, refs });
 }
 
 async function openCanvas(p) {
-  FolioCanvas.load({ nodes: [], edges: [] }, { path: p }); // don't show the previous canvas while this one loads
+  CinderCanvas.load({ nodes: [], edges: [] }, { path: p }); // don't show the previous canvas while this one loads
   showView('canvas');
   $('#crumbs').innerHTML = crumbsHtml(p);
-  document.title = `${displayName(p)} — ${VAULT} — Folio`;
+  document.title = `${displayName(p)} — ${VAULT} — Cinder`;
   setSaveState('');
   renderTreeActive(true);
   refreshPanels();
@@ -1098,10 +1098,10 @@ async function openCanvas(p) {
 
 function loadCanvas(p, content, mtime, view) {
   let data;
-  try { data = FolioCanvas.parseCanvas(content); } catch (e) { showDrawingError(p, e, 'a canvas'); return false; }
+  try { data = CinderCanvas.parseCanvas(content); } catch (e) { showDrawingError(p, e, 'a canvas'); return false; }
   S.canvasDoc = { mtime };
   if (S.view !== 'canvas') showView('canvas');
-  FolioCanvas.load(data, { view, path: p });
+  CinderCanvas.load(data, { view, path: p });
   indexCanvas(p, content, mtime);
   updateStatus();
   return true;
@@ -1118,7 +1118,7 @@ function canvasChanged() {
 async function doSaveCanvas(force) {
   const p = S.cur, d = S.canvasDoc;
   S.dirty = false; setSaveState('Saving…');
-  const content = FolioCanvas.serializeCanvas(FolioCanvas.getData());
+  const content = CinderCanvas.serializeCanvas(CinderCanvas.getData());
   try {
     const headers = (!force && d.mtime) ? { 'X-Base-Mtime': String(d.mtime) } : {};
     const r = await api(`/api/file?path=${enc(p)}`, { method: 'PUT', body: content, headers });
@@ -1133,17 +1133,17 @@ async function doSaveCanvas(force) {
     S.dirty = true;
     if (e.status !== 409) { setSaveState('Save failed: ' + e.message, true); return; }
   }
-  if (confirm(`"${basename(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveCanvas(true);
+  if (confirm(`"${basename(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveCanvas(true);
   S.dirty = false;
   const got = (await readMany([p]).catch(() => ({})))[p];
-  if (got && S.cur === p) loadCanvas(p, got.content, got.mtime, FolioCanvas.getView());
+  if (got && S.cur === p) loadCanvas(p, got.content, got.mtime, CinderCanvas.getView());
   setSaveState('Reloaded from disk');
 }
 
 async function newCanvas(folder) {
   if (folder == null) folder = cfg.newNoteFolder;
   const path = uniquePath(folder, 'Untitled.canvas');
-  await createNote(path, FolioCanvas.serializeCanvas({ nodes: [], edges: [] }));
+  await createNote(path, CinderCanvas.serializeCanvas({ nodes: [], edges: [] }));
 }
 
 // What a file card on a canvas shows.
@@ -1173,9 +1173,9 @@ function canvasSvgUrl(path) {
   const promise = (async () => {
     const content = (await readMany([path]))[path]?.content;
     if (content == null) throw new Error('file not found');
-    const data = FolioCanvas.parseCanvas(content);
+    const data = CinderCanvas.parseCanvas(content);
     const colors = { 1: v('--cv-red'), 2: v('--cv-orange'), 3: v('--cv-yellow'), 4: v('--cv-green'), 5: v('--cv-cyan'), 6: v('--cv-purple') };
-    const svg = FolioCanvas.toSVG(data, {
+    const svg = CinderCanvas.toSVG(data, {
       colors, text: v('--text'), muted: v('--muted'), bg: v('--bg'), border: v('--border'),
       noteText: p => S.notes.get(p)?.content ?? null, name: p => displayName(p),
     });
@@ -1204,7 +1204,7 @@ let rowsCache = { gen: -1, rows: [] };
 const propsCache = new WeakMap();
 function noteProps(n) {
   let p = propsCache.get(n);
-  if (!p) { p = FolioBases.frontmatter(n.content); propsCache.set(n, p); }
+  if (!p) { p = CinderBases.frontmatter(n.content); propsCache.set(n, p); }
   return p;
 }
 // Every file in the vault as a base row: file.* fields plus the note's properties.
@@ -1232,7 +1232,7 @@ function baseHooks(basePath, thisPath) {
     openLink: name => followLink(name, null, thisPath),
     imageUrl: (v, from) => {
       const s = String(v).replace(/^!?\[\[|\]\]$/g, '').split('|')[0].trim();
-      if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s)) return null; // Folio never loads images from the web
+      if (!s || /^[a-z][a-z0-9+.-]*:/i.test(s)) return null; // Cinder never loads images from the web
       const t = resolveLink(s, from);
       return t && IMG_EXT.test(t) ? rawUrl(t) : null;
     },
@@ -1249,7 +1249,7 @@ async function openBase(p) {
   showView('base');
   $('#view-base').replaceChildren();
   $('#crumbs').innerHTML = crumbsHtml(p);
-  document.title = `${displayName(p)} — ${VAULT} — Folio`;
+  document.title = `${displayName(p)} — ${VAULT} — Cinder`;
   setSaveState('');
   renderTreeActive(true);
   refreshPanels();
@@ -1260,12 +1260,12 @@ async function openBase(p) {
 }
 function loadBase(p, text, mtime) {
   let base;
-  try { base = FolioBases.parseBase(text); } catch (e) { showDrawingError(p, e, 'a base'); return; }
+  try { base = CinderBases.parseBase(text); } catch (e) { showDrawingError(p, e, 'a base'); return; }
   S.baseDoc = { mtime, text };
   if (S.view !== 'base') showView('base');
   const el = document.createElement('div');
   $('#view-base').replaceChildren(el);
-  baseView = FolioBases.mount(el, { base, path: p, editable: true, view: S.pos.get(p)?.baseView, hooks: baseHooks(p, p) });
+  baseView = CinderBases.mount(el, { base, path: p, editable: true, view: S.pos.get(p)?.baseView, hooks: baseHooks(p, p) });
   updateStatus();
 }
 async function reloadBase() {
@@ -1280,7 +1280,7 @@ async function reloadBase() {
 
 // A base's view settings changed in the UI: save the .base file.
 async function saveBaseFile(path, base) {
-  const text = FolioBases.serializeBase(base);
+  const text = CinderBases.serializeBase(base);
   if (S.view === 'base' && S.cur === path && S.baseDoc) {
     S.baseDoc.text = text;
     S.dirty = true; setSaveState('Unsaved'); scheduleSave();
@@ -1301,7 +1301,7 @@ async function doSaveBase(force) {
     S.dirty = true;
     if (e.status !== 409) { setSaveState('Save failed: ' + e.message, true); return; }
   }
-  if (confirm(`"${basename(p)}" was changed outside Folio.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveBase(true);
+  if (confirm(`"${basename(p)}" was changed outside Cinder.\n\nOK — overwrite it with your version\nCancel — discard your changes and load the version on disk`)) return doSaveBase(true);
   S.dirty = false;
   await reloadBase();
   setSaveState('Reloaded from disk');
@@ -1312,7 +1312,7 @@ async function setNoteProperty(path, key, value) {
   if (!S.notes.has(path)) return toast('Only notes have properties');
   if (path === S.cur && S.view === 'note') await save();
   const n = S.notes.get(path);
-  const text = FolioBases.setFrontmatter(n.content, key, value);
+  const text = CinderBases.setFrontmatter(n.content, key, value);
   if (text === n.content) return;
   try { await writeFile(path, text, n.mtime); } catch (e) { toast(`Couldn’t update ${noteName(path)}: ${e.message}`); return; }
   resolveNote(path);
@@ -1327,7 +1327,7 @@ function refreshBases() {
 
 async function createNoteWithProps(folder, props) {
   let text = '';
-  for (const [k, v] of Object.entries(props || {})) text = FolioBases.setFrontmatter(text, k, v);
+  for (const [k, v] of Object.entries(props || {})) text = CinderBases.setFrontmatter(text, k, v);
   await createNote(uniquePath(folder ?? cfg.newNoteFolder, 'Untitled.md'), text, { focusTitle: true, mode: 'edit' });
 }
 
@@ -1344,8 +1344,8 @@ function renderBaseEmbed(el, path, sub) {
   const thisPath = S.cur;
   readMany([path]).then(got => {
     if (!got[path]) throw new Error('file not found');
-    const base = FolioBases.parseBase(got[path].content);
-    FolioBases.mount(host, { base, path, editable: true, embedded: true, view: sub || undefined, stateKey: `${thisPath}|${path}|${sub || ''}`, hooks: baseHooks(path, thisPath) });
+    const base = CinderBases.parseBase(got[path].content);
+    CinderBases.mount(host, { base, path, editable: true, embedded: true, view: sub || undefined, stateKey: `${thisPath}|${path}|${sub || ''}`, hooks: baseHooks(path, thisPath) });
   }).catch(e => { host.innerHTML = `<div class="bs-error">Couldn’t show ${esc(displayName(path))}: ${esc(e.message)}</div>`; });
 }
 
@@ -1353,12 +1353,12 @@ function renderBaseEmbed(el, path, sub) {
 function renderBaseBlock(el, code, notePath) {
   el.classList.add('base-embed');
   let base;
-  try { base = FolioBases.parseBase(code); } catch (e) { el.innerHTML = `<div class="bs-error">This base block has a problem: ${esc(e.message)}</div>`; return; }
+  try { base = CinderBases.parseBase(code); } catch (e) { el.innerHTML = `<div class="bs-error">This base block has a problem: ${esc(e.message)}</div>`; return; }
   let current = code;
-  FolioBases.mount(el, {
+  CinderBases.mount(el, {
     // The UI state follows the block by its view names (they survive sorting and filtering).
     base, path: notePath, editable: true, embedded: true, stateKey: `${notePath}|block|${base.views.map(v => v.name).join('|')}`,
-    hooks: { ...baseHooks(notePath, notePath), save: b => { const next = FolioBases.serializeBase(b).replace(/\n$/, ''); saveBaseBlock(notePath, current, next); current = next; } },
+    hooks: { ...baseHooks(notePath, notePath), save: b => { const next = CinderBases.serializeBase(b).replace(/\n$/, ''); saveBaseBlock(notePath, current, next); current = next; } },
   });
 }
 async function saveBaseBlock(notePath, oldCode, newCode) {
@@ -1388,7 +1388,7 @@ function allTasks() {
   const tasks = [];
   // Template notes hold example tasks, not real ones.
   const tpl = cfg.templatesFolder ? cfg.templatesFolder + '/' : null;
-  for (const [p, n] of S.notes) if (!isDrawing(p) && !(tpl && p.startsWith(tpl))) tasks.push(...FolioTasks.parseNote(p, n.content));
+  for (const [p, n] of S.notes) if (!isDrawing(p) && !(tpl && p.startsWith(tpl))) tasks.push(...CinderTasks.parseNote(p, n.content));
   tasksCache = { gen: S.dataGen, tasks };
   return tasks;
 }
@@ -1420,9 +1420,9 @@ async function modifyTaskLine(x, fn) {
   }
   refreshTasks();
 }
-const toggleTaskItem = x => modifyTaskLine(x, l => FolioTasks.toggle(l, { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }));
-const setTaskField = (x, f, v) => modifyTaskLine(x, l => [FolioTasks.setField(l, f, v)]);
-const cancelTask = x => modifyTaskLine(x, l => [FolioTasks.setStatus(l, '-')]);
+const toggleTaskItem = x => modifyTaskLine(x, l => CinderTasks.toggle(l, { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }));
+const setTaskField = (x, f, v) => modifyTaskLine(x, l => [CinderTasks.setField(l, f, v)]);
+const cancelTask = x => modifyTaskLine(x, l => [CinderTasks.setStatus(l, '-')]);
 
 function refreshTasks() {
   if (S.view === 'tasks') tasksView?.refresh();
@@ -1435,7 +1435,7 @@ function refreshTasks() {
 function updateTaskBadge() {
   const b = $('[data-cmd=tasks] .rb-badge');
   if (!b) return;
-  const t = FolioTasks.today();
+  const t = CinderTasks.today();
   const n = allTasks().filter(x => !x.done && !x.cancelled && (x.due || x.scheduled) && (x.due || x.scheduled) <= t).length;
   b.textContent = n > 99 ? '99+' : String(n);
   b.hidden = !n;
@@ -1443,7 +1443,7 @@ function updateTaskBadge() {
 
 function taskInboxPath() {
   const p = String(cfg.taskInbox || '').trim().replace(/^\/+/, '');
-  if (!p) return join(cfg.dailyFolder, FolioTasks.today() + '.md');
+  if (!p) return join(cfg.dailyFolder, CinderTasks.today() + '.md');
   return isMd(p) ? p : p + '.md';
 }
 
@@ -1506,8 +1506,8 @@ async function openTasks() {
   showView('tasks');
   setSaveState('');
   $('#crumbs').innerHTML = '<b>Tasks</b>';
-  document.title = `Tasks — ${VAULT} — Folio`;
-  if (!tasksView) tasksView = FolioTasks.mountView($('#view-tasks'), taskHooks());
+  document.title = `Tasks — ${VAULT} — Cinder`;
+  if (!tasksView) tasksView = CinderTasks.mountView($('#view-tasks'), taskHooks());
   else tasksView.refresh();
   updateStatus();
   requestAnimationFrame(() => $('#view-tasks .tk-add')?.focus());
@@ -1519,12 +1519,12 @@ function quickAddTask() {
   const input = $('input', back), pv = $('.tk-preview', back);
   input.focus();
   input.addEventListener('input', () => {
-    const q = FolioTasks.parseQuick(input.value);
-    pv.textContent = input.value.trim() ? [q.text, q.due && FolioTasks.friendly(q.due), q.priority && q.priority + ' priority', q.recur && 'repeats ' + q.recur].filter(Boolean).join(' · ') : '';
+    const q = CinderTasks.parseQuick(input.value);
+    pv.textContent = input.value.trim() ? [q.text, q.due && CinderTasks.friendly(q.due), q.priority && q.priority + ' priority', q.recur && 'repeats ' + q.recur].filter(Boolean).join(' · ') : '';
   });
   input.addEventListener('keydown', e => {
     if (e.key === 'Escape') back.remove();
-    if (e.key === 'Enter' && input.value.trim()) { const q = FolioTasks.parseQuick(input.value); back.remove(); if (q.text) addTask(FolioTasks.formatTask(q)); }
+    if (e.key === 'Enter' && input.value.trim()) { const q = CinderTasks.parseQuick(input.value); back.remove(); if (q.text) addTask(CinderTasks.formatTask(q)); }
   });
   back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); });
 }
@@ -1532,7 +1532,7 @@ function quickAddTask() {
 // ```tasks blocks: a live query of tasks across the vault.
 function renderTasksBlock(el, code) {
   el.classList.add('tasks-embed');
-  FolioTasks.mountQuery(el, code, taskHooks());
+  CinderTasks.mountQuery(el, code, taskHooks());
 }
 
 function goHist(d) {
@@ -1829,7 +1829,7 @@ function toggleTask(i) {
   while ((m = re.exec(body))) {
     if (k++ === i) {
       const a = m.index, e = ed.value.indexOf('\n', a) < 0 ? ed.value.length : ed.value.indexOf('\n', a);
-      const next = FolioTasks.toggle(ed.value.slice(a, e).replace(/\r$/, ''), { date: FolioTasks.today(), doneDate: cfg.taskDoneDate }).join('\n');
+      const next = CinderTasks.toggle(ed.value.slice(a, e).replace(/\r$/, ''), { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }).join('\n');
       const cr = ed.value[e - 1] === '\r' ? '\r' : '';
       ed.insert(a, e, next + cr, ed.selectionStart, ed.selectionEnd);
       renderPreview();
@@ -2363,14 +2363,14 @@ async function renamePath(from, to) {
     if (!c.refs.some(r => moved.has(r))) continue;
     try {
       if (cp === S.cur && S.view === 'canvas' && S.canvasDoc) {
-        FolioCanvas.renameRefs(FolioCanvas.getData(), moved);
-        indexCanvas(cp, FolioCanvas.serializeCanvas(FolioCanvas.getData()), c.mtime);
-        canvasChanged(); FolioCanvas.refreshFiles();
+        CinderCanvas.renameRefs(CinderCanvas.getData(), moved);
+        indexCanvas(cp, CinderCanvas.serializeCanvas(CinderCanvas.getData()), c.mtime);
+        canvasChanged(); CinderCanvas.refreshFiles();
       } else {
         const got = (await readMany([cp]))[cp];
-        const data = FolioCanvas.parseCanvas(got.content);
-        if (!FolioCanvas.renameRefs(data, moved)) continue;
-        const text = FolioCanvas.serializeCanvas(data);
+        const data = CinderCanvas.parseCanvas(got.content);
+        if (!CinderCanvas.renameRefs(data, moved)) continue;
+        const text = CinderCanvas.serializeCanvas(data);
         await writeFile(cp, text, got.mtime);
         indexCanvas(cp, text, S.files.get(cp).mtime);
       }
@@ -2379,7 +2379,7 @@ async function renamePath(from, to) {
   }
   reindexAll();
   renderTree();
-  if (curMoved) { titleEl.value = noteName(S.cur); $('#crumbs').innerHTML = crumbsHtml(S.cur); document.title = `${noteName(S.cur)} — ${VAULT} — Folio`; store('last', S.cur); }
+  if (curMoved) { titleEl.value = noteName(S.cur); $('#crumbs').innerHTML = crumbsHtml(S.cur); document.title = `${noteName(S.cur)} — ${VAULT} — Cinder`; store('last', S.cur); }
   renderTreeActive(true);
   refreshPanels();
   if (n) toast(`Updated links in ${n} file${n > 1 ? 's' : ''}`);
@@ -2468,9 +2468,9 @@ function templateEnv(path, selection, templatePath) {
 // failed or was cancelled (the reason is shown as a toast).
 async function applyTemplate(text, path, { selection = '', templatePath = '' } = {}) {
   text = fillTemplate(text, noteName(path));
-  if (!FolioTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
+  if (!CinderTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
   try {
-    const r = await FolioTemplater.render(text, templateEnv(path, selection, templatePath));
+    const r = await CinderTemplater.render(text, templateEnv(path, selection, templatePath));
     if (r.aborted) { toast('Template cancelled'); return null; }
     return r;
   } catch (e) { toast(`Template error${templatePath ? ` in ${noteName(templatePath)}` : ''}: ${e.message}`, 6000); return null; }
@@ -2539,7 +2539,7 @@ async function newNoteFromTemplate() {
 async function replaceTemplatesInNote() {
   if (S.view !== 'note') return toast('Open a note first');
   const target = S.cur, src = ed.value;
-  if (!FolioTemplater.hasTemplaterSyntax(src) && !/\{\{\s*(date|time|title)/.test(src)) return toast('This note has no template commands');
+  if (!CinderTemplater.hasTemplaterSyntax(src) && !/\{\{\s*(date|time|title)/.test(src)) return toast('This note has no template commands');
   const r = await applyTemplate(src, target);
   if (!r || S.cur !== target || ed.value !== src) return;
   if (S.mode !== 'edit') setMode('edit');
@@ -2598,7 +2598,7 @@ async function attachAndLink(file, pasted, editor = ed) {
 // ============================================================ properties
 
 // Property types by name, shared by the whole vault like Obsidian's: .obsidian/types.json when the
-// vault has an .obsidian folder, otherwise Folio's own settings.
+// vault has an .obsidian folder, otherwise Cinder's own settings.
 S.propTypes = { ...(cfg.propTypes || {}) };
 let obsidianTypes = false;
 async function loadPropTypes() {
@@ -2612,13 +2612,13 @@ async function savePropType(key, type) {
   }
   cfg.propTypes = { ...(cfg.propTypes || {}), [key]: type }; saveCfg();
 }
-const propType = (key, value) => S.propTypes[key] || FolioProps.inferType(key, value);
+const propType = (key, value) => S.propTypes[key] || CinderProps.inferType(key, value);
 
 // A frontmatter block's properties, or null if it isn't a YAML mapping (then it shows as text).
 function propsOf(fmText) {
   const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n?---[ \t]*$/.exec(fmText.replace(/\s+$/, ''));
   if (!m) return null;
-  try { const v = FolioBases.parseYaml(m[1]); return v == null ? {} : typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+  try { const v = CinderBases.parseYaml(m[1]); return v == null ? {} : typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
 }
 
 // Names in use across the vault (commonest first), and the values a property already has.
@@ -2630,7 +2630,7 @@ function knownProps() {
   }
   // Types come from a typed reading of one note that has the property (5, not "5").
   return [...n.values()].sort((a, b) => b.count - a.count || collator.compare(a.name, b.name))
-    .map(e => ({ name: e.name, get type() { return propType(e.name, FolioBases.frontmatter(e.note.content)[e.name]); } }));
+    .map(e => ({ name: e.name, get type() { return propType(e.name, CinderBases.frontmatter(e.note.content)[e.name]); } }));
 }
 function knownValues(key) {
   const c = new Map();
@@ -2647,18 +2647,18 @@ function knownValues(key) {
 function mountProps(el, fmText, { edit, exit, from }) {
   const props = propsOf(fmText) || {};
   const redraw = () => { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); };
-  return FolioProps.render(el, {
+  return CinderProps.render(el, {
     props,
     typeOf: (k, v) => propType(k, v),
-    set: (k, v) => edit(c => FolioBases.setFrontmatter(c, k, v)),
+    set: (k, v) => edit(c => CinderBases.setFrontmatter(c, k, v)),
     rename: (a, b) => {
       if (S.propTypes[a] && !S.propTypes[b]) savePropType(b, S.propTypes[a]);
-      edit(c => FolioBases.renameFrontmatter(c, a, b));
+      edit(c => CinderBases.renameFrontmatter(c, a, b));
     },
     setType: async (k, t) => {
       await savePropType(k, t);
-      const v = FolioProps.coerce(props[k], t);
-      if (JSON.stringify(v) !== JSON.stringify(props[k] ?? null)) edit(c => FolioBases.setFrontmatter(c, k, v));
+      const v = CinderProps.coerce(props[k], t);
+      if (JSON.stringify(v) !== JSON.stringify(props[k] ?? null)) edit(c => CinderBases.setFrontmatter(c, k, v));
       redraw();
     },
     keys: () => knownProps(),
@@ -2702,7 +2702,7 @@ function knownPropsCounted() {
     const e = n.get(k) || { name: k, count: 0, note };
     e.count++; n.set(k, e);
   }
-  return [...n.values()].sort((a, b) => collator.compare(a.name, b.name)).map(e => ({ name: e.name, count: e.count, type: propType(e.name, FolioBases.frontmatter(e.note.content)[e.name]) }));
+  return [...n.values()].sort((a, b) => collator.compare(a.name, b.name)).map(e => ({ name: e.name, count: e.count, type: propType(e.name, CinderBases.frontmatter(e.note.content)[e.name]) }));
 }
 function knownValueCounts(key) {
   const c = new Map();
@@ -2747,7 +2747,7 @@ function propMenu(k, x, y) {
     [`Show notes with “${k}”`, () => searchFor(`[${quoteProp(k)}]`)],
     ['Rename everywhere…', () => renamePropEverywhere(k)],
     null,
-    ...FolioProps.TYPES.map(([t, name]) => [`Type: ${name}${t === cur ? '  ✓' : ''}`, async () => { await savePropType(k, t); S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); renderPropsPanel(); }]),
+    ...CinderProps.TYPES.map(([t, name]) => [`Type: ${name}${t === cur ? '  ✓' : ''}`, async () => { await savePropType(k, t); S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); renderPropsPanel(); }]),
     null,
     ['Remove from every note…', () => removePropEverywhere(k), 'danger'],
   ]);
@@ -2773,7 +2773,7 @@ async function editPropEverywhere(k, f) {
 async function renamePropEverywhere(k) {
   const to = (await promptModal(`Rename “${k}” in every note`, 'New name', k))?.trim();
   if (!to || to === k) return;
-  const { n, skipped } = await editPropEverywhere(k, (text, p) => S.notes.get(p)?.fm && to in S.notes.get(p).fm ? null : FolioBases.renameFrontmatter(text, k, to));
+  const { n, skipped } = await editPropEverywhere(k, (text, p) => S.notes.get(p)?.fm && to in S.notes.get(p).fm ? null : CinderBases.renameFrontmatter(text, k, to));
   if (S.propTypes[k] && !S.propTypes[to]) await savePropType(to, S.propTypes[k]);
   propsOpen.delete(k);
   renderPropsPanel();
@@ -2782,7 +2782,7 @@ async function renamePropEverywhere(k) {
 async function removePropEverywhere(k) {
   const count = [...S.notes.values()].filter(n => n.fm && k in n.fm).length;
   if (!confirm(`Remove the property “${k}” from ${count} note${count === 1 ? '' : 's'}?`)) return;
-  const { n } = await editPropEverywhere(k, text => FolioBases.setFrontmatter(text, k, undefined));
+  const { n } = await editPropEverywhere(k, text => CinderBases.setFrontmatter(text, k, undefined));
   toast(`Removed from ${n} note${n === 1 ? '' : 's'}`);
 }
 
@@ -2811,7 +2811,7 @@ function viewImages(path, list, ctx = {}) {
   const items = list.length ? list : [];
   let i = items.findIndex(it => it.path === path);
   if (i < 0) { items.unshift({ src: rawUrl(path), name: basename(path), path }); i = 0; }
-  return FolioImages.lightbox(items, i, imageActions(ctx));
+  return CinderImages.lightbox(items, i, imageActions(ctx));
 }
 
 // What the viewer's buttons do. ctx.retarget(newPath) repoints the embed the image came from.
@@ -2851,7 +2851,7 @@ async function saveBeside(like, suffix, blob, ext) {
 
 // Crop into a copy (the original stays), then point the embed at the copy.
 async function cropImage(p, ctx = {}) {
-  const blob = await FolioImages.crop(rawUrl(p));
+  const blob = await CinderImages.crop(rawUrl(p));
   if (!blob) return;
   let np;
   try { np = await saveBeside(p, 'cropped', blob, 'png'); } catch (e) { return toast('Couldn’t save the cropped image: ' + e.message); }
@@ -2867,15 +2867,15 @@ async function annotateImage(p, ctx = {}) {
   const bmp = await createImageBitmap(blob).catch(() => null);
   if (!bmp) return toast('Couldn’t read the image');
   const md = cfg.drawingFormat === 'md';
-  const scene = FolioSketch.emptyScene(), id = FolioSketch.randomId(40);
-  scene.elements.push(FolioSketch.newElement('image', { x: 0, y: 0, width: bmp.width, height: bmp.height, fileId: id, locked: true, strokeColor: 'transparent', backgroundColor: 'transparent' }));
+  const scene = CinderSketch.emptyScene(), id = CinderSketch.randomId(40);
+  scene.elements.push(CinderSketch.newElement('image', { x: 0, y: 0, width: bmp.width, height: bmp.height, fileId: id, locked: true, strokeColor: 'transparent', backgroundColor: 'transparent' }));
   const embedded = {};
   // .excalidraw.md points at the vault file (like the Obsidian plugin); .excalidraw carries the image.
   if (md) embedded[id] = p;
   else scene.files[id] = { mimeType: blob.type || 'image/png', id, dataURL: await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(blob); }), created: Date.now() };
   const stem = basename(p).replace(/\.[^.]+$/, '');
   const path = uniquePath(dirname(p), `${stem} (annotated).${md ? 'excalidraw.md' : 'excalidraw'}`);
-  try { await writeFile(path, FolioSketch.serializeDrawing(scene, md ? { format: 'md', source: '', embedded } : { format: 'json' })); }
+  try { await writeFile(path, CinderSketch.serializeDrawing(scene, md ? { format: 'md', source: '', embedded } : { format: 'json' })); }
   catch (e) { return toast('Couldn’t create the drawing: ' + e.message); }
   reindexAll(); renderTree();
   if (ctx.retarget) { ctx.retarget(path); await save(); }
@@ -3044,13 +3044,13 @@ async function insertScreenshot(o = {}) {
   if (delay) countdown(delay);
   try {
     const q = new URLSearchParams({ mode: o.screen ? 'screen' : 'region', hide: cfg.screenshotHide ? '1' : '0', delay: String(delay) });
-    const r = await fetch(`/api/screenshot?${q}`, { method: 'POST', headers: { 'X-Folio-Token': TOKEN } });
+    const r = await fetch(`/api/screenshot?${q}`, { method: 'POST', headers: { 'X-Cinder-Token': TOKEN } });
     if (r.status === 204) return;
     if (r.ok) blob = await r.blob();
     else {
       const msg = (await r.json().catch(() => ({}))).error || r.statusText;
-      if (r.status !== 501 || !FolioImages.canCaptureScreen()) return toast('Screenshot failed: ' + msg, 5000);
-      blob = await FolioImages.captureScreen({ crop: !o.screen });
+      if (r.status !== 501 || !CinderImages.canCaptureScreen()) return toast('Screenshot failed: ' + msg, 5000);
+      blob = await CinderImages.captureScreen({ crop: !o.screen });
     }
   } catch (e) { return toast('Screenshot failed: ' + e.message, 5000); }
   finally { shooting = false; }
@@ -3070,8 +3070,8 @@ async function insertScreenshot(o = {}) {
   try { await writeFile(path, file); } catch (e) { return toast('Couldn’t save the screenshot: ' + e.message); }
   if (cfg.attachFolder) S.dirs.add(cfg.attachFolder);
   reindexAll(); renderTree();
-  const card = FolioCanvas.addFile(path);
-  if (annotate && card) annotateImage(path, { retarget: np => FolioCanvas.setFile(card.id, np) });
+  const card = CinderCanvas.addFile(path);
+  if (annotate && card) annotateImage(path, { retarget: np => CinderCanvas.setFile(card.id, np) });
 }
 
 // "3… 2… 1…" while a delayed screenshot waits.
@@ -3233,7 +3233,7 @@ function openSwitcher() {
 
 // Every command, for the palette, hotkeys and the shortcuts sheet. `key` is the default binding
 // in CodeMirror notation (Mod = Ctrl, or Cmd on a Mac); Settings → Hotkeys overrides it
-// (cfg.hotkeys: id -> key, '' for none). Editor commands come from FolioEditor and are bound in
+// (cfg.hotkeys: id -> key, '' for none). Editor commands come from CinderEditor and are bound in
 // the editor's own keymap, so they work while typing and never leak out of it.
 const MAC = /Mac|iP(hone|ad)/.test(navigator.platform);
 const inNote = f => () => S.view === 'note' ? f() : toast('Open a note first');
@@ -3299,7 +3299,7 @@ const APP_COMMANDS = [
   ['vault', 'Open another vault…', '', () => switchVault()],
   ['settings', 'Settings', 'Mod-,', () => openSettings()],
 ].map(([id, name, key, run]) => ({ id, name, key, run }));
-const EDITOR_COMMANDS = Object.entries(FolioEditor.commands).map(([id, c]) => ({
+const EDITOR_COMMANDS = Object.entries(CinderEditor.commands).map(([id, c]) => ({
   id: 'editor:' + id, name: id === 'add-property' ? c.name : `Format: ${c.name}`, key: c.key, editor: id,
   run: inNote(() => { setMode('edit'); ed.run(id); }),
 }));
@@ -3307,7 +3307,7 @@ const COMMANDS = [...APP_COMMANDS, ...EDITOR_COMMANDS];
 const CMD_BY_ID = new Map(COMMANDS.map(c => [c.id, c]));
 
 const keyFor = c => (cfg.hotkeys && c.id in cfg.hotkeys ? cfg.hotkeys[c.id] : c.key) || '';
-// Editor key overrides by the editor's own command ids, for FolioEditor.create / setKeys.
+// Editor key overrides by the editor's own command ids, for CinderEditor.create / setKeys.
 const editorKeys = () => Object.fromEntries(EDITOR_COMMANDS.map(c => [c.editor, keyFor(c)]));
 let HOTKEYS = new Map(); // key -> app command
 function rebuildHotkeys() {
@@ -3468,21 +3468,21 @@ function openSettings() {
     <label>New drawings are saved as<select class="field" name="drawingFormat"><option value="excalidraw">.excalidraw (Excalidraw file; also opens on excalidraw.com)</option><option value="md">.excalidraw.md (Obsidian Excalidraw plugin)</option></select></label>
     <label>Default view for notes<select class="field" name="defaultMode"><option value="edit">Editing</option><option value="read">Reading</option></select></label>
     <label>Light or dark<select class="field" name="theme"><option value="">Follow system</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
-    <label>Colour theme<select class="field" name="palette">${FolioThemes.list.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
+    <label>Colour theme<select class="field" name="palette">${CinderThemes.list.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
     <label class="check"><input type="checkbox" name="livePreview"> Live preview (hide Markdown syntax except where you're editing)</label>
     <label class="check"><input type="checkbox" name="readable"> Readable line length</label>
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
     <label class="check"><input type="checkbox" name="mathSnippets"> Math shortcuts while typing equations (<code>//</code> fraction, <code>@a</code> α, <code>mk</code>+Tab inline math…)</label>
-    <label class="check"><input type="checkbox" name="screenshotHide"> Hide Folio while taking a screenshot (desktop app)</label>
+    <label class="check"><input type="checkbox" name="screenshotHide"> Hide Cinder while taking a screenshot (desktop app)</label>
     <div class="row" style="justify-content:flex-start;gap:12px"><label>Screenshot delay<select class="field" name="screenshotDelay"><option value="0">None</option><option value="3">3 seconds</option><option value="5">5 seconds</option><option value="10">10 seconds</option></select></label>
     <label>After a screenshot<select class="field" name="screenshotAfter"><option value="insert">Insert it</option><option value="annotate">Open it in a drawing to annotate</option></select></label></div>
-    <label>CSS snippets folder (every <code>.css</code> file in it styles Folio; pair with a note's <code>cssclasses</code>)<input class="field" name="cssFolder" placeholder="e.g. Snippets (empty: none)"></label>
-    ${NATIVE ? `<label>Window frame<select class="field" name="windowFrame"><option value="custom">Folio’s own (matches the theme; drag the tab bar to move)</option><option value="native">The system’s title bar</option></select></label>` : ''}
+    <label>CSS snippets folder (every <code>.css</code> file in it styles Cinder; pair with a note's <code>cssclasses</code>)<input class="field" name="cssFolder" placeholder="e.g. Snippets (empty: none)"></label>
+    ${NATIVE ? `<label>Window frame<select class="field" name="windowFrame"><option value="custom">Cinder’s own (matches the theme; drag the tab bar to move)</option><option value="native">The system’s title bar</option></select></label>` : ''}
     <label>Properties at the top of notes<select class="field" name="properties"><option value="visible">Show as a table you can edit</option><option value="source">Show the YAML frontmatter as text</option></select></label>
     <div class="row" style="justify-content:flex-start"><button type="button" class="btn" data-x-hotkeys>Hotkeys…</button><button type="button" class="btn" data-x-shortcuts>Keyboard shortcuts</button></div>
     <label>Text font (any font installed on this computer; empty for the system font)<input class="field" name="fontText" list="font-text-list" placeholder="System font" spellcheck="false"></label>
-    <label>Code font (empty for JetBrains Mono, which comes with Folio)<input class="field" name="fontMono" list="font-mono-list" placeholder="JetBrains Mono" spellcheck="false"></label>
+    <label>Code font (empty for JetBrains Mono, which comes with Cinder)<input class="field" name="fontMono" list="font-mono-list" placeholder="JetBrains Mono" spellcheck="false"></label>
     <datalist id="font-text-list"><option>Inter</option><option>Segoe UI</option><option>Noto Sans</option><option>Ubuntu</option><option>Georgia</option><option>Iowan Old Style</option><option>Literata</option><option>JetBrains Mono</option></datalist>
     <datalist id="font-mono-list"><option>JetBrains Mono</option><option>JetBrainsMono Nerd Font</option><option>FiraCode Nerd Font</option><option>Hack Nerd Font</option><option>Iosevka</option><option>Fira Code</option><option>Cascadia Code</option><option>Consolas</option><option>Menlo</option><option>Ubuntu Mono</option></datalist>
     <div class="font-preview">Preview: <span class="fp-text">The quick brown fox — 0O 1lI</span> <code class="fp-mono">fn main() { 0O 1lI =&gt; }</code> <span class="fp-icons">\uf09b \ue7a8 \uf0e7 \uf011 \udb80\ude0c</span></div>
@@ -3565,7 +3565,7 @@ async function chooseTheme() {
   const orig = cfg.palette;
   const v = await picker({
     placeholder: 'Choose a colour theme…',
-    items: q => rank(FolioThemes.list, q, t => t.name).map(t => ({ main: t.name, sub: t.id === orig ? 'current' : '', value: t.id })),
+    items: q => rank(CinderThemes.list, q, t => t.name).map(t => ({ main: t.name, sub: t.id === orig ? 'current' : '', value: t.id })),
     initial: orig,
     onHighlight: id => { if (cfg.palette !== id) { cfg.palette = id; applyTheme(); } },
   });
@@ -3595,7 +3595,7 @@ function showPanel(name, focus = false) {
 function toggleSide(which) {
   document.body.classList.toggle(`app-no-${which}`);
   store('layout', { left: !document.body.classList.contains('app-no-left'), right: !document.body.classList.contains('app-no-right') });
-  if (S.view === 'graph') FolioGraph.resize();
+  if (S.view === 'graph') CinderGraph.resize();
 }
 
 function searchFor(q) {
@@ -3840,7 +3840,7 @@ function drawRight(body, light) {
   if (!$('#panel-tags').hidden && !light) renderTags();
   if (!$('#panel-props').hidden && !light) renderPropsPanel();
   if (!$('#panel-search').hidden && $('#search-input').value && !light) runSearch();
-  if (S.view === 'graph' && !light) FolioGraph.refresh();
+  if (S.view === 'graph' && !light) CinderGraph.refresh();
   updateStatus();
   if (!S.cur) { body.innerHTML = '<div class="none">No file open.</div>'; return; }
   const n = S.notes.get(S.cur);
@@ -3929,12 +3929,12 @@ function updateStatus() {
     right.textContent = 'Base';
   } else if (S.view === 'canvas' && S.cur) {
     const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
-    const n = FolioCanvas.count();
+    const n = CinderCanvas.count();
     left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
     right.textContent = `Canvas · ${n.toLocaleString()} card${n === 1 ? '' : 's'}`;
   } else if (S.view === 'drawing' && S.cur) {
     const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
-    const n = FolioDraw.count();
+    const n = CinderDraw.count();
     left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
     right.textContent = `Drawing · ${n.toLocaleString()} element${n === 1 ? '' : 's'}`;
   } else if (S.view === 'note' && S.cur) {
@@ -4005,10 +4005,10 @@ async function openGraph(local) {
   showView('graph');
   setSaveState('');
   $('#crumbs').innerHTML = `<b>${local && S.cur ? 'Local graph · ' + esc(noteName(S.cur)) : 'Graph view'}</b>`;
-  FolioGraph.refresh(true);
+  CinderGraph.refresh(true);
 }
 
-FolioGraph.init($('#graph-canvas'), {
+CinderGraph.init($('#graph-canvas'), {
   data: () => graphData(graphOptions()),
   open: id => {
     if (id.startsWith('tag:')) return searchFor('tag:' + id.slice(4));
@@ -4034,7 +4034,7 @@ function mountCardEditor(host, o) {
         setNote(note, body, r.mtime);
         S.files.set(note, { ...S.files.get(note), mtime: r.mtime, size: new Blob([body]).size });
         resolveNote(note);
-        FolioCanvas.refreshFiles();
+        CinderCanvas.refreshFiles();
       } catch (e) {
         if (e.status !== 409) { toast('Save failed: ' + e.message); dirty = true; return; }
         // Changed elsewhere: take the version on disk rather than overwrite it.
@@ -4047,7 +4047,7 @@ function mountCardEditor(host, o) {
   };
   let alive = true;
   const from = () => note || o.from || S.cur;
-  const cm = FolioEditor.create(host, editorHooks(from, {
+  const cm = CinderEditor.create(host, editorHooks(from, {
     onChange: () => {
       if (note) { dirty = true; clearTimeout(timer); timer = setTimeout(save, 700); }
       else o.onChange?.(cm.value);
@@ -4078,7 +4078,7 @@ function mountCardEditor(host, o) {
   };
 }
 
-FolioCanvas.init($('#view-canvas'), {
+CinderCanvas.init($('#view-canvas'), {
   onChange: () => canvasChanged(),
   renderMarkdown: (el, text, from) => { renderInto(el, text, from || S.cur, 1); for (const cb of $$('input[type=checkbox]', el)) cb.disabled = false; },
   renderFile: (el, p, sub) => renderCanvasFile(el, p, sub),
@@ -4118,7 +4118,7 @@ FolioCanvas.init($('#view-canvas'), {
   modalOpen: () => $('#modal-root').children.length > 0,
 });
 
-FolioDraw.init($('#view-drawing'), {
+CinderDraw.init($('#view-drawing'), {
   onChange: () => drawingChanged(),
   openLink: link => openDrawingLink(link),
   menu: (x, y, items) => menu(x, y, items),
@@ -4137,8 +4137,8 @@ FolioDraw.init($('#view-drawing'), {
   },
 });
 
-for (const id of ['g-local', 'g-depth', 'g-tags', 'g-unresolved', 'g-orphans', 'g-attach']) $('#' + id).addEventListener('input', () => FolioGraph.refresh(id === 'g-local' || id === 'g-depth'));
-$('#g-filter').addEventListener('input', debounce(() => FolioGraph.refresh(), 200));
+for (const id of ['g-local', 'g-depth', 'g-tags', 'g-unresolved', 'g-orphans', 'g-attach']) $('#' + id).addEventListener('input', () => CinderGraph.refresh(id === 'g-local' || id === 'g-depth'));
+$('#g-filter').addEventListener('input', debounce(() => CinderGraph.refresh(), 200));
 
 // ============================================================ commands & keys
 
@@ -4201,7 +4201,7 @@ function makeResizer(handle, side) {
     const mv = ev => {
       const w = Math.max(180, Math.min(600, w0 + (side === 'left' ? 1 : -1) * (ev.clientX - x0)));
       panel.style.width = w + 'px';
-      if (S.view === 'graph') FolioGraph.resize();
+      if (S.view === 'graph') CinderGraph.resize();
     };
     const up = () => {
       handle.classList.remove('drag');
@@ -4214,7 +4214,7 @@ function makeResizer(handle, side) {
 
 // ============================================================ boot
 
-const WELCOME = `Folio is a local notes app. Your notes are plain Markdown files in this folder, so the same vault opens in Obsidian or any text editor.
+const WELCOME = `Cinder is a local notes app. Your notes are plain Markdown files in this folder, so the same vault opens in Obsidian or any text editor.
 
 ## The basics
 - Link notes with double brackets: [[Getting around]]. Clicking a link to a note that doesn't exist creates it.
@@ -4242,7 +4242,7 @@ const WELCOME = `Folio is a local notes app. Your notes are plain Markdown files
 - [ ] Make a daily note from the calendar icon
 
 > [!tip] Nothing leaves this machine
-> Folio only listens on 127.0.0.1 and has no plugin system, so it can't reach the network or run third-party code.
+> Cinder only listens on 127.0.0.1 and has no plugin system, so it can't reach the network or run third-party code.
 `;
 
 async function boot() {
@@ -4257,7 +4257,7 @@ async function boot() {
   makeResizer($('#resize-left'), 'left');
   makeResizer($('#resize-right'), 'right');
   showPanel('files', true);
-  try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Folio server: ${esc(e.message)}. Is it still running?</p>`; return; }
+  try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   renderTree();
   setInterval(poll, 2000);
   updateTaskBadge();
@@ -4272,11 +4272,11 @@ async function boot() {
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else poll(); });
 // Native window: Rust asks us to flush edits before it closes.
-window.__folioClose = async () => {
+window.__cinderClose = async () => {
   window.ipc.postMessage('close-ack');
   flushDocViews();
   try { await save(); } catch { }
-  if (S.dirty && !confirm('Folio couldn’t save your latest changes.\n\nClose anyway and lose them?')) {
+  if (S.dirty && !confirm('Cinder couldn’t save your latest changes.\n\nClose anyway and lose them?')) {
     window.ipc.postMessage('close-cancel');
     return;
   }
@@ -4286,12 +4286,12 @@ window.__folioClose = async () => {
 window.addEventListener('beforeunload', e => {
   if (NATIVE || !S.dirty || !S.cur) return;
   let body, base;
-  if (S.view === 'drawing' && S.drawing) { FolioDraw.flush(); body = drawingContent(S.drawing); base = S.drawing.mtime; }
-  else if (S.view === 'canvas' && S.canvasDoc) { FolioCanvas.flush(); body = FolioCanvas.serializeCanvas(FolioCanvas.getData()); base = S.canvasDoc.mtime; }
+  if (S.view === 'drawing' && S.drawing) { CinderDraw.flush(); body = drawingContent(S.drawing); base = S.drawing.mtime; }
+  else if (S.view === 'canvas' && S.canvasDoc) { CinderCanvas.flush(); body = CinderCanvas.serializeCanvas(CinderCanvas.getData()); base = S.canvasDoc.mtime; }
   else if (S.view === 'base' && S.baseDoc) { body = S.baseDoc.text; base = S.baseDoc.mtime; }
   else if (S.view === 'note') { body = ed.value; base = S.notes.get(S.cur)?.mtime; }
   else return;
-  fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body, keepalive: true, headers: { 'X-Folio-Token': TOKEN, ...(base ? { 'X-Base-Mtime': String(base) } : {}) } });
+  fetch(`/api/file?path=${enc(S.cur)}`, { method: 'PUT', body, keepalive: true, headers: { 'X-Cinder-Token': TOKEN, ...(base ? { 'X-Base-Mtime': String(base) } : {}) } });
 });
 
 boot();

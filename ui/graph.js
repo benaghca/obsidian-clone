@@ -1,7 +1,7 @@
-/* Folio graph view: canvas + a small force-directed layout. */
+/* Cinder graph view: canvas + a small force-directed layout. */
 'use strict';
 
-window.FolioGraph = (() => {
+window.CinderGraph = (() => {
   let canvas, ctx, opts;
   let nodes = [], edges = [], byId = new Map(), adj = new Map();
   let current = null, visible = false, raf = 0, alpha = 0, dirty = true, fitted = false;

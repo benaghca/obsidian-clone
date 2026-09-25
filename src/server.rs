@@ -12,7 +12,7 @@ pub fn run(ctx: Ctx, port: u16, open: bool, app_window: bool) -> ! {
     let url = format!("http://127.0.0.1:{port}/");
     let allowed_hosts = [format!("127.0.0.1:{port}"), format!("localhost:{port}")];
 
-    println!("Folio (browser mode)");
+    println!("Cinder (browser mode)");
     println!("  vault: {}", ctx.vault().display());
     println!("  open:  {url}");
     println!("  (Ctrl+C to quit)");

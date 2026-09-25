@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="folio-token" content="{{TOKEN}}">
-<meta name="folio-vault" content="{{VAULT}}">
-<meta name="folio-mode" content="{{MODE}}">
-<meta name="folio-frame" content="{{FRAME}}">
-<title>{{VAULT}} — Folio</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c5cff'/%3E%3Cpath d='M10 8h12v3H13.5v4H20v3h-6.5v6H10z' fill='white'/%3E%3C/svg%3E">
+<meta name="cinder-token" content="{{TOKEN}}">
+<meta name="cinder-vault" content="{{VAULT}}">
+<meta name="cinder-mode" content="{{MODE}}">
+<meta name="cinder-frame" content="{{FRAME}}">
+<title>{{VAULT}} — Cinder</title>
+<link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/vendor/katex/katex.min.css">
 <link rel="stylesheet" href="/style.css">
 </head>
@@ -112,6 +112,7 @@
 
     <div id="view-empty" class="view">
       <div class="empty">
+        <img class="empty-logo" src="/logo.svg" alt="" width="72" height="72">
         <h2>No note open</h2>
         <p><a data-cmd="new-note">Create a new note</a> <kbd>Ctrl N</kbd></p>
         <p><a data-cmd="switcher">Open a note</a> <kbd>Ctrl O</kbd></p>

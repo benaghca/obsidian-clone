@@ -20,6 +20,7 @@ const BASES_JS: &str = include_str!("../ui/bases.js");
 const TASKS_JS: &str = include_str!("../ui/tasks.js");
 const IMAGES_JS: &str = include_str!("../ui/images.js");
 const PROPERTIES_JS: &str = include_str!("../ui/properties.js");
+const LOGO_SVG: &str = include_str!("../ui/logo.svg");
 const DRAW_RENDER_JS: &str = include_str!("../ui/draw-render.js");
 const STYLE_CSS: &str = include_str!("../ui/style.css");
 const MARKED_JS: &str = include_str!("../ui/vendor/marked.min.js");
@@ -60,7 +61,7 @@ const VENDOR_FILES: &[(&str, &str, &[u8])] = &[
     ("katex/fonts/KaTeX_Typewriter-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/katex/fonts/KaTeX_Typewriter-Regular.woff2")),
 ];
 
-/// Everything the page may load comes from Folio itself; nothing else is allowed.
+/// Everything the page may load comes from Cinder itself; nothing else is allowed.
 pub const CSP: &str = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
                        img-src 'self' data: blob:; media-src 'self'; connect-src 'self'; \
                        object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'";
@@ -133,6 +134,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/properties.js" => return out(200, "text/javascript", PROPERTIES_JS.into()),
             "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
             "/style.css" => return out(200, "text/css", STYLE_CSS.into()),
+            "/logo.svg" => return out(200, "image/svg+xml", LOGO_SVG.into()),
             "/vendor/marked.min.js" => return out(200, "text/javascript", MARKED_JS.into()),
             "/vendor/purify.min.js" => return out(200, "text/javascript", PURIFY_JS.into()),
             "/vendor/editor.bundle.js" => return out(200, "text/javascript", EDITOR_JS.into()),
@@ -151,7 +153,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
 
     // A per-launch token only the served page knows. Custom header for fetch();
     // query param only for /api/raw (used by <img src>).
-    let tok_ok = header("X-Folio-Token").as_deref() == Some(ctx.token.as_str())
+    let tok_ok = header("X-Cinder-Token").as_deref() == Some(ctx.token.as_str())
         || (path == "/api/raw" && q("t").as_deref() == Some(ctx.token.as_str()));
     if !tok_ok {
         return text(401, "bad token");
@@ -279,7 +281,7 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
     }
     // Atomic write: temp file in the same folder, then rename over the target.
     let name = full.file_name().unwrap().to_string_lossy().to_string();
-    let tmp = full.with_file_name(format!(".{name}.folio-tmp"));
+    let tmp = full.with_file_name(format!(".{name}.cinder-tmp"));
     fs::write(&tmp, body).map_err(io_err)?;
     fs::rename(&tmp, &full).map_err(|e| {
         let _ = fs::remove_file(&tmp);
@@ -290,7 +292,7 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
 }
 
 /// Obsidian keeps property types (text, number, date…) in .obsidian/types.json. This is the one
-/// file under .obsidian Folio touches: it reads the "types" map, and a PUT merges names into it
+/// file under .obsidian Cinder touches: it reads the "types" map, and a PUT merges names into it
 /// (a null type removes one), keeping everything else. Only when the vault already has an
 /// .obsidian folder; otherwise 404 and the page keeps types in its own settings.
 fn api_prop_types(vault: &Path, update: Option<Value>) -> ApiResult {
@@ -325,7 +327,7 @@ fn api_prop_types(vault: &Path, update: Option<Value>) -> ApiResult {
             }
         }
         let text = serde_json::to_string_pretty(&doc).map_err(|e| (500, e.to_string()))?;
-        let tmp = dir.join(".types.json.folio-tmp");
+        let tmp = dir.join(".types.json.cinder-tmp");
         fs::write(&tmp, text).map_err(io_err)?;
         fs::rename(&tmp, &file).map_err(|e| {
             let _ = fs::remove_file(&tmp);
@@ -548,7 +550,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");
@@ -559,7 +561,7 @@ mod tests {
 
     #[test]
     fn prop_types_merge_into_obsidian_file() {
-        let dir = std::env::temp_dir().join(format!("folio-types-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("cinder-types-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         assert!(api_prop_types(&dir, None).is_ok(), "no .obsidian: empty types");

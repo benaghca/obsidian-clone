@@ -838,7 +838,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 #view-note.no-title .inline-title, #view-note.no-title .preview-title { display: none; }
 #view-note.center-images #preview img, #view-note.center-images .cm-image-block { display: block; margin-left: auto; margin-right: auto; }
 
-/* ---------------------------------------------------------------- Folio's own window frame (desktop) */
+/* ---------------------------------------------------------------- Cinder's own window frame (desktop) */
 #win-controls { position: fixed; top: 0; right: 0; z-index: 40; display: flex; height: 36px; }
 #win-controls button { width: 38px; height: 100%; display: grid; place-items: center; border: 0; background: none; color: var(--muted); cursor: default; }
 #win-controls button:hover { background: var(--accent-soft); color: var(--text); }
@@ -853,10 +853,11 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .win-ne, .win-nw, .win-se, .win-sw { width: 8px; height: 8px; } .win-ne { top: 0; right: 0; cursor: nesw-resize; } .win-nw { top: 0; left: 0; cursor: nwse-resize; }
 .win-se { bottom: 0; right: 0; cursor: nwse-resize; } .win-sw { bottom: 0; left: 0; cursor: nesw-resize; }
 .tabs button svg { display: none; }
-/* Folio's frame: the top rows line up at 36px, the right sidebar's tabs become icons, and the
+/* Cinder's frame: the top rows line up at 36px, the right sidebar's tabs become icons, and the
    window buttons sit at the top right. */
 .frame-custom #right .tabs { height: 36px; padding: 0 116px 0 8px; align-items: stretch; background: var(--bg2); }
 .frame-custom #right .tabs button { display: grid; place-items: center; padding: 0 9px; }
 .frame-custom #right .tabs button svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .frame-custom #right .tabs button span { display: none; }
 .frame-custom #left .panel-head { height: 36px; padding-top: 0; padding-bottom: 0; }
+.empty-logo { display: block; margin: 0 auto 10px; opacity: .95; }

@@ -1,4 +1,4 @@
-/* Folio images: a zoomable image viewer (the image file view, and a lightbox over notes and
+/* Cinder images: a zoomable image viewer (the image file view, and a lightbox over notes and
  * canvases), a crop tool, and screen capture through the browser for when the system has no
  * screenshot tool. No dependencies; everything draws with the DOM and a 2D canvas. */
 'use strict';
@@ -282,5 +282,5 @@
     finally { URL.revokeObjectURL(url); }
   }
 
-  root.FolioImages = { viewer, lightbox, crop, captureScreen, canCaptureScreen };
+  root.CinderImages = { viewer, lightbox, crop, captureScreen, canCaptureScreen };
 })(typeof window !== 'undefined' ? window : globalThis);

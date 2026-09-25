@@ -189,7 +189,7 @@ t('md output passes the Obsidian plugin\'s own parsing regexes', () => {
   assert.deepEqual(ids.slice(0, 2), [t1.id, t2.id]);
   const links = [...md.slice(md.indexOf('## Element Links\n'), md.indexOf('## Drawing')).matchAll(RE_ELEMENT_LINKS)].map(x => [x[1], x[2]]);
   assert.deepEqual(links, [[r.id, '[[Other]]']]);
-  // links edited in the note win on load; editing in Folio rewrites the section
+  // links edited in the note win on load; editing in Cinder rewrites the section
   const edited = md.replace(`${r.id}: [[Other]]`, `${r.id}: [[Renamed]]`);
   const p = S.parseDrawing(edited, 'x.excalidraw.md');
   assert.equal(p.scene.elements.find(e => e.id === r.id).link, '[[Renamed]]');

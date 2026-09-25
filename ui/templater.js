@@ -1,7 +1,7 @@
-/* Folio templates in the syntax of Obsidian's Templater plugin: <% tp.date.now() %>,
+/* Cinder templates in the syntax of Obsidian's Templater plugin: <% tp.date.now() %>,
  * <%* let x = await tp.system.prompt("Name") %>, whitespace control (<%- -%> <%_ _%>).
  *
- * Templater runs templates as JavaScript. Folio doesn't run code from the vault (and
+ * Templater runs templates as JavaScript. Cinder doesn't run code from the vault (and
  * its Content-Security-Policy forbids eval), so this file is a small interpreter for
  * the JavaScript Templater templates actually use: expressions, let/const, if/else,
  * for...of, tR +=, and the tp.* functions below. Anything else is a clear error.
@@ -316,7 +316,7 @@
       }
       if (isId('return')) { i++; if (!is(';') && !is('}') && peek().t !== 'eof' && peek().t !== 'text') expression(); semi(); return { s: 'return' }; }
       if (isId('function') || isId('while') || isId('do') || isId('class') || isId('try') || isId('switch') || isId('new')) {
-        throw new Error(`"${peek().v}" isn't supported in Folio templates`);
+        throw new Error(`"${peek().v}" isn't supported in Cinder templates`);
       }
       // assignment or expression
       if (peek().t === 'id' && (is('=', 1) || is('+=', 1) || is('-=', 1))) {
@@ -372,7 +372,7 @@
     function list(end) {
       const items = [];
       while (!is(end)) {
-        if (is('...')) throw new Error('spread (...) isn\'t supported in Folio templates');
+        if (is('...')) throw new Error('spread (...) isn\'t supported in Cinder templates');
         items.push(expression());
         if (!is(end)) expect(',');
       }
@@ -387,14 +387,14 @@
         if (k.v === 'true' || k.v === 'false') return { e: 'lit', v: k.v === 'true' };
         if (k.v === 'null') return { e: 'lit', v: null };
         if (k.v === 'undefined') return { e: 'lit', v: undefined };
-        if (is('=>')) throw new Error('arrow functions aren\'t supported in Folio templates');
+        if (is('=>')) throw new Error('arrow functions aren\'t supported in Cinder templates');
         return { e: 'var', name: k.v };
       }
       if (k.t === 'p' && k.v === '(') {
-        if (is(')') && is('=>', 1)) throw new Error('arrow functions aren\'t supported in Folio templates');
+        if (is(')') && is('=>', 1)) throw new Error('arrow functions aren\'t supported in Cinder templates');
         const e = expression();
         expect(')');
-        if (is('=>')) throw new Error('arrow functions aren\'t supported in Folio templates');
+        if (is('=>')) throw new Error('arrow functions aren\'t supported in Cinder templates');
         return e;
       }
       if (k.t === 'p' && k.v === '[') return { e: 'arr', items: list(']') };
@@ -475,7 +475,7 @@
       case 'var': {
         if (e.name === 'tR') return st.out;
         const sc = lookup(scope, e.name);
-        if (!sc) throw new Error(e.name === 'app' || e.name === 'window' || e.name === 'document' ? `"${e.name}" isn't available in Folio templates` : `"${e.name}" is not defined`);
+        if (!sc) throw new Error(e.name === 'app' || e.name === 'window' || e.name === 'document' ? `"${e.name}" isn't available in Cinder templates` : `"${e.name}" is not defined`);
         return sc.vars.get(e.name);
       }
       case 'arr': { const a = []; for (const x of e.items) a.push(await ev(x, scope, st)); return a; }
@@ -518,7 +518,7 @@
           }
           f = getProp(self, k);
         } else f = await ev(e.f, scope, st);
-        if (typeof f !== 'function' || !f[CALLABLE]) throw new Error(`${describe(e.f)} is not a function Folio templates can call`);
+        if (typeof f !== 'function' || !f[CALLABLE]) throw new Error(`${describe(e.f)} is not a function Cinder templates can call`);
         const args = [];
         for (const a of e.args) args.push(await ev(a, scope, st));
         return await f(...args);
@@ -530,7 +530,7 @@
   // Property reads: own properties of objects, and length/indexes of strings and lists.
   // (Methods of strings and lists are only reachable through calls, and only the safe ones.)
   function getProp(o, k) {
-    if (BLOCKED.has(String(k))) throw new Error(`"${k}" isn't available in Folio templates`);
+    if (BLOCKED.has(String(k))) throw new Error(`"${k}" isn't available in Cinder templates`);
     if (typeof o === 'string' || Array.isArray(o)) return k === 'length' || /^\d+$/.test(String(k)) ? o[k] : undefined;
     if ((o && typeof o === 'object') || typeof o === 'function') return Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined;
     return undefined;
@@ -547,7 +547,7 @@
   //       prompt(text, def, multiline), suggest(labels, values, placeholder), clipboard(),
   //       read(link) -> content, exists(link), createNote(path, content, open), templatePath}
   function makeTp(env, st) {
-    const unsupported = what => fn(() => { throw new Error(`${what} isn't available in Folio templates`); });
+    const unsupported = what => fn(() => { throw new Error(`${what} isn't available in Cinder templates`); });
     const date = {
       now: fn((format = 'YYYY-MM-DD', offset, reference, refFormat) => formatDate(addOffset(reference != null ? parseDate(reference, refFormat) : new Date(), offset), format)),
       tomorrow: fn((format = 'YYYY-MM-DD') => formatDate(addOffset(new Date(), 1), format)),
@@ -608,7 +608,7 @@
       date, file, system,
       frontmatter: { ...(env.frontmatter || {}) },
       config: { template_file: env.templatePath || '', target_file: env.path, run_mode: 0 },
-      web: { daily_quote: unsupported('tp.web (Folio makes no network requests)'), random_picture: unsupported('tp.web (Folio makes no network requests)'), request: unsupported('tp.web (Folio makes no network requests)') },
+      web: { daily_quote: unsupported('tp.web (Cinder makes no network requests)'), random_picture: unsupported('tp.web (Cinder makes no network requests)'), request: unsupported('tp.web (Cinder makes no network requests)') },
       user: {},
       hooks: { on_all_templates_executed: fn(() => '') },
     };
@@ -646,6 +646,6 @@
   const hasTemplaterSyntax = s => /<%[\s\S]*?%>/.test(s);
 
   const api = { render, formatDate, parseDate, addOffset, hasTemplaterSyntax };
-  root.FolioTemplater = api;
+  root.CinderTemplater = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

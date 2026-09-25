@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Cinder: a volcano with a glowing crater, lava running down and embers rising. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#23141b"/>
+      <stop offset="1" stop-color="#0c0709"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="32" cy="23" r="17" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ff7a2e" stop-opacity=".9"/>
+      <stop offset=".55" stop-color="#ff4d1a" stop-opacity=".22"/>
+      <stop offset="1" stop-color="#ff4d1a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="rock" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#7a4750"/>
+      <stop offset="1" stop-color="#3a2127"/>
+    </linearGradient>
+    <linearGradient id="lava" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe08a"/>
+      <stop offset=".35" stop-color="#ff9a2e"/>
+      <stop offset="1" stop-color="#e8361a"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#sky)"/>
+  <circle cx="32" cy="23" r="17" fill="url(#glow)"/>
+  <!-- the mountain, with a notched crater -->
+  <path d="M5 58 L25.5 25 Q27.5 27.5 29.5 25.8 Q32 27.8 34.5 25.8 Q36.5 27.5 38.5 25 L59 58 Z" fill="url(#rock)"/>
+  <!-- lava: the crater's rim and two flows -->
+  <path d="M25.5 25 Q27.5 27.5 29.5 25.8 Q32 27.8 34.5 25.8 Q36.5 27.5 38.5 25 Q32 22.6 25.5 25 Z" fill="#ffd36b"/>
+  <path d="M28.2 26.2 C27.4 32 24.6 36 22.2 41.4 C21 44.2 21.6 47.6 24 48 C25.8 48.2 26.9 46.2 27.1 43.8 C27.6 38.4 30.4 33.2 31.4 27.2 Z" fill="url(#lava)"/>
+  <path d="M34 26.6 C35 31 37.8 34.2 39 38.6 C39.6 40.8 38.8 42.8 37.2 42.7 C35.8 42.6 35.2 41 35.1 39.2 C34.8 35 33.2 31 32.6 27.2 Z" fill="url(#lava)"/>
+  <!-- embers -->
+  <circle cx="30.5" cy="16" r="2.4" fill="#ffb347"/>
+  <circle cx="36.6" cy="11.4" r="1.9" fill="#ff8a3a"/>
+  <circle cx="26.8" cy="9.6" r="1.2" fill="#ffcf70"/>
+  <circle cx="34.4" cy="19.2" r="1.1" fill="#ffd98a"/>
+  <circle cx="40.5" cy="17" r=".9" fill="#ff6a2a"/>
+</svg>

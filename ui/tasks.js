@@ -1,4 +1,4 @@
-/* Folio tasks: every "- [ ] …" line in the vault, in the format of Obsidian's Tasks
+/* Cinder tasks: every "- [ ] …" line in the vault, in the format of Obsidian's Tasks
  * plugin (📅 due, ⏳ scheduled, 🛫 start, ✅ done, ⏫ priority, 🔁 recurrence), with
  * natural-language quick add, recurring tasks, a Tasks view and ```tasks query blocks.
  * The parsing/formatting/query parts don't touch the DOM and are tested under Node. */
@@ -570,5 +570,5 @@
     return { refresh: render };
   }
 
-  root.FolioTasks = { ...pure, mountView, mountQuery };
+  root.CinderTasks = { ...pure, mountView, mountQuery };
 })(typeof window !== 'undefined' ? window : globalThis);
