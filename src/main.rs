@@ -17,11 +17,8 @@ mod pickfolder;
 mod screenshot;
 mod server;
 
-use std::collections::hash_map::RandomState;
-use std::hash::{BuildHasher, Hasher};
 use std::path::PathBuf;
 use std::sync::RwLock;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const HELP: &str = "cinder [VAULT_DIR] [--browser [--port N] [--no-open] [--app]]
 
@@ -103,15 +100,38 @@ fn attach_console() {
     }
 }
 
+/// The per-launch secret the page must send with every call: 32 bytes from the operating
+/// system's secure random generator, as 64 hex digits. No token, no app: if the generator
+/// can't be read, Cinder stops rather than fall back to something guessable.
 fn random_token() -> String {
-    // RandomState is seeded from the OS RNG once per process; mix in time + pid.
-    let mut s = String::new();
-    for i in 0..4u64 {
-        let mut h = RandomState::new().build_hasher();
-        h.write_u64(i);
-        h.write_u128(SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
-        h.write_u32(std::process::id());
-        s.push_str(&format!("{:016x}", h.finish()));
+    let mut b = [0u8; 32];
+    os_random(&mut b).unwrap_or_else(|e| die(&format!("can't read the system's secure random number generator: {e}")));
+    b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+#[cfg(unix)]
+fn os_random(buf: &mut [u8]) -> std::io::Result<()> {
+    use std::io::Read;
+    std::fs::File::open("/dev/urandom")?.read_exact(buf)
+}
+
+#[cfg(windows)]
+fn os_random(buf: &mut [u8]) -> std::io::Result<()> {
+    use windows_sys::Win32::Security::Cryptography::{BCRYPT_USE_SYSTEM_PREFERRED_RNG, BCryptGenRandom};
+    let len = u32::try_from(buf.len()).map_err(std::io::Error::other)?;
+    // SAFETY: buf is valid and writable for len bytes; no algorithm handle is needed with
+    // BCRYPT_USE_SYSTEM_PREFERRED_RNG.
+    let status = unsafe { BCryptGenRandom(std::ptr::null_mut(), buf.as_mut_ptr(), len, BCRYPT_USE_SYSTEM_PREFERRED_RNG) };
+    if status == 0 { Ok(()) } else { Err(std::io::Error::other(format!("BCryptGenRandom returned {status:#x}"))) }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn token_is_256_random_bits() {
+        let (a, b) = (super::random_token(), super::random_token());
+        assert_eq!(a.len(), 64);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
     }
-    s
 }
