@@ -95,5 +95,9 @@ window.CinderThemes = (() => {
     for (const [k, v] of Object.entries(vals)) root.style.setProperty(k, v);
   }
 
-  return { list: THEMES.map(t => ({ id: t.id, name: t.name })), apply, has: id => THEMES.some(t => t.id === id) };
+  // A theme's main colours, for the swatches in Settings (the default theme's are the stylesheet's).
+  const VOLCANIC = { dark: { bg: '#17110f', bg2: '#110c0b', text: '#eee2da', accent: '#ff6b2c', green: '#9cc46a', blue: '#6ea8d4' }, light: { bg: '#fbf7f4', bg2: '#f2ebe6', text: '#2a1e1a', accent: '#d9480f', green: '#4f7f24', blue: '#2f6f99' } };
+  const swatch = (id, mode) => { const t = THEMES.find(x => x.id === id); return (t && t[mode]) || VOLCANIC[mode]; };
+
+  return { list: THEMES.map(t => ({ id: t.id, name: t.name })), apply, swatch, has: id => THEMES.some(t => t.id === id) };
 })();

@@ -173,11 +173,15 @@ rebuildHotkeys();
 
 // ------------------------------------------------------------ Settings → Hotkeys
 
-function openHotkeys(filter = '') {
-  const back = modal(`<div class="hk"><div class="hk-head"><h3>Hotkeys</h3><input class="field hk-q" placeholder="Filter commands or keys…" spellcheck="false"></div>
+// Hotkeys are a page of Settings.
+function openHotkeys(filter = '') { openSettings('hotkeys', filter); }
+
+// The hotkeys list, inside `box` (Settings' Hotkeys page). `close` shuts the dialog it's in.
+function mountHotkeys(box, filter, close) {
+  box.innerHTML = `<div class="hk"><div class="hk-head"><input class="field hk-q" placeholder="Filter commands or keys…" spellcheck="false"></div>
     <div class="hk-list" tabindex="-1"></div>
-    <div class="hk-foot"><span>Click a shortcut to change it. Press the new keys, <kbd>Backspace</kbd> to clear, <kbd>Esc</kbd> to cancel.</span><button class="btn" data-x>Done</button></div></div>`);
-  back.querySelector('.modal').classList.add('wide');
+    <div class="hk-foot"><span>Click a shortcut to change it. Press the new keys, <kbd>Backspace</kbd> to clear, <kbd>Esc</kbd> to cancel.</span><button class="btn" data-x-shortcuts>All shortcuts</button></div></div>`;
+  const back = box;
   const q = $('.hk-q', back), list = $('.hk-list', back);
   let recording = null;
   const conflictsOf = c => {
@@ -210,7 +214,7 @@ function openHotkeys(filter = '') {
     else if (e.target.closest('[data-reset]')) { setKey(row.dataset.id, CMD_BY_ID.get(row.dataset.id).key); redraw(row.dataset.id); }
   });
   back.addEventListener('keydown', e => {
-    if (!recording) { if (e.key === 'Escape') { e.preventDefault(); back.remove(); } return; }
+    if (!recording) return;
     e.preventDefault(); e.stopPropagation();
     const id = recording;
     if (e.key === 'Escape') { recording = null; redraw(id); return; }
@@ -219,8 +223,7 @@ function openHotkeys(filter = '') {
     if (!k) return; // a lone modifier: keep waiting
     setKey(id, k); recording = null; redraw(id);
   }, true);
-  back.addEventListener('mousedown', e => { if (e.target === back) back.remove(); });
-  $('[data-x]', back).onclick = () => back.remove();
+  $('[data-x-shortcuts]', back).onclick = () => { close(); showShortcuts(); };
   q.value = filter;
   q.addEventListener('input', draw);
   draw(); q.focus();

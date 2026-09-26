@@ -38,8 +38,17 @@ function modal(html) {
   if (!$('#modal-root').children.length && document.activeElement !== document.body) focusBeforeModal = document.activeElement;
   const back = document.createElement('div');
   back.className = 'backdrop';
-  back.innerHTML = `<div class="modal">${html}</div>`;
+  back.innerHTML = `<div class="modal" role="dialog" aria-modal="true">${html}</div>`;
   $('#modal-root').append(back);
+  // Tab and Shift+Tab stay inside the dialog, wrapping around at the ends.
+  back.addEventListener('keydown', e => {
+    if (e.key !== 'Tab' || e.defaultPrevented) return;
+    const els = $$('button, input, select, textarea, [tabindex]:not([tabindex="-1"]), a[href]', back).filter(x => !x.disabled && x.offsetParent !== null);
+    if (!els.length) return;
+    const first = els[0], last = els[els.length - 1];
+    if (e.shiftKey && (document.activeElement === first || !back.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && (document.activeElement === last || !back.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+  });
   return back;
 }
 

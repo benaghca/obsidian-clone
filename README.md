@@ -185,6 +185,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Tabs come back when you reopen Cinder, and they follow renames and moves.
   - In a browser tab the browser keeps Ctrl+T and Ctrl+W for itself, so rebind them in Hotkeys.
 - **Select several files in the tree** with **Ctrl/Cmd-click**, **Shift-click** or **Shift+↑/↓**, then drag them onto a folder or right-click to *Move N items to…*, group them into a *New folder with N items…*, open them in tabs or delete them. Links are updated for every move.
+- **Settings** (**Ctrl+,**) is a window with a page for each area (General, Editor, Appearance, Files & links, Daily notes, Templates, Tasks, Inbox, Images & screenshots, Drawings, Hotkeys) and a search box that finds any setting on any page. Changes apply as you make them, with no Save button. A changed setting shows ↺ to put the default back. Colour themes are picked from swatches.
 - **Keyboard first**:
   - **Ctrl+/** shows every shortcut.
   - **Settings → Hotkeys** rebinds any command, including the formatting commands above. Click a shortcut, press the new keys, and clashes are flagged. The command palette lists your recent commands first and shows each command's current keys.
