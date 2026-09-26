@@ -1,0 +1,34 @@
+// Windows resources that build.rs compiles into cinder.exe: the icon that Explorer, pinned
+// taskbar items and shortcuts show, and the version details on Properties -> Details.
+// build.rs defines CINDER_VERSION (as 0,1,0,0) and CINDER_VERSION_STR (as "0.1.0") from Cargo.toml.
+// Plain numbers stand in for winver.h's names so this compiles without the Windows SDK headers.
+
+// ID 1 is also what src/native.rs loads for the window's own icons.
+1 ICON "cinder.ico"
+
+1 VERSIONINFO
+FILEVERSION CINDER_VERSION
+PRODUCTVERSION CINDER_VERSION
+FILEFLAGSMASK 0x3F
+FILEFLAGS 0x0
+FILEOS 0x40004 // VOS_NT_WINDOWS32
+FILETYPE 0x1 // VFT_APP
+FILESUBTYPE 0x0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0" // U.S. English, Unicode
+        BEGIN
+            VALUE "FileDescription", "Cinder"
+            VALUE "FileVersion", CINDER_VERSION_STR
+            VALUE "InternalName", "cinder"
+            VALUE "OriginalFilename", "cinder.exe"
+            VALUE "ProductName", "Cinder"
+            VALUE "ProductVersion", CINDER_VERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

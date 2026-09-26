@@ -16,3 +16,6 @@ windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Securit
 [profile.release]
 opt-level = 3
 strip = true
+
+[build-dependencies]
+embed-resource = "3.0.11"

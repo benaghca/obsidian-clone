@@ -69,6 +69,11 @@ pub fn run(ctx: Ctx) -> ! {
         .with_maximized(win["maximized"].as_bool().unwrap_or(false))
         .with_decorations(!custom_frame())
         .with_window_icon(Some(icon()));
+    #[cfg(windows)]
+    {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        wb = wb.with_taskbar_icon(Some(taskbar_icon()));
+    }
     if let (Some(x), Some(y)) = (win["x"].as_i64(), win["y"].as_i64()) {
         wb = wb.with_position(PhysicalPosition::new(x as i32, y as i32));
     }
@@ -322,9 +327,31 @@ fn save_window_state(window: &tao::window::Window) {
 }
 
 /// The volcano app icon: ui/logo.svg rendered at 64×64 as straight RGBA.
+#[cfg(not(windows))]
 fn icon() -> Icon {
     const RGBA: &[u8] = include_bytes!("icon-64.rgba");
     Icon::from_rgba(RGBA.to_vec(), 64, 64).expect("icon")
+}
+
+/// The title-bar icon, from the icon build.rs compiles into cinder.exe, at the display's size.
+#[cfg(windows)]
+fn icon() -> Icon {
+    resource_icon(windows_sys::Win32::UI::WindowsAndMessaging::SM_CXSMICON)
+}
+
+/// The taskbar and Alt+Tab icon: the same resource at the larger size.
+#[cfg(windows)]
+fn taskbar_icon() -> Icon {
+    resource_icon(windows_sys::Win32::UI::WindowsAndMessaging::SM_CXICON)
+}
+
+/// Icon 1 in src/cinder.rc, loaded at the size of the given system metric so Windows picks
+/// the closest drawn size instead of scaling the 64 px image.
+#[cfg(windows)]
+fn resource_icon(metric: windows_sys::Win32::UI::WindowsAndMessaging::SYSTEM_METRICS_INDEX) -> Icon {
+    use tao::platform::windows::IconExtWindows;
+    let px = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetSystemMetrics(metric) }.max(16) as u32;
+    Icon::from_resource(1, Some(tao::dpi::PhysicalSize::new(px, px))).expect("icon resource")
 }
 
 #[cfg(test)]
