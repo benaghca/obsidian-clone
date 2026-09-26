@@ -96,6 +96,7 @@ async function boot() {
   setInterval(poll, 2000);
   updateTaskBadge();
   updateInboxBadge();
+  loadBookmarks();
   api('/api/info').then(i => { S.vaultPath = i.vault; }).catch(() => { });
   if (S.files.size === 0 && !store('welcomed')) {
     store('welcomed', true);

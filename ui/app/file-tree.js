@@ -202,6 +202,7 @@ function renderTreeActive(reveal = false) {
   if (!S.cur) return;
   const row = $(`#tree .t-row[data-path="${CSS.escape(S.cur)}"]`);
   if (row) { row.classList.add('active'); if (reveal) row.scrollIntoView({ block: 'nearest' }); }
+  renderBookmarks(); // (its open-file mark)
 }
 
 $('#tree').addEventListener('click', e => {
@@ -240,6 +241,7 @@ $('#tree').addEventListener('contextmenu', e => {
     return menu(e.clientX, e.clientY, [
       [`Move ${n} items to…`, () => moveManyDialog(paths)],
       [`New folder with ${n} items…`, () => groupIntoFolder(paths)],
+      [`Bookmark ${n} items`, () => addBookmarks(paths)],
       ...(files.length ? [[`Open ${files.length} in new tabs`, async () => { for (const p of files) await openInNewTab(p); }]] : []),
       null,
       [`Delete ${n} items`, () => deleteMany(paths), 'danger'],
@@ -260,6 +262,7 @@ $('#tree').addEventListener('contextmenu', e => {
     items.push(null,
       ['Rename…', () => renameDialog(target)],
       ['Move to…', () => moveDialog(target)],
+      [isBookmarked(target) ? 'Remove bookmark' : 'Bookmark', () => toggleBookmark(target)],
     );
     if (path) items.unshift(['Open in new tab', () => openInNewTab(path)], null);
     if (path && isMd(path) && !isDrawing(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);

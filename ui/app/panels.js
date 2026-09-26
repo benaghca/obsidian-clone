@@ -10,6 +10,7 @@ function showPanel(name, focus = false) {
   for (const b of $$('#ribbon .rb[data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
   if (name === 'search') { const i = $('#search-input'); i.focus(); i.select(); }
   if (name === 'tags') renderTags();
+  if (name === 'bookmarks') { loadBookmarks(); if (focus) $('#bookmark-list').focus(); }
   if (name === 'props') { renderPropsPanel(); if (focus) $('#props-filter').focus(); }
 }
 
@@ -337,6 +338,12 @@ $('#right-body').addEventListener('click', async e => {
   if (cr) return followLink(cr.dataset.create, null, S.cur);
   const h = e.target.closest('[data-heading]');
   if (h) scrollToHeading(h.dataset.heading);
+});
+$('#right-body').addEventListener('contextmenu', e => {
+  const h = e.target.closest('.o-item[data-heading]');
+  if (!h || !S.cur) return;
+  e.preventDefault();
+  menu(e.clientX, e.clientY, [['Go to heading', () => scrollToHeading(h.dataset.heading)], ['Bookmark heading', () => bookmarkHeading(h.dataset.heading)]]);
 });
 
 function updateStatus() {

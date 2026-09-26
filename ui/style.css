@@ -116,6 +116,17 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--bor
 .t-row .name { overflow: hidden; text-overflow: ellipsis; }
 .t-row .ext { font-size: 10px; color: var(--faint); border: 1px solid var(--border); border-radius: 3px; padding: 0 3px; margin-left: 4px; text-transform: uppercase; }
 .t-row.folder { color: var(--text); }
+.bm-row .bm-ic { width: 14px; height: 14px; flex: none; color: var(--faint); margin-right: 2px; }
+.bm-row.bm-group { color: var(--text); }
+.bm-row .bm-count { margin-left: auto; font-size: 11px; color: var(--faint); padding-left: 6px; }
+.bm-row.missing .name { color: var(--faint); text-decoration: line-through; }
+.bm-row.drop { outline: none; box-shadow: inset 0 2px 0 var(--accent); }
+.bm-row.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+.bm-row.drop-in { outline: 1px dashed var(--accent); }
+.bm-row:focus-visible { outline: 1px solid var(--accent); }
+.bm-empty { padding: 10px 8px; font-size: 12.5px; color: var(--faint); line-height: 1.5; }
+.bm-end { min-height: 40px; flex: 1; }
+#bookmark-list { display: flex; flex-direction: column; }
 .t-kids { margin-left: 13px; border-left: 1px solid var(--border); padding-left: 3px; }
 .tree-root-drop { min-height: 40px; }
 

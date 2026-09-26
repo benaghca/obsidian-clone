@@ -144,6 +144,7 @@ async function renamePath(from, to) {
     S.recent = S.recent.map(h => h === a ? b : h);
   }
   tabsAfterRename(moved);
+  bookmarksAfterRename(moved, from, to, isDir);
   if (isDir) {
     const dirs = [...S.dirs];
     S.dirs = new Set(dirs.map(d => d === from ? to : d.startsWith(from + '/') ? to + d.slice(from.length) : d));
@@ -200,6 +201,7 @@ async function deletePath(path, opts = {}) {
   S.hist = S.hist.filter(h => S.files.has(h)); S.histIdx = S.hist.length - 1;
   reindexAll(); renderTree();
   tabsAfterDelete();
+  bookmarksAfterDelete(path);
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; showEmpty(); }
   refreshPanels();
 }

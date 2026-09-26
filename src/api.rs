@@ -38,6 +38,7 @@ const APP_JS: &str = concat!(
     include_str!("../ui/app/vaults.js"),
     include_str!("../ui/app/appearance.js"),
     include_str!("../ui/app/panels.js"),
+    include_str!("../ui/app/bookmarks.js"),
     include_str!("../ui/app/graph.js"),
     include_str!("../ui/app/actions.js"),
     include_str!("../ui/app/native-ui.js"),
@@ -227,6 +228,8 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         }),
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
         ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
+        ("GET", "/api/bookmarks") => api_bookmarks(&vault, None),
+        ("PUT", "/api/bookmarks") => parse(&body).and_then(|v| api_bookmarks(&vault, Some(v))),
         ("POST", "/api/screenshot") => Ok(match screenshot(ctx, q("mode").as_deref() == Some("screen"), q("hide").as_deref() == Some("1"), q("delay").and_then(|d| d.parse().ok()).unwrap_or(0)) {
             crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
             crate::screenshot::Shot::Cancelled => out(204, "text/plain", Vec::new()),
@@ -380,6 +383,38 @@ fn api_prop_types(vault: &Path, update: Option<Value>) -> ApiResult {
         })?;
     }
     Ok(json_out(200, json!({ "types": doc["types"], "obsidian": true })))
+}
+
+/// Bookmarks live where Obsidian keeps them, .obsidian/bookmarks.json, so both apps share one list.
+/// GET returns its "items"; PUT replaces them (keeping any other keys). Only when the vault already
+/// has an .obsidian folder; otherwise GET is empty and PUT is 404, and the page keeps its own list.
+fn api_bookmarks(vault: &Path, update: Option<Value>) -> ApiResult {
+    let dir = vault.join(".obsidian");
+    let file = dir.join("bookmarks.json");
+    let is_real_dir = fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir());
+    if !is_real_dir {
+        return match update {
+            None => Ok(json_out(200, json!({ "items": [], "obsidian": false }))),
+            Some(_) => Err((404, "no .obsidian folder".into())),
+        };
+    }
+    let mut doc: Value = fs::read(&file).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_else(|| json!({}));
+    if !doc.is_object() {
+        doc = json!({});
+    }
+    if let Some(update) = update {
+        let Some(items) = update.get("items").filter(|v| v.is_array()) else { return Err((400, "expected {items: [...]}".into())) };
+        doc["items"] = items.clone();
+        let text = serde_json::to_string_pretty(&doc).map_err(|e| (500, e.to_string()))?;
+        let tmp = dir.join(".bookmarks.json.cinder-tmp");
+        fs::write(&tmp, text).map_err(io_err)?;
+        fs::rename(&tmp, &file).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            io_err(e)
+        })?;
+    }
+    let items = if doc["items"].is_array() { doc["items"].clone() } else { json!([]) };
+    Ok(json_out(200, json!({ "items": items, "obsidian": true })))
 }
 
 fn api_rename(vault: &Path, from_rel: &str, to_rel: &str) -> ApiResult {
@@ -690,6 +725,26 @@ mod tests {
         assert_eq!(v["types"], json!({ "keep": "number", "rating": "number" }));
         assert_eq!(v["other"], json!(1));
         assert!(api_prop_types(&dir, Some(json!({ "x": 5 }))).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bookmarks_live_in_the_obsidian_file() {
+        let dir = std::env::temp_dir().join(format!("cinder-bookmarks-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        assert!(api_bookmarks(&dir, None).is_ok(), "no .obsidian: empty list");
+        assert_eq!(api_bookmarks(&dir, Some(json!({ "items": [] }))).err().map(|e| e.0), Some(404), "and nothing written");
+        assert!(!dir.join(".obsidian").exists());
+        fs::create_dir(dir.join(".obsidian")).unwrap();
+        fs::write(dir.join(".obsidian/bookmarks.json"), r#"{"items":[{"type":"file","path":"a.md"}],"keep":true}"#).unwrap();
+        let items = json!([{ "type": "group", "title": "G", "items": [{ "type": "file", "path": "b.md", "ctime": 1 }] }]);
+        api_bookmarks(&dir, Some(json!({ "items": items }))).unwrap();
+        let v: Value = serde_json::from_slice(&fs::read(dir.join(".obsidian/bookmarks.json")).unwrap()).unwrap();
+        assert_eq!(v["items"], items);
+        assert_eq!(v["keep"], json!(true), "other keys are kept");
+        assert!(api_bookmarks(&dir, Some(json!({ "items": 5 }))).is_err());
+        assert!(!dir.join(".obsidian/.bookmarks.json.cinder-tmp").exists());
         let _ = fs::remove_dir_all(&dir);
     }
 

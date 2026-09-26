@@ -69,6 +69,10 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 - A file tree with folders, drag-and-drop moves, file import from the desktop, and rename, move and delete from the context menu
   - Opening a file reveals it in the tree: its folders open and the tree scrolls to it. The target button in the tree's header (or *Settings*) turns this off. The button next to it expands or collapses every folder.
+- **Bookmarks** (the bookmark button in the ribbon), shared with Obsidian: they live in `.obsidian/bookmarks.json`, so the same list shows in both apps. Bookmark files, folders, headings (right-click in the Outline), searches (the button in the Search panel) and web links, and sort them into groups.
+  - Bookmark the open file with the button at the top of the panel, *Bookmark* in the note's ⋯ menu or the file tree's right-click menu (several selected files at once too), the command palette, or by dragging files from the tree into the panel.
+  - Click to open (Ctrl-click for a new tab). Drag to reorder: drop on the top or bottom half of a bookmark to put it before or after, or on a group to put it inside. Right-click to rename, move to a group or remove.
+  - Bookmarks follow files when they're renamed or moved, and go when the file is deleted. In a folder without an `.obsidian` folder, Cinder keeps the list itself.
 - Sidebar toggles like Obsidian's: the top of the ribbon shows or hides the left sidebar (**Ctrl+\\**), and the right end of the tab bar does the same for the right sidebar (**Ctrl+Shift+\\**).
 - **Live preview editing**, like Obsidian's: Markdown syntax is hidden and rendered as you write, and appears only on the line or element the cursor is in. That covers headings, bold, italic, highlights, links, tags, checkboxes you can click, bullets, callouts, quotes, code blocks, tables and embedded images and notes. Switch to plain source mode in Settings or from the command palette.
 - Switch vaults from **Settings**, the command palette or by clicking the vault name above the file tree
