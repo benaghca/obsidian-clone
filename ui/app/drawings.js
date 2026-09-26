@@ -292,19 +292,19 @@ function texSvg(tex) {
   return p;
 }
 
-// The equation editor: TeX on the left, a live preview under it. Resolves with the TeX, or null.
+// The equation editor: a LaTeX field (with the note editor's \command suggestions, snippets and
+// math shortcuts) and a live preview under it. Resolves with the TeX, or null.
 function editTexModal(value = '', editing = false) {
   return new Promise(resolve => {
     const back = modal(`<form class="form tex-form"><h3>${editing ? 'Edit equation' : 'Insert equation'}</h3>
-      <label>LaTeX<textarea class="field tex-src" rows="3" spellcheck="false" autocomplete="off" placeholder="e.g. \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"></textarea></label>
+      <label><span>LaTeX <span class="tex-tip">· type <kbd>\\</kbd> and a letter for suggestions</span></span><div class="field tex-src"></div></label>
       <div class="tex-preview" aria-live="polite"><span class="tex-hint">The equation appears here as you type.</span></div>
       <div class="row"><span class="tex-keys"><kbd>Enter</kbd> ${editing ? 'save' : 'insert'} · <kbd>Shift Enter</kbd> new line</span><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">${editing ? 'Save' : 'Insert'}</button></div></form>`);
     back.querySelector('.modal').classList.add('tex-modal');
-    const input = $('.tex-src', back), preview = $('.tex-preview', back);
-    input.value = value;
-    let seq = 0;
+    const preview = $('.tex-preview', back);
+    let seq = 0, field = null;
     const show = async () => {
-      const tex = input.value, n = ++seq;
+      const tex = field.value, n = ++seq;
       if (!tex.trim()) { preview.innerHTML = '<span class="tex-hint">The equation appears here as you type.</span>'; return; }
       try {
         const r = await texSvg(tex);
@@ -320,16 +320,20 @@ function editTexModal(value = '', editing = false) {
       }
     };
     const later = debounce(show, 120);
-    input.addEventListener('input', later);
-    const done = v => { back.remove(); resolve(v); };
-    $('form', back).addEventListener('submit', e => { e.preventDefault(); done(input.value.trim()); });
-    $('[data-x]', back).onclick = () => done(null);
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Escape') { e.preventDefault(); done(null); }
-      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(input.value.trim()); }
+    let closed = false;
+    const done = v => { if (closed) return; closed = true; field.destroy(); back.remove(); resolve(v); };
+    field = CinderEditor.mathField($('.tex-src', back), {
+      value,
+      placeholder: 'e.g. \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}',
+      hooks: { renderMath: (el, tex, display) => renderMath(el, tex, display), mathSnippets: () => cfg.mathSnippets },
+      onChange: later,
+      onSubmit: () => done(field.value.trim()),
+      onCancel: () => done(null),
     });
+    $('form', back).addEventListener('submit', e => { e.preventDefault(); done(field.value.trim()); });
+    $('[data-x]', back).onclick = () => done(null);
     back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
-    input.focus(); input.select();
+    field.focus(); // cursor at the end, ready to add to the equation
     show();
   });
 }

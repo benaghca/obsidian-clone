@@ -162,13 +162,13 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 #editor .cm-content { min-width: 0; } /* wide embeds (tables, bases) scroll inside themselves */
 #editor .cm-content { padding: 4px 0; }
 #editor .cm-line { padding: 0; }
-:is(#editor, .cv-cm) .cm-cursor { border-left: 2px solid var(--accent); }
+:is(#editor, .cv-cm, .tex-src) .cm-cursor { border-left: 2px solid var(--accent); }
 /* The selection is a translucent layer *over* the text, in the theme's accent: drawn underneath
    (CodeMirror's default), inline code, highlights, tags and code blocks would hide it. */
-:is(#editor, .cv-cm) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; }
-:is(#editor, .cv-cm) :is(.cm-selectionBackground, ::selection) { background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
-:is(#editor, .cv-cm) .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 32%, transparent) !important; }
-:is(#editor, .cv-cm) .cm-placeholder { color: var(--faint); }
+:is(#editor, .cv-cm, .tex-src) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; }
+:is(#editor, .cv-cm, .tex-src) :is(.cm-selectionBackground, ::selection) { background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
+:is(#editor, .cv-cm, .tex-src) .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 32%, transparent) !important; }
+:is(#editor, .cv-cm, .tex-src) .cm-placeholder { color: var(--faint); }
 :is(#editor, .cv-cm) .cm-selectionMatch { background: var(--mark); }
 :is(#editor, .cv-cm) .cm-searchMatch { background: var(--mark); outline: 1px solid rgba(255, 208, 0, .6); }
 :is(#editor, .cv-cm) .cm-searchMatch-selected { background: rgba(255, 150, 0, .55); }
@@ -684,7 +684,14 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .form h3 { margin: 0 0 4px; }
 .form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .form .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
-.tex-src { font-family: var(--font-mono); font-size: 13px; resize: vertical; min-height: 64px; }
+.tex-src { padding: 0; min-height: 64px; max-height: 30vh; overflow: auto; cursor: text; }
+.tex-src .cm-editor { min-height: 64px; font-family: var(--font-mono); font-size: 13px; }
+.tex-src .cm-editor.cm-focused { outline: none; }
+.tex-src .cm-content { padding: 8px 10px; caret-color: var(--text); }
+.tex-src .cm-line { padding: 0; }
+.tex-src:focus-within { border-color: var(--accent); }
+.tex-tip { font-size: 12px; color: var(--faint); }
+.tex-tip kbd { font-size: 11px; }
 .tex-preview { min-height: 72px; max-height: 40vh; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
 .tex-preview img { max-width: 100%; height: auto; }
 .tex-hint { color: var(--faint); font-size: 13px; }
