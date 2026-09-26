@@ -55,9 +55,18 @@ async function apiRaw(path, opts) {
   return (r.headers.get('content-type') || '').includes('json') ? r.json() : r.text();
 }
 
-function toast(msg, ms = 2600) {
+// A short message at the bottom of the window, optionally with a button (action: {label, run}).
+function toast(msg, ms = 2600, action) {
+  if (action) $$('.toast.has-action').forEach(t => t.remove());
   const t = document.createElement('div');
-  t.className = 'toast'; t.textContent = msg;
+  t.className = 'toast'; t.setAttribute('role', 'status');
+  const span = document.createElement('span'); span.textContent = msg; t.append(span);
+  if (action) {
+    t.classList.add('has-action');
+    const b = document.createElement('button'); b.textContent = action.label;
+    b.onclick = () => { t.remove(); action.run(); };
+    t.append(b);
+  }
   document.body.append(t);
   setTimeout(() => t.remove(), ms);
 }

@@ -139,6 +139,20 @@
     if (!replaced && token) body += (body ? ' ' : '') + token;
     return `${m[1]}${m[2]}${m[3]}[${m[4]}]${m[5] || ' '}${body.replace(/^\s+/, '')}${ref}`;
   }
+  // Replace a task's description, keeping its dates, priority, recurrence and block id.
+  function setText(line, text) {
+    const m = TASK_RE.exec(line);
+    if (!m) return line;
+    let body = m[6], ref = '';
+    const br = /\s\^[\w-]+\s*$/.exec(body);
+    if (br) { ref = br[0]; body = body.slice(0, br.index); }
+    const meta = [];
+    META_RE.lastIndex = 0;
+    let mm;
+    while ((mm = META_RE.exec(body))) if (mm[0].trim()) meta.push(mm[0].trim());
+    const t = String(text).replace(/\s+/g, ' ').trim();
+    return `${m[1]}${m[2]}${m[3]}[${m[4]}]${m[5] || ' '}${[t, ...meta].filter(Boolean).join(' ')}${ref}`;
+  }
   function setStatus(line, status) {
     const m = TASK_RE.exec(line);
     return m ? `${m[1]}${m[2]}${m[3]}[${status}]${m[5] || ' '}${m[6]}` : line;
@@ -384,7 +398,7 @@
     return out;
   }
 
-  const pure = { parseLine, parseNote, setField, setStatus, toggle, parseRecur, nextDate, parseQuick, formatTask, parseQuery, runQuery, buckets, friendly, today, addDays, addMonths, PRIORITY_EMOJI, PRIORITY_RANK };
+  const pure = { parseLine, parseNote, setField, setText, setStatus, toggle, parseRecur, nextDate, parseQuick, formatTask, parseQuery, runQuery, buckets, friendly, today, addDays, addMonths, PRIORITY_EMOJI, PRIORITY_RANK };
 
   if (typeof document === 'undefined') { if (typeof module !== 'undefined' && module.exports) module.exports = pure; return; }
 
@@ -393,81 +407,187 @@
   const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const ICON = p => `<svg viewBox="0 0 24 24">${p}</svg>`;
   const PRIO_LABEL = { highest: 'Highest', high: 'High', medium: 'Medium', low: 'Low', lowest: 'Lowest' };
+  const I = {
+    cal: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
+    arrow: '<path d="M5 12h12M13 7l5 5-5 5"/>',
+    more: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+    recur: '<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>',
+    flag: '<path d="M5 21V4.5M5 4.5h11l-2 4 2 4H5"/>',
+    note: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    check: '<path d="m6 12.5 4 4 8-9"/>',
+    star: '<path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z"/>',
+    upcoming: '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4M8 14h2M12 14h2M16 14h.01M8 17h2"/>',
+    layers: '<path d="m12 4 8 4-8 4-8-4z"/><path d="m4 12 8 4 8-4M4 16l8 4 8-4"/>',
+    inbox: '<path d="M4 13l2.5-7h11l2.5 7v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M4 13h4.5l1.5 2.5h4l1.5-2.5H20"/>',
+    book: '<path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 20.5A2.5 2.5 0 0 0 6.5 23H20v-5"/>',
+    hash: '<path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/>',
+  };
+  const PRIO_COLOR = { highest: 'var(--c-red)', high: 'var(--c-orange)', medium: 'var(--c-yellow)', low: 'var(--c-blue)', lowest: 'var(--c-blue)' };
+  const dateOf = x => x.due || x.scheduled || null;
+  const noteLabel = p => p.split('/').pop().replace(/\.md$/, '');
+  const longDate = d => parseYmd(d).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' });
 
-  // One task row. h: {inline(text, path) -> html}
+  // One task row. h: {inline(text, path) -> html}. opts: {source: show the note, actions, drag}
   function rowHtml(x, h, opts = {}) {
     const t = today();
-    const date = x.due || x.scheduled;
+    const date = dateOf(x);
     const cls = !date || x.done ? '' : date < t ? ' overdue' : date === t ? ' today' : '';
     const chips = [];
-    if (date) chips.push(`<span class="tk-date${cls}" title="${x.due ? 'Due' : 'Scheduled'} ${esc(date)}">${ICON('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>')}${esc(friendly(date))}</span>`);
-    if (x.recur) chips.push(`<span class="tk-recur" title="Repeats ${esc(x.recur)}">${ICON('<path d="M4 12a8 8 0 0 1 14-5.3L20 9M20 4v5h-5M20 12a8 8 0 0 1-14 5.3L4 15M4 20v-5h5"/>')}${esc(x.recur)}</span>`);
-    if (x.done && x.doneDate) chips.push(`<span class="tk-donedate">✓ ${esc(friendly(x.doneDate))}</span>`);
-    if (opts.source !== false) chips.push(`<a class="tk-src" data-open="${esc(x.path)}" data-line="${x.line}" title="${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}">${esc(x.path.split('/').pop().replace(/\.md$/, ''))}</a>`);
-    return `<div class="tk-row${x.done ? ' done' : ''}${x.cancelled ? ' cancelled' : ''}${x.priority ? ' p-' + x.priority : ''}" data-path="${esc(x.path)}" data-line="${x.line}" tabindex="-1" draggable="${opts.drag ? 'true' : 'false'}">
-      <input type="checkbox" class="tk-check"${x.done ? ' checked' : ''} title="${x.done ? 'Mark not done' : 'Complete'}">
-      <div class="tk-main"><div class="tk-text">${h.inline(x.text || '(empty task)', x.path)}</div><div class="tk-meta">${x.priority ? `<span class="tk-prio" title="${PRIO_LABEL[x.priority]} priority">${PRIO_LABEL[x.priority]}</span>` : ''}${chips.join('')}</div></div>
-      ${opts.actions !== false && !x.done ? `<div class="tk-actions"><button data-act="today" title="Do today">${ICON('<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6l1.4 1.4M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>')}</button><button data-act="tomorrow" title="Do tomorrow">${ICON('<path d="M5 12h14M13 6l6 6-6 6"/>')}</button><button data-act="date" title="Pick a date">${ICON('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>')}</button><button data-act="more" title="More">${ICON('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>')}</button></div>` : ''}
+    if (date) chips.push(`<button class="tk-chip tk-date${cls}" data-act="date" title="${x.due ? 'Due' : 'Scheduled'} ${esc(date)}">${ICON(I.cal)}${esc(friendly(date))}</button>`);
+    if (x.priority) chips.push(`<button class="tk-chip tk-prio" data-act="more" title="${PRIO_LABEL[x.priority]} priority" style="--pc:${PRIO_COLOR[x.priority]}">${ICON(I.flag)}${PRIO_LABEL[x.priority]}</button>`);
+    if (x.recur) chips.push(`<button class="tk-chip tk-recur" data-act="more" title="Repeats ${esc(x.recur)}">${ICON(I.recur)}${esc(x.recur)}</button>`);
+    if (x.done && x.doneDate) chips.push(`<span class="tk-chip tk-donedate">${ICON(I.check)}${esc(friendly(x.doneDate))}</span>`);
+    if (opts.source !== false) chips.push(`<a class="tk-src" data-open="${esc(x.path)}" data-line="${x.line}" title="${esc(x.path)}${x.heading ? ' › ' + esc(x.heading) : ''}">${ICON(I.note)}${esc(noteLabel(x.path))}${x.heading && opts.heading !== false && x.heading !== noteLabel(x.path) ? `<span> › ${esc(x.heading)}</span>` : ''}</a>`);
+    const actions = opts.actions !== false && !x.done && !x.cancelled
+      ? `<div class="tk-actions">${date === t ? '' : `<button data-act="today" title="Do today (T)">${ICON(I.sun)}</button>`}<button data-act="tomorrow" title="Tomorrow (M)">${ICON(I.arrow)}</button><button data-act="date" title="Pick a date (D)">${ICON(I.cal)}</button><button data-act="more" title="Details (P)">${ICON(I.more)}</button></div>` : '';
+    return `<div class="tk-row${x.done ? ' done' : ''}${x.cancelled ? ' cancelled' : ''}${x.priority ? ' p-' + x.priority : ''}" data-path="${esc(x.path)}" data-line="${x.line}" tabindex="-1" draggable="${opts.drag ? 'true' : 'false'}"${x.priority ? ` style="--pc:${PRIO_COLOR[x.priority]}"` : ''}>
+      <button class="tk-check" role="checkbox" aria-checked="${x.done}" title="${x.done ? 'Mark not done' : 'Complete (Space)'}">${ICON(I.check)}</button>
+      <div class="tk-main"><div class="tk-text" title="Click to edit">${h.inline(x.text || '(empty task)', x.path)}</div><div class="tk-meta">${chips.join('')}</div></div>
+      ${actions}
     </div>`;
   }
 
-  // Events shared by the Tasks view and ```tasks blocks. h: {toggle(x), setField(x, field, value), open(path, line), menu, find(path, line)}
+  // A small popover next to `anchor`, closed by Esc or a click outside. Returns its element.
+  function popover(anchor, html, cls = '') {
+    document.querySelector('.tk-pop')?.remove();
+    const pop = document.createElement('div');
+    pop.className = 'tk-pop ' + cls; pop.setAttribute('role', 'dialog');
+    pop.innerHTML = html;
+    document.body.append(pop);
+    const r = anchor.getBoundingClientRect(), w = pop.offsetWidth, hgt = pop.offsetHeight;
+    pop.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.right - w)) + 'px';
+    pop.style.top = (r.bottom + hgt + 8 > innerHeight ? Math.max(8, r.top - hgt - 4) : r.bottom + 4) + 'px';
+    const close = () => { pop.remove(); document.removeEventListener('mousedown', out, true); };
+    const out = e => { if (!pop.contains(e.target)) close(); };
+    setTimeout(() => document.addEventListener('mousedown', out, true));
+    pop.addEventListener('keydown', e => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); anchor.isConnected && anchor.focus?.(); } });
+    pop.close = close;
+    return pop;
+  }
+
+  // Dates offered for "when": [label, date or '' for none, hint]
+  function whenChoices(t = today()) {
+    const dow = new Date().getDay();
+    const sat = addDays(t, dow === 6 ? 0 : (6 - dow + 7) % 7);
+    const mon = addDays(t, ((8 - dow) % 7) || 7);
+    return [['Today', t, ICON(I.sun)], ['Tomorrow', addDays(t, 1), ICON(I.arrow)], ['This weekend', sat, ''], ['Next week', mon, ''], ['In a month', addMonths(t, 1), ''], ['No date', '', '']];
+  }
+
+  // Everything about one task: when, priority, repeat, and where it lives.
+  function details(anchor, x, h, focus = 'when') {
+    const field = x.due || !x.scheduled ? 'due' : 'scheduled';
+    const cur = x[field] || '';
+    const REPEATS = ['every day', 'every weekday', 'every week', 'every 2 weeks', 'every month', 'every year'];
+    const pop = popover(anchor, `
+      <div class="tk-pop-sec"><h5>When</h5><div class="tk-chips">${whenChoices().map(([l, d, ic]) => `<button data-when="${d}" class="${d === cur ? 'on' : ''}">${ic}${l}${d && friendly(d) !== l ? `<small>${esc(friendly(d))}</small>` : ''}</button>`).join('')}</div>
+        <label class="tk-pick">On <input type="date" value="${esc(cur)}"></label></div>
+      <div class="tk-pop-sec"><h5>Priority</h5><div class="tk-chips">${['highest', 'high', 'medium', null, 'low'].map(p => `<button data-prio="${p || ''}" class="${(x.priority || null) === p ? 'on' : ''}" style="--pc:${p ? PRIO_COLOR[p] : 'var(--faint)'}">${ICON(I.flag)}${p ? PRIO_LABEL[p] : 'None'}</button>`).join('')}</div></div>
+      <div class="tk-pop-sec"><h5>Repeat</h5><div class="tk-chips">${[null, ...REPEATS].map(r => `<button data-recur="${r || ''}" class="${(x.recur || null) === r ? 'on' : ''}">${r ? esc(r.replace(/^every /, 'Every ')) : 'Never'}</button>`).join('')}</div>
+        <input class="tk-recur-in" placeholder="or type: every mon, thu · every month on the 15th · every week when done" value="${esc(x.recur && !REPEATS.includes(x.recur) ? x.recur : '')}" spellcheck="false"></div>
+      <div class="tk-pop-foot"><button data-foot="open">${ICON(I.note)}Open in ${esc(noteLabel(x.path))}</button><span></span>${h.cancel ? '<button data-foot="cancel">Cancel task</button>' : ''}${h.remove ? '<button data-foot="delete" class="danger">Delete</button>' : ''}</div>`, 'tk-details');
+    const done = () => pop.close();
+    pop.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.when !== undefined) { h.setField(x, field, b.dataset.when || null); done(); }
+      else if (b.dataset.prio !== undefined) { h.setField(x, 'priority', b.dataset.prio || null); done(); }
+      else if (b.dataset.recur !== undefined) { h.setField(x, 'recur', b.dataset.recur || null); done(); }
+      else if (b.dataset.foot === 'open') { done(); h.open(x.path, x.line); }
+      else if (b.dataset.foot === 'cancel') { done(); h.cancel(x); }
+      else if (b.dataset.foot === 'delete') { done(); h.remove(x); }
+    });
+    pop.querySelector('input[type=date]').addEventListener('change', e => { if (e.target.value) { h.setField(x, field, e.target.value); done(); } });
+    const rin = pop.querySelector('.tk-recur-in');
+    rin.addEventListener('keydown', e => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const v = rin.value.trim().toLowerCase();
+      if (!v) return;
+      if (!parseRecur(v.startsWith('every') ? v : 'every ' + v)) { rin.classList.add('bad'); return; }
+      h.setField(x, 'recur', v.startsWith('every') ? v : 'every ' + v); done();
+    });
+    rin.addEventListener('input', () => rin.classList.remove('bad'));
+    (focus === 'date' ? pop.querySelector('input[type=date]') : pop.querySelector('button.on') || pop.querySelector('button'))?.focus();
+    if (focus === 'date') try { pop.querySelector('input[type=date]').showPicker?.(); } catch { }
+    return pop;
+  }
+
+  // Edit a task's text in place: Enter saves, Esc cancels.
+  function editText(row, x, h) {
+    const box = row.querySelector('.tk-text');
+    if (!box || row.querySelector('.tk-edit')) return;
+    const inp = document.createElement('input');
+    inp.className = 'tk-edit'; inp.value = x.text; inp.spellcheck = true;
+    box.replaceWith(inp);
+    inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length);
+    let finished = false;
+    const finish = save => {
+      if (finished) return; finished = true;
+      const v = inp.value.trim();
+      if (save && v && v !== x.text) h.setText(x, v);
+      else { inp.replaceWith(box); row.focus(); }
+    };
+    inp.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(false); }
+      e.stopPropagation();
+    });
+    inp.addEventListener('blur', () => finish(true));
+  }
+
+  // Events shared by the Tasks view and ```tasks blocks. h: {toggle(x), setField(x, field, value), setText, open(path, line), find(path, line), cancel, remove, complete?}
   function wire(el, h) {
+    const t0 = () => today();
+    const when = (x, d) => h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', d);
+    const complete = (row, x) => {
+      if (x.done || x.cancelled || !h.complete) return h.toggle(x);
+      // Tick it, let it be seen ticked for a moment, then complete it.
+      row.classList.add('completing'); row.querySelector('.tk-check')?.setAttribute('aria-checked', 'true');
+      setTimeout(() => h.complete(x), 650);
+    };
     el.addEventListener('click', e => {
       const row = e.target.closest('.tk-row');
       const src = e.target.closest('[data-open]');
       if (src) { e.preventDefault(); return h.open(src.dataset.open, +src.dataset.line); }
-      if (!row) return;
+      if (!row || e.target.closest('.tk-edit')) return;
       const x = h.find(row.dataset.path, +row.dataset.line);
       if (!x) return;
-      if (e.target.closest('.tk-check')) { e.preventDefault(); return h.toggle(x); }
+      if (e.target.closest('.tk-check')) { e.preventDefault(); return complete(row, x); }
       const b = e.target.closest('[data-act]');
-      if (!b) return;
-      const t = today();
-      if (b.dataset.act === 'today') return h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', t);
-      if (b.dataset.act === 'tomorrow') return h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', addDays(t, 1));
-      if (b.dataset.act === 'date') {
-        const inp = document.createElement('input');
-        inp.type = 'date'; inp.className = 'tk-datepick'; inp.value = x.due || t;
-        b.replaceWith(inp);
-        inp.focus(); try { inp.showPicker?.(); } catch { }
-        inp.addEventListener('change', () => { if (inp.value) h.setField(x, 'due', inp.value); });
-        inp.addEventListener('blur', () => setTimeout(() => inp.isConnected && h.refresh?.(), 200));
+      if (!b) {
+        // A click on the text edits it (links and tags inside it still work).
+        if (e.target.closest('.tk-text') && !e.target.closest('a, .tag, [data-href]') && h.setText) editText(row, x, h);
         return;
       }
-      if (b.dataset.act === 'more') {
-        const r = b.getBoundingClientRect();
-        return h.menu(r.left - 150, r.bottom + 4, [
-          ...['highest', 'high', 'medium', 'low'].map(p => [`Priority: ${PRIO_LABEL[p]}${x.priority === p ? ' ✓' : ''}`, () => h.setField(x, 'priority', p)]),
-          ['Priority: normal', () => h.setField(x, 'priority', null)],
-          null,
-          ['Next week', () => h.setField(x, 'due', addDays(t, 7 - ((new Date().getDay() + 6) % 7)))],
-          ['Remove date', () => h.setField(x, 'due', null)],
-          ['Cancel task', () => h.cancel?.(x)],
-          ['Open in note', () => h.open(x.path, x.line)],
-        ]);
-      }
+      if (b.dataset.act === 'today') return when(x, t0());
+      if (b.dataset.act === 'tomorrow') return when(x, addDays(t0(), 1));
+      if (b.dataset.act === 'date') return details(b, x, h, 'date');
+      if (b.dataset.act === 'more') return details(b, x, h);
     });
-    // Keyboard: ↑↓ (j/k) move, Space/X tick, T today, M tomorrow, Enter opens the note. The list
-    // redraws after each change, so focus comes back to the same place in it.
+    // Keyboard: ↑↓ (j/k) move, Space/X tick, T today, M tomorrow, D date, P details, E edit, Enter opens the note.
+    // The list redraws after each change, so focus comes back to the same place in it.
     let refocus = null;
     const rowsOf = () => [...el.querySelectorAll('.tk-row')];
     el.addEventListener('keydown', e => {
-      if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input:not(.tk-check), textarea, select')) return;
+      if (e.ctrlKey || e.metaKey || e.altKey || e.target.closest('input, textarea, select, .tk-pop')) return;
       const cur = e.target.closest('.tk-row');
       const rows = rowsOf(), i = rows.indexOf(cur);
       const go = j => { const r = rows[Math.max(0, Math.min(rows.length - 1, j))]; r?.focus(); r?.scrollIntoView({ block: 'nearest' }); };
       const x = cur && h.find(cur.dataset.path, +cur.dataset.line);
-      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, t = today();
+      const k = e.key.length === 1 ? e.key.toLowerCase() : e.key, t = t0();
       const change = f => { if (!x) return; refocus = i; f(); };
       if (k === 'ArrowDown' || k === 'j') go(i + 1);
       else if ((k === 'ArrowUp' || k === 'k') && i <= 0 && el.querySelector('.tk-add')) el.querySelector('.tk-add').focus();
       else if (k === 'ArrowUp' || k === 'k') go(i - 1);
       else if (k === 'Home') go(0);
       else if (k === 'End') go(rows.length - 1);
-      else if (k === ' ' || k === 'x') change(() => h.toggle(x));
-      else if (k === 't') change(() => h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', t));
-      else if (k === 'm') change(() => h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', addDays(t, 1)));
+      else if ((k === ' ' || k === 'x') && x) { refocus = i; complete(cur, x); }
+      else if (k === 't') change(() => when(x, t));
+      else if (k === 'm') change(() => when(x, addDays(t, 1)));
+      else if (k === 'd' && x) details(cur.querySelector('[data-act=date]') || cur, x, h, 'date');
+      else if (k === 'p' && x) details(cur.querySelector('[data-act=more]') || cur, x, h);
+      else if ((k === 'e' || k === 'F2') && x && h.setText) editText(cur, x, h);
+      else if ((k === 'Delete' || k === 'Backspace') && x && h.remove) change(() => h.remove(x));
       else if (k === 'Enter' && x) h.open(x.path, x.line);
       else return;
       e.preventDefault(); e.stopPropagation();
@@ -481,65 +601,160 @@
       r.focus({ preventScroll: true }); r.scrollIntoView({ block: 'nearest' });
     }).observe(el, { childList: true, subtree: true });
 
-    // Drag a task onto a section to reschedule it.
+    // Drag a task onto a section (or a list in the side bar) to reschedule it.
     let drag = null;
+    const target = e => e.target.closest?.('.tk-section[data-date], .tk-nav [data-date]');
     el.addEventListener('dragstart', e => { const row = e.target.closest?.('.tk-row'); if (!row) return; drag = h.find(row.dataset.path, +row.dataset.line); e.dataTransfer.setData('text/plain', row.textContent.trim()); e.dataTransfer.effectAllowed = 'move'; row.classList.add('dragging'); });
     el.addEventListener('dragend', () => { drag = null; el.querySelectorAll('.dragging, .drop').forEach(n => n.classList.remove('dragging', 'drop')); });
-    el.addEventListener('dragover', e => { const s = e.target.closest?.('.tk-section[data-date]'); if (!s || !drag) return; e.preventDefault(); el.querySelectorAll('.tk-section.drop').forEach(n => n !== s && n.classList.remove('drop')); s.classList.add('drop'); });
-    el.addEventListener('drop', e => { const s = e.target.closest?.('.tk-section[data-date]'); if (!s || !drag) return; e.preventDefault(); const x = drag; drag = null; h.setField(x, 'due', s.dataset.date || null); });
+    el.addEventListener('dragover', e => { const s = target(e); if (!s || !drag) return; e.preventDefault(); el.querySelectorAll('.drop').forEach(n => n !== s && n.classList.remove('drop')); s.classList.add('drop'); });
+    el.addEventListener('dragleave', e => { const s = target(e); if (s && !s.contains(e.relatedTarget)) s.classList.remove('drop'); });
+    el.addEventListener('drop', e => { const s = target(e); if (!s || !drag) return; e.preventDefault(); const x = drag; drag = null; h.setField(x, 'due', s.dataset.date || null); });
   }
 
-  // The Tasks view. h: {tasks(), inline, toggle, setField, open, menu, add(line) -> Promise, refresh via returned object, inboxLabel}
+  // Sections for a list of open tasks, by date / note / priority / heading.
+  function groupTasks(list, by, now = new Date()) {
+    const byPrio = (a, b) => (PRIORITY_RANK[a.priority ?? 'null'] - PRIORITY_RANK[b.priority ?? 'null']) || a.path.localeCompare(b.path) || a.line - b.line;
+    const byDate = (a, b) => ((dateOf(a) || '9') < (dateOf(b) || '9') ? -1 : (dateOf(a) || '9') > (dateOf(b) || '9') ? 1 : byPrio(a, b));
+    if (by === 'date') return buckets(list, now);
+    const m = new Map();
+    const key = by === 'note' ? x => x.path : by === 'heading' ? x => x.heading || '' : x => x.priority || 'none';
+    for (const x of list) { const k = key(x); if (!m.has(k)) m.set(k, []); m.get(k).push(x); }
+    let keys = [...m.keys()];
+    if (by === 'priority') keys.sort((a, b) => PRIORITY_RANK[a === 'none' ? 'null' : a] - PRIORITY_RANK[b === 'none' ? 'null' : b]);
+    else if (by === 'note') keys.sort((a, b) => noteLabel(a).localeCompare(noteLabel(b)));
+    else keys.sort((a, b) => Math.min(...m.get(a).map(x => x.line)) - Math.min(...m.get(b).map(x => x.line)));
+    return keys.map(k => ({ id: by + ':' + k, title: by === 'note' ? noteLabel(k) : by === 'heading' ? (k || 'Top of the note') : k === 'none' ? 'No priority' : PRIO_LABEL[k] + ' priority', path: by === 'note' ? k : undefined, tasks: m.get(k).sort(byDate) }));
+  }
+
+  // The Tasks view: smart lists on the left, the chosen list on the right.
+  // h: {tasks(), inline, toggle, complete, setField, setText, open, find, cancel, remove, add(line, path) -> Promise,
+  //     pickTarget() -> Promise<path>, targetLabel(path), defaultTarget(), saved, save(state)}
   function mountView(el, h) {
-    let search = '', tag = '', showDone = false, focusAdd = false;
-    const state = () => ({ search, tag, showDone });
+    const st = Object.assign({ list: 'today', group: {}, showDone: false, target: null }, h.saved || {});
+    let search = '', focusAdd = false;
+    const keep = () => h.save?.({ list: st.list, group: st.group, showDone: st.showDone });
+
+    const LISTS = [
+      { id: 'today', name: 'Today', icon: I.star, sub: () => longDate(today()) },
+      { id: 'upcoming', name: 'Upcoming', icon: I.upcoming, sub: () => 'The next seven days and later' },
+      { id: 'anytime', name: 'Anytime', icon: I.layers, sub: () => 'Tasks without a date', date: '' },
+      { id: 'all', name: 'Everything', icon: I.inbox, sub: () => 'Every open task in the vault' },
+      { id: 'logbook', name: 'Logbook', icon: I.book, sub: () => 'Done and cancelled in the last 30 days' },
+    ];
+    function listTasks(all, id, t) {
+      const open = all.filter(x => !x.done && !x.cancelled);
+      if (id === 'today') return open.filter(x => dateOf(x) && dateOf(x) <= t);
+      if (id === 'upcoming') return open.filter(x => dateOf(x) && dateOf(x) > t);
+      if (id === 'anytime') return open.filter(x => !dateOf(x));
+      if (id === 'all') return open;
+      if (id === 'logbook') { const since = addDays(t, -30); return all.filter(x => (x.done && (x.doneDate || '') >= since) || (x.cancelled && (!x.cancelledDate || x.cancelledDate >= since))); }
+      if (id.startsWith('note:')) return open.filter(x => x.path === id.slice(5));
+      if (id.startsWith('tag:')) { const tg = id.slice(4); return open.filter(x => x.tags.some(g => g === tg || g.startsWith(tg + '/'))); }
+      return open;
+    }
+    const groupFor = id => st.group[id] || (id.startsWith('note:') ? 'heading' : 'date');
+
     function render() {
-      const all = h.tasks();
-      const tags = [...new Set(all.filter(x => !x.done).flatMap(x => x.tags))].sort();
-      let list = all;
-      if (tag) list = list.filter(x => x.tags.some(t => t === tag || t.startsWith(tag + '/')));
+      const all = h.tasks(), t = today();
+      if (st.list.startsWith('note:') && !all.some(x => x.path === st.list.slice(5))) st.list = 'today';
+      const open = all.filter(x => !x.done && !x.cancelled);
+      const count = id => listTasks(all, id, t).length;
+      const noteCounts = new Map(); for (const x of open) noteCounts.set(x.path, (noteCounts.get(x.path) || 0) + 1);
+      const notes = [...noteCounts].sort((a, b) => b[1] - a[1] || noteLabel(a[0]).localeCompare(noteLabel(b[0]))).slice(0, 12);
+      const tagCounts = new Map(); for (const x of open) for (const g of x.tags) tagCounts.set(g, (tagCounts.get(g) || 0) + 1);
+      const tags = [...tagCounts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, 12);
+      const L = LISTS.find(l => l.id === st.list);
+      const title = L ? L.name : st.list.startsWith('note:') ? noteLabel(st.list.slice(5)) : '#' + st.list.slice(4);
+      const sub = L ? L.sub() : st.list.startsWith('note:') ? st.list.slice(5) : 'Open tasks with this tag';
+
+      let list = listTasks(all, st.list, t);
       if (search) { const q = search.toLowerCase(); list = list.filter(x => x.text.toLowerCase().includes(q) || x.path.toLowerCase().includes(q)); }
-      const secs = buckets(list);
-      const done = list.filter(x => x.done && x.doneDate && x.doneDate >= addDays(today(), -7)).sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || ''));
-      const openCount = list.filter(x => !x.done && !x.cancelled).length;
+      const logbook = st.list === 'logbook';
+      const group = groupFor(st.list);
+      let secs;
+      if (logbook) {
+        const m = new Map();
+        for (const x of list.sort((a, b) => (b.doneDate || b.cancelledDate || '').localeCompare(a.doneDate || a.cancelledDate || ''))) { const d = x.doneDate || x.cancelledDate || ''; if (!m.has(d)) m.set(d, []); m.get(d).push(x); }
+        secs = [...m].map(([d, ts]) => ({ id: 'd' + d, title: d ? friendly(d) : 'Cancelled', tasks: ts }));
+      } else {
+        secs = groupTasks(list, group);
+        if (st.list === 'today' && group === 'date') secs = secs.filter(s => s.id === 'today' || s.id === 'overdue');
+        if (st.list === 'upcoming' && group === 'date') secs = secs.filter(s => s.id !== 'today' && s.id !== 'overdue');
+      }
+      // Today's progress: what's been done today against what's left for today.
+      const doneToday = all.filter(x => x.done && x.doneDate === t).length, leftToday = count('today');
+      const pct = doneToday + leftToday ? doneToday / (doneToday + leftToday) : 0;
+      const tg = st.list.startsWith('tag:') ? st.list.slice(4) : null;
+      const recent = st.showDone && !logbook ? all.filter(x => x.done && (x.doneDate || '') >= addDays(t, -7) && (st.list === 'today' ? x.doneDate === t : st.list.startsWith('note:') ? x.path === st.list.slice(5) : tg ? x.tags.some(g => g === tg || g.startsWith(tg + '/')) : true)).sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || '')) : [];
       const addVal = el.querySelector('.tk-add')?.value || '';
-      el.innerHTML = `<div class="tk-view">
-        <div class="tk-head"><h2>Tasks</h2><span class="tk-count">${openCount} open</span></div>
-        <div class="tk-addbox"><input class="field tk-add" placeholder="Add a task… e.g. “Pay rent tomorrow !high every month #home”" spellcheck="false" value="${esc(addVal)}"><div class="tk-preview"></div><div class="tk-inbox">Adds to ${esc(h.inboxLabel())}</div></div>
-        <div class="tk-filters"><input class="field tk-search" type="search" placeholder="Filter…" value="${esc(search)}" spellcheck="false">
-          <select class="field tk-tag"><option value="">All tags</option>${tags.map(t => `<option value="${esc(t)}"${t === tag ? ' selected' : ''}>#${esc(t)}</option>`).join('')}</select>
-          <label class="tk-showdone"><input type="checkbox"${showDone ? ' checked' : ''}> Recently done</label></div>
-        ${secs.map(s => `<section class="tk-section${s.tone ? ' tk-' + s.tone : ''}"${s.date !== undefined ? ` data-date="${esc(s.date)}"` : ''}><h3>${esc(s.title)} <span>${s.tasks.length}</span></h3>${s.tasks.map(x => rowHtml(x, h, { drag: true })).join('') || '<div class="tk-empty">Nothing here — drag a task onto this day, or add one above.</div>'}</section>`).join('')}
-        ${showDone ? `<section class="tk-section tk-done"><h3>Done in the last week <span>${done.length}</span></h3>${done.map(x => rowHtml(x, h, { actions: false })).join('') || '<div class="tk-empty">Nothing yet.</div>'}</section>` : ''}
-        ${!all.length ? '<div class="tk-blank">No tasks in the vault yet. Add one above, or write <code>- [ ] something</code> in any note.</div>' : ''}
-      </div>`;
+      const target = st.target || (st.list.startsWith('note:') ? st.list.slice(5) : null);
+      const navItem = (id, name, icon, n, extra = '') => `<button class="tk-li${st.list === id ? ' on' : ''}" data-list="${esc(id)}"${extra}>${ICON(icon)}<span>${esc(name)}</span>${n ? `<b>${n}</b>` : ''}</button>`;
+
+      el.innerHTML = `<div class="tk-app">
+        <nav class="tk-nav" aria-label="Task lists">
+          ${navItem('today', 'Today', I.star, count('today'), ` data-date="${t}"`)}
+          ${navItem('upcoming', 'Upcoming', I.upcoming, count('upcoming'))}
+          ${navItem('anytime', 'Anytime', I.layers, count('anytime'), ' data-date=""')}
+          ${navItem('all', 'Everything', I.inbox, open.length)}
+          ${navItem('logbook', 'Logbook', I.book, 0)}
+          ${notes.length ? `<h5>Notes</h5>${notes.map(([p, n]) => navItem('note:' + p, noteLabel(p), I.note, n, ` title="${esc(p)}"`)).join('')}` : ''}
+          ${tags.length ? `<h5>Tags</h5>${tags.map(([g, n]) => navItem('tag:' + g, g, I.hash, n)).join('')}` : ''}
+        </nav>
+        <div class="tk-view">
+          <div class="tk-head"><div><h2>${esc(title)}</h2><div class="tk-sub">${esc(sub)}</div></div>
+            ${st.list === 'today' ? `<div class="tk-ring" title="${doneToday} done today, ${leftToday} to go"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="15" class="bg"/><circle cx="18" cy="18" r="15" class="fg" style="stroke-dasharray:${(pct * 94.25).toFixed(1)} 94.25"/></svg><span><b>${doneToday}</b> of ${doneToday + leftToday}</span></div>` : `<span class="tk-count">${logbook ? list.length + ' done' : list.length + ' open'}</span>`}</div>
+          ${logbook ? '' : `<div class="tk-addbox"><div class="tk-addrow"><span class="tk-plus">+</span><input class="tk-add" placeholder="Add a task… try “Call Sam tomorrow !high every week #home”" spellcheck="false" value="${esc(addVal)}" aria-label="Add a task"></div>
+            <div class="tk-addfoot"><div class="tk-preview"></div><button class="tk-target" title="Choose the note new tasks go to">Adds to <b>${esc(h.targetLabel(target))}</b> ▾</button></div></div>`}
+          <div class="tk-filters"><input class="field tk-search" type="search" placeholder="Filter this list…" value="${esc(search)}" spellcheck="false" aria-label="Filter tasks">
+            ${logbook ? '' : `<div class="seg tk-group" role="radiogroup" aria-label="Group by">${[['date', 'Date'], ['note', 'Note'], ['priority', 'Priority'], ...(st.list.startsWith('note:') ? [['heading', 'Heading']] : [])].map(([v, l]) => `<button data-group="${v}" class="${group === v ? 'on' : ''}" role="radio" aria-checked="${group === v}">${l}</button>`).join('')}</div>
+            <label class="tk-showdone"><input type="checkbox"${st.showDone ? ' checked' : ''}> Show done</label>`}</div>
+          ${st.list === 'today' && secs.some(s => s.id === 'overdue') ? `<div class="tk-rollover">${secs.find(s => s.id === 'overdue').tasks.length} overdue <button class="btn" data-roll>Move them all to today</button></div>` : ''}
+          ${secs.map(s => `<section class="tk-section${s.tone ? ' tk-' + s.tone : ''}"${s.date !== undefined ? ` data-date="${esc(s.date)}"` : ''}><h3>${s.path ? `<a data-open="${esc(s.path)}" data-line="0">${esc(s.title)}</a>` : esc(s.title)} <span>${s.tasks.length}</span></h3>${s.tasks.map(x => rowHtml(x, h, { drag: !logbook, source: !(group === 'note' || st.list.startsWith('note:')), heading: group !== 'heading', actions: !logbook })).join('') || (s.date !== undefined ? '<div class="tk-empty">Nothing here. Drag a task onto this day, or add one above.</div>' : '')}</section>`).join('')}
+          ${recent.length ? `<section class="tk-section tk-done"><h3>Done this week <span>${recent.length}</span></h3>${recent.map(x => rowHtml(x, h, { actions: false })).join('')}</section>` : ''}
+          ${!secs.length && all.length ? `<div class="tk-blank">${ICON(st.list === 'today' ? I.sun : I.check)}<p>${st.list === 'today' ? 'Nothing left for today.' : logbook ? 'Nothing done in the last 30 days.' : 'No tasks here.'}</p></div>` : ''}
+          ${!all.length ? `<div class="tk-blank">${ICON(I.check)}<p>No tasks in the vault yet. Add one above, or write <code>- [ ] something</code> in any note.</p></div>` : ''}
+        </div></div>`;
       preview();
       const add = el.querySelector('.tk-add');
-      if (focusAdd) { add.focus(); add.setSelectionRange(add.value.length, add.value.length); focusAdd = false; }
+      if (focusAdd && add) { add.focus(); add.setSelectionRange(add.value.length, add.value.length); focusAdd = false; }
     }
     function preview() {
       const inp = el.querySelector('.tk-add'), pv = el.querySelector('.tk-preview');
       if (!inp || !pv) return;
       const v = inp.value.trim();
-      if (!v) { pv.innerHTML = ''; return; }
+      if (!v) { pv.innerHTML = '<span class="tk-tip">Understands dates like “friday”, <code>!high</code>, <code>every week</code> and <code>#tags</code></span>'; return; }
       const q = parseQuick(v);
       const bits = [];
-      if (q.due) bits.push(`<b>${esc(friendly(q.due))}</b> <small>${esc(q.due)}</small>`);
-      if (q.priority) bits.push(`${PRIO_LABEL[q.priority]} priority`);
-      if (q.recur) bits.push(`repeats ${esc(q.recur)}`);
-      pv.innerHTML = `<span class="tk-pv-text">${esc(q.text || '…')}</span>${bits.length ? ' · ' + bits.join(' · ') : ''} <kbd>Enter</kbd>`;
+      if (q.due) bits.push(`<span class="tk-chip tk-date${q.due === today() ? ' today' : ''}">${ICON(I.cal)}${esc(friendly(q.due))}</span>`);
+      if (q.priority) bits.push(`<span class="tk-chip tk-prio" style="--pc:${PRIO_COLOR[q.priority]}">${ICON(I.flag)}${PRIO_LABEL[q.priority]}</span>`);
+      if (q.recur) bits.push(`<span class="tk-chip tk-recur">${ICON(I.recur)}repeats ${esc(q.recur)}</span>`);
+      pv.innerHTML = `<span class="tk-pv-text">${esc(q.text || '…')}</span>${bits.join('')}<kbd>Enter</kbd>`;
     }
     el.addEventListener('input', e => {
       if (e.target.classList.contains('tk-add')) return preview();
       if (e.target.classList.contains('tk-search')) { search = e.target.value; render(); el.querySelector('.tk-search').focus(); el.querySelector('.tk-search').setSelectionRange(search.length, search.length); }
     });
     el.addEventListener('change', e => {
-      if (e.target.classList.contains('tk-tag')) { tag = e.target.value; render(); }
-      if (e.target.closest('.tk-showdone')) { showDone = e.target.checked; render(); }
+      if (e.target.closest('.tk-showdone')) { st.showDone = e.target.checked; keep(); render(); }
+    });
+    el.addEventListener('click', async e => {
+      const li = e.target.closest('.tk-li');
+      if (li) { st.list = li.dataset.list; st.target = null; search = ''; keep(); render(); return; }
+      const g = e.target.closest('[data-group]');
+      if (g) { st.group = { ...st.group, [st.list]: g.dataset.group }; keep(); render(); return; }
+      if (e.target.closest('[data-roll]')) { const t = today(); for (const x of listTasks(h.tasks(), 'today', t).filter(x => dateOf(x) < t)) await h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', t); return; }
+      if (e.target.closest('.tk-target')) { const p = await h.pickTarget(); if (p) { st.target = p; render(); el.querySelector('.tk-add')?.focus(); } }
     });
     el.addEventListener('keydown', async e => {
-      // ↓ from the add or search box moves into the list.
+      // ↓ from the add or search box moves into the list; ↑↓ move through the side bar.
       if (e.key === 'ArrowDown' && e.target.matches('.tk-add, .tk-search') && el.querySelector('.tk-row')) { e.preventDefault(); el.querySelector('.tk-row').focus(); return; }
+      if (e.target.classList.contains('tk-li') && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        const lis = [...el.querySelectorAll('.tk-li')], i = lis.indexOf(e.target);
+        const n = lis[Math.max(0, Math.min(lis.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+        st.list = n.dataset.list; st.target = null; keep(); render(); el.querySelector(`.tk-li[data-list="${CSS.escape(n.dataset.list)}"]`)?.focus();
+        return;
+      }
       if (!e.target.classList.contains('tk-add')) return;
       if (e.key === 'Escape') { e.target.value = ''; preview(); return; }
       if (e.key !== 'Enter') return;
@@ -548,13 +763,16 @@
       if (!v) return;
       const q = parseQuick(v);
       if (!q.text) return;
+      // In Today, a task with no date is for today; in a tag's list it gets the tag.
+      if (st.list === 'today' && !q.due) q.due = today();
+      if (st.list.startsWith('tag:') && !q.text.toLowerCase().includes('#' + st.list.slice(4))) q.text += ' #' + st.list.slice(4);
       e.target.value = '';
       focusAdd = true;
-      await h.add(formatTask(q));
+      await h.add(formatTask(q), st.target || (st.list.startsWith('note:') ? st.list.slice(5) : null));
     });
     wire(el, { ...h, refresh: render });
     render();
-    return { refresh: render, state };
+    return { refresh: render, state: () => ({ ...st, search }), show: id => { st.list = id; keep(); render(); } };
   }
 
   // A ```tasks block. h as for wire, plus inline; source is the query text.

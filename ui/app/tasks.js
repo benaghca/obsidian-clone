@@ -24,10 +24,12 @@ async function modifyTaskLine(x, fn) {
   if ((lines[li] || '').replace(/\r$/, '') !== x.raw) li = lines.findIndex(l => l.replace(/\r$/, '') === x.raw);
   if (li < 0) { toast('That task has changed since the list was drawn'); refreshTasks(); return; }
   const cr = lines[li].endsWith('\r') ? '\r' : '';
-  const text = fn(lines[li].replace(/\r$/, '')).map(l => l + cr).join('\n');
+  const out = fn(lines[li].replace(/\r$/, ''));
+  const remove = out.length === 1 && out[0] === null; // the line goes, with its line break
+  const text = remove ? '' : out.map(l => l + cr).join('\n');
   let start = 0;
   for (let k = 0; k < li; k++) start += lines[k].length + 1;
-  const end = start + lines[li].length;
+  const end = start + lines[li].length + (remove && li < lines.length - 1 ? 1 : 0);
   if (inEditor) {
     const delta = text.length - (end - start), shift = v => v > end ? v + delta : v;
     ed.insert(start, end, text, shift(ed.selectionStart), shift(ed.selectionEnd));
@@ -42,7 +44,40 @@ async function modifyTaskLine(x, fn) {
 }
 const toggleTaskItem = x => modifyTaskLine(x, l => CinderTasks.toggle(l, { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }));
 const setTaskField = (x, f, v) => modifyTaskLine(x, l => [CinderTasks.setField(l, f, v)]);
+const setTaskText = (x, text) => modifyTaskLine(x, l => [CinderTasks.setText(l, text)]);
 const cancelTask = x => modifyTaskLine(x, l => [CinderTasks.setStatus(l, '-')]);
+// Deleting a task takes its line out of the note; Undo puts it back.
+async function deleteTask(x) {
+  await modifyTaskLine(x, () => [null]);
+  toast(`Deleted “${x.text}”`, 5000, { label: 'Undo', run: () => restoreTaskLine(x) });
+}
+async function restoreTaskLine(x) {
+  const inEditor = x.path === S.cur && S.view === 'note';
+  const content = inEditor ? ed.value : S.notes.get(x.path)?.content;
+  if (content == null) return;
+  const lines = content.split('\n'), li = Math.min(x.line, lines.length);
+  let start = 0;
+  for (let k = 0; k < li; k++) start += lines[k].length + 1;
+  const text = x.raw + '\n';
+  if (inEditor) { ed.insert(start, start, text, ed.selectionStart, ed.selectionEnd); const n = S.notes.get(x.path); if (n) { setNote(x.path, ed.value, n.mtime); resolveNote(x.path); } }
+  else { await writeFile(x.path, content.slice(0, start) + text + content.slice(start), S.notes.get(x.path).mtime); resolveNote(x.path); }
+  refreshTasks();
+}
+// Completing from a list offers Undo. A recurring task's next occurrence goes in above it, so
+// undoing removes that too.
+async function completeTask(x) {
+  await toggleTaskItem(x);
+  const recurring = !!CinderTasks.parseRecur(x.recur);
+  toast(`Done: “${x.text}”`, 5000, {
+    label: 'Undo', run: async () => {
+      const doneAt = recurring ? x.line + 1 : x.line;
+      const d = allTasks().find(y => y.path === x.path && y.line === doneAt && y.done && y.text === x.text);
+      if (!d) return toast('That task has changed since');
+      await toggleTaskItem(d);
+      if (recurring) { const n = allTasks().find(y => y.path === x.path && y.line === x.line && !y.done && y.text === x.text); if (n) await modifyTaskLine(n, () => [null]); }
+    },
+  });
+}
 
 function refreshTasks() {
   if (S.view === 'tasks') tasksView?.refresh();
@@ -67,9 +102,9 @@ function taskInboxPath() {
   return isMd(p) ? p : p + '.md';
 }
 
-// Append a task line to the inbox note (creating it if needed).
-async function addTask(line) {
-  const path = taskInboxPath();
+// Append a task line to a note (the task inbox unless one is given), creating it if needed.
+async function addTask(line, to) {
+  const path = to || taskInboxPath();
   try {
     if (path === S.cur && S.view === 'note') {
       const v = ed.value, pre = v && !v.endsWith('\n') ? '\n' : '';
@@ -104,8 +139,11 @@ function taskHooks() {
       return div.innerHTML;
     },
     toggle: x => toggleTaskItem(x),
+    complete: x => completeTask(x),
     setField: (x, f, v) => setTaskField(x, f, v),
+    setText: (x, t) => setTaskText(x, t),
     cancel: x => cancelTask(x),
+    remove: x => deleteTask(x),
     open: (path, line) => {
       const c = S.notes.get(path)?.content || '';
       let off = 0;
@@ -114,8 +152,18 @@ function taskHooks() {
       openPath(path, { mode: 'edit', select: [off, end < 0 ? c.length : end] });
     },
     menu: (x, y, items) => menu(x, y, items),
-    add: line => addTask(line),
+    add: (line, path) => addTask(line, path),
     inboxLabel: () => noteName(taskInboxPath()) + (cfg.taskInbox ? '' : ' (today’s daily note)'),
+    targetLabel: path => path ? noteName(path) : cfg.taskInbox ? noteName(taskInboxPath()) : 'today’s daily note',
+    pickTarget: () => picker({
+      placeholder: 'Add new tasks to which note?',
+      items: q => {
+        const def = { main: cfg.taskInbox ? noteName(taskInboxPath()) : 'Today’s daily note', sub: 'the default', value: taskInboxPath() };
+        return [...(score(q, def.main) > -Infinity || !q ? [def] : []), ...rank([...S.notes.keys()].filter(p => !isDrawing(p)), q, noteName).map(p => ({ main: noteName(p), sub: dirname(p), value: p }))].slice(0, 60);
+      },
+    }),
+    saved: store('tasksView'),
+    save: v => store('tasksView', v),
   };
 }
 
