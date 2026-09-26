@@ -36,6 +36,7 @@
     "app/navigation.js",
     "app/drawings.js",
     "app/window.js",
+    "app/tab-groups.js",
     "app/tabs.js",
     "app/canvases.js",
     "app/bases.js",

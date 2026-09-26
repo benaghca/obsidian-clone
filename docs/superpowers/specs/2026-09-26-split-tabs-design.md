@@ -163,7 +163,7 @@ Run targeted suites while working. Run the full regression (`ui/test/e2e/run.sh`
   - a restart keeping the groups, and conversion of the old `split` setting
 - **Updated suite, `ui/test/e2e/split.js`:** drop the checks for the swap and "open in main" buttons, and check swapping through the menu instead.
 - **Suites that touch the tab bar or layout, re-run:** `e2e1`, `e2e2`, `e2e3`, `keys`, `keys2`, `focus`, `present`, `nativeui`.
-- **Unit tests, `ui/test/app.test.js`:** the saved shape is built and read by two pure functions, `tabsToStore(tabs, active)` and `tabsFromStore(saved, exists)`, so they can be tested without a page. Test round trips, state saved before this change (no `splits`), and dropping missing files.
+- **Unit tests, `ui/test/tabgroups.test.js`** (loads `ui/app/tab-groups.js` on its own): the saved shape is built and read by two pure functions, `tabsToStore(tabs, active)` and `tabsFromStore(saved, exists)`, so they can be tested without a page. Test round trips, state saved before this change (no `splits`), and dropping missing files.
 - **Type check:** `npm run typecheck` in `ui/editor`, covering the new fields in `ui/types/`.
 - **By hand, in the native window (WebKitGTK):** a real mouse drag of a tab onto each half, and of each grip back to the tab bar. The synthetic events in the suite don't prove the platform's drag and drop works.
 
