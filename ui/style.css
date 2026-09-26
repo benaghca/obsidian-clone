@@ -939,6 +939,11 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .tab-name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tab-x { flex: none; width: 20px; height: 20px; display: grid; place-items: center; border: 0; background: none; color: var(--faint); border-radius: var(--radius-sm); font-size: var(--text-lg); line-height: 1; cursor: pointer; opacity: 0; }
 .tab:hover .tab-x, .tab.active .tab-x { opacity: 1; }
+.tab.group { max-width: 320px; }
+.tab.group .tab-name { flex: 1 1 0; }
+.tab-sep { flex: none; width: 1px; height: 14px; margin: 0 4px; background: var(--faint); opacity: .7; }
+#pane-close-left { display: none; }
+body.has-split #pane-close-left { display: grid; }
 .tab-x:hover { background: var(--accent-soft); color: var(--text); }
 .tab.drop-before::before, .tab.drop-after::after { content: ''; position: absolute; top: 4px; bottom: 4px; width: 2px; background: var(--accent); }
 .tab.drop-before::before { left: -2px; } .tab.drop-after::after { right: -2px; }

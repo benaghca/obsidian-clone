@@ -7,7 +7,7 @@
 // file on the right, its `split` (see tab-groups.js), shown in the split pane.
 S.tabs = []; S.tab = -1;
 const edStates = new Map(); // note path -> editor state
-const closedTabs = [];      // keys, for "Reopen closed tab"
+const closedTabs = [];      // { key, split }, for "Reopen closed tab"
 let tabSeq = 0;
 const newTabObj = key => ({ id: ++tabSeq, key, split: null, splitMode: 'edit', hist: key ? [key] : [], histIdx: key ? 0 : -1 });
 const curTab = () => S.tabs[S.tab];
@@ -61,7 +61,7 @@ async function closeTab(i = S.tab) {
   const t = S.tabs[i];
   if (!t) return;
   if (i === S.tab) await save();
-  if (t.key) closedTabs.push(t.key);
+  if (t.key || t.split) closedTabs.push({ key: t.key, split: t.split });
   if (S.tabs.length === 1) { S.tabs[0] = newTabObj(null); S.tab = 0; S.hist = []; S.histIdx = -1; return openKey(null); }
   S.tabs.splice(i, 1);
   if (i === S.tab) { S.tab = -1; await activateTab(Math.min(i, S.tabs.length - 1), { force: true }); }
@@ -72,16 +72,20 @@ async function closeTabs(keep) {
   const keepTabs = S.tabs.filter((t, i) => keep(t, i));
   if (!keepTabs.length) return;
   const cur = curTab();
-  for (const t of S.tabs) if (!keepTabs.includes(t) && t.key) closedTabs.push(t.key);
+  for (const t of S.tabs) if (!keepTabs.includes(t) && (t.key || t.split)) closedTabs.push({ key: t.key, split: t.split });
   S.tabs = keepTabs;
   const i = S.tabs.indexOf(cur);
   if (i >= 0) { S.tab = i; saveTabs(); renderTabs(); pruneEdStates(); }
   else { S.tab = -1; await activateTab(0, { force: true }); }
 }
-function reopenClosedTab() {
+async function reopenClosedTab() {
   while (closedTabs.length) {
-    const k = closedTabs.pop();
-    if (k.startsWith(':') || S.files.has(k)) return openInNewTab(k);
+    const c = closedTabs.pop();
+    const t = tabFromSaved(c.key, c.split, p => S.files.has(p));
+    if (!t || (t.key == null && !t.split)) continue;
+    await openInNewTab(t.key);
+    if (t.split) await openSplit(t.split);
+    return;
   }
   toast('No closed tabs to reopen');
 }
@@ -105,9 +109,17 @@ function tabsAfterDelete() {
   pruneEdStates(); saveTabs(); renderTabs();
 }
 
+// A tab in the bar. A group shows both names, "Draft │ Sources", each shortened on its own.
+function tabHtml(t, i) {
+  const title = k => k && !k.startsWith(':') ? k : tabName(k);
+  const name = k => `<span class="tab-name">${esc(tabName(k))}</span>`;
+  const names = t.split ? `${name(t.key)}<span class="tab-sep" aria-hidden="true"></span>${name(t.split)}` : name(t.key);
+  const label = t.split ? ` aria-label="${esc(`${tabName(t.key)} and ${tabName(t.split)}`)}"` : '';
+  return `<div class="tab${t.split ? ' group' : ''}${i === S.tab ? ' active' : ''}" data-i="${i}" draggable="true" title="${esc(t.split ? `${title(t.key)}\n${t.split}` : title(t.key))}"${label} role="tab" aria-selected="${i === S.tab}">${names}<button class="tab-x" tabindex="-1" title="Close (Ctrl+W)">×</button></div>`;
+}
 function renderTabs() {
   const bar = $('#tabbar .tabs-list');
-  bar.innerHTML = S.tabs.map((t, i) => `<div class="tab${i === S.tab ? ' active' : ''}" data-i="${i}" draggable="true" title="${esc(t.key && !t.key.startsWith(':') ? t.key : tabName(t.key))}" role="tab" aria-selected="${i === S.tab}"><span class="tab-name">${esc(tabName(t.key))}</span><button class="tab-x" tabindex="-1" title="Close (Ctrl+W)">×</button></div>`).join('');
+  bar.innerHTML = S.tabs.map(tabHtml).join('');
   bar.querySelector('.tab.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 
@@ -133,6 +145,7 @@ $('#tabbar').addEventListener('contextmenu', e => {
     ['Close tabs to the right', () => closeTabs((x, j) => j <= i)],
     null,
     ['Duplicate tab', () => { activateTab(i).then(() => openInNewTab(t.key)); }],
+    ...(t.split ? [['Separate tabs', () => activateTab(i).then(() => separateSplit())], ['Swap panes', () => activateTab(i).then(() => swapSplit())]] : []),
     ...(t.key && !t.key.startsWith(':') ? [['Open to the right', () => openSplit(t.key)]] : []),
     ...(t.key && !t.key.startsWith(':') ? [['Reveal in file tree', () => revealInTree(t.key)], ['Copy path', () => navigator.clipboard?.writeText(t.key).then(() => toast('Path copied'))]] : []),
   ]);

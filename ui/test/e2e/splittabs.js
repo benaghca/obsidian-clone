@@ -64,6 +64,46 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const [tb, sp] = await page.evaluate(() => [$('#tabbar'), $('#split')].map(e => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; }));
   assert(tb.r >= sp.r - 1 && sp.t >= tb.b - 1 && tb.l <= sp.l, 'the tab bar spans both panes, with the split pane below it');
 
+  // A group is one tab with both names.
+  const tab0 = '#tabbar .tab[data-i="0"]';
+  await reset([['Draft.md', 'Sources.md'], ['Extra.md', null]]);
+  assert(await page.$eval(tab0, el => el.classList.contains('group') && !!el.querySelector('.tab-sep') && [...el.querySelectorAll('.tab-name')].map(n => n.textContent).join('|') === 'Draft|Sources'), 'a group shows as one tab with both names');
+  assert(await page.getAttribute(tab0, 'title') === 'Draft.md\nSources.md' && await page.getAttribute(tab0, 'aria-label') === 'Draft and Sources', 'its tooltip and label name both notes');
+  assert(!(await page.$('[data-split=swap]')) && !(await page.$('[data-split=main]')), 'the split header has no swap or open-in-main buttons');
+  assert(await page.isVisible('#pane-close-left'), 'the left pane has a close button in a group');
+  await page.evaluate(() => activateTab(1)); await sleep(300);
+  assert(!(await page.isVisible('#pane-close-left')), 'but not in an ordinary tab');
+  await page.evaluate(() => activateTab(0)); await sleep(400);
+  // Its menu swaps and separates.
+  await page.click(tab0, { button: 'right' }); await sleep(150);
+  await page.click('.menu >> text=Swap panes'); await sleep(600);
+  assert(same(await tabs(), [['Sources.md', 'Draft.md'], ['Extra.md', null]]) && await page.evaluate(() => S.cur) === 'Sources.md' && await shown() === 'Draft.md', 'Swap panes trades the two notes');
+  await page.click(tab0, { button: 'right' }); await sleep(150);
+  await page.click('.menu >> text=Separate tabs'); await sleep(500);
+  assert(same(await tabs(), [['Sources.md', null], ['Draft.md', null], ['Extra.md', null]]) && await shown() === null, 'Separate tabs gives the partner its own tab, right after');
+  // Typing on the right, then swapping at once, keeps the typing.
+  await reset([['Draft.md', 'Sources.md']]);
+  await page.click('#split .cm-content'); await page.keyboard.press('Control+End'); await page.keyboard.type('\n- Typed then swapped');
+  await page.evaluate(() => swapSplit()); await sleep(1500);
+  assert(rd('Sources.md').includes('- Typed then swapped') && (await page.evaluate(() => ed.value)).includes('- Typed then swapped'), 'edits on the right survive a swap straight after typing');
+  // Each pane's × closes that note.
+  await reset([['Draft.md', 'Sources.md']]);
+  await page.click('#split [data-split=close]'); await sleep(400);
+  assert(same(await tabs(), [['Draft.md', null]]) && await shown() === null, "the right pane's × closes the right note");
+  await reset([['Draft.md', 'Sources.md']]);
+  await page.click('#pane-close-left'); await sleep(500);
+  assert(same(await tabs(), [['Sources.md', null]]) && await page.evaluate(() => S.cur) === 'Sources.md' && await shown() === null, "the left pane's × closes the left note and the right one moves over");
+  // The group's × closes both, and Reopen closed tab brings the group back.
+  await reset([['Draft.md', 'Sources.md'], ['Extra.md', null]]);
+  await page.click(`${tab0} .tab-x`); await sleep(400);
+  assert(same(await tabs(), [['Extra.md', null]]), "the group tab's × closes both notes");
+  await page.evaluate(() => reopenClosedTab()); await sleep(600);
+  assert(same(await tabs(), [['Extra.md', null], ['Draft.md', 'Sources.md']]) && await shown() === 'Sources.md', 'Reopen closed tab brings the whole group back');
+  // Closing the last tab when it's a group leaves one empty tab.
+  await reset([['Draft.md', 'Sources.md']]);
+  await page.evaluate(() => closeTab()); await sleep(400);
+  assert(same(await tabs(), [[null, null]]) && await shown() === null, 'closing the last tab, a group, leaves one empty tab');
+
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));

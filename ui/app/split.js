@@ -8,8 +8,6 @@
 
 const SPLIT = { path: null, handle: null, mode: 'edit', seq: 0 };
 const SPLIT_ICONS = {
-  swap: '<svg viewBox="0 0 24 24"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg>',
-  main: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 12h6M12 9l3 3-3 3"/></svg>',
   read: '<svg viewBox="0 0 24 24"><path d="M3 5.5h6a3 3 0 0 1 3 3V20a2.5 2.5 0 0 0-2.5-2.5H3zM21 5.5h-6a3 3 0 0 0-3 3V20a2.5 2.5 0 0 1 2.5-2.5H21z"/></svg>',
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>',
@@ -24,8 +22,7 @@ function splitDom() {
   el = document.createElement('section');
   el.id = 'split'; el.setAttribute('aria-label', 'Split pane');
   el.innerHTML = `<header class="split-head"><span class="split-title"></span>
-    <button class="ib" data-split="mode"></button><button class="ib" data-split="swap" title="Swap the panes">${SPLIT_ICONS.swap}</button>
-    <button class="ib" data-split="main" title="Open in the main pane">${SPLIT_ICONS.main}</button><button class="ib" data-split="close" title="Close the split pane">${SPLIT_ICONS.close}</button></header>
+    <button class="ib" data-split="mode"></button><button class="ib" data-split="close" title="Close this note">${SPLIT_ICONS.close}</button></header>
     <div class="split-body"></div>`;
   const handle = document.createElement('div');
   handle.className = 'resizer'; handle.id = 'resize-split';
@@ -43,8 +40,6 @@ function splitDom() {
     const b = e.target.closest('[data-split]'); if (!b) return;
     const a = b.dataset.split;
     if (a === 'close') closeSplit();
-    else if (a === 'main') { const p = SPLIT.path; closeSplit().then(() => openPath(p)); }
-    else if (a === 'swap') swapSplit();
     else if (a === 'mode') { const t = curTab(); if (t) { t.splitMode = t.splitMode === 'read' ? 'edit' : 'read'; showSplit(); } }
   });
   return el;
@@ -139,6 +134,28 @@ async function closeSplit() {
   saveTabs(); renderTabs();
   await showSplit();
 }
+
+// Close the note on the left: the right one moves over and the tab carries on with it.
+async function closeLeftPane() {
+  const t = curTab();
+  if (!t?.split) return;
+  await SPLIT.handle?.save?.();
+  await save();
+  closePane(t, 'left');
+  saveTabs(); renderTabs();
+  await openPath(t.key);
+}
+
+// Separate tabs: the note on the right gets its own tab, right after this one.
+async function separateSplit() {
+  const t = curTab();
+  if (!t?.split) return toast('Nothing is open in the split pane');
+  separateTab(S.tabs, t, newTabObj);
+  saveTabs(); renderTabs();
+  await showSplit();
+}
+
+$('#pane-close-left').addEventListener('click', () => closeLeftPane());
 
 // Swap the two panes' notes. The right one moves into the main editor, so its edits save first.
 async function swapSplit() {

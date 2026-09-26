@@ -36,7 +36,8 @@ const rd = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
   assert(await page.$('#split .split-read li'), 'the split pane has a reading view');
   w('Sources.md', '# Sources\n\n- Changed on disk\n'); await sleep(2800);
   assert((await page.textContent('#split .split-read')).includes('Changed on disk'), 'and follows changes on disk');
-  await page.click('[data-split=swap]'); await sleep(600);
+  await page.click('#tabbar .tab.active', { button: 'right' }); await sleep(150);
+  await page.click('.menu >> text=Swap panes'); await sleep(600);
   assert(await page.evaluate(() => S.cur) === 'Sources.md' && (await page.textContent('.split-title')) === 'Draft', 'Swap trades the two notes');
   // Renames follow; images show; reload keeps it; close.
   await page.evaluate(() => renamePath('Draft.md', 'Draft v2.md')); await sleep(800);
