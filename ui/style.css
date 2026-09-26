@@ -1148,3 +1148,45 @@ body.presenting #main { border: 0; }
   .st-row { flex-direction: column; align-items: stretch; gap: var(--space-2); }
   .st-ctl input.field { width: 100%; }
 }
+
+/* ---------------------------------------------------------------- template help */
+#template-bar { display: flex; align-items: center; gap: var(--space-2); padding: 6px var(--space-4); border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, var(--bg)); font-size: var(--text-sm); flex: none; }
+#template-bar .tb-what { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--accent); }
+#template-bar .tb-what svg { width: 16px; height: 16px; }
+#template-bar .tb-hint { color: var(--muted); margin-right: auto; }
+#template-bar .btn { padding: 3px 10px; font-size: var(--text-sm); }
+.cm-tooltip.cm-completionInfo .cm-tp-info { max-width: 340px; font-size: var(--text-sm); line-height: 1.45; }
+.cm-tp-info p { margin: 0 0 6px; }
+.cm-tp-info pre { margin: 0 0 6px; padding: 4px 6px; background: var(--code-bg); border-radius: var(--radius-sm); white-space: pre-wrap; font: 12px var(--font-mono); }
+.cm-tp-info .tp-ex { color: var(--muted); }
+.cm-tp-info code { font-family: var(--font-mono); font-size: .92em; }
+.cm-tooltip-autocomplete completion-section { display: block; padding: 4px 8px 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); border: 0 !important; }
+.tp-help, .tp-prev { display: flex; flex-direction: column; max-height: calc(88vh - 16px); }
+.tp-help header, .tp-prev header { display: flex; align-items: center; gap: var(--space-3); padding: 14px 16px 10px; border-bottom: 1px solid var(--border); }
+.tp-help h3, .tp-prev h3 { margin: 0; white-space: nowrap; font-size: var(--text-lg); }
+.tp-help header .field { flex: 1; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; font-size: 13.5px; background: var(--bg); }
+.tp-prev header .seg { margin-left: auto; }
+.tp-body { overflow-y: auto; padding: 4px 16px 16px; }
+.tp-intro p { margin: 10px 0 4px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.tp-intro code, .tp-r code { font: 12px var(--font-mono); background: var(--code-bg); padding: 0 4px; border-radius: 3px; }
+.tp-sec h4 { margin: 16px 0 4px; font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
+.tp-cmd { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(0, 2fr); gap: 2px 14px; align-items: baseline; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; color: var(--text); }
+.tp-cmd:hover, .tp-cmd:focus-visible { background: var(--bg-hover); outline: none; }
+.tp-cmd .tp-l { font-size: 13.5px; }
+.tp-cmd code { font: 12px var(--font-mono); color: var(--accent); overflow-wrap: anywhere; }
+.tp-cmd .tp-r { grid-column: 2; font-size: var(--text-sm); color: var(--muted); }
+.tp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 4px 12px; }
+.tp-grid div { display: flex; gap: 8px; align-items: baseline; font-size: var(--text-sm); padding: 3px 4px; }
+.tp-grid code { font: 12px var(--font-mono); color: var(--accent); min-width: 44px; }
+.tp-grid span { color: var(--muted); flex: 1; }
+.tp-grid b { font-weight: 500; }
+.tp-out { padding: 8px 20px; overflow-y: auto; min-height: 120px; }
+.tp-src { margin: 0; padding: 12px 20px; overflow: auto; font: 12.5px/1.5 var(--font-mono); white-space: pre-wrap; min-height: 120px; }
+.tp-prev footer { padding: 8px 16px; border-top: 1px solid var(--border); font-size: var(--text-sm); color: var(--muted); }
+.tp-err, .tp-acts { margin: 10px 16px 0; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 13px; }
+.tp-err { background: color-mix(in srgb, var(--danger) 12%, transparent); color: var(--danger); }
+.tp-acts { background: var(--accent-soft); }
+.seg { display: inline-flex; padding: 2px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); }
+.seg button { border: 0; background: none; color: var(--muted); padding: 3px 12px; border-radius: 6px; cursor: pointer; font-size: var(--text-sm); }
+.seg button.on { background: var(--bg3); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
+.st-btns { display: flex; gap: var(--space-2); }

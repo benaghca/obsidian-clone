@@ -28,6 +28,7 @@ const APP_JS: &str = concat!(
     include_str!("../ui/app/file-tree.js"),
     include_str!("../ui/app/files.js"),
     include_str!("../ui/app/templates.js"),
+    include_str!("../ui/app/template-help.js"),
     include_str!("../ui/app/editor.js"),
     include_str!("../ui/app/properties.js"),
     include_str!("../ui/app/link-embeds.js"),

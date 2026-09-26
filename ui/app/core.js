@@ -185,6 +185,7 @@ function editorHooks(from, extra) {
     renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : renderBaseBlock(el, code, from()),
     toggleTaskLine: text => CinderTasks.parseLine(text) ? CinderTasks.toggle(text, { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }) : null,
     renderMath: (el, tex, display) => renderMath(el, tex, display),
+    templaterOptions: (kind, path) => templaterOptions(kind, path),
     mathSnippets: () => cfg.mathSnippets,
     renderWebEmbed: (el, url, alt) => cfg.webEmbeds === 'off' ? (el.innerHTML = `<a class="cm-url" data-url="${esc(url)}">${esc(url)}</a>`) : renderWebEmbed(el, url, alt),
     sizeWebEmbed: (el, alt) => sizeWebEmbed(el, alt),

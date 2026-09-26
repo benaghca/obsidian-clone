@@ -12,6 +12,7 @@ function showView(v) {
   updateHistButtons();
   if (S.tabs) syncTab();
   applyNoteClasses();
+  updateTemplateBar();
 }
 
 function showEmpty() {

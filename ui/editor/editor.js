@@ -983,9 +983,54 @@ function latexCompletions(context) {
 
 // ------------------------------------------------------------------ completion
 
+// Templater: typing "<%" lists the commands in plain words (hooks.templaterOptions('open')), and
+// "tp." inside a <% … %> tag lists what comes next (hooks.templaterOptions('member', 'tp.date')).
+// Each option is {label, detail, info, snippet}; a snippet's ${fields} are Tab stops.
+function templaterCompletions(context) {
+  const h = hooksOf(context.state);
+  if (!h.templaterOptions) return null;
+  const line = context.state.doc.lineAt(context.pos);
+  const before = line.text.slice(0, context.pos - line.from);
+  const open = before.lastIndexOf('<%');
+  if (open < 0 || before.lastIndexOf('%>') > open) return null;
+  const inTag = before.slice(open);
+  const infoOf = o => o.info ? () => { const d = document.createElement('div'); d.className = 'cm-tp-info'; d.innerHTML = o.info; return d; } : undefined;
+  // Just after "<%" (plus any words typed to narrow the list): whole commands.
+  let m = /^<%([-_*]?)(\s*)([A-Za-z' ]*)$/.exec(inTag);
+  if (m && !/\btp\b/.test(m[3])) {
+    const opts = h.templaterOptions('open');
+    if (!opts.length) return null;
+    const tagFrom = line.from + open, from = tagFrom + 2 + m[1].length + m[2].length;
+    const after = context.state.sliceDoc(context.pos, Math.min(line.to, context.pos + 3));
+    const closeLen = /^\s?%>/.test(after) ? after.indexOf('%>') + 2 : 0;
+    return {
+      from, filter: true,
+      options: opts.map((o, i) => ({
+        label: o.label, detail: o.detail, info: infoOf(o), boost: -i, section: o.section,
+        apply: (view, c, _f, to) => snippet(o.snippet)(view, c, tagFrom, to + closeLen),
+      })),
+      validFor: /^[A-Za-z' ]*$/,
+    };
+  }
+  // tp.something.  → its members.
+  m = /\btp((?:\.\w+)*)\.(\w*)$/.exec(inTag);
+  if (m) {
+    const opts = h.templaterOptions('member', 'tp' + m[1]);
+    if (!opts.length) return null;
+    return {
+      from: context.pos - m[2].length,
+      options: opts.map((o, i) => ({ label: o.label, detail: o.detail, info: infoOf(o), boost: -i, type: o.snippet.includes('(') ? 'function' : 'property', apply: snippet(o.snippet) })),
+      validFor: /^\w*$/,
+    };
+  }
+  return null;
+}
+
 function completions(context) {
   const latex = latexCompletions(context);
   if (latex) return latex;
+  const tp = templaterCompletions(context);
+  if (tp) return tp;
   let m = context.matchBefore(/!?\[\[[^\[\]\n|]*/);
   if (m) {
     const at = m.text.indexOf('[[') + 2;
@@ -1168,6 +1213,8 @@ function create(parent, hooks, opts = {}) {
     setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vim() : []) }); },
     run(id) { const c = COMMANDS[id]; if (!c) return false; view.focus(); return c.run(view); },
     toggleCheckbox() { return toggleCheckbox(view); },
+    // Insert a snippet over the selection; its ${fields} become Tab stops, the first one selected.
+    snippet(text) { const r = view.state.selection.main; view.focus(); snippet(text)(view, null, r.from, r.to); },
     openSearch() { view.focus(); openSearchPanel(view); },
     destroy() { view.destroy(); },
   };

@@ -49,6 +49,7 @@ const SETTINGS = [
   { k: 'dailyFolder', page: 'daily', name: 'Daily notes folder', type: 'text', folder: true },
   { k: 'dailyTemplate', page: 'daily', name: 'Daily note template', desc: 'A note name or path. Its text starts each new daily note.', type: 'text', placeholder: 'e.g. Templates/Daily' },
   // Templates
+  { k: 'templateHelp', page: 'templates', name: 'Template commands', desc: 'Type <code>&lt;%</code> in a note to pick a command (a date, a question, the cursor…) from a list. The cheat sheet shows them all.', type: 'custom', render: settingTemplateHelp },
   { k: 'templatesFolder', page: 'templates', name: 'Templates folder', desc: 'The notes <i>Insert template</i> offers.', type: 'text', folder: true },
   { k: 'folderTemplates', page: 'templates', name: 'Folder templates', desc: 'New notes in a folder start from its template. One per line, as <code>Folder: Template</code>; <code>/</code> means every folder.', type: 'textarea', placeholder: 'Meetings: Templates/Meeting' },
   // Tasks
