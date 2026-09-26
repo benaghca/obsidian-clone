@@ -110,7 +110,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - A backlinks panel with context, including unlinked mentions and a one-click **Link** button, plus outgoing links and an outline
 - **Related notes** (a tab in the right side bar): notes about the same things as the open one, found from the words, tags and links they share. Each shows what it has in common. Those not linked yet come first, with a **Link** button. It all happens on this computer, with no AI service and no network.
 - **One launcher** for everything: **Ctrl+O** finds notes by name (**Shift+Enter** creates one), and a prefix switches what it finds: `>` commands (**Ctrl+P** opens it with `>` typed), `@` headings in the open note, `#` tags, `/` text in any note (it opens the note with the text selected). Deleting the prefix goes back to notes.
-- Vault search (**Ctrl+Shift+F**) with `tag:`, `path:`, `file:`, `"exact phrase"` and `-exclude`
+- Vault search (**Ctrl+Shift+F**) with `tag:`, `path:`, `file:`, `"exact phrase"` and `-exclude`. Results are ranked: a word in a note's title counts for most, then headings and tags, then the text, and recently changed notes get a small lift. Search words also find words they begin (`gard` finds *garden*) and near misses (`recieve` finds *receive*), accents are ignored, and the line under the box says what else matched. The index lives in memory and updates only the notes that changed.
 - **Daily, weekly and monthly notes**, like Obsidian's Daily notes and Periodic Notes plugins. Each has a folder, a name format (`YYYY-MM-DD`, `GGGG-[W]WW`, `YYYY-MM` or your own) and a template, set in **Settings → Daily & weekly notes**, which also shows what today's notes would be called. A note made for another day gets that day's date in its template. Commands open today's, tomorrow's, this week's or this month's note, and step to the previous or next daily note, skipping days without one.
   - **Calendar** (a tab in the right side bar): a month with a dot under each day that has a note (more dots for longer notes) and a ring on days with tasks due. Click a day for its daily note, a week number for the weekly note or the month's name for the monthly note (**Ctrl**+click for a new tab). Weeks start on Monday or Sunday.
 - An *Insert template* command. Templates support `{{date}}`, `{{time}}`, `{{title}}` and `{{date:dddd, MMMM DD}}`.
@@ -248,6 +248,7 @@ ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board vie
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
 ui/diff.js         line and word diffs (Myers), for version history and conflicting copies
 ui/related.js      related notes: TF-IDF over the words, tags and links notes share
+ui/search.js       the search index: BM25 ranking, prefixes, near misses
 ui/images.js       image viewer / lightbox, crop tool, browser screen capture
 ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
@@ -265,7 +266,7 @@ The editor bundle is already built and checked in, so building Cinder doesn't ne
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js`, `node ui/test/search.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
 
 ## Ideas for round two
 

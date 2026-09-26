@@ -94,6 +94,7 @@ async function boot() {
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   renderTree();
   watchVault();
+  setTimeout(() => syncSearchIndex(), 1500); // ready before the first search
   updateTaskBadge();
   updateInboxBadge();
   loadBookmarks();

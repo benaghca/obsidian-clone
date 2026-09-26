@@ -47,50 +47,64 @@ function parseQuery(q) {
   return terms;
 }
 
+// The search index (ui/search.js), kept up to date lazily: before a search, the notes that
+// changed since the last one are re-indexed.
+const searchIx = new CinderSearch.Index();
+const searchBody = (p, n) => isDrawing(p) ? n.content.replace(/%%[\s\S]*?(?:%%|$)/g, m => ' '.repeat(m.length)) : n.content;
+function syncSearchIndex() {
+  for (const [p, n] of S.notes) searchIx.set(p, { key: n.content, title: noteName(p), body: searchBody(p, n), headings: n.headings.map(h => h.text), tags: [...n.tags], mtime: S.files.get(p)?.mtime });
+  for (const id of [...searchIx.docs.keys()]) if (!S.notes.has(id)) searchIx.remove(id);
+}
+
 function runSearch() {
   const q = $('#search-input').value.trim();
   const out = $('#search-results'), meta = $('#search-meta');
   if (!q) { out.innerHTML = ''; meta.textContent = ''; return; }
   const terms = parseQuery(q);
-  const texts = terms.filter(t => t.op === 'text' && !t.neg).map(t => t.v);
-  const results = [];
-  for (const [p, n] of S.notes) {
-    // Leave out a drawing note's hidden %% data %% (its JSON), as Obsidian hides it too.
-    const text = isDrawing(p) ? n.content.replace(/%%[\s\S]*?(?:%%|$)/g, m => ' '.repeat(m.length)) : n.content;
-    const low = text.toLowerCase(), pl = p.toLowerCase();
-    let ok = true;
-    for (const t of terms) {
+  // Plain words go to the index (ranked, with prefixes and near misses); phrases and the
+  // operators (tag:, path:, file:, [prop], -word) then have to hold as well.
+  const plain = terms.filter(t => t.op === 'text' && !t.neg && !/\s/.test(t.v));
+  const words = plain.flatMap(t => CinderSearch.tokens(t.v).map(k => k.t));
+  const rest = terms.filter(t => !plain.includes(t));
+  const phrases = rest.filter(t => t.op === 'text' && !t.neg).map(t => t.v);
+  const passes = p => {
+    const n = S.notes.get(p);
+    const low = searchBody(p, n).toLowerCase(), pl = p.toLowerCase();
+    for (const t of rest) {
       let hit;
       if (t.op === 'tag') hit = [...n.tags].some(x => x === t.v || x.startsWith(t.v + '/'));
       else if (t.op === 'path') hit = pl.includes(t.v);
       else if (t.op === 'file') hit = noteName(p).toLowerCase().includes(t.v);
       else if (t.op === 'prop') hit = propMatches(n.fm, t.k, t.v);
       else hit = low.includes(t.v) || noteName(p).toLowerCase().includes(t.v);
-      if (hit === t.neg) { ok = false; break; }
+      if (hit === t.neg) return false;
     }
-    if (!ok) continue;
-    const snips = [];
-    let hits = 0;
-    for (const t of texts) {
-      let i = low.indexOf(t);
-      while (i >= 0) {
-        hits++;
-        if (snips.length < 4 && !snips.some(s => Math.abs(s.i - i) < 60)) snips.push({ i, len: t.length });
-        i = low.indexOf(t, i + t.length);
-      }
-    }
-    const titleHit = texts.some(t => noteName(p).toLowerCase().includes(t));
-    results.push({ p, snips, hits, titleHit });
+    return true;
+  };
+  let results;
+  if (words.length) {
+    syncSearchIndex();
+    results = searchIx.search(words, { filter: p => S.notes.has(p) && passes(p) }).map(r => ({ p: r.id, pos: Object.values(r.matched).flat(), used: r.used }));
+  } else {
+    results = [...S.notes.keys()].filter(passes).sort(collator.compare).map(p => ({ p, pos: [], used: [] }));
   }
-  results.sort((a, b) => (b.titleHit - a.titleHit) || (b.hits - a.hits) || collator.compare(a.p, b.p));
-  meta.textContent = `${results.length} note${results.length === 1 ? '' : 's'}`;
+  // Where the phrases are, too.
+  for (const r of results) {
+    if (!phrases.length) continue;
+    const low = S.notes.get(r.p).content.toLowerCase();
+    for (const ph of phrases) { let i = low.indexOf(ph); while (i >= 0 && r.pos.length < 60) { r.pos.push([i, ph.length]); i = low.indexOf(ph, i + ph.length); } }
+  }
+  const also = [...new Set(results.flatMap(r => r.used))].filter(t => !words.includes(t)).slice(0, 5);
+  meta.innerHTML = `${results.length} note${results.length === 1 ? '' : 's'}${also.length ? ` · also matching <i>${also.map(esc).join(', ')}</i>` : ''}`;
   out.innerHTML = results.slice(0, 300).map(r => {
     const c = S.notes.get(r.p).content;
-    const sn = r.snips.map(s => {
+    const snips = [];
+    for (const [i, len] of r.pos.sort((a, b) => a[0] - b[0])) if (snips.length < 4 && !snips.some(s => Math.abs(s.i - i) < 60)) snips.push({ i, len });
+    const sn = snips.map(s => {
       const a = Math.max(0, s.i - 50), b = Math.min(c.length, s.i + s.len + 70);
       return `<div class="s-snip" tabindex="-1" data-path="${esc(r.p)}" data-i="${s.i}" data-len="${s.len}">${a > 0 ? '…' : ''}${esc(c.slice(a, s.i))}<mark>${esc(c.slice(s.i, s.i + s.len))}</mark>${esc(c.slice(s.i + s.len, b))}${b < c.length ? '…' : ''}</div>`;
     }).join('');
-    return `<div class="s-file"><div class="s-file-name" tabindex="-1" data-path="${esc(r.p)}">${esc(noteName(r.p))}<small>${esc(dirname(r.p))}</small>${r.hits ? `<small>${r.hits}</small>` : ''}</div>${sn}</div>`;
+    return `<div class="s-file"><div class="s-file-name" tabindex="-1" data-path="${esc(r.p)}">${esc(noteName(r.p))}<small>${esc(dirname(r.p))}</small>${r.pos.length ? `<small>${r.pos.length}</small>` : ''}</div>${sn}</div>`;
   }).join('');
 }
 $('#search-input').addEventListener('input', debounce(runSearch, 120));
