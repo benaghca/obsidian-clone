@@ -54,6 +54,8 @@ VAULT_DIR   folder of .md notes (default: last vault, else Documents\Cinder)
 
 On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
+**Arch Linux and CachyOS:** `packaging/arch/PKGBUILD` builds a pacman package from this checkout, including any uncommitted changes. It adds `cinder` to `/usr/bin` along with a launcher entry and the icon. To install or update, run `cd packaging/arch && makepkg -si`. To remove it, run `sudo pacman -R cinder`. The version includes the commit count, so pacman sees each new commit as an upgrade.
+
 ## For IT: what this program does and doesn't do
 
 - **Network:** in its default mode, Cinder doesn't open any network port. The UI talks to the program through a private protocol that is handled inside the process. It makes no outbound connections of its own: no telemetry, no update checks, no CDN assets. The only web traffic is a page you embed yourself with `![](https://…)` or a canvas link card, and you can set that to load on click, or not at all, in Settings. The page's Content-Security-Policy allows scripts, fonts, connections and media only from Cinder itself, with no `eval` and no plugins (`object-src 'none'`). It has two deliberate exceptions. Frames may load any `http:` or `https:` page, so that embedded pages work. Inline styles are allowed, because themes and layout set them. The exact policy is `CSP` in `src/api.rs`. Embedded pages load in sandboxed frames of their own origin. A navigation guard sends every other external link to the system browser instead of loading it inside Cinder.

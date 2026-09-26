@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Cinder
+GenericName=Notes
+Comment=Markdown notes in an Obsidian-compatible vault
+Exec=cinder
+Icon=cinder
+Terminal=false
+Categories=Office;TextEditor;
+Keywords=notes;markdown;obsidian;vault;
+StartupWMClass=cinder

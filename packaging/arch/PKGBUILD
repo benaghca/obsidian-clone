@@ -1,0 +1,32 @@
+# Builds Cinder from the git checkout this file sits in, not from GitHub.
+# Install or update:  cd packaging/arch && makepkg -si
+# Remove:             sudo pacman -R cinder
+
+_repo=$(git -C "$startdir" rev-parse --show-toplevel)
+
+pkgname=cinder
+# Cargo.toml's version, then the commit count and hash, so every new commit is an upgrade.
+# Set here rather than in a pkgver() function so makepkg doesn't rewrite this file on each build.
+pkgver=$(sed -n 's/^version = "\(.*\)"/\1/p' "$_repo/Cargo.toml" | head -1).r$(git -C "$_repo" rev-list --count HEAD).g$(git -C "$_repo" rev-parse --short HEAD)
+pkgrel=1
+pkgdesc='Local, plugin-free Markdown notes app that uses the Obsidian vault format'
+arch=('x86_64')
+url='https://github.com/benaghca/obsidian-clone'
+# The repository has no license file yet.
+license=('LicenseRef-proprietary')
+depends=('webkit2gtk-4.1' 'gtk3')
+makedepends=('cargo' 'git')
+# makepkg's LTO flags can break the C code that some crates compile.
+options=('!lto')
+
+build() {
+  cd "$_repo"
+  # A target folder of its own, so makepkg's compiler flags don't force the dev build in target/ to rebuild.
+  CARGO_TARGET_DIR="$srcdir/target" cargo build --release --locked
+}
+
+package() {
+  install -Dm755 "$srcdir/target/release/cinder" "$pkgdir/usr/bin/cinder"
+  install -Dm644 "$startdir/cinder.desktop" "$pkgdir/usr/share/applications/cinder.desktop"
+  install -Dm644 "$_repo/ui/logo.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/cinder.svg"
+}
