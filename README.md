@@ -199,6 +199,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Drag tabs to reorder them. Right-click for close others, close to the right, duplicate and reveal.
   - Tabs come back when you reopen Cinder, and they follow renames and moves.
   - In a browser tab the browser keeps Ctrl+T and Ctrl+W for itself, so rebind them in Hotkeys.
+- **Split pane**: *Open to the right* (a tab's or the file tree's right-click menu, or **Ctrl+Alt+\\** to pick a note) shows a second file beside the main one. A note there has its own editor and saves as you type, and the same note open in both panes stays in step. It also has a reading view, follows renames and changes on disk, and comes back after a restart. Images, drawings, canvases and bases show as previews. The header's buttons swap the two panes, open the file in the main pane or close the split. Drag the divider to resize it.
 - **Select several files in the tree** with **Ctrl/Cmd-click**, **Shift-click** or **Shift+↑/↓**, then drag them onto a folder or right-click to *Move N items to…*, group them into a *New folder with N items…*, open them in tabs or delete them. Links are updated for every move.
 - **Settings** (**Ctrl+,**) is a window with a page for each area (General, Editor, Appearance, Files & links, Daily notes, Templates, Tasks, Inbox, Images & screenshots, Drawings, Hotkeys) and a search box that finds any setting on any page. Changes apply as you make them, with no Save button. A changed setting shows ↺ to put the default back. Colour themes are picked from swatches.
 - **Keyboard first**:
@@ -266,7 +267,5 @@ cd ui/editor && npm install && npm run build
 
 ## Ideas for round two
 
-- Tabs and split panes
-- Hover previews of links
 - Using the `notify` crate to push file changes to the UI instead of polling every 2s
 - An embedded `.exe` icon so Explorer shows it too. It needs the Windows SDK's `rc.exe` at build time. Right now the icon appears on the window and taskbar only.

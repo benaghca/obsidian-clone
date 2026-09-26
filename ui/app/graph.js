@@ -117,18 +117,29 @@ function mountCardEditor(host, o) {
     const body = cm.value;
     chain = chain.then(async () => {
       try {
-        const r = await api(`/api/file?path=${enc(note)}`, { method: 'PUT', body, headers: mtime ? { 'X-Base-Mtime': String(mtime) } : {} });
+        // The index knows about saves made from other editors of this note (the main pane).
+        const base = Math.max(mtime, S.notes.get(note)?.mtime || 0);
+        const r = await api(`/api/file?path=${enc(note)}`, { method: 'PUT', body, headers: base ? { 'X-Base-Mtime': String(base) } : {} });
         mtime = r.mtime;
         setNote(note, body, r.mtime);
         S.files.set(note, { ...S.files.get(note), mtime: r.mtime, size: new Blob([body]).size });
         resolveNote(note);
         CinderCanvas.refreshFiles();
+        o.onSaved?.(body);
       } catch (e) {
         if (e.status !== 409) { toast('Save failed: ' + e.message); dirty = true; return; }
-        // Changed elsewhere: take the version on disk rather than overwrite it.
+        // Changed elsewhere: merge, keep these edits, or take the version on disk.
+        const r = await resolveDiskConflict(note, body);
+        if (r === null) { dirty = true; return; }
+        if (r === 'mine' || r.text != null) {
+          if (r.text != null && alive) cm.setSilently(r.text);
+          const text = r.text ?? body;
+          const w = await api(`/api/file?path=${enc(note)}`, { method: 'PUT', body: text });
+          mtime = w.mtime; setNote(note, text, w.mtime); resolveNote(note); o.onSaved?.(text);
+          return;
+        }
         const got = await readMany([note]);
         if (got[note]) { setNote(note, got[note].content, got[note].mtime); resolveNote(note); mtime = got[note].mtime; if (alive) cm.setSilently(got[note].content); }
-        toast(`"${noteName(note)}" changed on disk, so the card now shows that version.`, 4000);
       }
     });
     return chain;
@@ -161,8 +172,13 @@ function mountCardEditor(host, o) {
     o.onExit?.();
   }, true);
   return {
+    cm,
     focus() { cm.focus(); if (!note) cm.setSelectionRange(cm.value.length); },
     destroy() { alive = false; const p = save(); cm.destroy(); return p; },
+    save,
+    dirty: () => dirty,
+    // The note changed elsewhere (the main editor, or on disk): show that, unless this has unsaved edits.
+    reload(text, m) { if (dirty || text === cm.value) return false; const st = host.closest('.split-body')?.scrollTop; cm.setSilently(text); if (m) mtime = m; if (st != null) host.closest('.split-body').scrollTop = st; return true; },
   };
 }
 

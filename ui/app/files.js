@@ -145,6 +145,7 @@ async function renamePath(from, to) {
   }
   tabsAfterRename(moved);
   bookmarksAfterRename(moved, from, to, isDir);
+  splitFileMoved(from, to);
   if (isDir) {
     const dirs = [...S.dirs];
     S.dirs = new Set(dirs.map(d => d === from ? to : d.startsWith(from + '/') ? to + d.slice(from.length) : d));
@@ -202,6 +203,7 @@ async function deletePath(path, opts = {}) {
   reindexAll(); renderTree();
   tabsAfterDelete();
   bookmarksAfterDelete(path);
+  splitFileMoved(path, null);
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; showEmpty(); }
   refreshPanels();
 }

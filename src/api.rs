@@ -34,6 +34,7 @@ const APP_JS: &str = concat!(
     include_str!("../ui/app/conflicts.js"),
     include_str!("../ui/app/export.js"),
     include_str!("../ui/app/related-notes.js"),
+    include_str!("../ui/app/split.js"),
     include_str!("../ui/app/editor.js"),
     include_str!("../ui/app/properties.js"),
     include_str!("../ui/app/link-embeds.js"),

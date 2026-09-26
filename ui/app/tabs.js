@@ -129,6 +129,7 @@ $('#tabbar').addEventListener('contextmenu', e => {
     ['Close tabs to the right', () => closeTabs((x, j) => j <= i)],
     null,
     ['Duplicate tab', () => { activateTab(i).then(() => openInNewTab(t.key)); }],
+    ...(t.key && !t.key.startsWith(':') ? [['Open to the right', () => openSplit(t.key)]] : []),
     ...(t.key && !t.key.startsWith(':') ? [['Reveal in file tree', () => revealInTree(t.key)], ['Copy path', () => navigator.clipboard?.writeText(t.key).then(() => toast('Path copied'))]] : []),
   ]);
 });

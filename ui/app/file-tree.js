@@ -264,7 +264,7 @@ $('#tree').addEventListener('contextmenu', e => {
       ['Move to…', () => moveDialog(target)],
       [isBookmarked(target) ? 'Remove bookmark' : 'Bookmark', () => toggleBookmark(target)],
     );
-    if (path) items.unshift(['Open in new tab', () => openInNewTab(path)], null);
+    if (path) items.unshift(['Open in new tab', () => openInNewTab(path)], ['Open to the right', () => openSplit(path)], null);
     if (path && isMd(path) && !isDrawing(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
     if (path && isMd(path) && isDrawing(path)) items.push(['Open as Markdown', () => openPath(path, { raw: true })]);
     if (path) items.push(['Version history…', () => openHistory(path)]);

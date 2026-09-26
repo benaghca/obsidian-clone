@@ -180,23 +180,23 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 #preview { height: 100%; overflow: auto; padding-top: 36px; padding-bottom: 40vh; }
 
 /* ---------- CodeMirror editor ---------- */
-#editor .cm-editor { font: 16px/1.7 var(--font-text); color: var(--text); }
-.mono #editor .cm-editor { font: 14.5px/1.65 var(--font-mono); }
-:is(#editor, .cv-cm) .cm-editor.cm-focused { outline: none; }
-#editor .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; min-width: 0; }
-#editor .cm-content { min-width: 0; } /* wide embeds (tables, bases) scroll inside themselves */
-#editor .cm-content { padding: 4px 0; }
-#editor .cm-line { padding: 0; }
-:is(#editor, .cv-cm, .tex-src) .cm-cursor { border-left: 2px solid var(--accent); }
+:is(#editor, .split-editor) .cm-editor { font: 16px/1.7 var(--font-text); color: var(--text); }
+.mono :is(#editor, .split-editor) .cm-editor { font: 14.5px/1.65 var(--font-mono); }
+:is(#editor, .split-editor, .cv-cm) .cm-editor.cm-focused { outline: none; }
+:is(#editor, .split-editor) .cm-scroller { font-family: inherit; line-height: inherit; overflow: visible; min-width: 0; }
+:is(#editor, .split-editor) .cm-content { min-width: 0; } /* wide embeds (tables, bases) scroll inside themselves */
+:is(#editor, .split-editor) .cm-content { padding: 4px 0; }
+:is(#editor, .split-editor) .cm-line { padding: 0; }
+:is(#editor, .split-editor, .cv-cm, .tex-src) .cm-cursor { border-left: 2px solid var(--accent); }
 /* The selection is a translucent layer *over* the text, in the theme's accent: drawn underneath
    (CodeMirror's default), inline code, highlights, tags and code blocks would hide it. */
-:is(#editor, .cv-cm, .tex-src) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; }
-:is(#editor, .cv-cm, .tex-src) :is(.cm-selectionBackground, ::selection) { background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
-:is(#editor, .cv-cm, .tex-src) .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 32%, transparent) !important; }
-:is(#editor, .cv-cm, .tex-src) .cm-placeholder { color: var(--faint); }
-:is(#editor, .cv-cm) .cm-selectionMatch { background: var(--mark); }
-:is(#editor, .cv-cm) .cm-searchMatch { background: var(--mark); outline: 1px solid rgba(255, 208, 0, .6); }
-:is(#editor, .cv-cm) .cm-searchMatch-selected { background: rgba(255, 150, 0, .55); }
+:is(#editor, .split-editor, .cv-cm, .tex-src) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; }
+:is(#editor, .split-editor, .cv-cm, .tex-src) :is(.cm-selectionBackground, ::selection) { background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
+:is(#editor, .split-editor, .cv-cm, .tex-src) .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 32%, transparent) !important; }
+:is(#editor, .split-editor, .cv-cm, .tex-src) .cm-placeholder { color: var(--faint); }
+:is(#editor, .split-editor, .cv-cm) .cm-selectionMatch { background: var(--mark); }
+:is(#editor, .split-editor, .cv-cm) .cm-searchMatch { background: var(--mark); outline: 1px solid rgba(255, 208, 0, .6); }
+:is(#editor, .split-editor, .cv-cm) .cm-searchMatch-selected { background: rgba(255, 150, 0, .55); }
 
 /* syntax tokens (source mode + code blocks) */
 .tok-heading { font-weight: 700; }
@@ -267,7 +267,7 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .cm-table-widget { cursor: text; overflow-x: auto; }
 
 /* source mode shows raw markdown, lightly styled */
-.source-mode #editor .cm-editor { font: 14.5px/1.65 var(--font-mono); }
+.source-mode :is(#editor, .split-editor) .cm-editor { font: 14.5px/1.65 var(--font-mono); }
 
 /* search panel & autocomplete */
 .cm-panels { background: var(--bg2) !important; color: var(--text) !important; border-color: var(--border) !important; }
@@ -1449,3 +1449,18 @@ body.focus-mode #view-note .cm-line { opacity: .32; transition: opacity var(--du
 body.focus-mode #view-note .cm-line.cm-focus-para, body.focus-mode #view-note .cm-editor:not(.cm-focused) .cm-line { opacity: 1; }
 body.focus-mode.frame-custom #win-controls { opacity: 0; transition: opacity var(--dur); }
 body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }
+
+/* ---------------------------------------------------------------- split pane */
+#split { flex: 1 1 0; min-width: 260px; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
+#split[hidden], #resize-split[hidden] { display: none; }
+#resize-split { border-left: 1px solid var(--border); }
+.split-head { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--border); }
+.split-title { flex: 1; min-width: 0; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.split-body { flex: 1; overflow: auto; min-height: 0; scrollbar-gutter: stable; }
+.split-body .page { --col: 700px; padding-top: 18px; }
+.split-read { padding-top: 18px; }
+.split-media { padding: 16px; display: grid; place-items: center; }
+.split-media img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
+.frame-custom.app-no-right .split-head { padding-right: 124px; }
+body.focus-mode #split, body.focus-mode #resize-split { display: none !important; }
+body.presenting #split, body.presenting #resize-split { display: none !important; }

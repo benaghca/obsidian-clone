@@ -180,6 +180,7 @@ async function applyList(l, gen) {
       const prev = S.notes.get(p);
       if (prev && prev.content === v.content) { prev.mtime = v.mtime; continue; }
       setNote(p, v.content, v.mtime);
+      splitNoteChanged(p, v.content, v.mtime);
       if (p === S.cur && S.view === 'note') reloadEditorFromDisk(v.content);
       else if (p === S.cur && S.view === 'drawing') reloadDrawingFromDisk(v.content, v.mtime);
     }
@@ -229,6 +230,7 @@ function markDirty() {
   scheduleSave();
   liveReindex();
   noteClassesSoon();
+  splitFollowMain();
 }
 
 // ------------------------------------------------------------ cssclasses and CSS snippets
