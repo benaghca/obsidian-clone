@@ -116,7 +116,6 @@ async function boot() {
     return;
   }
   await restoreTabs();
-  { const sp = store('split'); if (sp && S.files.has(sp)) openSplit(sp); }
 }
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else poll(); });

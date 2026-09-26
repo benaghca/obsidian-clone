@@ -3,12 +3,13 @@
 
 // Each tab shows one thing: a file, the graph (':graph'), tasks (':tasks'), or nothing (null).
 // A tab has its own back/forward history (swapped in and out of S.hist), and a note keeps its
-// editor state, undo history included, while it's open in a tab.
+// editor state, undo history included, while it's open in a tab. A tab can also hold a second
+// file on the right, its `split` (see tab-groups.js), shown in the split pane.
 S.tabs = []; S.tab = -1;
 const edStates = new Map(); // note path -> editor state
 const closedTabs = [];      // keys, for "Reopen closed tab"
 let tabSeq = 0;
-const newTabObj = key => ({ id: ++tabSeq, key, hist: key ? [key] : [], histIdx: key ? 0 : -1 });
+const newTabObj = key => ({ id: ++tabSeq, key, split: null, splitMode: 'edit', hist: key ? [key] : [], histIdx: key ? 0 : -1 });
 const curTab = () => S.tabs[S.tab];
 const viewKey = () => S.view === 'graph' ? ':graph' : S.view === 'tasks' ? ':tasks' : S.view === 'inbox' ? ':inbox' : S.view === 'empty' ? null : S.cur;
 const tabName = k => k == null ? 'New tab' : k === ':graph' ? 'Graph' : k === ':tasks' ? 'Tasks' : k === ':inbox' ? 'Inbox' : displayName(k);
@@ -20,9 +21,10 @@ function syncTab() {
   t.key = viewKey(); t.hist = S.hist; t.histIdx = S.histIdx;
   pruneEdStates();
   saveTabs(); renderTabs();
+  syncSplitPane();
 }
 function pruneEdStates() { const open = new Set(S.tabs.map(t => t.key)); for (const k of edStates.keys()) if (!open.has(k)) edStates.delete(k); }
-function saveTabs() { store('tabs', { keys: S.tabs.map(t => t.key), active: S.tab }); }
+function saveTabs() { store('tabs', tabsToStore(S.tabs, S.tab)); }
 
 // Show tab i: its history comes back and its thing reopens.
 async function activateTab(i, opts = {}) {
@@ -87,11 +89,13 @@ const cycleTab = d => S.tabs.length > 1 && activateTab((S.tab + d + S.tabs.lengt
 
 // Files renamed or deleted: tabs follow, or close.
 function tabsAfterRename(moved) {
+  groupsAfterRename(S.tabs, moved);
   for (const t of S.tabs) { if (moved.has(t.key)) t.key = moved.get(t.key); t.hist = t.hist.map(h => moved.get(h) || h); }
   for (const [a, b] of moved) if (edStates.has(a)) { edStates.set(b, edStates.get(a)); edStates.delete(a); }
   saveTabs(); renderTabs();
 }
 function tabsAfterDelete() {
+  groupsAfterDelete(S.tabs, p => S.files.has(p));
   const gone = k => k && !k.startsWith(':') && !S.files.has(k);
   for (const t of S.tabs) { t.hist = t.hist.filter(h => !gone(h)); t.histIdx = Math.min(t.histIdx, t.hist.length - 1); }
   const cur = curTab();
@@ -155,15 +159,19 @@ $('#tabbar').addEventListener('drop', e => {
 });
 $('#tabbar').addEventListener('dragend', () => { dragTab = null; $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); });
 
-// Start with the tabs from last time (or the last file, in one tab).
+// Start with the tabs from last time (or the last file, in one tab). Before tabs had partners
+// there was one split pane, saved on its own: it joins the tab that was active, once.
 async function restoreTabs() {
-  const saved = store('tabs');
-  const keys = (saved?.keys || []).filter(k => k == null || k.startsWith(':') || S.files.has(k));
-  if (!keys.length) {
+  const exists = p => S.files.has(p), legacy = store('split');
+  let { tabs, active } = tabsFromStore(store('tabs'), exists, legacy ?? null);
+  if (!tabs.length) {
     const last = store('last');
-    S.tabs = [newTabObj(last && S.files.has(last) ? last : null)];
-  } else S.tabs = keys.map(newTabObj);
+    tabs = [tabFromSaved(last && exists(last) ? last : null, legacy ?? null, exists)];
+    active = 0;
+  }
+  if (legacy != null) store('split', null);
+  S.tabs = tabs.map(x => Object.assign(newTabObj(x.key), { split: x.split }));
   S.tab = -1;
-  await activateTab(Math.max(0, Math.min(saved?.active ?? 0, S.tabs.length - 1)), { force: true, focus: false });
+  await activateTab(active, { force: true, focus: false });
 }
 

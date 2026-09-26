@@ -1,11 +1,12 @@
-/* Cinder app — the split pane: a second note beside the main one, to read or write in while
- * working in the other. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.)
+/* Cinder app — the split pane: the current tab's partner, beside its main note. (One of the
+ * ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.)
  *
- * Notes open in their own editor and save as you type; the same note open in both panes stays
- * in step. Images, drawings, canvases and bases show as previews. Links followed from the split
- * pane open in the main one. */
+ * A tab can hold a second file (its `split`, see tab-groups.js); this pane shows the current
+ * tab's. Notes open in their own editor and save as you type; the same note open in both panes
+ * stays in step. Images, drawings, canvases and bases show as previews. Links followed from the
+ * split pane open in the main one. */
 
-const SPLIT = { path: null, handle: null, mode: 'edit' };
+const SPLIT = { path: null, handle: null, mode: 'edit', seq: 0 };
 const SPLIT_ICONS = {
   swap: '<svg viewBox="0 0 24 24"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg>',
   main: '<svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 12h6M12 9l3 3-3 3"/></svg>',
@@ -13,6 +14,9 @@ const SPLIT_ICONS = {
   edit: '<svg viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>',
 };
+
+// Can the split pane show this file? Notes, images, drawings, canvases and bases.
+const canSplit = p => !!p && S.files.has(p) && ((isMd(p) && !isDrawing(p) && S.notes.has(p)) || IMG_EXT.test(p) || visualEmbed(p));
 
 function splitDom() {
   let el = $('#split');
@@ -41,13 +45,14 @@ function splitDom() {
     if (a === 'close') closeSplit();
     else if (a === 'main') { const p = SPLIT.path; closeSplit().then(() => openPath(p)); }
     else if (a === 'swap') swapSplit();
-    else if (a === 'mode') { SPLIT.mode = SPLIT.mode === 'edit' ? 'read' : 'edit'; openSplit(SPLIT.path, { keepMode: true }); }
+    else if (a === 'mode') { const t = curTab(); if (t) { t.splitMode = t.splitMode === 'read' ? 'edit' : 'read'; showSplit(); } }
   });
   return el;
 }
 
-// Show `path` in the split pane (asking which note when none is given).
-async function openSplit(path, { keepMode = false, focus = false } = {}) {
+// Give the current tab `path` as its partner and show it (asking which file when none is given).
+// A partner it replaces gets a tab of its own.
+async function openSplit(path, { focus = false } = {}) {
   if (!path) {
     const files = [...S.files.keys()];
     path = await picker({ placeholder: 'Open beside this one…', items: q => rank(files, q, displayName).map(p => ({ main: displayName(p), sub: dirname(p), value: p })) });
@@ -55,14 +60,29 @@ async function openSplit(path, { keepMode = false, focus = false } = {}) {
     focus = true;
   }
   if (!S.files.has(path)) return toast('Not found: ' + path);
-  if (!keepMode) SPLIT.mode = 'edit';
-  await SPLIT.handle?.destroy?.();
+  const t = curTab();
+  if (!t) return;
+  if (t.split !== path) t.splitMode = 'edit';
+  setPartner(S.tabs, t, path, newTabObj);
+  saveTabs(); renderTabs();
+  await showSplit(focus);
+}
+
+// Show the current tab's partner, or hide the pane when it has none. The editor it replaces saves
+// first. Only the latest call finishes, so quick tab switches can't leave two editors behind.
+async function showSplit(focus = false) {
+  const seq = ++SPLIT.seq;
+  const old = SPLIT.handle;
   SPLIT.handle = null;
+  await old?.destroy?.();
+  if (seq !== SPLIT.seq) return;
+  const t = curTab(), path = t?.split || null;
+  SPLIT.path = path;
+  if (!path) return hideSplitPane();
+  SPLIT.mode = t.splitMode || 'edit';
   const el = splitDom(), body = $('.split-body', el);
   el.hidden = false; $('#resize-split').hidden = false;
   document.body.classList.add('has-split');
-  SPLIT.path = path;
-  store('split', path);
   $('.split-title', el).textContent = displayName(path);
   $('.split-title', el).title = path;
   const note = isMd(path) && !isDrawing(path) && S.notes.has(path);
@@ -98,38 +118,44 @@ async function openSplit(path, { keepMode = false, focus = false } = {}) {
   if (S.view === 'graph') CinderGraph.resize();
 }
 
-async function closeSplit() {
-  await SPLIT.handle?.destroy?.();
-  SPLIT.handle = null; SPLIT.path = null;
-  store('split', null);
+function hideSplitPane() {
   const el = $('#split');
   if (el) { el.hidden = true; $('#resize-split').hidden = true; }
   document.body.classList.remove('has-split');
   if (S.view === 'graph') CinderGraph.resize();
 }
 
-// Main ↔ split.
+// After anything that may have changed the current tab's partner: a tab switch, a rename, a delete.
+function syncSplitPane() {
+  const want = curTab()?.split || null, el = $('#split');
+  if (want !== (el && !el.hidden ? SPLIT.path : null)) showSplit();
+}
+
+// Close the note on the right; the tab carries on with its left one.
+async function closeSplit() {
+  const t = curTab();
+  if (!t?.split) return;
+  closePane(t, 'right');
+  saveTabs(); renderTabs();
+  await showSplit();
+}
+
+// Swap the two panes' notes. The right one moves into the main editor, so its edits save first.
 async function swapSplit() {
-  const a = SPLIT.path, b = S.cur;
-  if (!a) return;
+  const t = curTab();
+  if (!t?.split) return toast('Nothing is open in the split pane');
+  if (!canSplit(t.key)) return toast('This can’t be shown in the split pane');
+  await SPLIT.handle?.save?.();
   await save();
-  if (b && S.files.has(b)) await openSplit(b); else await closeSplit();
-  await openPath(a);
+  swapPanes(t, canSplit);
+  saveTabs(); renderTabs();
+  await openPath(t.key);
 }
 
 // Keep the split pane in step with edits made elsewhere to the same note.
 function splitNoteChanged(path, text, mtime) {
   if (SPLIT.path !== path || !$('#split') || $('#split').hidden) return;
   if (SPLIT.handle?.reload) SPLIT.handle.reload(text, mtime);
-  else if (SPLIT.mode === 'read') openSplit(path, { keepMode: true });
+  else if (SPLIT.mode === 'read') showSplit();
 }
 const splitFollowMain = debounce(() => { if (S.view === 'note' && S.cur === SPLIT.path) splitNoteChanged(S.cur, ed.value); }, 400);
-
-// A renamed or deleted file.
-function splitFileMoved(from, to) {
-  if (!SPLIT.path) return;
-  if (SPLIT.path === from || SPLIT.path.startsWith(from + '/')) {
-    const p = to ? to + SPLIT.path.slice(from.length) : null;
-    if (p && S.files.has(p)) openSplit(p, { keepMode: true }); else closeSplit();
-  }
-}
