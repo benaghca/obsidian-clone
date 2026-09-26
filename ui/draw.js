@@ -1639,8 +1639,9 @@ window.CinderDraw = (() => {
     root.querySelector('[data-act=redo]').disabled = !hist.redo.length;
   }
 
-  // The laser: a glowing red line whose tail fades, plus a dot at the pointer. Keeps redrawing
-  // until the trail has faded.
+  // The laser: a glowing red trail that thins to nothing as it ages, plus a dot at the pointer.
+  // Each trail is filled as one tapered shape (smoothed, curved through segment midpoints), so
+  // there are no overlapping joints to show up as beads. Keeps redrawing until the trail fades.
   function drawLaser() {
     const now = performance.now();
     for (let i = laser.length - 1; i >= 0; i--) {
@@ -1648,26 +1649,75 @@ window.CinderDraw = (() => {
       while (pts.length > 1 && now - pts[0][2] > LASER_FADE) pts.shift();
       if (now - pts[pts.length - 1][2] > LASER_FADE && !(i === laser.length - 1 && action?.type === 'laser')) laser.splice(i, 1);
     }
-    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     for (const { pts } of laser) {
-      for (let j = 1; j < pts.length; j++) {
-        const a = 1 - Math.min(1, (now - pts[j][2]) / LASER_FADE);
-        if (a <= 0) continue;
-        const [x1, y1] = toScreen(pts[j - 1][0], pts[j - 1][1]), [x2, y2] = toScreen(pts[j][0], pts[j][1]);
-        ctx.globalAlpha = a * 0.35; ctx.strokeStyle = '#ff2d2d'; ctx.lineWidth = 9;
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-        ctx.globalAlpha = a; ctx.strokeStyle = '#ff5a5a'; ctx.lineWidth = 3;
-        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-      }
+      const path = laserPath(pts, now);
+      if (!path) continue;
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 40, 40, 0.9)'; ctx.shadowBlur = 14;
+      ctx.fillStyle = '#ff3030'; laserShape(path, 1); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#ff8c80'; laserShape(path, 0.4); ctx.fill();
     }
     if (tool === 'laser' && laserAt) {
-      ctx.globalAlpha = 0.35; ctx.fillStyle = '#ff2d2d';
-      ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 8, 0, TAU); ctx.fill();
-      ctx.globalAlpha = 1; ctx.fillStyle = '#ff4040';
-      ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 3.5, 0, TAU); ctx.fill();
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 40, 40, 0.9)'; ctx.shadowBlur = 12;
+      ctx.fillStyle = '#ff3030'; ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 5, 0, TAU); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = '#ff8c80'; ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 2, 0, TAU); ctx.fill();
     }
-    ctx.globalAlpha = 1; ctx.lineCap = 'butt';
     if (laser.length) requestRender();
+  }
+
+  // Screen points of a laser trail with a half-width each: points closer than a couple of pixels
+  // are dropped, the rest are eased toward their neighbours to take out the jitter.
+  const LASER_W = 7;
+  function laserPath(pts, now) {
+    const raw = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [x, y] = toScreen(pts[i][0], pts[i][1]), last = raw[raw.length - 1];
+      if (last && i < pts.length - 1 && Math.hypot(x - last[0], y - last[1]) < 2) continue;
+      raw.push([x, y, pts[i][2]]);
+    }
+    if (raw.length < 2) return null;
+    const out = raw.map((p, i) => {
+      if (i === 0 || i === raw.length - 1) return p;
+      const a = raw[i - 1], b = raw[i + 1];
+      return [(a[0] + 2 * p[0] + b[0]) / 4, (a[1] + 2 * p[1] + b[1]) / 4, p[2]];
+    });
+    return out.map(([x, y, t], i) => {
+      const life = Math.max(0, 1 - (now - t) / LASER_FADE);
+      // Taper the very tail to a point too, so a fresh stroke doesn't start blunt.
+      const tail = Math.min(1, i / 6);
+      return [x, y, (LASER_W / 2) * life * (0.25 + 0.75 * tail)];
+    });
+  }
+
+  // Build the outline of a laser trail at `scale` times its width: down one side, round the head,
+  // back up the other side, curving through midpoints so the edge stays smooth.
+  function laserShape(pts, scale) {
+    const n = pts.length, left = [], right = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+      let tx = b[0] - a[0], ty = b[1] - a[1];
+      const len = Math.hypot(tx, ty) || 1; tx /= len; ty /= len;
+      const w = pts[i][2] * scale;
+      left.push([pts[i][0] - ty * w, pts[i][1] + tx * w]);
+      right.push([pts[i][0] + ty * w, pts[i][1] - tx * w]);
+    }
+    const curve = side => {
+      for (let i = 1; i < side.length - 1; i++) {
+        ctx.quadraticCurveTo(side[i][0], side[i][1], (side[i][0] + side[i + 1][0]) / 2, (side[i][1] + side[i + 1][1]) / 2);
+      }
+      ctx.lineTo(side[side.length - 1][0], side[side.length - 1][1]);
+    };
+    ctx.beginPath();
+    ctx.moveTo(left[0][0], left[0][1]);
+    curve(left);
+    const h = pts[n - 1], hw = h[2] * scale, a = pts[n - 2];
+    const dir = Math.atan2(h[1] - a[1], h[0] - a[0]);
+    ctx.arc(h[0], h[1], hw, dir + Math.PI / 2, dir - Math.PI / 2, true);
+    curve(right.reverse());
+    ctx.closePath();
   }
 
   function drawGrid(g) {
