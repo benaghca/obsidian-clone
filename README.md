@@ -68,6 +68,8 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 ## Features
 
 - A file tree with folders, drag-and-drop moves, file import from the desktop, and rename, move and delete from the context menu
+  - Opening a file reveals it in the tree: its folders open and the tree scrolls to it. The target button in the tree's header (or *Settings*) turns this off. The button next to it expands or collapses every folder.
+- Sidebar toggles like Obsidian's: the top of the ribbon shows or hides the left sidebar (**Ctrl+\\**), and the right end of the tab bar does the same for the right sidebar (**Ctrl+Shift+\\**).
 - **Live preview editing**, like Obsidian's: Markdown syntax is hidden and rendered as you write, and appears only on the line or element the cursor is in. That covers headings, bold, italic, highlights, links, tags, checkboxes you can click, bullets, callouts, quotes, code blocks, tables and embedded images and notes. Switch to plain source mode in Settings or from the command palette.
 - Switch vaults from **Settings**, the command palette or by clicking the vault name above the file tree
 - A reading view (**Ctrl+E**), plus an inline title you can edit to rename the note. **↑** on the first line jumps to the title.

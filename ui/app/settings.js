@@ -21,6 +21,7 @@ function openSettings() {
     <label class="check"><input type="checkbox" name="mono"> Monospace editor font</label>
     <label class="check"><input type="checkbox" name="vim"> Vim key bindings in the editor</label>
     <label>Embedded web pages (<code>![](https://…)</code> and canvas link cards)<select class="field" name="webEmbeds"><option value="auto">Load them</option><option value="click">Load when clicked</option><option value="off">Show just the link</option></select></label>
+    <label class="check"><input type="checkbox" name="autoReveal"> Reveal the open file in the file tree (open its folders and scroll to it)</label>
     <label class="check"><input type="checkbox" name="hoverPreview"> Preview links on hover (hold Ctrl in the editor and for web pages)</label>
     <label class="check"><input type="checkbox" name="mathSnippets"> Math shortcuts while typing equations (<code>//</code> fraction, <code>@a</code> α, <code>mk</code>+Tab inline math…)</label>
     <label class="check"><input type="checkbox" name="screenshotHide"> Hide Cinder while taking a screenshot (desktop app)</label>
@@ -63,6 +64,7 @@ function openSettings() {
     setFrame(cfg.windowFrame);
     S.version++; ed.refresh(); if (S.view === 'note' && S.mode === 'read') renderPreview(); // (properties display)
     userCssKey = null; loadUserCss();
+    updateTreeButtons();
   });
 }
 

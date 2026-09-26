@@ -824,6 +824,8 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 #tabbar { display: flex; align-items: flex-end; gap: 2px; height: 36px; flex: none; padding: 0 6px; background: var(--bg2); border-bottom: 1px solid var(--border); }
 #tabbar .tabs-list { display: flex; flex: 0 1 auto; align-items: flex-end; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; height: 100%; }
 #tabbar .tabs-list::-webkit-scrollbar { display: none; }
+#tabbar .tab-side { margin-left: auto; align-self: center; flex: none; }
+.ib[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
 .tab { position: relative; display: flex; align-items: center; gap: 4px; flex: 0 1 auto; max-width: 220px; min-width: 72px; height: 30px; padding: 0 4px 0 12px; border-radius: 7px 7px 0 0; color: var(--muted); font-size: 13px; cursor: pointer; user-select: none; }
 .tab:hover { background: color-mix(in srgb, var(--bg) 55%, transparent); color: var(--text); }
 .tab.active { background: var(--bg); color: var(--text); box-shadow: 0 -1px 0 var(--border), 1px 0 0 var(--border), -1px 0 0 var(--border); margin-bottom: -1px; height: 31px; }

@@ -45,7 +45,42 @@ function renderTree() {
   renderTreeActive();
   if (treeCursor) treeRow(treeCursor)?.classList.add('kb');
   refreshInboxSoon(); // files moved, made or deleted
+  updateTreeButtons();
   for (const k of [...treeSel]) { const r = treeRow(k); if (r) r.classList.add('sel'); else treeSel.delete(k); }
+}
+
+// ------------------------------------------------------------ expand / collapse all, auto-reveal
+
+function allFolders() {
+  const out = new Set();
+  const add = d => { for (; d; d = dirname(d)) out.add(d); };
+  for (const d of S.dirs) add(d);
+  for (const p of S.files.keys()) add(dirname(p));
+  return out;
+}
+const anyExpanded = () => { const all = allFolders(); return [...S.expanded].some(d => all.has(d)); };
+function setAllExpanded(open) {
+  S.expanded.clear();
+  if (open) for (const d of allFolders()) S.expanded.add(d);
+  store('expanded', [...S.expanded]);
+  renderTree();
+  if (open) renderTreeActive(true);
+}
+function toggleAutoReveal() {
+  cfg.autoReveal = !cfg.autoReveal; saveCfg();
+  updateTreeButtons();
+  toast(cfg.autoReveal ? 'The file tree follows the open file' : 'Auto-reveal is off');
+  if (cfg.autoReveal) renderTreeActive(true);
+}
+// The header's toggle shows what a click does next: collapse when anything is open, else expand.
+function updateTreeButtons() {
+  const ex = $('#panel-files [data-cmd=toggle-expand]'), ar = $('#panel-files [data-cmd=auto-reveal]');
+  if (ex) {
+    const open = anyExpanded();
+    ex.title = open ? 'Collapse all' : 'Expand all';
+    ex.innerHTML = `<svg viewBox="0 0 24 24"><path d="${open ? 'm7 20 5-5 5 5M7 4l5 5 5-5' : 'm7 15 5 5 5-5M7 9l5-5 5 5'}"/></svg>`;
+  }
+  if (ar) { ar.setAttribute('aria-pressed', String(!!cfg.autoReveal)); ar.title = cfg.autoReveal ? 'Auto-reveal the open file: on' : 'Auto-reveal the open file: off'; }
 }
 
 // ------------------------------------------------------------ file tree keyboard
@@ -154,11 +189,14 @@ $('#tree').addEventListener('keydown', e => {
   if (done) { e.preventDefault(); e.stopPropagation(); }
 });
 
+// Mark the open file in the tree. With `reveal` (opening a file) and auto-reveal on, its folders
+// open and the tree scrolls to it.
 function renderTreeActive(reveal = false) {
+  reveal = reveal && cfg.autoReveal;
   if (reveal && S.cur) {
     let d = dirname(S.cur), changed = false;
     while (d) { if (!S.expanded.has(d)) { S.expanded.add(d); changed = true; } d = dirname(d); }
-    if (changed) { store('expanded', [...S.expanded]); return renderTree(); }
+    if (changed) { store('expanded', [...S.expanded]); renderTree(); }
   }
   for (const r of $$('#tree .t-row.active')) r.classList.remove('active');
   if (!S.cur) return;
