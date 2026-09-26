@@ -92,6 +92,9 @@ const DEFAULTS = {
   fontText: '',          // '' = system font
   fontMono: '',          // '' = JetBrains Mono (bundled)
   vim: false,            // Vim key bindings in the editor
+  focusMode: false,      // hide the side bars and dim all but the paragraph being written
+  typewriter: false,     // keep the line being typed on in the middle of the window
+  statusChars: false,    // the status bar counts characters rather than words
   folderTemplates: '',
   taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
@@ -128,7 +131,8 @@ function applyTheme() {
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
-  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); }
+  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); ed.setFocusMode(cfg.focusMode); ed.setTypewriter(cfg.typewriter); }
+  document.body.classList.toggle('focus-mode', !!cfg.focusMode);
   if (window.CinderGraph) CinderGraph.restyle();
   if (window.CinderDraw) CinderDraw.restyle();
   if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
@@ -213,7 +217,7 @@ const ed = CinderEditor.create($('#editor'), editorHooks(() => S.cur, {
   onCursor: () => cursorMoved(),
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
-}), { vim: cfg.vim });
+}), { vim: cfg.vim, focus: cfg.focusMode, typewriter: cfg.typewriter });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
 const preview = $('#preview');

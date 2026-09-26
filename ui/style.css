@@ -1429,3 +1429,23 @@ body.presenting #main { border: 0; }
 .lm-keys { white-space: nowrap; }
 .pick .main mark { background: var(--mark); border-radius: 2px; }
 .pick-badge { font-size: 10.5px; color: var(--faint); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0 6px; flex: none; }
+
+/* ---------------------------------------------------------------- status bar */
+#status-left, #status-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
+#statusbar .sb, #statusbar .sb-t { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 0; border-radius: 4px; background: none; color: var(--faint); font: inherit; white-space: nowrap; }
+#statusbar .sb { cursor: pointer; }
+#statusbar .sb:hover { background: var(--bg-hover); color: var(--text); }
+#statusbar .sb svg { width: 13px; height: 13px; }
+#statusbar .sb-t { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- focus mode */
+body.focus-mode :is(#ribbon, #left, #right, .resizer, #tabbar) { display: none !important; }
+body.focus-mode #viewbar { opacity: 0; transition: opacity var(--dur) var(--ease); }
+body.focus-mode #viewbar:hover, body.focus-mode #viewbar:focus-within { opacity: 1; }
+body.focus-mode #statusbar { border-top-color: transparent; }
+body.focus-mode #statusbar > * { opacity: .5; transition: opacity var(--dur); }
+body.focus-mode #statusbar:hover > * { opacity: 1; }
+body.focus-mode #view-note .cm-line { opacity: .32; transition: opacity var(--dur) var(--ease); }
+body.focus-mode #view-note .cm-line.cm-focus-para, body.focus-mode #view-note .cm-editor:not(.cm-focused) .cm-line { opacity: 1; }
+body.focus-mode.frame-custom #win-controls { opacity: 0; transition: opacity var(--dur); }
+body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }

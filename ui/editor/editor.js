@@ -1060,6 +1060,31 @@ function completions(context) {
   return null;
 }
 
+// ------------------------------------------------------------------ focus mode and typewriter scrolling
+
+// Focus mode: the lines of the paragraph (or list item, or block) the cursor is in get
+// .cm-focus-para, so CSS can dim the rest.
+const focusPara = ViewPlugin.fromClass(class {
+  constructor(view) { this.deco = this.build(view); }
+  update(u) { if (u.docChanged || u.selectionSet || u.viewportChanged) this.deco = this.build(u.view); }
+  build(view) {
+    const doc = view.state.doc, head = view.state.selection.main.head;
+    let a = doc.lineAt(head).number, b = a;
+    const blank = n => !doc.line(n).text.trim();
+    if (!blank(a)) {
+      while (a > 1 && !blank(a - 1)) a--;
+      while (b < doc.lines && !blank(b + 1)) b++;
+    }
+    const out = [];
+    for (let n = a; n <= b; n++) out.push(Decoration.line({ class: 'cm-focus-para' }).range(doc.line(n).from));
+    return Decoration.set(out);
+  }
+}, { decorations: v => v.deco });
+
+// Typewriter scrolling: the line being typed on stays in the middle of the window.
+const typewriter = EditorState.transactionExtender.of(tr =>
+  tr.selection && (tr.docChanged || (tr.isUserEvent('select') && !tr.isUserEvent('select.pointer'))) ? { effects: EditorView.scrollIntoView(tr.newSelection.main.head, { y: 'center' }) } : null);
+
 // ------------------------------------------------------------------ public API
 
 const theme = EditorView.theme({
@@ -1073,10 +1098,13 @@ function create(parent, hooks, opts = {}) {
   const spellComp = new Compartment();
   const keysComp = new Compartment();
   const vimComp = new Compartment();
+  const focusComp = new Compartment(), typeComp = new Compartment();
 
   let liveOn = opts.live ?? true, keys = opts.keys || {}, vimOn = !!opts.vim;
   const extensions = () => [
     vimComp.of(vimOn ? vim() : []),
+    focusComp.of(opts.focus ? focusPara : []),
+    typeComp.of(opts.typewriter ? typewriter : []),
     hooksFacet.of(hooks),
     focusField,
     EditorView.focusChangeEffect.of((_s, focusing) => setFocus.of(focusing)),
@@ -1211,6 +1239,14 @@ function create(parent, hooks, opts = {}) {
       return completionStatus(view.state) === 'active' || searchPanelOpen(view.state) || (!!st && (st.insertMode || st.visualMode));
     },
     setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vim() : []) }); },
+    setFocusMode(on) { opts.focus = !!on; view.dispatch({ effects: focusComp.reconfigure(on ? focusPara : []) }); },
+    setTypewriter(on) { opts.typewriter = !!on; view.dispatch({ effects: typeComp.reconfigure(on ? typewriter : []) }); },
+    // Where the cursor is: {line, col, selected (characters), words (in the selection)}.
+    cursorInfo() {
+      const r = view.state.selection.main, l = view.state.doc.lineAt(r.head);
+      const sel = view.state.sliceDoc(r.from, r.to);
+      return { line: l.number, col: r.head - l.from + 1, selected: r.to - r.from, words: sel ? (sel.match(/[\p{L}\p{N}'’_-]+/gu) || []).length : 0 };
+    },
     run(id) { const c = COMMANDS[id]; if (!c) return false; view.focus(); return c.run(view); },
     toggleCheckbox() { return toggleCheckbox(view); },
     // Insert a snippet over the selection; its ${fields} become Tab stops, the first one selected.

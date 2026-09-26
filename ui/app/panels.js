@@ -348,34 +348,66 @@ $('#right-body').addEventListener('contextmenu', e => {
   menu(e.clientX, e.clientY, [['Go to heading', () => scrollToHeading(h.dataset.heading)], ['Bookmark heading', () => bookmarkHeading(h.dataset.heading)]]);
 });
 
+// Backlink counts, redone only when the vault changes.
+let blCountCache = { key: '', n: 0 };
+function backlinkCount(p) {
+  const key = S.dataGen + ':' + p;
+  if (blCountCache.key !== key) blCountCache = { key, n: [...backlinksOf(p).values()].reduce((a, b) => a + b.length, 0) };
+  return blCountCache.n;
+}
+function toggleFocusMode() {
+  cfg.focusMode = !cfg.focusMode; saveCfg(); applyTheme(); updateStatus();
+  toast(cfg.focusMode ? `Focus mode. ${fmtKey(keyFor(CMD_BY_ID.get('focus-mode'))) || 'The ◎ in the status bar'} brings the side bars back.` : 'Focus mode off');
+}
+
+// The status bar: things about the open file, each a button that does the obvious thing.
 function updateStatus() {
   const left = $('#status-left'), right = $('#status-right');
+  const b = (act, text, title) => `<button class="sb" data-sb="${act}"${title ? ` title="${esc(title)}"` : ''}>${text}</button>`;
+  const s = (text, title) => `<span class="sb-t"${title ? ` title="${esc(title)}"` : ''}>${text}</span>`;
+  const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
+  const focus = b('focus', `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"${cfg.focusMode ? ' fill="currentColor"' : ''}/></svg>`, cfg.focusMode ? 'Leave focus mode' : 'Focus mode: hide the side bars, dim all but the current paragraph');
   if (S.view === 'tasks') {
     const open = allTasks().filter(x => !x.done && !x.cancelled).length;
-    left.textContent = '';
-    right.textContent = `${open.toLocaleString()} open task${open === 1 ? '' : 's'}`;
+    left.innerHTML = '';
+    right.innerHTML = s(plural(open, 'open task'));
   } else if (S.view === 'base' && S.cur) {
-    left.textContent = '';
-    right.textContent = 'Base';
-  } else if (S.view === 'canvas' && S.cur) {
-    const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
-    const n = CinderCanvas.count();
-    left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
-    right.textContent = `Canvas · ${n.toLocaleString()} card${n === 1 ? '' : 's'}`;
-  } else if (S.view === 'drawing' && S.cur) {
-    const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
-    const n = CinderDraw.count();
-    left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
-    right.textContent = `Drawing · ${n.toLocaleString()} element${n === 1 ? '' : 's'}`;
+    left.innerHTML = ''; right.innerHTML = s('Base');
+  } else if ((S.view === 'canvas' || S.view === 'drawing') && S.cur) {
+    const bl = backlinkCount(S.cur), n = S.view === 'canvas' ? CinderCanvas.count() : CinderDraw.count();
+    left.innerHTML = b('backlinks', plural(bl, 'backlink'), 'Show backlinks');
+    right.innerHTML = s(S.view === 'canvas' ? `Canvas · ${plural(n, 'card')}` : `Drawing · ${plural(n, 'element')}`);
   } else if (S.view === 'note' && S.cur) {
     const text = ed.value.slice(splitFrontmatter(ed.value).fmLen);
     const words = (text.match(/[\p{L}\p{N}'’_-]+/gu) || []).length;
-    const bl = [...backlinksOf(S.cur).values()].reduce((a, b) => a + b.length, 0);
-    left.textContent = `${bl} backlink${bl === 1 ? '' : 's'}`;
-    right.textContent = `${words.toLocaleString()} words · ${text.length.toLocaleString()} characters`;
+    const mins = Math.max(1, Math.round(words / 230));
+    const bl = backlinkCount(S.cur);
+    const tasks = allTasks().filter(x => x.path === S.cur && !x.done && !x.cancelled).length;
+    left.innerHTML = b('backlinks', plural(bl, 'backlink'), 'Show backlinks') + (tasks ? b('tasks', plural(tasks, 'open task'), 'Show this note’s tasks') : '');
+    const c = S.mode === 'edit' ? ed.cursorInfo() : null;
+    const count = cfg.statusChars ? plural(text.length, 'character') : `${plural(words, 'word')} · ${mins} min read`;
+    right.innerHTML = (c && c.selected ? s(`${plural(c.words, 'word')} selected`, `${c.selected.toLocaleString()} characters selected`) : '')
+      + (c ? s(`Ln ${c.line}, Col ${c.col}`) : '')
+      + b('count', count, cfg.statusChars ? 'Show words' : 'Show characters')
+      + b('mode', S.mode === 'read' ? 'Reading' : cfg.livePreview ? 'Live preview' : 'Source', 'Switch between reading and editing (Ctrl+E); right-click for source mode')
+      + focus;
   } else {
-    left.textContent = '';
-    right.textContent = `${S.notes.size.toLocaleString()} notes · ${(S.files.size - S.notes.size).toLocaleString()} attachments`;
+    left.innerHTML = '';
+    right.innerHTML = s(`${plural(S.notes.size, 'note')} · ${plural(S.files.size - S.notes.size, 'attachment')}`);
   }
 }
+$('#statusbar').addEventListener('click', e => {
+  const x = e.target.closest('[data-sb]'); if (!x) return;
+  const a = x.dataset.sb;
+  if (a === 'backlinks') showRight('backlinks');
+  else if (a === 'tasks') { const p = S.cur; openTasks().then(() => tasksView?.show('note:' + p)); }
+  else if (a === 'count') { cfg.statusChars = !cfg.statusChars; saveCfg(); updateStatus(); }
+  else if (a === 'mode') { if (S.view === 'note') setMode(S.mode === 'edit' ? 'read' : 'edit'); updateStatus(); }
+  else if (a === 'focus') toggleFocusMode();
+});
+$('#statusbar').addEventListener('contextmenu', e => {
+  if (!e.target.closest('[data-sb=mode]')) return;
+  e.preventDefault();
+  cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); updateStatus();
+});
 

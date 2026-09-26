@@ -30,6 +30,8 @@ const SETTINGS = [
   // Editor
   { k: 'livePreview', page: 'editor', name: 'Live preview', desc: 'Hide Markdown syntax except on the line you’re editing. Off shows plain source.', type: 'toggle', apply: 'theme' },
   { k: 'readable', page: 'editor', name: 'Readable line length', desc: 'Keep lines to a comfortable width instead of filling the window.', type: 'toggle', apply: 'theme' },
+  { k: 'focusMode', page: 'editor', name: 'Focus mode', desc: 'Hide the side bars and tabs, and dim everything but the paragraph you’re writing. The ◎ in the status bar switches it too.', type: 'toggle', apply: 'theme' },
+  { k: 'typewriter', page: 'editor', name: 'Typewriter scrolling', desc: 'Keep the line you’re typing on in the middle of the window.', type: 'toggle', apply: 'theme' },
   { k: 'vim', page: 'editor', name: 'Vim key bindings', desc: 'Edit with Vim’s modes and motions.', type: 'toggle', apply: 'theme' },
   { k: 'mathSnippets', page: 'editor', name: 'Math shortcuts', desc: 'While typing an equation: <code>//</code> makes a fraction, <code>@a</code> α, <code>mk</code>+Tab starts inline math, and more.', type: 'toggle' },
   { k: 'properties', page: 'editor', name: 'Properties at the top of notes', desc: 'Show the frontmatter as a table you can edit, or as its YAML text.', type: 'select', options: [['visible', 'Table'], ['source', 'YAML text']], apply: 'editor' },

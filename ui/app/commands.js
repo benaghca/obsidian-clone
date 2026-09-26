@@ -158,6 +158,8 @@ const APP_COMMANDS = [
   ['live-preview', 'Toggle live preview / source mode', '', () => { cfg.livePreview = !cfg.livePreview; saveCfg(); applyTheme(); toast(cfg.livePreview ? 'Live preview' : 'Source mode'); }],
   ['find', 'Find in current note', 'Mod-f', inNote(() => { setMode('edit'); ed.openSearch(); })],
   ['toggle-theme', 'Toggle light / dark theme', '', () => toggleTheme()],
+  ['focus-mode', 'Toggle focus mode', 'Mod-Alt-z', () => toggleFocusMode()],
+  ['typewriter', 'Toggle typewriter scrolling', '', () => { cfg.typewriter = !cfg.typewriter; saveCfg(); applyTheme(); toast(cfg.typewriter ? 'Typewriter scrolling' : 'Typewriter scrolling off'); }],
   ['insert-icon', 'Insert icon (Nerd Fonts)…', '', () => insertIcon()],
   ['choose-theme', 'Change colour theme…', '', () => chooseTheme()],
   ['random', 'Open random note', '', () => { const n = [...S.notes.keys()]; n.length && openPath(n[Math.floor(Math.random() * n.length)]); }],
