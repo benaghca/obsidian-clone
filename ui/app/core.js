@@ -86,6 +86,7 @@ const DEFAULTS = {
   windowFrame: 'custom',  // desktop app: Cinder's own title bar, or the system's ('native'); lives in the app config
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
   mathSnippets: true,     // LaTeX Suite-style shortcuts while typing math
+  inboxFolder: 'Inbox',   // where things captured elsewhere arrive (the Inbox view)
   webEmbeds: 'auto',      // ![](https://…) pages: 'auto' load, 'click' to load, 'off' (show the link)
   hoverPreview: true,     // hover a link to preview the note (Ctrl in the editor; Ctrl for web pages)
   cssFolder: '',          // a vault folder of .css snippets to apply ('' = none)

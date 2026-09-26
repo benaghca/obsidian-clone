@@ -7,6 +7,7 @@ const CMD = {
   'panel-tags': () => showPanel('tags'),
   'panel-props': () => showPanel('props'),
   switcher: openSwitcher,
+  inbox: () => openInbox(),
   palette: openPalette,
   daily: openDaily,
   graph: () => openGraph(false),

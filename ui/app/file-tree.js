@@ -44,6 +44,7 @@ function renderTree() {
   $('#tree').innerHTML = rows.join('') + '<div class="tree-root-drop" data-dir=""></div>';
   renderTreeActive();
   if (treeCursor) treeRow(treeCursor)?.classList.add('kb');
+  refreshInboxSoon(); // files moved, made or deleted
   for (const k of [...treeSel]) { const r = treeRow(k); if (r) r.classList.add('sel'); else treeSel.delete(k); }
 }
 

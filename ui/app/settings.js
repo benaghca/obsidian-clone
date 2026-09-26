@@ -9,6 +9,7 @@ function openSettings() {
     <label>Templates folder<input class="field" name="templatesFolder"></label>
     <label><span>Folder templates — new notes in a folder start from its template. One per line, e.g. <code>Meetings: Templates/Meeting</code> (<code>/</code> means every folder)</span><textarea class="field" name="folderTemplates" rows="3" spellcheck="false" placeholder="Meetings: Templates/Meeting"></textarea></label>
     <label>Attachments folder<input class="field" name="attachFolder"></label>
+    <label>Inbox folder (where things you capture on your phone or elsewhere land; the Inbox shows it)<input class="field" name="inboxFolder" placeholder="Inbox"></label>
     <label>New tasks go to (a note path; empty means today's daily note)<input class="field" name="taskInbox" placeholder="(today's daily note)"></label>
     <label class="check"><input type="checkbox" name="taskDoneDate"> Add a done date (✅) when ticking a task</label>
     <label>New drawings are saved as<select class="field" name="drawingFormat"><option value="excalidraw">.excalidraw (Excalidraw file; also opens on excalidraw.com)</option><option value="md">.excalidraw.md (Obsidian Excalidraw plugin)</option></select></label>

@@ -70,6 +70,8 @@ const APP_COMMANDS = [
   ['recent-back', 'Switch to a recent file (backwards)', MAC ? 'Ctrl-Shift-Tab' : 'Mod-Shift-Tab', () => recentSwitcher(-1)],
   ['toggle-right', 'Toggle right sidebar', 'Mod-Shift-\\', () => toggleSide('right')],
   ['tasks', 'Open tasks', 'Mod-Shift-t', () => openTasks()],
+  ['inbox', 'Open inbox', 'Mod-Shift-i', () => openInbox()],
+  ['inbox-capture', 'Add to inbox…', '', async () => { const t = await promptModal('Add to inbox', 'A quick note (it goes into the inbox folder)', '', { multiline: true }); if (t) inboxCapture(t); }],
   ['add-task', 'Add task…', '', () => quickAddTask()],
   ['screenshot', 'Insert screenshot', 'Mod-Shift-s', () => insertScreenshot()],
   ['screenshot-annotate', 'Insert screenshot and annotate it', 'Mod-Alt-s', () => insertScreenshot({ annotate: true })],

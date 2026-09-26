@@ -21,6 +21,7 @@
     <button class="rb" data-cmd="panel-tags" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
     <div class="rb-sep"></div>
     <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    <button class="rb" data-cmd="inbox" title="Inbox"><svg viewBox="0 0 24 24"><path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/></svg><span class="rb-badge" hidden></span></button>
     <button class="rb" data-cmd="tasks" title="Tasks (Ctrl+Shift+T)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/></svg><span class="rb-badge" hidden></span></button>
     <button class="rb" data-cmd="daily" title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
     <button class="rb" data-cmd="new-drawing" title="New drawing"><svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/></svg></button>
@@ -96,6 +97,7 @@
     <div id="view-base" class="view" hidden></div>
 
     <div id="view-tasks" class="view" hidden></div>
+    <div id="view-inbox" class="view" hidden></div>
 
     <div id="view-graph" class="view" hidden>
       <canvas id="graph-canvas"></canvas>

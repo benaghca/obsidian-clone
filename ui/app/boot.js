@@ -95,6 +95,7 @@ async function boot() {
   renderTree();
   setInterval(poll, 2000);
   updateTaskBadge();
+  updateInboxBadge();
   api('/api/info').then(i => { S.vaultPath = i.vault; }).catch(() => { });
   if (S.files.size === 0 && !store('welcomed')) {
     store('welcomed', true);

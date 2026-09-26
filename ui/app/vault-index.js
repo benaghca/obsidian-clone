@@ -194,7 +194,7 @@ async function applyList(l, gen) {
   // Views built from the notes redraw now that S.notes holds the new contents.
   if (S.view === 'canvas' && (changed.length || structural)) CinderCanvas.refreshFiles();
   if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
-  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); }
+  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); refreshInboxSoon(); }
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
   if (structural) renderTree();
   refreshPanels();
