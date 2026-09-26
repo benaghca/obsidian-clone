@@ -59,6 +59,11 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.evaluate(() => deletePath('Temp.md', { confirm: false })); await sleep(700);
   assert(same(await tabs(), [['Scratch.md', null]]) && await page.evaluate(() => S.cur) === 'Scratch.md' && await shown() === null, 'a deleted left note hands over to its partner');
 
+  // The tab bar spans both panes, with the split pane below it.
+  await reset([['Draft.md', 'Sources.md']]);
+  const [tb, sp] = await page.evaluate(() => [$('#tabbar'), $('#split')].map(e => { const r = e.getBoundingClientRect(); return { l: r.left, r: r.right, t: r.top, b: r.bottom }; }));
+  assert(tb.r >= sp.r - 1 && sp.t >= tb.b - 1 && tb.l <= sp.l, 'the tab bar spans both panes, with the split pane below it');
+
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));

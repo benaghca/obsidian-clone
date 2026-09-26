@@ -157,7 +157,9 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 .tag-row .n { color: var(--faint); font-size: var(--text-sm); }
 
 /* main */
-#main { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
+#workspace { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+#panes { flex: 1; display: flex; min-height: 0; position: relative; }
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 #viewbar { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 8px; border-bottom: 1px solid var(--border); }
 #crumbs { flex: 1; min-width: 0; text-align: center; color: var(--muted); font-size: var(--text-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #crumbs b { color: var(--text); font-weight: 500; }
@@ -1461,6 +1463,5 @@ body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }
 .split-read { padding-top: 18px; }
 .split-media { padding: 16px; display: grid; place-items: center; }
 .split-media img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
-.frame-custom.app-no-right .split-head { padding-right: 124px; }
 body.focus-mode #split, body.focus-mode #resize-split { display: none !important; }
 body.presenting #split, body.presenting #resize-split { display: none !important; }
