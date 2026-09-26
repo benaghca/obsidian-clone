@@ -30,6 +30,7 @@ const APP_JS: &str = concat!(
     include_str!("../ui/app/templates.js"),
     include_str!("../ui/app/template-help.js"),
     include_str!("../ui/app/history.js"),
+    include_str!("../ui/app/conflicts.js"),
     include_str!("../ui/app/editor.js"),
     include_str!("../ui/app/properties.js"),
     include_str!("../ui/app/link-embeds.js"),

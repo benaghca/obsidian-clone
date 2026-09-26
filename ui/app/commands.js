@@ -55,6 +55,7 @@ const APP_COMMANDS = [
   ['move', 'Move current file to folder…', '', () => S.cur && moveDialog(S.cur)],
   ['delete', 'Delete current file', '', () => S.cur && deletePath(S.cur)],
   ['history', 'Show version history of current file', '', () => openHistory()],
+  ['conflicts', 'Resolve conflicting copies (from OneDrive, Dropbox…)', '', () => listConflicts()],
   ['reveal', 'Reveal current file in file tree', '', () => S.cur && revealInTree(S.cur)],
   ['bookmark', 'Bookmark current file (or remove its bookmark)', '', () => S.cur ? toggleBookmark() : toast('Open a file first')],
   ['bookmarks', 'Show bookmarks', '', () => showPanel('bookmarks', true)],

@@ -196,7 +196,7 @@ async function applyList(l, gen) {
   if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
   if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); refreshInboxSoon(); }
   if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
-  if (structural) renderTree();
+  if (structural) { renderTree(); updateConflictBar(); }
   refreshPanels();
   return true;
 }
@@ -297,8 +297,13 @@ async function doSave(force) {
   } catch (e) { err = e; S.dirty = true; }
   if (!err) return;
   if (err.status !== 409) { setSaveState('Save failed: ' + err.message, true); return; }
-  const overwrite = await conflictAsk(noteName(p));
-  if (overwrite) return doSave(true);
+  const r = await resolveDiskConflict(p, S.cur === p ? ed.value : content);
+  if (r === null) { S.dirty = true; setSaveState('Not saved: changed on disk', true); return; }
+  if (r === 'mine') return doSave(true);
+  if (r.text != null) {
+    if (S.cur === p && S.view === 'note') ed.insert(0, ed.value.length, r.text, Math.min(ed.selectionStart, r.text.length));
+    return doSave(true);
+  }
   S.dirty = false;
   const got = await readMany([p]);
   if (got[p]) { setNote(p, got[p].content, got[p].mtime); resolveNote(p); if (S.cur === p) reloadEditorFromDisk(got[p].content); }

@@ -13,6 +13,7 @@ function showView(v) {
   if (S.tabs) syncTab();
   applyNoteClasses();
   updateTemplateBar();
+  updateConflictBar();
 }
 
 function showEmpty() {
