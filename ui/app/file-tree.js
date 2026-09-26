@@ -267,6 +267,7 @@ $('#tree').addEventListener('contextmenu', e => {
     if (path) items.unshift(['Open in new tab', () => openInNewTab(path)], null);
     if (path && isMd(path) && !isDrawing(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
     if (path && isMd(path) && isDrawing(path)) items.push(['Open as Markdown', () => openPath(path, { raw: true })]);
+    if (path) items.push(['Version history…', () => openHistory(path)]);
     items.push(null, ['Delete', () => deletePath(target), 'danger']);
   }
   menu(e.clientX, e.clientY, items);

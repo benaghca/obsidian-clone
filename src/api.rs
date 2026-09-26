@@ -29,6 +29,7 @@ const APP_JS: &str = concat!(
     include_str!("../ui/app/files.js"),
     include_str!("../ui/app/templates.js"),
     include_str!("../ui/app/template-help.js"),
+    include_str!("../ui/app/history.js"),
     include_str!("../ui/app/editor.js"),
     include_str!("../ui/app/properties.js"),
     include_str!("../ui/app/link-embeds.js"),
@@ -52,6 +53,7 @@ const TEMPLATER_JS: &str = include_str!("../ui/templater.js");
 const CANVAS_JS: &str = include_str!("../ui/canvas.js");
 const BASES_JS: &str = include_str!("../ui/bases.js");
 const TASKS_JS: &str = include_str!("../ui/tasks.js");
+const DIFF_JS: &str = include_str!("../ui/diff.js");
 const IMAGES_JS: &str = include_str!("../ui/images.js");
 const PROPERTIES_JS: &str = include_str!("../ui/properties.js");
 const LOGO_SVG: &str = include_str!("../ui/logo.svg");
@@ -166,6 +168,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/canvas.js" => return out(200, "text/javascript", CANVAS_JS.into()),
             "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
             "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
+            "/diff.js" => return out(200, "text/javascript", DIFF_JS.into()),
             "/images.js" => return out(200, "text/javascript", IMAGES_JS.into()),
             "/properties.js" => return out(200, "text/javascript", PROPERTIES_JS.into()),
             "/draw-render.js" => return out(200, "text/javascript", DRAW_RENDER_JS.into()),
@@ -227,6 +230,8 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             crate::pickfolder::Picked::Cancelled => out(204, "text/plain", Vec::new()),
             crate::pickfolder::Picked::NoTool => json_out(200, json!({ "path": null, "noPicker": true })), // the page browses instead
         }),
+        ("GET", "/api/history") => api_history(&vault, &q("path").unwrap_or_default()),
+        ("GET", "/api/history/read") => api_history_read(&vault, &q("path").unwrap_or_default(), &q("id").unwrap_or_default()),
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
         ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
         ("GET", "/api/bookmarks") => api_bookmarks(&vault, None),
@@ -328,6 +333,7 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
     if let Some(parent) = full.parent() {
         fs::create_dir_all(parent).map_err(io_err)?;
     }
+    crate::history::record(&crate::history::root(vault), p, &full, body);
     // Atomic write: temp file in the same folder, then rename over the target.
     let name = full.file_name().unwrap().to_string_lossy().to_string();
     let tmp = full.with_file_name(format!(".{name}.cinder-tmp"));
@@ -435,7 +441,27 @@ fn api_rename(vault: &Path, from_rel: &str, to_rel: &str) -> ApiResult {
         fs::create_dir_all(parent).map_err(io_err)?;
     }
     fs::rename(&from, &to).map_err(io_err)?;
+    crate::history::rename(&crate::history::root(vault), from_rel, to_rel);
     Ok(json_out(200, json!({ "ok": true })))
+}
+
+/// A file's saved versions, newest first.
+fn api_history(vault: &Path, p: &str) -> ApiResult {
+    resolve(vault, p)?;
+    let versions: Vec<Value> = crate::history::list(&crate::history::root(vault), p)
+        .into_iter()
+        .map(|(id, saved, size)| json!({ "id": id, "saved": saved, "size": size }))
+        .collect();
+    Ok(json_out(200, json!({ "versions": versions, "keepDays": crate::history::KEEP_DAYS })))
+}
+
+fn api_history_read(vault: &Path, p: &str, id: &str) -> ApiResult {
+    resolve(vault, p)?;
+    let id: u64 = id.parse().map_err(|_| (400, "bad version id".to_string()))?;
+    match crate::history::read(&crate::history::root(vault), p, id) {
+        Some(b) => Ok(out(200, "text/plain; charset=utf-8", b)),
+        None => Err((404, "no such version".into())),
+    }
 }
 
 fn api_delete(vault: &Path, p: &str) -> ApiResult {
@@ -684,7 +710,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

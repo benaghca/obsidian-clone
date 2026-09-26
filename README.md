@@ -62,7 +62,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `JetBrains Mono` 2.304, the default code font, in regular, bold, italic and bold italic (`ui/vendor/JetBrainsMono-*.woff2`, SIL Open Font License 1.1, see `ui/vendor/jetbrains-mono.LICENSE`).
   - `Symbols Nerd Font Mono` from Nerd Fonts 3.5.1 (`ui/vendor/SymbolsNerdFontMono.woff2`) and its list of icon names (`ui/vendor/nerd-icons.txt`). Its icons come from Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0), and Octicons, Devicons and others (MIT and SIL OFL). See `ui/vendor/nerd-fonts.LICENSE` for the full list and attributions.
   - The drawing editor is Cinder's own code (`ui/draw.js`, `ui/draw-render.js`). It reads and writes Excalidraw's file format, but none of Excalidraw's code is included. Its sketchy-line maths is adapted from rough.js and its decompression from lz-string, both MIT-licensed (see `ui/vendor/draw-ports.LICENSE`).
-- **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Cinder`, which holds `config.json` (last vault and window size) and the WebView2 profile.
+- **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Cinder`, which holds `config.json` (last vault and window size), the WebView2 profile and `history\` (earlier versions of the vault's text files, kept for 30 days).
 - **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. Their source is all in `vendor-crates/`. Dev tools are disabled in release builds.
 
 ## Features
@@ -118,6 +118,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **Folder templates** (Settings): new notes in a folder start from that folder's template.
   - Templates run in a small built-in interpreter, not as JavaScript, so a template can't reach anything outside the note and the vault. Arbitrary JavaScript, `tp.web` (network), `app` and user scripts aren't supported; using them gives a clear error.
 - A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag. **Click a node** to select it: its links light up and everything else dims, and a card lists what it links to and what links to it. Click an entry in the card to hop there. Click the node again, click empty space or press **Esc** to clear. **Double-click** (or **Enter**) opens a note, and **Ctrl+click** opens it in a new tab. *Click opens notes* in the graph controls brings back one-click opening. Tick **3D** for a 3D graph: drag to orbit, use the wheel to zoom, and right-drag or **Shift**+drag to pan. Nearer notes are larger and farther ones fade. **Rotate** turns it slowly, and selection works the same as in 2D.
+- **Version history**: every save is recorded outside the vault, with at most one version per five minutes of editing, and the note as it was before its first edit is kept too. *Version history…* (the note's ⋯ menu, the file tree's right-click menu or the command palette) lists the versions by day and shows what each one changed, how it differs from the file now, or its full text. Changed words are marked within changed lines. **Restore this version** puts it back (in an open note, **Ctrl+Z** undoes that). Versions follow renames and moves and are kept for 30 days, in `%LOCALAPPDATA%\Cinder\history` (`~/.local/share/cinder/history` on Linux).
 - Detection of edits made outside Cinder. If a note changed on disk while you also had unsaved edits, Cinder asks which version to keep.
 - **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images, an eraser and a **laser pointer** (**K**). The laser draws a smooth glowing trail that stays short and fades after a second. It never changes the drawing, which makes it handy for pointing things out while presenting. You can pick its colour (red, the theme accent, green or blue) while the laser is selected. Features:
   - Arrows attach to shapes and follow them when they move. Shapes and arrows can have labels (double-click or **Enter**).
@@ -222,6 +223,7 @@ src/native.rs      the desktop window (wry/tao), cinder:// protocol, close-to-sa
 src/server.rs      --browser mode: the 127.0.0.1 server
 src/config.rs      %LOCALAPPDATA%\Cinder\config.json
 src/screenshot.rs  Insert screenshot: runs the platform region-capture tool
+src/history.rs     version history: snapshots of saved files, outside the vault
 ui/index.html      shell
 ui/app/*.js        the app itself, one file per concern (core, vault index, navigation, tabs,
                    file tree, markdown, properties, commands, panels, graph, boot…); src/api.rs
@@ -234,6 +236,7 @@ ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, pane
 ui/canvas.js       canvas editor and JSON Canvas files
 ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
+ui/diff.js         line and word diffs (Myers), for version history and conflicting copies
 ui/images.js       image viewer / lightbox, crop tool, browser screen capture
 ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
@@ -251,7 +254,7 @@ The editor bundle is already built and checked in, so building Cinder doesn't ne
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js` and `node ui/test/properties.test.js`.
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
 
 ## Ideas for round two
 

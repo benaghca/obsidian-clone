@@ -10,6 +10,7 @@
 
 mod api;
 mod config;
+mod history;
 mod native;
 mod pickfolder;
 mod screenshot;

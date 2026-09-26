@@ -1270,3 +1270,45 @@ body.presenting #main { border: 0; }
 .seg button { border: 0; background: none; color: var(--muted); padding: 3px 12px; border-radius: 6px; cursor: pointer; font-size: var(--text-sm); }
 .seg button.on { background: var(--bg3); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
 .st-btns { display: flex; gap: var(--space-2); }
+
+/* ---------------------------------------------------------------- diffs and version history */
+.df { font: 12.5px/1.55 var(--font-mono); padding: var(--space-2) 0 var(--space-4); }
+.df-row { display: grid; grid-template-columns: 3.2em 3.2em 1.4em 1fr; align-items: start; }
+.df-n { color: var(--faint); text-align: right; padding-right: 8px; user-select: none; font-size: 11px; line-height: 1.55rem; }
+.df-s { color: var(--faint); text-align: center; user-select: none; }
+.df-t { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: var(--space-4); }
+.df-add { background: color-mix(in srgb, var(--c-green) 12%, transparent); }
+.df-add .df-s, .df-add mark { color: var(--c-green); }
+.df-del { background: color-mix(in srgb, var(--c-red) 11%, transparent); }
+.df-del .df-s, .df-del mark { color: var(--c-red); }
+.df-add mark { background: color-mix(in srgb, var(--c-green) 28%, transparent); border-radius: 2px; padding: 0; }
+.df-del mark { background: color-mix(in srgb, var(--c-red) 26%, transparent); border-radius: 2px; padding: 0; text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--c-red) 60%, transparent); }
+.df-skip { margin: 6px 0; padding: 2px 0 2px calc(6.4em + 8px); color: var(--faint); font: 11.5px var(--font-ui); border-top: 1px dashed var(--border); border-bottom: 1px dashed var(--border); background: var(--bg2); }
+.df-none { padding: 60px 20px; text-align: center; color: var(--muted); font-size: 13.5px; }
+.backdrop:has(.hist-modal) { align-items: center; padding-top: 0; }
+.modal.hist-modal { width: min(1100px, calc(100vw - 32px)); height: min(760px, calc(100vh - 48px)); max-height: none; overflow: hidden; border-radius: var(--radius-lg); }
+.hist { display: flex; height: 100%; }
+.hist-side { width: 260px; flex: none; display: flex; flex-direction: column; border-right: 1px solid var(--border); background: var(--bg); }
+.hist-side header { padding: var(--space-4) var(--space-4) var(--space-2); }
+.hist-side h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-lg); }
+.hist-side h3 svg { color: var(--accent); }
+.hist-file { margin-top: 4px; color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hist-list { flex: 1; overflow-y: auto; padding: 0 var(--space-2) var(--space-2); outline: none; }
+.hist-list h4 { margin: var(--space-3) 8px var(--space-1); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }
+.hist-v { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+.hist-v:hover { background: var(--bg-hover); }
+.hist-v.on { background: var(--accent-soft); }
+.hist-list:focus-visible .hist-v.on { box-shadow: inset 0 0 0 1.5px var(--accent); }
+.hist-t { flex: 1; min-width: 0; }
+.hist-d { font: 11.5px var(--font-mono); color: var(--faint); }
+.hist-d.add, .hist-stat .add { color: var(--c-green); }
+.hist-d.del, .hist-stat .del { color: var(--c-red); }
+.hist-tag { font-size: 10.5px; color: var(--faint); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0 6px; }
+.hist-empty { padding: var(--space-4); color: var(--muted); font-size: 13px; line-height: 1.5; }
+.hist-side footer { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); color: var(--faint); font-size: var(--text-xs); }
+.hist-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hist-bar { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-3) var(--space-3) var(--space-4); border-bottom: 1px solid var(--border); }
+.hist-stat { flex: 1; font-size: 12.5px; color: var(--muted); }
+.hist-stat b { font-weight: 600; font-family: var(--font-mono); }
+.hist-body { flex: 1; overflow: auto; }
+.hist-text { margin: 0; padding: var(--space-4) var(--space-5); font: 12.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
