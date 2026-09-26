@@ -102,7 +102,7 @@ $('#search-results').addEventListener('click', e => {
 });
 
 // Focusable items in the right pane (backlinks, outgoing links, outline).
-const RIGHT_ITEMS = '.bl-file, .bl-ctx, .o-item, a.tag';
+const RIGHT_ITEMS = '.bl-file, .bl-ctx, .o-item, a.tag, .rl-item';
 
 // ↑↓ through a panel's items, Enter opens one, Esc goes back (to the search box, or the page).
 function listKeys(box, sel, back) {
@@ -125,7 +125,7 @@ listKeys($('#search-results'), '.s-file-name, .s-snip', () => $('#search-input')
 listKeys($('#right-body'), RIGHT_ITEMS, () => focusMain());
 // In the right pane: ←/→ switch between Backlinks, Outgoing and Outline; Space previews a
 // heading; L links an unlinked mention.
-const RTABS = ['backlinks', 'outgoing', 'outline'];
+const RTABS = ['backlinks', 'outgoing', 'outline', 'related', 'calendar'];
 function showRight(tab) {
   if (document.body.classList.contains('app-no-right')) toggleSide('right');
   rtab = tab; store('rtab', rtab); refreshPanels();
@@ -136,7 +136,7 @@ $('#right').addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typingIn(e.target)) {
     e.preventDefault();
-    showRight(RTABS[(RTABS.indexOf(rtab) + (e.key === 'ArrowRight' ? 1 : 2)) % 3]);
+    showRight(RTABS[(RTABS.indexOf(rtab) + (e.key === 'ArrowRight' ? 1 : RTABS.length - 1)) % RTABS.length]);
   } else if (e.key === ' ' && e.target.matches?.('.o-item[data-heading]')) {
     // Space scrolls the page to a heading without leaving the outline (Enter goes there).
     e.preventDefault();
@@ -264,6 +264,8 @@ function drawRight(body, light) {
   if (!$('#panel-search').hidden && $('#search-input').value && !light) runSearch();
   if (S.view === 'graph' && !light) CinderGraph.refresh();
   updateStatus();
+  if (rtab === 'calendar') { drawCalendar(body); body.dataset.tab = rtab; return; }
+  if (rtab === 'related') { drawRelated(body); body.dataset.tab = rtab; body.dataset.for = S.cur; return; }
   if (!S.cur) { body.innerHTML = '<div class="none">No file open.</div>'; return; }
   const n = S.notes.get(S.cur);
   if (rtab === 'backlinks') {

@@ -9,7 +9,7 @@ const SETTINGS_PAGES = [
   { id: 'editor', name: 'Editor', icon: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>' },
   { id: 'appearance', name: 'Appearance', icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>' },
   { id: 'files', name: 'Files & links', icon: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>' },
-  { id: 'daily', name: 'Daily notes', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>' },
+  { id: 'daily', name: 'Daily & weekly notes', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>' },
   { id: 'templates', name: 'Templates', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>' },
   { id: 'tasks', name: 'Tasks', icon: '<rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/>' },
   { id: 'inbox', name: 'Inbox', icon: '<path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/>' },
@@ -46,8 +46,17 @@ const SETTINGS = [
   { k: 'newNoteFolder', page: 'files', name: 'Folder for new notes', desc: 'Where Ctrl+N and new links put notes.', type: 'text', folder: true, placeholder: 'The vault’s top folder' },
   { k: 'attachFolder', page: 'files', name: 'Attachments folder', desc: 'Where pasted and dropped images and files are saved.', type: 'text', folder: true },
   // Daily notes
+  { k: 'periodicPreview', page: 'daily', name: 'Today’s notes would be', type: 'custom', render: settingPeriodicPreview, wide: true, search: false },
   { k: 'dailyFolder', page: 'daily', name: 'Daily notes folder', type: 'text', folder: true },
-  { k: 'dailyTemplate', page: 'daily', name: 'Daily note template', desc: 'A note name or path. Its text starts each new daily note.', type: 'text', placeholder: 'e.g. Templates/Daily' },
+  { k: 'dailyFormat', page: 'daily', name: 'Daily note name', desc: 'A date format: <code>YYYY-MM-DD</code>, <code>dddd, MMMM Do YYYY</code>… (as in Obsidian).', type: 'text', placeholder: 'YYYY-MM-DD' },
+  { k: 'dailyTemplate', page: 'daily', name: 'Daily note template', desc: 'A note name or path. Its text starts each new daily note, with that day’s date in its date commands.', type: 'text', placeholder: 'e.g. Templates/Daily' },
+  { k: 'weeklyFolder', page: 'daily', name: 'Weekly notes folder', desc: 'Empty uses the daily notes folder.', type: 'text', folder: true, placeholder: 'The daily notes folder' },
+  { k: 'weeklyFormat', page: 'daily', name: 'Weekly note name', desc: '<code>GGGG-[W]WW</code> gives 2026-W39.', type: 'text', placeholder: 'GGGG-[W]WW' },
+  { k: 'weeklyTemplate', page: 'daily', name: 'Weekly note template', type: 'text', placeholder: 'e.g. Templates/Weekly' },
+  { k: 'monthlyFolder', page: 'daily', name: 'Monthly notes folder', desc: 'Empty uses the daily notes folder.', type: 'text', folder: true, placeholder: 'The daily notes folder' },
+  { k: 'monthlyFormat', page: 'daily', name: 'Monthly note name', type: 'text', placeholder: 'YYYY-MM' },
+  { k: 'monthlyTemplate', page: 'daily', name: 'Monthly note template', type: 'text', placeholder: 'e.g. Templates/Monthly' },
+  { k: 'weekStart', page: 'daily', name: 'Weeks in the calendar start on', type: 'select', options: [['monday', 'Monday'], ['sunday', 'Sunday']], apply: 'calendar' },
   // Templates
   { k: 'templateHelp', page: 'templates', name: 'Template commands', desc: 'Type <code>&lt;%</code> in a note to pick a command (a date, a question, the cursor…) from a list. The cheat sheet shows them all.', type: 'custom', render: settingTemplateHelp },
   { k: 'templatesFolder', page: 'templates', name: 'Templates folder', desc: 'The notes <i>Insert template</i> offers.', type: 'text', folder: true },
@@ -203,6 +212,7 @@ function applySetting(s) {
   if (what === 'frame') setFrame(cfg.windowFrame);
   if (what === 'tree') { updateTreeButtons(); if (cfg.autoReveal) renderTreeActive(true); }
   if (what === 'css') { userCssKey = null; loadUserCss(); }
+  if (what === 'calendar') refreshCalendar();
   if (what === 'editor') { S.version++; ed.refresh(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
 }
 

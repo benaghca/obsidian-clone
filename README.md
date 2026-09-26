@@ -108,9 +108,12 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Frontmatter that isn't valid YAML stays as text. **Settings → Properties** can show the YAML instead.
 - Callouts (`> [!warning] Title`), `==highlights==`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing)
 - A backlinks panel with context, including unlinked mentions and a one-click **Link** button, plus outgoing links and an outline
-- A quick switcher (**Ctrl+O**; **Shift+Enter** creates a note) and a command palette (**Ctrl+P**)
+- **Related notes** (a tab in the right side bar): notes about the same things as the open one, found from the words, tags and links they share. Each shows what it has in common. Those not linked yet come first, with a **Link** button. It all happens on this computer, with no AI service and no network.
+- **One launcher** for everything: **Ctrl+O** finds notes by name (**Shift+Enter** creates one), and a prefix switches what it finds: `>` commands (**Ctrl+P** opens it with `>` typed), `@` headings in the open note, `#` tags, `/` text in any note (it opens the note with the text selected). Deleting the prefix goes back to notes.
 - Vault search (**Ctrl+Shift+F**) with `tag:`, `path:`, `file:`, `"exact phrase"` and `-exclude`
-- Daily notes with an optional template, and an *Insert template* command. Templates support `{{date}}`, `{{time}}`, `{{title}}` and `{{date:dddd, MMMM DD}}`.
+- **Daily, weekly and monthly notes**, like Obsidian's Daily notes and Periodic Notes plugins. Each has a folder, a name format (`YYYY-MM-DD`, `GGGG-[W]WW`, `YYYY-MM` or your own) and a template, set in **Settings → Daily & weekly notes**, which also shows what today's notes would be called. A note made for another day gets that day's date in its template. Commands open today's, tomorrow's, this week's or this month's note, and step to the previous or next daily note, skipping days without one.
+  - **Calendar** (a tab in the right side bar): a month with a dot under each day that has a note (more dots for longer notes) and a ring on days with tasks due. Click a day for its daily note, a week number for the weekly note or the month's name for the monthly note (**Ctrl**+click for a new tab). Weeks start on Monday or Sunday.
+- An *Insert template* command. Templates support `{{date}}`, `{{time}}`, `{{title}}` and `{{date:dddd, MMMM DD}}`.
 - **Templater-style templates**, the syntax of Obsidian's Templater plugin: `<% tp.date.now("dddd, MMMM Do") %>`, `<% tp.file.title %>`, `<% tp.frontmatter.status %>`, `<%* let who = await tp.system.prompt("Who?") %>`, `if`/`else`, `for…of`, `tR +=`, `tp.file.cursor()`, `tp.file.rename()` / `move()` / `include()` / `create_new()`, `tp.system.suggester()` and whitespace control (`<%-` `-%>` `<%_` `_%>`). Dates use moment.js formats and ISO durations (`"P1W"`).
   - *Create new note from template* and *Replace template commands in current note* commands.
   - **You don't need to remember the syntax.** Type `<%` in a note to pick a command from a list in plain words, like *Today's date*, *Ask a question*, *Pick from a list* or *Put the cursor here*. Each one shows what it would give right now. **Tab** moves through the parts to fill in. Inside a tag, `tp.` and `tp.date.` list what comes next. *Insert template command…* in the command palette does the same.
@@ -184,6 +187,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - **Vim key bindings** in the editor, available as a setting.
 - **Fonts and Nerd Font icons**: JetBrains Mono comes with Cinder and is the default code font. **Settings** can set the text and code fonts to any font installed on the computer, with a live preview. All of Nerd Fonts' roughly 11,000 icons (Font Awesome, Material Design, Codicons, Devicons, Octicons and more) work in every font Cinder uses, including notes, code, canvases and drawings. The icon font only loads on pages that contain an icon. *Insert icon (Nerd Fonts)…* searches the icons by name. Icons are private-use Unicode characters, so a note that uses them needs a Nerd Font wherever else you open it.
 - Colour themes, each with a light and a dark variant. **Volcanic** is the default: obsidian and basalt darks with a lava-orange accent, and warm ash in light mode. The others are Violet (Cinder's original purple), Catppuccin (Mocha, Macchiato or Frappé, with Latte for light), Everforest, Gruvbox, Nord, Rosé Pine, Tokyo Night, Dracula and Solarized. Choose one in **Settings** or with *Change colour theme…* in the command palette, which previews each theme as you move through the list.
+- **Export**: *Export to PDF…* (the note's ⋯ menu or the command palette) prints the note on its own, in light colours, through the system's print dialog, which also saves PDFs. *Export to HTML* writes a single, self-contained `.html` file beside the note: its own styles, images inlined, math as MathML, and no scripts. *Copy as formatted text* is for pasting into an email or a document.
 - Autosave, back and forward history (**Alt+←/→**), light and dark modes, readable line length, and resizable sidebars
 - Editor shortcuts: **Ctrl+B** bold, **Ctrl+I** italic, **Ctrl+Shift+H** highlight, **Ctrl+K** wrap in `[[ ]]`, **Ctrl+Enter** toggle checkbox, **Ctrl+1**…**6** headings (the same level again removes it), **Ctrl+Shift+8/7/9** bullet, numbered and task lists, **Ctrl+M** / **Ctrl+Shift+M** math, and **Tab**/**Shift+Tab** to indent list items
 - **Tabs**:
@@ -238,6 +242,7 @@ ui/canvas.js       canvas editor and JSON Canvas files
 ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
 ui/diff.js         line and word diffs (Myers), for version history and conflicting copies
+ui/related.js      related notes: TF-IDF over the words, tags and links notes share
 ui/images.js       image viewer / lightbox, crop tool, browser screen capture
 ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
@@ -255,7 +260,7 @@ The editor bundle is already built and checked in, so building Cinder doesn't ne
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
 
 ## Ideas for round two
 

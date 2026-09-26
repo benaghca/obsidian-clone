@@ -76,6 +76,10 @@ function toast(msg, ms = 2600, action) {
 const DEFAULTS = {
   newNoteFolder: '',
   dailyFolder: 'Daily',
+  dailyFormat: 'YYYY-MM-DD',      // daily notes' names (moment.js format)
+  weeklyFolder: '', weeklyFormat: 'GGGG-[W]WW', weeklyTemplate: '',   // '' folder = the daily notes folder
+  monthlyFolder: '', monthlyFormat: 'YYYY-MM', monthlyTemplate: '',
+  weekStart: 'monday',            // the calendar's first column
   dailyTemplate: '',
   templatesFolder: 'Templates',
   attachFolder: 'attachments',

@@ -1,17 +1,73 @@
 /* Cinder app — the quick switcher, commands, hotkeys, palette and shortcuts sheet. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
-function openSwitcher() {
+// One launcher for everything: files by name, and after a prefix, commands (>), headings in
+// the open note (@), tags (#) and text in any note (/). Ctrl+O opens it on files, Ctrl+P on
+// commands; deleting the prefix switches back.
+const LAUNCH_MODES = [['', 'Files'], ['>', 'Commands'], ['@', 'Headings'], ['#', 'Tags'], ['/', 'Text']];
+function openSwitcher() { return openLauncher(''); }
+function openPalette() { return openLauncher('>'); }
+
+function openLauncher(prefix = '') {
   const files = [...S.files.keys()];
-  picker({
-    placeholder: 'Find or create a note…',
-    foot: '<span>↑↓ navigate</span><span>↵ open</span><span>ctrl ↵ new tab</span><span>⇧↵ create</span><span>esc close</span>',
-    items: q => {
-      const r = rank(files, q, p => isMd(p) ? noteName(p) : basename(p)).map(p => ({ main: isMd(p) ? noteName(p) : basename(p), sub: dirname(p), value: p }));
-      if (q) for (const [a, p] of S.byAlias) if (a.includes(q.toLowerCase())) r.push({ main: a, sub: '→ ' + noteName(p), value: p });
-      if (!q) { const recent = S.recent.filter(p => S.files.has(p)); return [...recent.map(p => ({ main: noteName(p), sub: dirname(p) || 'recent', value: p })), ...r.filter(x => !recent.includes(x.value))]; }
-      return r;
-    },
+  const recentCmds = store('recentCmds') || [];
+  const order = c => { const i = recentCmds.indexOf(c.id); return i < 0 ? 1e9 : i; };
+  const modeOf = q => LAUNCH_MODES.find(([p]) => p && q.startsWith(p))?.[0] || '';
+  const items = q => {
+    const mode = modeOf(q), t = q.slice(mode.length).trim();
+    if (mode === '>') return (t ? rank(COMMANDS, t, c => c.name) : [...COMMANDS].sort((a, b) => order(a) - order(b)))
+      .map(c => ({ main: c.name, sub: fmtKey(keyFor(c)), value: { kind: 'cmd', c } }));
+    if (mode === '@') {
+      const n = S.cur && S.notes.get(S.cur);
+      if (!n) return [];
+      const hs = n.headings.map((h, i) => ({ ...h, i }));
+      return (t ? rank(hs, t, h => h.text) : hs).map(h => ({ main: '  '.repeat(h.level - 1) + h.text, sub: 'H' + h.level, value: { kind: 'heading', text: h.text } }));
+    }
+    if (mode === '#') {
+      const count = new Map();
+      for (const n of S.notes.values()) for (const tg of n.tags) count.set(tg, (count.get(tg) || 0) + 1);
+      return rank([...count].map(([tg, n]) => ({ tg, n })), t, x => x.tg).map(x => ({ main: '#' + x.tg, sub: `${x.n} note${x.n === 1 ? '' : 's'}`, value: { kind: 'tag', tag: x.tg } }));
+    }
+    if (mode === '/') {
+      if (t.length < 2) return [];
+      const out = [], lq = t.toLowerCase();
+      for (const [p, n] of S.notes) {
+        if (isDrawing(p)) continue;
+        const low = n.content.toLowerCase();
+        let i = low.indexOf(lq), k = 0;
+        while (i >= 0 && k < 3 && out.length < 60) {
+          const s = n.content.lastIndexOf('\n', i) + 1, e0 = n.content.indexOf('\n', i), e = e0 < 0 ? n.content.length : e0;
+          const a = Math.max(s, i - 50), line = n.content.slice(a, Math.min(e, i + t.length + 70));
+          const at = i - a;
+          out.push({ main: line, mainHtml: `${a > s ? '…' : ''}${esc(line.slice(0, at))}<mark>${esc(line.slice(at, at + t.length))}</mark>${esc(line.slice(at + t.length))}`, sub: noteName(p), value: { kind: 'text', path: p, index: i, len: t.length } });
+          i = low.indexOf(lq, i + t.length); k++;
+        }
+        if (out.length >= 60) break;
+      }
+      return out;
+    }
+    const r = rank(files, t, p => isMd(p) ? noteName(p) : basename(p)).map(p => ({ main: isMd(p) ? noteName(p) : basename(p), sub: dirname(p), value: { kind: 'file', path: p } }));
+    if (t) for (const [a, p] of S.byAlias) if (a.includes(t.toLowerCase())) r.push({ main: a, sub: '→ ' + noteName(p), value: { kind: 'file', path: p } });
+    if (!t) { const recent = S.recent.filter(p => S.files.has(p)); return [...recent.map(p => ({ main: noteName(p), sub: dirname(p) || 'recent', value: { kind: 'file', path: p } })), ...r.filter(x => !recent.includes(x.value.path))]; }
+    return r;
+  };
+  const HINTS = { '': 'Find or create a note', '>': 'Run a command', '@': 'Go to a heading in this note', '#': 'Find notes with a tag', '/': 'Find text in any note' };
+  const foot = q => {
+    const m = modeOf(q);
+    return `<span class="lm-modes">${LAUNCH_MODES.map(([p, name]) => `<span class="lm${p === m ? ' on' : ''}">${p ? `<kbd>${esc(p)}</kbd> ` : ''}${name}</span>`).join('')}</span><span class="lm-keys">${m === '' ? '↵ open · ctrl ↵ new tab · ⇧↵ create' : m === '>' ? '↵ run' : '↵ go'}</span>`;
+  };
+  return picker({
+    placeholder: 'Find a note… or type > for commands, @ headings, # tags, / text',
+    value: prefix, items, foot,
+    createIf: q => modeOf(q) === '',
+    empty: q => { const m = modeOf(q); return m === '@' && !(S.cur && S.notes.get(S.cur)) ? 'Open a note to jump to its headings' : m === '/' && q.slice(1).trim().length < 2 ? 'Type at least two letters' : 'No matches'; },
     onCreate: name => followLink(name, null, null),
-  }).then(p => p && (pickedWithMod ? openInNewTab(p) : openPath(p)));
+  }).then(v => {
+    if (!v) return;
+    if (v.kind === 'file') return pickedWithMod ? openInNewTab(v.path) : openPath(v.path);
+    if (v.kind === 'cmd') { store('recentCmds', [v.c.id, ...recentCmds.filter(x => x !== v.c.id)].slice(0, 12)); return v.c.run(); }
+    if (v.kind === 'heading') return scrollToHeading(v.text);
+    if (v.kind === 'tag') return searchFor(`tag:${v.tag}`);
+    if (v.kind === 'text') return openPath(v.path, { mode: 'edit', select: [v.index, v.index + v.len] });
+  });
 }
 
 // Every command, for the palette, hotkeys and the shortcuts sheet. `key` is the default binding
@@ -37,6 +93,13 @@ const APP_COMMANDS = [
   ['copy-drawing', 'Copy drawing as PNG', '', () => S.view === 'drawing' ? copyDrawing('png', false) : toast('Open a drawing first')],
   ['drawing-md', 'Open drawing as Markdown', '', () => S.cur && isMd(S.cur) && isDrawing(S.cur) ? openPath(S.cur, { raw: true }) : toast('Only .excalidraw.md drawings have a Markdown view')],
   ['daily', "Open today's daily note", '', () => openDaily()],
+  ['daily-prev', 'Open the previous daily note', '', () => stepDaily(-1)],
+  ['daily-next', 'Open the next daily note', '', () => stepDaily(1)],
+  ['daily-tomorrow', "Open tomorrow's daily note", '', () => { const d = new Date(); d.setDate(d.getDate() + 1); openDaily(d); }],
+  ['weekly', "Open this week's note", '', () => openPeriodic('week')],
+  ['monthly', "Open this month's note", '', () => openPeriodic('month')],
+  ['calendar', 'Show calendar', '', () => showRight('calendar')],
+  ['related', 'Show related notes', '', () => showRight('related')],
   ['insert-template', 'Insert template', '', () => insertTemplate()],
   ['note-from-template', 'Create new note from template', '', () => newNoteFromTemplate()],
   ['run-templates', 'Replace template commands in current note', '', () => replaceTemplatesInNote()],
@@ -55,6 +118,9 @@ const APP_COMMANDS = [
   ['move', 'Move current file to folder…', '', () => S.cur && moveDialog(S.cur)],
   ['delete', 'Delete current file', '', () => S.cur && deletePath(S.cur)],
   ['history', 'Show version history of current file', '', () => openHistory()],
+  ['export-pdf', 'Export current note to PDF (print)…', '', () => printNote()],
+  ['export-html', 'Export current note to HTML', '', () => exportHtml()],
+  ['copy-html', 'Copy current note as formatted text', '', () => copyHtml()],
   ['conflicts', 'Resolve conflicting copies (from OneDrive, Dropbox…)', '', () => listConflicts()],
   ['reveal', 'Reveal current file in file tree', '', () => S.cur && revealInTree(S.cur)],
   ['bookmark', 'Bookmark current file (or remove its bookmark)', '', () => S.cur ? toggleBookmark() : toast('Open a file first')],
@@ -158,21 +224,6 @@ function onHotkey(e) {
   if (!/(^|-)(Mod|Ctrl|Meta|Alt)-/.test(k) && !/^(Shift-)?F\d+$/.test(k) && typingIn(e.target)) return;
   e.preventDefault();
   c.run();
-}
-
-function openPalette() {
-  const recent = store('recentCmds') || [];
-  const order = c => { const i = recent.indexOf(c.id); return i < 0 ? 1e9 : i; };
-  picker({
-    placeholder: 'Type a command…',
-    items: q => (q.trim() ? rank(COMMANDS, q, c => c.name) : [...COMMANDS].sort((a, b) => order(a) - order(b)))
-      .map(c => ({ main: c.name, sub: fmtKey(keyFor(c)), value: c })),
-    foot: '<span>↑↓ navigate</span><span>↵ run</span><span>esc close</span><span>recent commands first</span>',
-  }).then(c => {
-    if (!c) return;
-    store('recentCmds', [c.id, ...recent.filter(x => x !== c.id)].slice(0, 12));
-    c.run();
-  });
 }
 
 rebuildHotkeys();

@@ -12,24 +12,13 @@ function fmtDate(d, f) {
   return f.replace(/YYYY|MMMM|MMM|MM|DD|dddd|ddd|HH|mm/g, t => map[t]);
 }
 
-function fillTemplate(text, title) {
-  const now = new Date();
+function fillTemplate(text, title, now = new Date()) {
   return text
     .replace(/\{\{\s*date:([^}]+)\}\}/g, (_, f) => fmtDate(now, f.trim()))
     .replace(/\{\{\s*time:([^}]+)\}\}/g, (_, f) => fmtDate(now, f.trim()))
     .replace(/\{\{\s*date\s*\}\}/g, fmtDate(now, 'YYYY-MM-DD'))
     .replace(/\{\{\s*time\s*\}\}/g, fmtDate(now, 'HH:mm'))
     .replace(/\{\{\s*title\s*\}\}/g, title);
-}
-
-async function openDaily() {
-  const name = fmtDate(new Date(), 'YYYY-MM-DD');
-  const path = join(cfg.dailyFolder, name + '.md');
-  if (S.files.has(path)) return openPath(path);
-  const t = cfg.dailyTemplate && resolveLink(cfg.dailyTemplate, null);
-  const template = t && S.notes.has(t) ? { text: S.notes.get(t).content, from: t, optional: true } : undefined;
-  const r = await createNote(path, '', { mode: 'edit', template });
-  if (r && r.cursor < 0 && S.cur === path) ed.setSelectionRange(ed.value.length, ed.value.length, true);
 }
 
 // ============================================================ templates (core {{date}} syntax + Templater's <% %>)
@@ -45,9 +34,10 @@ async function pickTemplate(placeholder) {
 }
 
 // What tp.* sees when a template is applied to the note at `path`.
-function templateEnv(path, selection, templatePath) {
+function templateEnv(path, selection, templatePath, now) {
   const n = S.notes.get(path), f = S.files.get(path);
   return {
+    now,
     path, title: noteName(path), folder: dirname(path), content: n?.content ?? '', selection,
     frontmatter: n?.fm || {}, tags: n ? [...n.tags] : [], vaultPath: S.vaultPath || '',
     ctime: f?.ctime || f?.mtime || Date.now(), mtime: f?.mtime || Date.now(), templatePath,
@@ -64,11 +54,11 @@ function templateEnv(path, selection, templatePath) {
 
 // Fill a template for the note at `path`. Returns {text, cursor, actions}, or null if it
 // failed or was cancelled (the reason is shown as a toast).
-async function applyTemplate(text, path, { selection = '', templatePath = '' } = {}) {
-  text = fillTemplate(text, noteName(path));
+async function applyTemplate(text, path, { selection = '', templatePath = '', now } = {}) {
+  text = fillTemplate(text, noteName(path), now);
   if (!CinderTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
   try {
-    const r = await CinderTemplater.render(text, templateEnv(path, selection, templatePath));
+    const r = await CinderTemplater.render(text, templateEnv(path, selection, templatePath, now));
     if (r.aborted) { toast('Template cancelled'); return null; }
     return r;
   } catch (e) { toast(`Template error${templatePath ? ` in ${noteName(templatePath)}` : ''}: ${e.message}`, 6000); return null; }

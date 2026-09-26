@@ -52,24 +52,30 @@ function modal(html) {
   return back;
 }
 
-// items(q) -> [{main, sub, value}] ; resolves with value or null.
+// items(q) -> [{main, sub, value, badge?}] ; resolves with value or null.
 // onHighlight(value) is called as the selection moves (for live previews); `initial` preselects a value.
+// value: text to start with. createIf(q): whether to offer "Create" (with onCreate). foot: html, or a function of q.
 // Whether the last picker choice was made with Ctrl/Cmd held (the quick switcher opens a new tab).
 let pickedWithMod = false;
-function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
+function picker({ placeholder, items, onCreate, createIf, foot, onHighlight, initial, value, empty }) {
   pickedWithMod = false;
   return new Promise(resolve => {
-    const back = modal(`<input class="field" placeholder="${esc(placeholder)}" spellcheck="false"><div class="pick-list"></div><div class="pick-foot">${foot || '<span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>'}</div>`);
-    const input = $('input', back), list = $('.pick-list', back);
+    const footHtml = q => (typeof foot === 'function' ? foot(q) : foot) || '<span>↑↓ navigate</span><span>↵ open</span><span>esc close</span>';
+    const back = modal(`<input class="field" placeholder="${esc(placeholder)}" spellcheck="false" role="combobox" aria-expanded="true" aria-controls="pick-list" aria-autocomplete="list"><div class="pick-list" id="pick-list" role="listbox"></div><div class="pick-foot">${footHtml(value || '')}</div>`);
+    const input = $('input', back), list = $('.pick-list', back), footEl = $('.pick-foot', back);
+    if (value) input.value = value;
     let cur = [], sel = 0, first = true;
     const draw = () => {
-      cur = items(input.value).slice(0, 60);
+      const q = input.value;
+      cur = items(q).slice(0, 60);
       if (first && initial !== undefined) { const i = cur.findIndex(c => c.value === initial); if (i >= 0) sel = i; }
       first = false;
-      if (onCreate && input.value.trim() && !cur.some(c => c.main.toLowerCase() === input.value.trim().toLowerCase()))
-        cur.push({ main: `Create “${input.value.trim()}”`, sub: '⇧↵', create: true });
+      if (onCreate && q.trim() && (!createIf || createIf(q)) && !cur.some(c => c.main.toLowerCase() === q.trim().toLowerCase()))
+        cur.push({ main: `Create “${q.trim()}”`, sub: '⇧↵', create: true });
       sel = Math.min(sel, Math.max(0, cur.length - 1));
-      list.innerHTML = cur.map((c, i) => `<div class="pick${i === sel ? ' sel' : ''}" data-i="${i}"><span class="main">${esc(c.main)}</span>${c.sub ? `<span class="sub">${esc(c.sub)}</span>` : ''}</div>`).join('') || '<div class="none">No matches</div>';
+      list.innerHTML = cur.map((c, i) => `<div class="pick${i === sel ? ' sel' : ''}" data-i="${i}" role="option" id="pick-${i}" aria-selected="${i === sel}">${c.badge ? `<span class="pick-badge">${esc(c.badge)}</span>` : ''}<span class="main">${c.mainHtml || esc(c.main)}</span>${c.sub ? `<span class="sub">${esc(c.sub)}</span>` : ''}</div>`).join('') || `<div class="none">${esc(typeof empty === 'function' ? empty(q) : empty || 'No matches')}</div>`;
+      input.setAttribute('aria-activedescendant', cur.length ? 'pick-' + sel : '');
+      if (typeof foot === 'function') footEl.innerHTML = footHtml(q);
       list.querySelector('.sel')?.scrollIntoView({ block: 'nearest' });
       if (onHighlight && cur[sel] && !cur[sel].create) onHighlight(cur[sel].value);
     };
@@ -89,7 +95,7 @@ function picker({ placeholder, items, onCreate, foot, onHighlight, initial }) {
     list.addEventListener('mousemove', e => { const d = e.target.closest('.pick'); if (d && +d.dataset.i !== sel) { sel = +d.dataset.i; draw(); } });
     list.addEventListener('click', e => { const d = e.target.closest('.pick'); if (d) { pickedWithMod = e.ctrlKey || e.metaKey; choose(+d.dataset.i); } });
     back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
-    draw(); input.focus();
+    draw(); input.focus(); input.setSelectionRange(input.value.length, input.value.length);
   });
 }
 

@@ -98,7 +98,7 @@ function updateTaskBadge() {
 
 function taskInboxPath() {
   const p = String(cfg.taskInbox || '').trim().replace(/^\/+/, '');
-  if (!p) return join(cfg.dailyFolder, CinderTasks.today() + '.md');
+  if (!p) return periodPath('day', new Date());
   return isMd(p) ? p : p + '.md';
 }
 

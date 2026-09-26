@@ -45,6 +45,7 @@ const CMD = {
       ...(S.view === 'note' ? [['New drawing embedded here', () => newDrawingInNote()]] : []),
       [isBookmarked(S.cur) ? 'Remove bookmark' : 'Bookmark', () => toggleBookmark()],
       ['Version history…', () => openHistory(S.cur)],
+      ...(S.view === 'note' ? [null, ['Export to PDF…', () => printNote()], ['Export to HTML', () => exportHtml()], ['Copy as formatted text', () => copyHtml()], null] : []),
       ['Copy path', () => navigator.clipboard?.writeText(S.cur).then(() => toast('Copied'))],
       null,
       ['Delete', () => deletePath(S.cur), 'danger'],

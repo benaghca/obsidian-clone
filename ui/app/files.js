@@ -23,7 +23,7 @@ async function createNote(path, content = '', opts = {}) {
   }
   let cursor = -1, actions = [];
   if (tpl) {
-    const r = await applyTemplate(tpl.text, path, { templatePath: tpl.from });
+    const r = await applyTemplate(tpl.text, path, { templatePath: tpl.from, now: tpl.now });
     if (!r && !tpl.optional) return;
     if (r) ({ text: content, cursor, actions } = r);
   }

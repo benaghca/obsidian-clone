@@ -548,13 +548,15 @@
   //       read(link) -> content, exists(link), createNote(path, content, open), templatePath}
   function makeTp(env, st) {
     const unsupported = what => fn(() => { throw new Error(`${what} isn't available in Cinder templates`); });
+    // "Now" is env.now when given (a note made for another day, like a daily note for tomorrow).
+    const now = () => env.now ? new Date(env.now) : new Date();
     const date = {
-      now: fn((format = 'YYYY-MM-DD', offset, reference, refFormat) => formatDate(addOffset(reference != null ? parseDate(reference, refFormat) : new Date(), offset), format)),
-      tomorrow: fn((format = 'YYYY-MM-DD') => formatDate(addOffset(new Date(), 1), format)),
-      yesterday: fn((format = 'YYYY-MM-DD') => formatDate(addOffset(new Date(), -1), format)),
+      now: fn((format = 'YYYY-MM-DD', offset, reference, refFormat) => formatDate(addOffset(reference != null ? parseDate(reference, refFormat) : now(), offset), format)),
+      tomorrow: fn((format = 'YYYY-MM-DD') => formatDate(addOffset(now(), 1), format)),
+      yesterday: fn((format = 'YYYY-MM-DD') => formatDate(addOffset(now(), -1), format)),
       weekday: fn((format = 'YYYY-MM-DD', weekday = 0, reference, refFormat) => {
         // Monday-based, as in Templater's docs: 0 is this week's Monday, 7 next Monday.
-        const d = reference != null ? parseDate(reference, refFormat) : new Date();
+        const d = reference != null ? parseDate(reference, refFormat) : now();
         const monday = addOffset(d, -((d.getDay() + 6) % 7));
         return formatDate(addOffset(monday, weekday), format);
       }),
