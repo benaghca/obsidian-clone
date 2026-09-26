@@ -47,17 +47,17 @@ fn run(mut c: Command) -> Option<Picked> {
 
 #[cfg(windows)]
 fn system_pick(start: &str) -> Picked {
+    // The start folder goes in through an environment variable, never into the script's text:
+    // PowerShell treats curly quotes as string delimiters too, so a folder named "Bob’s notes"
+    // would otherwise end the string early, and a crafted name could run commands.
     // A top-most owner keeps the dialog in front of Cinder's window.
-    let script = format!(
-        "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
-         $o = New-Object System.Windows.Forms.Form -Property @{{TopMost=$true}}; \
+    let script = "[Console]::OutputEncoding=[Text.Encoding]::UTF8; Add-Type -AssemblyName System.Windows.Forms; \
+         $o = New-Object System.Windows.Forms.Form -Property @{TopMost=$true}; \
          $d = New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description = 'Choose a folder for your vault'; \
-         $d.ShowNewFolderButton = $true; $d.SelectedPath = '{}'; \
-         if ($d.ShowDialog($o) -eq 'OK') {{ $d.SelectedPath }} else {{ exit 1 }}",
-        start.replace('\'', "''")
-    );
+         $d.ShowNewFolderButton = $true; $d.SelectedPath = $env:CINDER_START; \
+         if ($d.ShowDialog($o) -eq 'OK') { $d.SelectedPath } else { exit 1 }";
     let mut c = Command::new("powershell");
-    c.args(["-NoProfile", "-NonInteractive", "-STA", "-Command", &script]);
+    c.args(["-NoProfile", "-NonInteractive", "-STA", "-Command", script]).env("CINDER_START", start);
     run(c).unwrap_or(Picked::NoTool)
 }
 
