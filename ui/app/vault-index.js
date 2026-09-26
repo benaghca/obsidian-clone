@@ -209,6 +209,30 @@ function reloadEditorFromDisk(content) {
   if (S.mode === 'read') renderPreview();
 }
 
+// Changes on disk: the server says when something changed (it watches the vault folder), and
+// the page then looks. If it can't watch, the page looks every two seconds instead. Either way
+// it also looks now and then, in case a change slipped by.
+let pollTimer = null;
+async function watchVault() {
+  let since = 0, fails = 0;
+  const every = ms => { clearInterval(pollTimer); pollTimer = setInterval(poll, ms); };
+  every(2000);
+  while (true) {
+    try {
+      const r = await api(`/api/changes?since=${since}`);
+      fails = 0;
+      if (!r.watching) { every(2000); return; } // no watcher here: keep polling
+      every(30000);
+      if (since && r.version !== since) setTimeout(poll, 120); // let a burst of changes settle
+      since = r.version;
+    } catch {
+      // The server is gone or restarting: poll, and try again later.
+      every(2000);
+      await new Promise(r => setTimeout(r, Math.min(30000, 1000 * 2 ** fails++)));
+    }
+  }
+}
+
 async function poll() {
   if (S.saving || document.hidden) return;
   const gen = S.gen;

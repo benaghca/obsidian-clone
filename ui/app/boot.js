@@ -93,7 +93,7 @@ async function boot() {
   showPanel('files', true);
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   renderTree();
-  setInterval(poll, 2000);
+  watchVault();
   updateTaskBadge();
   updateInboxBadge();
   loadBookmarks();

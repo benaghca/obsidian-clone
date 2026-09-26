@@ -63,7 +63,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `Symbols Nerd Font Mono` from Nerd Fonts 3.5.1 (`ui/vendor/SymbolsNerdFontMono.woff2`) and its list of icon names (`ui/vendor/nerd-icons.txt`). Its icons come from Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0), and Octicons, Devicons and others (MIT and SIL OFL). See `ui/vendor/nerd-fonts.LICENSE` for the full list and attributions.
   - The drawing editor is Cinder's own code (`ui/draw.js`, `ui/draw-render.js`). It reads and writes Excalidraw's file format, but none of Excalidraw's code is included. Its sketchy-line maths is adapted from rough.js and its decompression from lz-string, both MIT-licensed (see `ui/vendor/draw-ports.LICENSE`).
 - **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Cinder`, which holds `config.json` (last vault and window size), the WebView2 profile and `history\` (earlier versions of the vault's text files, kept for 30 days).
-- **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. Their source is all in `vendor-crates/`. Dev tools are disabled in release builds.
+- **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `notify` (watching the vault folder for changes), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. Their source is all in `vendor-crates/`. Dev tools are disabled in release builds.
 
 ## Features
 
@@ -122,6 +122,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Templates run in a small built-in interpreter, not as JavaScript, so a template can't reach anything outside the note and the vault. Arbitrary JavaScript, `tp.web` (network), `app` and user scripts aren't supported; using them gives a clear error.
 - A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag. **Click a node** to select it: its links light up and everything else dims, and a card lists what it links to and what links to it. Click an entry in the card to hop there. Click the node again, click empty space or press **Esc** to clear. **Double-click** (or **Enter**) opens a note, and **Ctrl+click** opens it in a new tab. *Click opens notes* in the graph controls brings back one-click opening. Tick **3D** for a 3D graph: drag to orbit, use the wheel to zoom, and right-drag or **Shift**+drag to pan. Nearer notes are larger and farther ones fade. **Rotate** turns it slowly, and selection works the same as in 2D.
 - **Version history**: every save is recorded outside the vault, with at most one version per five minutes of editing, and the note as it was before its first edit is kept too. *Version history…* (the note's ⋯ menu, the file tree's right-click menu or the command palette) lists the versions by day and shows what each one changed, how it differs from the file now, or its full text. Changed words are marked within changed lines. **Restore this version** puts it back (in an open note, **Ctrl+Z** undoes that). Versions follow renames and moves and are kept for 30 days, in `%LOCALAPPDATA%\Cinder\history` (`~/.local/share/cinder/history` on Linux).
+- Changes made outside Cinder (another app, a sync) show up at once: Cinder watches the vault folder and the page looks only when something changed. Where the folder can't be watched, it checks every two seconds instead.
 - Detection of edits made outside Cinder. If a note changed on disk while you also had unsaved edits, Cinder shows both versions side by side where they differ. Keep either version, or merge them part by part (this one, the other, both or neither), with a preview of the result.
 - **Conflicting copies from sync apps**: when OneDrive (`Note-DESKTOP-AB12CD.md`), Dropbox (`Note (Sam's conflicted copy …).md`), Syncthing (`Note.sync-conflict-….md`) or Nextcloud leaves a second copy beside a note, the note shows a banner saying where it came from. **Compare and merge…** opens the same side-by-side merge. Saving puts the result in the note and the copy in the trash. *Resolve conflicting copies* in the command palette lists every copy in the vault.
 - **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images, an eraser and a **laser pointer** (**K**). The laser draws a smooth glowing trail that stays short and fades after a second. It never changes the drawing, which makes it handy for pointing things out while presenting. You can pick its colour (red, the theme accent, green or blue) while the laser is selected. Features:
@@ -232,6 +233,7 @@ src/server.rs      --browser mode: the 127.0.0.1 server
 src/config.rs      %LOCALAPPDATA%\Cinder\config.json
 src/screenshot.rs  Insert screenshot: runs the platform region-capture tool
 src/history.rs     version history: snapshots of saved files, outside the vault
+src/watch.rs       watches the vault folder and tells the page when something changed
 ui/index.html      shell
 ui/app/*.js        the app itself, one file per concern (core, vault index, navigation, tabs,
                    file tree, markdown, properties, commands, panels, graph, boot…); src/api.rs
@@ -267,5 +269,4 @@ cd ui/editor && npm install && npm run build
 
 ## Ideas for round two
 
-- Using the `notify` crate to push file changes to the UI instead of polling every 2s
 - An embedded `.exe` icon so Explorer shows it too. It needs the Windows SDK's `rc.exe` at build time. Right now the icon appears on the window and taskbar only.

@@ -237,6 +237,11 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             crate::pickfolder::Picked::Cancelled => out(204, "text/plain", Vec::new()),
             crate::pickfolder::Picked::NoTool => json_out(200, json!({ "path": null, "noPicker": true })), // the page browses instead
         }),
+        ("GET", "/api/changes") => {
+            let since = q("since").and_then(|v| v.parse().ok()).unwrap_or(0);
+            let (version, watching) = crate::watch::wait(&vault, since, std::time::Duration::from_secs(25));
+            Ok(json_out(200, json!({ "version": version, "watching": watching })))
+        }
         ("GET", "/api/history") => api_history(&vault, &q("path").unwrap_or_default()),
         ("GET", "/api/history/read") => api_history_read(&vault, &q("path").unwrap_or_default(), &q("id").unwrap_or_default()),
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
@@ -274,7 +279,7 @@ fn screenshot(ctx: &Ctx, screen: bool, hide: bool, delay_s: u64) -> crate::scree
 /// Requests that can take a long time (waiting on the user), which transports should answer
 /// off their main thread.
 pub fn is_slow(path: &str) -> bool {
-    path == "/api/screenshot" || path == "/api/pick-folder"
+    path == "/api/screenshot" || path == "/api/pick-folder" || path == "/api/changes"
 }
 
 fn str_field(v: &Value, k: &str) -> Result<String, (u16, String)> {

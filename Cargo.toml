@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+notify = "8"
 serde_json = "1.0.151"
 tao = "0.37.0"
 tiny_http = "0.12.0"
