@@ -1,12 +1,23 @@
 /* Cinder app — parsing notes, the vault index, loading, syncing and saving. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
 // ============================================================ parsing & index
 
-function blankCode(s) {
-  // Replace fenced + inline code with spaces (same length) so offsets survive.
-  return s
-    .replace(/^([ \t]*)(```+|~~~+)[^\n]*\n[\s\S]*?(?:^[ \t]*\2[^\n]*$|(?![\s\S]))/gm, m => m.replace(/[^\n]/g, ' '))
-    .replace(/(`+)(?!`)[^\n]*?[^`]\1(?!`)|`[^`\n]`/g, m => ' '.repeat(m.length));
+// Notes are read with the editor's own Markdown parser (CinderEditor.scanMarkdown, Lezer), so
+// the index agrees with the editor about what's code, what's a heading and what's a link.
+
+// `s` with the given [from, to] ranges turned into spaces (line breaks kept, so offsets hold).
+function blankRanges(s, ranges) {
+  if (!ranges.length) return s;
+  let out = '', at = 0;
+  for (const [a, b] of [...ranges].sort((x, y) => x[0] - y[0])) {
+    if (b <= at) continue;
+    const from = Math.max(a, at);
+    out += s.slice(at, from) + s.slice(from, b).replace(/[^\n]/g, ' ');
+    at = b;
+  }
+  return out + s.slice(at);
 }
+// Code (fenced, indented, inline), HTML blocks and comments blanked out.
+const blankCode = s => blankRanges(s, CinderEditor.scanMarkdown(s).code);
 
 // A note's frontmatter, read by the shared YAML parser (ui/yaml.js). Frontmatter that isn't
 // valid YAML is read leniently (flat keys and lists), so its tags and aliases still count;
@@ -20,8 +31,11 @@ const asList = v => v == null ? [] : Array.isArray(v) ? v : String(v).split(/[,\
 
 function parseNote(content) {
   const { fm, fmLen, fmValid } = splitFrontmatter(content);
-  const body = blankCode(content.slice(fmLen));
-  const links = [], headings = [], tags = new Set();
+  const raw = content.slice(fmLen);
+  const scan = CinderEditor.scanMarkdown(raw);
+  const body = blankRanges(raw, scan.code);   // no links or tags inside code
+  const words = blankRanges(body, scan.urls); // nor tags inside a link's target ("#anchor")
+  const links = [], tags = new Set();
   let m;
   const wre = /(!?)\[\[([^\[\]\n]+?)\]\]/g;
   while ((m = wre.exec(body))) {
@@ -29,19 +43,17 @@ function parseNote(content) {
     const [name, sub] = splitOnce(tgt, '#');
     links.push({ embed: !!m[1], name: name.trim(), sub: (sub || '').trim(), alias, index: m.index + fmLen, len: m[0].length });
   }
-  const mre = /(!?)\[([^\]\n]*)\]\(<?([^)\n>]+?)>?\)/g;
-  while ((m = mre.exec(body))) {
-    let href = m[3].trim();
-    if (/^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) continue;
+  for (const l of scan.links) {
+    let href = l.url.trim().replace(/^<([\s\S]*)>$/, '$1');
+    if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) continue;
     try { href = decodeURIComponent(href); } catch { }
     const [name, sub] = splitOnce(href, '#');
-    links.push({ embed: !!m[1], md: true, text: m[2], name, sub: sub || '', index: m.index + fmLen, len: m[0].length });
+    links.push({ embed: l.image, md: true, text: l.text, name, sub: sub || '', index: l.from + fmLen, len: l.to - l.from });
   }
   links.sort((a, b) => a.index - b.index);
   const tre = /(^|[\s(,;])#([\p{L}\p{N}_\-\/]+)/gu;
-  while ((m = tre.exec(body))) if (!/^[\d\/]+$/.test(m[2])) tags.add(m[2].toLowerCase());
-  const hre = /^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$/gm;
-  while ((m = hre.exec(body))) headings.push({ level: m[1].length, text: m[2], index: m.index + fmLen });
+  while ((m = tre.exec(words))) if (!/^[\d\/]+$/.test(m[2])) tags.add(m[2].toLowerCase());
+  const headings = scan.headings.map(h => ({ level: h.level, text: h.text, index: h.from + fmLen }));
   const aliases = [];
   if (fm) {
     for (const t of asList(fm.tags ?? fm.tag)) { const x = String(t).replace(/^#/, '').trim(); if (x) tags.add(x.toLowerCase()); }
@@ -97,7 +109,7 @@ function resolveLink(name, from) {
   if (arr.length === 1) return arr[0];
   const dir = from ? dirname(from) : null;
   return [...arr].sort((a, b) =>
-    (isMd(b) - isMd(a)) || ((dirname(b) === dir) - (dirname(a) === dir)) || (a.length - b.length))[0];
+    (+isMd(b) - +isMd(a)) || (+(dirname(b) === dir) - +(dirname(a) === dir)) || (a.length - b.length))[0];
 }
 
 function resolveNote(path) {

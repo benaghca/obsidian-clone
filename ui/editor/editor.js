@@ -8,6 +8,7 @@ import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, dr
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab, insertNewline } from '@codemirror/commands';
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { parser as mdParser } from '@lezer/markdown';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField } from '@codemirror/autocomplete';
 import { vim, getCM } from '@replit/codemirror-vim';
 import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, searchPanelOpen } from '@codemirror/search';
@@ -1297,4 +1298,47 @@ function mathField(parent, o = {}) {
   };
 }
 
-window.CinderEditor = { create, mathField, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
+// ------------------------------------------------------------------ reading a note's structure
+
+// The vault index reads notes with the same Markdown parser as the editor (Lezer), trimmed of
+// the inline syntax it doesn't need. Returns, as offsets into `text`:
+//   code: [[from, to]] (fenced and indented code, inline code, HTML blocks and comments),
+//   urls: [[from, to]] (the targets of Markdown links, so "#anchor" isn't read as a tag),
+//   headings: [{level, text, from}], links: [{from, to, url, text, image}].
+const scanParser = mdParser.configure([{ remove: ['Emphasis', 'HardBreak', 'Entity', 'HTMLTag', 'Autolink'] }]);
+function scanMarkdown(text) {
+  const code = [], urls = [], headings = [], links = [];
+  scanParser.parse(text).iterate({
+    enter(n) {
+      switch (n.name) {
+        case 'FencedCode': case 'CodeBlock': case 'InlineCode': case 'HTMLBlock': case 'CommentBlock': case 'Comment':
+          code.push([n.from, n.to]); return false;
+        case 'ATXHeading1': case 'ATXHeading2': case 'ATXHeading3': case 'ATXHeading4': case 'ATXHeading5': case 'ATXHeading6': {
+          if (n.node.parent?.name !== 'Document') return; // not headings inside quotes or lists, as in Obsidian's outline
+          const raw = text.slice(n.from, n.to);
+          headings.push({ level: +n.name.slice(-1), text: raw.replace(/^#{1,6}[ \t]*/, '').replace(/[ \t]+#+[ \t]*$|[ \t]+$/, ''), from: n.from });
+          return;
+        }
+        case 'SetextHeading1': case 'SetextHeading2': {
+          if (n.node.parent?.name !== 'Document') return;
+          const raw = text.slice(n.from, n.to).split('\n');
+          headings.push({ level: +n.name.slice(-1), text: raw.slice(0, -1).map(l => l.trim()).join(' '), from: n.from });
+          return;
+        }
+        case 'Link': case 'Image': {
+          const u = n.node.getChild('URL');
+          if (u) {
+            urls.push([u.from, u.to]);
+            const marks = n.node.getChildren('LinkMark');
+            const textEnd = marks.length > 1 ? marks[1].from : u.from;
+            links.push({ from: n.from, to: n.to, url: text.slice(u.from, u.to), text: text.slice(n.from + (n.name === 'Image' ? 2 : 1), textEnd), image: n.name === 'Image' });
+          }
+          return;
+        }
+      }
+    },
+  });
+  return { code, urls, headings, links };
+}
+
+window.CinderEditor = { create, mathField, scanMarkdown, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
