@@ -21,7 +21,14 @@ target\release\cinder.exe
 The first build takes a couple of minutes. After that, copy `cinder.exe` wherever you like and pin it to the taskbar. It's the only file you need.
 
 - **Where your notes go:** the first launch uses `Documents\Cinder` (created if missing). To use a different folder, pass it once, as in `cinder.exe "C:\Users\you\Documents\Notes"`, or pick it in the app with **Settings → Vault → Change…**. Cinder remembers the last vault and your window size.
-- **Offline build:** the build needs no network. The source of every Rust dependency needed for 64-bit Windows and Linux is in `vendor-crates/`, and `.cargo/config.toml` points cargo at it. To build from crates.io instead, delete `.cargo/config.toml`.
+- **Offline build:** by default cargo downloads the Rust dependencies from crates.io. `Cargo.lock` pins each one by version and checksum. Their source isn't in this repository because, for every platform cargo knows, it comes to about 540 MB. To build on a machine with no internet access, run this once in Command Prompt on a connected machine, in the Cinder folder:
+
+  ```bat
+  mkdir .cargo
+  cargo vendor --locked vendor-crates > .cargo\config.toml
+  ```
+
+  Then copy the whole folder, including `vendor-crates\` and `.cargo\config.toml`, to the offline machine and run `cargo build --release --offline`. Git ignores both. Use Command Prompt rather than PowerShell for the redirect, because Windows PowerShell writes the file in UTF-16, which cargo can't read. To build from crates.io again, delete `.cargo\config.toml`.
 
 ```
 cinder [VAULT_DIR] [--browser [--port N] [--no-open] [--app]]
@@ -49,9 +56,9 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 
 ## For IT: what this program does and doesn't do
 
-- **Network:** in its default mode, Cinder doesn't open any network port. The UI talks to the program through a private protocol that is handled inside the process. It makes no outbound connections of its own: no telemetry, no update checks, no CDN assets. The only web traffic is a page you embed yourself with `![](https://…)` or a canvas link card, and you can set that to load on click, or not at all, in Settings. The page has a Content-Security-Policy of `default-src 'self'`. Embedded pages load in sandboxed frames of their own origin. A navigation guard sends every other external link to the system browser instead of loading it inside Cinder.
-- **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a random 256-bit token that the page must present with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
-- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Cinder's own UI is about 11,300 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
+- **Network:** in its default mode, Cinder doesn't open any network port. The UI talks to the program through a private protocol that is handled inside the process. It makes no outbound connections of its own: no telemetry, no update checks, no CDN assets. The only web traffic is a page you embed yourself with `![](https://…)` or a canvas link card, and you can set that to load on click, or not at all, in Settings. The page's Content-Security-Policy allows scripts, fonts, connections and media only from Cinder itself, with no `eval` and no plugins (`object-src 'none'`). It has two deliberate exceptions. Frames may load any `http:` or `https:` page, so that embedded pages work. Inline styles are allowed, because themes and layout set them. The exact policy is `CSP` in `src/api.rs`. Embedded pages load in sandboxed frames of their own origin. A navigation guard sends every other external link to the system browser instead of loading it inside Cinder.
+- **Browser mode (optional):** only when started with `--browser`, it listens on `127.0.0.1`. Each launch creates a 256-bit token from the operating system's secure random generator (`BCryptGenRandom` on Windows, `/dev/urandom` elsewhere), and the page must present it with every call. Requests whose `Host` header isn't `127.0.0.1` or `localhost` are rejected, which blocks DNS rebinding. Together these stop other websites in the same browser from reading or writing notes.
+- **No plugin system:** there's no way to load third-party code. Everything the app runs is compiled into the binary, and Cinder's own UI is about 18,900 lines of readable JS, HTML and CSS in `ui/`. The third-party front-end code is vendored, with pinned versions:
   - `CodeMirror` 6 (the editor, MIT license), bundled with Cinder's editor module into `ui/vendor/editor.bundle.js`. The source is `ui/editor/editor.js`, and `ui/editor/package.json` pins every package version.
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
@@ -63,7 +70,13 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `Symbols Nerd Font Mono` from Nerd Fonts 3.5.1 (`ui/vendor/SymbolsNerdFontMono.woff2`) and its list of icon names (`ui/vendor/nerd-icons.txt`). Its icons come from Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0), and Octicons, Devicons and others (MIT and SIL OFL). See `ui/vendor/nerd-fonts.LICENSE` for the full list and attributions.
   - The drawing editor is Cinder's own code (`ui/draw.js`, `ui/draw-render.js`). It reads and writes Excalidraw's file format, but none of Excalidraw's code is included. Its sketchy-line maths is adapted from rough.js and its decompression from lz-string, both MIT-licensed (see `ui/vendor/draw-ports.LICENSE`).
 - **Filesystem scope:** it reads and writes only inside the vault folder. Paths containing `..`, absolute paths, hidden files and symlinks that leave the vault are all rejected (see `resolve()` in `src/api.rs`). Deleted notes are moved to `<vault>\.trash`, never hard-deleted. The only other thing it writes is `%LOCALAPPDATA%\Cinder`, which holds `config.json` (last vault and window size), the WebView2 profile and `history\` (earlier versions of the vault's text files, kept for 30 days).
-- **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `notify` (watching the vault folder for changes), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. Their source is all in `vendor-crates/`. Dev tools are disabled in release builds.
+- **Rust dependencies:** `wry` and `tao` from the Tauri project (the webview window), `notify` (watching the vault folder for changes), `serde_json`, `tiny_http` (browser mode only) and `windows-sys`, plus their transitive dependencies. `Cargo.lock` pins each one by checksum, and `cargo vendor` gathers their source for review or an offline build (see **Offline build** above). Dev tools are disabled in release builds.
+- **Programs it starts:** only these, and only when you use the feature.
+  - Opening an external link: `rundll32 url.dll,FileProtocolHandler` on Windows, `open` on macOS and `xdg-open` on Linux, which hand the link to the default browser.
+  - **Open folder…**: on Windows, `powershell -NoProfile -NonInteractive` showing the standard folder dialog. The starting folder is passed in an environment variable, never as script text. On macOS it's `osascript`, and on Linux `zenity`, `kdialog` or `yad`. If PowerShell is blocked from starting, Cinder uses its own folder browser instead.
+  - **Insert screenshot**: on Linux and macOS, the system's capture tool (listed under the feature below). Nothing on Windows.
+  - Browser mode, to open its tab: `cmd /C start` on Windows, `open` on macOS and `xdg-open` on Linux. With `--app` it starts Edge, Chrome or Chromium in app mode instead, and with `--no-open` it starts nothing.
+- **Environment variables:** `CINDER_FOLDER_PICKER` and `CINDER_SCREENSHOT_CMD` replace the folder picker and the screenshot tool with a shell command of your choice. They run with the user's own rights, so they allow nothing the user couldn't already do, but they are how Cinder can be made to start another program. `CINDER_DEBUG` logs window events to the console, and `CINDER_HISTORY_SESSION_MS` changes how long one version in the history gathers saves (for tests).
 
 ## Features
 
@@ -258,7 +271,6 @@ ui/test/e2e/       browser tests: one file per area, run.sh runs them against a 
 ui/tsconfig.json   type-checks ui/ (npm run typecheck in ui/editor); ui/types/ declares the shared globals
 ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, MathJax, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
-vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
 ```
 
 **Browser tests** (`ui/test/e2e/`): 46 suites drive the real app in headless Chromium, each against a fresh vault. That's about 800 checks of what a person does: typing, clicking, dragging, keys and menus. Set it up once with `cd ui/test/e2e && npm install && npx playwright-core install chromium`. Then `ui/test/e2e/run.sh` runs them all (about ten minutes), or `ui/test/e2e/run.sh tasks search` just those. It builds Cinder first and says where the screenshots went.

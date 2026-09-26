@@ -1,3 +1,5 @@
 /target
 /vault
 node_modules/
+/vendor-crates
+/.cargo/config.toml
