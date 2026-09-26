@@ -1,0 +1,45 @@
+const { chromium } = require('playwright-core');
+const fs = require('fs'), path = require('path');
+const FIX = __dirname + '/fixtures';
+const SP = process.env.SP, VAULT = SP + '/vault', OUT = SP + '/shots';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
+const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursive: true }); fs.writeFileSync(path.join(VAULT, p), s); };
+(async () => {
+  w('attachments/red.png', fs.readFileSync(FIX + '/red.png'));
+  w('Report.md', '---\nstatus: draft\n---\n# Quarterly report\n\nSome **bold** text and a [[Other]] link. $E=mc^2$\n\n> [!note] Heads up\n> A callout.\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n![[red.png|40]]\n\n- [ ] a task\n\n```js\nlet x = 1;\n```\n');
+  w('Other.md', 'other');
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  await page.goto('http://127.0.0.1:43199/'); await sleep(900);
+  await page.evaluate(() => openPath('Report.md')); await sleep(400);
+  await page.click('[data-cmd=note-menu]'); await sleep(150);
+  await page.click('.menu >> text=Export to HTML'); await sleep(1500);
+  const html = fs.readFileSync(path.join(VAULT, 'Report.html'), 'utf8');
+  assert(html.startsWith('<!doctype html>') && html.includes('<title>Report</title>') && html.includes('<strong>bold</strong>'), 'Export to HTML writes Report.html beside the note');
+  assert(html.includes('<math') && !html.includes('katex-html'), 'math is MathML, with no KaTeX styles needed');
+  assert(/<img[^>]+src="data:image\/png;base64,/.test(html), 'images are inlined');
+  assert(!html.includes('/api/') && !html.includes('<script'), 'nothing points back into Cinder, and no scripts');
+  assert(html.includes('class="callout') && html.includes('<table'), 'callouts and tables come along');
+  // PDF: the print view shows just the note, in light colours.
+  await page.evaluate(() => { window.print = () => { window.__printed = document.body.classList.contains('printing') && !!document.querySelector('#print-root .export-doc h1'); }; });
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  const keep = await page.evaluate(() => { const r = window.removeEventListener; return true; });
+  await page.evaluate(() => printNote()); await sleep(200);
+  assert(await page.evaluate(() => window.__printed), 'Export to PDF prints a view of just the note');
+  // Put the print view back and render it as a PDF, as the print dialog would.
+  await page.evaluate(async () => { window.print = () => {}; const p = printNote(); await p; document.body.classList.add('printing'); });
+  await page.evaluate(async () => { const box = await renderForExport('Report.md'); const r = document.createElement('div'); r.id = 'print-root'; r.append(box); document.body.append(r); document.body.classList.add('printing'); });
+  await page.emulateMedia({ media: 'print' });
+  await page.screenshot({ path: OUT + '/print.png' });
+  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+  assert(bg === 'rgb(255, 255, 255)', 'the printed page is white even in dark mode: ' + bg);
+  assert(await page.evaluate(() => getComputedStyle(document.querySelector('#app')).display) === 'none', 'and the app around it is hidden');
+  await page.pdf({ path: OUT + '/report.pdf' });
+  assert(fs.statSync(OUT + '/report.pdf').size > 5000, 'a PDF comes out');
+  await page.emulateMedia({ media: 'screen' });
+  assert(errors.length === 0, 'no page errors ' + errors.join('; '));
+  await browser.close();
+})().catch(e => { console.log(e.message); process.exit(1); });

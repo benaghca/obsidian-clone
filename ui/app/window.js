@@ -17,7 +17,7 @@ document.addEventListener('fullscreenchange', () => { if (!document.fullscreenEl
 // double-click maximizes, and buttons at the top right minimize, maximize and close. The frame
 // choice lives in the app's config, since the window is made before the page loads.
 const winCmd = c => { if (NATIVE && window.ipc) window.ipc.postMessage('win:' + c); };
-if (NATIVE) cfg.windowFrame = document.querySelector('meta[name=cinder-frame]')?.content === 'custom' ? 'custom' : 'native';
+if (NATIVE) cfg.windowFrame = $('meta[name=cinder-frame]')?.content === 'custom' ? 'custom' : 'native';
 
 let frameNow = cfg.windowFrame; // what the window was made with
 function setFrame(kind) {

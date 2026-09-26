@@ -25,25 +25,27 @@ const CHEV = '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></sv
 function renderTree() {
   const root = buildTree();
   const rows = [];
-  const walk = (node) => {
+  let n = 0;
+  // A tree for assistive technology too: treeitems with their level and state, the cursor as the active descendant.
+  const walk = (node, level = 1) => {
     const dirs = [...node.dirs.values()].sort((a, b) => collator.compare(a.name, b.name));
     for (const d of dirs) {
       const open = S.expanded.has(d.path);
-      rows.push(`<div class="t-row folder${open ? ' open' : ''}" draggable="true" data-dir="${esc(d.path)}">${CHEV}<span class="name">${esc(d.name)}</span></div>`);
-      if (open) { rows.push('<div class="t-kids">'); walk(d); rows.push('</div>'); }
+      rows.push(`<div class="t-row folder${open ? ' open' : ''}" id="tr-${n++}" role="treeitem" aria-level="${level}" aria-expanded="${open}" draggable="true" data-dir="${esc(d.path)}">${CHEV}<span class="name">${esc(d.name)}</span></div>`);
+      if (open) { rows.push('<div class="t-kids" role="group">'); walk(d, level + 1); rows.push('</div>'); }
     }
     const files = node.files.sort((a, b) => collator.compare(noteName(a), noteName(b)));
     for (const f of files) {
       const drawing = isDrawing(f), canvas = isCanvas(f), base = isBase(f);
       const ext = drawing ? '<span class="ext">draw</span>' : canvas ? '<span class="ext">canvas</span>' : base ? '<span class="ext">base</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
       const name = drawing || canvas || base ? displayName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
-      rows.push(`<div class="t-row file" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(name)}</span>${ext}</div>`);
+      rows.push(`<div class="t-row file" id="tr-${n++}" role="treeitem" aria-level="${level}" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(name)}</span>${ext}</div>`);
     }
   };
   walk(root);
   $('#tree').innerHTML = rows.join('') + '<div class="tree-root-drop" data-dir=""></div>';
   renderTreeActive();
-  if (treeCursor) treeRow(treeCursor)?.classList.add('kb');
+  if (treeCursor) { const r = treeRow(treeCursor); if (r) { r.classList.add('kb'); $('#tree').setAttribute('aria-activedescendant', r.id); } }
   refreshInboxSoon(); // files moved, made or deleted
   updateTreeButtons();
   for (const k of [...treeSel]) { const r = treeRow(k); if (r) r.classList.add('sel'); else treeSel.delete(k); }
@@ -83,6 +85,16 @@ function updateTreeButtons() {
   if (ar) { ar.setAttribute('aria-pressed', String(!!cfg.autoReveal)); ar.title = cfg.autoReveal ? 'Auto-reveal the open file: on' : 'Auto-reveal the open file: off'; }
 }
 
+// The menu key (or Shift+F10) opens the right-click menu of the row the keyboard is on.
+$('#tree').addEventListener('keydown', e => {
+  if (e.key !== 'ContextMenu' && !(e.key === 'F10' && e.shiftKey)) return;
+  const r = treeCursor && treeRow(treeCursor);
+  if (!r) return;
+  e.preventDefault(); e.stopPropagation();
+  const b = r.getBoundingClientRect();
+  r.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: b.left + 24, clientY: b.bottom }));
+}, true);
+
 // ------------------------------------------------------------ file tree keyboard
 
 // The row the keyboard is on ('d:<dir>' or 'f:<file>'), kept across re-renders.
@@ -93,7 +105,7 @@ const selPaths = () => [...treeSel].map(k => k.slice(2));
 function setTreeSel(keys) {
   treeSel.clear();
   for (const k of keys) treeSel.add(k);
-  for (const r of $$('#tree .t-row')) r.classList.toggle('sel', treeSel.has(rowKey(r)));
+  for (const r of $$('#tree .t-row')) { r.classList.toggle('sel', treeSel.has(rowKey(r))); r.setAttribute('aria-selected', String(treeSel.has(rowKey(r)))); }
 }
 // Rows from a to b (in the order shown).
 function rowRange(a, b) {
@@ -109,8 +121,9 @@ const treeRow = k => $(k.startsWith('d:') ? `#tree .t-row[data-dir="${CSS.escape
 function setTreeCursor(r, scroll = true) {
   for (const x of $$('#tree .t-row.kb')) x.classList.remove('kb');
   treeCursor = r ? rowKey(r) : null;
-  if (!r) return;
+  if (!r) { $('#tree').removeAttribute('aria-activedescendant'); return; }
   r.classList.add('kb');
+  $('#tree').setAttribute('aria-activedescendant', r.id);
   if (scroll) r.scrollIntoView({ block: 'nearest' });
 }
 function focusTree() {
@@ -250,6 +263,7 @@ $('#tree').addEventListener('contextmenu', e => {
   if (row && !treeSel.has(rowKey(row)) && treeSel.size) setTreeSel([]);
   const dir = row?.dataset.dir, path = row?.dataset.path;
   const folder = dir != null ? dir : path ? dirname(path) : '';
+  /** @type {any[]} */
   const items = [
     ['New note', () => newNote(folder)],
     ['New drawing', () => newDrawing(folder)],

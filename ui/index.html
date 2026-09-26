@@ -46,7 +46,7 @@
         <button class="ib" data-cmd="auto-reveal" title="Auto-reveal the open file" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg></button>
         <button class="ib" data-cmd="toggle-expand" title="Collapse all"><svg viewBox="0 0 24 24"><path d="m7 20 5-5 5 5M7 4l5 5 5-5"/></svg></button>
       </header>
-      <div id="tree" class="panel-body" tabindex="0"></div>
+      <div id="tree" class="panel-body" tabindex="0" role="tree" aria-label="Files" aria-multiselectable="true"></div>
     </section>
     <section id="panel-search" class="panel" hidden>
       <header class="panel-head"><span class="panel-title">Search</span><button class="ib" data-cmd="bookmark-search" title="Bookmark this search"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/></svg></button></header>
@@ -142,7 +142,7 @@
 
   <div class="resizer" id="resize-right"></div>
   <aside id="right">
-    <div class="tabs">
+    <div class="tabs" role="tablist" aria-label="Side panel">
       <button data-rtab="backlinks" class="active" title="Backlinks"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Backlinks</span></button>
       <button data-rtab="outgoing" title="Outgoing links"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Outgoing</span></button>
       <button data-rtab="outline" title="Outline"><svg viewBox="0 0 24 24"><path d="M4 6h16M8 12h12M12 18h8"/></svg><span>Outline</span></button>

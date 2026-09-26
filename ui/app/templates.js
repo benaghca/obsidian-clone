@@ -54,7 +54,9 @@ function templateEnv(path, selection, templatePath, now) {
 
 // Fill a template for the note at `path`. Returns {text, cursor, actions}, or null if it
 // failed or was cancelled (the reason is shown as a toast).
-async function applyTemplate(text, path, { selection = '', templatePath = '', now } = {}) {
+/** @param {string} text @param {string} path @param {{selection?: string, templatePath?: string, now?: Date}} [opts] */
+async function applyTemplate(text, path, opts = {}) {
+  const { selection = '', templatePath = '', now } = opts;
   text = fillTemplate(text, noteName(path), now);
   if (!CinderTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
   try {

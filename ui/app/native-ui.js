@@ -42,9 +42,9 @@ function suggestionsFor(input) {
   const dl = document.getElementById(input.dataset.suggest);
   if (!dl) return [];
   const q = input.value.trim().toLowerCase();
-  const all = [...dl.options].map(o => o.value).filter(Boolean);
+  const all = [.../** @type {HTMLDataListElement} */ (dl).options].map(o => o.value).filter(Boolean);
   return all.filter(v => v.toLowerCase() !== q && (!q || v.toLowerCase().includes(q)))
-    .sort((a, b) => (b.toLowerCase().startsWith(q) - a.toLowerCase().startsWith(q))).slice(0, 8);
+    .sort((a, b) => (+b.toLowerCase().startsWith(q) - +a.toLowerCase().startsWith(q))).slice(0, 8);
 }
 function showSuggest(input) {
   suggest.input = input;

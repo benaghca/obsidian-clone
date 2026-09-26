@@ -21,17 +21,17 @@
     const day = t.getUTCDay() || 7;
     t.setUTCDate(t.getUTCDate() + 4 - day);
     const y = t.getUTCFullYear();
-    return { week: Math.ceil(((t - Date.UTC(y, 0, 1)) / 864e5 + 1) / 7), year: y };
+    return { week: Math.ceil(((t.getTime() - Date.UTC(y, 0, 1)) / 864e5 + 1) / 7), year: y };
   }
   function localWeek(d) { // US-style weeks (Sunday start), as moment's default locale
     const jan1 = new Date(d.getFullYear(), 0, 1);
-    return Math.ceil(((d - jan1) / 864e5 + jan1.getDay() + 1) / 7);
+    return Math.ceil(((d.getTime() - jan1.getTime()) / 864e5 + jan1.getDay() + 1) / 7);
   }
 
   const TOKENS = /\[([^\]]*)\]|YYYY|YY|Q|MMMM|MMM|MM|M|Do|DDDD|DDD|DD|D|dddd|ddd|dd|d|E|e|HH|H|hh|h|kk|k|mm|m|ss|s|SSS|A|a|WW|W|ww|w|GGGG|gggg|X|x|ZZ|Z/g;
   function formatDate(d, fmt = 'YYYY-MM-DD') {
     const tz = -d.getTimezoneOffset(), tzs = (tz >= 0 ? '+' : '-') + pad(Math.floor(Math.abs(tz) / 60)) + ':' + pad(Math.abs(tz) % 60);
-    const doy = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(d.getFullYear(), 0, 1)) / 864e5) + 1;
+    const doy = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 864e5) + 1;
     const h12 = d.getHours() % 12 || 12;
     return fmt.replace(TOKENS, (t, lit) => {
       if (lit !== undefined) return lit;
@@ -117,7 +117,7 @@
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s); // a bare date is local, not UTC
     if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
     const d = new Date(s);
-    if (isNaN(d)) throw new Error(`can't read "${s}" as a date`);
+    if (isNaN(d.getTime())) throw new Error(`can't read "${s}" as a date`);
     return d;
   }
 

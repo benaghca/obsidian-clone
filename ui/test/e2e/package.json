@@ -1,0 +1,8 @@
+{
+  "name": "cinder-e2e",
+  "private": true,
+  "description": "Cinder's browser tests: each suite drives the real app (browser mode) with a fresh vault. Run ./run.sh.",
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

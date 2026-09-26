@@ -30,7 +30,7 @@ const HISTORY_ICON = '<svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.
 
 function histWhen(ms) {
   const d = new Date(ms), now = new Date();
-  const mins = Math.round((now - d) / 60000);
+  const mins = Math.round((now.getTime() - d.getTime()) / 60000);
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   if (mins < 1) return `Just now · ${time}`;
   if (mins < 60) return `${mins} minute${mins === 1 ? '' : 's'} ago · ${time}`;

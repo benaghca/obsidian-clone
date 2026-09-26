@@ -272,7 +272,8 @@ function refreshPanels(light = false) {
   }
 }
 function drawRight(body, light) {
-  for (const b of $$('#right .tabs button')) b.classList.toggle('active', b.dataset.rtab === rtab);
+  for (const b of $$('#right .tabs button')) { b.classList.toggle('active', b.dataset.rtab === rtab); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(b.dataset.rtab === rtab)); }
+  body.setAttribute('role', 'tabpanel');
   if (!$('#panel-tags').hidden && !light) renderTags();
   if (!$('#panel-props').hidden && !light) renderPropsPanel();
   if (!$('#panel-search').hidden && $('#search-input').value && !light) runSearch();

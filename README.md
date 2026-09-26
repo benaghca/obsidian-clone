@@ -253,11 +253,17 @@ ui/search.js       the search index: BM25 ranking, prefixes, near misses
 ui/images.js       image viewer / lightbox, crop tool, browser screen capture
 ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
-ui/test/           Node tests for the drawing, template, canvas, bases, tasks and properties modules (no packages needed)
+ui/test/           Node tests for the drawing, template, canvas, bases, tasks, properties, diff, search, YAML and related-notes modules (no packages needed)
+ui/test/e2e/       browser tests: one file per area, run.sh runs them against a fresh vault each
+ui/tsconfig.json   type-checks ui/ (npm run typecheck in ui/editor); ui/types/ declares the shared globals
 ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, MathJax, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
 ```
+
+**Browser tests** (`ui/test/e2e/`): 46 suites drive the real app in headless Chromium, each against a fresh vault. That's about 800 checks of what a person does: typing, clicking, dragging, keys and menus. Set it up once with `cd ui/test/e2e && npm install && npx playwright-core install chromium`. Then `ui/test/e2e/run.sh` runs them all (about ten minutes), or `ui/test/e2e/run.sh tasks search` just those. It builds Cinder first and says where the screenshots went.
+
+The front end is plain JavaScript, type-checked by TypeScript without being compiled: `npm run typecheck` in `ui/editor` (after `npm install`) checks every file in `ui/` against `ui/tsconfig.json`, with JSDoc types where inference needs help and `ui/types/globals.d.ts` for the libraries and modules the pieces share. GitHub Actions (`.github/workflows/ci.yml`) runs the Rust tests, the front-end unit tests and the type check on every push.
 
 The UI files are embedded with `include_str!`, so the binary is self-contained. After changing anything in `ui/`, run `cargo build` again.
 

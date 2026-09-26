@@ -1,0 +1,27 @@
+# Checks every push and pull request: the Rust tests, the front end's type check, and the
+# front-end unit tests (plain Node, no browser).
+name: checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries for the desktop window (WebKitGTK)
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libxdo-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Rust tests
+        run: cargo test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Front-end unit tests
+        run: for f in ui/test/*.test.js; do node "$f" || exit 1; done
+      - name: Type check
+        working-directory: ui/editor
+        run: npm ci && npm run typecheck

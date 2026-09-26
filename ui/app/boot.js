@@ -79,7 +79,18 @@ async function showWelcome() {
   await openPath(p, { mode: 'read' });
 }
 
+// Buttons that show only an icon are named by their tooltip, for screen readers.
+/** @param {ParentNode} [root] */
+function labelIconButtons(root = document) {
+  const sel = 'button[title]:not([aria-label])';
+  const self = /** @type {any} */ (root).matches?.(sel) ? [root] : [];
+  for (const b of [...self, ...root.querySelectorAll(sel)]) if (!b.textContent.trim()) b.setAttribute('aria-label', b.title.replace(/\s*\([^)]*\)$/, ''));
+}
+// (The editors' own frequent changes are skipped: they have no such buttons.)
+new MutationObserver(ms => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && !(/** @type {Element} */ (n)).closest('.cm-editor')) labelIconButtons(/** @type {Element} */ (n)); }).observe(document.body, { childList: true, subtree: true });
+
 async function boot() {
+  labelIconButtons();
   applyTheme();
   matchMedia('(prefers-color-scheme: light)').addEventListener('change', applyTheme);
   $('#vault-name .vault-label').textContent = VAULT;

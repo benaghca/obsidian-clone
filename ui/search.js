@@ -94,7 +94,9 @@
       return [...out].sort((a, b) => b[1] - a[1]).slice(0, 40);
     }
     // Ranked ids for query words (every word has to match): [{id, score, matched: {term: [[i, len]]}, used: [terms]}]
-    search(words, { limit = 300, now = Date.now(), filter } = {}) {
+    /** @param {string[]} words @param {{limit?: number, now?: number, filter?: (id: string) => boolean}} [o] */
+    search(words, o = {}) {
+      const { limit = 300, now = Date.now(), filter } = o;
       words = words.map(fold).filter(Boolean);
       if (!words.length || !this.docs.size) return [];
       const N = this.docs.size, avg = this.totalLen / N;
@@ -114,7 +116,7 @@
           }
         }
         if (acc) { for (const [id, r] of acc) { const p = per.get(id); if (!p) acc.delete(id); else { r.score += p.s; r.used.push(...p.terms); } } }
-        else acc = new Map([...per].map(([id, p]) => [id, { id, score: p.s, used: [...p.terms] }]));
+        else acc = new Map([...per].map(([id, p]) => [id, /** @type {any} */ ({ id, score: p.s, used: [...p.terms] })]));
         if (!acc.size) return [];
       }
       const out = [];

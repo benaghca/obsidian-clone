@@ -1,0 +1,47 @@
+const { chromium } = require('playwright-core');
+const fs = require('fs'), path = require('path');
+const SP = process.env.SP, VAULT = SP + '/vault';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
+(async () => {
+  const names = Array.from({ length: 24 }, (_, i) => 'N' + i);
+  names.forEach((n, i) => fs.writeFileSync(path.join(VAULT, n + '.md'), `# ${n}\n[[${names[(i + 1) % 24]}]] [[${names[(i * 7 + 3) % 24]}]]\n`));
+  fs.writeFileSync(path.join(VAULT, 'Hub.md'), '# Hub\n[[N1]] [[N2]] [[N3]]\n');
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, colorScheme: 'dark' });
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message + '\n' + e.stack));
+  await page.goto('http://127.0.0.1:43199/'); await sleep(900);
+  await page.keyboard.press('Control+g'); await sleep(1200);
+  await page.check('#g-3d'); await sleep(1500);
+  assert(await page.evaluate(() => CinderGraph.is3d()), 'the 3D box switches the graph to 3D');
+  await page.screenshot({ path: SP + '/shots/graph3d-a.png' });
+  const box = await page.locator('#graph-canvas').boundingBox();
+  const before = await page.evaluate(() => CinderGraph.screenPos('Hub.md'));
+  await page.mouse.move(box.x + 60, box.y + box.height - 60); await page.mouse.down();
+  await page.mouse.move(box.x + 260, box.y + box.height - 60, { steps: 8 }); await page.mouse.up(); await sleep(300);
+  const after = await page.evaluate(() => CinderGraph.screenPos('Hub.md'));
+  assert(Math.hypot(after[0] - before[0], after[1] - before[1]) > 20, 'dragging empty space orbits the view');
+  await page.screenshot({ path: SP + '/shots/graph3d-b.png' });
+  // select a node in 3D
+  await page.evaluate(() => { CinderGraph.select('Hub.md', { center: true }); CinderGraph.select(null); }); await sleep(900);
+  const [hx, hy] = await page.evaluate(() => CinderGraph.screenPos('Hub.md'));
+  await page.mouse.click(box.x + hx, box.y + hy); await sleep(300);
+  assert(await page.evaluate(() => CinderGraph.selected()) === 'Hub.md' && await page.$eval('#graph-info b', b => b.textContent === 'Hub'), 'clicking a node selects it in 3D too');
+  await page.screenshot({ path: SP + '/shots/graph3d-c.png' });
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const d0 = await page.evaluate(() => CinderGraph.screenPos('N5.md'));
+  await page.mouse.wheel(0, 400); await sleep(300);
+  const d1 = await page.evaluate(() => CinderGraph.screenPos('N5.md'));
+  assert(Math.hypot(d1[0] - d0[0], d1[1] - d0[1]) > 5, 'the wheel zooms');
+  await page.check('#g-spin'); await sleep(100);
+  const s0 = await page.evaluate(() => CinderGraph.screenPos('N7.md')); await sleep(600);
+  const s1 = await page.evaluate(() => CinderGraph.screenPos('N7.md'));
+  assert(Math.hypot(s1[0] - s0[0], s1[1] - s0[1]) > 2, 'Rotate turns it slowly');
+  await page.reload(); await sleep(900); await page.keyboard.press('Control+g'); await sleep(1200);
+  assert(await page.evaluate(() => CinderGraph.is3d()) && await page.isChecked('#g-spin'), '3D and Rotate are remembered');
+  await page.uncheck('#g-3d'); await sleep(800);
+  assert(!(await page.evaluate(() => CinderGraph.is3d())), 'and 3D can be turned off again');
+  if (errors.length) { console.log(errors.join('\n')); process.exitCode = 1; }
+  await browser.close();
+})().catch(e => { console.log(e.message); process.exit(1); });

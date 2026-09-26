@@ -110,7 +110,7 @@
       const last = out[out.length - 1];
       if (o.t === '=') { if (last && last.same) last.same.push(o.v); else out.push({ same: [o.v] }); }
       else {
-        const c = last && !last.same ? last : (out.push({ mine: [], theirs: [] }), out[out.length - 1]);
+        const c = /** @type {{mine: string[], theirs: string[]}} */ (last && !last.same ? last : (out.push({ mine: [], theirs: [] }), out[out.length - 1]));
         (o.t === '-' ? c.mine : c.theirs).push(o.v);
       }
     }

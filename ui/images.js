@@ -148,7 +148,7 @@
       const back = document.createElement('div');
       back.className = 'iv-back';
       modalRoot().append(back);
-      const prev = document.activeElement;
+      const prev = /** @type {HTMLElement} */ (document.activeElement);
       const close = () => { v.destroy(); back.remove(); prev?.focus?.({ preventScroll: true }); resolve(); };
       const wrap = f => f && (it => { close(); f(it); });
       const v = viewer(back, items, index, { ...o, modal: true, onClose: close, onCrop: wrap(o.onCrop), onAnnotate: wrap(o.onAnnotate), onOpen: wrap(o.onOpen) });
@@ -169,7 +169,7 @@
         <div class="ic-bar"><button class="btn" data-a="cancel">Cancel</button>${o.whole ? '<button class="btn" data-a="whole">Use whole image</button>' : ''}<button class="btn primary" data-a="ok" disabled>${esc(o.okLabel || 'Crop')}</button></div>`;
       modalRoot().append(back);
       back.tabIndex = -1;
-      const prevFocus = document.activeElement;
+      const prevFocus = /** @type {HTMLElement} */ (document.activeElement);
       const frame = back.querySelector('.ic-frame'), img = back.querySelector('.ic-img'), selEl = back.querySelector('.ic-sel');
       const okBtn = back.querySelector('[data-a=ok]'), sizeEl = back.querySelector('.ic-size');
       let sel = null, drag = null; // sel in natural image pixels {x, y, w, h}
@@ -262,7 +262,7 @@
   async function captureScreen(o = {}) {
     if (!canCaptureScreen()) throw new Error('screen capture isn’t available in this window');
     let stream;
-    try { stream = await navigator.mediaDevices.getDisplayMedia({ video: { cursor: 'never' }, audio: false }); }
+    try { stream = await navigator.mediaDevices.getDisplayMedia(/** @type {any} */ ({ video: { cursor: 'never' }, audio: false })); }
     catch (e) { if (e.name === 'NotAllowedError' || e.name === 'AbortError') return null; throw e; }
     let blob;
     try {

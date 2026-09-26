@@ -8,6 +8,7 @@
  * both or neither. The same merge view settles a note changed on disk while being edited. */
 
 // [re, where from]: each re captures (name)(source)(.ext), or (name)(.ext) with a fixed source.
+/** @type {[RegExp, string][]} */
 const CONFLICT_PATTERNS = [
   [/^(.+?)-((?:DESKTOP|LAPTOP|PC|MACBOOK|WIN|SURFACE)[A-Z0-9-]*|[A-Z][A-Z0-9]{5,}(?:-[A-Z0-9]+)*)(?:-\d+)?(\.[^.\/]+)$/, 'OneDrive'],
   [/^(.+)\.sync-conflict-\d{8}-\d{6}(?:-([A-Z0-9]+))?(\.[^.\/]+)$/, 'Syncthing'],

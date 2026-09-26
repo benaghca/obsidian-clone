@@ -5,7 +5,10 @@
 
 // ============================================================ basics
 
+/** The first element matching a selector (typed loosely: the app knows what its selectors find).
+ * @param {string} s @param {ParentNode} [el] @returns {any} */
 const $ = (s, el = document) => el.querySelector(s);
+/** Every element matching a selector. @param {string} s @param {ParentNode} [el] @returns {any[]} */
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const TOKEN = $('meta[name=cinder-token]').content;
 const VAULT = $('meta[name=cinder-vault]').content;
@@ -50,7 +53,7 @@ async function apiRaw(path, opts) {
   if (!r.ok) {
     let msg = r.statusText;
     try { msg = (await r.json()).error || msg; } catch { }
-    const e = new Error(msg); e.status = r.status; throw e;
+    const e = /** @type {Error & {status?: number}} */ (new Error(msg)); e.status = r.status; throw e;
   }
   return (r.headers.get('content-type') || '').includes('json') ? r.json() : r.text();
 }
@@ -137,7 +140,7 @@ function applyTheme() {
   if (window.CinderDraw) CinderDraw.restyle();
   if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
   // The desktop window's own frame (when the system draws it) follows light / dark too.
-  if (window.ipc && document.querySelector('meta[name=cinder-mode]')?.content === 'native') window.ipc.postMessage('win:theme:' + t);
+  if (window.ipc && $('meta[name=cinder-mode]')?.content === 'native') window.ipc.postMessage('win:theme:' + t);
 }
 
 // ============================================================ state

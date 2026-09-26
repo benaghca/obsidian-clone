@@ -164,7 +164,7 @@
   function curvePoints(el) {
     if (!isCurved(el)) return el.points;
     const out = [el.points[0]];
-    for (const seg of catmull(el.points)) for (let i = 1; i <= 10; i++) out.push(bezierAt(seg, i / 10));
+    for (const seg of catmull(el.points)) for (let i = 1; i <= 10; i++) out.push(bezierAt(/** @type {any} */ (seg), i / 10));
     return out;
   }
 
@@ -986,6 +986,7 @@
     };
   }
 
+  /** @param {string | number} [indent] */
   function sceneJSON(scene, files = usedFiles(scene), indent = 2) {
     return JSON.stringify({ ...scene.rest, type: 'excalidraw', version: 2, source: 'cinder', elements: scene.elements, appState: scene.appState, files }, null, indent);
   }
@@ -1148,6 +1149,7 @@ tags: [excalidraw]
     return lzDecompress(input.length, 32, i => rev[input.charAt(i)]);
   }
   function lzDecompress(length, resetValue, next) {
+    /** @type {any[]} */
     const dict = [0, 1, 2], result = [];
     let enlargeIn = 4, dictSize = 4, numBits = 3, w, c;
     const data = { val: next(0), position: resetValue, index: 1 };

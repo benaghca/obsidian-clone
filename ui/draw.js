@@ -37,6 +37,7 @@ window.CinderDraw = (() => {
     roughness: 1, opacity: 100, roundness: 'round', fontSize: 20, fontFamily: 1, textAlign: 'left',
     startArrowhead: null, endArrowhead: 'arrow', arrowType: 'round',
   };
+  /** @type {typeof DEFAULT_STYLE & {laserColor?: string}} */
   let style = { ...DEFAULT_STYLE };
 
   const TOOLS = [

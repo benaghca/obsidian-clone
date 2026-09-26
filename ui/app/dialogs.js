@@ -57,6 +57,12 @@ function modal(html) {
 // value: text to start with. createIf(q): whether to offer "Create" (with onCreate). foot: html, or a function of q.
 // Whether the last picker choice was made with Ctrl/Cmd held (the quick switcher opens a new tab).
 let pickedWithMod = false;
+/**
+ * @typedef {{main: string, sub?: string, value?: any, badge?: string, mainHtml?: string, create?: boolean}} PickItem
+ * @param {{placeholder: string, items: (q: string) => PickItem[], onCreate?: (name: string) => any, createIf?: (q: string) => boolean,
+ *   foot?: string | ((q: string) => string), onHighlight?: (value: any) => void, initial?: any, value?: string, empty?: string | ((q: string) => string)}} o
+ * @returns {Promise<any>}
+ */
 function picker({ placeholder, items, onCreate, createIf, foot, onHighlight, initial, value, empty }) {
   pickedWithMod = false;
   return new Promise(resolve => {
@@ -130,23 +136,45 @@ function promptModal(title, label, value, opts = {}) {
   });
 }
 
+/** A menu at (x, y). items: [label, action, class?] rows, with null for a separator line.
+ * @param {number} x @param {number} y @param {Array<any[] | null | false | undefined>} items */
 function menu(x, y, items) {
   const root = $('#menu-root');
   root.innerHTML = '';
   const m = document.createElement('div');
-  m.className = 'menu';
+  m.className = 'menu'; m.setAttribute('role', 'menu');
   m.addEventListener('mousedown', e => e.preventDefault()); // (focus and selection stay where they were)
+  const rows = [];
+  const close = () => { root.innerHTML = ''; document.removeEventListener('keydown', keys, true); document.removeEventListener('mousedown', outside); };
   items.forEach((it, i) => {
-    if (!it) { m.append(document.createElement('hr')); return; }
+    if (!it) { const hr = document.createElement('hr'); hr.setAttribute('role', 'separator'); m.append(hr); return; }
     const d = document.createElement('div');
     d.textContent = it[0]; if (it[2]) d.className = it[2];
-    d.onclick = () => { root.innerHTML = ''; it[1](); };
-    m.append(d);
+    d.id = 'mi-' + i; d.setAttribute('role', 'menuitem');
+    d.onclick = () => { close(); it[1](); };
+    d.onmousemove = () => hl(rows.indexOf(d));
+    rows.push(d); m.append(d);
   });
+  // The keyboard works the menu without taking focus from where it was: ↑↓ Home End, Enter, Esc.
+  let at = -1;
+  const hl = i => { at = i; rows.forEach((r, j) => r.classList.toggle('hl', j === i)); if (rows[i]) { m.setAttribute('aria-activedescendant', rows[i].id); rows[i].scrollIntoView({ block: 'nearest' }); } };
+  const keys = e => {
+    if (!m.isConnected) { close(); return; } // (closed some other way)
+    const k = e.key;
+    if (k === 'ArrowDown' || k === 'ArrowUp') hl(at < 0 ? (k === 'ArrowDown' ? 0 : rows.length - 1) : (at + (k === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length);
+    else if (k === 'Home') hl(0);
+    else if (k === 'End') hl(rows.length - 1);
+    else if (k === 'Enter' || k === ' ') { if (rows[at]) rows[at].click(); else return; }
+    else if (k === 'Escape' || k === 'Tab') close();
+    else return;
+    e.preventDefault(); e.stopPropagation();
+  };
+  const outside = e => { if (!m.contains(/** @type {Node} */ (e.target))) close(); };
   root.append(m);
   const r = m.getBoundingClientRect();
   m.style.left = Math.min(x, innerWidth - r.width - 8) + 'px';
   m.style.top = Math.min(y, innerHeight - r.height - 8) + 'px';
-  setTimeout(() => document.addEventListener('mousedown', function h(e) { if (!m.contains(e.target)) { root.innerHTML = ''; document.removeEventListener('mousedown', h); } }), 0);
+  document.addEventListener('keydown', keys, true);
+  setTimeout(() => document.addEventListener('mousedown', outside), 0);
 }
 

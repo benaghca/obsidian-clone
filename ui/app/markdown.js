@@ -200,8 +200,9 @@ function linkifyTags(el) {
   const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
     acceptNode: n => n.parentElement.closest('code, pre, a') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT,
   });
+  /** @type {Text[]} */
   const texts = [];
-  while (tw.nextNode()) if (tw.currentNode.data.includes('#')) texts.push(tw.currentNode);
+  while (tw.nextNode()) { const n = /** @type {Text} */ (tw.currentNode); if (n.data.includes('#')) texts.push(n); }
   const re = /(^|[\s(,;])#([\p{L}\p{N}_\-\/]+)/gu;
   for (const t of texts) {
     const frag = document.createDocumentFragment();

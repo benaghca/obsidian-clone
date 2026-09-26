@@ -52,7 +52,7 @@ const leaveInbox = () => { if (S.view !== 'inbox') store('inboxSeen', Date.now()
 
 const dayLabel = t => {
   const d = new Date(t), today = new Date(); today.setHours(0, 0, 0, 0);
-  const diff = Math.round((new Date(d).setHours(0, 0, 0, 0) - today) / 864e5);
+  const diff = Math.round((new Date(d).setHours(0, 0, 0, 0) - today.getTime()) / 864e5);
   if (diff === 0) return 'Today';
   if (diff === -1) return 'Yesterday';
   return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });

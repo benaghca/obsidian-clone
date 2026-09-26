@@ -15,7 +15,8 @@
 
   function randomId() {
     const b = new Uint8Array(8);
-    (globalThis.crypto || require('crypto').webcrypto).getRandomValues(b);
+    const req = typeof require === 'function' ? require : null; // (Node, for the tests)
+    (globalThis.crypto || req('crypto').webcrypto).getRandomValues(b);
     return [...b].map(x => x.toString(16).padStart(2, '0')).join('');
   }
 

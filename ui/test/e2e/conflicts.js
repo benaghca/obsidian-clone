@@ -1,0 +1,51 @@
+const { chromium } = require('playwright-core');
+const fs = require('fs'), path = require('path');
+const SP = process.env.SP, VAULT = SP + '/vault', OUT = SP + '/shots';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
+const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursive: true }); fs.writeFileSync(path.join(VAULT, p), s); };
+const rd = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
+(async () => {
+  w('Note.md', '# Note\nshared\nmine only\nend\n');
+  w('Note-DESKTOP-AB12CD.md', '# Note\nshared\ntheirs only\nend\nadded later\n');
+  w('Meeting.md', 'x'); w('Meeting-Notes.md', 'y');
+  w('Sub/Plan.md', 'a'); w('Sub/Plan.sync-conflict-20240101-120000-ABCDEF7.md', 'b');
+  w('Other.md', 'line one\nline two\n');
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message));
+  await page.goto('http://127.0.0.1:43199/'); await sleep(900);
+  const found = await page.evaluate(() => conflictCopies().map(c => `${c.copy} > ${c.base} (${c.from})`));
+  assert(found.length === 2 && found.includes('Note-DESKTOP-AB12CD.md > Note.md (DESKTOP-AB12CD (OneDrive))') && found.some(f => f.startsWith('Sub/Plan.sync-conflict') && f.includes('Syncthing')), 'finds OneDrive and Syncthing copies, not ordinary names: ' + found.join(' | '));
+  await page.evaluate(() => openPath('Meeting.md')); await sleep(300);
+  assert(await page.$eval('#conflict-bar', b => b.hidden).catch(() => true), 'no banner on a note without copies');
+  await page.evaluate(() => openPath('Note.md')); await sleep(300);
+  assert(!(await page.$eval('#conflict-bar', b => b.hidden)) && (await page.textContent('#conflict-bar')).includes('DESKTOP-AB12CD'), 'a banner on the note says where the copy came from');
+  await page.click('#conflict-bar [data-merge]'); await sleep(400);
+  assert(await page.$$eval('.mg-diff', d => d.length) === 2, 'the merge shows the two places they differ');
+  assert(await page.$$eval('.mg-diff .seg .on', b => b.map(x => x.dataset.pick).join()) === 'mine,theirs', 'a part only the copy has is kept by default');
+  await page.screenshot({ path: OUT + '/merge.png' });
+  await page.click('.mg-diff[data-i="1"] [data-pick=both]'); await sleep(100);
+  await page.click('[data-v=result]'); await sleep(100);
+  assert((await page.textContent('.mg-result')) === '# Note\nshared\nmine only\ntheirs only\nend\nadded later\n', 'Result shows the merged text');
+  await page.click('[data-ok]'); await sleep(1200);
+  assert(rd('Note.md') === '# Note\nshared\nmine only\ntheirs only\nend\nadded later\n', 'saving writes the merged note');
+  assert(!fs.existsSync(path.join(VAULT, 'Note-DESKTOP-AB12CD.md')) && fs.readdirSync(path.join(VAULT, '.trash')).some(f => f.startsWith('Note-DESKTOP')), 'and moves the copy to the trash');
+  assert(await page.$eval('#conflict-bar', b => b.hidden), 'the banner goes');
+
+  // Changed on disk while being edited.
+  await page.evaluate(() => openPath('Other.md')); await sleep(300);
+  await page.evaluate(() => { setMode('edit'); ed.setSelectionRange(ed.value.length); ed.focus(); });
+  await page.keyboard.type('mine\n');
+  await sleep(50); w('Other.md', 'line one\nline two\ndisk\n');
+  await page.waitForSelector('.mg', { timeout: 5000 }); await sleep(200);
+  assert((await page.textContent('.mg-head h3')).includes('changed outside Cinder'), 'a note changed on disk while edited opens the merge');
+  await page.click('.mg-diff [data-pick=both]'); await page.click('[data-ok]'); await sleep(1200);
+  assert(rd('Other.md') === 'line one\nline two\nmine\ndisk\n' && await page.evaluate(() => ed.value) === 'line one\nline two\nmine\ndisk\n', 'the merged text is saved and shown: ' + JSON.stringify(rd('Other.md')));
+
+  await page.keyboard.press('Control+p'); await page.keyboard.type('conflicting copies'); await page.keyboard.press('Enter'); await sleep(300);
+  assert((await page.$$eval('.pick .main', p => p.map(x => x.textContent))).some(t => t.startsWith('Plan.sync-conflict')), 'the command lists the remaining copies');
+  assert(errors.length === 0, 'no page errors ' + errors.join('; '));
+  await browser.close();
+})().catch(e => { console.log(e.message); process.exit(1); });

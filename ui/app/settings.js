@@ -193,8 +193,8 @@ function settingRow(s, content, words = []) {
 // Wrap each occurrence of any of `words` in el's text in <mark>.
 function markWords(el, words) {
   const re = new RegExp(words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
-  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), nodes = [];
-  while (walk.nextNode()) nodes.push(walk.currentNode);
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT), /** @type {Text[]} */ nodes = [];
+  while (walk.nextNode()) nodes.push(/** @type {Text} */ (walk.currentNode));
   for (const n of nodes) {
     const t = n.nodeValue; let m, last = 0; const frag = document.createDocumentFragment();
     re.lastIndex = 0;

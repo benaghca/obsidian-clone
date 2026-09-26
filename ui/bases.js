@@ -68,7 +68,9 @@
     return d.dateOnly || (x.getHours() === 0 && x.getMinutes() === 0) ? ymd : `${ymd} ${pad2(x.getHours())}:${pad2(x.getMinutes())}`;
   }
   function humanDuration(ms) {
-    const a = Math.abs(ms), units = [['year', 365 * DAY], ['month', 30 * DAY], ['week', 7 * DAY], ['day', DAY], ['hour', 36e5], ['minute', 6e4]];
+    /** @type {[string, number][]} */
+    const units = [['year', 365 * DAY], ['month', 30 * DAY], ['week', 7 * DAY], ['day', DAY], ['hour', 36e5], ['minute', 6e4]];
+    const a = Math.abs(ms);
     for (const [u, n] of units) if (a >= n) { const v = Math.floor(a / n); return `${v} ${u}${v === 1 ? '' : 's'}`; }
     return 'just now';
   }
@@ -175,7 +177,7 @@
       if (l === LV.length) return unary();
       let a = bin(l + 1);
       for (;;) {
-        const tk = toks[i];
+        const tk = /** @type {any} */ (toks[i]);
         const op = tk.t === 'p' && LV[l].includes(tk.v) ? tk.v : tk.t === 'id' && LV[l].includes(tk.v) ? (tk.v === 'and' ? '&&' : '||') : null;
         if (!op) return a;
         i++;

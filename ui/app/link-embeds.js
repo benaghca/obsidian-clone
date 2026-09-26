@@ -18,9 +18,10 @@ function framedUrl(u) {
 // A live web page in a sandboxed frame, with its address, reload and open-in-browser. size is the
 // alt text of ![alt|W x H](url) (or {height}); fill: take the container's height (canvas cards).
 // The size in "alt|W x H" (either part may be missing); height defaults to 460.
+/** A web embed's size from its alt text ("600x400", "x380", "600"), or {height}. @param {string | {height?: number}} size */
 function embedSize(size) {
   const m = typeof size === 'string' ? /(?:^|\|)\s*(\d+)?\s*(?:x\s*(\d+))?\s*$/.exec(size) : null;
-  return { w: m?.[1] ? +m[1] : null, h: Math.max(120, Math.min(2400, (m?.[2] ? +m[2] : size?.height) || 460)) };
+  return { w: m?.[1] ? +m[1] : null, h: Math.max(120, Math.min(2400, (m?.[2] ? +m[2] : typeof size === 'object' ? size?.height : null) || 460)) };
 }
 function sizeWebEmbed(el, size) {
   const { w, h } = embedSize(size);
@@ -28,6 +29,7 @@ function sizeWebEmbed(el, size) {
   const f = $('.we-frame', el);
   if (f) f.style.height = h + 'px';
 }
+/** @param {HTMLElement} el @param {string} url @param {string | {height?: number}} [size] @param {{fill?: boolean, fixed?: boolean}} [o] */
 function renderWebEmbed(el, url, size = '', o = {}) {
   const { w } = embedSize(size), hgt = o.fill ? null : embedSize(size).h;
   let host = url;
@@ -164,6 +166,7 @@ document.addEventListener('contextmenu', e => {
   const url = l.kind === 'wiki' ? null : l.href;
   const name = l.kind === 'wiki' ? splitOnce(splitOnce(l.text.replace(/^!?\[\[|\]\]$/g, ''), '|')[0], '#')[0] : null;
   const target = name != null ? resolveLink(name, reg.from()) : url && !/^[a-z][a-z0-9+.-]*:/i.test(url) ? resolveLink(safeDecode(url.split('#')[0]), reg.from()) : null;
+  /** @type {any[]} */
   const items = [[l.embed ? 'Show as a link' : 'Embed (show it here)', () => toggleEmbed(reg.ed, l.from + 1)]];
   if (target) items.push(['Open', () => openPath(target)], ['Open in new tab', () => openInNewTab(target)]);
   else if (url && WEB_URL_RE.test(url)) items.push(['Open in browser', () => window.open(url, '_blank', 'noopener')]);
@@ -204,7 +207,7 @@ function showHover(a) {
   if (level >= MAX_PREVIEWS) return;
   const pop = document.createElement('div');
   pop.className = 'hover-pop' + (t.web ? ' hp-web' : '');
-  pop.style.zIndex = 55 + level;
+  pop.style.zIndex = String(55 + level);
   if (t.web) renderWebEmbed(pop, t.web, { height: 380 }, { fixed: true });
   else {
     pop.innerHTML = `<div class="hp-head"><b>${esc(displayName(t.path))}${t.sub ? ` › ${esc(t.sub.replace(/^\^/, ''))}` : ''}</b><button class="ib hp-open" title="Open (Ctrl-click: new tab)"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg></button></div><div class="hp-body markdown"></div>`;

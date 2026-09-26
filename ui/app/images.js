@@ -106,7 +106,9 @@ function embedAt(line, from, to) {
 
 // Rewrite the image embed covering [from, to] in editor `e`: a new target and/or width.
 // width: a number, null to remove it, undefined to keep it.
-function editImageEmbed(e, from, to, { target, width } = {}) {
+/** @param {{target?: string, width?: number | null}} [change] */
+function editImageEmbed(e, from, to, change = {}) {
+  const { target, width } = change;
   const doc = e.view.state.doc, line = doc.lineAt(from), text = line.text;
   const l = embedAt(line, from, to);
   if (!l) return false;

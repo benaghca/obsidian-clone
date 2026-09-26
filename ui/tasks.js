@@ -17,7 +17,7 @@
     d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate())); // Jan 31 + 1 month = Feb 29/28
     return ymd(d);
   };
-  const daysBetween = (a, b) => Math.round((parseYmd(b) - parseYmd(a)) / 864e5);
+  const daysBetween = (a, b) => Math.round((parseYmd(b).getTime() - parseYmd(a).getTime()) / 864e5);
   const today = (now = new Date()) => ymd(now);
   const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
   const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];
@@ -244,6 +244,7 @@
     // dates
     const lead = '(?:\\s(?:due|by|on))?';
     const dow = d => { const cur = now.getDay(); let n = (d - cur + 7) % 7; if (n === 0) n = 7; return addDays(t, n); };
+    /** @type {[RegExp, (m: any) => any][]} */
     const rules = [
       [new RegExp(`${lead}\\s(today|tonight)(?=\\s)`, 'i'), () => t],
       [new RegExp(`${lead}\\s(tomorrow|tmrw|tmr)(?=\\s)`, 'i'), () => addDays(t, 1)],
@@ -451,7 +452,7 @@
   // A small popover next to `anchor`, closed by Esc or a click outside. Returns its element.
   function popover(anchor, html, cls = '') {
     document.querySelector('.tk-pop')?.remove();
-    const pop = document.createElement('div');
+    const pop = /** @type {any} */ (document.createElement('div'));
     pop.className = 'tk-pop ' + cls; pop.setAttribute('role', 'dialog');
     pop.innerHTML = html;
     document.body.append(pop);

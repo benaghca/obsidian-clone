@@ -21,7 +21,7 @@ async function openCanvas(p) {
   setSaveState('');
   renderTreeActive(true);
   refreshPanels();
-  const got = await readMany([p]).catch(e => ({ error: e }));
+  const got = /** @type {any} */ (await readMany([p]).catch(e => ({ error: e })));
   if (S.cur !== p) return;
   if (!got[p]) return showDrawingError(p, got.error || new Error('the file couldn’t be read'), 'a canvas');
   loadCanvas(p, got[p].content, got[p].mtime, S.pos.get(p)?.canvas);

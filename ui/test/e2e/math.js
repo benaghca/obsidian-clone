@@ -1,0 +1,63 @@
+const { chromium } = require('playwright-core');
+const fs = require('fs');
+const SP = process.env.SP, VAULT = SP + '/vault', OUT = SP + '/shots';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
+(async () => {
+  fs.writeFileSync(VAULT + '/Math.md', '# Math\n\nEnergy $E=mc^2$ costs $5 and $10 today.\n\n$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$\n\nWater is $\\ce{H2O}$ and $\\bad{x}$ fails.\n\n- [ ] prove $a^2+b^2=c^2$\n\nlast line\n');
+  fs.writeFileSync(VAULT + '/M.canvas', JSON.stringify({ nodes: [{ id: 'a', type: 'text', text: 'Euler: $e^{i\\pi}+1=0$', x: 0, y: 0, width: 300, height: 80 }], edges: [] }));
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+  const errors = []; global.PAGE = page;
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message + '\n' + e.stack));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.goto('http://127.0.0.1:43199/'); await sleep(800);
+  await page.keyboard.press('Control+o'); await page.keyboard.type('Math'); await page.keyboard.press('Enter'); await sleep(900);
+  await page.evaluate(() => { if (S.mode !== 'edit') setMode('edit'); ed.setSelectionRange(ed.value.length, ed.value.length); });
+  await sleep(300);
+  assert(await page.$$eval('.cm-math-inline .katex', k => k.length) === 4, 'inline formulas render in live preview (E=mc², ce, bad, task)');
+  assert(await page.$$eval('.cm-math-block .katex-display', k => k.length) === 1, 'block formula renders');
+  assert((await page.textContent('.cm-content')).includes('costs $5 and $10 today'), '"$5 and $10" stays text');
+  assert(await page.$$eval('.cm-math-inline', k => k.some(x => x.textContent.includes('\\bad'))), 'an unknown command shows as red text, not a crash');
+  assert(await page.$$eval('.cm-math-inline .mhchem, .cm-math-inline .katex', k => k.some(x => x.textContent.includes('H'))) , 'mhchem \\ce works');
+  await page.screenshot({ path: OUT + '/80-math-live.png' });
+  // click into a formula: source + preview bubble
+  { const b = await page.locator('.cm-math-inline .katex-html .mord >> nth=0').boundingBox(); await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); } await sleep(200);
+  assert(await page.$$eval('.cm-math-src', s => s.length) >= 1 && await page.$$eval('.cm-math-preview .katex', s => s.length) === 1, 'clicking a formula shows its source with a live preview beside it');
+  // Ctrl+M wraps a selection, Ctrl+Shift+M inserts a block
+  await page.evaluate(() => { const i = ed.value.indexOf('last line'); ed.setSelectionRange(i, i + 4); });
+  await page.keyboard.press('Control+m'); await sleep(100);
+  assert((await page.evaluate(() => ed.value)).includes('$last$ line'), 'Ctrl+M wraps the selection in $…$');
+  await page.evaluate(() => ed.setSelectionRange(ed.value.length, ed.value.length));
+  await page.keyboard.press('Control+Shift+M'); await sleep(100);
+  await page.keyboard.type('\\fr'); await sleep(300);
+  const opts = await page.$$eval('.cm-tooltip-autocomplete li', l => l.map(x => x.textContent).slice(0, 5));
+  assert(opts.some(o => o.startsWith('\\frac')), 'typing \\fr inside math suggests \\frac: ' + opts.join(' | '));
+  await page.keyboard.press('Enter'); await sleep(100);
+  await page.keyboard.type('a'); await page.keyboard.press('Tab'); await page.keyboard.type('b'); await sleep(200);
+  const v = await page.evaluate(() => ed.value);
+  assert(v.endsWith('$$\n\\frac{a}{b}\n$$\n'), 'snippet fields: \\frac{a}{b} typed with Tab between them: ' + JSON.stringify(v.slice(-30)));
+  assert(await page.$$eval('.cm-math-preview-block .katex', k => k.length) === 1, 'the block being typed shows a rendered preview under it');
+  await page.screenshot({ path: OUT + '/81-math-editing.png' });
+  await page.keyboard.press('Control+e'); await sleep(500);
+  assert(await page.$$eval('#preview .math-block .katex-display', k => k.length) === 2 && await page.$$eval('#preview .katex', k => k.length) >= 6, 'reading view renders math');
+  await page.screenshot({ path: OUT + '/82-math-reading.png' });
+  await page.keyboard.press('Control+e');
+  // canvas and tasks
+  await page.keyboard.press('Control+o'); await page.keyboard.type('M.canvas'); await page.keyboard.press('Enter'); await sleep(700);
+  assert(await page.$$eval('.cv-node .katex', k => k.length) === 1, 'math renders in canvas cards');
+  await page.keyboard.press('Control+Shift+T'); await sleep(400);
+  await page.click('.tk-li[data-list="all"]'); await sleep(200);
+  assert(await page.$$eval('.tk-text .katex', k => k.length) === 1, 'math renders in the Tasks view');
+  // vim
+  await page.evaluate(() => openSettings('editor')); await page.check('input[name=vim]'); await page.click('.st [data-x]'); await sleep(200);
+  await page.keyboard.press('Control+o'); await page.keyboard.type('Math'); await page.keyboard.press('Enter'); await sleep(600);
+  await page.evaluate(() => { if (S.mode !== 'edit') setMode('edit'); ed.focus(); ed.setSelectionRange(0, 0); });
+  await page.keyboard.press('Escape'); await page.keyboard.type('dd'); await sleep(200);
+  assert(!(await page.evaluate(() => ed.value)).startsWith('# Math'), 'Vim mode: dd deletes the first line');
+  await page.keyboard.type('u'); await sleep(200);
+  assert((await page.evaluate(() => ed.value)).startsWith('# Math'), 'Vim mode: u undoes');
+  await page.evaluate(() => openSettings('editor')); await page.uncheck('input[name=vim]'); await page.click('.st [data-x]'); await sleep(200);
+  console.log('ERRORS:', errors.join('\n') || 'none');
+  await browser.close();
+})().catch(async e => { console.error(e.message); try { await global.PAGE.screenshot({ path: OUT + '/fail.png' }); } catch {} process.exit(1); });

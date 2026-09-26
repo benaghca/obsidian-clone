@@ -1,0 +1,38 @@
+const { chromium } = require('playwright-core');
+const fs = require('fs'), path = require('path');
+const SP = process.env.SP, VAULT = SP + '/vault';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
+const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursive: true }); fs.writeFileSync(path.join(VAULT, p), s); };
+(async () => {
+  w('Wide.md', '---\ncssclasses:\n  - wide\n  - no-title\n  - redtext\n---\nsome words\n');
+  w('Plain.md', 'plain words\n');
+  w('Snippets/red.css', '.redtext #preview p { color: rgb(255, 0, 0); }\n');
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message + '\n' + e.stack));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.goto('http://127.0.0.1:43199/'); await sleep(900);
+  const open = async q => { await page.keyboard.press('Control+o'); await page.keyboard.type(q); await page.keyboard.press('Enter'); await sleep(700); };
+  await open('Wide');
+  await page.evaluate(() => setMode('edit')); await sleep(200);
+  assert(await page.$eval('#view-note', v => v.classList.contains('wide') && v.classList.contains('no-title')), 'cssclasses go on the note');
+  await page.evaluate(() => { document.body.classList.add('app-no-right'); }); await sleep(100);
+  const wideW = await page.$eval('#view-note .page', p => p.getBoundingClientRect().width);
+  assert(wideW > 1000, 'wide: the page uses the full width (' + wideW + ')');
+  assert(await page.$eval('#title', t => getComputedStyle(t).display === 'none'), 'no-title hides the title');
+  await open('Plain');
+  assert(await page.$eval('#view-note', v => !v.classList.contains('wide')), 'another note doesn\'t keep them');
+  assert(await page.$eval('#view-note .page', p => p.getBoundingClientRect().width) <= 800, 'and has the usual width');
+  await open('Wide');
+  await page.evaluate(() => { cfg.cssFolder = 'Snippets'; loadUserCss(); setMode('read'); }); await sleep(500);
+  assert(await page.$eval('#preview p', p => getComputedStyle(p).color === 'rgb(255, 0, 0)'), 'a CSS snippet styles notes with its class');
+  fs.writeFileSync(path.join(VAULT, 'Snippets/red.css'), '.redtext #preview p { color: rgb(0, 0, 255); }\n');
+  await sleep(50); await page.evaluate(() => loadAll()); await sleep(600);
+  assert(await page.$eval('#preview p', p => getComputedStyle(p).color === 'rgb(0, 0, 255)'), 'editing the snippet file restyles right away');
+  await page.evaluate(() => { setMode('edit'); ed.value = ed.value.replace('  - wide\n', ''); }); await sleep(500);
+  assert(await page.$eval('#view-note', v => !v.classList.contains('wide') && v.classList.contains('no-title')), 'editing cssclasses updates the classes');
+  if (errors.length) { console.log(errors.join('\n')); process.exitCode = 1; }
+  await browser.close();
+})().catch(e => { console.log(e.message); process.exit(1); });

@@ -1,0 +1,66 @@
+const { chromium } = require('playwright-core');
+const fs = require('fs'), path = require('path');
+const SP = process.env.SP, VAULT = SP + '/vault';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
+const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursive: true }); fs.writeFileSync(path.join(VAULT, p), s); };
+const rd = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
+(async () => {
+  w('Hub.md', '# Hub\n\n## First\ntext\n\n## Second\nmore about Spoke\n\n### Deep\nend\n');
+  w('Spoke.md', '# Spoke\nsee [[Hub]] and [[Other]]\n');
+  w('Other.md', '# Other\nalso [[Hub]]\n');
+  w('Mention.md', 'I talk about Hub here.\n');
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1300, height: 900 } });
+  const errors = [];
+  page.on('pageerror', e => errors.push('pageerror: ' + e.message + '\n' + e.stack));
+  page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
+  await page.goto('http://127.0.0.1:43199/'); await sleep(900);
+  const open = async q => { await page.keyboard.press('Control+o'); await page.keyboard.type(q); await page.keyboard.press('Enter'); await sleep(700); };
+  const act = () => page.evaluate(() => { const a = document.activeElement; return a.className + '|' + a.textContent.trim().slice(0, 40); });
+
+  console.log('right pane');
+  await open('Hub');
+  await page.keyboard.press('Control+Shift+O'); await sleep(200);
+  assert(/o-item\|Hub/.test(await act()), 'Ctrl+Shift+O focuses the outline');
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await sleep(50);
+  assert(/o-item\|Deep/.test(await act()), '↓ moves through the headings');
+  await page.keyboard.press('Space'); await sleep(200);
+  assert(/o-item\|Deep/.test(await act()) && await page.evaluate(() => ed.value.slice(ed.selectionStart).startsWith('### Deep')), 'Space moves the page to the heading and stays in the outline');
+  await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter'); await sleep(300);
+  assert(/cm-content/.test(await act()) && await page.evaluate(() => ed.value.slice(ed.selectionStart).startsWith('## Second')), 'Enter goes to the heading in the editor');
+  await page.keyboard.press('Control+Shift+O'); await sleep(150);
+  await page.keyboard.press('ArrowLeft'); await sleep(200);
+  assert(await page.evaluate(() => rtab === 'outgoing' && document.activeElement.dataset.rtab === 'outgoing'), '← switches to Outgoing links (nothing listed, so the tab itself has focus)');
+  await page.keyboard.press('Control+Shift+B'); await sleep(200);
+  assert(await page.evaluate(() => rtab === 'backlinks') && /bl-file\|(Other|Spoke)/.test(await act()), 'Ctrl+Shift+B focuses the backlinks');
+  await page.evaluate(() => refreshPanels()); await sleep(50);
+  assert(/bl-file/.test(await act()), 'focus survives the pane redrawing');
+  let n = 0;
+  while (!/bl-ctx.*Hub here/.test(await act()) && n++ < 12) await page.keyboard.press('ArrowDown');
+  assert(/bl-ctx.*Hub here/.test(await act()), 'unlinked mentions are reachable');
+  await page.keyboard.press('l'); await sleep(500);
+  assert(rd('Mention.md').includes('[[Hub]]'), 'L links the mention');
+  await page.keyboard.press('Escape'); await sleep(100);
+  assert(/cm-content/.test(await act()), 'Esc goes back to the page');
+
+  console.log('recent files');
+  await open('Spoke'); await open('Other'); await open('Hub');
+  await page.keyboard.down('Control');
+  await page.keyboard.press('Tab'); await sleep(100);
+  assert(await page.$('.rs-back') && await page.$eval('.rs-item.sel span', e => e.textContent) === 'Other', 'Ctrl+Tab shows recent files with the previous one selected');
+  await page.keyboard.press('Tab'); await sleep(50);
+  assert(await page.$eval('.rs-item.sel span', e => e.textContent) === 'Spoke', 'Tab again moves on');
+  await page.keyboard.up('Control'); await sleep(600);
+  assert(!(await page.$('.rs-back')) && await page.evaluate(() => S.cur === 'Spoke.md'), 'releasing Ctrl opens it');
+  await page.keyboard.down('Control'); await page.keyboard.press('Tab'); await page.keyboard.up('Control'); await sleep(600);
+  assert(await page.evaluate(() => S.cur === 'Hub.md'), 'a quick Ctrl+Tab flips back to the last file');
+  await page.keyboard.down('Control'); await page.keyboard.press('Tab'); await page.keyboard.press('Escape'); await page.keyboard.up('Control'); await sleep(300);
+  assert(await page.evaluate(() => S.cur === 'Hub.md') && !(await page.$('.rs-back')), 'Esc cancels');
+  await page.keyboard.press('Control+o'); await sleep(150);
+  assert(await page.$eval('.pick .main', e => e.textContent) === 'Hub', 'the quick switcher lists recent files first too');
+  await page.keyboard.press('Escape');
+
+  if (errors.length) { console.log(errors.join('\n')); process.exitCode = 1; }
+  await browser.close();
+})().catch(e => { console.log(e.message); process.exit(1); });
