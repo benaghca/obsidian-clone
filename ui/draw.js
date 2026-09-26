@@ -18,7 +18,9 @@ window.CinderDraw = (() => {
   // Laser pointer: strokes of [x, y, time] in scene coordinates, fading out; nothing is saved.
   const laser = [];
   let laserAt = null; // the pointer on screen, for the laser's dot
-  const LASER_FADE = 1100;
+  let laserDot = null, laserFrame = 0; // the dot as drawn: eased toward the pointer every frame
+  const LASER_FADE = 1100, LASER_MAX = 520, LASER_EASE = 22; // ms, screen px, ms
+  const LASER_COLORS = { red: '#ff3030', accent: null, green: '#22c55e', blue: '#3b82f6' }; // accent: the theme's
   let action = null;           // the pointer interaction in progress
   let multi = null;            // a line/arrow being placed click by click
   let editing = null;          // {el, ta, container, isNew}
@@ -394,7 +396,7 @@ window.CinderDraw = (() => {
     switch (tool) {
       case 'selection': return downSelect(e, wx, wy, mx, my);
       case 'eraser': action = { type: 'erase' }; eraseAt(wx, wy); return;
-      case 'laser': action = { type: 'laser' }; laser.push({ pts: [[wx, wy, performance.now()]] }); requestRender(); return;
+      case 'laser': action = { type: 'laser' }; laserAt = [mx, my]; laserDot = [mx, my]; laser.push({ pts: [[wx, wy, performance.now()]] }); requestRender(); return;
       case 'rectangle': case 'diamond': case 'ellipse': return startShape(tool, wx, wy, e);
       case 'arrow': case 'line': return startLinear(tool, wx, wy, e);
       case 'freedraw': return startFreedraw(wx, wy, e);
@@ -450,11 +452,7 @@ window.CinderDraw = (() => {
         break;
       }
       case 'erase': eraseAt(wx, wy); break;
-      case 'laser': {
-        const stroke = laser[laser.length - 1], evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
-        for (const ev of evs.length ? evs : [e]) { const [cx, cy] = toWorld(...mouse(ev)); stroke.pts.push([cx, cy, performance.now()]); }
-        break;
-      }
+      case 'laser': break; // the trail follows the eased dot, sampled as it's drawn
     }
     requestRender();
   }
@@ -1487,6 +1485,7 @@ window.CinderDraw = (() => {
   function applyProp(key, value) {
     style[key] = value;
     try { hooks.store?.('drawStyle', style); } catch { }
+    if (key === 'laserColor') { renderProps(); requestRender(); return; }
     const targets = propTargets().filter(t => !t._proto);
     const touched = [];
     for (const el of targets) {
@@ -1543,6 +1542,12 @@ window.CinderDraw = (() => {
 
   function renderProps() {
     if (!propsEl) return;
+    if (tool === 'laser') {
+      const cur = style.laserColor || 'red';
+      propsEl.innerHTML = `<div class="dr-sec"><h5>Laser colour</h5><div class="dr-swatches">${Object.keys(LASER_COLORS).map(k => `<button class="dr-sw${cur === k ? ' on' : ''}" data-prop="laserColor" data-value="${k}" title="${k === 'accent' ? 'Theme accent' : k[0].toUpperCase() + k.slice(1)}" style="--c:${laserColors(k).main}"></button>`).join('')}</div></div>`;
+      propsEl.hidden = false;
+      return;
+    }
     const targets = propTargets();
     if (!targets.length) { propsEl.hidden = true; return; }
     const types = new Set(targets.map(t => t.type));
@@ -1639,38 +1644,61 @@ window.CinderDraw = (() => {
     root.querySelector('[data-act=redo]').disabled = !hist.redo.length;
   }
 
-  // The laser: a glowing red trail that thins to nothing as it ages, plus a dot at the pointer.
-  // Each trail is filled as one tapered shape (smoothed, curved through segment midpoints), so
-  // there are no overlapping joints to show up as beads. Keeps redrawing until the trail fades.
+  // The laser: a glowing trail that thins to nothing as it ages or trails too far behind, plus a
+  // dot at the pointer. The dot eases toward the pointer each frame and the trail is sampled from
+  // it, so quick flicks come out as curves rather than jumps. Each trail is filled as one tapered
+  // shape, so there are no overlapping joints to show up as beads. Redraws until it has faded.
+  function laserColors(name) {
+    let main = LASER_COLORS[name] || (name === 'accent' && /^#[0-9a-f]{6}$/i.test(accent) ? accent : LASER_COLORS.red);
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(main.slice(i, i + 2), 16));
+    const mix = (c, t) => Math.round(c + (255 - c) * t);
+    return { main, core: `rgb(${mix(r, 0.5)}, ${mix(g, 0.5)}, ${mix(b, 0.5)})`, glow: `rgba(${r}, ${g}, ${b}, 0.9)` };
+  }
+
   function drawLaser() {
-    const now = performance.now();
+    const now = performance.now(), dt = Math.min(64, now - (laserFrame || now));
+    laserFrame = now;
+    if (!laserAt) laserDot = null;
+    else if (!laserDot) laserDot = [...laserAt];
+    else {
+      const k = 1 - Math.exp(-dt / LASER_EASE);
+      laserDot[0] += (laserAt[0] - laserDot[0]) * k; laserDot[1] += (laserAt[1] - laserDot[1]) * k;
+    }
+    if (action?.type === 'laser' && laserDot && laser.length) {
+      const pts = laser[laser.length - 1].pts, last = pts[pts.length - 1], [wx, wy] = toWorld(laserDot[0], laserDot[1]);
+      if (Math.hypot(wx - last[0], wy - last[1]) * view.zoom > 0.5) pts.push([wx, wy, now]);
+    }
     for (let i = laser.length - 1; i >= 0; i--) {
       const pts = laser[i].pts;
       while (pts.length > 1 && now - pts[0][2] > LASER_FADE) pts.shift();
       if (now - pts[pts.length - 1][2] > LASER_FADE && !(i === laser.length - 1 && action?.type === 'laser')) laser.splice(i, 1);
     }
+    const col = laserColors(style.laserColor || 'red');
     for (const { pts } of laser) {
       const path = laserPath(pts, now);
       if (!path) continue;
       ctx.save();
-      ctx.shadowColor = 'rgba(255, 40, 40, 0.9)'; ctx.shadowBlur = 14;
-      ctx.fillStyle = '#ff3030'; laserShape(path, 1); ctx.fill();
+      ctx.shadowColor = col.glow; ctx.shadowBlur = 14;
+      ctx.fillStyle = col.main; laserShape(path, 1); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#ff8c80'; laserShape(path, 0.4); ctx.fill();
+      ctx.fillStyle = col.core; laserShape(path, 0.4); ctx.fill();
     }
-    if (tool === 'laser' && laserAt) {
+    if (tool === 'laser' && laserDot) {
       ctx.save();
-      ctx.shadowColor = 'rgba(255, 40, 40, 0.9)'; ctx.shadowBlur = 12;
-      ctx.fillStyle = '#ff3030'; ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 5, 0, TAU); ctx.fill();
+      ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
+      ctx.fillStyle = col.main; ctx.beginPath(); ctx.arc(laserDot[0], laserDot[1], 5, 0, TAU); ctx.fill();
       ctx.restore();
-      ctx.fillStyle = '#ff8c80'; ctx.beginPath(); ctx.arc(laserAt[0], laserAt[1], 2, 0, TAU); ctx.fill();
+      ctx.fillStyle = col.core; ctx.beginPath(); ctx.arc(laserDot[0], laserDot[1], 2, 0, TAU); ctx.fill();
     }
-    if (laser.length) requestRender();
+    if (laser.length || (laserDot && Math.hypot(laserAt[0] - laserDot[0], laserAt[1] - laserDot[1]) > 0.3)) requestRender();
+    else laserFrame = 0;
   }
 
   // Screen points of a laser trail with a half-width each: points closer than a couple of pixels
-  // are dropped, the rest are eased toward their neighbours to take out the jitter.
+  // are dropped, the rest are eased toward their neighbours to take out the jitter. Width follows
+  // both age and distance behind the head, each eased so the trail stays full then tapers late.
   const LASER_W = 7;
+  const easeOut = x => 1 - (1 - x) ** 3;
   function laserPath(pts, now) {
     const raw = [];
     for (let i = 0; i < pts.length; i++) {
@@ -1679,17 +1707,25 @@ window.CinderDraw = (() => {
       raw.push([x, y, pts[i][2]]);
     }
     if (raw.length < 2) return null;
-    const out = raw.map((p, i) => {
+    const sm = raw.map((p, i) => {
       if (i === 0 || i === raw.length - 1) return p;
       const a = raw[i - 1], b = raw[i + 1];
       return [(a[0] + 2 * p[0] + b[0]) / 4, (a[1] + 2 * p[1] + b[1]) / 4, p[2]];
     });
-    return out.map(([x, y, t], i) => {
-      const life = Math.max(0, 1 - (now - t) / LASER_FADE);
-      // Taper the very tail to a point too, so a fresh stroke doesn't start blunt.
-      const tail = Math.min(1, i / 6);
-      return [x, y, (LASER_W / 2) * life * (0.25 + 0.75 * tail)];
-    });
+    // Walk back from the head, stopping once the trail is LASER_MAX long.
+    const out = [];
+    let dist = 0;
+    for (let i = sm.length - 1; i >= 0; i--) {
+      if (i < sm.length - 1) dist += Math.hypot(sm[i + 1][0] - sm[i][0], sm[i + 1][1] - sm[i][1]);
+      if (dist > LASER_MAX) break;
+      const life = Math.max(0, 1 - (now - sm[i][2]) / LASER_FADE);
+      out.push([sm[i][0], sm[i][1], (LASER_W / 2) * easeOut(life) * easeOut(1 - dist / LASER_MAX)]);
+    }
+    if (out.length < 2) return null;
+    out.reverse();
+    // Taper the very tail to a point too, so a fresh stroke doesn't start blunt.
+    for (let i = 0; i < Math.min(6, out.length); i++) out[i][2] *= 0.25 + 0.75 * (i / 6);
+    return out;
   }
 
   // Build the outline of a laser trail at `scale` times its width: down one side, round the head,
