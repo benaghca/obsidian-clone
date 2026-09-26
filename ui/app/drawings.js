@@ -76,8 +76,10 @@ function dataURLToBlob(u) {
 // .excalidraw.md drawings keep images as vault attachments, like the Obsidian plugin does.
 async function storeDrawingImages(d) {
   let added = false;
-  for (const [id, f] of Object.entries(CinderDraw.getScene().files)) {
-    if (d.info.embedded[id] || !f.dataURL) continue;
+  const scene = CinderDraw.getScene();
+  const equations = new Set(scene.elements.filter(CinderSketch.isEquation).map(e => e.fileId)); // kept as $$source$$
+  for (const [id, f] of Object.entries(scene.files)) {
+    if (d.info.embedded[id] || !f.dataURL || equations.has(id)) continue;
     const ext = ((f.mimeType || 'image/png').split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg');
     const now = new Date();
     const path = uniquePath(cfg.attachFolder, `Pasted image ${fmtDate(now, 'YYYYMMDDHHmm')}${String(now.getSeconds()).padStart(2, '0')}.${ext}`);
@@ -179,6 +181,7 @@ function drawingSvgUrl(path) {
     const data = {};
     for (const el of scene.elements) {
       if (el.type !== 'image' || !el.fileId || data[el.fileId]) continue;
+      if (CinderSketch.isEquation(el) && !scene.files[el.fileId]?.dataURL) { try { data[el.fileId] = (await texSvg(el.customData.latex)).dataURL; } catch { } continue; }
       if (scene.files[el.fileId]?.dataURL) { data[el.fileId] = scene.files[el.fileId].dataURL; continue; }
       const t = embedded?.[el.fileId] && resolveLink(embedded[el.fileId], path);
       if (t) try { data[el.fileId] = await blobToDataURL(await (await fetch(rawUrl(t))).blob()); } catch { }
@@ -243,3 +246,90 @@ function openDrawingLink(link) {
   followLink(name.trim(), sub, S.cur);
 }
 
+
+// ============================================================ equations (LaTeX in drawings)
+
+// MathJax turns TeX into self-contained SVG (glyphs as paths), which draws on a canvas and
+// exports cleanly. It's large, so it's only loaded the first time a drawing needs it.
+let mathJaxReady = null;
+function loadMathJax() {
+  if (!mathJaxReady) mathJaxReady = new Promise((resolve, reject) => {
+    window.MathJax = {
+      startup: { typeset: false },
+      options: { enableMenu: false },
+      svg: { fontCache: 'none' },
+      tex: { formatError: (jax, err) => { throw err; } },
+    };
+    const s = document.createElement('script');
+    s.src = '/vendor/mathjax/tex-svg-full.js';
+    s.onload = () => MathJax.startup.promise.then(resolve, reject);
+    s.onerror = () => { mathJaxReady = null; s.remove(); reject(new Error('MathJax didn’t load')); };
+    document.head.append(s);
+  });
+  return mathJaxReady;
+}
+
+// TeX -> { dataURL, width, height } with the size in px at a 20px font (MathJax measures in ex,
+// half an em). The SVG draws in currentColor, which the drawing sets per element and theme.
+const texSvgCache = new Map();
+function texSvg(tex) {
+  let p = texSvgCache.get(tex);
+  if (!p) {
+    p = (async () => {
+      await loadMathJax();
+      const node = await MathJax.tex2svgPromise(tex, { display: true });
+      const svg = node.querySelector('svg');
+      if (!svg) throw new Error('nothing to show');
+      const EX = 10, size = k => Math.max(1, parseFloat(svg.getAttribute(k)) * EX);
+      const width = size('width'), height = size('height');
+      svg.setAttribute('width', width.toFixed(2)); svg.setAttribute('height', height.toFixed(2));
+      for (const a of ['style', 'role', 'focusable', 'aria-hidden']) svg.removeAttribute(a);
+      return { dataURL: CinderSketch.svgDataURL(new XMLSerializer().serializeToString(svg)), width, height };
+    })();
+    texSvgCache.set(tex, p);
+    p.catch(() => texSvgCache.delete(tex));
+  }
+  return p;
+}
+
+// The equation editor: TeX on the left, a live preview under it. Resolves with the TeX, or null.
+function editTexModal(value = '', editing = false) {
+  return new Promise(resolve => {
+    const back = modal(`<form class="form tex-form"><h3>${editing ? 'Edit equation' : 'Insert equation'}</h3>
+      <label>LaTeX<textarea class="field tex-src" rows="3" spellcheck="false" autocomplete="off" placeholder="e.g. \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"></textarea></label>
+      <div class="tex-preview" aria-live="polite"><span class="tex-hint">The equation appears here as you type.</span></div>
+      <div class="row"><span class="tex-keys"><kbd>Enter</kbd> ${editing ? 'save' : 'insert'} · <kbd>Shift Enter</kbd> new line</span><button type="button" class="btn" data-x>Cancel</button><button class="btn primary">${editing ? 'Save' : 'Insert'}</button></div></form>`);
+    back.querySelector('.modal').classList.add('tex-modal');
+    const input = $('.tex-src', back), preview = $('.tex-preview', back);
+    input.value = value;
+    let seq = 0;
+    const show = async () => {
+      const tex = input.value, n = ++seq;
+      if (!tex.trim()) { preview.innerHTML = '<span class="tex-hint">The equation appears here as you type.</span>'; return; }
+      try {
+        const r = await texSvg(tex);
+        if (n !== seq) return;
+        const img = new Image();
+        img.src = CinderSketch.tintSvg(r.dataURL, getComputedStyle(preview).color);
+        img.alt = tex;
+        img.style.width = r.width * 1.2 + 'px';
+        preview.replaceChildren(img);
+      } catch (err) {
+        if (n !== seq) return;
+        preview.innerHTML = `<span class="tex-err">${esc(err.message || String(err))}</span>`;
+      }
+    };
+    const later = debounce(show, 120);
+    input.addEventListener('input', later);
+    const done = v => { back.remove(); resolve(v); };
+    $('form', back).addEventListener('submit', e => { e.preventDefault(); done(input.value.trim()); });
+    $('[data-x]', back).onclick = () => done(null);
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Escape') { e.preventDefault(); done(null); }
+      else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); done(input.value.trim()); }
+    });
+    back.addEventListener('mousedown', e => { if (e.target === back) done(null); });
+    input.focus(); input.select();
+    show();
+  });
+}

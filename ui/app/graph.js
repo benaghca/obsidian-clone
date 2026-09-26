@@ -219,6 +219,8 @@ CinderDraw.init($('#view-drawing'), {
   store: (k, v) => store(k, v),
   modalOpen: () => $('#modal-root').children.length > 0,
   exportFile: kind => exportDrawing(kind),
+  renderTex: tex => texSvg(tex),
+  editTex: (tex, editing) => editTexModal(tex, editing),
   copyPNG: onlySelected => copyDrawing('png', onlySelected),
   copySVG: onlySelected => copyDrawing('svg', onlySelected),
   fetchVaultImage: async p => {

@@ -684,6 +684,12 @@ mark { background: var(--mark); color: inherit; border-radius: 2px; padding: 0 1
 .form h3 { margin: 0 0 4px; }
 .form label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
 .form .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.tex-src { font-family: var(--font-mono); font-size: 13px; resize: vertical; min-height: 64px; }
+.tex-preview { min-height: 72px; max-height: 40vh; overflow: auto; display: flex; align-items: center; justify-content: center; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+.tex-preview img { max-width: 100%; height: auto; }
+.tex-hint { color: var(--faint); font-size: 13px; }
+.tex-err { color: var(--danger); font-size: 13px; font-family: var(--font-mono); white-space: pre-wrap; }
+.tex-keys { margin-right: auto; align-self: center; font-size: 12px; color: var(--faint); }
 .btn { border: 1px solid var(--border); background: var(--bg3); color: var(--text); border-radius: 6px; padding: 6px 14px; cursor: pointer; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.danger { color: var(--danger); }

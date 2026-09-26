@@ -56,6 +56,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
   - `KaTeX` 0.18.9 with its mhchem extension and fonts (math rendering, MIT, `ui/vendor/katex/`). It doesn't use `eval`, and "trusted" commands such as `\href` are off.
+  - `MathJax` 3.2.2 (`tex-svg-full.js`, Apache-2.0, `ui/vendor/mathjax/`), which turns LaTeX into SVG for equations in drawings. It loads the first time a drawing needs it.
   - `@replit/codemirror-vim` 6.4.0 (Vim mode, MIT), bundled into `editor.bundle.js` and pinned in `ui/editor/package.json`.
   - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
   - `JetBrains Mono` 2.304, the default code font, in regular, bold, italic and bold italic (`ui/vendor/JetBrainsMono-*.woff2`, SIL Open Font License 1.1, see `ui/vendor/jetbrains-mono.LICENSE`).
@@ -113,6 +114,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images, an eraser and a **laser pointer** (**K**). The laser draws a smooth glowing trail that stays short and fades after a second. It never changes the drawing, which makes it handy for pointing things out while presenting. You can pick its colour (red, the theme accent, green or blue) while the laser is selected. Features:
   - Arrows attach to shapes and follow them when they move. Shapes and arrows can have labels (double-click or **Enter**).
   - Stroke and fill colours, hachure, cross-hatch and solid fills, stroke width and style, sloppiness, sharp or round edges, arrowheads, fonts, opacity and layer order.
+  - **LaTeX equations**: press **M** (or use the Σ button, or right-click › *Insert equation…*), type LaTeX and watch it render live, then press **Enter**. Double-click or **Enter** edits an equation. Equations take the stroke colour, follow the light and dark themes, stay sharp at any zoom and export to SVG and PNG. In `.excalidraw.md` drawings they're saved as `id: $$…$$` under *Embedded Files*, the same way Obsidian's Excalidraw plugin saves them, so equations made in either app open in the other.
   - Grouping, aligning, locking, element links (`[[Note]]` or a web address), a snap grid, zoom and pan, undo and redo, copy and paste, and a shortcut sheet (**?**).
   - Drawings are saved as `.excalidraw` files, the same format excalidraw.com uses, so you can open them there too. In **Settings**, you can switch to `.excalidraw.md`, the format of Obsidian's Excalidraw plugin. Cinder reads and writes that format, including compressed drawings, and keeps its text and images in step with the plugin.
   - Embed a drawing in a note with `![[Drawing.excalidraw]]` or `![[Drawing.excalidraw|400]]`. It renders in live preview and reading view, and clicking it opens the drawing. Renaming a drawing updates those embeds.
@@ -223,7 +225,7 @@ ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
 ui/test/           Node tests for the drawing, template, canvas, bases, tasks and properties modules (no packages needed)
 ui/style.css       themes and layout
-ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
+ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, MathJax, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
 ```
 
