@@ -22,7 +22,7 @@ const propType = (key, value) => S.propTypes[key] || CinderProps.inferType(key, 
 function propsOf(fmText) {
   const m = /^---[ \t]*\r?\n([\s\S]*?)\r?\n?---[ \t]*$/.exec(fmText.replace(/\s+$/, ''));
   if (!m) return null;
-  try { const v = CinderBases.parseYaml(m[1]); return v == null ? {} : typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
+  try { const v = CinderYaml.parse(m[1]); return v == null ? {} : typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; }
 }
 
 // Names in use across the vault (commonest first), and the values a property already has.
@@ -34,7 +34,7 @@ function knownProps() {
   }
   // Types come from a typed reading of one note that has the property (5, not "5").
   return [...n.values()].sort((a, b) => b.count - a.count || collator.compare(a.name, b.name))
-    .map(e => ({ name: e.name, get type() { return propType(e.name, CinderBases.frontmatter(e.note.content)[e.name]); } }));
+    .map(e => ({ name: e.name, get type() { return propType(e.name, noteProps(e.note)[e.name]); } }));
 }
 function knownValues(key) {
   const c = new Map();
@@ -106,7 +106,7 @@ function knownPropsCounted() {
     const e = n.get(k) || { name: k, count: 0, note };
     e.count++; n.set(k, e);
   }
-  return [...n.values()].sort((a, b) => collator.compare(a.name, b.name)).map(e => ({ name: e.name, count: e.count, type: propType(e.name, CinderBases.frontmatter(e.note.content)[e.name]) }));
+  return [...n.values()].sort((a, b) => collator.compare(a.name, b.name)).map(e => ({ name: e.name, count: e.count, type: propType(e.name, noteProps(e.note)[e.name]) }));
 }
 function knownValueCounts(key) {
   const c = new Map();

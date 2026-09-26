@@ -3,12 +3,9 @@
 
 let baseView = null;
 let rowsCache = { gen: -1, rows: [] };
-const propsCache = new WeakMap();
-function noteProps(n) {
-  let p = propsCache.get(n);
-  if (!p) { p = CinderBases.frontmatter(n.content); propsCache.set(n, p); }
-  return p;
-}
+// A note's properties, as Bases and Properties see them: the index has already read them (typed,
+// by ui/yaml.js); frontmatter that isn't valid YAML has none.
+const noteProps = n => (n && n.fmValid && n.fm) || {};
 // Every file in the vault as a base row: file.* fields plus the note's properties.
 function baseRows() {
   if (rowsCache.gen === S.dataGen) return rowsCache.rows;

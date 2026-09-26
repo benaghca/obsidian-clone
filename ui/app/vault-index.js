@@ -8,34 +8,18 @@ function blankCode(s) {
     .replace(/(`+)(?!`)[^\n]*?[^`]\1(?!`)|`[^`\n]`/g, m => ' '.repeat(m.length));
 }
 
+// A note's frontmatter, read by the shared YAML parser (ui/yaml.js). Frontmatter that isn't
+// valid YAML is read leniently (flat keys and lists), so its tags and aliases still count;
+// `fmValid` says which it was.
 function splitFrontmatter(s) {
-  const m = /^---\r?\n([\s\S]*?)\r?\n---[ \t]*(?:\r?\n|$)/.exec(s);
-  if (!m) return { fm: null, fmLen: 0 };
-  return { fm: parseYaml(m[1]), fmLen: m[0].length };
-}
-
-function parseYaml(t) {
-  const unq = s => s.trim().replace(/^(["'])(.*)\1$/, '$2');
-  const o = {}; let key = null;
-  for (const line of t.split(/\r?\n/)) {
-    let m;
-    if ((m = /^([^\s:#][^:]*):[ \t]*(.*)$/.exec(line))) {
-      key = m[1].trim(); const v = m[2].trim();
-      if (v === '') o[key] = [];
-      else if (/^\[.*\]$/.test(v)) o[key] = v.slice(1, -1).split(',').map(unq).filter(Boolean);
-      else o[key] = unq(v);
-    } else if ((m = /^\s+-\s+(.*)$|^-\s+(.*)$/.exec(line)) && key) {
-      if (!Array.isArray(o[key])) o[key] = o[key] ? [o[key]] : [];
-      o[key].push(unq(m[1] ?? m[2]));
-    }
-  }
-  return o;
+  const r = CinderYaml.split(s);
+  return { fm: r.data, fmLen: r.len, fmValid: r.valid };
 }
 
 const asList = v => v == null ? [] : Array.isArray(v) ? v : String(v).split(/[,\s]+/);
 
 function parseNote(content) {
-  const { fm, fmLen } = splitFrontmatter(content);
+  const { fm, fmLen, fmValid } = splitFrontmatter(content);
   const body = blankCode(content.slice(fmLen));
   const links = [], headings = [], tags = new Set();
   let m;
@@ -64,7 +48,7 @@ function parseNote(content) {
     const al = fm.aliases ?? fm.alias;
     for (const a of Array.isArray(al) ? al : al ? [al] : []) if (String(a).trim()) aliases.push(String(a).trim());
   }
-  return { links, headings, tags, aliases, fm, fmLen };
+  return { links, headings, tags, aliases, fm, fmLen, fmValid };
 }
 
 function setNote(path, content, mtime) {

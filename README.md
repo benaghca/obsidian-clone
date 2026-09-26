@@ -244,7 +244,8 @@ ui/themes.js       colour themes (Catppuccin, Everforest, …)
 ui/templater.js    Templater-syntax template interpreter (tp.date, tp.file, tp.system, …)
 ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
 ui/canvas.js       canvas editor and JSON Canvas files
-ui/bases.js        bases: YAML, expressions, queries, table/cards/list/board views
+ui/yaml.js         YAML for frontmatter and .base files: one parser for the index, Properties and Bases
+ui/bases.js        bases: expressions, queries, table/cards/list/board views
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
 ui/diff.js         line and word diffs (Myers), for version history and conflicting copies
 ui/related.js      related notes: TF-IDF over the words, tags and links notes share
@@ -266,7 +267,7 @@ The editor bundle is already built and checked in, so building Cinder doesn't ne
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js`, `node ui/test/search.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js`, `node ui/test/search.test.js`, `node ui/test/yaml.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
 
 ## Ideas for round two
 
