@@ -15,12 +15,16 @@
 <body>
 <div id="app">
   <nav id="ribbon">
+    <button class="rb" data-cmd="toggle-left" title="Toggle left sidebar (Ctrl+\)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
+    <div class="rb-sep"></div>
     <button class="rb" data-cmd="panel-files" title="Files"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></button>
     <button class="rb" data-cmd="panel-search" data-hk="search" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+    <button class="rb" data-cmd="panel-bookmarks" title="Bookmarks"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/></svg></button>
     <button class="rb" data-cmd="panel-props" data-hk="all-properties" title="All properties"><svg viewBox="0 0 24 24"><path d="M4 6.5h4M4 12h4M4 17.5h4M11 6.5h9M11 12h9M11 17.5h9"/></svg></button>
     <button class="rb" data-cmd="panel-tags" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
     <div class="rb-sep"></div>
     <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    <button class="rb" data-cmd="inbox" title="Inbox"><svg viewBox="0 0 24 24"><path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/></svg><span class="rb-badge" hidden></span></button>
     <button class="rb" data-cmd="tasks" title="Tasks (Ctrl+Shift+T)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/></svg><span class="rb-badge" hidden></span></button>
     <button class="rb" data-cmd="daily" title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
     <button class="rb" data-cmd="new-drawing" title="New drawing"><svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/></svg></button>
@@ -36,15 +40,16 @@
   <aside id="left">
     <section id="panel-files" class="panel">
       <header class="panel-head">
-        <span class="panel-title" id="vault-name"></span>
+        <button id="vault-name" class="vault-btn" title="Switch vault"><img src="/logo.svg" alt="" width="18" height="18"><span class="vault-label"></span><svg class="vault-chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
         <button class="ib" data-cmd="new-note" title="New note (Ctrl+N)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M12 11v6M9 14h6"/></svg></button>
         <button class="ib" data-cmd="new-folder" title="New folder"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10v6M9 13h6"/></svg></button>
-        <button class="ib" data-cmd="collapse-all" title="Collapse all"><svg viewBox="0 0 24 24"><path d="m7 15 5-5 5 5"/></svg></button>
+        <button class="ib" data-cmd="auto-reveal" title="Auto-reveal the open file" aria-pressed="false"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="1.8"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/></svg></button>
+        <button class="ib" data-cmd="toggle-expand" title="Collapse all"><svg viewBox="0 0 24 24"><path d="m7 20 5-5 5 5M7 4l5 5 5-5"/></svg></button>
       </header>
       <div id="tree" class="panel-body" tabindex="0"></div>
     </section>
     <section id="panel-search" class="panel" hidden>
-      <header class="panel-head"><span class="panel-title">Search</span></header>
+      <header class="panel-head"><span class="panel-title">Search</span><button class="ib" data-cmd="bookmark-search" title="Bookmark this search"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/></svg></button></header>
       <div class="panel-body">
         <input id="search-input" class="field" type="search" placeholder="Search…  (tag:x  path:y  [prop:value]  &quot;exact phrase&quot;  -exclude)" spellcheck="false">
         <div id="search-meta" class="meta"></div>
@@ -58,6 +63,10 @@
         <div id="props-list"></div>
       </div>
     </section>
+    <section id="panel-bookmarks" class="panel" hidden>
+      <header class="panel-head"><span class="panel-title">Bookmarks</span><button class="ib" data-cmd="bookmark" title="Bookmark the open file" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/><path d="M12 7.5v5M9.5 10h5"/></svg></button><button class="ib" data-cmd="bookmark-group" title="New group"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 10v6M9 13h6"/></svg></button></header>
+      <div id="bookmark-list" class="panel-body" tabindex="0"></div>
+    </section>
     <section id="panel-tags" class="panel" hidden>
       <header class="panel-head"><span class="panel-title">Tags</span></header>
       <div id="tag-list" class="panel-body"></div>
@@ -66,7 +75,7 @@
   <div class="resizer" id="resize-left"></div>
 
   <main id="main">
-    <nav id="tabbar"><div class="tabs-list" role="tablist"></div><button class="tab-new" title="New tab (Ctrl+T)" aria-label="New tab"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button></nav>
+    <nav id="tabbar"><div class="tabs-list" role="tablist"></div><button class="tab-new" title="New tab (Ctrl+T)" aria-label="New tab"><svg viewBox="0 0 24 24"><path d="M12 6v12M6 12h12"/></svg></button><button class="ib tab-side" data-cmd="toggle-right" title="Toggle right sidebar (Ctrl+Shift+\)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M14.5 4.5v15"/></svg></button></nav>
     <header id="viewbar">
       <button class="ib" data-cmd="back" title="Back (Alt+←)"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
       <button class="ib" data-cmd="forward" title="Forward (Alt+→)"><svg viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></svg></button>
@@ -74,7 +83,6 @@
       <span id="save-state"></span>
       <button class="ib" id="mode-btn" data-cmd="toggle-mode" title="Toggle reading / editing (Ctrl+E)"></button>
       <button class="ib" data-cmd="note-menu" title="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/></svg></button>
-      <button class="ib" data-cmd="toggle-right" title="Toggle right sidebar"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M15 4.5v15"/></svg></button>
     </header>
 
     <div id="view-note" class="view" hidden>
@@ -96,6 +104,7 @@
     <div id="view-base" class="view" hidden></div>
 
     <div id="view-tasks" class="view" hidden></div>
+    <div id="view-inbox" class="view" hidden></div>
 
     <div id="view-graph" class="view" hidden>
       <canvas id="graph-canvas"></canvas>

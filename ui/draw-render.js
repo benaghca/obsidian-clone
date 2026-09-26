@@ -899,7 +899,8 @@
           out.push(`<text x="${f2(l.x)}" y="${f2(l.y)}" font-family="${xmlEsc(fontCss(el.fontFamily))}" font-size="${el.fontSize}px" fill="${xmlEsc(themeColor(el.strokeColor, dark))}" text-anchor="${anchor}" style="white-space:pre">${xmlEsc(l.t)}</text>`);
         }
       } else if (el.type === 'image') {
-        const data = o.fileData && o.fileData(el.fileId);
+        let data = o.fileData && o.fileData(el.fileId);
+        if (data && isEquation(el)) data = tintSvg(data, equationColor(el, dark));
         const sx = el.scale?.[0] ?? 1, sy = el.scale?.[1] ?? 1;
         const flip = sx < 0 || sy < 0 ? ` transform="translate(${sx < 0 ? f2(el.width) : 0} ${sy < 0 ? f2(el.height) : 0}) scale(${sx < 0 ? -1 : 1} ${sy < 0 ? -1 : 1})"` : '';
         if (data) out.push(`<image href="${xmlEsc(data)}" width="${f2(el.width)}" height="${f2(el.height)}" preserveAspectRatio="none"${flip}/>`);
@@ -922,6 +923,30 @@
   }
 
   // ============================================================ files
+
+  // The files the live elements still refer to (edited equations leave their old SVG behind).
+  function usedFiles(scene) {
+    const ids = new Set(scene.elements.filter(e => e.type === 'image' && !e.isDeleted).map(e => e.fileId));
+    return Object.fromEntries(Object.entries(scene.files || {}).filter(([id]) => ids.has(id)));
+  }
+
+  // ============================================================ equations
+  // A LaTeX equation is an image element whose SVG (from MathJax) is drawn in the element's
+  // stroke colour; its source is kept in customData.latex. In .excalidraw.md notes it's also
+  // listed under "Embedded Files" as `fileId: $$latex$$`, the way the Obsidian plugin does it.
+  const isEquation = el => el?.type === 'image' && typeof el.customData?.latex === 'string';
+  const equationColor = (el, dark) => themeColor(!el.strokeColor || isTransparent(el.strokeColor) ? '#1e1e1e' : el.strokeColor, dark);
+  const svgDataURL = svg => 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  function svgFromDataURL(url) {
+    const i = url.indexOf(',');
+    if (i < 0) return '';
+    return /;base64$/.test(url.slice(0, i)) ? atob(url.slice(i + 1)) : decodeURIComponent(url.slice(i + 1));
+  }
+  // The SVG with its currentColor set to `color`.
+  function tintSvg(url, color) {
+    const svg = svgFromDataURL(url).replace(/^(\s*(?:<\?xml[^>]*>\s*)?<svg)(?:\s+color="[^"]*")?/, `$1 color="${xmlEsc(color)}"`);
+    return svgDataURL(svg);
+  }
 
   function emptyScene() {
     return { elements: [], appState: { gridSize: null, viewBackgroundColor: '#ffffff' }, files: {}, rest: {} };
@@ -961,7 +986,7 @@
     };
   }
 
-  function sceneJSON(scene, files = scene.files, indent = 2) {
+  function sceneJSON(scene, files = usedFiles(scene), indent = 2) {
     return JSON.stringify({ ...scene.rest, type: 'excalidraw', version: 2, source: 'cinder', elements: scene.elements, appState: scene.appState, files }, null, indent);
   }
 
@@ -970,6 +995,7 @@
   const TEXT_HEADING = /(^|\n)#{1,2} Text Elements[ \t]*\r?\n/;
   const EMBED_HEADING = /(^|\n)#{1,2} Embedded Files[ \t]*\r?\n/;
   const LINKS_HEADING = /(^|\n)#{1,2} Element Links[ \t]*\r?\n/;
+  const EQ_LINE = /^([\w-]+):[ \t]*\$\$([\s\S]*?)\$\$[ \t]*(?:\r?\n)*/m;
   const SECTION_END = /\n(?=#{1,2} (?:Text Elements|Element Links|Embedded Files|Drawing)[ \t]*\r?\n|%%)/;
 
   function sectionRange(text, heading) {
@@ -988,16 +1014,18 @@
       if (!data || !Array.isArray(data.elements)) throw new Error('This file isn’t an Excalidraw drawing.');
       return { scene: restore(data), format: 'json' };
     }
-    const embedded = {};
+    const embedded = {}, equations = {};
     const er = sectionRange(text, EMBED_HEADING);
     if (er) {
       const re = /^([\w-]+):\s*!?\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/gm;
       let m;
       const body = text.slice(er.start, er.end);
       while ((m = re.exec(body))) embedded[m[1]] = m[2].trim();
+      const eq = new RegExp(EQ_LINE.source, 'gm');
+      while ((m = eq.exec(body))) equations[m[1]] = m[2].trim();
     }
     const m = DRAWING_BLOCK.exec(text);
-    if (!m) return { scene: emptyScene(), format: 'md', embedded };
+    if (!m) return { scene: emptyScene(), format: 'md', embedded, equations };
     let json = m[4];
     if (m[3] === 'compressed-json') {
       json = lzDecompressFromBase64(json.replace(/\s+/g, ''));
@@ -1006,6 +1034,9 @@
     const data = JSON.parse(json);
     if (!data || !Array.isArray(data.elements)) throw new Error('The drawing data in this note is not valid.');
     const scene = restore(data);
+    for (const el of scene.elements) {
+      if (el.type === 'image' && el.fileId && el.fileId in equations) el.customData = { ...(el.customData || {}), latex: equations[el.fileId] };
+    }
     // Like the plugin, treat the Markdown "Text Elements" as the source of each text's
     // content, so edits made to the note (e.g. links rewritten on rename) are kept.
     const relayout = [];
@@ -1033,7 +1064,7 @@
       let l;
       while ((l = re.exec(body))) { const el = byId.get(l[1]); if (el) el.link = l[2]; }
     }
-    return { scene, format: 'md', embedded, relayout };
+    return { scene, format: 'md', embedded, equations, relayout };
   }
 
   const MD_HEADER = `---
@@ -1075,8 +1106,13 @@ tags: [excalidraw]
       const after = sectionRange(text, TEXT_HEADING);
       if (after) text = text.slice(0, after.end) + '## Element Links\n' + links + text.slice(after.end);
     }
-    const known = parseDrawingEmbedded(text);
-    const add = Object.entries(embedded).filter(([id]) => !(id in known)).map(([id, link]) => `${id}: [[${link}]]\n\n`);
+    // Equations are rewritten from the elements each time, so edited or deleted ones don't linger.
+    const er = sectionRange(text, EMBED_HEADING);
+    if (er) text = text.slice(0, er.start) + text.slice(er.start, er.end).replace(new RegExp(EQ_LINE.source, 'gm'), '') + text.slice(er.end);
+    const known = parseDrawingEmbedded(text), eqs = new Map();
+    for (const el of scene.elements) if (!el.isDeleted && isEquation(el) && el.fileId) eqs.set(el.fileId, el.customData.latex);
+    const add = Object.entries(embedded).filter(([id]) => !(id in known) && !eqs.has(id)).map(([id, link]) => `${id}: [[${link}]]\n\n`)
+      .concat([...eqs].map(([id, tex]) => `${id}: $$${tex}$$\n\n`));
     if (add.length) {
       const r = sectionRange(text, EMBED_HEADING);
       if (r) text = text.slice(0, r.end).replace(/\n*$/, '\n') + (r.end > r.start ? '\n' : '') + add.join('') + text.slice(r.end);
@@ -1162,6 +1198,7 @@ tags: [excalidraw]
     linearMidpoint, pointAlong, hitTest, toLocal, outlinePoint, distToPolyline, insidePolygon,
     fontCss, fontString, lineHeightOf, measureText, wrapText, textWidth, refreshText, layoutBoundText, boundTextMaxWidth, textLines,
     shapeOf, buildShape, hatchLines, themeColor, parseColor, drawElement, toSVG,
+    isEquation, equationColor, tintSvg, svgDataURL, svgFromDataURL,
     emptyScene, restore, sceneJSON, parseDrawing, serializeDrawing, serializeMd, lzDecompressFromBase64,
   };
   root.CinderSketch = api;

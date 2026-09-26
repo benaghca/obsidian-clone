@@ -5,7 +5,7 @@
 
 import { EditorState, EditorSelection, StateField, StateEffect, Compartment, Prec, Annotation, Facet } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, drawSelection, dropCursor, rectangularSelection } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab, insertNewline } from '@codemirror/commands';
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField } from '@codemirror/autocomplete';
@@ -881,8 +881,12 @@ const LATEX = [
   ['begin{aligned}', 'begin{aligned}\n\t${a} &= ${b} \\\\\n\t&= ${c}\n\\end{aligned}', 'begin{aligned} a &= b \\\\ &= c \\end{aligned}'],
 ];
 
+// A field that holds nothing but math (the drawing's equation editor).
+const allMath = Facet.define({ combine: v => v.some(Boolean) });
+
 // Is the cursor inside $…$ or $$…$$ (also while the closing $ isn't typed yet)?
 function inMath(state, pos) {
+  if (state.facet(allMath)) return true;
   for (let n = syntaxTree(state).resolveInner(pos, -1); n; n = n.parent) if (n.name === 'InlineMath' || n.name === 'BlockMath') return true;
   const line = state.doc.lineAt(pos), before = line.text.slice(0, pos - line.from).replace(/\\\$/g, '');
   return (before.match(/\$/g) || []).length % 2 === 1;
@@ -916,6 +920,7 @@ const MATH_AUTO = [
 const MATH_TAB = [['mk', '$${}$${}'], ['dm', '$$\n${}\n$$${}']];
 
 let lastSpaced = -1; // where the last space-ended expansion left the cursor
+let lastExpanded = -1; // where the last expansion ended (no suggestion list for what it just wrote)
 function mathSnippetInput(view, from, to, text) {
   if (from !== to || text.length !== 1 || !hooksOf(view.state).mathSnippets?.()) return false;
   const st = view.state;
@@ -931,6 +936,7 @@ function mathSnippetInput(view, from, to, text) {
     if (word && /[\\a-zA-Z]/.test(st.sliceDoc(start - 1, start))) continue;
     snippet(tpl)(view, null, start, from);
     lastSpaced = tpl.endsWith(' ') ? view.state.selection.main.head : -1;
+    lastExpanded = view.state.selection.main.head;
     return true;
   }
   // x1 → x_1 (a single-letter name followed by a digit)
@@ -960,6 +966,7 @@ function mathTab(view) {
 
 function latexCompletions(context) {
   if (!inMath(context.state, context.pos)) return null;
+  if (context.pos === lastExpanded && !context.explicit) return null;
   const m = context.matchBefore(/\\[a-zA-Z]*[{(\[|]?/);
   if (!m || (m.text.length < 2 && !context.explicit)) return null;
   const h = hooksOf(context.state);
@@ -1166,4 +1173,45 @@ function create(parent, hooks, opts = {}) {
   };
 }
 
-window.CinderEditor = { create, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
+// ------------------------------------------------------------------ equation field
+
+// A small LaTeX field where everything is math, so it has what the note editor has inside $…$:
+// \command suggestions with previews, snippet fields to Tab through, and the math shortcuts.
+// Enter submits (Shift+Enter for a new line) and Escape cancels, once any suggestion list is closed.
+function mathField(parent, o = {}) {
+  const view = new EditorView({
+    parent,
+    state: EditorState.create({
+      doc: o.value || '',
+      extensions: [
+        hooksFacet.of(o.hooks || {}),
+        allMath.of(true),
+        history(),
+        drawSelection(),
+        EditorView.lineWrapping,
+        EditorView.inputHandler.of(mathSnippetInput),
+        EditorState.languageData.of(() => [{ closeBrackets: { brackets: ['(', '[', '{'] } }]),
+        closeBrackets(),
+        autocompletion({ override: [latexCompletions], icons: false, activateOnTyping: true }),
+        placeholder(o.placeholder || ''),
+        EditorView.contentAttributes.of({ spellcheck: 'false', autocorrect: 'off', autocapitalize: 'off', 'aria-label': o.label || 'LaTeX' }),
+        Prec.high(keymap.of([
+          { key: 'Tab', run: v => mathTab(v) },
+          { key: 'Enter', run: v => { if (completionStatus(v.state) === 'active') return false; o.onSubmit?.(); return true; } },
+          { key: 'Shift-Enter', run: insertNewline },
+          { key: 'Escape', run: v => { if (completionStatus(v.state) === 'active') return false; o.onCancel?.(); return true; } },
+        ])),
+        keymap.of([...closeBracketsKeymap, ...completionKeymap, ...historyKeymap, ...defaultKeymap]),
+        EditorView.updateListener.of(u => { if (u.docChanged) o.onChange?.(u.state.doc.toString()); }),
+      ],
+    }),
+  });
+  return {
+    view,
+    get value() { return view.state.doc.toString(); },
+    focus() { view.focus(); view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true }); },
+    destroy() { view.destroy(); },
+  };
+}
+
+window.CinderEditor = { create, mathField, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };

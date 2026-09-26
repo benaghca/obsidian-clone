@@ -205,6 +205,44 @@ t('legacy excalidraw fields are upgraded', () => {
   assert.equal(p.scene.elements[1].type, 'line');
 });
 
+t('md equations (the plugin writes them as `id: $$tex$$` under Embedded Files)', () => {
+  const scene = { elements: [S.newElement('image', { id: 'E1', fileId: 'eq1', width: 80, height: 20 }), S.newElement('image', { id: 'I1', fileId: 'f1', width: 10, height: 10 })], appState: {}, files: {} };
+  const md = PLUGIN_MD('```json\n' + JSON.stringify({ type: 'excalidraw', elements: scene.elements }) + '\n```', '## Embedded Files\nf1: [[pic.png]]\n\neq1: $$\\frac{a}{b} + \\sqrt{x}$$\n\nold: $$gone$$\n\n');
+  const p = S.parseDrawing(md, 'Eq.excalidraw.md');
+  assert.deepEqual(p.embedded, { f1: 'pic.png' });
+  assert.deepEqual(p.equations, { eq1: '\\frac{a}{b} + \\sqrt{x}', old: 'gone' });
+  const eq = p.scene.elements.find(e => e.id === 'E1');
+  assert(S.isEquation(eq) && eq.customData.latex === '\\frac{a}{b} + \\sqrt{x}');
+  assert(!S.isEquation(p.scene.elements.find(e => e.id === 'I1')));
+  // Editing: the element points at a new file with new source; stale entries go, others stay.
+  eq.fileId = 'eq2'; eq.customData.latex = 'e^{i\\pi} = -1';
+  const out = S.serializeDrawing(p.scene, { format: 'md', source: md, embedded: p.embedded });
+  assert(out.includes('## Embedded Files\nf1: [[pic.png]]\n\neq2: $$e^{i\\pi} = -1$$\n\n%%'), out);
+  assert(!out.includes('eq1:') && !out.includes('old:'));
+  const again = S.parseDrawing(out, 'Eq.excalidraw.md');
+  assert.deepEqual(again.equations, { eq2: 'e^{i\\pi} = -1' });
+  assert.equal(S.serializeDrawing(again.scene, { format: 'md', source: out, embedded: again.embedded }), out);
+  // A multi-line equation survives too.
+  eq.customData.latex = '\\begin{aligned}a &= b\\\\\nc &= d\\end{aligned}';
+  const ml = S.serializeDrawing(p.scene, { format: 'md', source: out, embedded: p.embedded });
+  assert.equal(S.parseDrawing(ml, 'Eq.excalidraw.md').equations.eq2, eq.customData.latex);
+});
+
+t('equation svg is tinted with the stroke colour, per theme', () => {
+  const url = S.svgDataURL('<svg xmlns="http://www.w3.org/2000/svg" width="10" height="5"><g fill="currentColor"/></svg>');
+  const el = S.newElement('image', { fileId: 'q', strokeColor: '#1e1e1e', customData: { latex: 'x' } });
+  assert(S.svgFromDataURL(S.tintSvg(url, S.equationColor(el, true))).startsWith('<svg color="#d3d3d3" xmlns'));
+  assert(S.svgFromDataURL(S.tintSvg(S.tintSvg(url, 'red'), 'blue')).startsWith('<svg color="blue" xmlns'));
+  assert.equal(S.equationColor({ ...el, strokeColor: 'transparent' }, false), '#1e1e1e');
+  const b64 = 'data:image/svg+xml;base64,' + Buffer.from('<svg width="1"/>').toString('base64');
+  assert.equal(S.svgFromDataURL(S.tintSvg(b64, '#e03131')), '<svg color="#e03131" width="1"/>');
+  const svg = S.toSVG([el], { dark: false, fileData: () => url });
+  assert(svg.includes(encodeURIComponent('<svg color="#1e1e1e"')), svg);
+  // Saved .excalidraw JSON keeps only the files the elements still use.
+  const sc = { elements: [el], appState: {}, files: { q: { id: 'q', dataURL: url }, stale: { id: 'stale', dataURL: url } }, rest: {} };
+  assert.deepEqual(Object.keys(JSON.parse(S.sceneJSON(sc)).files), ['q']);
+});
+
 t('svg export', () => {
   const els = [S.newElement('rectangle', { x: 0, y: 0, width: 100, height: 50, backgroundColor: '#ffc9c9', fillStyle: 'hachure' }),
     S.newElement('text', { x: 10, y: 10, text: 'a <b> & "c"', width: 50, height: 25 }),

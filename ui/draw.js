@@ -10,11 +10,19 @@ window.CinderDraw = (() => {
   let scene = K.emptyScene();
   let els = scene.elements;
   let fileUrls = {};           // fileId -> URL for images stored in the vault (.excalidraw.md)
-  const images = new Map();    // fileId -> {img, ok}
+  const images = new Map();    // fileId (or fileId|colour for equations) -> {img, ok}
+  const texData = new Map();   // fileId -> SVG data URL, for equations whose file isn't in the scene (.excalidraw.md)
+  const texPending = new Map(); // fileId -> promise of that render
   let visible = false, raf = 0, dark = false, accent = '#8f73ff', pageBg = '#ffffff';
   let view = { sx: 0, sy: 0, zoom: 1 }; // screen = (world + s) * zoom
   let selected = new Set();
   let tool = 'selection', locked = false;
+  // Laser pointer: strokes of [x, y, time] in scene coordinates, fading out; nothing is saved.
+  const laser = [];
+  let laserAt = null; // the pointer on screen, for the laser's dot
+  let laserDot = null, laserFrame = 0; // the dot as drawn: eased toward the pointer every frame
+  const LASER_FADE = 1100, LASER_MAX = 520, LASER_EASE = 22; // ms, screen px, ms
+  const LASER_COLORS = { red: '#ff3030', accent: null, green: '#22c55e', blue: '#3b82f6' }; // accent: the theme's
   let action = null;           // the pointer interaction in progress
   let multi = null;            // a line/arrow being placed click by click
   let editing = null;          // {el, ta, container, isNew}
@@ -41,10 +49,12 @@ window.CinderDraw = (() => {
     ['freedraw', 'Draw', 'P or 7', '<path d="M4.5 19.5l1-4.2L16.2 4.6a2 2 0 0 1 2.8 0l.4.4a2 2 0 0 1 0 2.8L8.7 18.5z"/><path d="M14.5 6.5l3 3"/>'],
     ['text', 'Text', 'T or 8', '<path d="M5 7V4.5h14V7M12 4.5v15M9 19.5h6"/>'],
     ['image', 'Insert image', '9', '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.7"/><path d="M20.5 16l-5-5L5 19.5"/>'],
+    ['math', 'Insert equation (LaTeX)', 'M', '<path d="M17.5 6V4.5h-11l6.2 7.5-6.2 7.5h11V18"/>'],
     ['eraser', 'Eraser', 'E or 0', '<path d="M8.5 19.5H20M5.6 14.6l8.2-8.2a2 2 0 0 1 2.8 0l2.5 2.5a2 2 0 0 1 0 2.8l-7.6 7.8H9z"/><path d="M9.5 10.5l5 5"/>'],
+    ['laser', 'Laser pointer', 'K', '<circle cx="17.5" cy="6.5" r="2.5"/><path d="M15.7 8.3L4 20"/><path d="M17.5 1.5v1.5M22.5 6.5H21M20.9 3.1l-1 1M20.9 9.9l-1-1"/>'],
     ['hand', 'Hand (pan)', 'H or Space', '<path d="M8 12.5V6a1.5 1.5 0 0 1 3 0v5M11 10.5V4.5a1.5 1.5 0 0 1 3 0v6M14 10.5V6a1.5 1.5 0 0 1 3 0v5.5M17 9.5a1.5 1.5 0 0 1 3 0V14a6.5 6.5 0 0 1-6.5 6.5H12a6 6 0 0 1-4.9-2.6l-3-4.5a1.5 1.5 0 0 1 2.4-1.8L8 13.5"/>'],
   ];
-  const TOOL_KEYS = { v: 'selection', 1: 'selection', r: 'rectangle', 2: 'rectangle', d: 'diamond', 3: 'diamond', o: 'ellipse', 4: 'ellipse', a: 'arrow', 5: 'arrow', l: 'line', 6: 'line', p: 'freedraw', x: 'freedraw', 7: 'freedraw', t: 'text', 8: 'text', 9: 'image', e: 'eraser', 0: 'eraser', h: 'hand' };
+  const TOOL_KEYS = { v: 'selection', 1: 'selection', r: 'rectangle', 2: 'rectangle', d: 'diamond', 3: 'diamond', o: 'ellipse', 4: 'ellipse', a: 'arrow', 5: 'arrow', l: 'line', 6: 'line', p: 'freedraw', x: 'freedraw', 7: 'freedraw', t: 'text', 8: 'text', 9: 'image', e: 'eraser', 0: 'eraser', k: 'laser', m: 'math', h: 'hand' };
   const ICON = p => `<svg viewBox="0 0 24 24">${p}</svg>`;
 
   // ============================================================ setup
@@ -79,6 +89,7 @@ window.CinderDraw = (() => {
     canvas.addEventListener('pointerdown', onDown);
     canvas.addEventListener('mousedown', e => e.preventDefault()); // onDown manages focus (the text editor keeps it)
     canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerleave', () => { if (laserAt) { laserAt = null; requestRender(); } });
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('pointercancel', onUp);
     canvas.addEventListener('dblclick', onDouble);
@@ -141,7 +152,7 @@ window.CinderDraw = (() => {
     cancelEditing();
     scene = sc; els = scene.elements;
     fileUrls = opts.fileUrls || {};
-    images.clear();
+    images.clear(); texData.clear(); texPending.clear();
     selected = new Set(); action = null; multi = null; eraseSet = new Set(); bindHint = null;
     // Texts whose content came from the note's Markdown need measuring again.
     for (const id of opts.relayout || []) {
@@ -343,15 +354,16 @@ window.CinderDraw = (() => {
 
   function setTool(t) {
     if (t === 'image') { fileInput._at = null; fileInput.click(); return; }
+    if (t === 'math') { editEquation(); return; }
     finishMulti();
     commitText();
     tool = t;
-    if (t !== 'selection' && t !== 'hand') { if (t !== 'eraser') selected = new Set(); }
+    if (t !== 'selection' && t !== 'hand') { if (t !== 'eraser' && t !== 'laser') selected = new Set(); }
     for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === t);
     renderProps(); updateCursor(); requestRender();
   }
   function toolDone(el) {
-    if (!locked && tool !== 'freedraw' && tool !== 'eraser') {
+    if (!locked && tool !== 'freedraw' && tool !== 'eraser' && tool !== 'laser') {
       tool = 'selection';
       for (const b of toolsEl.querySelectorAll('[data-tool]')) b.classList.toggle('active', b.dataset.tool === 'selection');
     }
@@ -364,6 +376,7 @@ window.CinderDraw = (() => {
     if (spaceDown || tool === 'hand') c = action?.type === 'pan' ? 'grabbing' : 'grab';
     else if (tool === 'text') c = 'text';
     else if (tool === 'eraser') c = 'cell';
+    else if (tool === 'laser') c = 'none'; // the laser's own dot is the pointer
     else if (tool !== 'selection') c = 'crosshair';
     canvas.style.cursor = c;
   }
@@ -387,6 +400,7 @@ window.CinderDraw = (() => {
     switch (tool) {
       case 'selection': return downSelect(e, wx, wy, mx, my);
       case 'eraser': action = { type: 'erase' }; eraseAt(wx, wy); return;
+      case 'laser': action = { type: 'laser' }; laserAt = [mx, my]; laserDot = [mx, my]; laser.push({ pts: [[wx, wy, performance.now()]] }); requestRender(); return;
       case 'rectangle': case 'diamond': case 'ellipse': return startShape(tool, wx, wy, e);
       case 'arrow': case 'line': return startLinear(tool, wx, wy, e);
       case 'freedraw': return startFreedraw(wx, wy, e);
@@ -406,7 +420,8 @@ window.CinderDraw = (() => {
       requestRender();
       return;
     }
-    if (!action) { hoverCursor(mx, my, wx, wy); return; }
+    if (!action) { hoverCursor(mx, my, wx, wy); if (tool === 'laser') { laserAt = [mx, my]; requestRender(); } return; }
+    if (action.type === 'laser') laserAt = [mx, my];
     switch (action.type) {
       case 'pan':
         view.sx = action.sx + (mx - action.mx) / view.zoom; view.sy = action.sy + (my - action.my) / view.zoom;
@@ -441,6 +456,7 @@ window.CinderDraw = (() => {
         break;
       }
       case 'erase': eraseAt(wx, wy); break;
+      case 'laser': break; // the trail follows the eased dot, sampled as it's drawn
     }
     requestRender();
   }
@@ -625,6 +641,7 @@ window.CinderDraw = (() => {
     const [mx, my] = mouse(e);
     const [wx, wy] = toWorld(mx, my);
     const hit = elementAt(wx, wy);
+    if (hit && K.isEquation(hit)) return editEquation(hit);
     if (hit && hit.type === 'text') return editText(hit, false);
     if (hit && K.canContainText(hit)) return editContainerText(hit);
     if (hit && hit.type === 'line') {
@@ -1203,6 +1220,7 @@ window.CinderDraw = (() => {
   function imageFor(el) {
     const id = el.fileId;
     if (!id) return null;
+    if (K.isEquation(el)) return equationImage(el);
     let rec = images.get(id);
     if (!rec) {
       const src = scene.files?.[id]?.dataURL || fileUrls[id];
@@ -1214,6 +1232,73 @@ window.CinderDraw = (() => {
       img.src = src;
     }
     return rec.ok ? rec.img : null;
+  }
+
+  // ============================================================ equations
+
+  // An equation's image is its SVG tinted with the element's colour for the theme, one per colour.
+  const eqKey = (el, dk) => el.fileId + '|' + K.equationColor(el, dk);
+  function equationImage(el, dk = dark) {
+    const key = eqKey(el, dk);
+    let rec = images.get(key);
+    if (!rec) {
+      const base = scene.files?.[el.fileId]?.dataURL || texData.get(el.fileId);
+      if (!base) { renderTexFor(el); return null; }
+      const img = new Image();
+      rec = { img, ok: false };
+      rec.ready = new Promise(res => { img.onload = () => { rec.ok = true; requestRender(); res(); }; img.onerror = () => res(); });
+      images.set(key, rec);
+      img.src = K.tintSvg(base, K.equationColor(el, dk));
+    }
+    return rec.ok ? rec.img : null;
+  }
+  // Equations from an .excalidraw.md note arrive as source only; MathJax renders them on demand.
+  function renderTexFor(el) {
+    let p = texPending.get(el.fileId);
+    if (!p) {
+      p = Promise.resolve(hooks.renderTex?.(el.customData.latex)).then(r => { if (r) { texData.set(el.fileId, r.dataURL); requestRender(); } }, () => { });
+      texPending.set(el.fileId, p);
+    }
+    return p;
+  }
+  async function equationReady(el, dk) {
+    if (!scene.files?.[el.fileId]?.dataURL && !texData.has(el.fileId)) await renderTexFor(el);
+    equationImage(el, dk);
+    await images.get(eqKey(el, dk))?.ready;
+  }
+  async function equationData(el) {
+    if (!scene.files?.[el.fileId]?.dataURL && !texData.has(el.fileId)) await renderTexFor(el);
+    return scene.files?.[el.fileId]?.dataURL || texData.get(el.fileId);
+  }
+
+  // Insert a new equation (at `at`, or the middle of the view) or edit `el`. Each version gets a
+  // new file, so undo brings back the old picture along with the old source.
+  async function editEquation(el = null, at = null) {
+    if (!hooks.editTex || !hooks.renderTex || (el && el.locked)) return;
+    commitText(); finishMulti();
+    const tex = await hooks.editTex(el ? el.customData.latex : '', !!el);
+    if (tex == null || !tex.trim() || (el && tex === el.customData.latex)) { canvas.focus(); return; }
+    let r;
+    try { r = await hooks.renderTex(tex); } catch (err) { hooks.toast?.('That equation didn’t render: ' + (err.message || err)); return; }
+    const id = K.randomId(40);
+    scene.files[id] = { mimeType: 'image/svg+xml', id, dataURL: r.dataURL, created: Date.now(), lastRetrieved: Date.now() };
+    if (el && byId(el.id)) {
+      // Keep the size the old one was drawn at, relative to its natural size.
+      const old = images.get(eqKey(el, dark));
+      const k = old?.ok && old.img.naturalHeight ? el.height / old.img.naturalHeight : el.height / (r.height || el.height);
+      K.mutate(el, { fileId: id, width: r.width * k, height: r.height * k, customData: { ...el.customData, latex: tex } });
+      selected = new Set([el.id]);
+    } else {
+      const k = (style.fontSize || 20) / 20;
+      const w = r.width * k, h = r.height * k;
+      const [cx, cy] = at || toWorld(cw() / 2, ch() / 2);
+      el = K.newElement('image', { x: cx - w / 2, y: cy - h / 2, width: w, height: h, fileId: id, strokeColor: style.strokeColor || '#1e1e1e', backgroundColor: 'transparent', customData: { latex: tex } });
+      els.push(el);
+      if (tool !== 'selection') setTool('selection');
+      selected = new Set([el.id]);
+    }
+    commit(); renderProps(); requestRender();
+    canvas.focus();
   }
 
   const readDataURL = blob => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
@@ -1335,7 +1420,8 @@ window.CinderDraw = (() => {
     else if (k === 'Enter') {
       if (!finishMulti()) {
         const sel = selectedEls();
-        if (sel.length === 1 && sel[0].type === 'text') editText(sel[0], false);
+        if (sel.length === 1 && K.isEquation(sel[0])) editEquation(sel[0]);
+        else if (sel.length === 1 && sel[0].type === 'text') editText(sel[0], false);
         else if (sel.length === 1 && K.canContainText(sel[0])) editContainerText(sel[0]);
         else handled = false;
       }
@@ -1384,9 +1470,10 @@ window.CinderDraw = (() => {
         [sel[0].link ? 'Edit link…' : 'Add link…', () => editLink()],
       );
       if (linkOf(sel[0])) items.push(['Open link', () => openLink(linkOf(sel[0]))]);
+      if (sel.length === 1 && K.isEquation(sel[0])) items.push(['Edit equation…', () => editEquation(sel[0])]);
       items.push(null, ['Copy as PNG', () => hooks.copyPNG?.(true)], ['Copy as SVG', () => hooks.copySVG?.(true)], null, ['Delete', () => deleteSelected(), 'danger']);
     } else {
-      items.push(['Select all', () => selectAll()]);
+      items.push(['Insert equation…', () => editEquation(null, [wx, wy])], ['Select all', () => selectAll()]);
       if (els.some(e => e.locked)) items.push(['Unlock all', () => unlockAll()]);
       items.push(
         [gridSize() ? 'Hide grid' : 'Show grid', () => toggleGrid()],
@@ -1422,7 +1509,7 @@ window.CinderDraw = (() => {
         <p><span>Undo / redo</span><kbd>Ctrl Z</kbd> <kbd>Ctrl Y</kbd></p><p><span>Duplicate</span><kbd>Ctrl D</kbd> or <kbd>Alt</kbd>-drag</p>
         <p><span>Group / ungroup</span><kbd>Ctrl G</kbd> <kbd>Ctrl Shift G</kbd></p><p><span>Bring forward / to front</span><kbd>Ctrl ]</kbd> <kbd>Ctrl Shift ]</kbd></p>
         <p><span>Send backward / to back</span><kbd>Ctrl [</kbd> <kbd>Ctrl Shift [</kbd></p><p><span>Add link</span><kbd>Ctrl K</kbd></p>
-        <p><span>Lock selection</span><kbd>Ctrl Shift L</kbd></p><p><span>Edit text / label</span><kbd>Enter</kbd> or double-click</p>
+        <p><span>Lock selection</span><kbd>Ctrl Shift L</kbd></p><p><span>Edit text / label / equation</span><kbd>Enter</kbd> or double-click</p>
         <p><span>Square / straight / 15°</span>hold <kbd>Shift</kbd></p><p><span>Resize from centre</span>hold <kbd>Alt</kbd></p>
         <p><span>Finish a line</span><kbd>Enter</kbd> <kbd>Esc</kbd></p></div>
       <div><h4>View</h4>
@@ -1473,6 +1560,7 @@ window.CinderDraw = (() => {
   function applyProp(key, value) {
     style[key] = value;
     try { hooks.store?.('drawStyle', style); } catch { }
+    if (key === 'laserColor') { renderProps(); requestRender(); return; }
     const targets = propTargets().filter(t => !t._proto);
     const touched = [];
     for (const el of targets) {
@@ -1491,7 +1579,7 @@ window.CinderDraw = (() => {
           if (el.type === 'arrow') K.mutate(el, { [key]: value });
           break;
         case 'strokeColor': case 'opacity':
-          if (el.type === 'image' && key === 'strokeColor') break;
+          if (el.type === 'image' && key === 'strokeColor' && !K.isEquation(el)) break;
           K.mutate(el, { [key]: value });
           if (text && text !== el) K.mutate(text, { [key]: value });
           break;
@@ -1529,6 +1617,12 @@ window.CinderDraw = (() => {
 
   function renderProps() {
     if (!propsEl) return;
+    if (tool === 'laser') {
+      const cur = style.laserColor || 'red';
+      propsEl.innerHTML = `<div class="dr-sec"><h5>Laser colour</h5><div class="dr-swatches">${Object.keys(LASER_COLORS).map(k => `<button class="dr-sw${cur === k ? ' on' : ''}" data-prop="laserColor" data-value="${k}" title="${k === 'accent' ? 'Theme accent' : k[0].toUpperCase() + k.slice(1)}" style="--c:${laserColors(k).main}"></button>`).join('')}</div></div>`;
+      propsEl.hidden = false;
+      return;
+    }
     const targets = propTargets();
     if (!targets.length) { propsEl.hidden = true; return; }
     const types = new Set(targets.map(t => t.type));
@@ -1542,7 +1636,7 @@ window.CinderDraw = (() => {
     const opts = (key, list, cur = val(key)) => `<div class="dr-opts">${list.map(([v, label, icon]) => `<button class="dr-opt${cur === v || (cur == null && v == null && cur !== undefined) ? ' on' : ''}" data-prop="${key}" data-value="${v}" title="${esc(label)}">${icon}</button>`).join('')}</div>`;
     const sec = (title, body) => `<div class="dr-sec"><h5>${title}</h5>${body}</div>`;
     const icon = p => `<svg viewBox="0 0 24 24">${p}</svg>`;
-    const onlyImages = [...types].every(t => t === 'image');
+    const onlyImages = targets.every(t => t.type === 'image' && !K.isEquation(t));
     let h = '';
     if (!onlyImages) h += sec('Stroke', swatch('strokeColor', K.COLORS.stroke));
     if (has('rectangle', 'diamond', 'ellipse', 'line', 'freedraw') && !editing) h += sec('Background', swatch('backgroundColor', K.COLORS.bg));
@@ -1618,10 +1712,123 @@ window.CinderDraw = (() => {
     ctx.globalAlpha = 1;
     ctx.setTransform(r, 0, 0, r, 0, 0);
     drawOverlay();
+    if (laser.length || tool === 'laser') drawLaser();
     hintEl.textContent = els.length || editing ? '' : 'Pick a tool above and start drawing — double-click anywhere to write text';
     zoomLabel.textContent = Math.round(z * 100) + '%';
     root.querySelector('[data-act=undo]').disabled = !hist.undo.length;
     root.querySelector('[data-act=redo]').disabled = !hist.redo.length;
+  }
+
+  // The laser: a glowing trail that thins to nothing as it ages or trails too far behind, plus a
+  // dot at the pointer. The dot eases toward the pointer each frame and the trail is sampled from
+  // it, so quick flicks come out as curves rather than jumps. Each trail is filled as one tapered
+  // shape, so there are no overlapping joints to show up as beads. Redraws until it has faded.
+  function laserColors(name) {
+    let main = LASER_COLORS[name] || (name === 'accent' && /^#[0-9a-f]{6}$/i.test(accent) ? accent : LASER_COLORS.red);
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(main.slice(i, i + 2), 16));
+    const mix = (c, t) => Math.round(c + (255 - c) * t);
+    return { main, core: `rgb(${mix(r, 0.5)}, ${mix(g, 0.5)}, ${mix(b, 0.5)})`, glow: `rgba(${r}, ${g}, ${b}, 0.9)` };
+  }
+
+  function drawLaser() {
+    const now = performance.now(), dt = Math.min(64, now - (laserFrame || now));
+    laserFrame = now;
+    if (!laserAt) laserDot = null;
+    else if (!laserDot) laserDot = [...laserAt];
+    else {
+      const k = 1 - Math.exp(-dt / LASER_EASE);
+      laserDot[0] += (laserAt[0] - laserDot[0]) * k; laserDot[1] += (laserAt[1] - laserDot[1]) * k;
+    }
+    if (action?.type === 'laser' && laserDot && laser.length) {
+      const pts = laser[laser.length - 1].pts, last = pts[pts.length - 1], [wx, wy] = toWorld(laserDot[0], laserDot[1]);
+      if (Math.hypot(wx - last[0], wy - last[1]) * view.zoom > 0.5) pts.push([wx, wy, now]);
+    }
+    for (let i = laser.length - 1; i >= 0; i--) {
+      const pts = laser[i].pts;
+      while (pts.length > 1 && now - pts[0][2] > LASER_FADE) pts.shift();
+      if (now - pts[pts.length - 1][2] > LASER_FADE && !(i === laser.length - 1 && action?.type === 'laser')) laser.splice(i, 1);
+    }
+    const col = laserColors(style.laserColor || 'red');
+    for (const { pts } of laser) {
+      const path = laserPath(pts, now);
+      if (!path) continue;
+      ctx.save();
+      ctx.shadowColor = col.glow; ctx.shadowBlur = 14;
+      ctx.fillStyle = col.main; laserShape(path, 1); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = col.core; laserShape(path, 0.4); ctx.fill();
+    }
+    if (tool === 'laser' && laserDot) {
+      ctx.save();
+      ctx.shadowColor = col.glow; ctx.shadowBlur = 12;
+      ctx.fillStyle = col.main; ctx.beginPath(); ctx.arc(laserDot[0], laserDot[1], 5, 0, TAU); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = col.core; ctx.beginPath(); ctx.arc(laserDot[0], laserDot[1], 2, 0, TAU); ctx.fill();
+    }
+    if (laser.length || (laserDot && Math.hypot(laserAt[0] - laserDot[0], laserAt[1] - laserDot[1]) > 0.3)) requestRender();
+    else laserFrame = 0;
+  }
+
+  // Screen points of a laser trail with a half-width each: points closer than a couple of pixels
+  // are dropped, the rest are eased toward their neighbours to take out the jitter. Width follows
+  // both age and distance behind the head, each eased so the trail stays full then tapers late.
+  const LASER_W = 7;
+  const easeOut = x => 1 - (1 - x) ** 3;
+  function laserPath(pts, now) {
+    const raw = [];
+    for (let i = 0; i < pts.length; i++) {
+      const [x, y] = toScreen(pts[i][0], pts[i][1]), last = raw[raw.length - 1];
+      if (last && i < pts.length - 1 && Math.hypot(x - last[0], y - last[1]) < 2) continue;
+      raw.push([x, y, pts[i][2]]);
+    }
+    if (raw.length < 2) return null;
+    const sm = raw.map((p, i) => {
+      if (i === 0 || i === raw.length - 1) return p;
+      const a = raw[i - 1], b = raw[i + 1];
+      return [(a[0] + 2 * p[0] + b[0]) / 4, (a[1] + 2 * p[1] + b[1]) / 4, p[2]];
+    });
+    // Walk back from the head, stopping once the trail is LASER_MAX long.
+    const out = [];
+    let dist = 0;
+    for (let i = sm.length - 1; i >= 0; i--) {
+      if (i < sm.length - 1) dist += Math.hypot(sm[i + 1][0] - sm[i][0], sm[i + 1][1] - sm[i][1]);
+      if (dist > LASER_MAX) break;
+      const life = Math.max(0, 1 - (now - sm[i][2]) / LASER_FADE);
+      out.push([sm[i][0], sm[i][1], (LASER_W / 2) * easeOut(life) * easeOut(1 - dist / LASER_MAX)]);
+    }
+    if (out.length < 2) return null;
+    out.reverse();
+    // Taper the very tail to a point too, so a fresh stroke doesn't start blunt.
+    for (let i = 0; i < Math.min(6, out.length); i++) out[i][2] *= 0.25 + 0.75 * (i / 6);
+    return out;
+  }
+
+  // Build the outline of a laser trail at `scale` times its width: down one side, round the head,
+  // back up the other side, curving through midpoints so the edge stays smooth.
+  function laserShape(pts, scale) {
+    const n = pts.length, left = [], right = [];
+    for (let i = 0; i < n; i++) {
+      const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+      let tx = b[0] - a[0], ty = b[1] - a[1];
+      const len = Math.hypot(tx, ty) || 1; tx /= len; ty /= len;
+      const w = pts[i][2] * scale;
+      left.push([pts[i][0] - ty * w, pts[i][1] + tx * w]);
+      right.push([pts[i][0] + ty * w, pts[i][1] - tx * w]);
+    }
+    const curve = side => {
+      for (let i = 1; i < side.length - 1; i++) {
+        ctx.quadraticCurveTo(side[i][0], side[i][1], (side[i][0] + side[i + 1][0]) / 2, (side[i][1] + side[i + 1][1]) / 2);
+      }
+      ctx.lineTo(side[side.length - 1][0], side[side.length - 1][1]);
+    };
+    ctx.beginPath();
+    ctx.moveTo(left[0][0], left[0][1]);
+    curve(left);
+    const h = pts[n - 1], hw = h[2] * scale, a = pts[n - 2];
+    const dir = Math.atan2(h[1] - a[1], h[0] - a[0]);
+    ctx.arc(h[0], h[1], hw, dir + Math.PI / 2, dir - Math.PI / 2, true);
+    curve(right.reverse());
+    ctx.closePath();
   }
 
   function drawGrid(g) {
@@ -1715,6 +1922,7 @@ window.CinderDraw = (() => {
     const out = {};
     for (const el of list) {
       if (el.type !== 'image' || !el.fileId || out[el.fileId]) continue;
+      if (K.isEquation(el)) { const d = await equationData(el); if (d) out[el.fileId] = d; continue; }
       const f = scene.files?.[el.fileId];
       if (f?.dataURL) { out[el.fileId] = f.dataURL; continue; }
       const url = fileUrls[el.fileId];
@@ -1735,8 +1943,9 @@ window.CinderDraw = (() => {
     return K.toSVG(list, { background: background ? (scene.appState.viewBackgroundColor || '#ffffff') : null, fontData, fileData: id => data[id] });
   }
 
-  function exportPNG({ onlySelected = false, background = true, scale = 2 } = {}) {
+  async function exportPNG({ onlySelected = false, background = true, scale = 2 } = {}) {
     const list = exportList(onlySelected);
+    await Promise.all(list.filter(K.isEquation).map(el => equationReady(el, false)));
     const b = K.commonBounds(list) || [0, 0, 1, 1], pad = 10;
     const w = b[2] - b[0] + pad * 2, h = b[3] - b[1] + pad * 2;
     const s = Math.min(scale, 16000 / Math.max(w, h));
@@ -1745,7 +1954,7 @@ window.CinderDraw = (() => {
     const x = c.getContext('2d');
     if (background && !K.isTransparent(scene.appState.viewBackgroundColor)) { x.fillStyle = scene.appState.viewBackgroundColor || '#ffffff'; x.fillRect(0, 0, c.width, c.height); }
     x.setTransform(s, 0, 0, s, (pad - b[0]) * s, (pad - b[1]) * s);
-    for (const el of list) K.drawElement(x, el, { dark: false, image: imageFor, label: boundTextOf });
+    for (const el of list) K.drawElement(x, el, { dark: false, image: el => K.isEquation(el) ? equationImage(el, false) : imageFor(el), label: boundTextOf });
     return new Promise(res => c.toBlob(res, 'image/png'));
   }
 

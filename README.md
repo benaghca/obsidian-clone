@@ -56,6 +56,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
   - `KaTeX` 0.18.9 with its mhchem extension and fonts (math rendering, MIT, `ui/vendor/katex/`). It doesn't use `eval`, and "trusted" commands such as `\href` are off.
+  - `MathJax` 3.2.2 (`tex-svg-full.js`, Apache-2.0, `ui/vendor/mathjax/`), which turns LaTeX into SVG for equations in drawings. It loads the first time a drawing needs it.
   - `@replit/codemirror-vim` 6.4.0 (Vim mode, MIT), bundled into `editor.bundle.js` and pinned in `ui/editor/package.json`.
   - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
   - `JetBrains Mono` 2.304, the default code font, in regular, bold, italic and bold italic (`ui/vendor/JetBrainsMono-*.woff2`, SIL Open Font License 1.1, see `ui/vendor/jetbrains-mono.LICENSE`).
@@ -67,6 +68,12 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 ## Features
 
 - A file tree with folders, drag-and-drop moves, file import from the desktop, and rename, move and delete from the context menu
+  - Opening a file reveals it in the tree: its folders open and the tree scrolls to it. The target button in the tree's header (or *Settings*) turns this off. The button next to it expands or collapses every folder.
+- **Bookmarks** (the bookmark button in the ribbon), shared with Obsidian: they live in `.obsidian/bookmarks.json`, so the same list shows in both apps. Bookmark files, folders, headings (right-click in the Outline), searches (the button in the Search panel) and web links, and sort them into groups.
+  - Bookmark the open file with the button at the top of the panel, *Bookmark* in the note's ⋯ menu or the file tree's right-click menu (several selected files at once too), the command palette, or by dragging files from the tree into the panel.
+  - Click to open (Ctrl-click for a new tab). Drag to reorder: drop on the top or bottom half of a bookmark to put it before or after, or on a group to put it inside. Right-click to rename, move to a group or remove.
+  - Bookmarks follow files when they're renamed or moved, and go when the file is deleted. In a folder without an `.obsidian` folder, Cinder keeps the list itself.
+- Sidebar toggles like Obsidian's: the top of the ribbon shows or hides the left sidebar (**Ctrl+\\**), and the right end of the tab bar does the same for the right sidebar (**Ctrl+Shift+\\**).
 - **Live preview editing**, like Obsidian's: Markdown syntax is hidden and rendered as you write, and appears only on the line or element the cursor is in. That covers headings, bold, italic, highlights, links, tags, checkboxes you can click, bullets, callouts, quotes, code blocks, tables and embedded images and notes. Switch to plain source mode in Settings or from the command palette.
 - Switch vaults from **Settings**, the command palette or by clicking the vault name above the file tree
 - A reading view (**Ctrl+E**), plus an inline title you can edit to rename the note. **↑** on the first line jumps to the title.
@@ -110,9 +117,10 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Templates run in a small built-in interpreter, not as JavaScript, so a template can't reach anything outside the note and the vault. Arbitrary JavaScript, `tp.web` (network), `app` and user scripts aren't supported; using them gives a clear error.
 - A graph view (**Ctrl+G**): global or local with a depth slider, optional tags, unresolved-link and attachment nodes, a filter, and zoom, pan and drag. **Click a node** to select it: its links light up and everything else dims, and a card lists what it links to and what links to it. Click an entry in the card to hop there. Click the node again, click empty space or press **Esc** to clear. **Double-click** (or **Enter**) opens a note, and **Ctrl+click** opens it in a new tab. *Click opens notes* in the graph controls brings back one-click opening. Tick **3D** for a 3D graph: drag to orbit, use the wheel to zoom, and right-drag or **Shift**+drag to pan. Nearer notes are larger and farther ones fade. **Rotate** turns it slowly, and selection works the same as in 2D.
 - Detection of edits made outside Cinder. If a note changed on disk while you also had unsaved edits, Cinder asks which version to keep.
-- **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images and an eraser. Features:
+- **Drawings**, an Excalidraw-style whiteboard with a hand-drawn look. It has rectangles, diamonds, ellipses, arrows, lines, freehand pen, text, images, an eraser and a **laser pointer** (**K**). The laser draws a smooth glowing trail that stays short and fades after a second. It never changes the drawing, which makes it handy for pointing things out while presenting. You can pick its colour (red, the theme accent, green or blue) while the laser is selected. Features:
   - Arrows attach to shapes and follow them when they move. Shapes and arrows can have labels (double-click or **Enter**).
   - Stroke and fill colours, hachure, cross-hatch and solid fills, stroke width and style, sloppiness, sharp or round edges, arrowheads, fonts, opacity and layer order.
+  - **LaTeX equations**: press **M** (or use the Σ button, or right-click › *Insert equation…*), type LaTeX and watch it render live, then press **Enter**. The equation box works like math in a note: type `\` and a letter for a list of commands with a preview of each, **Tab** through the fields of `\frac`, `\sum` and friends, and use the math shortcuts (`//` for a fraction, `@a` for α and so on). Double-click or **Enter** edits an equation. Equations take the stroke colour, follow the light and dark themes, stay sharp at any zoom and export to SVG and PNG. In `.excalidraw.md` drawings they're saved as `id: $$…$$` under *Embedded Files*, the same way Obsidian's Excalidraw plugin saves them, so equations made in either app open in the other.
   - Grouping, aligning, locking, element links (`[[Note]]` or a web address), a snap grid, zoom and pan, undo and redo, copy and paste, and a shortcut sheet (**?**).
   - Drawings are saved as `.excalidraw` files, the same format excalidraw.com uses, so you can open them there too. In **Settings**, you can switch to `.excalidraw.md`, the format of Obsidian's Excalidraw plugin. Cinder reads and writes that format, including compressed drawings, and keeps its text and images in step with the plugin.
   - Embed a drawing in a note with `![[Drawing.excalidraw]]` or `![[Drawing.excalidraw|400]]`. It renders in live preview and reading view, and clicking it opens the drawing. Renaming a drawing updates those embeds.
@@ -146,6 +154,11 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **New note** from a view fills in the view's simple filters (tag, folder, `status == "todo"`), and on a board, the column you clicked it in.
   - Embed a base in a note with `![[Books.base]]` or `![[Books.base#Board]]`. `` ```base `` blocks render live in both live preview and reading view, and view changes you make there are written back into the block.
   - Expressions run in a small built-in interpreter, never as JavaScript.
+- **Inbox**: a triage desk for things you capture away from your desk. It shows what lands in the vault's `Inbox/` folder, whether from Obsidian on your phone, OneDrive's camera upload or scans, typing at the top, or dropping files. The folder can be changed in Settings.
+  - Items are grouped by the day they were made (not the day they synced), newest first. Photos show as thumbnails and notes as their first lines. A dot marks what arrived since your last visit, and the ribbon button counts what's waiting.
+  - **Make a note from this day** turns a day's items into one note, with photos embedded and notes as sections in the order they were made. It offers to move the photos to attachments and clear the scraps.
+  - Or select items (click the corner, Ctrl/Shift-click, or **Space**) and **make a note**, **add them to an existing note**, **file them to a folder** or **delete** them. Keys: arrows, **Enter** opens, **C**/**A**/**M**/**Del**.
+  - At the bottom, *Photos no note uses yet* lists images elsewhere in the vault that nothing links to.
 - **Tasks** across the whole vault, in the format of Obsidian's Tasks plugin, so existing Tasks vaults work as they are. Tasks use `📅` due, `⏳` scheduled, `🛫` start and `✅` done dates, `🔺⏫🔼🔽⏬` priorities and `🔁` recurrence. Dataview-style `[due:: …]` fields are read too.
   - **The Tasks view** (**Ctrl+Shift+T**, or the checkbox icon, which shows how many tasks are due) sorts tasks into Overdue, Today, the next six days, Later and No date. It has one-click *today*, *tomorrow* and *pick a date* buttons, drag-to-reschedule onto a day, priority, a filter box and a tag filter, a *Recently done* list, and a link to each task's source note.
   - **Natural-language quick add**, in the Tasks view or with *Add task…* from anywhere: `Pay rent tomorrow !high every month #home` becomes `- [ ] Pay rent #home ⏫ 🔁 every month 📅 2026-09-25`. A live preview shows how the text was understood. New tasks go to today's daily note or to a note you choose in Settings.
@@ -202,7 +215,9 @@ src/server.rs      --browser mode: the 127.0.0.1 server
 src/config.rs      %LOCALAPPDATA%\Cinder\config.json
 src/screenshot.rs  Insert screenshot: runs the platform region-capture tool
 ui/index.html      shell
-ui/app.js          index, preview, panels, search, commands
+ui/app/*.js        the app itself, one file per concern (core, vault index, navigation, tabs,
+                   file tree, markdown, properties, commands, panels, graph, boot…); src/api.rs
+                   joins them in order into /app.js, so they share one scope with no build step
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
 ui/graph.js        graph view (canvas + force layout)
 ui/themes.js       colour themes (Catppuccin, Everforest, …)
@@ -216,7 +231,7 @@ ui/properties.js   the Properties table (frontmatter at the top of notes)
 ui/draw-render.js  drawing scene model, hand-drawn renderer, SVG export, .excalidraw/.excalidraw.md files
 ui/test/           Node tests for the drawing, template, canvas, bases, tasks and properties modules (no packages needed)
 ui/style.css       themes and layout
-ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
+ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, MathJax, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
 vendor-crates/     vendored Rust dependencies (Windows + Linux x64) for offline builds
 ```
 
