@@ -215,7 +215,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Drag tabs to reorder them. Right-click for close others, close to the right, duplicate and reveal.
   - Tabs come back when you reopen Cinder, and they follow renames and moves.
   - In a browser tab the browser keeps Ctrl+T and Ctrl+W for itself, so rebind them in Hotkeys.
-- **Split pane**: *Open to the right* (a tab's or the file tree's right-click menu, or **Ctrl+Alt+\\** to pick a note) shows a second file beside the main one. A note there has its own editor and saves as you type, and the same note open in both panes stays in step. It also has a reading view, follows renames and changes on disk, and comes back after a restart. Images, drawings, canvases and bases show as previews. The header's buttons swap the two panes, open the file in the main pane or close the split. Drag the divider to resize it.
+- **Split tabs**: drag a tab onto the page to see it beside the note you're on. Drop it on the right half to put it on the right, or on the left half to put it on the left. The two become one tab, "Draft │ Sources", which you can switch away from and back to, and which comes back after a restart. You can also use *Open to the right* (a tab's or the file tree's right-click menu, or **Ctrl+Alt+\\** to pick a file), or **Ctrl+Alt+click** a link to open it in the other pane. Other links open in the left pane. A note on the right has its own editor and saves as you type, and the same note open on both sides stays in step. Images, drawings, canvases and bases show as previews. Each pane's × closes that note, and the tab's × closes both. Drag a pane's ⠿ grip onto the tab bar to give that note its own tab again, or right-click the tab for *Separate tabs* and *Swap panes*. Drag the divider to resize.
 - **Select several files in the tree** with **Ctrl/Cmd-click**, **Shift-click** or **Shift+↑/↓**, then drag them onto a folder or right-click to *Move N items to…*, group them into a *New folder with N items…*, open them in tabs or delete them. Links are updated for every move.
 - **Settings** (**Ctrl+,**) is a window with a page for each area (General, Editor, Appearance, Files & links, Daily notes, Templates, Tasks, Inbox, Images & screenshots, Drawings, Hotkeys) and a search box that finds any setting on any page. Changes apply as you make them, with no Save button. A changed setting shows ↺ to put the default back. Colour themes are picked from swatches.
 - **Keyboard first**:
@@ -275,7 +275,7 @@ ui/style.css       themes and layout
 ui/vendor/         editor.bundle.js (built from ui/editor), marked, DOMPurify, KaTeX, MathJax, fonts (Virgil, JetBrains Mono, Nerd Fonts symbols)
 ```
 
-**Browser tests** (`ui/test/e2e/`): 46 suites drive the real app in headless Chromium, each against a fresh vault. That's about 800 checks of what a person does: typing, clicking, dragging, keys and menus. Set it up once with `cd ui/test/e2e && npm install && npx playwright-core install chromium`. Then `ui/test/e2e/run.sh` runs them all (about ten minutes), or `ui/test/e2e/run.sh tasks search` just those. It builds Cinder first and says where the screenshots went.
+**Browser tests** (`ui/test/e2e/`): 47 suites drive the real app in headless Chromium, each against a fresh vault. That's about 800 checks of what a person does: typing, clicking, dragging, keys and menus. Set it up once with `cd ui/test/e2e && npm install && npx playwright-core install chromium`. Then `ui/test/e2e/run.sh` runs them all (about ten minutes), or `ui/test/e2e/run.sh tasks search` just those. It builds Cinder first and says where the screenshots went.
 
 The front end is plain JavaScript, type-checked by TypeScript without being compiled: `npm run typecheck` in `ui/editor` (after `npm install`) checks every file in `ui/` against `ui/tsconfig.json`, with JSDoc types where inference needs help and `ui/types/globals.d.ts` for the libraries and modules the pieces share. GitHub Actions (`.github/workflows/ci.yml`) runs the Rust tests, the front-end unit tests and the type check on every push.
 
@@ -287,7 +287,7 @@ The editor bundle is already built and checked in, so building Cinder doesn't ne
 cd ui/editor && npm install && npm run build
 ```
 
-`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js`, `node ui/test/search.test.js`, `node ui/test/yaml.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
+`cargo test` runs the Rust tests. The front-end tests run under plain Node: `node ui/test/draw-render.test.js`, `node ui/test/tabgroups.test.js`, `node ui/test/templater.test.js`, `node ui/test/canvas.test.js`, `node ui/test/bases.test.js`, `node ui/test/tasks.test.js`, `node ui/test/properties.test.js`, `node ui/test/diff.test.js`, `node ui/test/related.test.js`, `node ui/test/search.test.js`, `node ui/test/yaml.test.js` and `node ui/test/app.test.js` (which checks that the joined `app.js` still compiles).
 
 ## Ideas for round two
 
