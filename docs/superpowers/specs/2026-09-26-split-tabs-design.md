@@ -126,7 +126,7 @@ This uses the HTML5 drag and drop that already reorders tabs (`dragTab` in `tabs
 | **Separate tabs** (new command and group-tab menu item) | The group's `split` becomes a new ordinary tab right after it. |
 | **Swap panes** (group-tab menu, and the existing `split-swap` command, renamed) | Swaps `key` and `split`. Only available when `canSplit(key)`. |
 | *Move between the panes* | Unchanged. |
-| **Ctrl+Alt+click** on a link, in the editor (`ui/editor/editor.js` click handler, which now checks `altKey` before following) and in reading view (`ui/app/markdown.js` link clicks) | Resolves the link as `followLink` does, then does *Open to the right* with the result. From the right pane, links already open on the left, so Ctrl+Alt+click there does the same as a plain click. An unresolved link creates the note as a plain click would, then opens it on the right. |
+| **Ctrl+Alt+click** on a link, in the editor (`ui/editor/editor.js` click handler, which now checks `altKey` before following) and in reading view (`ui/app/markdown.js` link clicks) | Resolves the link as `followLink` does, then does *Open to the right* with the result. From the right pane, links already open on the left, so Ctrl+Alt+click there does the same as a plain click. An unresolved link creates the note and opens it on the left, as a plain click does. |
 
 ### Files changing on disk
 

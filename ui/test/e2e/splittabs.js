@@ -155,6 +155,21 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   const blocked = await page.evaluate(() => { document.body.classList.add('frame-custom'); const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }); $('#viewbar .pane-grip').dispatchEvent(ev); document.body.classList.remove('frame-custom'); return ev.defaultPrevented; });
   assert(blocked === false, "a grip isn't a window-drag area");
 
+  // Ctrl+Alt+click on a link opens it in the other pane: reading view, then the editor.
+  await reset([['Links.md', null]]);
+  await page.evaluate(() => setMode('read')); await sleep(300);
+  await page.click('#preview a.internal-link', { modifiers: ['Control', 'Alt'] }); await sleep(600);
+  assert(same(await tabs(), [['Links.md', 'Sources.md']]) && await page.evaluate(() => S.cur) === 'Links.md', 'Ctrl+Alt+click on a link in reading view opens it on the right');
+  await reset([['Links.md', null]]);
+  await page.evaluate(() => setMode('edit')); await sleep(300);
+  await page.click('#editor .cm-content [data-link="Sources"]', { modifiers: ['Control', 'Alt'] }); await sleep(600);
+  assert(same(await tabs(), [['Links.md', 'Sources.md']]) && await page.evaluate(() => S.cur) === 'Links.md', 'and in the editor');
+  // From the right pane, it opens on the left, like a plain click.
+  await reset([['Extra.md', 'Links.md']]);
+  await page.evaluate(() => { curTab().splitMode = 'read'; return showSplit(); }); await sleep(400);
+  await page.click('#split a.internal-link', { modifiers: ['Control', 'Alt'] }); await sleep(600);
+  assert(await page.evaluate(() => S.cur) === 'Sources.md' && await shown() === 'Links.md', 'from the right pane, Ctrl+Alt+click opens the link on the left');
+
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));

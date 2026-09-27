@@ -272,8 +272,10 @@ document.addEventListener('click', e => {
   const a = e.target.closest('a.internal-link');
   if (a) {
     e.preventDefault();
-    if (a.dataset.path) return openPath(a.dataset.href);
-    return followLink(a.dataset.href, a.dataset.sub, a.dataset.from || S.cur);
+    // Ctrl+Alt+click: the other pane. From the split pane the other pane is the main one, where links open anyway.
+    const split = e.altKey && (e.ctrlKey || e.metaKey) && !a.closest('#split');
+    if (a.dataset.path) return split ? openSplit(a.dataset.href) : openPath(a.dataset.href);
+    return followLink(a.dataset.href, a.dataset.sub, a.dataset.from || S.cur, { split });
   }
   const tg = e.target.closest('a.tag');
   if (tg) { e.preventDefault(); searchFor(`tag:${tg.dataset.tag}`); }

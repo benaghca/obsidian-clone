@@ -214,9 +214,12 @@ function updateHistButtons() {
   $('[data-cmd=forward]').disabled = S.histIdx >= S.hist.length - 1;
 }
 
-async function followLink(name, sub, from, opts = {}) {
+// `split`: open it in the split pane, beside this note (Ctrl+Alt+click). A link to a note that
+// doesn't exist yet creates it and opens it here either way.
+async function followLink(name, sub, from, { split = false, ...opts } = {}) {
   const target = resolveLink(name, from);
   if (target) {
+    if (split) return openSplit(target);
     if (target === S.cur && sub) return scrollToHeading(sub);
     return openPath(target, { heading: sub || undefined });
   }

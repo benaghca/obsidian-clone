@@ -710,7 +710,7 @@ const clickHandler = EditorView.domEventHandlers({
     if (!el.dataset.live && !(e.ctrlKey || e.metaKey)) return false;
     e.preventDefault();
     const h = hooksOf(view.state);
-    if (el.dataset.link != null) h.follow(el.dataset.link, el.dataset.sub || '');
+    if (el.dataset.link != null) h.follow(el.dataset.link, el.dataset.sub || '', { other: e.altKey && (e.ctrlKey || e.metaKey) });
     else if (el.dataset.url) h.openUrl(el.dataset.url);
     else if (el.dataset.tag) h.tag(el.dataset.tag);
     return true;
