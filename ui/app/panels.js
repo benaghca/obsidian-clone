@@ -249,10 +249,13 @@ function unlinkedMentions(p) {
   const res = new Map();
   for (const [q, n] of S.notes) {
     if (q === p) continue;
-    const body = blankCode(n.content);
+    // Most notes never mention it: a plain search rules them out before anything else.
+    re.lastIndex = n.fmLen;
+    if (!re.test(n.content)) continue;
     let m; re.lastIndex = n.fmLen;
-    while ((m = re.exec(body))) {
-      const i = m.index;
+    while ((m = re.exec(n.content))) {
+      const i = m.index, j = i + m[0].length;
+      if (n.code.some(([a, b]) => i < b && j > a)) continue; // in code, an HTML block or a comment
       if (n.links.some(l => i >= l.index && i < l.index + l.len)) continue;
       if (!res.has(q)) res.set(q, []);
       const list = res.get(q);
