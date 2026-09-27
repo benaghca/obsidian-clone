@@ -1205,6 +1205,56 @@ body.presenting #main { border: 0; }
 .ib-fold .chev { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; transition: transform var(--dur-fast); }
 .ib-orphans.open .ib-fold .chev { transform: rotate(90deg); }
 
+/* The Inbox as a board of sticky notes in lanes. Sticky paper keeps dark ink in both themes. */
+.inbox.ib-board { max-width: none; }
+.ib-broken { margin: 0 0 14px; padding: 9px 12px; border-radius: var(--radius-lg); border: 1px solid color-mix(in srgb, var(--c-orange) 55%, var(--border)); background: color-mix(in srgb, var(--c-orange) 12%, transparent); color: var(--text); font-size: var(--text-ui); }
+.ib-lanes { display: flex; align-items: flex-start; gap: 16px; overflow-x: auto; padding: 4px 2px 16px; }
+.ib-lane { flex: 0 0 264px; display: flex; flex-direction: column; gap: 10px; padding: 10px 10px 14px; border-radius: var(--radius-xl); background: color-mix(in srgb, var(--text) 4%, var(--bg)); border: 1px solid color-mix(in srgb, var(--border) 70%, transparent); }
+.ib-lane-head { display: flex; align-items: center; gap: 6px; padding: 0 2px; font-weight: 600; font-size: var(--text-ui-lg); }
+.ib-lane-n { color: var(--faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.ib-lane-menu { margin-left: auto; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; padding: 2px 6px; border-radius: var(--radius-md); cursor: pointer; }
+.ib-lane-menu:hover { background: var(--bg-hover); color: var(--text); }
+.ib-stack { display: flex; flex-direction: column; gap: 12px; min-height: 64px; }
+.ib-lane-empty { border: 1.5px dashed var(--border); border-radius: var(--radius-lg); color: var(--faint); font-size: var(--text-sm); text-align: center; padding: 20px 8px; }
+.ib-addlane { flex: 0 0 110px; height: 96px; border: 1.5px dashed var(--border); border-radius: var(--radius-xl); background: none; color: var(--muted); font: 500 var(--text-ui) var(--font-ui); cursor: pointer; }
+.ib-addlane:hover { color: var(--text); border-color: var(--muted); }
+.ib-drop { height: 6px; border-radius: 3px; background: var(--accent); margin: -3px 0; }
+/* Hidden, not removed, while a sticky hovers: removing the element under the pointer cancels the drop. */
+.ib-stack:has(.ib-drop) .ib-lane-empty { display: none; }
+.ib-lane .ib-card { --paper: #fff3a8; --text: #3a3226; --muted: #6b5f4d; --faint: #8a7d6a; --border: rgba(58, 50, 38, .18); --bg2: var(--paper); --bg3: rgba(58, 50, 38, .08);
+  border: 0; border-radius: 3px 3px 14px 3px; background: var(--paper); color: var(--text); overflow: visible; box-shadow: 0 1px 2px rgba(0, 0, 0, .12), 0 4px 10px rgba(0, 0, 0, .14); cursor: grab; }
+.ib-lane .ib-card:hover { transform: translateY(-1px) rotate(-.4deg); box-shadow: 0 2px 3px rgba(0, 0, 0, .14), 0 8px 18px rgba(0, 0, 0, .2); }
+.ib-lane .ib-card.c-1 { --paper: #ffd0dc; } .ib-lane .ib-card.c-2 { --paper: #ffdcb0; } .ib-lane .ib-card.c-3 { --paper: #fff3a8; }
+.ib-lane .ib-card.c-4 { --paper: #d4f2c8; } .ib-lane .ib-card.c-5 { --paper: #cfe8ff; } .ib-lane .ib-card.c-6 { --paper: #e6d6ff; }
+.ib-lane .ib-card.is-picture, .ib-lane .ib-card.is-file { --paper: #fff; padding: 8px 8px 0; }
+.ib-lane .ib-card.new { box-shadow: 0 0 0 2px var(--accent), 0 4px 10px rgba(0, 0, 0, .14); }
+.ib-lane .ib-card.new::before { display: none; }
+.ib-lane .ib-card.sel { box-shadow: 0 0 0 2.5px var(--text), 0 4px 10px rgba(0, 0, 0, .14); background: var(--paper); }
+.ib-lane .ib-card.focus:focus-visible, .ib-lane .ib-card.focus:focus { box-shadow: 0 0 0 2px var(--accent), 0 4px 12px rgba(0, 0, 0, .18); }
+.ib-lane .ib-card.editing { cursor: text; transform: none; box-shadow: 0 0 0 2px var(--accent), 0 6px 16px rgba(0, 0, 0, .2); }
+.ib-lane .ib-card.dragging { opacity: .35; }
+.ib-lane .ib-text { aspect-ratio: auto; max-height: 15.5em; padding: 12px 13px 2px; white-space: normal; font-size: var(--text-ui); -webkit-mask-image: none; mask-image: none; }
+.ib-lane .ib-text.clipped { -webkit-mask-image: linear-gradient(#000 78%, transparent); mask-image: linear-gradient(#000 78%, transparent); }
+.ib-lane .ib-text > :first-child { margin-top: 0; } .ib-lane .ib-text > :last-child { margin-bottom: 0; }
+.ib-lane .ib-text h1, .ib-lane .ib-text h2, .ib-lane .ib-text h3 { font-size: 1.1em; margin: .3em 0; }
+.ib-lane .ib-edit { padding: 8px 6px 2px; font-size: var(--text-ui); }
+.ib-lane .ib-edit .cm-editor { background: transparent; }
+.ib-lane .ib-thumb { aspect-ratio: 4 / 3; border-radius: 2px; }
+.ib-lane .ib-file { aspect-ratio: 5 / 2; border-radius: 2px; }
+.ib-lane .ib-meta { border-top: 0; padding: 6px 12px 8px; }
+.ib-lane .is-picture .ib-meta, .ib-lane .is-file .ib-meta { padding: 6px 2px 8px; }
+.ib-tools { position: absolute; top: -13px; right: 8px; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 3px 7px; border-radius: 14px; background: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, .25); opacity: 0; transition: opacity var(--dur-fast); }
+.ib-lane .ib-card:hover .ib-tools, .ib-lane .ib-card.focus .ib-tools, .ib-lane .ib-card.sel .ib-tools, .ib-lane .ib-card:focus-within .ib-tools { opacity: 1; }
+.ib-lane .ib-card.editing .ib-tools, .ib-lane .ib-card.dragging .ib-tools { display: none; }
+.ib-pin { border: 0; background: none; padding: 0 2px; font-size: 13px; cursor: pointer; filter: grayscale(1); opacity: .6; }
+.ib-pin.on, .ib-pin:hover { filter: none; opacity: 1; }
+.ib-dot { width: 13px; height: 13px; padding: 0; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .2); background: var(--paper, #fff3a8); cursor: pointer; }
+.ib-dot.c-1 { --paper: #ffd0dc; } .ib-dot.c-2 { --paper: #ffdcb0; } .ib-dot.c-3 { --paper: #fff3a8; } .ib-dot.c-4 { --paper: #d4f2c8; } .ib-dot.c-5 { --paper: #cfe8ff; } .ib-dot.c-6 { --paper: #e6d6ff; }
+.ib-dot.plain { --paper: #fff3a8; background: linear-gradient(135deg, #fff3a8 45%, #fff 45%); }
+.ib-dot:hover { transform: scale(1.2); }
+.ib-lane .ib-check { position: static; width: 18px; height: 18px; border-radius: 5px; opacity: 1; margin-left: 2px; border-color: rgba(0, 0, 0, .3); background: #fff; color: #3a3226; font-size: 11px; }
+.ib-lane .ib-card.sel .ib-check { background: #3a3226; border-color: #3a3226; color: #fff; }
+
 /* ---------------------------------------------------------------- Settings */
 .backdrop:has(.settings-modal) { align-items: center; padding-top: 0; }
 .modal.settings-modal { width: min(980px, calc(100vw - 32px)); height: min(720px, calc(100vh - 48px)); max-height: none; overflow: hidden; border-radius: var(--radius-lg); }

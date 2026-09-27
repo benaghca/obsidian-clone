@@ -170,6 +170,7 @@ async function applyList(l, gen) {
     delete got[p];
     if (!v) continue;
     indexCanvas(p, v.content, v.mtime);
+    if (p === inboxBoardPath()) { boardFile = { mtime: v.mtime, text: v.content }; refreshInboxSoon(); } // the Inbox's sticky board
     if (p === S.cur && S.view === 'canvas' && !S.dirty && S.canvasDoc && v.mtime !== S.canvasDoc.mtime) loadCanvas(p, v.content, v.mtime, CinderCanvas.getView());
   }
   {
