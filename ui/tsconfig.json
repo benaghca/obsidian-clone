@@ -30,6 +30,7 @@
     "images.js",
     "graph.js",
     "canvas.js",
+    "inboxboard.js",
     "draw-render.js",
     "draw.js",
     "app/core.js",

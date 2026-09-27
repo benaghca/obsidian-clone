@@ -6,6 +6,7 @@ declare var CinderTemplater: any;
 declare var CinderTasks: any;
 declare var CinderBases: any;
 declare var CinderCanvas: any;
+declare var CinderInboxBoard: any;
 declare var CinderDraw: any;
 declare var CinderDrawRender: any;
 declare var CinderGraph: any;
