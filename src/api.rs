@@ -73,6 +73,7 @@ const PURIFY_JS: &str = include_str!("../ui/vendor/purify.min.js");
 const EDITOR_JS: &str = include_str!("../ui/vendor/editor.bundle.js");
 /// Fonts and data files served as-is from /vendor/.
 const VENDOR_FILES: &[(&str, &str, &[u8])] = &[
+    ("d3-force.bundle.js", "text/javascript", include_bytes!("../ui/vendor/d3-force.bundle.js")),
     ("Virgil.woff2", "font/woff2", include_bytes!("../ui/vendor/Virgil.woff2")),
     ("SymbolsNerdFontMono.woff2", "font/woff2", include_bytes!("../ui/vendor/SymbolsNerdFontMono.woff2")),
     ("JetBrainsMono-Regular.woff2", "font/woff2", include_bytes!("../ui/vendor/JetBrainsMono-Regular.woff2")),
@@ -732,7 +733,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/related.js", "text/javascript"), ("/search.js", "text/javascript"), ("/yaml.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/related.js", "text/javascript"), ("/search.js", "text/javascript"), ("/yaml.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/d3-force.bundle.js", "text/javascript"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

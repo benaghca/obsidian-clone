@@ -9,6 +9,7 @@ declare var CinderCanvas: any;
 declare var CinderDraw: any;
 declare var CinderDrawRender: any;
 declare var CinderGraph: any;
+declare var d3Force: any;
 declare var CinderImages: any;
 declare var CinderProps: any;
 declare var CinderDiff: any;

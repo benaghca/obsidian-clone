@@ -4,8 +4,24 @@
 window.CinderGraph = (() => {
   let canvas, ctx, opts;
   let nodes = [], edges = [], byId = new Map(), adj = new Map();
-  let current = null, visible = false, raf = 0, alpha = 0, dirty = true, fitted = false;
+  let current = null, visible = false, raf = 0, dirty = true, fitted = false;
   let view = { x: 0, y: 0, k: 1 };
+  // The layout: d3-force (its 3D build), stepped from our own animation frames. Links are soft and
+  // a grab warms the layout only a little, so linked notes trail a dragged one and a dropped note
+  // stays near where it lands. A new layout cools slowly enough to come fully to rest; one that
+  // stopped short would lurch the rest of the way the moment anything is grabbed.
+  const LINK = 90, REPEL = 400, GRAVITY = 0.02, LINK_SOFTNESS = 0.2, DRAG_HEAT = 0.1;
+  const SETTLE_TICKS = 1200, SETTLE_MS = 300, SETTLE_DECAY = 1 - Math.pow(0.001, 1 / SETTLE_TICKS);
+  const pull = n => adj.get(n)?.size ? GRAVITY : GRAVITY * 2.5; // unlinked notes stay closer in
+  const linkForce = d3Force.forceLink([]).distance(LINK);
+  const linkStrength = linkForce.strength(); // d3's own: weaker for links to well-linked notes
+  linkForce.strength((l, i, ls) => linkStrength(l, i, ls) * LINK_SOFTNESS);
+  const sim = d3Force.forceSimulation([], 2).stop().velocityDecay(0.3)
+    .force('link', linkForce)
+    .force('charge', d3Force.forceManyBody().strength(-REPEL).distanceMax(1200))
+    .force('x', d3Force.forceX(0).strength(pull))
+    .force('y', d3Force.forceY(0).strength(pull));
+  const DECAY = sim.alphaDecay();
   let hover = null, drag = null, pan = null, moved = false;
   // A clicked node stays selected: it and its links stay lit (opts.onSelect gets its details).
   let selected = null;
@@ -47,7 +63,7 @@ window.CinderGraph = (() => {
       const [mx, my] = mouse(e);
       moved = false;
       const n = pick(mx, my);
-      if (n) { drag = n; n.fx = n.x; n.fy = n.y; n.fz = n.z; drag.grab = mode3d ? { mx, my, p: toCam(n.x, n.y, n.z, basis()), s: proj(n, basis()).s } : null; alpha = Math.max(alpha, 0.3); }
+      if (n) { drag = n; n.fx = n.x; n.fy = n.y; n.fz = n.z; drag.grab = mode3d ? { mx, my, p: toCam(n.x, n.y, n.z, basis()), s: proj(n, basis()).s } : null; sim.alphaTarget(DRAG_HEAT); }
       else if (mode3d && !(e.shiftKey || e.button === 2)) { orbit = { x: mx, y: my, yaw: cam.yaw, pitch: cam.pitch }; pan = { x: mx, y: my, orbit: true }; }
       else pan = { x: mx, y: my, vx: view.x, vy: view.y, cam: { ...cam } };
       canvas.classList.add('dragging');
@@ -60,10 +76,10 @@ window.CinderGraph = (() => {
         // 3D: the node moves across the screen at its own depth.
         const g = drag.grab, B = basis();
         const w = fromCam(g.p[0] + (mx - g.mx) / g.s, g.p[1] + (my - g.my) / g.s, g.p[2], B);
-        drag.fx = w[0]; drag.fy = w[1]; drag.fz = w[2]; moved = true; alpha = Math.max(alpha, 0.3); kick();
+        drag.fx = w[0]; drag.fy = w[1]; drag.fz = w[2]; moved = true; kick();
       } else if (drag) {
         const [wx, wy] = toWorld(mx, my);
-        drag.fx = wx; drag.fy = wy; moved = true; alpha = Math.max(alpha, 0.3); kick();
+        drag.fx = wx; drag.fy = wy; moved = true; kick();
       } else if (pan && pan.orbit) {
         cam.yaw = orbit.yaw + (mx - orbit.x) * 0.008;
         cam.pitch = Math.max(-1.45, Math.min(1.45, orbit.pitch + (my - orbit.y) * 0.008));
@@ -90,7 +106,7 @@ window.CinderGraph = (() => {
       canvas.classList.remove('dragging');
       if (drag) {
         const n = drag; drag = null;
-        n.fx = n.fy = n.fz = null; n.grab = null;
+        n.fx = n.fy = n.fz = null; n.grab = null; sim.alphaTarget(0);
         // A click selects (again: clears); with "click opens" on, or Ctrl/Cmd-click, it opens.
         if (!moved) { if (opts.clickOpens?.() || e.ctrlKey || e.metaKey) opts.open(n.id, e); else select(selected === n ? null : n); }
       } else if (pan && !moved && selected) select(null); // a click on empty space
@@ -203,76 +219,19 @@ window.CinderGraph = (() => {
     current = d.current ? byId.get(d.current) : null;
     if (hover && !byId.has(hover.id)) hover = null;
     if (selected) { const again = byId.get(selected.id); selected = null; if (again) select(again); else opts.onSelect?.(null); }
+    sim.nodes(nodes);
+    linkForce.links(edges.map(([source, target]) => ({ source, target })));
     const fresh = refit || !fitted || old.size === 0;
-    alpha = 1;
-    if (fresh) {
-      // Settle most of the layout up-front so the first frame looks sane.
-      const steps = nodes.length > 2000 ? 60 : nodes.length > 600 ? 150 : 300;
-      for (let s = 0; s < steps; s++) tick();
-      fit(); fitted = true;
-    }
+    sim.alphaDecay(SETTLE_DECAY).alpha(fresh ? 1 : Math.max(sim.alpha(), 0.3));
+    if (fresh) { settle(); fit(); fitted = true; }
     dirty = true; kick();
   }
 
-  function tick() {
-    const n = nodes.length;
-    if (!n) return;
-    const rep = 900 * alpha;
-    if (n <= 700) {
-      for (let i = 0; i < n; i++) {
-        const a = nodes[i];
-        for (let j = i + 1; j < n; j++) {
-          const b = nodes[j];
-          let dx = b.x - a.x, dy = b.y - a.y, dz = mode3d ? b.z - a.z : 0, d2 = dx * dx + dy * dy + dz * dz;
-          if (d2 < 1) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = 1; }
-          const m = rep / d2;
-          a.vx -= dx * m; a.vy -= dy * m; b.vx += dx * m; b.vy += dy * m;
-          if (mode3d) { a.vz -= dz * m; b.vz += dz * m; }
-        }
-      }
-    } else {
-      // Grid-bucketed repulsion with a cutoff for big vaults.
-      const C = 160, grid = new Map();
-      for (const a of nodes) {
-        const key = Math.floor(a.x / C) + ',' + Math.floor(a.y / C);
-        (grid.get(key) || grid.set(key, []).get(key)).push(a);
-      }
-      for (const a of nodes) {
-        const gx = Math.floor(a.x / C), gy = Math.floor(a.y / C);
-        for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
-          const cell = grid.get((gx + ox) + ',' + (gy + oy));
-          if (!cell) continue;
-          for (const b of cell) {
-            if (b === a) continue;
-            let dx = b.x - a.x, dy = b.y - a.y, dz = mode3d ? b.z - a.z : 0, d2 = dx * dx + dy * dy + dz * dz;
-            if (d2 < 1) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = 1; }
-            const m = rep / d2 / 2;
-            a.vx -= dx * m; a.vy -= dy * m; b.vx += dx * m; b.vy += dy * m;
-            if (mode3d) { a.vz -= dz * m; b.vz += dz * m; }
-          }
-        }
-      }
-    }
-    const L = 55, K = 0.06 * alpha;
-    for (const [a, b] of edges) {
-      const dx = b.x - a.x, dy = b.y - a.y, dz = mode3d ? b.z - a.z : 0, d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;
-      const f = (d - L) / d * K;
-      a.vx += dx * f; a.vy += dy * f; b.vx -= dx * f; b.vy -= dy * f;
-      if (mode3d) { a.vz += dz * f; b.vz -= dz * f; }
-    }
-    const G = 0.012 * alpha;
-    for (const a of nodes) {
-      const g = adj.get(a).size ? G : G * 2.5;
-      a.vx -= a.x * g; a.vy -= a.y * g;
-      if (mode3d) a.vz = (a.vz || 0) - (a.z || 0) * g;
-      if (a.fx != null) { a.x = a.fx; a.y = a.fy; if (a.fz != null) a.z = a.fz; a.vx = a.vy = a.vz = 0; continue; }
-      a.vx *= 0.55; a.vy *= 0.55; a.vz = mode3d ? (a.vz || 0) * 0.55 : 0;
-      const sp = Math.hypot(a.vx, a.vy, a.vz);
-      if (sp > 40) { a.vx *= 40 / sp; a.vy *= 40 / sp; a.vz *= 40 / sp; }
-      a.x += a.vx; a.y += a.vy; a.z = mode3d ? (a.z || 0) + a.vz : 0;
-    }
-    alpha *= 0.985;
-    dirty = true;
+  // As much of the slow cool-down as fits in SETTLE_MS, so the first frame looks sane; the rest
+  // plays out on screen.
+  function settle() {
+    const t0 = performance.now();
+    for (let s = 0; s < SETTLE_TICKS && performance.now() - t0 < SETTLE_MS; s++) sim.tick();
   }
 
   function fit() {
@@ -414,14 +373,16 @@ window.CinderGraph = (() => {
     dirty = false;
   }
 
+  const hot = () => sim.alpha() >= sim.alphaMin() || sim.alphaTarget() > 0;
   function frame() {
     raf = 0;
     if (!visible) return;
-    if (alpha > 0.01) tick();
+    if (hot()) { sim.tick(); dirty = true; }
+    else sim.alphaDecay(DECAY); // settled: later warm-ups (a drag) cool at the usual pace
     const spinning = mode3d && spin && !drag && !pan;
     if (spinning) { cam.yaw += 0.0035; dirty = true; }
     if (dirty) draw();
-    if (alpha > 0.01 || drag || pan || spinning) kick();
+    if (hot() || drag || pan || spinning) kick();
   }
   function kick() { if (visible && !raf) raf = requestAnimationFrame(frame); }
 
@@ -442,9 +403,9 @@ window.CinderGraph = (() => {
       if (on === mode3d) return;
       mode3d = on;
       for (const n of nodes) { n.z = on ? (Math.random() - .5) * 300 : 0; n.vz = 0; }
-      alpha = 1;
-      for (let s = 0; s < (nodes.length > 1500 ? 60 : 180); s++) tick();
-      fit(); dirty = true; kick();
+      sim.numDimensions(on ? 3 : 2).force('z', on ? d3Force.forceZ(0).strength(pull) : null);
+      sim.alphaDecay(SETTLE_DECAY).alpha(1);
+      settle(); fit(); dirty = true; kick();
     },
     is3d: () => mode3d,
     setSpin(on) { spin = !!on; kick(); },

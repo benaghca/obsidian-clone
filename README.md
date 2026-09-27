@@ -67,6 +67,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `marked` 12.0.2 (a Markdown parser for reading view, MIT license)
   - `DOMPurify` 3.4.16 (an HTML sanitizer, Apache-2.0/MPL-2.0)
   - `KaTeX` 0.18.9 with its mhchem extension and fonts (math rendering, MIT, `ui/vendor/katex/`). It doesn't use `eval`, and "trusted" commands such as `\href` are off.
+  - `d3-force-3d` 3.0.6 (the graph view's force layout, in 2D and 3D, MIT) with its d3 helper packages (ISC and MIT), bundled into `ui/vendor/d3-force.bundle.js` from `ui/editor/force.js` (`npm run build:force` in `ui/editor`) and pinned in `ui/editor/package.json`. See `ui/vendor/d3-force.LICENSE`.
   - `MathJax` 3.2.2 (`tex-svg-full.js`, Apache-2.0, `ui/vendor/mathjax/`), which turns LaTeX into SVG for equations in drawings. It loads the first time a drawing needs it.
   - `@replit/codemirror-vim` 6.4.0 (Vim mode, MIT), bundled into `editor.bundle.js` and pinned in `ui/editor/package.json`.
   - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
@@ -256,7 +257,7 @@ ui/app/*.js        the app itself, one file per concern (core, vault index, navi
                    file tree, markdown, properties, commands, panels, graph, boot…); src/api.rs
                    joins them in order into /app.js, so they share one scope with no build step
 ui/editor/         editor.js (CodeMirror setup + live preview) and its build config
-ui/graph.js        graph view (canvas + force layout)
+ui/graph.js        graph view (canvas; the layout is d3-force-3d)
 ui/themes.js       colour themes (Catppuccin, Everforest, …)
 ui/templater.js    Templater-syntax template interpreter (tp.date, tp.file, tp.system, …)
 ui/draw.js         drawing editor (tools, selection, text, undo, clipboard, panels)
