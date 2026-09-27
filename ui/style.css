@@ -259,6 +259,10 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 .cm-codeinfo { color: var(--faint); }
 .cm-line.cm-hr { background: linear-gradient(var(--border), var(--border)) center / 100% 1px no-repeat; }
 .cm-line.cm-frontmatter { font-family: var(--font-mono); font-size: .85em; color: var(--muted); background: var(--bg2); padding: 0 12px !important; }
+/* The theme button shows the mode it switches to: a moon in light mode, a sun in dark mode. */
+[data-cmd=theme] .i-sun, html[data-theme=dark] [data-cmd=theme] .i-moon { display: none; }
+html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
+
 /* Rendered blocks in the editor are spaced with padding, never margins: CodeMirror measures a block
    widget without its margins, so a margin puts every line below it off by that much, and clicks and
    arrow keys there land on the wrong line. */
