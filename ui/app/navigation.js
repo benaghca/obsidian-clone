@@ -4,7 +4,7 @@
 function showView(v) {
   if (S.view === 'inbox' && v !== 'inbox') store('inboxSeen', Date.now()); // leaving the inbox: it's all been seen
   S.view = v;
-  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'tasks', 'inbox', 'empty']) $(`#view-${id}`).hidden = id !== v;
+  for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'tasks', 'flashcards', 'inbox', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
   if (v === 'graph') CinderGraph.show(); else CinderGraph.hide();
   if (v === 'drawing') CinderDraw.show(); else CinderDraw.hide();

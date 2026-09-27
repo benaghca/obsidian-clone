@@ -43,6 +43,7 @@
     "app/bases.js",
     "app/tasks.js",
     "app/inbox.js",
+    "app/flashcards.js",
     "app/markdown.js",
     "app/file-tree.js",
     "app/files.js",

@@ -1,7 +1,7 @@
 /* Cinder app — tab groups. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.)
  *
  * A tab can hold a second file, shown in the split pane on its right. Its `key` is the left pane (a
- * file, ':graph', ':tasks', ':inbox' or null) and its `split` is the right pane's file, or null. A
+ * file, ':graph', ':tasks', ':flashcards', ':inbox' or null) and its `split` is the right pane's file, or null. A
  * tab with a `split` is a group. Only plain functions over tabs live here, with no page access, so
  * ui/test/tabgroups.test.js can load this file on its own. The callers pass `exists(path)`,
  * `canSplit(path)` (can the split pane show it) and `make(key)` (a new ordinary tab). */

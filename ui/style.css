@@ -619,6 +619,40 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .rb { position: relative; }
 .rb-badge { position: absolute; top: 1px; right: 0; min-width: 15px; height: 15px; padding: 0 4px; border-radius: var(--radius-md); background: var(--danger); color: #fff; font-size: var(--text-2xs); line-height: 15px; font-weight: 600; }
 #view-tasks { overflow: hidden; }
+
+/* Flashcards */
+#view-flashcards { overflow: auto; }
+.fc-decks, .fc-review, .fc-done { max-width: 760px; margin: 0 auto; padding: 36px 28px 60px; }
+.fc-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 18px; }
+.fc-head h2, .fc-done h2 { margin: 0; }
+.fc-cols, .fc-deck { display: grid; grid-template-columns: 1fr 64px 64px; gap: 8px; align-items: center; }
+.fc-cols { color: var(--faint); font-size: 12px; padding: 0 12px 6px; border-bottom: 1px solid var(--border); margin-bottom: 4px; }
+.fc-cols span + span, .fc-due, .fc-new { text-align: right; font-variant-numeric: tabular-nums; }
+.fc-deck { padding: 9px 12px 9px calc(12px + var(--depth) * 20px); border-radius: var(--radius-sm); cursor: pointer; outline: none; }
+.fc-deck:hover, .fc-deck:focus-visible { background: var(--bg-hover); }
+.fc-due { color: var(--accent); font-weight: 600; }
+.fc-new { color: var(--muted); }
+.fc-due.zero, .fc-new.zero { color: var(--faint); font-weight: normal; }
+.fc-empty, .fc-note { color: var(--muted); margin-top: 18px; }
+.fc-bar { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; color: var(--muted); }
+.fc-title { flex: 1; font-weight: 600; color: var(--text); }
+.fc-count { font-variant-numeric: tabular-nums; }
+.fc-card { border: 1px solid var(--border); border-radius: 10px; padding: 26px 30px; min-height: 180px; font-size: 1.1em; }
+.fc-back:not([hidden]) { border-top: 1px dashed var(--border); margin-top: 22px; padding-top: 22px; }
+.fc-front[hidden] + .fc-back { border-top: 0; margin-top: 0; padding-top: 0; }
+.fc-card > div > :first-child { margin-top: 0; }
+.fc-card > div > :last-child { margin-bottom: 0; }
+.fc-actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin: 20px 0; }
+.fc-actions .btn { min-width: 120px; }
+.fc-actions kbd { margin-left: 6px; opacity: .55; font-size: .85em; }
+.fc-again { border-color: var(--c-red); }
+.fc-hard { border-color: var(--c-yellow); }
+.fc-good { border-color: var(--accent); }
+.fc-easy { border-color: var(--c-green); }
+.fc-foot { display: flex; gap: 8px; align-items: center; }
+.fc-where { margin-left: auto; color: var(--faint); font-size: 12px; }
+.fc-done { text-align: center; }
+.fc-done p { color: var(--muted); margin: 12px 0 20px; }
 .tk-app { display: flex; height: 100%; min-height: 0; }
 .tk-nav { width: 210px; flex: none; overflow-y: auto; padding: var(--space-5) var(--space-2) var(--space-5) var(--space-3); border-right: 1px solid var(--border); display: flex; flex-direction: column; gap: 1px; }
 .tk-nav h5 { margin: var(--space-4) 10px var(--space-1); font-size: var(--text-xs); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); }

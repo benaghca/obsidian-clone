@@ -191,7 +191,7 @@ async function applyList(l, gen) {
   // Views built from the notes redraw now that S.notes holds the new contents.
   if (S.view === 'canvas' && (changed.length || structural)) CinderCanvas.refreshFiles();
   if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
-  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); refreshInboxSoon(); }
+  if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); refreshFlashcards(); refreshInboxSoon(); }
   // Files deleted outside Cinder: groups follow, as for deletes made inside it (deletePath).
   if (removed.length && S.tabs.length) { groupsAfterDelete(S.tabs, p => S.files.has(p)); saveTabs(); renderTabs(); }
   if (S.cur && !S.files.has(S.cur)) {

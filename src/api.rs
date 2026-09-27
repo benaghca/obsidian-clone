@@ -25,6 +25,7 @@ const APP_JS: &str = concat!(
     include_str!("../ui/app/bases.js"),
     include_str!("../ui/app/tasks.js"),
     include_str!("../ui/app/inbox.js"),
+    include_str!("../ui/app/flashcards.js"),
     include_str!("../ui/app/markdown.js"),
     include_str!("../ui/app/file-tree.js"),
     include_str!("../ui/app/files.js"),
@@ -59,6 +60,7 @@ const TEMPLATER_JS: &str = include_str!("../ui/templater.js");
 const CANVAS_JS: &str = include_str!("../ui/canvas.js");
 const BASES_JS: &str = include_str!("../ui/bases.js");
 const TASKS_JS: &str = include_str!("../ui/tasks.js");
+const FLASHCARDS_JS: &str = include_str!("../ui/flashcards.js");
 const DIFF_JS: &str = include_str!("../ui/diff.js");
 const RELATED_JS: &str = include_str!("../ui/related.js");
 const SEARCH_JS: &str = include_str!("../ui/search.js");
@@ -178,6 +180,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/canvas.js" => return out(200, "text/javascript", CANVAS_JS.into()),
             "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
             "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
+            "/flashcards.js" => return out(200, "text/javascript", FLASHCARDS_JS.into()),
             "/diff.js" => return out(200, "text/javascript", DIFF_JS.into()),
             "/related.js" => return out(200, "text/javascript", RELATED_JS.into()),
             "/search.js" => return out(200, "text/javascript", SEARCH_JS.into()),
@@ -733,7 +736,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/related.js", "text/javascript"), ("/search.js", "text/javascript"), ("/yaml.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/d3-force.bundle.js", "text/javascript"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/flashcards.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/related.js", "text/javascript"), ("/search.js", "text/javascript"), ("/yaml.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/d3-force.bundle.js", "text/javascript"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");

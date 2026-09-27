@@ -1,7 +1,7 @@
 /* Cinder app — tabs. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
 // ============================================================ tabs
 
-// Each tab shows one thing: a file, the graph (':graph'), tasks (':tasks'), or nothing (null).
+// Each tab shows one thing: a file, the graph (':graph'), tasks (':tasks'), flashcards (':flashcards'), or nothing (null).
 // A tab has its own back/forward history (swapped in and out of S.hist), and a note keeps its
 // editor state, undo history included, while it's open in a tab. A tab can also hold a second
 // file on the right, its `split` (see tab-groups.js), shown in the split pane.
@@ -11,8 +11,8 @@ const closedTabs = [];      // { key, split }, for "Reopen closed tab"
 let tabSeq = 0;
 const newTabObj = key => ({ id: ++tabSeq, key, split: null, splitMode: 'edit', hist: key ? [key] : [], histIdx: key ? 0 : -1 });
 const curTab = () => S.tabs[S.tab];
-const viewKey = () => S.view === 'graph' ? ':graph' : S.view === 'tasks' ? ':tasks' : S.view === 'inbox' ? ':inbox' : S.view === 'empty' ? null : S.cur;
-const tabName = k => k == null ? 'New tab' : k === ':graph' ? 'Graph' : k === ':tasks' ? 'Tasks' : k === ':inbox' ? 'Inbox' : displayName(k);
+const viewKey = () => S.view === 'graph' ? ':graph' : S.view === 'tasks' ? ':tasks' : S.view === 'flashcards' ? ':flashcards' : S.view === 'inbox' ? ':inbox' : S.view === 'empty' ? null : S.cur;
+const tabName = k => k == null ? 'New tab' : k === ':graph' ? 'Graph' : k === ':tasks' ? 'Tasks' : k === ':flashcards' ? 'Flashcards' : k === ':inbox' ? 'Inbox' : displayName(k);
 
 // The page changed what it shows (see showView): the current tab follows.
 function syncTab() {
@@ -39,6 +39,7 @@ async function activateTab(i, opts = {}) {
 async function openKey(k, opts = {}) {
   if (k === ':graph') return openGraph(false);
   if (k === ':tasks') return openTasks();
+  if (k === ':flashcards') return openFlashcards();
   if (k === ':inbox') return openInbox();
   if (k && S.files.has(k)) return openPath(k, { push: false, ...opts });
   flushDocViews(); await save(); rememberPos();

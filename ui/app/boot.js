@@ -107,6 +107,7 @@ async function boot() {
   watchVault();
   setTimeout(() => syncSearchIndex(), 1500); // ready before the first search
   updateTaskBadge();
+  updateCardBadge();
   updateInboxBadge();
   loadBookmarks();
   api('/api/info').then(i => { S.vaultPath = i.vault; }).catch(() => { });
