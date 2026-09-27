@@ -113,6 +113,17 @@ const saved = () => {
   await page.fill('.ib-combine [name=t]', 'Crater visit'); await page.click('.ib-combine .btn.primary'); await sleep(1500);
   assert(/## Crater rim\n\nRim is steeper/.test(fs.readFileSync(path.join(VAULT, 'Crater visit.md'), 'utf8')), 'with the notes as sections and the photos embedded');
 
+  console.log('jotting from anywhere');
+  await page.evaluate(() => openPath('Trip log.md')); await sleep(500);
+  await page.keyboard.press('Control+Shift+j'); await sleep(250);
+  assert(await page.$('.ib-jot textarea:focus'), 'Ctrl+Shift+J opens a jot box from a note');
+  await page.keyboard.type('Buy more sample bags'); await page.keyboard.press('Enter'); await sleep(700);
+  assert(!(await page.$('.ib-jot')) && await page.evaluate(() => S.view === 'note' && S.cur === 'Trip log.md'), 'Enter saves it and leaves you where you were');
+  const jotted = fs.readdirSync(path.join(VAULT, 'Inbox')).filter(f => /^\d{4}-\d\d-\d\d \d{4}( \d+)?\.md$/.test(f)).find(f => fs.readFileSync(path.join(VAULT, 'Inbox', f), 'utf8').startsWith('Buy more sample bags'));
+  assert(jotted, 'as a note in the inbox');
+  await page.click('[data-cmd=inbox]'); await sleep(500);
+  assert((await lanes())[1][1][0] === jotted, 'at the top of New');
+
   console.log('arrivals and a damaged board');
   await page.click('[data-cmd=inbox]'); await sleep(500);
   const before = boardText();

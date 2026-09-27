@@ -180,10 +180,11 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - **New note** from a view fills in the view's simple filters (tag, folder, `status == "todo"`), and on a board, the column you clicked it in.
   - Embed a base in a note with `![[Books.base]]` or `![[Books.base#Board]]`. `` ```base `` blocks render live in both live preview and reading view, and view changes you make there are written back into the block.
   - Expressions run in a small built-in interpreter, never as JavaScript.
-- **Inbox**: a triage desk for things you capture away from your desk. It shows what lands in the vault's `Inbox/` folder, whether from Obsidian on your phone, OneDrive's camera upload or scans, typing at the top, or dropping files. The folder can be changed in Settings.
-  - Items are grouped by the day they were made (not the day they synced), newest first. Photos show as thumbnails and notes as their first lines. A dot marks what arrived since your last visit, and the ribbon button counts what's waiting.
-  - **Make a note from this day** turns a day's items into one note, with photos embedded and notes as sections in the order they were made. It offers to move the photos to attachments and clear the scraps.
-  - Or select items (click the corner, Ctrl/Shift-click, or **Space**) and **make a note**, **add them to an existing note**, **file them to a folder** or **delete** them. Keys: arrows, **Enter** opens, **C**/**A**/**M**/**Del**.
+- **Inbox**: a sticky-note board for things you jot or capture away from here. Everything in the vault's `Inbox/` folder is a sticky, whether it came from Obsidian on your phone, OneDrive's camera upload or scans, typing at the top, **Ctrl+Shift+J** from anywhere, or dropping files. The folder can be changed in Settings.
+  - Notes show their text on coloured paper, and photos show as polaroids. Stickies sit in lanes: **📌 Pinned**, **New** (where everything arriving lands, newest first), and lanes you add with **+ Lane** and rename, move or delete from the lane's ⋯ menu. An orange outline marks what arrived since your last visit, and the ribbon button counts what's in New.
+  - Drag a sticky to reorder it or move it to another lane. Hover it for **📌** (pin or unpin), six paper colours and ✓ (select). Click a note sticky to edit it right there (it saves as you type, and **Esc** finishes); double-click opens it as a note.
+  - The arrangement is kept in `Inbox/Inbox.canvas`, a normal canvas file, so Obsidian shows the same board. It's only written when you arrange something, so new arrivals don't change it.
+  - Select stickies (✓, Ctrl/Shift-click, or **Space**) to **make a note** from them (photos embedded and notes as sections, in the order they were made), **add them to an existing note**, **file them to a folder** or **delete** them. A lane's ⋯ menu can make a note from the whole lane. Keys: arrows (across lanes too), **Enter** edits or opens, **P** pins, **C**/**A**/**M**/**Del**.
   - At the bottom, *Photos no note uses yet* lists images elsewhere in the vault that nothing links to.
 - **Tasks** across the whole vault, in the format of Obsidian's Tasks plugin, so existing Tasks vaults work as they are. Tasks use `📅` due, `⏳` scheduled, `🛫` start and `✅` done dates, `🔺⏫🔼🔽⏬` priorities and `🔁` recurrence. Dataview-style `[due:: …]` fields are read too.
   - **The Tasks view** (**Ctrl+Shift+T**, or the checkbox icon, which shows how many tasks are due) has lists down the side, each with a count:
@@ -271,6 +272,7 @@ ui/canvas.js       canvas editor and JSON Canvas files
 ui/yaml.js         YAML for frontmatter and .base files: one parser for the index, Properties and Bases
 ui/bases.js        bases: expressions, queries, table/cards/list/board views
 ui/tasks.js        tasks: Tasks-plugin format, recurrence, quick add, Tasks view, queries
+ui/inboxboard.js   the Inbox's sticky board: lanes read from and written to Inbox.canvas
 ui/flashcards.js   flashcards: SR-plugin cards, scheduling and <!--SR--> comments (the view is ui/app/flashcards.js)
 ui/diff.js         line and word diffs (Myers), for version history and conflicting copies
 ui/related.js      related notes: TF-IDF over the words, tags and links notes share

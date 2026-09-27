@@ -157,6 +157,7 @@ const APP_COMMANDS = [
   ['recent-back', 'Switch to a recent file (backwards)', MAC ? 'Ctrl-Shift-Tab' : 'Mod-Shift-Tab', () => recentSwitcher(-1)],
   ['toggle-right', 'Toggle right sidebar', 'Mod-Shift-\\', () => toggleSide('right')],
   ['tasks', 'Open tasks', 'Mod-Shift-t', () => openTasks()],
+  ['jot', 'Jot a sticky…', 'Mod-Shift-j', () => jotSticky()],
   ['flashcards', 'Review flashcards', 'Mod-Shift-y', () => openFlashcards()],
   ['flashcards-note', 'Review flashcards in this note', '', () => S.cur && isMd(S.cur) ? openFlashcards({ note: S.cur }) : toast('Open a note first')],
   ['inbox', 'Open inbox', 'Mod-Shift-i', () => openInbox()],

@@ -1218,6 +1218,9 @@ body.presenting #main { border: 0; }
 .ib-lane-empty { border: 1.5px dashed var(--border); border-radius: var(--radius-lg); color: var(--faint); font-size: var(--text-sm); text-align: center; padding: 20px 8px; }
 .ib-addlane { flex: 0 0 110px; height: 96px; border: 1.5px dashed var(--border); border-radius: var(--radius-xl); background: none; color: var(--muted); font: 500 var(--text-ui) var(--font-ui); cursor: pointer; }
 .ib-addlane:hover { color: var(--text); border-color: var(--muted); }
+.ib-jot { min-width: min(440px, 80vw); }
+.ib-jot textarea { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; line-height: 1.45; }
+.ib-jot .ib-hint { display: block; margin-top: 6px; }
 .ib-drop { height: 6px; border-radius: 3px; background: var(--accent); margin: -3px 0; }
 /* Hidden, not removed, while a sticky hovers: removing the element under the pointer cancels the drop. */
 .ib-stack:has(.ib-drop) .ib-lane-empty { display: none; }

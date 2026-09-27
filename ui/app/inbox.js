@@ -220,6 +220,23 @@ function laneMenu(id, btn) {
     ] : []),
   ]);
 }
+// Ctrl+Shift+J from anywhere: jot a sticky into New without leaving what you're doing.
+function jotSticky() {
+  const back = modal(`<div class="form ib-jot"><h3>Jot a sticky</h3><textarea class="field" rows="4" spellcheck="true" placeholder="A thought, a reminder…"></textarea><div class="ib-hint">Enter adds it to the Inbox (New) · Shift+Enter for a new line · Esc cancels</div></div>`);
+  const ta = $('textarea', back);
+  ta.focus();
+  const close = () => back.remove();
+  ta.addEventListener('keydown', e => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      const text = ta.value;
+      close();
+      if (text.trim()) inboxCapture(text).then(() => { if (S.view !== 'inbox') toast('Added to the Inbox'); });
+    }
+  });
+  back.addEventListener('mousedown', e => { if (e.target === back) close(); });
+}
 const togglePin = p => { const l = CinderInboxBoard.laneOf(currentBoard(), p); if (l) changeBoard(l.kind === 'pinned' ? { unpin: p } : { pin: p }); };
 
 // ------------------------------------------------------------ acting on items
