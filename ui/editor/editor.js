@@ -1165,6 +1165,12 @@ function create(parent, hooks, opts = {}) {
     EditorView.domEventHandlers({
       paste(e, view) {
         const files = [...(e.clipboardData?.files || [])];
+        // WebKitGTK (the Linux app) pastes an image as an empty event: hooks.clipboardImage reads it.
+        if (!files.length && !e.clipboardData?.types.length && hooks.clipboardImage && hooks.onFiles) {
+          e.preventDefault();
+          hooks.clipboardImage().then(f => f && hooks.onFiles([f], true));
+          return true;
+        }
         if (!files.length) return false;
         e.preventDefault();
         if (!hooks.onFiles) return false;

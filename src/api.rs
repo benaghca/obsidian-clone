@@ -258,6 +258,11 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             crate::screenshot::Shot::Cancelled => out(204, "text/plain", Vec::new()),
             crate::screenshot::Shot::NoTool(msg) => json_out(501, json!({ "error": msg })),
         }),
+        ("GET", "/api/clipboard-image") => Ok(match crate::clipboard::image() {
+            crate::clipboard::Clip::Image(ctype, bytes) => out(200, ctype, bytes),
+            crate::clipboard::Clip::None => out(204, "text/plain", Vec::new()),
+            crate::clipboard::Clip::NoTool(msg) => json_out(501, json!({ "error": msg })),
+        }),
         _ => Err((404, "no such endpoint".into())),
     };
     result.unwrap_or_else(|(code, msg)| json_out(code, json!({ "error": msg })))
@@ -284,7 +289,7 @@ fn screenshot(ctx: &Ctx, screen: bool, hide: bool, delay_s: u64) -> crate::scree
 /// Requests that can take a long time (waiting on the user), which transports should answer
 /// off their main thread.
 pub fn is_slow(path: &str) -> bool {
-    path == "/api/screenshot" || path == "/api/pick-folder" || path == "/api/changes"
+    path == "/api/screenshot" || path == "/api/pick-folder" || path == "/api/changes" || path == "/api/clipboard-image"
 }
 
 fn str_field(v: &Value, k: &str) -> Result<String, (u16, String)> {

@@ -194,6 +194,7 @@ CinderCanvas.init($('#view-canvas'), {
     const files = [...S.files.keys()].filter(p => kind === 'note' ? isMd(p) && !isDrawing(p) : !isMd(p) || isDrawing(p));
     return picker({ placeholder: kind === 'note' ? 'Add a note to the canvas…' : 'Add an image or file to the canvas…', items: q => rank(files, q, displayName).map(p => ({ main: displayName(p), sub: dirname(p), value: p })) });
   },
+  clipboardImage: () => clipboardImage(),
   importFile: async f => {
     const path = uniquePath(cfg.attachFolder, f.name || `Pasted image ${Date.now()}.png`);
     try { await writeFile(path, f); } catch (e) { toast('Import failed: ' + e.message); return null; }

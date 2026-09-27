@@ -243,6 +243,20 @@ document.addEventListener('click', e => {
   viewImages(img.dataset.path, readingImages(img));
 });
 
+// The clipboard's image, read by the desktop app: WebKitGTK (the Linux window) gives the page an
+// empty paste event when the clipboard holds one. Null when there's no image.
+async function clipboardImage() {
+  if (!NATIVE) return null;
+  try {
+    const r = await fetch('/api/clipboard-image', { headers: { 'X-Cinder-Token': TOKEN } });
+    if (r.status === 501) toast('Couldn’t paste the image: ' + ((await r.json().catch(() => ({}))).error || r.statusText), 5000);
+    if (r.status !== 200) return null;
+    const blob = await r.blob(), now = new Date();
+    const ext = (blob.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    return new File([blob], `Pasted image ${fmtDate(now, 'YYYYMMDDHHmm')}${String(now.getSeconds()).padStart(2, '0')}.${ext}`, { type: blob.type });
+  } catch { return null; }
+}
+
 // Insert screenshot: the system's region picker (via the app), else the browser's screen capture.
 // o.screen: the whole screen rather than a region; o.annotate: open it in a drawing right away
 // (also Settings → "After a screenshot"). The desktop app can step out of the way first, and

@@ -49,6 +49,8 @@ async function api(path, opts = {}) {
 }
 
 async function apiRaw(path, opts) {
+  // WebKitGTK (the Linux app) crashes reading a Blob request body, so send its bytes instead.
+  if (opts.body instanceof Blob) opts = { ...opts, body: await opts.body.arrayBuffer() };
   const r = await fetch(path, { ...opts, headers: { 'X-Cinder-Token': TOKEN, ...(opts.headers || {}) } });
   if (!r.ok) {
     let msg = r.statusText;
@@ -190,6 +192,7 @@ function editorHooks(from, extra) {
   return {
     resolve: name => resolveLink(name, from()),
     rawUrl: p => rawUrl(p),
+    clipboardImage: () => clipboardImage(),
     imageUrl: src => { const t = /^[a-z][a-z0-9+.-]*:/i.test(src) ? null : resolveLink(safeDecode(src), from()); return t ? rawUrl(t) : null; },
     follow: (name, sub) => followLink(name, sub, from()),
     openUrl: url => window.open(url, '_blank', 'noopener'),

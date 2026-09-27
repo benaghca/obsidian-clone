@@ -863,7 +863,14 @@
       return;
     }
     const text = e.clipboardData?.getData('text/plain');
-    if (!text) return;
+    if (!text) {
+      // WebKitGTK (the Linux app) pastes an image as an empty event: hooks.clipboardImage reads it.
+      if (e.clipboardData?.types.length) return;
+      const f = await hooks.clipboardImage?.();
+      const p = f && await hooks.importFile?.(f);
+      if (p) addFileNode(p, pointerWorld);
+      return;
+    }
     e.preventDefault();
     try { const p = JSON.parse(text); if (p && Array.isArray(p.nodes) && p.nodes.length) return pastePayload(p); } catch { }
     if (/^https?:\/\/\S+$/.test(text.trim())) return addNode({ type: 'link', url: text.trim(), width: 360, height: 120 }, pointerWorld);
