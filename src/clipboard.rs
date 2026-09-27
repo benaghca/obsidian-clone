@@ -3,6 +3,7 @@
 //! whichever app owns the clipboard — possibly this one's own window — so the transports run it
 //! off their main thread (see `api::is_slow`).
 
+#[cfg_attr(not(all(unix, not(target_os = "macos"))), allow(dead_code))]
 pub enum Clip {
     /// Content type and bytes.
     Image(&'static str, Vec<u8>),
