@@ -243,6 +243,8 @@ document.addEventListener('dragstart', e => {
   dragPane = g.dataset.pane;
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('application/x-cinder-pane', dragPane);
+  // WebKitGTK only tracks a drag inside the page that carries some text, as tabs and tree rows do.
+  e.dataTransfer.setData('text/plain', tabName(dragPane === 'left' ? curTab()?.key : curTab()?.split));
 });
 // A grip's drag ends on the grip, outside the tab bar, so the tab bar's own dragend never clears its markers.
 document.addEventListener('dragend', () => { dragPane = null; $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); });
