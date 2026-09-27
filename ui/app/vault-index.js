@@ -192,7 +192,14 @@ async function applyList(l, gen) {
   if (S.view === 'canvas' && (changed.length || structural)) CinderCanvas.refreshFiles();
   if (S.view === 'base' && (changed.length || structural)) baseView?.refresh();
   if (changed.length || structural) { if (S.view === 'tasks') tasksView?.refresh(); updateTaskBadge(); refreshInboxSoon(); }
-  if (S.cur && !S.files.has(S.cur)) { S.cur = null; S.dirty = false; showEmpty(); }
+  // Files deleted outside Cinder: groups follow, as for deletes made inside it (deletePath).
+  if (removed.length && S.tabs.length) { groupsAfterDelete(S.tabs, p => S.files.has(p)); saveTabs(); renderTabs(); }
+  if (S.cur && !S.files.has(S.cur)) {
+    S.dirty = false;
+    const k = curTab()?.key;
+    if (k && k !== S.cur && S.files.has(k)) await openPath(k); else { S.cur = null; showEmpty(); }
+  }
+  if (removed.length && S.tabs.length) syncSplitPane();
   if (structural) { renderTree(); updateConflictBar(); }
   refreshPanels();
   return true;

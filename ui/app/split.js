@@ -49,12 +49,13 @@ function splitDom() {
 // A partner it replaces gets a tab of its own.
 async function openSplit(path, { focus = false } = {}) {
   if (!path) {
-    const files = [...S.files.keys()];
+    const files = [...S.files.keys()].filter(canSplit);
     path = await picker({ placeholder: 'Open beside this one…', items: q => rank(files, q, displayName).map(p => ({ main: displayName(p), sub: dirname(p), value: p })) });
     if (!path) return;
     focus = true;
   }
   if (!S.files.has(path)) return toast('Not found: ' + path);
+  if (!canSplit(path)) return toast('This can’t be shown in the split pane');
   const t = curTab();
   if (!t) return;
   if (t.split !== path) t.splitMode = 'edit';
@@ -236,7 +237,8 @@ document.addEventListener('dragstart', e => {
   e.dataTransfer.effectAllowed = 'move';
   e.dataTransfer.setData('application/x-cinder-pane', dragPane);
 });
-document.addEventListener('dragend', () => { dragPane = null; });
+// A grip's drag ends on the grip, outside the tab bar, so the tab bar's own dragend never clears its markers.
+document.addEventListener('dragend', () => { dragPane = null; $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); });
 
 // A pane's grip dropped on the tab bar at `at`: that pane's note gets its own tab there.
 async function detachByDrop(side, at) {

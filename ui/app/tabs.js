@@ -146,7 +146,7 @@ $('#tabbar').addEventListener('contextmenu', e => {
     null,
     ['Duplicate tab', () => { activateTab(i).then(() => openInNewTab(t.key)); }],
     ...(t.split ? [['Separate tabs', () => activateTab(i).then(() => separateSplit())], ['Swap panes', () => activateTab(i).then(() => swapSplit())]] : []),
-    ...(t.key && !t.key.startsWith(':') ? [['Open to the right', () => openSplit(t.key)]] : []),
+    ...(canSplit(t.key) ? [['Open to the right', () => openSplit(t.key)]] : []),
     ...(t.key && !t.key.startsWith(':') ? [['Reveal in file tree', () => revealInTree(t.key)], ['Copy path', () => navigator.clipboard?.writeText(t.key).then(() => toast('Path copied'))]] : []),
   ]);
 });

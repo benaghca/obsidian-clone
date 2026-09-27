@@ -274,7 +274,7 @@ document.addEventListener('click', e => {
     e.preventDefault();
     // Ctrl+Alt+click: the other pane. From the split pane the other pane is the main one, where links open anyway.
     const split = e.altKey && (e.ctrlKey || e.metaKey) && !a.closest('#split');
-    if (a.dataset.path) return split ? openSplit(a.dataset.href) : openPath(a.dataset.href);
+    if (a.dataset.path) return split && canSplit(a.dataset.href) ? openSplit(a.dataset.href) : openPath(a.dataset.href);
     return followLink(a.dataset.href, a.dataset.sub, a.dataset.from || S.cur, { split });
   }
   const tg = e.target.closest('a.tag');

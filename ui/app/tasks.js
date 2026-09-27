@@ -214,12 +214,12 @@ function updateHistButtons() {
   $('[data-cmd=forward]').disabled = S.histIdx >= S.hist.length - 1;
 }
 
-// `split`: open it in the split pane, beside this note (Ctrl+Alt+click). A link to a note that
-// doesn't exist yet creates it and opens it here either way.
+// `split`: open it in the split pane, beside this note (Ctrl+Alt+click). A file the split pane
+// can't show, or a note that doesn't exist yet, opens here instead.
 async function followLink(name, sub, from, { split = false, ...opts } = {}) {
   const target = resolveLink(name, from);
   if (target) {
-    if (split) return openSplit(target);
+    if (split && canSplit(target)) return openSplit(target);
     if (target === S.cur && sub) return scrollToHeading(sub);
     return openPath(target, { heading: sub || undefined });
   }

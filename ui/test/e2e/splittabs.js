@@ -18,6 +18,10 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   w('Old/Ref.md', '# Ref\n');
   w('notes.txt', 'plain text\n');
   w('pic.png', fs.readFileSync(FIX + '/red.png'));
+  w('TxtLink.md', '# TxtLink\n\nSee [[notes.txt]].\n');
+  w('Ext1.md', '# Ext1\n');
+  w('Ext2.md', '# Ext2\n');
+  w('Ext3.md', '# Ext3\n');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1400, height: 850 } });
   const errors = [];
@@ -169,6 +173,30 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.evaluate(() => { curTab().splitMode = 'read'; return showSplit(); }); await sleep(400);
   await page.click('#split a.internal-link', { modifiers: ['Control', 'Alt'] }); await sleep(600);
   assert(await page.evaluate(() => S.cur) === 'Sources.md' && await shown() === 'Links.md', 'from the right pane, Ctrl+Alt+click opens the link on the left');
+
+  // Final review fixes.
+  // Only files the split pane can show become partners; Ctrl+Alt+click on another opens it on the left.
+  await reset([['Draft.md', null]]);
+  await page.evaluate(() => openSplit('notes.txt')); await sleep(400);
+  assert(same(await tabs(), [['Draft.md', null]]) && await shown() === null, "Open to the right won't pair a file the split pane can't show");
+  await reset([['TxtLink.md', null]]);
+  await page.evaluate(() => setMode('read')); await sleep(300);
+  await page.click('#preview a.internal-link', { modifiers: ['Control', 'Alt'] }); await sleep(600);
+  assert(same(await tabs(), [['notes.txt', null]]), "Ctrl+Alt+click on a file the split pane can't show opens it on the left instead");
+  // A grip dragged over the tab bar and dropped elsewhere leaves no drop markers.
+  await reset([['Draft.md', 'Sources.md'], ['Extra.md', null]]);
+  const edge = await barEdge(1, true);
+  await dragFrom(await gripAt('#split .pane-grip')); await moveTo(edge); await moveTo({ x: edge.x - 8, y: edge.y }); // dragover follows dragenter on the next move
+  const marked = await page.$$eval('#tabbar .drop-before, #tabbar .drop-after', x => x.length);
+  await moveTo(await paneAt(0.25)); await page.mouse.up(); await sleep(300);
+  assert(marked > 0 && await page.$$eval('#tabbar .drop-before, #tabbar .drop-after', x => x.length) === 0, 'a grip drag that ends elsewhere leaves no drop markers on the tab bar');
+  // Files deleted outside Cinder: groups follow as they do for deletes made inside it.
+  await reset([['Ext1.md', 'Ext2.md']]);
+  fs.unlinkSync(path.join(VAULT, 'Ext2.md')); await sleep(2800);
+  assert(same(await tabs(), [['Ext1.md', null]]) && await shown() === null, 'a partner deleted outside Cinder leaves an ordinary tab');
+  await reset([['Ext3.md', 'Ext1.md']]);
+  fs.unlinkSync(path.join(VAULT, 'Ext3.md')); await sleep(2800);
+  assert(same(await tabs(), [['Ext1.md', null]]) && await page.evaluate(() => S.cur) === 'Ext1.md' && await shown() === null, 'a left note deleted outside Cinder hands over to its partner');
 
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
