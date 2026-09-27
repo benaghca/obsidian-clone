@@ -717,7 +717,29 @@ const clickHandler = EditorView.domEventHandlers({
   },
 });
 
-const livePreview = [livePlugin, blockField, clickHandler, skipProps];
+// Up/Down onto a block shown rendered (a formula, table, code block or embed) step into its source,
+// on its line nearest where you came from, as Obsidian does. CodeMirror's own vertical motion can't
+// stop inside a widget, so it would jump the whole block.
+const enterBlock = forward => view => {
+  const { state } = view, sel = state.selection.main;
+  if (state.selection.ranges.length > 1 || !sel.empty) return false;
+  const line = state.doc.lineAt(sel.head), moved = view.moveVertically(sel, forward).head;
+  if (moved >= line.from && moved <= line.to) return false; // a wrapped line: still moving within it
+  const n = line.number + (forward ? 1 : -1);
+  if (n < 1 || n > state.doc.lines) return false;
+  const next = state.doc.line(n);
+  let block = null;
+  state.field(blockField).between(next.from, next.from, (from, to, d) => {
+    if (d.spec.block && to > from && !(d.spec.widget instanceof PropsWidget)) { block = { from, to }; return false; }
+  });
+  if (!block) return false;
+  const land = state.doc.lineAt(forward ? block.from : block.to);
+  view.dispatch({ selection: { anchor: land.from + Math.min(sel.head - line.from, land.length) }, scrollIntoView: true, userEvent: 'select' });
+  return true;
+};
+
+const livePreview = [livePlugin, blockField, clickHandler, skipProps,
+  Prec.high(keymap.of([{ key: 'ArrowUp', run: enterBlock(false) }, { key: 'ArrowDown', run: enterBlock(true) }]))];
 
 // ------------------------------------------------------------------ commands
 

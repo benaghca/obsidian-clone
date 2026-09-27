@@ -259,11 +259,14 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 .cm-codeinfo { color: var(--faint); }
 .cm-line.cm-hr { background: linear-gradient(var(--border), var(--border)) center / 100% 1px no-repeat; }
 .cm-line.cm-frontmatter { font-family: var(--font-mono); font-size: .85em; color: var(--muted); background: var(--bg2); padding: 0 12px !important; }
-.cm-embed-block { margin: .3em 0; white-space: normal; }
+/* Rendered blocks in the editor are spaced with padding, never margins: CodeMirror measures a block
+   widget without its margins, so a margin puts every line below it off by that much, and clicks and
+   arrow keys there land on the wrong line. */
+.cm-embed-block { margin: 0 !important; padding: .3em 0; white-space: normal; }
 .cm-image-block img, .cm-image-inline img { max-width: 100%; border-radius: var(--radius-sm); vertical-align: middle; }
 .cm-note-embed { border-left: 2px solid var(--accent); padding: 4px 0 4px 16px; font-size: .95em; }
 .cm-note-embed .markdown { font-size: 1em; }
-.cm-table-widget table { border-collapse: collapse; margin: .4em 0; }
+.cm-table-widget table { border-collapse: collapse; margin: .1em 0; }
 .cm-table-widget th, .cm-table-widget td { border: 1px solid var(--border); padding: 6px 12px; }
 .cm-table-widget th { background: var(--bg2); }
 .cm-table-widget { cursor: text; overflow-x: auto; }
@@ -439,7 +442,7 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 .drawing-embed { display: block; margin: .5em 0 1em; cursor: pointer; border-radius: var(--radius-sm); }
 .drawing-embed img { display: block; max-width: 100%; height: auto; }
 .drawing-embed:hover { outline: 1px solid var(--border); outline-offset: 4px; }
-.cm-visual-embed { padding: .2em 0; }
+.cm-visual-embed { padding: .5em 0; }
 
 /* canvas (JSON Canvas boards) */
 :root { --cv-red: var(--c-red, #e03131); --cv-orange: var(--c-orange, #f08c00); --cv-yellow: var(--c-yellow, #e0b000); --cv-green: var(--c-green, #2f9e44); --cv-cyan: var(--c-cyan, #0c8599); --cv-purple: var(--c-purple, #7048e8); }
@@ -829,7 +832,7 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 
 /* math (KaTeX) */
 .math-block, .cm-math-block { display: block; margin: .6em 0; overflow-x: auto; overflow-y: hidden; text-align: center; }
-.cm-math-block { cursor: text; padding: .2em 0; }
+.cm-math-block { cursor: text; padding: .8em 0; }
 .cm-math-inline, .math:not(.math-block) { cursor: text; }
 .katex { font-size: 1.12em; }
 .math-error, .katex .katex-error { color: var(--danger) !important; font-family: var(--font-mono); font-size: .9em; }
@@ -915,7 +918,7 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .pp-add { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; border: 0; background: none; color: var(--faint); font: 13px var(--font-ui); padding: 4px 6px; border-radius: var(--radius-sm); cursor: pointer; }
 .pp-add:hover, .pp-add:focus-visible { color: var(--text); background: var(--accent-soft); outline: none; }
 .pp-new .pp-type { cursor: default; }
-.cm-props-block { padding: 2px 0 6px; border-bottom: 1px solid var(--border); margin-bottom: 10px !important; }
+.cm-props-block { padding: 2px 0 17px; background: linear-gradient(var(--border), var(--border)) left bottom 10px / 100% 1px no-repeat; } /* the rule 10px above its end: no margin (see .cm-embed-block) */
 
 /* Ctrl+Tab recent files */
 .rs-back { padding-top: 18vh; }

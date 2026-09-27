@@ -24,6 +24,20 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   // click into a formula: source + preview bubble
   { const b = await page.locator('.cm-math-inline .katex-html .mord >> nth=0').boundingBox(); await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); } await sleep(200);
   assert(await page.$$eval('.cm-math-src', s => s.length) >= 1 && await page.$$eval('.cm-math-preview .katex', s => s.length) === 1, 'clicking a formula shows its source with a live preview beside it');
+  // A rendered block must take the room CodeMirror thinks it does, or clicks and arrow keys below it land on the wrong line.
+  const at = n => page.evaluate(n => { const v = ed.view, l = v.state.doc.line(n + 1); v.focus(); v.dispatch({ selection: { anchor: l.from } }); }, n);
+  const lineNow = () => page.evaluate(() => { const v = ed.view; return v.state.doc.lineAt(v.state.selection.main.head).number - 1; });
+  await at(12); await sleep(150);
+  const drift = await page.evaluate(() => { const v = ed.view, off = n => { const l = v.state.doc.line(n + 1); return v.coordsAtPos(l.from).top - v.documentTop - v.lineBlockAt(l.from).top; }; return [off(2), off(8)]; });
+  assert(Math.abs(drift[1] - drift[0]) < 1, `lines after a rendered block sit where CodeMirror measures them (offset ${drift.map(Math.round).join(' vs ')})`);
+  await at(8); await sleep(150);
+  const ups = [];
+  for (let i = 0; i < 2; i++) { await page.keyboard.press('ArrowUp'); await sleep(120); ups.push(await lineNow()); }
+  assert(ups.join() === '7,6', 'ArrowUp from below steps onto the blank line, then into the block at its closing $$: ' + ups.join(' → '));
+  await at(2); await sleep(150);
+  const downs = [];
+  for (let i = 0; i < 2; i++) { await page.keyboard.press('ArrowDown'); await sleep(120); downs.push(await lineNow()); }
+  assert(downs.join() === '3,4', 'ArrowDown from above steps onto the blank line, then into the block at its opening $$: ' + downs.join(' → '));
   // Ctrl+M wraps a selection, Ctrl+Shift+M inserts a block
   await page.evaluate(() => { const i = ed.value.indexOf('last line'); ed.setSelectionRange(i, i + 4); });
   await page.keyboard.press('Control+m'); await sleep(100);
