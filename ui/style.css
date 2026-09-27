@@ -944,6 +944,9 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .tab-sep { flex: none; width: 1px; height: 14px; margin: 0 4px; background: var(--faint); opacity: .7; }
 #pane-close-left { display: none; }
 body.has-split #pane-close-left { display: grid; }
+.pane-grip { display: none; flex: none; width: 18px; height: 24px; place-items: center; color: var(--faint); font-size: 13px; cursor: grab; user-select: none; }
+.pane-grip:hover { color: var(--text); }
+body.has-split .pane-grip { display: grid; }
 .tab-x:hover { background: var(--accent-soft); color: var(--text); }
 .tab.drop-before::before, .tab.drop-after::after { content: ''; position: absolute; top: 4px; bottom: 4px; width: 2px; background: var(--accent); }
 .tab.drop-before::before { left: -2px; } .tab.drop-after::after { right: -2px; }
@@ -1461,7 +1464,7 @@ body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }
 #split { flex: 1 1 0; min-width: 260px; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
 #split[hidden], #resize-split[hidden] { display: none; }
 #resize-split { border-left: 1px solid var(--border); }
-.split-head { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px 0 14px; border-bottom: 1px solid var(--border); }
+.split-head { height: 40px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--border); }
 .split-title { flex: 1; min-width: 0; font-size: var(--text-ui); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .split-body { flex: 1; overflow: auto; min-height: 0; scrollbar-gutter: stable; }
 .split-body .page { --col: 700px; padding-top: 18px; }

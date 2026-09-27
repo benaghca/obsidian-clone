@@ -51,7 +51,7 @@ document.addEventListener('mousedown', e => {
   if (win) { e.preventDefault(); return winCmd(win.dataset.win); }
   const edge = e.target.closest('.win-edge');
   if (edge) { e.preventDefault(); return winCmd('resize:' + edge.dataset.dir); }
-  if (!e.target.closest(DRAG_AREAS) || e.target.closest('button, input, select, a, .tab, #crumbs, [contenteditable]')) return;
+  if (!e.target.closest(DRAG_AREAS) || e.target.closest('button, input, select, a, .tab, .pane-grip, #crumbs, [contenteditable]')) return;
   e.preventDefault();
   winCmd(e.detail === 2 ? 'max' : 'drag');
 });

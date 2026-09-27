@@ -151,19 +151,28 @@ $('#tabbar').addEventListener('contextmenu', e => {
   ]);
 });
 $('#tabbar').addEventListener('dragstart', e => { const tab = e.target.closest('.tab'); if (!tab) return; dragTab = S.tabs[+tab.dataset.i]; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', tabName(dragTab.key)); });
+// Where a drop on the tab bar lands: an index into S.tabs.
+function tabDropIndex(e) {
+  const tab = e.target.closest('.tab');
+  if (!tab) return S.tabs.length;
+  const r = tab.getBoundingClientRect();
+  return +tab.dataset.i + (e.clientX < r.left + r.width / 2 ? 0 : 1);
+}
 $('#tabbar').addEventListener('dragover', e => {
-  if (!dragTab) return;
+  if (!dragTab && !dragPane) return;
   const tab = e.target.closest('.tab');
   e.preventDefault();
   $$('#tabbar .tab.drop-before, #tabbar .tab.drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
   if (tab) { const r = tab.getBoundingClientRect(); tab.classList.add(e.clientX < r.left + r.width / 2 ? 'drop-before' : 'drop-after'); }
 });
 $('#tabbar').addEventListener('drop', e => {
-  if (!dragTab) return;
+  if (!dragTab && !dragPane) return;
   e.preventDefault();
-  const tab = e.target.closest('.tab'), cur = curTab(), moving = dragTab;
-  let to = S.tabs.length;
-  if (tab) { const r = tab.getBoundingClientRect(); to = +tab.dataset.i + (e.clientX < r.left + r.width / 2 ? 0 : 1); }
+  const to = tabDropIndex(e);
+  $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after'));
+  // A pane's grip: that note leaves its group for a tab of its own here.
+  if (dragPane) { const side = dragPane; dragPane = null; return detachByDrop(side, to); }
+  const cur = curTab(), moving = dragTab;
   const from = S.tabs.indexOf(moving);
   S.tabs.splice(from, 1);
   S.tabs.splice(to > from ? to - 1 : to, 0, moving);

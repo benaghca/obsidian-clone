@@ -135,6 +135,26 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await moveTo(await paneAt(0.75)); await page.mouse.up(); await sleep(700);
   assert(overGraphLeft === null && same(await tabs(), [['Extra.md', 'Draft.md'], [':graph', 'Sources.md'], ['notes.txt', null]]) && await shown() === 'Sources.md', 'beside the graph only the right half takes a drop');
 
+  // Each pane of a group has a grip; dragging it onto the tab bar gives that note its own tab there.
+  const gripAt = sel => page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  const barEdge = (i, end) => page.$eval(`#tabbar .tab[data-i="${i}"]`, (el, end) => { const r = el.getBoundingClientRect(); return { x: end ? r.right - 4 : r.left + 4, y: r.top + r.height / 2 }; }, end);
+  await reset([['Draft.md', 'Sources.md'], ['Extra.md', null]]);
+  assert(await page.isVisible('#viewbar .pane-grip') && await page.isVisible('#split .pane-grip'), 'both panes of a group have a grip');
+  await dragFrom(await gripAt('#split .pane-grip')); await moveTo(await barEdge(1, true)); await page.mouse.up(); await sleep(600);
+  assert(same(await tabs(), [['Draft.md', null], ['Extra.md', null], ['Sources.md', null]]) && await shown() === null, "dragging the right pane's grip onto the tab bar gives that note its own tab where it's dropped");
+  assert(!(await page.isVisible('#viewbar .pane-grip')), 'an ordinary tab shows no grip');
+  await reset([['Draft.md', 'Sources.md'], ['Extra.md', null]]);
+  await dragFrom(await gripAt('#viewbar .pane-grip')); await moveTo(await barEdge(0, false)); await page.mouse.up(); await sleep(700);
+  assert(same(await tabs(), [['Draft.md', null], ['Sources.md', null], ['Extra.md', null]]) && await page.evaluate(() => [S.tab, S.cur]).then(x => same(x, [1, 'Sources.md'])), "dragging the left pane's grip out leaves the group showing its right note");
+  // A grip dropped on the page does nothing, and types nothing.
+  await reset([['Draft.md', 'Sources.md']]);
+  const before = await page.evaluate(() => ed.value);
+  await dragFrom(await gripAt('#split .pane-grip')); await moveTo(await paneAt(0.25)); await page.mouse.up(); await sleep(400);
+  assert(same(await tabs(), [['Draft.md', 'Sources.md']]) && await page.evaluate(() => ed.value) === before, 'a grip dropped on the page does nothing');
+  // With the custom title bar, pressing a grip doesn't start a window drag (which would block the drag).
+  const blocked = await page.evaluate(() => { document.body.classList.add('frame-custom'); const ev = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }); $('#viewbar .pane-grip').dispatchEvent(ev); document.body.classList.remove('frame-custom'); return ev.defaultPrevented; });
+  assert(blocked === false, "a grip isn't a window-drag area");
+
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));

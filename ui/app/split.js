@@ -21,7 +21,7 @@ function splitDom() {
   if (el) return el;
   el = document.createElement('section');
   el.id = 'split'; el.setAttribute('aria-label', 'Split pane');
-  el.innerHTML = `<header class="split-head"><span class="split-title"></span>
+  el.innerHTML = `<header class="split-head"><span class="pane-grip" data-pane="right" draggable="true" title="Drag onto the tab bar to give this note its own tab">⠿</span><span class="split-title"></span>
     <button class="ib" data-split="mode"></button><button class="ib" data-split="close" title="Close this note">${SPLIT_ICONS.close}</button></header>
     <div class="split-body"></div>`;
   const handle = document.createElement('div');
@@ -194,8 +194,9 @@ function showDropOverlay(side) {
 // In the capture phase, so the editors and canvases under the pointer never see a dragged tab
 // (CodeMirror would type its name into the note).
 $('#panes').addEventListener('dragover', e => {
-  if (!dragTab) return;
+  if (!dragTab && !dragPane) return;
   e.stopPropagation();
+  if (dragPane) return;
   const side = dropSide(e);
   if (!canDropOnPage(curTab(), dragTab, side, canSplit)) return showDropOverlay(null);
   e.preventDefault();
@@ -204,9 +205,10 @@ $('#panes').addEventListener('dragover', e => {
 }, true);
 $('#panes').addEventListener('dragleave', e => { if (dragTab && !$('#panes').contains(e.relatedTarget)) showDropOverlay(null); }, true);
 $('#panes').addEventListener('drop', e => {
-  if (!dragTab) return;
+  if (!dragTab && !dragPane) return;
   e.stopPropagation(); e.preventDefault();
   showDropOverlay(null);
+  if (dragPane) return;
   const t = curTab(), moving = dragTab, side = dropSide(e);
   dragTab = null;
   if (canDropOnPage(t, moving, side, canSplit)) joinByDrop(t, moving, side);
@@ -221,5 +223,30 @@ async function joinByDrop(t, moving, side) {
   dropOnPage(S.tabs, t, moving, side, newTabObj);
   S.tab = S.tabs.indexOf(t);
   pruneEdStates(); saveTabs(); renderTabs();
+  if (t.key !== before) await openPath(t.key); else await showSplit();
+}
+
+// ------------------------------------------------------------ dragging a pane's grip onto the tab bar
+
+let dragPane = null; // 'left' or 'right' while a pane's grip is being dragged
+document.addEventListener('dragstart', e => {
+  const g = e.target.closest?.('.pane-grip');
+  if (!g) return;
+  dragPane = g.dataset.pane;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('application/x-cinder-pane', dragPane);
+});
+document.addEventListener('dragend', () => { dragPane = null; });
+
+// A pane's grip dropped on the tab bar at `at`: that pane's note gets its own tab there.
+async function detachByDrop(side, at) {
+  const t = curTab();
+  if (!t?.split) return;
+  await SPLIT.handle?.save?.();
+  if (side === 'left') await save();
+  const before = t.key;
+  detachPane(S.tabs, t, side, at, newTabObj);
+  S.tab = S.tabs.indexOf(t);
+  saveTabs(); renderTabs();
   if (t.key !== before) await openPath(t.key); else await showSplit();
 }
