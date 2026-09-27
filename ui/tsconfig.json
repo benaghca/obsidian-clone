@@ -21,6 +21,7 @@
     "yaml.js",
     "templater.js",
     "tasks.js",
+    "flashcards.js",
     "bases.js",
     "diff.js",
     "related.js",
