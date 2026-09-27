@@ -915,7 +915,7 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .shortcuts kbd { white-space: nowrap; }
 
 /* ---------------------------------------------------------------- properties (frontmatter) */
-.pp { margin: 0 0 1.2em; font-size: var(--text-md); font-family: var(--font-ui); line-height: 1.4; white-space: normal; }
+.pp { margin: 0 0 1.2em; font-size: var(--text-md); font-family: var(--font-ui); line-height: 1.4; white-space: normal; container-type: inline-size; }
 .pp-head { display: flex; align-items: center; margin-bottom: 4px; }
 .pp-fold { display: inline-flex; align-items: center; gap: 6px; border: 0; background: none; padding: 2px 4px 2px 0; color: var(--muted); font: 600 13px var(--font-ui); cursor: pointer; border-radius: var(--radius-sm); }
 .pp-fold svg { transition: transform var(--dur-fast); transform: rotate(90deg); }
@@ -956,6 +956,11 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .pp-add { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; border: 0; background: none; color: var(--faint); font: 13px var(--font-ui); padding: 4px 6px; border-radius: var(--radius-sm); cursor: pointer; }
 .pp-add:hover, .pp-add:focus-visible { color: var(--text); background: var(--accent-soft); outline: none; }
 .pp-new .pp-type { cursor: default; }
+/* Too narrow for key and value side by side: the value drops under its key */
+@container (max-width: 360px) {
+  .pp-rows { grid-template-columns: auto minmax(0, 1fr); }
+  .pp-value { grid-column: 2; min-height: 0; margin-bottom: 6px; }
+}
 .cm-props-block { padding: 2px 0 17px; background: linear-gradient(var(--border), var(--border)) left bottom 10px / 100% 1px no-repeat; } /* the rule 10px above its end: no margin (see .cm-embed-block) */
 
 /* Ctrl+Tab recent files */

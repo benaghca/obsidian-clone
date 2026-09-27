@@ -116,7 +116,17 @@ const rd = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
   await page.evaluate(() => { cfg.properties = 'source'; S.version++; ed.refresh(); });
   await open('Book');
   assert(!(await page.$('.cm-props-block')) && await page.$('#editor .cm-frontmatter'), 'the Source setting shows the YAML');
-  await page.evaluate(() => { cfg.properties = 'visible'; });
+
+  console.log('narrow pane');
+  await page.evaluate(() => { cfg.properties = 'visible'; S.version++; ed.refresh(); });
+  await open('Book');
+  const box = s => page.$eval(row('title') + ' ' + s, e => { const r = e.getBoundingClientRect(); return { top: r.top, left: r.left, width: r.width }; });
+  let k = await box('.pp-key'), v = await box('.pp-value');
+  assert(Math.abs(k.top - v.top) < 4, 'wide: the value sits beside its name');
+  await page.setViewportSize({ width: 900, height: 900 }); await sleep(300);
+  k = await box('.pp-key'); v = await box('.pp-value');
+  assert(v.top > k.top + 10 && Math.abs(v.left - k.left) < 4 && v.width > 150, 'narrow: the value drops under its name, full width: ' + JSON.stringify({ k, v }));
+  await page.setViewportSize({ width: 1300, height: 900 }); await sleep(300);
 
   if (errors.length) { console.log(errors.join('\n')); process.exitCode = 1; }
   await browser.close();
