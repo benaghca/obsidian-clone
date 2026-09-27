@@ -245,14 +245,19 @@ function backlinksOf(p) {
 function unlinkedMentions(p) {
   const names = [noteName(p), ...(S.notes.get(p)?.aliases || [])].filter(x => x.length >= 3);
   if (!names.length) return new Map();
-  const re = new RegExp(`(?<![\\p{L}\\p{N}_])(${names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})(?![\\p{L}\\p{N}_])`, 'giu');
+  const alts = names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])(${alts})(?![\\p{L}\\p{N}_])`, 'giu');
+  // A plain search rules out the many notes that never mention it (in WebKit it's ~40x faster
+  // than the whole-word Unicode search, which then runs only on the notes it lets through).
+  const quick = new RegExp(alts, 'i');
   const res = new Map();
   for (const [q, n] of S.notes) {
     if (q === p) continue;
-    const body = blankCode(n.content);
+    if (!quick.test(n.content)) continue;
     let m; re.lastIndex = n.fmLen;
-    while ((m = re.exec(body))) {
-      const i = m.index;
+    while ((m = re.exec(n.content))) {
+      const i = m.index, j = i + m[0].length;
+      if (n.code.some(([a, b]) => i < b && j > a)) continue; // in code, an HTML block or a comment
       if (n.links.some(l => i >= l.index && i < l.index + l.len)) continue;
       if (!res.has(q)) res.set(q, []);
       const list = res.get(q);

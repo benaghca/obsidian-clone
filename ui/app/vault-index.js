@@ -60,7 +60,9 @@ function parseNote(content) {
     const al = fm.aliases ?? fm.alias;
     for (const a of Array.isArray(al) ? al : al ? [al] : []) if (String(a).trim()) aliases.push(String(a).trim());
   }
-  return { links, headings, tags, aliases, fm, fmLen, fmValid };
+  // Where the code is (whole-note offsets, sorted), so searches can skip it without parsing again.
+  const code = scan.code.map(([a, b]) => [a + fmLen, b + fmLen]).sort((x, y) => x[0] - y[0]);
+  return { links, headings, tags, aliases, fm, fmLen, fmValid, code };
 }
 
 function setNote(path, content, mtime) {
