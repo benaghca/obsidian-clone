@@ -176,3 +176,50 @@ function splitNoteChanged(path, text, mtime) {
   else if (SPLIT.mode === 'read') showSplit();
 }
 const splitFollowMain = debounce(() => { if (S.view === 'note' && S.cur === SPLIT.path) splitNoteChanged(S.cur, ed.value); }, 400);
+
+// ------------------------------------------------------------ dragging a tab onto the page
+
+// The half of the panes the pointer is over.
+function dropSide(e) {
+  const r = $('#panes').getBoundingClientRect();
+  return e.clientX < r.left + r.width / 2 ? 'left' : 'right';
+}
+function showDropOverlay(side) {
+  let o = $('#drop-overlay');
+  if (!o && !side) return;
+  if (!o) { o = document.createElement('div'); o.id = 'drop-overlay'; $('#panes').append(o); }
+  o.hidden = !side;
+  if (side) { o.className = side; o.textContent = side === 'left' ? 'Open on the left' : 'Open on the right'; }
+}
+// In the capture phase, so the editors and canvases under the pointer never see a dragged tab
+// (CodeMirror would type its name into the note).
+$('#panes').addEventListener('dragover', e => {
+  if (!dragTab) return;
+  e.stopPropagation();
+  const side = dropSide(e);
+  if (!canDropOnPage(curTab(), dragTab, side, canSplit)) return showDropOverlay(null);
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+  showDropOverlay(side);
+}, true);
+$('#panes').addEventListener('dragleave', e => { if (dragTab && !$('#panes').contains(e.relatedTarget)) showDropOverlay(null); }, true);
+$('#panes').addEventListener('drop', e => {
+  if (!dragTab) return;
+  e.stopPropagation(); e.preventDefault();
+  showDropOverlay(null);
+  const t = curTab(), moving = dragTab, side = dropSide(e);
+  dragTab = null;
+  if (canDropOnPage(t, moving, side, canSplit)) joinByDrop(t, moving, side);
+}, true);
+
+// The tab `moving` dropped on `side` of the current tab `t`: they become one group.
+async function joinByDrop(t, moving, side) {
+  await SPLIT.handle?.save?.();
+  if (side === 'left') await save();
+  const before = t.key;
+  t.splitMode = 'edit';
+  dropOnPage(S.tabs, t, moving, side, newTabObj);
+  S.tab = S.tabs.indexOf(t);
+  pruneEdStates(); saveTabs(); renderTabs();
+  if (t.key !== before) await openPath(t.key); else await showSplit();
+}

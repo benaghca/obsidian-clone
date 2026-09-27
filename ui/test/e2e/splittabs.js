@@ -104,6 +104,37 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await page.evaluate(() => closeTab()); await sleep(400);
   assert(same(await tabs(), [[null, null]]) && await shown() === null, 'closing the last tab, a group, leaves one empty tab');
 
+  // Dragging a tab over the page lights up the half it will land in; dropping makes a group.
+  const tabAt = i => page.$eval(`#tabbar .tab[data-i="${i}"]`, el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  const paneAt = fx => page.$eval('#panes', (el, fx) => { const r = el.getBoundingClientRect(); return { x: r.left + r.width * fx, y: r.top + r.height / 2 }; }, fx);
+  const overlay = () => page.evaluate(() => { const o = $('#drop-overlay'); return o && !o.hidden ? `${o.className}:${o.textContent}` : null; });
+  const dragFrom = async p => { await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.mouse.move(p.x + 20, p.y + 40, { steps: 5 }); };
+  const moveTo = async p => { await page.mouse.move(p.x, p.y, { steps: 10 }); await sleep(150); };
+  await reset([['Draft.md', null], ['Sources.md', null], ['Extra.md', null], [':graph', null], ['notes.txt', null]]);
+  const draftText = await page.evaluate(() => ed.value);
+  await dragFrom(await tabAt(1)); await moveTo(await paneAt(0.75));
+  assert(await overlay() === 'right:Open on the right', 'dragging a tab over the right half lights it up');
+  await moveTo(await paneAt(0.25));
+  assert(await overlay() === 'left:Open on the left', 'and the left half');
+  await moveTo(await paneAt(0.75)); await page.mouse.up(); await sleep(700);
+  assert(same(await tabs(), [['Draft.md', 'Sources.md'], ['Extra.md', null], [':graph', null], ['notes.txt', null]]) && await shown() === 'Sources.md' && await overlay() === null, 'dropping on the right half makes a group, and the dragged tab leaves the bar');
+  assert(await page.evaluate(() => ed.value) === draftText, "the dropped tab's name isn't typed into the note");
+  // Onto a group's left half: the tab goes left, the left note moves right, the right note gets its own tab.
+  await dragFrom(await tabAt(1)); await moveTo(await paneAt(0.25)); await page.mouse.up(); await sleep(700);
+  assert(same(await tabs(), [['Extra.md', 'Draft.md'], ['Sources.md', null], [':graph', null], ['notes.txt', null]]) && await page.evaluate(() => S.cur) === 'Extra.md' && await shown() === 'Draft.md', "dropping on a group's left half pushes its right note out into its own tab");
+  // No drop for the current tab, the graph, or a file the split pane can't show.
+  for (const [i, what] of [[0, 'the tab you are on'], [2, 'the graph'], [3, 'a text file']]) {
+    await dragFrom(await tabAt(i)); await moveTo(await paneAt(0.75));
+    const o = await overlay(); await page.mouse.up(); await sleep(300);
+    assert(o === null && same(await tabs(), [['Extra.md', 'Draft.md'], ['Sources.md', null], [':graph', null], ['notes.txt', null]]), `no drop for ${what}`);
+  }
+  // Beside the graph only the right half takes a drop.
+  await page.evaluate(() => activateTab(2)); await sleep(500);
+  await dragFrom(await tabAt(1)); await moveTo(await paneAt(0.25));
+  const overGraphLeft = await overlay();
+  await moveTo(await paneAt(0.75)); await page.mouse.up(); await sleep(700);
+  assert(overGraphLeft === null && same(await tabs(), [['Extra.md', 'Draft.md'], [':graph', 'Sources.md'], ['notes.txt', null]]) && await shown() === 'Sources.md', 'beside the graph only the right half takes a drop');
+
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));

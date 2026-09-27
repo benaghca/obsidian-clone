@@ -1470,3 +1470,7 @@ body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }
 .split-media img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
 body.focus-mode #split, body.focus-mode #resize-split { display: none !important; }
 body.presenting #split, body.presenting #resize-split { display: none !important; }
+#drop-overlay { position: absolute; top: 8px; bottom: 8px; width: calc(50% - 12px); z-index: 50; display: grid; place-items: center; border: 2px dashed var(--accent); border-radius: var(--radius-lg); background: var(--accent-soft); color: var(--accent); font-size: var(--text-ui); font-weight: 600; pointer-events: none; }
+#drop-overlay.left { left: 8px; }
+#drop-overlay.right { right: 8px; }
+#drop-overlay[hidden] { display: none; }

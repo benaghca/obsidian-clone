@@ -170,7 +170,7 @@ $('#tabbar').addEventListener('drop', e => {
   S.tab = S.tabs.indexOf(cur);
   dragTab = null; saveTabs(); renderTabs();
 });
-$('#tabbar').addEventListener('dragend', () => { dragTab = null; $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); });
+$('#tabbar').addEventListener('dragend', () => { dragTab = null; showDropOverlay(null); $$('#tabbar .drop-before, #tabbar .drop-after').forEach(x => x.classList.remove('drop-before', 'drop-after')); });
 
 // Start with the tabs from last time (or the last file, in one tab). Before tabs had partners
 // there was one split pane, saved on its own: it joins the tab that was active, once.
