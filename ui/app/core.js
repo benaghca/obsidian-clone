@@ -228,5 +228,16 @@ const ed = CinderEditor.create($('#editor'), editorHooks(() => S.cur, {
 }), { vim: cfg.vim, focus: cfg.focusMode, typewriter: cfg.typewriter });
 const safeDecode = s => { try { return decodeURIComponent(s); } catch { return s; } };
 const titleEl = $('#title');
+// The title is a one-line textarea so a long name wraps in a narrow pane. It grows to fit its text:
+// on typing, on a width change, and whenever code sets its value (WebKitGTK has no field-sizing).
+function fitTitle() { titleEl.style.height = 'auto'; titleEl.style.height = titleEl.scrollHeight + 'px'; }
+{
+  const v = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value');
+  Object.defineProperty(titleEl, 'value', { get() { return v.get.call(this); }, set(x) { v.set.call(this, x); fitTitle(); } });
+  titleEl.addEventListener('input', () => { if (/\n/.test(titleEl.value)) titleEl.value = titleEl.value.replace(/\s*\n\s*/g, ' '); else fitTitle(); });
+  let w = 0;
+  new ResizeObserver(([e]) => { if (e.contentRect.width !== w) { w = e.contentRect.width; fitTitle(); } }).observe(titleEl);
+  document.fonts?.ready.then(fitTitle);
+}
 const preview = $('#preview');
 

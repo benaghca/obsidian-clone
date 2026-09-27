@@ -16,9 +16,32 @@ function showPanel(name, focus = false) {
 
 function toggleSide(which) {
   document.body.classList.toggle(`app-no-${which}`);
-  store('layout', { left: !document.body.classList.contains('app-no-left'), right: !document.body.classList.contains('app-no-right') });
+  sideFolded[which] = false;
+  fitSides(which);
+  store('layout', { left: sideOpen('left') || sideFolded.left, right: sideOpen('right') || sideFolded.right });
   if (S.view === 'graph') CinderGraph.resize();
 }
+
+// A narrow window folds the sidebars away (the right one first) so the note keeps MIN_NOTE_WIDTH,
+// and brings them back once there's room. Only a side the person toggles is saved to the layout.
+const MIN_NOTE_WIDTH = 400;
+const sideFolded = { left: false, right: false };
+const sideOpen = side => !document.body.classList.contains(`app-no-${side}`);
+function fitSides(keep) {
+  const room = () => $('#workspace').getBoundingClientRect().width;
+  const open = () => `${sideOpen('left')},${sideOpen('right')}`, before = open();
+  for (const side of ['left', 'right']) {
+    if (!sideFolded[side]) continue;
+    const need = parseFloat(getComputedStyle($('#' + side)).width) + $('#resize-' + side).offsetWidth + 4;
+    if (room() - need >= MIN_NOTE_WIDTH) { document.body.classList.remove(`app-no-${side}`); sideFolded[side] = false; }
+  }
+  for (const side of ['right', 'left']) {
+    if (side === keep || !sideOpen(side) || room() >= MIN_NOTE_WIDTH) continue;
+    document.body.classList.add(`app-no-${side}`); sideFolded[side] = true;
+  }
+  if (before !== open() && S.view === 'graph') CinderGraph.resize();
+}
+addEventListener('resize', () => fitSides());
 
 function searchFor(q) {
   showPanel('search', true);
@@ -376,7 +399,7 @@ function backlinkCount(p) {
   return blCountCache.n;
 }
 function toggleFocusMode() {
-  cfg.focusMode = !cfg.focusMode; saveCfg(); applyTheme(); updateStatus();
+  cfg.focusMode = !cfg.focusMode; saveCfg(); applyTheme(); fitSides(); updateStatus();
   toast(cfg.focusMode ? `Focus mode. ${fmtKey(keyFor(CMD_BY_ID.get('focus-mode'))) || 'The ◎ in the status bar'} brings the side bars back.` : 'Focus mode off');
 }
 
@@ -384,7 +407,7 @@ function toggleFocusMode() {
 function updateStatus() {
   const left = $('#status-left'), right = $('#status-right');
   const b = (act, text, title) => `<button class="sb" data-sb="${act}"${title ? ` title="${esc(title)}"` : ''}>${text}</button>`;
-  const s = (text, title) => `<span class="sb-t"${title ? ` title="${esc(title)}"` : ''}>${text}</span>`;
+  const s = (text, title, cls = '') => `<span class="sb-t${cls && ' ' + cls}"${title ? ` title="${esc(title)}"` : ''}>${text}</span>`;
   const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
   const focus = b('focus', `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"${cfg.focusMode ? ' fill="currentColor"' : ''}/></svg>`, cfg.focusMode ? 'Leave focus mode' : 'Focus mode: hide the side bars, dim all but the current paragraph');
   if (S.view === 'tasks') {
@@ -405,9 +428,9 @@ function updateStatus() {
     const tasks = allTasks().filter(x => x.path === S.cur && !x.done && !x.cancelled).length;
     left.innerHTML = b('backlinks', plural(bl, 'backlink'), 'Show backlinks') + (tasks ? b('tasks', plural(tasks, 'open task'), 'Show this note’s tasks') : '');
     const c = S.mode === 'edit' ? ed.cursorInfo() : null;
-    const count = cfg.statusChars ? plural(text.length, 'character') : `${plural(words, 'word')} · ${mins} min read`;
-    right.innerHTML = (c && c.selected ? s(`${plural(c.words, 'word')} selected`, `${c.selected.toLocaleString()} characters selected`) : '')
-      + (c ? s(`Ln ${c.line}, Col ${c.col}`) : '')
+    const count = cfg.statusChars ? plural(text.length, 'character') : `${plural(words, 'word')}<span class="sb-read"> · ${mins} min read</span>`;
+    right.innerHTML = (c && c.selected ? s(`${plural(c.words, 'word')} selected`, `${c.selected.toLocaleString()} characters selected`, 'sb-sel') : '')
+      + (c ? s(`Ln ${c.line}, Col ${c.col}`, '', 'sb-pos') : '')
       + b('count', count, cfg.statusChars ? 'Show words' : 'Show characters')
       + b('mode', S.mode === 'read' ? 'Reading' : cfg.livePreview ? 'Live preview' : 'Source', 'Switch between reading and editing (Ctrl+E); right-click for source mode')
       + focus;

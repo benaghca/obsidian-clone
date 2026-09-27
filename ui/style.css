@@ -178,6 +178,7 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 .inline-title {
   display: block; width: 100%; border: 0; outline: none; background: transparent; color: var(--text);
   font-family: var(--font-text); font-weight: 700; font-size: 30px; line-height: 1.25; padding: 36px 0 8px;
+  resize: none; overflow: hidden;
 }
 #preview { height: 100%; overflow: auto; padding-top: 36px; padding-bottom: 40vh; }
 
@@ -1540,12 +1541,18 @@ body.presenting #main { border: 0; }
 .pick-badge { font-size: var(--text-2xs); color: var(--faint); border: 1px solid var(--border); border-radius: var(--radius-pill); padding: 0 6px; flex: none; }
 
 /* ---------------------------------------------------------------- status bar */
-#status-left, #status-right { display: flex; align-items: center; gap: 2px; min-width: 0; }
+#status-left, #status-right { display: flex; align-items: center; gap: 2px; min-width: 0; overflow: hidden; }
 #statusbar .sb, #statusbar .sb-t { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 6px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--faint); font: inherit; white-space: nowrap; }
 #statusbar .sb { cursor: pointer; }
 #statusbar .sb:hover { background: var(--bg-hover); color: var(--text); }
 #statusbar .sb svg { width: 13px; height: 13px; }
 #statusbar .sb-t { font-variant-numeric: tabular-nums; }
+#statusbar { container-type: inline-size; }
+/* A narrow pane drops the least useful items first, so the two ends never run into each other */
+@container (max-width: 560px) { #statusbar :is(.sb-pos, .sb-sel) { display: none; } }
+@container (max-width: 460px) { #statusbar .sb-read { display: none; } }
+@container (max-width: 380px) { #statusbar [data-sb=tasks] { display: none; } }
+@container (max-width: 300px) { #statusbar [data-sb=count] { display: none; } }
 
 /* ---------------------------------------------------------------- focus mode */
 body.focus-mode :is(#ribbon, #left, #right, .resizer, #tabbar) { display: none !important; }

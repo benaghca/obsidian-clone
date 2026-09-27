@@ -7,9 +7,10 @@ function makeResizer(handle, side) {
   handle.addEventListener('mousedown', e => {
     e.preventDefault();
     const x0 = e.clientX, w0 = panel.getBoundingClientRect().width;
+    const most = Math.max(w0, w0 + $('#workspace').getBoundingClientRect().width - MIN_NOTE_WIDTH); // don't crowd out the note
     handle.classList.add('drag');
     const mv = ev => {
-      const w = Math.max(180, Math.min(600, w0 + (side === 'left' ? 1 : -1) * (ev.clientX - x0)));
+      const w = Math.max(180, Math.min(600, most, w0 + (side === 'left' ? 1 : -1) * (ev.clientX - x0)));
       panel.style.width = w + 'px';
       if (S.view === 'graph') CinderGraph.resize();
     };
@@ -101,6 +102,7 @@ async function boot() {
   if (layout && !layout.right) document.body.classList.add('app-no-right');
   makeResizer($('#resize-left'), 'left');
   makeResizer($('#resize-right'), 'right');
+  fitSides();
   showPanel('files', true);
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   renderTree();
