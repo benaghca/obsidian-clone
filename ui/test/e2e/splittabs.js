@@ -222,6 +222,12 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   assert(await treeDrop('[data-path="Sources.md"]', 0.72) === null && same(await tabs(), [['Board.canvas', null]]), 'with a canvas open, a file from the tree gets no split');
   assert(await page.$$eval('#view-canvas .cv-node', x => x.length) === cardsBefore + 1, 'it becomes a card on the canvas, as before');
 
+  // Duplicate tab on a group copies the whole group.
+  await reset([['Draft.md', 'Sources.md'], ['Extra.md', null]]);
+  await page.click('#tabbar .tab[data-i="0"]', { button: 'right' }); await sleep(150);
+  await page.click('.menu >> text=Duplicate tab'); await sleep(700);
+  assert(same(await tabs(), [['Draft.md', 'Sources.md'], ['Draft.md', 'Sources.md'], ['Extra.md', null]]) && await page.evaluate(() => S.tab) === 1 && await shown() === 'Sources.md', 'Duplicate tab on a group copies both notes');
+
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));

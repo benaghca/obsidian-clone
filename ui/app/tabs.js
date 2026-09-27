@@ -144,7 +144,7 @@ $('#tabbar').addEventListener('contextmenu', e => {
     ['Close other tabs', () => closeTabs(x => x === t)],
     ['Close tabs to the right', () => closeTabs((x, j) => j <= i)],
     null,
-    ['Duplicate tab', () => { activateTab(i).then(() => openInNewTab(t.key)); }],
+    ['Duplicate tab', () => { activateTab(i).then(() => openInNewTab(t.key)).then(() => t.split && openSplit(t.split)); }],
     ...(t.split ? [['Separate tabs', () => activateTab(i).then(() => separateSplit())], ['Swap panes', () => activateTab(i).then(() => swapSplit())]] : []),
     ...(canSplit(t.key) ? [['Open to the right', () => openSplit(t.key)]] : []),
     ...(t.key && !t.key.startsWith(':') ? [['Reveal in file tree', () => revealInTree(t.key)], ['Copy path', () => navigator.clipboard?.writeText(t.key).then(() => toast('Path copied'))]] : []),
