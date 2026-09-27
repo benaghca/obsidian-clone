@@ -22,6 +22,8 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   w('Ext1.md', '# Ext1\n');
   w('Ext2.md', '# Ext2\n');
   w('Ext3.md', '# Ext3\n');
+  w('Folder/Inner.md', '# Inner\n');
+  w('Board.canvas', '{"nodes":[],"edges":[]}');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1400, height: 850 } });
   const errors = [];
@@ -197,6 +199,28 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
   await reset([['Ext3.md', 'Ext1.md']]);
   fs.unlinkSync(path.join(VAULT, 'Ext3.md')); await sleep(2800);
   assert(same(await tabs(), [['Ext1.md', null]]) && await page.evaluate(() => S.cur) === 'Ext1.md' && await shown() === null, 'a left note deleted outside Cinder hands over to its partner');
+
+  // Dragging a file from the file tree onto the page splits it too.
+  const rowAt = sel => page.$eval(`#tree .t-row${sel}`, el => { const r = el.getBoundingClientRect(); return { x: r.left + 30, y: r.top + r.height / 2 }; });
+  const treeDrop = async (sel, fx) => { await dragFrom(await rowAt(sel)); await moveTo(await paneAt(fx)); await moveTo(await paneAt(fx + 0.03)); const o = await overlay(); await page.mouse.up(); await sleep(700); return o; };
+  await reset([['Draft.md', null], ['Extra.md', null]]);
+  const draftBefore = await page.evaluate(() => ed.value);
+  assert(await treeDrop('[data-path="Sources.md"]', 0.72) === 'right:Open on the right', 'dragging a file from the file tree over the right half lights it up');
+  assert(same(await tabs(), [['Draft.md', 'Sources.md'], ['Extra.md', null]]) && await shown() === 'Sources.md', 'dropping a file from the file tree on the right half opens it beside the note');
+  assert(await page.evaluate(() => ed.value) === draftBefore, "the file's path isn't typed into the note");
+  assert(await treeDrop('[data-path="Links.md"]', 0.22) === 'left:Open on the left', 'and over the left half');
+  assert(same(await tabs(), [['Links.md', 'Draft.md'], ['Sources.md', null], ['Extra.md', null]]) && await page.evaluate(() => S.cur) === 'Links.md' && await shown() === 'Draft.md', 'on the left half it takes the left, and the right note gets its own tab');
+  // No split for a folder or several files at once.
+  await reset([['Draft.md', null]]);
+  assert(await treeDrop('[data-dir="Folder"]', 0.72) === null && same(await tabs(), [['Draft.md', null]]), 'a folder dragged from the file tree gets no split');
+  await page.click('#tree .t-row[data-path="Sources.md"]', { modifiers: ['Control'] }); await page.click('#tree .t-row[data-path="Extra.md"]', { modifiers: ['Control'] }); await sleep(200);
+  assert(await treeDrop('[data-path="Sources.md"]', 0.72) === null && same(await tabs(), [['Draft.md', null]]), 'nor do several files dragged at once');
+  await page.evaluate(() => { treeSel.clear(); setTreeSel([]); });
+  // With a canvas open, a file dragged from the tree still goes onto the canvas as a card.
+  await reset([['Board.canvas', null]]); await sleep(300);
+  const cardsBefore = await page.$$eval('#view-canvas .cv-node', x => x.length);
+  assert(await treeDrop('[data-path="Sources.md"]', 0.72) === null && same(await tabs(), [['Board.canvas', null]]), 'with a canvas open, a file from the tree gets no split');
+  assert(await page.$$eval('#view-canvas .cv-node', x => x.length) === cardsBefore + 1, 'it becomes a card on the canvas, as before');
 
   // ---- end
   await page.screenshot({ path: OUT + '/splittabs.png' });

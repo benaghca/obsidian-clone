@@ -22,7 +22,7 @@ Not in scope, for the later "more panes" round:
 - More than two panes, stacked (top/bottom) or grid layouts.
 - Equal panes. The right pane keeps the lighter editor that canvas note cards use, and the left pane keeps the full editor.
 - An "active pane" model. Plain link clicks and the file tree, search and switcher all still open in the left pane.
-- Dragging files from the file tree onto the page.
+- Dragging files from the file tree onto the page. (Added afterwards: a single file the split pane can show, except while a canvas or drawing is open, since those take tree drags as cards and images.)
 
 ## Decisions made while brainstorming
 

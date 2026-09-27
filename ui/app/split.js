@@ -178,7 +178,7 @@ function splitNoteChanged(path, text, mtime) {
 }
 const splitFollowMain = debounce(() => { if (S.view === 'note' && S.cur === SPLIT.path) splitNoteChanged(S.cur, ed.value); }, 400);
 
-// ------------------------------------------------------------ dragging a tab onto the page
+// ------------------------------------------------------------ dragging a tab or a file onto the page
 
 // The half of the panes the pointer is over.
 function dropSide(e) {
@@ -192,36 +192,43 @@ function showDropOverlay(side) {
   o.hidden = !side;
   if (side) { o.className = side; o.textContent = side === 'left' ? 'Open on the left' : 'Open on the right'; }
 }
-// In the capture phase, so the editors and canvases under the pointer never see a dragged tab
+// A single file dragged from the file tree, unless the view under it takes files itself (a canvas
+// adds it as a card, a drawing as an image).
+const treeDragFile = () => dragPath && !dragMany && S.view !== 'canvas' && S.view !== 'drawing' ? dragPath : null;
+// Can what's being dragged, a tab or a file from the tree, be dropped on `side` of the page?
+const canDropHere = side => dragTab ? canDropOnPage(curTab(), dragTab, side, canSplit) : canDropPathOnPage(curTab(), treeDragFile(), side, canSplit);
+// In the capture phase, so the editors under the pointer never see a dragged tab or file
 // (CodeMirror would type its name into the note).
 $('#panes').addEventListener('dragover', e => {
-  if (!dragTab && !dragPane) return;
+  if (!dragTab && !dragPane && !treeDragFile()) return;
   e.stopPropagation();
   if (dragPane) return;
   const side = dropSide(e);
-  if (!canDropOnPage(curTab(), dragTab, side, canSplit)) return showDropOverlay(null);
+  if (!canDropHere(side)) return showDropOverlay(null);
   e.preventDefault();
   e.dataTransfer.dropEffect = 'move';
   showDropOverlay(side);
 }, true);
-$('#panes').addEventListener('dragleave', e => { if (dragTab && !$('#panes').contains(e.relatedTarget)) showDropOverlay(null); }, true);
+$('#panes').addEventListener('dragleave', e => { if ((dragTab || treeDragFile()) && !$('#panes').contains(e.relatedTarget)) showDropOverlay(null); }, true);
 $('#panes').addEventListener('drop', e => {
-  if (!dragTab && !dragPane) return;
+  if (!dragTab && !dragPane && !treeDragFile()) return;
   e.stopPropagation(); e.preventDefault();
   showDropOverlay(null);
   if (dragPane) return;
-  const t = curTab(), moving = dragTab, side = dropSide(e);
-  dragTab = null;
-  if (canDropOnPage(t, moving, side, canSplit)) joinByDrop(t, moving, side);
+  const t = curTab(), side = dropSide(e);
+  if (!canDropHere(side)) return;
+  if (dragTab) { const moving = dragTab; dragTab = null; return joinByDrop(t, side, () => dropOnPage(S.tabs, t, moving, side, newTabObj)); }
+  const path = treeDragFile(); dragPath = null;
+  joinByDrop(t, side, () => dropPathOnPage(S.tabs, t, path, side, newTabObj));
 }, true);
 
-// The tab `moving` dropped on `side` of the current tab `t`: they become one group.
-async function joinByDrop(t, moving, side) {
+// Something dropped on `side` of the current tab `t`; `apply` changes the tabs to match.
+async function joinByDrop(t, side, apply) {
   await SPLIT.handle?.save?.();
   if (side === 'left') await save();
   const before = t.key;
   t.splitMode = 'edit';
-  dropOnPage(S.tabs, t, moving, side, newTabObj);
+  apply();
   S.tab = S.tabs.indexOf(t);
   pruneEdStates(); saveTabs(); renderTabs();
   if (t.key !== before) await openPath(t.key); else await showSplit();

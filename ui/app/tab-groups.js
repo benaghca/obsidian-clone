@@ -56,6 +56,24 @@ function dropOnPage(tabs, cur, dragged, side, make) {
   return out;
 }
 
+// Can the file `path`, dragged from the file tree, be dropped on the `side` of the page showing
+// `cur`? Only a file the split pane can show, and not onto the side that already shows it.
+function canDropPathOnPage(cur, path, side, canSplit) {
+  if (!cur || !canSplit(path)) return false;
+  if (side === 'left') return path !== cur.key && canSplit(cur.key);
+  return path !== cur.split;
+}
+
+// Drop the file `path` on `side` of `cur`: on the right it becomes the partner, on the left it
+// takes the left and the current file moves right. A partner pushed out gets its own tab, returned.
+function dropPathOnPage(tabs, cur, path, side, make) {
+  if (side === 'right') return setPartner(tabs, cur, path, make);
+  const out = cur.split ? make(cur.split) : null;
+  cur.split = cur.key; cur.key = path;
+  if (out) tabs.splice(tabs.indexOf(cur) + 1, 0, out);
+  return out;
+}
+
 // Give `cur` the partner `path` (Open to the right). A partner it replaces gets its own tab.
 function setPartner(tabs, cur, path, make) {
   if (cur.split === path) return null;

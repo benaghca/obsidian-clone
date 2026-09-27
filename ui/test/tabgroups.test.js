@@ -149,4 +149,35 @@ t('groupsAfterDelete: a missing partner goes; a missing left file hands over to 
   assert.deepEqual(pairs(tabs), [['A.md', null], ['B.md', null], [':graph', null], ['gone.md', null]]);
 });
 
+t('canDropPathOnPage: a single file from the file tree that the pane can show', () => {
+  const cur = tab('A.md');
+  assert.equal(G.canDropPathOnPage(cur, 'B.md', 'right', canSplit), true);
+  assert.equal(G.canDropPathOnPage(cur, 'B.md', 'left', canSplit), true);
+  assert.equal(G.canDropPathOnPage(cur, 'A.md', 'right', canSplit), true, 'the same note on both sides');
+  assert.equal(G.canDropPathOnPage(cur, 'A.md', 'left', canSplit), false, 'already on the left');
+  assert.equal(G.canDropPathOnPage(tab('A.md', 'B.md'), 'B.md', 'right', canSplit), false, 'already on the right');
+  assert.equal(G.canDropPathOnPage(cur, 'notes.txt', 'right', canSplit), false, "a file the pane can't show");
+  assert.equal(G.canDropPathOnPage(cur, 'Folder', 'right', canSplit), false, 'a folder');
+  assert.equal(G.canDropPathOnPage(cur, null, 'right', canSplit), false);
+  assert.equal(G.canDropPathOnPage(tab(':graph'), 'B.md', 'right', canSplit), true, 'beside the graph');
+  assert.equal(G.canDropPathOnPage(tab(':graph'), 'B.md', 'left', canSplit), false, 'the graph would have to move right');
+  assert.equal(G.canDropPathOnPage(null, 'B.md', 'right', canSplit), false);
+});
+
+t('dropPathOnPage: right makes it the partner, left puts it on the left; a pushed-out partner gets its own tab', () => {
+  let a = tab('A.md'), tabs = [a];
+  assert.equal(G.dropPathOnPage(tabs, a, 'B.md', 'right', make), null);
+  assert.deepEqual(pairs(tabs), [['A.md', 'B.md']]);
+  a = tab('A.md'); tabs = [a];
+  G.dropPathOnPage(tabs, a, 'B.md', 'left', make);
+  assert.deepEqual(pairs(tabs), [['B.md', 'A.md']]);
+  a = tab('A.md', 'B.md'); tabs = [a, tab('D.md')];
+  G.dropPathOnPage(tabs, a, 'C.md', 'right', make);
+  assert.deepEqual(pairs(tabs), [['A.md', 'C.md'], ['B.md', null], ['D.md', null]]);
+  a = tab('A.md', 'B.md'); tabs = [a];
+  const out = G.dropPathOnPage(tabs, a, 'C.md', 'left', make);
+  assert.deepEqual(pairs(tabs), [['C.md', 'A.md'], ['B.md', null]]);
+  assert.equal(out, tabs[1]);
+});
+
 console.log(`ok ${n} tests`);
