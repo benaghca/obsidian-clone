@@ -104,6 +104,7 @@ const APP_COMMANDS = [
   ['related', 'Show related notes', '', () => showRight('related')],
   ['insert-template', 'Insert template', '', () => insertTemplate()],
   ['note-from-template', 'Create new note from template', 'Alt-n', () => newNoteFromTemplate()],
+  ['assistant-instructions', 'Add assistant instructions to this vault (AGENTS.md)', '', () => addAssistantInstructions()],
   ['run-templates', 'Replace template commands in current note', '', () => replaceTemplatesInNote()],
   ['templater-insert', 'Insert template command… (date, question, cursor…)', '', () => insertTemplaterCommand()],
   ['templater-help', 'Template commands cheat sheet', '', () => showTemplaterHelp()],

@@ -11,6 +11,7 @@ const FILE = path.join(VAULT, '.cinder/settings.json');
 const file = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8')) : null;
 (async () => {
   w('Note.md', '# Note\n');
+  w('00 - System/Templates/Daily.md', '# <% tp.date.now("dddd") %>\n');
   w('.obsidian/daily-notes.json', JSON.stringify({ folder: '10 - Timestamps', format: 'YYYY/MM-MMMM/YYYY-MM-DD-dddd', template: '00 - System/Templates/Daily' }));
   w('.obsidian/templates.json', JSON.stringify({ folder: '00 - System/Templates' }));
   const browser = await browserLaunch();
@@ -26,6 +27,21 @@ const file = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8'
   await sleep(500);
   const ref = fs.existsSync(path.join(VAULT, '.cinder/settings.md')) ? fs.readFileSync(path.join(VAULT, '.cinder/settings.md'), 'utf8') : '';
   assert(ref.includes('- `dailyFolder` (Daily notes folder): ') && ref.includes('default "Daily"') && ref.includes('`note-from-template`: Create new note from template ("Alt-n")') && !ref.includes('`fontText`: '), 'next to it, settings.md lists every setting, its values and default, and the command ids for hotkeys');
+  console.log('a guide for assistants');
+  const guide = () => fs.readFileSync(path.join(VAULT, '.cinder/README.md'), 'utf8');
+  const g = guide();
+  assert(g.includes('Templates folder: `00 - System/Templates`. Templates in it: `Daily`.') && g.includes('Daily notes: in `10 - Timestamps`, named `YYYY/MM-MMMM/YYYY-MM-DD-dddd`, template `00 - System/Templates/Daily`'), 'README.md next to it describes this vault as it is set up');
+  assert(g.includes('`tp.system.prompt(question, default?, throwOnCancel?, multiline?)`') && g.includes('`multitext` (List)') && g.includes('## Ground rules'), 'with the template commands Cinder supports, the property types, and ground rules');
+  const run = () => page.evaluate(() => CMD_BY_ID.get('assistant-instructions').run());
+  await run(); await sleep(800);
+  const agents = () => fs.readFileSync(path.join(VAULT, 'AGENTS.md'), 'utf8');
+  assert(/^# Instructions for AI assistants\n/.test(agents()) && agents().includes('read `.cinder/README.md`'), '"Add assistant instructions" makes an AGENTS.md pointing to it');
+  const once = agents(); await run(); await sleep(500);
+  assert(agents() === once, 'and doesn’t add it twice');
+  fs.writeFileSync(path.join(VAULT, 'AGENTS.md'), '# My rules\n\nAsk before moving notes.\n'); await sleep(2800);
+  await run(); await sleep(800);
+  assert(agents().startsWith('# My rules\n\nAsk before moving notes.\n\n## Cinder\n\n') && agents().includes('.cinder/README.md'), 'an AGENTS.md of your own keeps its rules and gets the pointer added');
+
   console.log('changes made in Cinder');
   await page.evaluate(() => { cfg.inboxFolder = 'Capture'; cfg.fontText = 'Inter'; saveCfg(); }); await sleep(900);
   assert(file().inboxFolder === 'Capture' && !('fontText' in file()), 'a setting changed here is written; a machine setting (the font) isn’t');

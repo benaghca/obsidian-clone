@@ -107,6 +107,7 @@ async function boot() {
   await loadVaultSettings(); // the vault's .cinder/settings.json, before anything uses the settings
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   settingsBooted = true;
+  if (vaultFile.text != null) syncSettingsDoc(vaultFile.doc, vaultFile.guide);
   renderTree();
   watchVault();
   setTimeout(() => syncSearchIndex(), 1500); // ready before the first search

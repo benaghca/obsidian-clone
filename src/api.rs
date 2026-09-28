@@ -266,7 +266,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("GET", "/api/bookmarks") => api_bookmarks(&vault, None),
         ("GET", "/api/settings") => api_settings(&vault, None),
         ("PUT", "/api/settings") => parse(&body).and_then(|v| api_settings(&vault, Some(v))),
-        ("PUT", "/api/settings-doc") => api_settings_doc(&vault, &body),
+        ("PUT", "/api/settings-doc") => api_settings_doc(&vault, &q("name").unwrap_or_else(|| "settings.md".into()), &body),
         ("PUT", "/api/bookmarks") => parse(&body).and_then(|v| api_bookmarks(&vault, Some(v))),
         ("POST", "/api/screenshot") => Ok(match screenshot(ctx, q("mode").as_deref() == Some("screen"), q("hide").as_deref() == Some("1"), q("delay").and_then(|d| d.parse().ok()).unwrap_or(0)) {
             crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
@@ -558,13 +558,17 @@ fn api_settings(vault: &Path, update: Option<Value>) -> ApiResult {
         out["obsidian"] = Value::Object(o);
     }
     out["doc"] = fs::read_to_string(dir.join("settings.md")).map(Value::String).unwrap_or(Value::Null);
+    out["guide"] = fs::read_to_string(dir.join("README.md")).map(Value::String).unwrap_or(Value::Null);
     Ok(json_out(200, out))
 }
 
-/// `.cinder/settings.md`: the reference to every setting the file can hold, which the page writes
-/// (from the Settings page's own definitions) so a person or an LLM editing settings.json can see
-/// what's there. Written whole, through a temp file.
-fn api_settings_doc(vault: &Path, body: &[u8]) -> ApiResult {
+/// The two files the page writes beside settings.json, whole, through a temp file: `settings.md`
+/// (every setting the file can hold, from the Settings page's own definitions) and `README.md`
+/// (a guide for assistants to Cinder and this vault). No other name is accepted.
+fn api_settings_doc(vault: &Path, name: &str, body: &[u8]) -> ApiResult {
+    if name != "settings.md" && name != "README.md" {
+        return Err((400, "only settings.md or README.md".into()));
+    }
     if body.len() > 512 * 1024 || std::str::from_utf8(body).is_err() {
         return Err((400, "expected Markdown text".into()));
     }
@@ -573,9 +577,9 @@ fn api_settings_doc(vault: &Path, body: &[u8]) -> ApiResult {
         return Err((409, ".cinder isn't a folder".into()));
     }
     fs::create_dir_all(&dir).map_err(io_err)?;
-    let tmp = dir.join(".settings.md.cinder-tmp");
+    let tmp = dir.join(format!(".{name}.cinder-tmp"));
     fs::write(&tmp, body).map_err(io_err)?;
-    fs::rename(&tmp, dir.join("settings.md")).map_err(|e| {
+    fs::rename(&tmp, dir.join(name)).map_err(|e| {
         let _ = fs::remove_file(&tmp);
         io_err(e)
     })?;
@@ -1017,9 +1021,12 @@ mod tests {
         assert_eq!(v["obsidian"]["periodic"]["weekly"]["enabled"], json!(true));
         assert!(v["obsidian"]["app"].is_null() && v["obsidian"]["templates"].is_null(), "unreadable or missing files are left out");
         assert!(v["doc"].is_null());
-        api_settings_doc(&dir, "# Settings\n".as_bytes()).unwrap();
+        api_settings_doc(&dir, "settings.md", "# Settings\n".as_bytes()).unwrap();
         assert_eq!(get(&dir)["doc"], json!("# Settings\n"), "the reference next to it");
-        assert!(api_settings_doc(&dir, &[0xff, 0xfe]).is_err(), "text only");
+        api_settings_doc(&dir, "README.md", "# Guide\n".as_bytes()).unwrap();
+        assert_eq!(get(&dir)["guide"], json!("# Guide\n"), "and the guide");
+        assert!(api_settings_doc(&dir, "settings.md", &[0xff, 0xfe]).is_err(), "text only");
+        assert!(api_settings_doc(&dir, "../evil.md", b"x").is_err() && api_settings_doc(&dir, "settings.json", b"x").is_err(), "and only those two names");
         let _ = fs::remove_dir_all(&dir);
     }
 

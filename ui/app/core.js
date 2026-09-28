@@ -130,12 +130,16 @@ const saveCfg = () => { store('settings', cfg); store('settingsUnsaved', true); 
 // they travel with the vault and anything can edit them. The file wins; this window's storage is
 // a cache for a fast start. It's read at start-up and whenever the vault is checked (poll), and
 // written shortly after a change here. A file that doesn't read is reported, and never overwritten.
-const vaultFile = { text: null, obj: null, broken: false, told: '', doc: null };
-// Keep .cinder/settings.md (settingsReference) up to date alongside the file.
-async function syncSettingsDoc(have) {
-  const doc = settingsReference();
-  if (doc === have || doc === vaultFile.doc) { vaultFile.doc = doc; return; }
-  try { await api('/api/settings-doc', { method: 'PUT', body: doc }); vaultFile.doc = doc; } catch { }
+const vaultFile = { text: null, obj: null, broken: false, told: '', doc: null, guide: null };
+// Keep .cinder/settings.md (settingsReference) and .cinder/README.md (assistantGuide) up to date
+// alongside the file; each is only written when what it says has changed.
+async function syncSettingsDoc(haveDoc, haveGuide) {
+  for (const [key, name, make, have] of [['doc', 'settings.md', settingsReference, haveDoc], ['guide', 'README.md', assistantGuide, haveGuide]]) {
+    if (key === 'guide' && !settingsBooted) continue; // it describes the vault's notes: once they're loaded
+    const text = make();
+    if (text === have || text === vaultFile[key]) { vaultFile[key] = text; continue; }
+    try { await api(`/api/settings-doc?name=${name}`, { method: 'PUT', body: text }); vaultFile[key] = text; } catch { }
+  }
 }
 let settingsTimer = 0, settingsWriting = false, settingsBooted = false;
 function scheduleSettingsWrite() { clearTimeout(settingsTimer); settingsTimer = setTimeout(writeVaultSettings, 400); }
@@ -149,7 +153,7 @@ async function writeVaultSettings() {
   try {
     await api('/api/settings', { method: 'PUT', body: text }); vaultFile.text = text; vaultFile.obj = obj;
     if (!settingsTimer) store('settingsUnsaved', false);
-    syncSettingsDoc(vaultFile.doc);
+    syncSettingsDoc(vaultFile.doc, vaultFile.guide);
   }
   catch (e) { toast('Couldn’t save the settings to the vault: ' + e.message); }
   finally { settingsWriting = false; }
@@ -174,7 +178,7 @@ async function loadVaultSettings() {
     }
     return writeVaultSettings();
   }
-  syncSettingsDoc(r.doc);
+  syncSettingsDoc(r.doc, r.guide);
   const text = JSON.stringify(r.settings);
   if (text === vaultFile.text) return;
   vaultFile.text = text; vaultFile.obj = r.settings;

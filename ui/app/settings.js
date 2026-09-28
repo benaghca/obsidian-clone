@@ -247,6 +247,94 @@ function settingsReference() {
   return out.join('\n') + '\n';
 }
 
+// .cinder/README.md: a guide for AI assistants (and people) working on this vault: what Cinder is,
+// how this vault is set up right now, how to set it up for someone, the formats Cinder reads and
+// the ground rules. Generated from Cinder's own data (settings, templates, template commands,
+// property types), so it matches the running version; rewritten only when something in it changes.
+function assistantGuide() {
+  // Real HTML tags go; a template tag like <%* %> in the text stays.
+  const text = h => String(h || '').replace(/<\/?[a-z][^>]*>/gi, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const q = v => v ? '`' + v + '`' : 'the top of the vault';
+  const templates = templateList().filter(isMd).sort(collator.compare);
+  const folderTemplates = String(cfg.folderTemplates || '').split('\n').map(l => l.trim()).filter(Boolean);
+  // Each command with its signature and what it does, from the editor's own "tp." help.
+  const tp = Object.entries(TP_MEMBERS).filter(([path]) => path !== 'tp').flatMap(([path, members]) => members.map(([name, , info]) => {
+    const [sig, ...rest] = text(info).split(' — '), desc = rest.join(' — ');
+    if (desc) return `- \`${path}.${sig}\`: ${desc}`;
+    return sig.startsWith(name + '(') ? `- \`${path}.${sig}\`` : `- \`${path}.${name}\`: ${sig}`;
+  }));
+  return [
+    '# Cinder: a guide for assistants',
+    '',
+    'This folder is a vault for **Cinder**, a notes app that keeps notes as plain Markdown files and reads and writes them in the formats Obsidian and its common plugins use, so the same vault also opens in Obsidian. Cinder writes this guide (and `settings.md` beside it) and keeps it up to date; edits to it are replaced. If you’re helping someone set up or organise this vault, read it first.',
+    '',
+    '## This vault now',
+    '',
+    `- Templates folder: ${q(cfg.templatesFolder)}. Templates in it: ${templates.length ? templates.map(t => '`' + noteName(t) + '`').join(', ') : 'none yet'}.`,
+    `- Daily notes: in ${q(cfg.dailyFolder)}, named \`${cfg.dailyFormat}\`, template ${cfg.dailyTemplate ? '`' + cfg.dailyTemplate + '`' : 'none'}.`,
+    `- Weekly notes: in ${cfg.weeklyFolder ? q(cfg.weeklyFolder) : 'the daily notes folder'}, named \`${cfg.weeklyFormat}\`, template ${cfg.weeklyTemplate ? '`' + cfg.weeklyTemplate + '`' : 'none'}.`,
+    `- Monthly notes: in ${cfg.monthlyFolder ? q(cfg.monthlyFolder) : 'the daily notes folder'}, named \`${cfg.monthlyFormat}\`, template ${cfg.monthlyTemplate ? '`' + cfg.monthlyTemplate + '`' : 'none'}.`,
+    `- Folder templates (a new note in the folder starts from the template): ${folderTemplates.length ? folderTemplates.map(l => '`' + l + '`').join(', ') : 'none'}.`,
+    `- New notes go to ${q(cfg.newNoteFolder)}; pasted and dropped files to ${q(cfg.attachFolder)}; the Inbox is ${q(cfg.inboxFolder)}; quick-added tasks go to ${cfg.taskInbox ? '`' + cfg.taskInbox + '`' : 'today’s daily note'}.`,
+    '',
+    '## Setting it up for someone',
+    '',
+    '1. Ask how they work before changing anything: what they keep (work, study, projects, a journal…), whether they want daily, weekly or monthly notes, how they track tasks, and whether they study with flashcards.',
+    '2. Change settings in `settings.json` in this folder. It holds only settings that differ from their defaults; `settings.md` lists every key, its values and its default. It must stay valid JSON. Cinder applies changes within a few seconds, even while it’s open.',
+    '3. Put templates in the templates folder (below: what they can contain). Point the daily, weekly and monthly templates and the folder templates at them in `settings.json` (a template is named by its path without `.md`).',
+    '4. Make the folders, and a `Home.md` linking the main areas.',
+    '5. Check the result: every `[[link]]` goes to a note that exists, `settings.json` reads as JSON, and templates render (`{{date}}` and `<% %>` below).',
+    '',
+    '## What Cinder reads',
+    '',
+    '- **Notes** are `.md` files. `[[Note]]`, `[[Note#Heading]]`, `[[Note|shown text]]` link; `![[Note]]` embeds a note, `![[image.png|300]]` an image 300 px wide, `![[clip.mov]]` a video player. `#tag` and `#nested/tag` are tags.',
+    `- **Properties** are YAML frontmatter between \`---\` lines. Their types: ${CinderProps.TYPES.map(([t, n]) => `\`${t}\` (${n})`).join(', ')}. With an \`.obsidian/types.json\`, types are kept there, as Obsidian does.`,
+    '- **Callouts**: `> [!note] Title`, also `tip`, `warning`, `question` and the rest of Obsidian’s. **Math**: `$…$` inline, `$$…$$` on its own lines.',
+    '- **Tasks** use the Obsidian Tasks plugin’s format: `- [ ] Call Sam 📅 2026-10-02 ⏫ 🔁 every week`, with 📅 due, ⏳ scheduled, 🛫 start, ✅ done, priorities 🔺 ⏫ 🔼 🔽 ⏬ and 🔁 repeats. A ```` ```tasks ```` block is a live list (`not done`, `due before tomorrow`, `path includes Projects`, `sort by due`, `group by tags`…).',
+    '- **Flashcards** use the Spaced Repetition plugin’s format, in notes tagged `#flashcards` (or `#flashcards/deck`): `Question::Answer`, `Question:::Answer` (both ways), several lines with `?` or `??` between, and `==clozes==`. Cinder writes each card’s schedule after it as `<!--SR:…-->`; leave those alone.',
+    '- **Bases** are database views of notes in Obsidian’s `.base` YAML format (filters, formulas, table, cards, list and board views), as files or in ```` ```base ```` blocks.',
+    '- **Canvases** are `.canvas` files (JSON Canvas). Groups on a canvas are slides when it’s presented.',
+    '- **Drawings** are `.excalidraw` or `.excalidraw.md` files, in Excalidraw’s format.',
+    `- **The Inbox** is every file in ${q(cfg.inboxFolder)}, shown as sticky notes in lanes. The lanes are kept in \`${cfg.inboxFolder || 'Inbox'}/Inbox.canvas\`; to add something, just put a file in the folder (a text note named like \`2026-09-28 0930.md\`), and it appears in New.`,
+    '- **Daily, weekly and monthly notes** are named by date formats in moment.js style (`YYYY-MM-DD`, `GGGG-[W]WW`, `YYYY/MM-MMMM/YYYY-MM-DD-dddd` with folders).',
+    '',
+    '## Templates',
+    '',
+    '- Obsidian’s core syntax: `{{title}}`, `{{date}}`, `{{time}}`, `{{date:YYYY-MM-DD}}`.',
+    '- Templater’s `<% … %>` (outputs a value) and `<%* … %>` (runs statements; `tR += "text"` adds text), with these commands:',
+    ...tp.map(l => '  ' + l),
+    '- In `<%* %>`: `let`/`const`, `if`/`else`, `for (const x of list)`, and `await` for the commands that ask something. For safety, templates can’t define functions or use arrow functions, `while` loops, the network (`tp.web`) or Obsidian’s `app` object (except `app.workspace.activeLeaf.view.editor.focus()`, which does nothing here). Anything else stops the template with a message saying what.',
+    '- A template can name and file its note: `<%* await tp.file.rename(await tp.system.prompt("Title")) %>`, `<%* await tp.file.move("Projects/" + tp.file.title) %>`.',
+    '',
+    '## Ground rules',
+    '',
+    '- Keep everything Obsidian-compatible; the person may open this vault in Obsidian too.',
+    '- Never put passwords, tokens or keys in the vault: it syncs (OneDrive, git…) and may be shared.',
+    '- Renaming or moving a note breaks links to it: say so and update the links, or ask first.',
+    '- Don’t delete notes without asking.',
+    '- Leave `.obsidian/`, `.trash/` and the `<!--SR:…-->` comments alone unless asked.',
+    '',
+  ].join('\n');
+}
+
+// The command "Add assistant instructions to this vault": an AGENTS.md at the top of the vault
+// (the file AI coding assistants look for) pointing to the guide, written now if it isn't yet.
+const AGENTS_POINTER = 'This folder is a notes vault for Cinder, a Markdown notes app compatible with Obsidian. Before changing anything, read `.cinder/README.md`: what Cinder is, how this vault is set up, the formats it reads, and how to change its settings (`.cinder/settings.json`, whose keys are listed in `.cinder/settings.md`). Cinder writes those files and keeps them current.';
+async function addAssistantInstructions() {
+  try {
+    await api('/api/settings-doc?name=README.md', { method: 'PUT', body: assistantGuide() });
+    await api('/api/settings-doc?name=settings.md', { method: 'PUT', body: settingsReference() });
+  } catch (e) { return toast('Couldn’t write the guide: ' + e.message); }
+  const p = 'AGENTS.md', n = S.notes.get(p);
+  if (n?.content.includes('.cinder/README.md')) { toast('AGENTS.md already points assistants to Cinder’s guide'); return openPath(p); }
+  const body = n ? n.content.replace(/\s*$/, '\n\n## Cinder\n\n') + AGENTS_POINTER + '\n'
+    : `# Instructions for AI assistants\n\n${AGENTS_POINTER}\n\nAdd your own instructions here: how you like your notes organised, and what an assistant may and may not change.\n`;
+  try { await writeFile(p, body, n?.mtime); } catch (e) { return toast('Couldn’t write AGENTS.md: ' + e.message); }
+  reindexAll(); renderTree();
+  await openPath(p);
+  toast(n ? 'Added a pointer to Cinder’s guide to AGENTS.md' : 'Made AGENTS.md: assistants will find Cinder’s guide from it');
+}
+
 function applySetting(s) {
   const what = s.apply;
   if (what === 'theme') { applyTheme(); $('.st-fp')?.dispatchEvent(new Event('refresh')); }
