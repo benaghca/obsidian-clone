@@ -168,13 +168,17 @@
     return out;
   }
   // The %> that closes a tag, skipping any inside string literals.
+  // Where a tag's %> is: not inside a string, but quotes inside a comment ("// don't") are just
+  // text. A line comment still ends at %>, as in Templater ("<%* // note %>").
   function findClose(src, i) {
-    let q = null;
+    let q = null, comment = null;
     for (; i < src.length - 1; i++) {
       const c = src[i];
       if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; }
-      if (c === '"' || c === "'" || c === '`') q = c;
-      else if (c === '%' && src[i + 1] === '>') return i;
+      if (c === '%' && src[i + 1] === '>') return i;
+      if (comment) { if (comment === '//' ? c === '\n' : c === '*' && src[i + 1] === '/') comment = null; continue; }
+      if (c === '/' && (src[i + 1] === '/' || src[i + 1] === '*')) { comment = '/' + src[i + 1]; i++; }
+      else if (c === '"' || c === "'" || c === '`') q = c;
     }
     return -1;
   }
@@ -432,6 +436,9 @@
 
   // Functions the interpreter may call carry this mark.
   const CALLABLE = Symbol('callable');
+  // Stand-ins for Obsidian's app object: only the paths templates use for nothing but side effects
+  // Cinder already has (the editor's focus), each a no-op; any other path says it isn't available.
+  const STUB = Symbol('stub');
   const fn = f => { f[CALLABLE] = true; return f; };
 
   class Abort extends Error { }
@@ -531,6 +538,7 @@
   // (Methods of strings and lists are only reachable through calls, and only the safe ones.)
   function getProp(o, k) {
     if (BLOCKED.has(String(k))) throw new Error(`"${k}" isn't available in Cinder templates`);
+    if (o && o[STUB] && !Object.prototype.hasOwnProperty.call(o, k)) throw new Error(`"${o[STUB]}.${k}" isn't available in Cinder templates`);
     if (typeof o === 'string' || Array.isArray(o)) return k === 'length' || /^\d+$/.test(String(k)) ? o[k] : undefined;
     if ((o && typeof o === 'object') || typeof o === 'function') return Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined;
     return undefined;
@@ -630,7 +638,9 @@
     const body = parse(tokenize(src));
     const st = { out: '', steps: 0, depth, actions: [], cursorAppend: [] };
     const { tp, cursors } = makeTp(env, st);
-    const scope = { vars: new Map(Object.entries({ ...GLOBALS, tp })), parent: null };
+    const stub = (name, props) => ({ [STUB]: name, ...props });
+    const app = stub('app', { workspace: stub('app.workspace', { activeLeaf: stub('app.workspace.activeLeaf', { view: stub('app.workspace.activeLeaf.view', { editor: stub('app.workspace.activeLeaf.view.editor', { focus: fn(() => { }) }) }) }) }) });
+    const scope = { vars: new Map(Object.entries({ ...GLOBALS, tp, app })), parent: null };
     try { await run(body, scope, st); } catch (e) { if (!(e instanceof Abort)) throw e; st.aborted = true; }
     let text = st.out, cursor = -1;
     if (depth === 0) {

@@ -123,6 +123,19 @@ t('strings containing %> inside tags', async () => {
   assert.equal(await r('<% "50%> done" %>'), '50%> done');
 });
 
+t('quotes inside comments in tags', async () => {
+  assert.equal(await r("<%* // don't worry\n%>ok"), 'ok');
+  assert.equal(await r("<%* /* it's fine */ %>ok"), 'ok');
+  assert.equal(await r("<%* // a note on one line %>ok"), 'ok', 'a line comment still ends at %>');
+  assert.equal(await r("<% 'it''s' %>".replace("''", "\\'")), "it's");
+});
+
+t('Templater’s editor focus line is a no-op', async () => {
+  assert.equal(await r('<%* app.workspace.activeLeaf.view.editor?.focus(); %>ok'), 'ok');
+  assert.equal(await r('<%* app.workspace.activeLeaf.view.editor.focus() %>ok'), 'ok');
+  await assert.rejects(T.render('<% app.workspace.getActiveFile() %>', env()), /app\.workspace\.getActiveFile" isn't available/);
+});
+
 (async () => {
   for (const [name, fn] of tests) {
     try { await fn(); n++; } catch (e) { console.error(`FAIL ${name}`); throw e; }
