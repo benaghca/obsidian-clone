@@ -82,6 +82,9 @@
   const isDeck = t => /^flashcards(\/|$)/i.test(t);
   const CLOZE = /==(?!=)(?:(\d+);;)?(.+?)(?:;;(.+?))?==/g;
   const HAS_CLOZE = /==(?!=).+?==/;
+  const CLOZE_ONE = new RegExp(CLOZE.source); // one match, no lastIndex to carry over
+  // Inline code blanked out (same length), so ==…== inside it isn't taken for a highlight.
+  const maskCode = s => s.replace(/`[^`\n]*`/g, m => ' '.repeat(m.length));
   const SR_COMMENT = /\s?<!--SR:(.*?)-->/;
   const BLOCK_ID = / \^[a-zA-Z0-9-]+$/;
   const CALLOUT = '> [!sr|card-metadata]';
@@ -145,7 +148,7 @@
         const fence = /^(`+|~+)/.exec(line)[1];
         while (i + 1 < lines.length && !lines[i + 1].startsWith(fence)) { i++; count++; }
         i++; count++;
-      } else if (!kind && HAS_CLOZE.test(line)) kind = 'cloze';
+      } else if (!kind && HAS_CLOZE.test(maskCode(line))) kind = 'cloze';
     }
     if (kind) found.push({ kind, first, last: lines.length - 1 });
 
@@ -217,17 +220,21 @@
   // with no numbers, each highlight is a card; with numbers, card k hides every highlight numbered
   // k (and there are as many cards as the highest number), and unnumbered highlights stay as they are.
   function clozeFaces(text) {
-    if (/==[ash]+;;/.test(text)) return null; // overlapping clozes ("==ash;;answer=="): not yet
-    const dels = [...text.matchAll(CLOZE)].map(m => ({ seq: m[1] ? +m[1] : 0, answer: m[2], hint: m[3] || '' }));
+    const masked = maskCode(text);
+    if (/==[ash]+;;/.test(masked)) return null; // overlapping clozes ("==ash;;answer=="): not yet
+    // Found in the masked text, read from the real one (the positions are the same).
+    const found = [...masked.matchAll(CLOZE)].map(m => ({ at: m.index, len: m[0].length, m: CLOZE_ONE.exec(text.slice(m.index, m.index + m[0].length)) }));
+    const dels = found.map(({ m }) => ({ seq: m[1] ? +m[1] : 0, answer: m[2], hint: m[3] || '' }));
     const numbered = dels.some(d => d.seq);
     const count = numbered ? Math.max(...dels.map(d => d.seq)) : dels.length;
     const face = (k, hidden) => {
-      let j = 0;
-      return text.replace(CLOZE, raw => {
-        const d = dels[j++];
-        if (numbered && !d.seq) return raw;
-        return (numbered ? d.seq === k : j === k) ? hidden(d) : d.answer;
+      let out = '', last = 0;
+      found.forEach(({ at, len }, j) => {
+        const d = dels[j], raw = text.slice(at, at + len);
+        out += text.slice(last, at) + (numbered && !d.seq ? raw : (numbered ? d.seq === k : j + 1 === k) ? hidden(d) : d.answer);
+        last = at + len;
       });
+      return out + text.slice(last);
     };
     const out = [];
     for (let k = 1; k <= count; k++) out.push({ front: face(k, d => `[${d.hint || '...'}]`), back: face(k, d => `==${d.answer}==`) });

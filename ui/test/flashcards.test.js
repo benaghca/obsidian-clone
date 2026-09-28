@@ -135,6 +135,10 @@ t('highlight clozes', () => {
   const [num] = parse('#flashcards\n\n==1;;A== and ==2;;B== and ==1;;C== and ==plain==\n');
   assert.deepEqual(faces(num), [['[...] and B and [...] and ==plain==', '==A== and B and ==C== and ==plain=='], ['A and [...] and C and ==plain==', 'A and ==B== and C and ==plain==']]);
   assert.equal(parse('#flashcards\n\n==3;;x==\n')[0].sides.length, 3);
+  // Inside inline code, ==…== is code, not a highlight: no card, and not a cloze in a card.
+  assert.deepEqual(parse('#flashcards\n\nType `==text==` to highlight.\n'), []);
+  const [code] = parse('#flashcards\n\nIn `a==b==c` the ==operator== compares\n');
+  assert.deepEqual(faces(code), [['In `a==b==c` the [...] compares', 'In `a==b==c` the ==operator== compares']]);
   const [over] = parse('#flashcards\n\nThe ==ash;;sun== rises\n');
   assert.deepEqual([over.readable, over.reason], [false, 'overlapping cloze']);
   const [multi] = parse('#flashcards\n\nFirst ==one==\nsecond ==two==\n<!--SR:!2024-03-01,3,250-->\n');
