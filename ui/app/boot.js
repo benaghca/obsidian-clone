@@ -104,7 +104,9 @@ async function boot() {
   makeResizer($('#resize-right'), 'right');
   fitSides();
   showPanel('files', true);
+  await loadVaultSettings(); // the vault's .cinder/settings.json, before anything uses the settings
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
+  settingsBooted = true;
   renderTree();
   watchVault();
   setTimeout(() => syncSearchIndex(), 1500); // ready before the first search
@@ -127,6 +129,7 @@ window.__cinderClose = async () => {
   window.ipc.postMessage('close-ack');
   flushDocViews();
   try { await save(); } catch { }
+  if (settingsTimer) await writeVaultSettings();
   if (S.dirty && !(await confirmModal('Your latest changes aren’t saved', 'Cinder couldn’t save them. Close anyway and lose them?', { ok: 'Close anyway', cancel: 'Stay', danger: true }))) {
     window.ipc.postMessage('close-cancel');
     return;

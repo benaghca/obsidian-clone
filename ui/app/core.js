@@ -118,7 +118,78 @@ const DEFAULTS = {
   screenshotAfter: 'insert', // or 'annotate': open the screenshot in a drawing
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
-const saveCfg = () => store('settings', cfg);
+const saveCfg = () => { store('settings', cfg); scheduleSettingsWrite(); };
+
+// ------------------------------------------------------------ the vault's settings file
+
+// The vault settings in cfg also live in <vault>/.cinder/settings.json (ui/vaultsettings.js), so
+// they travel with the vault and anything can edit them. The file wins; this window's storage is
+// a cache for a fast start. It's read at start-up and whenever the vault is checked (poll), and
+// written shortly after a change here. A file that doesn't read is reported, and never overwritten.
+const vaultFile = { text: null, obj: null, broken: false, told: '', doc: null };
+// Keep .cinder/settings.md (settingsReference) up to date alongside the file.
+async function syncSettingsDoc(have) {
+  const doc = settingsReference();
+  if (doc === have || doc === vaultFile.doc) { vaultFile.doc = doc; return; }
+  try { await api('/api/settings-doc', { method: 'PUT', body: doc }); vaultFile.doc = doc; } catch { }
+}
+let settingsTimer = 0, settingsWriting = false, settingsBooted = false;
+function scheduleSettingsWrite() { clearTimeout(settingsTimer); settingsTimer = setTimeout(writeVaultSettings, 400); }
+async function writeVaultSettings() {
+  clearTimeout(settingsTimer); settingsTimer = 0;
+  if (vaultFile.broken) return;
+  const obj = CinderVaultSettings.forFile(cfg, DEFAULTS, vaultFile.obj || {}), text = JSON.stringify(obj);
+  // No file until a setting differs from its default; after that, keep it up to date.
+  if (text === vaultFile.text || (vaultFile.text == null && text === '{}')) return;
+  settingsWriting = true;
+  try { await api('/api/settings', { method: 'PUT', body: text }); vaultFile.text = text; vaultFile.obj = obj; syncSettingsDoc(vaultFile.doc); }
+  catch (e) { toast('Couldn’t save the settings to the vault: ' + e.message); }
+  finally { settingsWriting = false; }
+}
+async function loadVaultSettings() {
+  if (settingsTimer || settingsWriting) return; // a change made here is on its way to the file
+  let r;
+  try { r = await api('/api/settings'); } catch { return; }
+  if (settingsTimer || settingsWriting) return;
+  if (r.exists && !r.settings) {
+    vaultFile.broken = true;
+    if (vaultFile.told !== r.error) { vaultFile.told = r.error; toast(`.cinder/settings.json has a mistake (${r.error}). Cinder is keeping its last good settings and won’t change the file until it reads again.`, 9000); }
+    return;
+  }
+  vaultFile.broken = false; vaultFile.told = '';
+  if (!r.exists) {
+    // First run: this window's settings for the vault, or for a vault new to Cinder, Obsidian's.
+    vaultFile.text = null; vaultFile.obj = null;
+    if (!store('settings')) {
+      const seed = CinderVaultSettings.fromObsidian(r.obsidian);
+      if (Object.keys(seed).length) { Object.assign(cfg, seed); store('settings', cfg); applyAllSettings(); }
+    }
+    return writeVaultSettings();
+  }
+  syncSettingsDoc(r.doc);
+  const text = JSON.stringify(r.settings);
+  if (text === vaultFile.text) return;
+  vaultFile.text = text; vaultFile.obj = r.settings;
+  const next = CinderVaultSettings.fromFile(r.settings, DEFAULTS);
+  if (Object.keys(next).every(k => JSON.stringify(cfg[k]) === JSON.stringify(next[k]))) return;
+  Object.assign(cfg, next); store('settings', cfg);
+  applyAllSettings();
+}
+// Settings changed from outside (or seeded): refresh everything they touch.
+function applyAllSettings() {
+  applyTheme();
+  rebuildHotkeys();
+  if (!settingsBooted) return; // start-up does the rest itself
+  loadPropTypes();
+  updateTreeButtons();
+  userCssKey = null; loadUserCss();
+  refreshCalendar();
+  S.version++; ed.refresh();
+  if (S.view === 'note' && S.mode === 'read') renderPreview();
+  S.dataGen++; updateTaskBadge(); updateInboxBadge();
+  if (S.view === 'tasks') refreshTasks();
+  if (S.view === 'inbox') renderInbox();
+}
 
 // A chosen font goes first; the default stack (with the Nerd Fonts symbols) stays behind it.
 const FONT_MONO_DEFAULT = '"JetBrains Mono", ui-monospace, "Cascadia Code", Consolas, Menlo, monospace, "Symbols Nerd Font Mono"';

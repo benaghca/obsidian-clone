@@ -61,6 +61,7 @@ const CANVAS_JS: &str = include_str!("../ui/canvas.js");
 const BASES_JS: &str = include_str!("../ui/bases.js");
 const TASKS_JS: &str = include_str!("../ui/tasks.js");
 const INBOXBOARD_JS: &str = include_str!("../ui/inboxboard.js");
+const VAULTSETTINGS_JS: &str = include_str!("../ui/vaultsettings.js");
 const FLASHCARDS_JS: &str = include_str!("../ui/flashcards.js");
 const DIFF_JS: &str = include_str!("../ui/diff.js");
 const RELATED_JS: &str = include_str!("../ui/related.js");
@@ -182,6 +183,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             "/bases.js" => return out(200, "text/javascript", BASES_JS.into()),
             "/tasks.js" => return out(200, "text/javascript", TASKS_JS.into()),
             "/inboxboard.js" => return out(200, "text/javascript", INBOXBOARD_JS.into()),
+            "/vaultsettings.js" => return out(200, "text/javascript", VAULTSETTINGS_JS.into()),
             "/flashcards.js" => return out(200, "text/javascript", FLASHCARDS_JS.into()),
             "/diff.js" => return out(200, "text/javascript", DIFF_JS.into()),
             "/related.js" => return out(200, "text/javascript", RELATED_JS.into()),
@@ -258,6 +260,9 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
         ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
         ("GET", "/api/bookmarks") => api_bookmarks(&vault, None),
+        ("GET", "/api/settings") => api_settings(&vault, None),
+        ("PUT", "/api/settings") => parse(&body).and_then(|v| api_settings(&vault, Some(v))),
+        ("PUT", "/api/settings-doc") => api_settings_doc(&vault, &body),
         ("PUT", "/api/bookmarks") => parse(&body).and_then(|v| api_bookmarks(&vault, Some(v))),
         ("POST", "/api/screenshot") => Ok(match screenshot(ctx, q("mode").as_deref() == Some("screen"), q("hide").as_deref() == Some("1"), q("delay").and_then(|d| d.parse().ok()).unwrap_or(0)) {
             crate::screenshot::Shot::Png(png) => out(200, "image/png", png),
@@ -418,6 +423,78 @@ fn api_prop_types(vault: &Path, update: Option<Value>) -> ApiResult {
         })?;
     }
     Ok(json_out(200, json!({ "types": doc["types"], "obsidian": true })))
+}
+
+/// The vault's own Cinder settings, `.cinder/settings.json` (docs/superpowers/specs/2026-09-28-
+/// settings-json-design.md). GET gives `{exists, settings}` (or `{exists: true, error}` when the
+/// file isn't a JSON object, so the page neither uses nor overwrites it), plus `obsidian`: the
+/// Obsidian settings a vault's first Cinder settings can come from, when there's an .obsidian
+/// folder. PUT writes an object, pretty-printed, through a temp file.
+fn api_settings(vault: &Path, update: Option<Value>) -> ApiResult {
+    let dir = vault.join(".cinder");
+    let file = dir.join("settings.json");
+    if let Some(update) = update {
+        if !update.is_object() {
+            return Err((400, "expected an object".into()));
+        }
+        let text = serde_json::to_string_pretty(&update).map_err(|e| (500, e.to_string()))? + "\n";
+        if text.len() > 256 * 1024 {
+            return Err((413, "settings are too big".into()));
+        }
+        if fs::symlink_metadata(&dir).is_ok_and(|m| !m.is_dir()) {
+            return Err((409, ".cinder isn't a folder".into()));
+        }
+        fs::create_dir_all(&dir).map_err(io_err)?;
+        let tmp = dir.join(".settings.json.cinder-tmp");
+        fs::write(&tmp, text).map_err(io_err)?;
+        fs::rename(&tmp, &file).map_err(|e| {
+            let _ = fs::remove_file(&tmp);
+            io_err(e)
+        })?;
+        return Ok(json_out(200, json!({ "ok": true })));
+    }
+    let mut out = match fs::read(&file) {
+        Err(_) => json!({ "exists": false, "settings": null }),
+        Ok(bytes) => match serde_json::from_slice::<Value>(&bytes) {
+            Ok(v) if v.is_object() => json!({ "exists": true, "settings": v }),
+            Ok(_) => json!({ "exists": true, "settings": null, "error": "it isn't a JSON object" }),
+            Err(e) => json!({ "exists": true, "settings": null, "error": e.to_string() }),
+        },
+    };
+    let ob = vault.join(".obsidian");
+    if fs::symlink_metadata(&ob).is_ok_and(|m| m.is_dir()) {
+        let read = |rel: &str| fs::read(ob.join(rel)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(Value::is_object);
+        let mut o = serde_json::Map::new();
+        for (k, rel) in [("daily", "daily-notes.json"), ("templates", "templates.json"), ("app", "app.json"), ("templater", "plugins/templater-obsidian/data.json"), ("periodic", "plugins/periodic-notes/data.json")] {
+            if let Some(v) = read(rel) {
+                o.insert(k.into(), v);
+            }
+        }
+        out["obsidian"] = Value::Object(o);
+    }
+    out["doc"] = fs::read_to_string(dir.join("settings.md")).map(Value::String).unwrap_or(Value::Null);
+    Ok(json_out(200, out))
+}
+
+/// `.cinder/settings.md`: the reference to every setting the file can hold, which the page writes
+/// (from the Settings page's own definitions) so a person or an LLM editing settings.json can see
+/// what's there. Written whole, through a temp file.
+fn api_settings_doc(vault: &Path, body: &[u8]) -> ApiResult {
+    if body.len() > 512 * 1024 || std::str::from_utf8(body).is_err() {
+        return Err((400, "expected Markdown text".into()));
+    }
+    let dir = vault.join(".cinder");
+    if fs::symlink_metadata(&dir).is_ok_and(|m| !m.is_dir()) {
+        return Err((409, ".cinder isn't a folder".into()));
+    }
+    fs::create_dir_all(&dir).map_err(io_err)?;
+    let tmp = dir.join(".settings.md.cinder-tmp");
+    fs::write(&tmp, body).map_err(io_err)?;
+    fs::rename(&tmp, dir.join("settings.md")).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        io_err(e)
+    })?;
+    Ok(json_out(200, json!({ "ok": true })))
 }
 
 /// Bookmarks live where Obsidian keeps them, .obsidian/bookmarks.json, so both apps share one list.
@@ -738,7 +815,7 @@ mod tests {
     fn serves_drawing_assets() {
         let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: true, hide_window: OnceLock::new() };
         let get = |p: &str| dispatch(&ctx, "GET", p, "", &|_| None, Vec::new());
-        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/inboxboard.js", "text/javascript"), ("/flashcards.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/related.js", "text/javascript"), ("/search.js", "text/javascript"), ("/yaml.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/d3-force.bundle.js", "text/javascript"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
+        for (p, ctype) in [("/themes.js", "text/javascript"), ("/templater.js", "text/javascript"), ("/canvas.js", "text/javascript"), ("/bases.js", "text/javascript"), ("/tasks.js", "text/javascript"), ("/inboxboard.js", "text/javascript"), ("/vaultsettings.js", "text/javascript"), ("/flashcards.js", "text/javascript"), ("/diff.js", "text/javascript"), ("/related.js", "text/javascript"), ("/search.js", "text/javascript"), ("/yaml.js", "text/javascript"), ("/images.js", "text/javascript"), ("/properties.js", "text/javascript"), ("/logo.svg", "image/svg+xml"), ("/draw.js", "text/javascript"), ("/draw-render.js", "text/javascript"), ("/vendor/Virgil.woff2", "font/woff2"), ("/vendor/d3-force.bundle.js", "text/javascript"), ("/vendor/SymbolsNerdFontMono.woff2", "font/woff2"), ("/vendor/JetBrainsMono-BoldItalic.woff2", "font/woff2"), ("/vendor/nerd-icons.txt", "text/plain; charset=utf-8"), ("/vendor/mathjax/tex-svg-full.js", "text/javascript"), ("/vendor/katex/katex.min.js", "text/javascript"), ("/vendor/katex/katex.min.css", "text/css"), ("/vendor/katex/fonts/KaTeX_Main-Regular.woff2", "font/woff2")] {
             let o = get(p);
             assert_eq!((o.status, o.ctype), (200, ctype), "{p}");
             assert!(!o.body.is_empty(), "{p}");
@@ -780,6 +857,42 @@ mod tests {
         assert_eq!(v["types"], json!({ "keep": "number", "rating": "number" }));
         assert_eq!(v["other"], json!(1));
         assert!(api_prop_types(&dir, Some(json!({ "x": 5 }))).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn vault_settings_file() {
+        let dir = std::env::temp_dir().join(format!("cinder-settings-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let get = |d: &Path| -> Value { serde_json::from_slice(&api_settings(d, None).unwrap().body).unwrap() };
+        let v = get(&dir);
+        assert_eq!(v["exists"], json!(false));
+        assert!(v["obsidian"].is_null(), "no .obsidian folder, nothing from it");
+        api_settings(&dir, Some(json!({ "dailyFolder": "Journal", "theme": "dark" }))).unwrap();
+        let text = fs::read_to_string(dir.join(".cinder/settings.json")).unwrap();
+        assert!(text.contains("\n  \"dailyFolder\": \"Journal\""), "pretty-printed: {text}");
+        let v = get(&dir);
+        assert_eq!((v["exists"].clone(), v["settings"]["theme"].clone()), (json!(true), json!("dark")));
+        assert!(!dir.join(".cinder/.settings.json.cinder-tmp").exists());
+        assert!(api_settings(&dir, Some(json!([1]))).is_err(), "only an object");
+        assert!(api_settings(&dir, Some(json!({ "big": "x".repeat(300_000) }))).is_err(), "and not too big");
+        fs::write(dir.join(".cinder/settings.json"), "{ \"dailyFolder\": ").unwrap();
+        let v = get(&dir);
+        assert_eq!(v["exists"], json!(true));
+        assert!(v["settings"].is_null() && v["error"].as_str().is_some_and(|e| !e.is_empty()), "a broken file says why: {v}");
+        fs::create_dir_all(dir.join(".obsidian/plugins/periodic-notes")).unwrap();
+        fs::write(dir.join(".obsidian/daily-notes.json"), r#"{"folder":"Days"}"#).unwrap();
+        fs::write(dir.join(".obsidian/plugins/periodic-notes/data.json"), r#"{"weekly":{"enabled":true}}"#).unwrap();
+        fs::write(dir.join(".obsidian/app.json"), "not json").unwrap();
+        let v = get(&dir);
+        assert_eq!(v["obsidian"]["daily"]["folder"], json!("Days"));
+        assert_eq!(v["obsidian"]["periodic"]["weekly"]["enabled"], json!(true));
+        assert!(v["obsidian"]["app"].is_null() && v["obsidian"]["templates"].is_null(), "unreadable or missing files are left out");
+        assert!(v["doc"].is_null());
+        api_settings_doc(&dir, "# Settings\n".as_bytes()).unwrap();
+        assert_eq!(get(&dir)["doc"], json!("# Settings\n"), "the reference next to it");
+        assert!(api_settings_doc(&dir, &[0xff, 0xfe]).is_err(), "text only");
         let _ = fs::remove_dir_all(&dir);
     }
 

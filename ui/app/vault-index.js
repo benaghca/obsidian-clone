@@ -246,6 +246,7 @@ async function poll() {
     const l = await api('/api/list');
     if (gen !== S.gen) return;
     await applyList(l, gen);
+    loadVaultSettings(); // .cinder/settings.json may have changed too
   } catch { /* server gone; ignore */ }
 }
 

@@ -209,6 +209,44 @@ function markWords(el, words) {
 }
 
 // Redraw what a setting affects.
+// .cinder/settings.md: every setting the vault's settings.json can hold, from the definitions
+// above, so a person or an LLM editing the file can see what's there. Nothing in it changes unless
+// Cinder does (no dates), so it's only rewritten then.
+function settingsReference() {
+  const text = h => String(h || '').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+  const js = v => JSON.stringify(v);
+  const local = CinderVaultSettings.LOCAL_KEYS;
+  const out = [
+    '# Cinder settings for this vault', '',
+    'Cinder keeps this vault’s settings in `settings.json`, next to this file. It holds only the settings that differ from their defaults: add a key to change a setting, and remove it to go back to the default. While Cinder is open it picks up changes to the file within a few seconds, and it keeps any key it doesn’t know. If the file isn’t valid JSON, Cinder keeps its last good settings and leaves the file alone until it’s fixed.', '',
+    `Settings that belong to the computer rather than the vault aren’t kept here: ${local.map(k => '`' + k + '`').join(', ')}.`, '',
+    'Cinder writes this reference; edits to it are replaced.', '',
+  ];
+  for (const pg of SETTINGS_PAGES) {
+    const items = SETTINGS.filter(s => s.page === pg.id && s.k in DEFAULTS && !local.includes(s.k));
+    if (!items.length) continue;
+    out.push(`## ${pg.name}`, '');
+    for (const s of items) {
+      let kind;
+      if (s.type === 'toggle') kind = 'true or false';
+      else if (s.type === 'select') kind = 'one of ' + s.options.map(([v, label]) => `${js(v)} (${text(label)})`).join(', ');
+      else if (s.k === 'palette') kind = 'one of ' + CinderThemes.list.map(t => js(t.id)).join(', ');
+      else if (s.type === 'textarea') kind = 'text, one entry per line (\\n)';
+      else kind = s.folder ? 'a folder path in the vault' : 'text';
+      out.push(`- \`${s.k}\` (${text(s.name)}): ${kind}; default ${js(DEFAULTS[s.k])}.${s.desc ? ' ' + text(s.desc) : ''}`);
+    }
+    out.push('');
+  }
+  const unlisted = Object.keys(DEFAULTS).filter(k => !local.includes(k) && !SETTINGS.some(s => s.k === k));
+  if (unlisted.length) out.push('## Set elsewhere in Cinder', '', ...unlisted.map(k => `- \`${k}\`: default ${js(DEFAULTS[k])}.`), '');
+  out.push('## Other keys', '',
+    '- `hotkeys`: custom shortcuts, as `{ "command id": "key" }`, overriding a command’s default key. A key is written `Mod-Shift-k` (Mod is Ctrl, or Cmd on a Mac; then Ctrl-/Meta-, Alt-, Shift-, and the key: a lower-case letter, a digit, or a name like `ArrowLeft`, `Enter`, `F5`). An empty string removes a command’s key.',
+    '- `propTypes`: property types, as `{ "property": "text" | "multitext" (a list) | "number" | "checkbox" | "date" | "datetime" | "tags" | "aliases" }`. Only used when the vault has no `.obsidian/types.json`; Obsidian’s file is used when it does.', '',
+    '## Commands', '', 'Their ids, for `hotkeys`, with each one’s default key.', '');
+  for (const c of COMMANDS) out.push(`- \`${c.id}\`: ${c.name}${c.key ? ` (${js(c.key)})` : ''}`);
+  return out.join('\n') + '\n';
+}
+
 function applySetting(s) {
   const what = s.apply;
   if (what === 'theme') { applyTheme(); $('.st-fp')?.dispatchEvent(new Event('refresh')); }
