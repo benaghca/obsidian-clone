@@ -329,3 +329,52 @@ titleEl.addEventListener('blur', async () => {
   await renamePath(S.cur, join(dirname(S.cur), name + '.md'));
 });
 
+// ============================================================ video and audio
+
+// A player for a vault video or audio file (served in pieces by /api/raw, so seeking works), with
+// "Open in default app" beside it: VLC or whatever the system uses plays formats this window can't.
+function mediaHtml(p, o = {}) {
+  const tag = VIDEO_EXT.test(p) ? 'video' : 'audio';
+  return `<${tag} class="media" controls preload="metadata" playsinline src="${rawUrl(p)}"${o.width ? ` style="width:${+o.width}px"` : ''}></${tag}>`;
+}
+const openDefaultButton = p => `<button class="btn media-open" data-open-default="${esc(p)}" title="Open it in this computer’s default app for it">Open in default app</button>`;
+const sizeText = n => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : (n / 1024).toFixed(1) + ' KB';
+
+// ![[clip.mov]] in a note (reading view and live preview), a canvas card or a split pane.
+function renderMediaEmbed(el, path, width) {
+  el.classList.add('media-embed');
+  el.innerHTML = mediaHtml(path, { width }) + `<div class="media-bar"><span>${esc(basename(path))}</span>${openDefaultButton(path)}</div>`;
+}
+
+// Why a file won't play here, and what to do about it on this computer.
+function mediaAdvice(p) {
+  const ua = navigator.userAgent, win = /Windows/.test(ua), mac = /Mac OS/.test(ua), video = VIDEO_EXT.test(p);
+  const what = video ? 'This video can’t be played here, most likely because of its format: iPhone videos are usually HEVC (H.265).' : 'This audio file can’t be played here.';
+  const fix = win ? (video ? 'Installing <b>HEVC Video Extensions</b> from the Microsoft Store lets Windows play them. Or open it in your default app (VLC plays it as it is).' : 'Open it in your default app.')
+    : mac ? 'Open it in your default app.' : 'Installing GStreamer’s <b>gst-libav</b> and <b>gst-plugins-bad</b> lets Cinder play it. Or open it in your default app.';
+  const tip = video ? ' For new videos, the iPhone’s <b>Settings → Camera → Formats → Most Compatible</b> records H.264, which plays everywhere.' : '';
+  return `<div class="media-fail"><p>${what} ${fix}${tip}</p>${openDefaultButton(p)}</div>`;
+}
+// Media errors don't bubble, so they're caught on the way down.
+document.addEventListener('error', e => {
+  const m = e.target;
+  if (!(m instanceof HTMLMediaElement)) return;
+  const p = new URL(m.currentSrc || m.src, location.href).searchParams.get('path');
+  if (!p) return;
+  if (m.classList.contains('ib-vthumb')) { m.closest('.ib-video')?.classList.add('ib-noplay'); return; }
+  if (m.classList.contains('media')) m.outerHTML = mediaAdvice(p);
+}, true);
+// A video sticky's badge shows its length once it's known.
+document.addEventListener('loadedmetadata', e => {
+  const m = e.target;
+  if (!(m instanceof HTMLVideoElement) || !m.classList.contains('ib-vthumb') || !isFinite(m.duration)) return;
+  const s = Math.round(m.duration), badge = m.parentElement?.querySelector('.ib-play');
+  if (badge) badge.textContent = `▶ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}, true);
+document.addEventListener('click', e => {
+  const b = e.target.closest?.('[data-open-default]');
+  if (!b) return;
+  e.preventDefault(); e.stopPropagation();
+  api(`/api/open-file?path=${enc(b.dataset.openDefault)}`, { method: 'POST' }).catch(err => toast('Couldn’t open it: ' + err.message, 5000));
+}, true);
+

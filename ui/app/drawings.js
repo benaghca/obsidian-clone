@@ -196,6 +196,7 @@ function drawingSvgUrl(path) {
 }
 
 function renderVisualEmbed(el, path, width, sub) {
+  if (isMedia(path)) return renderMediaEmbed(el, path, width);
   if (isCanvas(path)) return renderCanvasEmbed(el, path, width);
   if (isBase(path)) return renderBaseEmbed(el, path, sub);
   return renderDrawingEmbed(el, path, width);

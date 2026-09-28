@@ -445,6 +445,20 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .modal:has(.dr-help) { width: min(820px, calc(100vw - 32px)); }
 /* drawings embedded in notes: ![[Drawing.excalidraw]] */
 .drawing-embed { display: block; margin: .5em 0 1em; cursor: pointer; border-radius: var(--radius-sm); }
+/* Video and audio: in notes, canvases and split panes (.media-embed), and opened on their own (.media-view). */
+.media-embed { display: block; margin: .5em 0 1em; }
+.media-embed video, .media-view video { display: block; max-width: 100%; border-radius: var(--radius-md); background: #000; }
+.media-embed video { max-height: 70vh; } /* a portrait phone video stays on screen */
+.media-embed audio, .media-view audio { display: block; width: min(520px, 100%); }
+.media-bar { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: var(--text-sm); color: var(--muted); }
+.media-bar span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.media-bar .btn, .media-fail .btn { padding: 3px 10px; font-size: var(--text-sm); }
+.media-view { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+.media-view video { height: calc(100% - 48px); width: auto; object-fit: contain; } /* fills the pane, portrait or landscape */
+.media-view .media-bar { width: min(720px, 100%); }
+.media-fail { max-width: 560px; padding: 12px 14px; border: 1px dashed var(--border); border-radius: var(--radius-lg); color: var(--muted); line-height: 1.5; font-size: var(--text-ui); }
+.media-fail p { margin: 0 0 10px; }
+:is(.media-view, .media-embed):has(.media-fail) .media-bar .media-open { display: none; } /* the message offers it */
 .drawing-embed img { display: block; max-width: 100%; height: auto; }
 .drawing-embed:hover { outline: 1px solid var(--border); outline-offset: 4px; }
 .cm-visual-embed { padding: .5em 0; }
@@ -1257,6 +1271,12 @@ body.presenting #main { border: 0; }
 .ib-lane .ib-text h1, .ib-lane .ib-text h2, .ib-lane .ib-text h3 { font-size: 1.1em; margin: .3em 0; }
 .ib-lane .ib-edit { padding: 8px 6px 2px; font-size: var(--text-ui); }
 .ib-lane .ib-edit .cm-editor { background: transparent; }
+.ib-video { position: relative; }
+.ib-vthumb { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.ib-play { position: absolute; left: 8px; bottom: 8px; padding: 2px 8px; border-radius: var(--radius-pill); background: rgba(0, 0, 0, .6); color: #fff; font-size: var(--text-sm); font-variant-numeric: tabular-nums; pointer-events: none; }
+.ib-video.ib-noplay { display: grid; place-items: center; background: var(--bg3); }
+.ib-video.ib-noplay video { display: none; }
+.ib-video.ib-noplay .ib-play { position: static; }
 .ib-lane .ib-thumb, .ib-lane .ib-file { border-radius: calc(var(--radius-lg) - 1px) calc(var(--radius-lg) - 1px) 0 0; }
 .ib-lane .ib-file { aspect-ratio: 5 / 2; }
 .ib-lane .ib-meta { border-top: 0; min-height: 20px; align-items: center; padding: 5px 12px 7px; }

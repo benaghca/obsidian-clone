@@ -57,6 +57,9 @@ fn respond(req: Request, o: api::Out) {
     if o.csp {
         resp = resp.with_header(hdr("Content-Security-Policy", api::CSP));
     }
+    for (k, v) in &o.headers {
+        resp = resp.with_header(hdr(k, v));
+    }
     let _ = req.respond(resp);
 }
 

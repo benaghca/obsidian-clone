@@ -307,7 +307,36 @@ fn handle(ctx: &Ctx, req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     if o.csp {
         b = b.header("Content-Security-Policy", api::CSP);
     }
+    for (k, v) in &o.headers {
+        b = b.header(*k, v.as_str());
+    }
     b.body(Cow::Owned(o.body)).unwrap_or_else(|_| Response::new(Cow::Borrowed(&b""[..])))
+}
+
+/// Open a file in the system's default app for it (the caller has checked it's a media file in the
+/// vault). CINDER_OPEN_FILE=none skips it, for tests.
+pub fn open_file(path: &std::path::Path) -> Result<(), String> {
+    if std::env::var("CINDER_OPEN_FILE").is_ok_and(|v| v == "none") {
+        return Ok(());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::{Shell::ShellExecuteW, WindowsAndMessaging::SW_SHOWNORMAL};
+        let wide = |s: &std::ffi::OsStr| s.encode_wide().chain(std::iter::once(0)).collect::<Vec<u16>>();
+        let (verb, file) = (wide("open".as_ref()), wide(path.as_os_str()));
+        // ShellExecute hands the path to the default app without any command-line parsing.
+        let r = unsafe { ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL) };
+        if r as usize <= 32 {
+            return Err(format!("Windows couldn't open it (error {})", r as usize));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let cmd = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+        std::process::Command::new(cmd).arg(path).spawn().map(|_| ()).map_err(|e| format!("couldn't run {cmd}: {e}"))
+    }
 }
 
 pub fn open_external(url: &str) {

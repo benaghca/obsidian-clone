@@ -24,7 +24,7 @@ if [ $# -gt 0 ]; then SUITES=("$@"); else SUITES=($(cd "$HERE" && ls *.js | sed 
 fail=0
 for t in "${SUITES[@]}"; do
   rm -rf "$WORK/vault" "$WORK/xdg"; mkdir -p "$WORK/vault" "$WORK/xdg"
-  CINDER_HISTORY_SESSION_MS=1500 CINDER_FOLDER_PICKER=none CINDER_SCREENSHOT_CMD="cat $HERE/fixtures/pic.png" XDG_DATA_HOME="$WORK/xdg" \
+  CINDER_HISTORY_SESSION_MS=1500 CINDER_FOLDER_PICKER=none CINDER_OPEN_FILE=none CINDER_SCREENSHOT_CMD="cat $HERE/fixtures/pic.png" XDG_DATA_HOME="$WORK/xdg" \
     "$BIN" "$WORK/vault" --browser --port 43199 --no-open >"$WORK/server.log" 2>&1 &
   SRV=$!
   for _ in $(seq 50); do up && break; sleep 0.1; done

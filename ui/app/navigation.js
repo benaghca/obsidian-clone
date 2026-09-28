@@ -97,6 +97,8 @@ function openAttachment(p) {
     const { onCopy, onCrop, onAnnotate } = imageActions();
     fileViewer = CinderImages.viewer(v, items, items.findIndex(it => it.path === p), { onCopy, onCrop, onAnnotate });
     fileViewer.focus();
+  } else if (isMedia(p)) {
+    v.innerHTML = `<div class="media-view">${mediaHtml(p)}<div class="media-bar"><span>${esc(p)} · ${sizeText(f?.size || 0)}</span>${openDefaultButton(p)}</div></div>`;
   } else v.innerHTML = `<div class="file-info"><p>${esc(p)} · ${kb}</p><p><a class="btn" href="${rawUrl(p)}" target="_blank" rel="noopener">Open in new tab</a></p></div>`;
   $('#crumbs').innerHTML = crumbsHtml(p);
   renderTreeActive(true); refreshPanels(); updateStatus();

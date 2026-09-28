@@ -3,6 +3,7 @@
 
 use serde_json::{Value, json};
 use std::fs;
+use std::io::{Read, Seek};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{OnceLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -140,12 +141,14 @@ pub struct Out {
     pub ctype: &'static str,
     pub body: Vec<u8>,
     pub csp: bool,
+    /// Extra response headers (Content-Range and Accept-Ranges for media).
+    pub headers: Vec<(&'static str, String)>,
 }
 
 type ApiResult = Result<Out, (u16, String)>;
 
 fn out(status: u16, ctype: &'static str, body: Vec<u8>) -> Out {
-    Out { status, ctype, body, csp: false }
+    Out { status, ctype, body, csp: false, headers: Vec::new() }
 }
 pub fn text(status: u16, s: &str) -> Out {
     out(status, "text/plain; charset=utf-8", s.as_bytes().to_vec())
@@ -230,7 +233,8 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
             let paths = v.as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
             api_read(&vault, paths)
         }),
-        ("GET", "/api/raw") => api_raw(&vault, &q("path").unwrap_or_default()),
+        ("GET", "/api/raw") => api_raw(&vault, &q("path").unwrap_or_default(), header("range").as_deref()),
+        ("POST", "/api/open-file") => api_open_file(&vault, &q("path").unwrap_or_default()),
         ("PUT", "/api/file") => {
             let base = header("X-Base-Mtime").and_then(|s| s.parse::<u64>().ok());
             api_write(&vault, &q("path").unwrap_or_default(), &body, base)
@@ -349,10 +353,91 @@ fn api_read(vault: &Path, paths: Vec<String>) -> ApiResult {
     Ok(json_out(200, Value::Object(res)))
 }
 
-fn api_raw(vault: &Path, p: &str) -> ApiResult {
+/// A file's bytes. Video and audio come in pieces when asked for a range (as players do, to start
+/// quickly and to seek), reading only that piece, and an open-ended range gets MEDIA_CHUNK at most.
+fn api_raw(vault: &Path, p: &str, range: Option<&str>) -> ApiResult {
     let full = resolve(vault, p)?;
-    let data = fs::read(&full).map_err(|e| (404, e.to_string()))?;
-    Ok(out(200, mime_for(p), data))
+    let ctype = mime_for(p);
+    if !is_media(ctype) {
+        let data = fs::read(&full).map_err(|e| (404, e.to_string()))?;
+        return Ok(out(200, ctype, data));
+    }
+    let mut f = fs::File::open(&full).map_err(|e| (404, e.to_string()))?;
+    let len = f.metadata().map_err(io_err)?.len();
+    let ranges = ("Accept-Ranges", "bytes".to_string());
+    let mut o = match range.and_then(|r| parse_range(r, len)) {
+        None => {
+            let mut data = Vec::new();
+            f.read_to_end(&mut data).map_err(io_err)?;
+            out(200, ctype, data)
+        }
+        Some(Err(())) => {
+            let mut o = out(416, "text/plain; charset=utf-8", Vec::new());
+            o.headers.push(("Content-Range", format!("bytes */{len}")));
+            o
+        }
+        Some(Ok((start, end))) => {
+            let end = end.min(start + MEDIA_CHUNK - 1);
+            let mut data = vec![0; (end - start + 1) as usize];
+            f.seek(std::io::SeekFrom::Start(start)).map_err(io_err)?;
+            f.read_exact(&mut data).map_err(io_err)?;
+            let mut o = out(206, ctype, data);
+            o.headers.push(("Content-Range", format!("bytes {start}-{end}/{len}")));
+            o
+        }
+    };
+    o.headers.push(ranges);
+    Ok(o)
+}
+
+/// The most of a media file one open-ended range request gets; the player asks for more.
+const MEDIA_CHUNK: u64 = 8 * 1024 * 1024;
+fn is_media(ctype: &str) -> bool {
+    ctype.starts_with("video/") || ctype.starts_with("audio/")
+}
+
+/// A single `bytes=` range of a file `len` long: `Some(Ok((first, last)))`, `Some(Err(()))` when it
+/// starts past the end (416), or None for no range we serve (the whole file then).
+fn parse_range(h: &str, len: u64) -> Option<Result<(u64, u64), ()>> {
+    let spec = h.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (a, b) = spec.split_once('-')?;
+    let (a, b) = (a.trim(), b.trim());
+    if a.is_empty() {
+        let n: u64 = b.parse().ok()?;
+        return Some(if n == 0 || len == 0 { Err(()) } else { Ok((len.saturating_sub(n), len - 1)) });
+    }
+    let start: u64 = a.parse().ok()?;
+    if start >= len {
+        return Some(Err(()));
+    }
+    let end = if b.is_empty() { len - 1 } else { b.parse::<u64>().ok()?.min(len - 1) };
+    if end < start {
+        return None;
+    }
+    Some(Ok((start, end)))
+}
+
+/// A vault file that may be handed to its default app: video or audio only, so a stray program or
+/// script in the vault can never be run this way.
+fn openable(vault: &Path, p: &str) -> Result<PathBuf, (u16, String)> {
+    let full = resolve(vault, p)?;
+    if !is_media(mime_for(p)) {
+        return Err((403, "only video and audio files open in another app".into()));
+    }
+    if !full.is_file() {
+        return Err((404, "no such file".into()));
+    }
+    Ok(full)
+}
+
+/// Open a video or audio file in the system's default app for it (VLC, if that's the default).
+fn api_open_file(vault: &Path, p: &str) -> ApiResult {
+    let full = openable(vault, p)?;
+    crate::native::open_file(&full).map_err(|e| (500, e))?;
+    Ok(json_out(200, json!({ "ok": true })))
 }
 
 fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult {
@@ -792,8 +877,15 @@ fn mime_for(p: &str) -> &'static str {
         "pdf" => "application/pdf",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
-        "mp4" => "video/mp4",
+        "m4a" => "audio/mp4",
+        "aac" => "audio/aac",
+        "ogg" | "oga" | "opus" => "audio/ogg",
+        "flac" => "audio/flac",
+        // QuickTime (.mov, as iPhones record) and .m4v are MP4's close relatives: served as MP4,
+        // which Chromium and WebView2 play (codec allowing) where they'd refuse video/quicktime.
+        "mp4" | "m4v" | "mov" => "video/mp4",
         "webm" => "video/webm",
+        "ogv" => "video/ogg",
         "md" | "txt" | "csv" | "json" | "excalidraw" | "canvas" | "base" => "text/plain; charset=utf-8",
         _ => "application/octet-stream",
     }
@@ -857,6 +949,41 @@ mod tests {
         assert_eq!(v["types"], json!({ "keep": "number", "rating": "number" }));
         assert_eq!(v["other"], json!(1));
         assert!(api_prop_types(&dir, Some(json!({ "x": 5 }))).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn media_in_pieces() {
+        assert_eq!(parse_range("bytes=0-", 1000), Some(Ok((0, 999))));
+        assert_eq!(parse_range("bytes=10-19", 1000), Some(Ok((10, 19))));
+        assert_eq!(parse_range("bytes=990-5000", 1000), Some(Ok((990, 999))), "an end past the file is the file's end");
+        assert_eq!(parse_range("bytes=-100", 1000), Some(Ok((900, 999))), "the last 100 bytes");
+        assert_eq!(parse_range("bytes=1000-", 1000), Some(Err(())), "past the end");
+        assert_eq!(parse_range("bytes=0-1,5-9", 1000), None, "several ranges: the whole file");
+        assert_eq!(parse_range("items=0-1", 1000), None);
+        let dir = std::env::temp_dir().join(format!("cinder-media-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let data: Vec<u8> = (0..20_000_000u32).map(|i| (i % 251) as u8).collect();
+        fs::write(dir.join("clip.mov"), &data).unwrap();
+        let o = api_raw(&dir, "clip.mov", Some("bytes=100-199")).unwrap();
+        assert_eq!((o.status, o.ctype, o.body.as_slice()), (206, "video/mp4", &data[100..200]));
+        assert!(o.headers.contains(&("Content-Range", "bytes 100-199/20000000".into())) && o.headers.contains(&("Accept-Ranges", "bytes".into())));
+        let o = api_raw(&dir, "clip.mov", Some("bytes=0-")).unwrap();
+        assert!(o.status == 206 && o.body.len() == MEDIA_CHUNK as usize && o.body[..] == data[..MEDIA_CHUNK as usize], "an open range comes a piece at a time");
+        let o = api_raw(&dir, "clip.mov", Some("bytes=30000000-")).unwrap();
+        assert_eq!(o.status, 416);
+        assert!(o.headers.contains(&("Content-Range", "bytes */20000000".into())));
+        let o = api_raw(&dir, "clip.mov", None).unwrap();
+        assert_eq!((o.status, o.body.len()), (200, data.len()), "no range: the whole file");
+        fs::write(dir.join("a.png"), b"png").unwrap();
+        assert_eq!(api_raw(&dir, "a.png", Some("bytes=0-0")).unwrap().body, b"png", "not media: as before");
+        // Opening a file in its default app: media inside the vault only.
+        fs::write(dir.join("run.bat"), b"x").unwrap();
+        assert!(openable(&dir, "clip.mov").is_ok());
+        assert!(openable(&dir, "run.bat").is_err(), "never a program or script");
+        assert!(openable(&dir, "a.png").is_err());
+        assert!(openable(&dir, "../clip.mov").is_err() && openable(&dir, "missing.mp4").is_err());
         let _ = fs::remove_dir_all(&dir);
     }
 

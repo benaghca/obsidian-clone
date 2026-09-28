@@ -37,7 +37,7 @@ function orphanImages() {
 // The board file's text, loaded when it changes on disk (meanwhile the last version read is used,
 // and the board redraws once the new one is in).
 let boardFile = { mtime: null, text: '' }, boardLoading = null;
-const stickyMeta = p => ({ mtime: whenOf(p), kind: IMG_EXT.test(p) ? 'picture' : isMd(p) ? 'text' : 'file', length: S.notes.get(p)?.content.length || 0 });
+const stickyMeta = p => ({ mtime: whenOf(p), kind: IMG_EXT.test(p) || VIDEO_EXT.test(p) ? 'picture' : isMd(p) ? 'text' : 'file', length: S.notes.get(p)?.content.length || 0 });
 function boardTextNow() {
   const p = inboxBoardPath(), f = S.files.get(p);
   if (!f) { boardFile = { mtime: null, text: '' }; return ''; }
@@ -123,6 +123,7 @@ function stickyHtml(s, lane, seen) {
   const tint = s.color && !preset ? ` style="--sticky:${esc(s.color)}"` : '';
   let kind, body;
   if (IMG_EXT.test(p)) { kind = 'picture'; body = `<div class="ib-thumb"><img src="${rawUrl(p)}" alt="" loading="lazy" draggable="false"></div>`; }
+  else if (VIDEO_EXT.test(p)) { kind = 'video'; body = `<div class="ib-thumb ib-video"><video class="ib-vthumb" muted preload="metadata" src="${rawUrl(p)}#t=0.1"></video><span class="ib-play">▶ ${esc((p.split('.').pop() || '').toUpperCase())}</span></div>`; }
   else if (isMd(p)) { kind = 'text'; body = '<div class="ib-text markdown"></div>'; }
   else { kind = 'file'; body = `<div class="ib-file"><span>${esc((p.split('.').pop() || '').toUpperCase())}</span></div>`; }
   return `<div class="ib-card ib-st is-${kind}${preset}${s.color ? ' tinted' : ''}${sel ? ' sel' : ''}${isNew ? ' new' : ''}${p === inboxFocus ? ' focus' : ''}" data-path="${esc(p)}" draggable="true" tabindex="${p === inboxFocus ? 0 : -1}" role="option" aria-selected="${sel}"${tint}>

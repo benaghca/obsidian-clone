@@ -22,6 +22,8 @@ const noteName = p => { const b = basename(p); return isMd(b) ? b.slice(0, -3) :
 const join = (d, n) => d ? `${d}/${n}` : n;
 const splitOnce = (s, ch) => { const i = s.indexOf(ch); return i < 0 ? [s, null] : [s.slice(0, i), s.slice(i + 1)]; };
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
+const VIDEO_EXT = /\.(mp4|m4v|mov|webm|ogv)$/i, AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i;
+const isMedia = p => VIDEO_EXT.test(p) || AUDIO_EXT.test(p);
 const DRAWING_EXT = /\.excalidraw(\.md)?$/i;
 // Drawings: .excalidraw (Excalidraw JSON) or Obsidian Excalidraw plugin notes (.excalidraw.md / frontmatter flag).
 const isDrawing = p => !!p && (DRAWING_EXT.test(p) || (isMd(p) && S.notes.get(p)?.fm?.['excalidraw-plugin'] != null));
@@ -29,7 +31,7 @@ const drawingName = p => basename(p).replace(DRAWING_EXT, '').replace(/\.md$/i, 
 const isCanvas = p => !!p && /\.canvas$/i.test(p);
 const isBase = p => !!p && /\.base$/i.test(p);
 // Files whose ![[embeds]] app.js draws itself rather than as Markdown or an image.
-const visualEmbed = p => isDrawing(p) || isCanvas(p) || isBase(p);
+const visualEmbed = p => isDrawing(p) || isCanvas(p) || isBase(p) || isMedia(p);
 const displayName = p => isDrawing(p) ? drawingName(p) : isCanvas(p) || isBase(p) ? basename(p).replace(/\.(canvas|base)$/i, '') : isMd(p) ? noteName(p) : basename(p);
 const rawUrl = p => `/api/raw?path=${enc(p)}&t=${TOKEN}`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
