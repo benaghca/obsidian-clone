@@ -74,14 +74,15 @@ const saved = () => {
   assert(JSON.stringify(saved()[0]) === '["Pinned",["Lava flow.md"]]', '📌 pins a sticky');
   await page.hover(sticky('Lava flow.md')); await page.click(sticky('Lava flow.md') + ' [data-color="4"]'); await sleep(500);
   assert(saved()[0][1][0] === 'Lava flow.md:4' && await page.$eval(sticky('Lava flow.md'), c => c.classList.contains('c-4')), 'a colour dot colours it');
-  // A sticky is a card in the theme's own colours; its colour is an edge down the left, the canvas's own green here.
-  const look = await page.$eval(sticky('Lava flow.md'), c => {
-    const probe = document.createElement('div'); probe.style.cssText = 'background: var(--bg2); color: var(--cv-green)'; c.parentNode.append(probe);
-    const cs = getComputedStyle(c), ps = getComputedStyle(probe), out = { bg: cs.backgroundColor, edge: getComputedStyle(c, '::after').borderLeftColor, themeBg: ps.backgroundColor, green: ps.color };
+  // A coloured sticky is washed with its colour over the theme's card; a plain one is the theme's card.
+  const look = await page.evaluate(([c, p]) => {
+    const probe = document.createElement('div'); probe.style.background = 'var(--bg2)'; document.querySelector(c).parentNode.append(probe);
+    const out = { coloured: getComputedStyle(document.querySelector(c)).backgroundColor, plain: getComputedStyle(document.querySelector(p)).backgroundColor, theme: getComputedStyle(probe).backgroundColor };
     probe.remove(); return out;
-  });
-  assert(look.bg === look.themeBg && look.edge === look.green, 'coloured stickies are theme cards with a coloured edge: ' + JSON.stringify(look));
-  assert(await page.$eval(sticky('Ash sample.md'), c => getComputedStyle(c, '::after').content === 'none'), 'plain stickies have no edge');
+  }, [sticky('Lava flow.md'), sticky('Ash sample.md')]);
+  assert(look.coloured !== look.theme && look.plain === look.theme, 'a colour tints the whole sticky, and plain ones stay neutral: ' + JSON.stringify(look));
+  assert(await page.$$eval('#view-inbox .ib-lane:not([data-kind=new]) .ib-card.new', c => c.length) === 0 && await page.$$eval('#view-inbox .ib-lane[data-kind=new] .ib-card.new', c => c.length) > 0, 'only stickies still in New are marked new');
+  assert(await page.$(sticky('Lava flow.md') + ' .ib-meta .ib-tools'), 'the tools sit in the sticky’s bottom row');
   assert(await page.$(sticky('Lava flow.md') + ' [data-ib=pin] svg'), 'the pin is an icon, not an emoji');
   assert(await badge() === '3', 'the badge counts only what’s left in New');
 
@@ -114,7 +115,7 @@ const saved = () => {
     document.querySelector('#view-inbox').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }));
   }); await sleep(800);
   assert(ex('Inbox/dropped.png') && await page.$(sticky('dropped.png')), 'dropping a file adds a sticky');
-  await page.click(sticky('flow.png') + ' .ib-check'); await page.click('.ib-bar [data-ib=move]'); await sleep(200);
+  await page.hover(sticky('flow.png')); await page.click(sticky('flow.png') + ' .ib-check'); await page.click('.ib-bar [data-ib=move]'); await sleep(200);
   await page.keyboard.type('Pictures'); await page.keyboard.press('Enter'); await sleep(900);
   assert(ex('Pictures/flow.png') && !ex('Inbox/flow.png'), 'File to folder moves it');
   await page.evaluate(h => h.querySelector('[data-ib=lanemenu]').click(), await lane('Volcanoes')); await sleep(150);
@@ -144,6 +145,37 @@ const saved = () => {
   await page.hover(sticky('ridge.png')); await page.click(sticky('ridge.png') + ' [data-ib=pin]'); await sleep(600);
   assert(!(await page.$('.ib-broken')) && saved()[0][1][0] === 'ridge.png', 'arranging again writes a good board');
   await page.screenshot({ path: SP + '/shots/inbox-board.png' });
+
+  console.log('a big board');
+  for (let i = 1; i <= 24; i++) put(`Inbox/Big ${i}.md`, `Sticky number ${i}, long enough to wrap onto a second line.`, 0, 8);
+  for (let i = 1; i <= 5; i++) await page.evaluate(n => changeBoard({ addLane: n }), 'Lane ' + i);
+  await sleep(1800);
+  const geo = () => page.evaluate(() => {
+    const v = document.querySelector('#view-inbox'), l = document.querySelector('.ib-lanes'), s = document.querySelector('.ib-lane[data-kind=new] .ib-stack');
+    return { pageScrolls: v.scrollHeight > v.clientHeight + 1, lanesBottom: l.getBoundingClientRect().bottom, viewBottom: v.getBoundingClientRect().bottom, left: l.scrollLeft, wide: l.scrollWidth > l.clientWidth, stackTop: s.scrollTop, stackScrolls: s.scrollHeight > s.clientHeight };
+  });
+  let g = await geo();
+  assert(!g.pageScrolls && g.lanesBottom <= g.viewBottom + 1 && g.wide, 'the board fits the window and scrolls sideways: ' + JSON.stringify(g));
+  assert(g.stackScrolls, 'a long lane scrolls on its own');
+  const box = await page.$eval('#view-inbox .ib-lane[data-kind=new] .ib-stack .ib-card', c => { const r = c.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; });
+  await page.mouse.move(box.x, box.y); await page.mouse.wheel(0, 300); await sleep(300);
+  g = await geo();
+  assert(g.stackTop > 0 && g.left === 0, 'the wheel over a lane scrolls that lane');
+  const gap = await page.$eval('#view-inbox .ib-lane[data-kind=pinned]', l => { const r = l.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.bottom + 30 }; });
+  await page.mouse.move(gap.x, gap.y); await page.mouse.wheel(0, 200); await sleep(300);
+  g = await geo();
+  assert(g.left > 0, 'the wheel over empty board scrolls sideways: ' + g.left);
+  const was = g.left;
+  const empty = await page.$eval('#view-inbox .ib-lanes', ls => {
+    const box = ls.getBoundingClientRect();
+    const l = [...ls.querySelectorAll('.ib-lane')].map(x => x.getBoundingClientRect()).filter(r => r.left > box.left && r.right < box.right).sort((a, b) => a.bottom - b.bottom)[0];
+    return { x: l.x + l.width / 2, y: l.bottom + 30 };
+  });
+  await page.mouse.move(empty.x, empty.y); await page.mouse.down(); await page.mouse.move(empty.x + 120, empty.y, { steps: 6 }); await page.mouse.up(); await sleep(200);
+  g = await geo();
+  assert(Math.abs(was - g.left - 120) <= 2, 'dragging empty board pans it: ' + was + ' → ' + g.left);
+  await page.evaluate(() => renderInbox()); await sleep(200);
+  assert((await geo()).stackTop > 0, 'lanes keep their scroll when the board redraws');
   await page.evaluate(p => openPath(p), BOARD); await sleep(800);
   assert(await page.evaluate(() => S.view === 'canvas' && CinderCanvas.getData().nodes.some(n => n.type === 'group' && n.label === '📌 Pinned')), 'Inbox.canvas opens as a canvas, with the lanes as groups');
 

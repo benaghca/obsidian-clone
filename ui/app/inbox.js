@@ -1,7 +1,7 @@
 /* Cinder app — the Inbox: a sticky-note board for things you jot or capture away from here. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
 
 // Everything in the inbox folder (Settings; "Inbox" by default) is a sticky: notes show their
-// text on a card with a coloured edge, photos and other files as tiles. Stickies sit in lanes:
+// text on a card tinted with its colour, photos and other files as tiles. Stickies sit in lanes:
 // 📌 Pinned, New (where everything arriving lands) and lanes you name. The arrangement is kept in
 // <inbox>/Inbox.canvas (ui/inboxboard.js), a JSON Canvas file Obsidian opens as the same board;
 // it's only written when you arrange something, so arrivals don't touch it. Any selection, or a
@@ -118,7 +118,7 @@ const stickyTime = t => {
 const STICKY_COLORS = [['1', 'Red'], ['2', 'Orange'], ['3', 'Yellow'], ['4', 'Green'], ['5', 'Cyan'], ['6', 'Purple']];
 const PIN_ICON = '<svg viewBox="0 0 24 24"><path d="M9 3h6l-1 6 4 4v2H6v-2l4-4z"/><path d="M12 15v6"/></svg>';
 function stickyHtml(s, lane, seen) {
-  const p = s.path, sel = inboxSel.has(p), isNew = arrivedOf(p) > seen, pinned = lane.kind === 'pinned';
+  const p = s.path, sel = inboxSel.has(p), isNew = lane.kind === 'new' && arrivedOf(p) > seen, pinned = lane.kind === 'pinned';
   const preset = /^[1-6]$/.test(s.color || '') ? ` c-${s.color}` : '';
   const tint = s.color && !preset ? ` style="--sticky:${esc(s.color)}"` : '';
   let kind, body;
@@ -126,9 +126,8 @@ function stickyHtml(s, lane, seen) {
   else if (isMd(p)) { kind = 'text'; body = '<div class="ib-text markdown"></div>'; }
   else { kind = 'file'; body = `<div class="ib-file"><span>${esc((p.split('.').pop() || '').toUpperCase())}</span></div>`; }
   return `<div class="ib-card ib-st is-${kind}${preset}${s.color ? ' tinted' : ''}${sel ? ' sel' : ''}${isNew ? ' new' : ''}${p === inboxFocus ? ' focus' : ''}" data-path="${esc(p)}" draggable="true" tabindex="${p === inboxFocus ? 0 : -1}" role="option" aria-selected="${sel}"${tint}>
-    <div class="ib-tools"><button class="ib-pin${pinned ? ' on' : ''}" data-ib="pin" tabindex="-1" title="${pinned ? 'Unpin' : 'Pin'} (P)">${PIN_ICON}</button>${STICKY_COLORS.map(([c, name]) => `<button class="ib-dot c-${c}" data-ib="color" data-color="${c}" tabindex="-1" title="${name}"></button>`).join('')}<button class="ib-dot plain" data-ib="color" data-color="" tabindex="-1" title="Plain"></button><button class="ib-check" tabindex="-1" title="Select (Space)">${sel ? '✓' : ''}</button></div>
     ${body}
-    <div class="ib-meta"><span class="ib-name">${kind === 'text' ? '' : esc(displayName(p))}</span><span class="ib-time">${esc(stickyTime(whenOf(p)))}</span></div>
+    <div class="ib-meta"><span class="ib-name">${kind === 'text' ? '' : esc(displayName(p))}</span><span class="ib-time">${esc(stickyTime(whenOf(p)))}</span><div class="ib-tools"><button class="ib-pin${pinned ? ' on' : ''}" data-ib="pin" tabindex="-1" title="${pinned ? 'Unpin' : 'Pin'} (P)">${PIN_ICON}</button>${STICKY_COLORS.map(([c, name]) => `<button class="ib-dot c-${c}" data-ib="color" data-color="${c}" tabindex="-1" title="${name}"></button>`).join('')}<button class="ib-dot plain" data-ib="color" data-color="" tabindex="-1" title="Plain"></button><button class="ib-check" tabindex="-1" title="Select (Space)">${sel ? '✓' : ''}</button></div></div>
   </div>`;
 }
 const laneHtml = (lane, seen) => `<section class="ib-lane" data-lane="${esc(lane.id)}" data-kind="${lane.kind}">
@@ -147,7 +146,7 @@ function renderInbox() {
   const orphans = orphanImages();
   const fresh = items.filter(p => arrivedOf(p) > seen).length;
   const had = box.contains(document.activeElement) ? (document.activeElement.closest('.ib-card') ? 'card' : document.activeElement.matches('.ib-capture input') ? 'capture' : null) : null;
-  const scroll = $('.ib-lanes', box)?.scrollLeft || 0;
+  const scroll = $('.ib-lanes', box)?.scrollLeft || 0, tops = new Map($$('.ib-lane', box).map(l => [l.dataset.lane, $('.ib-stack', l).scrollTop]));
   box.innerHTML = `<div class="inbox ib-board">
     <header class="ib-head">
       <div><h2>Inbox</h2><p>${items.length ? `${items.length} ${items.length === 1 ? 'sticky' : 'stickies'}${fresh ? ` · <b>${fresh} new</b>` : ''} in <code>${esc(inboxDir())}/</code>` : `Things you jot or capture away from here land in <code>${esc(inboxDir())}/</code>.`}</p></div>
@@ -161,6 +160,7 @@ function renderInbox() {
       ${inboxOrphansOpen ? `<div class="ib-grid">${orphans.slice(0, 120).map(p => orphanCard(p)).join('')}</div>` : ''}</section>` : ''}
   </div>`;
   $('.ib-lanes', box).scrollLeft = scroll;
+  for (const l of $$('.ib-lane', box)) $('.ib-stack', l).scrollTop = tops.get(l.dataset.lane) || 0;
   // Text stickies show their note rendered, faded out if it runs long.
   for (const el of $$('.ib-lane .ib-text', box)) {
     const p = el.closest('.ib-card').dataset.path, content = S.notes.get(p)?.content || '';
@@ -439,6 +439,26 @@ $('#view-inbox').addEventListener('keydown', e => {
   else if (k === 'Escape' && inboxSel.size) { inboxSel.clear(); renderInbox(); }
   else done = false;
   if (done) { e.preventDefault(); e.stopPropagation(); }
+});
+
+// Moving around the board: each lane scrolls on its own; the wheel anywhere else on the board
+// (over a lane too short to scroll, or with Shift) scrolls it sideways, and dragging empty board pans it.
+$('#view-inbox').addEventListener('wheel', e => {
+  const lanes = e.target.closest?.('.ib-lanes'), stack = e.target.closest('.ib-stack');
+  if (!lanes || e.ctrlKey || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; // trackpads scroll sideways themselves
+  if (stack && !e.shiftKey && stack.scrollHeight > stack.clientHeight) return;
+  e.preventDefault();
+  lanes.scrollLeft += e.deltaY * (e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? lanes.clientWidth : 1);
+}, { passive: false });
+$('#view-inbox').addEventListener('pointerdown', e => {
+  const lanes = e.target.closest?.('.ib-lanes');
+  if (!lanes || e.button !== 0 || e.pointerType === 'touch' || e.target.closest('.ib-card, button, input, a, .ib-lane-empty')) return;
+  e.preventDefault();
+  const x0 = e.clientX, left0 = lanes.scrollLeft;
+  lanes.setPointerCapture(e.pointerId); lanes.classList.add('panning');
+  const move = ev => { lanes.scrollLeft = left0 - (ev.clientX - x0); };
+  const up = () => { lanes.classList.remove('panning'); lanes.removeEventListener('pointermove', move); lanes.removeEventListener('pointerup', up); lanes.removeEventListener('pointercancel', up); };
+  lanes.addEventListener('pointermove', move); lanes.addEventListener('pointerup', up); lanes.addEventListener('pointercancel', up);
 });
 
 // Dragging a sticky: within its lane to reorder, onto another lane to move it there. A placeholder
