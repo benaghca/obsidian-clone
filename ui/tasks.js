@@ -289,6 +289,61 @@
     return s;
   }
 
+  // ============================================================ suggestions while typing
+
+  // As in the Tasks plugin: on a task line, a keyword ("due", "sch", "hig", "every"…) offers its
+  // emoji, and after 📅 ⏳ 🛫 or 🔁 come dates or repeats (typed words read as quick add reads them).
+  // line and pos: the line's text and the cursor in it. Returns null or { from (where the
+  // replacement starts; it runs to pos), options: [{ label, detail, insert, reopen }] }, reopen
+  // meaning the next suggestions follow at once.
+  const TASK_LINE = /^\s*(?:[-*+]|\d+[.)])\s+\[[^\]]\]\s/;
+  const SUGGEST_FIELDS = [
+    ['due', '📅', 'due date'], ['scheduled', '⏳', 'scheduled date'], ['start', '🛫', 'start date'],
+    ['repeat', '🔁', 'repeats'], ['recurring', '🔁', 'repeats'], ['every', '🔁', 'repeats'],
+    ['high', '⏫', 'high priority'], ['highest', '🔺', 'highest priority'], ['urgent', '🔺', 'highest priority'],
+    ['medium', '🔼', 'medium priority'], ['low', '🔽', 'low priority'], ['lowest', '⏬', 'lowest priority'],
+  ];
+  const SUGGEST_REPEATS = ['every day', 'every weekday', 'every week', 'every 2 weeks', 'every month', 'every year'];
+  const TASK_EMOJI = '📅⏳🛫🔁🔺⏫🔼🔽⏬✅➕❌';
+  function suggestFor(line, pos, now = new Date()) {
+    if (!TASK_LINE.test(line)) return null;
+    const before = line.slice(0, pos), t = today(now);
+    const short = d => { const x = parseYmd(d); return `${DAYS[x.getDay()].slice(0, 3).replace(/^./, c => c.toUpperCase())} ${x.getDate()} ${MONTHS[x.getMonth()].slice(0, 3).replace(/^./, c => c.toUpperCase())}`; };
+    const tail = e => new RegExp(`(${e})\\uFE0F?([^${TASK_EMOJI}]*)$`, 'u').exec(before);
+    // After a date emoji: dates.
+    let m = tail('📅|⏳|🛫');
+    if (m && !/^\s*\d{4}-/.test(m[2]) && !(m[2].trim() && /\s$/.test(m[2])) && m[2].length <= 30) {
+      const typed = m[2].trim().toLowerCase(), from = pos - m[2].length, opts = [];
+      const add = (label, d) => { if (!opts.some(o => o.insert === ` ${d} `)) opts.push({ label, detail: short(d), insert: ` ${d} ` }); };
+      const q = typed ? parseQuick(typed, now) : null;
+      if (q?.due && !q.text) add(friendly(q.due, now), q.due);
+      const presets = [['Today', t], ['Tomorrow', addDays(t, 1)]];
+      for (let k = 2; k < 7; k++) presets.push([friendly(addDays(t, k), now), addDays(t, k)]);
+      presets.push(['Next week', addDays(t, 7 - ((now.getDay() + 6) % 7))], ['In 2 weeks', addDays(t, 14)], ['Next month', addMonths(t, 1)]);
+      for (const [label, d] of presets) if (!typed || label.toLowerCase().startsWith(typed)) add(label, d);
+      if (opts.length) return { from, options: opts };
+    }
+    // After 🔁: repeats.
+    m = tail('🔁');
+    if (m && !(m[2].trim() && /\s$/.test(m[2]))) {
+      const typed = m[2].trim().toLowerCase(), from = pos - m[2].length;
+      const rules = SUGGEST_REPEATS.filter(r => r.startsWith(typed));
+      if (typed && !rules.includes(typed) && parseRecur(typed)) rules.unshift(typed);
+      if (rules.length) return { from, options: rules.map(r => ({ label: r, insert: ` ${r} ` })) };
+    }
+    // A keyword: its field.
+    m = /(^|\s)([A-Za-z]{3,})$/.exec(before);
+    if (!m || before.lastIndexOf('[[') > before.lastIndexOf(']]') || (before.match(/`/g) || []).length % 2) return null;
+    const word = m[2].toLowerCase(), hasPriority = /[🔺⏫🔼🔽⏬]/u.test(line), options = [];
+    for (const [key, emoji, label] of SUGGEST_FIELDS) {
+      if (!key.startsWith(word) || line.includes(emoji) || options.some(o => o.insert === emoji + ' ')) continue;
+      const priority = /priority/.test(label);
+      if (priority && hasPriority) continue;
+      options.push({ label: `${emoji} ${label}`, insert: emoji + ' ', reopen: !priority });
+    }
+    return options.length ? { from: pos - m[2].length, options } : null;
+  }
+
   // ============================================================ queries (```tasks blocks)
 
   // A subset of the Tasks plugin's query language, one instruction per line.
@@ -399,7 +454,7 @@
     return out;
   }
 
-  const pure = { parseLine, parseNote, setField, setText, setStatus, toggle, parseRecur, nextDate, parseQuick, formatTask, parseQuery, runQuery, buckets, friendly, today, addDays, addMonths, PRIORITY_EMOJI, PRIORITY_RANK };
+  const pure = { parseLine, parseNote, setField, setText, setStatus, toggle, parseRecur, nextDate, parseQuick, formatTask, suggestFor, parseQuery, runQuery, buckets, friendly, today, addDays, addMonths, PRIORITY_EMOJI, PRIORITY_RANK };
 
   if (typeof document === 'undefined') { if (typeof module !== 'undefined' && module.exports) module.exports = pure; return; }
 

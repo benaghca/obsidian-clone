@@ -103,6 +103,7 @@ const DEFAULTS = {
   folderTemplates: '',
   taskInbox: '',         // where quick-added tasks go ('' = today's daily note)
   taskDoneDate: true,    // add ✅ YYYY-MM-DD when a task is ticked
+  taskSuggest: true,     // suggest dates, repeats and priorities while typing a task line
   drawingFormat: 'excalidraw',
   windowFrame: 'custom',  // desktop app: Cinder's own title bar, or the system's ('native'); lives in the app config
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
@@ -201,6 +202,7 @@ function editorHooks(from, extra) {
     renderMarkdown: (el, text) => { el.innerHTML = markdownToHtml(text, from(), 1); linkifyTags(el); },
     version: () => S.version,
     linkOptions: q => linkOptions(q),
+    taskSuggest: (line, pos) => cfg.taskSuggest ? CinderTasks.suggestFor(line, pos) : null,
     tagOptions: () => allTags(),
     visualEmbed: p => visualEmbed(p),
     renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),

@@ -118,4 +118,39 @@ t('Tasks view buckets', () => {
   assert.equal(T.friendly('2024-03-04', NOW), '2 days ago');
 });
 
+t('suggestions while typing a task line', () => {
+  const S = line => T.suggestFor(line, line.length, NOW); // NOW is Wednesday 2024-03-06
+  const ins = r => r && r.options.map(o => o.insert);
+  assert.equal(S('Call Ingrid due'), null, 'only on task lines');
+  assert.equal(S('- [ ] Call Ingrid du'), null, 'three letters first');
+  let r = S('- [ ] Call Ingrid due');
+  assert.equal(r.from, '- [ ] Call Ingrid '.length);
+  assert.deepEqual(ins(r), ['📅 ']);
+  assert.ok(r.options[0].reopen, 'a date field goes straight on to its dates');
+  assert.deepEqual(ins(S('- [ ] Pay rent hig')), ['⏫ ', '🔺 ']);
+  assert.ok(!S('- [ ] Pay rent hig').options[0].reopen, 'a priority is done at once');
+  assert.deepEqual(ins(S('- [ ] Water plants eve')), ['🔁 ']);
+  assert.deepEqual(ins(S('- [ ] Plan sch')), ['⏳ ']);
+  assert.equal(S('- [ ] Call Ingrid 📅 2024-03-08 due'), null, 'a field the task has isn’t offered again');
+  assert.equal(S('- [ ] Pay ⏫ rent hig'), null, 'nor a second priority');
+  assert.equal(S('- [ ] see [[due'), null, 'not inside a link');
+  assert.equal(S('- [ ] run `due'), null, 'or inline code');
+  r = S('- [ ] Call Ingrid 📅');
+  assert.equal(r.from, '- [ ] Call Ingrid 📅'.length);
+  assert.deepEqual(ins(r).slice(0, 3), [' 2024-03-06 ', ' 2024-03-07 ', ' 2024-03-08 ']);
+  assert.deepEqual(r.options.slice(0, 3).map(o => o.label), ['Today', 'Tomorrow', 'Friday']);
+  assert.equal(S('- [ ] Call Ingrid 📅 fri').options[0].insert, ' 2024-03-08 ', 'typed dates are read like quick add');
+  assert.equal(S('- [ ] Call Ingrid 📅 mar 20').options[0].insert, ' 2024-03-20 ');
+  assert.equal(S('- [ ] Call Ingrid 📅 in 2 weeks').options[0].insert, ' 2024-03-20 ');
+  assert.deepEqual(ins(S('- [ ] Call Ingrid 📅 to')), [' 2024-03-06 ', ' 2024-03-07 '], 'presets narrow as you type');
+  assert.equal(S('- [ ] Call Ingrid 📅 2024-03-08 '), null, 'a finished date stops');
+  assert.equal(S('- [ ] Call Ingrid ⏳ tomorrow').options[0].insert, ' 2024-03-07 ');
+  r = S('- [ ] Water plants 🔁 ');
+  assert.ok(ins(r).includes(' every week ') && ins(r).includes(' every weekday '));
+  assert.equal(S('- [ ] Water plants 🔁 every 3 weeks').options[0].insert, ' every 3 weeks ', 'a typed rule that reads is offered first');
+  assert.deepEqual(ins(S('- [ ] Water plants 🔁 every w')), [' every weekday ', ' every week ']);
+  assert.equal(S('- [ ] Water plants 🔁 every week '), null);
+  assert.deepEqual(ins(S('- [ ] X 📅 2024-03-08 then low')), ['🔽 ', '⏬ '], 'after a date, fields again');
+});
+
 console.log(`ok ${n} tests`);

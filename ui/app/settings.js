@@ -65,6 +65,7 @@ const SETTINGS = [
   { k: 'folderTemplates', page: 'templates', name: 'Folder templates', desc: 'New notes in a folder start from its template. One per line, as <code>Folder: Template</code>; <code>/</code> means every folder.', type: 'textarea', placeholder: 'Meetings: Templates/Meeting' },
   // Tasks
   { k: 'taskInbox', page: 'tasks', name: 'New tasks go to', desc: 'A note path. Empty means today’s daily note.', type: 'text', placeholder: 'Today’s daily note' },
+  { k: 'taskSuggest', page: 'tasks', name: 'Suggest dates and priorities in task lines', desc: 'Typing “due”, “every”, “high”… in a task offers 📅 🔁 ⏫ and dates, as the Tasks plugin does.', type: 'toggle' },
   { k: 'taskDoneDate', page: 'tasks', name: 'Add a done date', desc: 'Ticking a task adds ✅ and the date.', type: 'toggle' },
   // Inbox
   { k: 'inboxFolder', page: 'inbox', name: 'Inbox folder', desc: 'Where things you capture on your phone or elsewhere land. The Inbox shows what’s in it.', type: 'text', folder: true, placeholder: 'Inbox' },

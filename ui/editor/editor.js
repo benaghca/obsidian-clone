@@ -9,7 +9,7 @@ import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTa
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { parser as mdParser } from '@lezer/markdown';
-import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField, startCompletion } from '@codemirror/autocomplete';
 import { vim, getCM } from '@replit/codemirror-vim';
 import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, searchPanelOpen } from '@codemirror/search';
 import { classHighlighter, tags as t } from '@lezer/highlight';
@@ -1049,11 +1049,32 @@ function templaterCompletions(context) {
   return null;
 }
 
+// Task lines: dates, repeats and priorities as you type (hooks.taskSuggest(line, pos), null when off).
+function taskCompletions(context) {
+  const h = hooksOf(context.state);
+  if (!h.taskSuggest || /Code|Comment/.test(syntaxTree(context.state).resolveInner(context.pos, -1).name)) return null;
+  const line = context.state.doc.lineAt(context.pos);
+  const r = h.taskSuggest(line.text, context.pos - line.from);
+  if (!r) return null;
+  return {
+    from: line.from + r.from, filter: false,
+    options: r.options.map((o, i) => ({
+      label: o.label, detail: o.detail, boost: -i,
+      apply(view, _c, f, to) {
+        view.dispatch({ changes: { from: f, to, insert: o.insert }, selection: { anchor: f + o.insert.length } });
+        if (o.reopen) setTimeout(() => startCompletion(view));
+      },
+    })),
+  };
+}
+
 function completions(context) {
   const latex = latexCompletions(context);
   if (latex) return latex;
   const tp = templaterCompletions(context);
   if (tp) return tp;
+  const task = taskCompletions(context);
+  if (task) return task;
   let m = context.matchBefore(/!?\[\[[^\[\]\n|]*/);
   if (m) {
     const at = m.text.indexOf('[[') + 2;
