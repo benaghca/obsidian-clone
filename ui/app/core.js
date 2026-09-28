@@ -147,8 +147,9 @@ async function writeVaultSettings() {
   clearTimeout(settingsTimer); settingsTimer = 0;
   if (vaultFile.broken) { store('settingsUnsaved', false); return; } // the file wins once it's fixed
   const obj = CinderVaultSettings.forFile(cfg, DEFAULTS, vaultFile.obj || {}), text = JSON.stringify(obj);
-  // No file until a setting differs from its default; after that, keep it up to date.
-  if (text === vaultFile.text || (vaultFile.text == null && text === '{}')) { if (!settingsTimer) store('settingsUnsaved', false); return; }
+  // Every vault gets the file, even as {} (every setting at its default), so there's always one
+  // to edit, with settings.md and the assistants' guide beside it.
+  if (text === vaultFile.text) { if (!settingsTimer) store('settingsUnsaved', false); return; }
   settingsWriting = true;
   try {
     await api('/api/settings', { method: 'PUT', body: text }); vaultFile.text = text; vaultFile.obj = obj;

@@ -76,6 +76,13 @@ const file = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8'
   assert(JSON.stringify(file()) === JSON.stringify({ dailyFolder: 'Journal', vim: true }), 'its settings move into the file (not the machine ones): ' + JSON.stringify(file()));
   await page2.close();
 
+  console.log('a vault with every setting at its default');
+  fs.rmSync(path.join(VAULT, '.cinder'), { recursive: true }); fs.rmSync(path.join(VAULT, '.obsidian'), { recursive: true });
+  const page3 = await browser.newPage();
+  await page3.goto('http://127.0.0.1:43199/'); await sleep(1500);
+  assert(JSON.stringify(file()) === '{}' && fs.existsSync(path.join(VAULT, '.cinder/README.md')) && fs.existsSync(path.join(VAULT, '.cinder/settings.md')), 'still gets .cinder: an empty settings.json to edit, settings.md and the guide');
+  await page3.close();
+
   console.log('ERRORS:', errors.join('\n') || 'none');
   assert(!errors.length, 'no page errors');
   await browser.close();

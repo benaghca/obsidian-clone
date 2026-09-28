@@ -12,7 +12,7 @@ The user asked for "a settings.json" and left the design calls to Claude (2026-0
 ## The file
 
 - **Where:** `<vault>/.cinder/settings.json`. It's a dot-folder, which Obsidian and Cinder's file tree both ignore. It works whether or not the vault has `.obsidian`, and it syncs with the vault.
-- **What:** each vault setting whose value differs from Cinder's default, with the keys sorted and pretty-printed (as Obsidian's `app.json` does). A key that isn't there means the default. The key names are those in `DEFAULTS` (`ui/app/core.js`), plus:
+- **What:** each vault setting whose value differs from Cinder's default, with the keys sorted and pretty-printed (as Obsidian's `app.json` does). A key that isn't there means the default. Every vault Cinder opens gets the file, `{}` when every setting is at its default (changed 2026-09-28: a vault with default settings got no `.cinder` at all, so no guide either). The key names are those in `DEFAULTS` (`ui/app/core.js`), plus:
   - `hotkeys`: custom shortcuts, as Obsidian keeps them per vault;
   - `propTypes`: property types, only used when the vault has no `.obsidian/types.json`.
 - **Kept local, never in the file:**
