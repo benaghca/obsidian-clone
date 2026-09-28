@@ -2,6 +2,9 @@
 name = "cinder"
 version = "0.1.0"
 edition = "2024"
+description = "A local, plugin-free Markdown notes app that uses the Obsidian vault format"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/benaghca/obsidian-clone"
 
 [dependencies]
 notify = "8"
