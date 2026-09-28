@@ -1,11 +1,15 @@
 /* Cinder app — opening files and moving between them. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
 // ============================================================ navigation
 
+// Views that show a file, and so have the note menu (⋯); Tasks, the Inbox, Flashcards, the graph
+// and the empty page don't, though the note that was open stays S.cur behind them.
+const FILE_VIEWS = ['note', 'file', 'drawing', 'canvas', 'base'];
 function showView(v) {
   if (S.view === 'inbox' && v !== 'inbox') store('inboxSeen', Date.now()); // leaving the inbox: it's all been seen
   S.view = v;
   for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'tasks', 'flashcards', 'inbox', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
+  $('#viewbar [data-cmd=note-menu]').hidden = !FILE_VIEWS.includes(v);
   if (v === 'graph') CinderGraph.show(); else CinderGraph.hide();
   if (v === 'drawing') CinderDraw.show(); else CinderDraw.hide();
   if (v === 'canvas') CinderCanvas.show(); else CinderCanvas.hide();

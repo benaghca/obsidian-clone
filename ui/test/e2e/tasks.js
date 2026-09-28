@@ -132,6 +132,14 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   await page.keyboard.press('Control+Shift+T'); await sleep(400);
   await page.click('[data-roll]'); await sleep(1200);
   assert(!(await page.$('.tk-section.tk-danger')) && rd('Misc.md') === `- [ ] Old overdue 📅 ${T0}\n- [ ] Also late 📅 ${T0}\n`, 'Move them all to today clears Overdue');
+  console.log('the note menu');
+  const moreShown = () => page.$eval('#viewbar [data-cmd=note-menu]', b => b.offsetParent !== null);
+  assert(!(await moreShown()), 'Tasks shows no note menu (⋯)');
+  await page.evaluate(() => openPath('Misc.md')); await sleep(400);
+  assert(await moreShown(), 'a note does');
+  await page.keyboard.press('Control+Shift+T'); await sleep(400);
+  await page.evaluate(() => CMD['note-menu']()); await sleep(200);
+  assert(!(await moreShown()) && !(await page.$('.menu')), 'and back on Tasks after a note, the hidden note’s menu can’t be opened');
   console.log('ERRORS:', errors.join('\n') || 'none');
   assert(!errors.length, 'no page errors');
   await browser.close();

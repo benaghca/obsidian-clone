@@ -34,7 +34,7 @@ const CMD = {
   'toggle-mode': () => setMode(S.mode === 'edit' ? 'read' : 'edit'),
   'toggle-right': () => toggleSide('right'),
   'note-menu': () => {
-    if (!S.cur) return;
+    if (!S.cur || !FILE_VIEWS.includes(S.view)) return;
     const r = $('[data-cmd=note-menu]').getBoundingClientRect();
     const drawing = S.view === 'drawing';
     menu(r.left - 150, r.bottom + 4, [
