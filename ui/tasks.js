@@ -289,6 +289,28 @@
     return s;
   }
 
+  // Where a new task line goes in a note: at the end of its first "Tasks" section (any heading
+  // level; the section runs to the next heading as high or higher), else at the end. Returns
+  // { at, insert }: the offset, and the text to put there (with the newlines it needs).
+  function taskInsertion(content, line) {
+    const lines = content.split('\n');
+    let start = -1, level = 0, end = lines.length, fence = null;
+    for (let i = 0; i < lines.length; i++) {
+      const f = /^\s*(`{3,}|~{3,})/.exec(lines[i]);
+      if (fence) { if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null; continue; }
+      if (f) { fence = f[1]; continue; }
+      const h = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(lines[i]);
+      if (!h) continue;
+      if (start < 0) { if (h[2].trim().toLowerCase() === 'tasks') { start = i; level = h[1].length; } }
+      else if (h[1].length <= level) { end = i; break; }
+    }
+    if (start < 0) return { at: content.length, insert: (content && !content.endsWith('\n') ? '\n' : '') + line + '\n' };
+    let last = end - 1;
+    while (last > start && !lines[last].trim()) last--;
+    const at = lines.slice(0, last + 1).join('\n').length;
+    return at >= content.length ? { at, insert: '\n' + line + '\n' } : { at, insert: '\n' + line };
+  }
+
   // ============================================================ suggestions while typing
 
   // As in the Tasks plugin: on a task line, a keyword ("due", "sch", "hig", "every"…) offers its
@@ -454,7 +476,7 @@
     return out;
   }
 
-  const pure = { parseLine, parseNote, setField, setText, setStatus, toggle, parseRecur, nextDate, parseQuick, formatTask, suggestFor, parseQuery, runQuery, buckets, friendly, today, addDays, addMonths, PRIORITY_EMOJI, PRIORITY_RANK };
+  const pure = { parseLine, parseNote, setField, setText, setStatus, toggle, parseRecur, nextDate, parseQuick, formatTask, taskInsertion, suggestFor, parseQuery, runQuery, buckets, friendly, today, addDays, addMonths, PRIORITY_EMOJI, PRIORITY_RANK };
 
   if (typeof document === 'undefined') { if (typeof module !== 'undefined' && module.exports) module.exports = pure; return; }
 

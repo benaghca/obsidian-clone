@@ -10,6 +10,7 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
 (async () => {
   const T0 = day(0), Y = day(-1), TM = day(1);
   w('Projects/Launch.md', `# Launch\n- [ ] Write press release 📅 ${Y} ⏫ #work\n- [ ] Book venue 📅 ${T0}\n- [ ] Water plants 🔁 every week 📅 ${T0} #home\n- [ ] Someday idea\n- [x] Old thing ✅ ${Y}\n`);
+  w('Templates/Daily.md', '# Day\n\n## Tasks\n\n## Notes\n');
   w('Dashboard.md', '# Dashboard\n\n```tasks\nnot done\ndue on or before today\nsort by priority\n```\n\n- [ ] local task\n');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
@@ -17,6 +18,7 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   page.on('pageerror', e => errors.push('pageerror: ' + e.message + '\n' + e.stack));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('http://127.0.0.1:43199/'); await sleep(900);
+  await page.evaluate(() => { cfg.dailyTemplate = 'Templates/Daily'; });
   assert((await page.textContent('[data-cmd=tasks] .rb-badge')) === '3', 'ribbon badge counts overdue + today (3)');
   await page.keyboard.press('Control+Shift+T'); await sleep(400);
   const secs = () => page.$$eval('.tk-section h3', h => h.map(x => x.textContent.trim()));
@@ -31,10 +33,10 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   const pv = await page.textContent('.tk-preview');
   assert(pv.includes('Buy milk #errand') && pv.includes('Tomorrow') && pv.includes('High'), 'live preview understands it: ' + pv);
   await page.keyboard.press('Enter'); await sleep(900);
-  assert(rd(`Daily/${T0}.md`) === `- [ ] Buy milk #errand ⏫ 📅 ${TM}\n`, 'written to today\'s daily note in Tasks format');
+  assert(rd(`Daily/${T0}.md`) === `# Day\n\n## Tasks\n- [ ] Buy milk #errand ⏫ 📅 ${TM}\n\n## Notes\n`, 'written to today\'s daily note (made from its template) in Tasks format, under Tasks: ' + JSON.stringify(rd(`Daily/${T0}.md`)));
   assert(await page.evaluate(() => document.activeElement.classList.contains('tk-add')), 'input stays focused for the next task');
   await page.keyboard.type('Call mum'); await page.keyboard.press('Enter'); await sleep(900);
-  assert(rd(`Daily/${T0}.md`).endsWith(`- [ ] Call mum 📅 ${T0}\n`), 'in Today, a task without a date is for today');
+  assert(rd(`Daily/${T0}.md`).includes(`📅 ${TM}\n- [ ] Call mum 📅 ${T0}\n\n## Notes`), 'in Today, a task without a date is for today; it goes after the last task');
   await list('upcoming');
   assert((await secs()).includes('Tomorrow 1'), 'Upcoming shows tomorrow’s task: ' + (await secs()).join(' | '));
 
@@ -126,7 +128,7 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   await page.keyboard.type('Plan retro next friday every 2 weeks'); await sleep(100);
   assert((await page.textContent('.modal .tk-preview')).includes('repeats every 2 weeks'), 'palette quick add previews');
   await page.keyboard.press('Enter'); await sleep(900);
-  assert(/- \[ \] Plan retro 🔁 every 2 weeks 📅 \d{4}-\d\d-\d\d\n$/.test(rd(`Daily/${T0}.md`)), 'palette quick add appends to the inbox');
+  assert(/- \[ \] Plan retro 🔁 every 2 weeks 📅 \d{4}-\d\d-\d\d\n\n## Notes\n$/.test(rd(`Daily/${T0}.md`)), 'palette quick add appends to the inbox');
   console.log('rollover');
   w('Misc.md', `- [ ] Old overdue 📅 ${day(-3)}\n- [ ] Also late 📅 ${day(-1)}\n`); await sleep(2600);
   await page.keyboard.press('Control+Shift+T'); await sleep(400);

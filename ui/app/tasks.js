@@ -106,16 +106,22 @@ function taskInboxPath() {
 async function addTask(line, to) {
   const path = to || taskInboxPath();
   try {
+    // It goes at the end of the note's "Tasks" section, if it has one (CinderTasks.taskInsertion).
     if (path === S.cur && S.view === 'note') {
-      const v = ed.value, pre = v && !v.endsWith('\n') ? '\n' : '';
-      ed.insert(v.length, v.length, pre + line + '\n', ed.selectionStart, ed.selectionEnd);
+      const { at, insert } = CinderTasks.taskInsertion(ed.value, line);
+      ed.insert(at, at, insert, ed.selectionStart, ed.selectionEnd);
       await save();
     } else if (S.notes.has(path)) {
-      const n = S.notes.get(path), pre = n.content && !n.content.endsWith('\n') ? '\n' : '';
-      await writeFile(path, n.content + pre + line + '\n', n.mtime);
+      const n = S.notes.get(path), { at, insert } = CinderTasks.taskInsertion(n.content, line);
+      await writeFile(path, n.content.slice(0, at) + insert + n.content.slice(at), n.mtime);
       resolveNote(path);
     } else {
-      await writeFile(path, line + '\n');
+      // Today's daily note, not made yet: from the daily template, as opening it would.
+      let content = '';
+      const tname = path === periodPath('day', new Date()) && PERIODS.day.template(), t = tname && resolveLink(tname, null);
+      if (t && S.notes.has(t)) content = (await applyTemplate(S.notes.get(t).content, path, { templatePath: t }))?.text || '';
+      const { at, insert } = CinderTasks.taskInsertion(content, line);
+      await writeFile(path, content.slice(0, at) + insert + content.slice(at));
       let d = dirname(path);
       while (d) { S.dirs.add(d); d = dirname(d); }
       reindexAll(); renderTree();

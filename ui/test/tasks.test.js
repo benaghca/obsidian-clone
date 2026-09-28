@@ -153,4 +153,15 @@ t('suggestions while typing a task line', () => {
   assert.deepEqual(ins(S('- [ ] X 📅 2024-03-08 then low')), ['🔽 ', '⏬ '], 'after a date, fields again');
 });
 
+t('where a quick-added task goes', () => {
+  const put = (content, line = '- [ ] New') => { const { at, insert } = T.taskInsertion(content, line); return content.slice(0, at) + insert + content.slice(at); };
+  assert.equal(put(''), '- [ ] New\n');
+  assert.equal(put('# Day\nNotes'), '# Day\nNotes\n- [ ] New\n', 'no Tasks section: at the end');
+  assert.equal(put('# Day\n\n## Tasks\n- [ ] Old\n\n## Log\nx\n'), '# Day\n\n## Tasks\n- [ ] Old\n- [ ] New\n\n## Log\nx\n', 'after the last line of the Tasks section');
+  assert.equal(put('## Tasks\n\n## Log\n'), '## Tasks\n- [ ] New\n\n## Log\n', 'an empty section: under its heading');
+  assert.equal(put('## Tasks\n- [ ] Old\n### Sub\n- [ ] s\n# Next\n'), '## Tasks\n- [ ] Old\n### Sub\n- [ ] s\n- [ ] New\n# Next\n', 'sub-headings are part of it');
+  assert.equal(put('# Day\n## tasks'), '# Day\n## tasks\n- [ ] New\n', 'any case, at the end of the note');
+  assert.equal(put('```\n## Tasks\n```\nend'), '```\n## Tasks\n```\nend\n- [ ] New\n', 'not a heading inside code');
+});
+
 console.log(`ok ${n} tests`);
