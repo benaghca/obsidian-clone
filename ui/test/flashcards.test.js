@@ -80,6 +80,9 @@ t('decks: frontmatter, body tags and a tag starting a card', () => {
   const cards = parse(note, fmMeta(note, ['flashcards/fm']));
   assert.deepEqual(cards.map(c => [c.deck, c.sides[0].front]), [['flashcards/fm', 'q1'], ['flashcards/later', 'q2'], ['flashcards/own', 'q3']]);
   assert.deepEqual(parse('q0::a0\n\n#flashcards/x\n').map(c => c.deck), ['flashcards/x']);
+  // A card's own tag is for that card only: the cards after it keep the body's deck.
+  assert.deepEqual(parse('#flashcards/body\n\nq1::a1\n#flashcards/own q2::a2\nq3::a3\n\n#flashcards/own Q4\n?\nA4\n\nq5::a5\n').map(c => c.deck),
+    ['flashcards/body', 'flashcards/own', 'flashcards/body', 'flashcards/own', 'flashcards/body']);
   assert.deepEqual(parse('q::a\n#other\n'), []);
   const fmOnly = '---\ntags: flashcards\n---\nq::a\n';
   assert.deepEqual(parse(fmOnly, fmMeta(fmOnly, ['flashcards'])).map(c => c.deck), ['flashcards']);

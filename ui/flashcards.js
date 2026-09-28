@@ -110,7 +110,7 @@
       const f = /^(`{3,}|~{3,})/.exec(lines[i]);
       if (fence) { if (f && lines[i].startsWith(fence)) fence = null; continue; }
       if (f) { fence = f[1]; continue; }
-      for (const m of lines[i].matchAll(DECK_TAG)) tagAt.push({ line: i, deck: m[2] });
+      for (const m of lines[i].matchAll(DECK_TAG)) tagAt.push({ line: i, deck: m[2], start: m.index === 0 });
     }
     if (!fmDeck && !tagAt.length) return [];
 
@@ -150,7 +150,10 @@
     if (kind) found.push({ kind, first, last: lines.length - 1 });
 
     const fallback = fmDeck || tagAt[0].deck;
-    const deckAt = line => { let d = null; for (const t of tagAt) if (t.line <= line) d = t.deck; return d || fallback; };
+    // A tag starting a card's first line is that card's own deck (makeCard), not a body tag.
+    const own = new Set(found.filter(f => OWN_DECK.test(lines[f.first])).map(f => f.first));
+    const body = tagAt.filter(t => !(t.start && own.has(t.line)));
+    const deckAt = line => { let d = null; for (const t of body) if (t.line <= line) d = t.deck; return d || fallback; };
     return found.map(f => makeCard(path, lines, f, deckAt(f.first)));
   }
 
