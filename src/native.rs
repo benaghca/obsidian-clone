@@ -72,7 +72,10 @@ pub fn run(ctx: Ctx) -> ! {
     #[cfg(windows)]
     {
         use tao::platform::windows::WindowBuilderExtWindows;
-        wb = wb.with_taskbar_icon(Some(taskbar_icon()));
+        // tao's own drop target (for files dropped on the window, which Cinder doesn't use: the
+        // page takes dropped files itself) breaks HTML5 drag and drop inside WebView2, such as
+        // dragging a base's board cards. Tauri turns it off on Windows for the same reason.
+        wb = wb.with_taskbar_icon(Some(taskbar_icon())).with_drag_and_drop(false);
     }
     if let (Some(x), Some(y)) = (win["x"].as_i64(), win["y"].as_i64()) {
         wb = wb.with_position(PhysicalPosition::new(x as i32, y as i32));

@@ -12,8 +12,7 @@ pkgrel=1
 pkgdesc='Local, plugin-free Markdown notes app that uses the Obsidian vault format'
 arch=('x86_64')
 url='https://github.com/benaghca/obsidian-clone'
-# The repository has no license file yet.
-license=('LicenseRef-proprietary')
+license=('MIT OR Apache-2.0')
 depends=('webkit2gtk-4.1' 'gtk3')
 makedepends=('cargo' 'git')
 # makepkg's LTO flags can break the C code that some crates compile.
@@ -29,4 +28,5 @@ package() {
   install -Dm755 "$srcdir/target/release/cinder" "$pkgdir/usr/bin/cinder"
   install -Dm644 "$startdir/cinder.desktop" "$pkgdir/usr/share/applications/cinder.desktop"
   install -Dm644 "$_repo/ui/logo.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/cinder.svg"
+  install -Dm644 -t "$pkgdir/usr/share/licenses/cinder" "$_repo/LICENSE-MIT" "$_repo/LICENSE-APACHE" "$_repo/THIRD-PARTY-LICENSES.md"
 }

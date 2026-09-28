@@ -18,7 +18,7 @@ cargo build --release
 target\release\cinder.exe
 ```
 
-The first build takes a couple of minutes. After that, copy `cinder.exe` wherever you like and pin it to the taskbar. It's the only file you need.
+The first build takes a couple of minutes. After that, copy `cinder.exe` wherever you like and pin it to the taskbar. It's the only file you need. If you give Cinder to someone else, include `LICENSE-MIT`, `LICENSE-APACHE` and `THIRD-PARTY-LICENSES.md` with it (see **License** below).
 
 The icon and the version details on **Properties → Details** are built into `cinder.exe`, so a pinned or shortcut Cinder shows the volcano. If a pin you made from an older build still looks blank, unpin it and pin it again, because Windows caches taskbar icons.
 
@@ -69,7 +69,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - `KaTeX` 0.18.9 with its mhchem extension and fonts (math rendering, MIT, `ui/vendor/katex/`). It doesn't use `eval`, and "trusted" commands such as `\href` are off.
   - `d3-force-3d` 3.0.6 (the graph view's force layout, in 2D and 3D, MIT) with its d3 helper packages (ISC and MIT), bundled into `ui/vendor/d3-force.bundle.js` from `ui/editor/force.js` (`npm run build:force` in `ui/editor`) and pinned in `ui/editor/package.json`. See `ui/vendor/d3-force.LICENSE`.
   - `MathJax` 3.2.2 (`tex-svg-full.js`, Apache-2.0, `ui/vendor/mathjax/`), which turns LaTeX into SVG for equations in drawings. It loads the first time a drawing needs it.
-  - `@replit/codemirror-vim` 6.4.0 (Vim mode, MIT), bundled into `editor.bundle.js` and pinned in `ui/editor/package.json`.
+  - `@replit/codemirror-vim` 6.4.0 (Vim mode, MIT), bundled into `editor.bundle.js` and pinned in `ui/editor/package.json`. See `ui/vendor/codemirror-vim.LICENSE`.
   - The `Virgil` hand-drawn font from Excalidraw (`ui/vendor/Virgil.woff2`, SIL Open Font License 1.1, see `ui/vendor/virgil.LICENSE.md`). It's a font file, not code.
   - `JetBrains Mono` 2.304, the default code font, in regular, bold, italic and bold italic (`ui/vendor/JetBrainsMono-*.woff2`, SIL Open Font License 1.1, see `ui/vendor/jetbrains-mono.LICENSE`).
   - `Symbols Nerd Font Mono` from Nerd Fonts 3.5.1 (`ui/vendor/SymbolsNerdFontMono.woff2`) and its list of icon names (`ui/vendor/nerd-icons.txt`). Its icons come from Font Awesome and Codicons (CC BY 4.0), Material Design Icons (Apache 2.0), and Octicons, Devicons and others (MIT and SIL OFL). See `ui/vendor/nerd-fonts.LICENSE` for the full list and attributions.
@@ -309,3 +309,14 @@ cd ui/editor && npm install && npm run build
 ## Ideas for round two
 
 - An embedded `.exe` icon so Explorer shows it too. It needs the Windows SDK's `rc.exe` at build time. Right now the icon appears on the window and taskbar only.
+
+## License
+
+Cinder is free and open source, licensed under either of
+
+- the MIT license ([LICENSE-MIT](LICENSE-MIT)), or
+- the Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE)),
+
+at your option. Unless you say otherwise, any contribution you submit for inclusion in Cinder is dual-licensed the same way, without any additional terms.
+
+The libraries Cinder is built with keep their own licenses. The Rust crates compiled into the app are listed, with their license texts, in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md) (regenerate it with `python3 packaging/third-party-licenses.py` after changing dependencies). The web libraries and fonts in `ui/vendor` have their license files next to them, and are listed under **For IT** above.
