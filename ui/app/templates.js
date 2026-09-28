@@ -122,7 +122,8 @@ async function newNoteFromTemplate() {
   const pick = await pickTemplate('New note from template…');
   if (!pick) return;
   const path = uniquePath(cfg.newNoteFolder, 'Untitled.md');
-  await createNote(path, '', { mode: 'edit', template: { text: S.notes.get(pick).content, from: pick } });
+  // As Ctrl+N: the title is ready to be named, unless the template puts the cursor somewhere.
+  await createNote(path, '', { focusTitle: true, mode: 'edit', template: { text: S.notes.get(pick).content, from: pick } });
 }
 
 // Run the template commands written in the current note itself.
