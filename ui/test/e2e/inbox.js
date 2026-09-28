@@ -67,12 +67,22 @@ const saved = () => {
   await page.dragAndDrop(sticky('Crater rim.md'), '#view-inbox .ib-lane:nth-of-type(3) .ib-stack'); await sleep(600);
   await page.dragAndDrop(sticky('crater.png'), '#view-inbox .ib-lane:nth-of-type(3) .ib-stack'); await sleep(600);
   assert(JSON.stringify(saved()[2]) === '["Volcanoes",["Crater rim.md","crater.png"]]', 'dragging moves stickies to another lane: ' + JSON.stringify(saved()[2]));
+  await page.mouse.move(0, 0); await sleep(300); // let the last drop's hover lift settle, or Playwright sees the target moving and scrolls mid-drag
   await page.dragAndDrop(sticky('crater.png'), sticky('Crater rim.md'), { targetPosition: { x: 40, y: 4 } }); await sleep(600);
-  assert(JSON.stringify(saved()[2][1]) === '["crater.png","Crater rim.md"]', 'and dropping on the top half of another reorders them');
+  assert(JSON.stringify(saved()[2][1]) === '["crater.png","Crater rim.md"]', 'and dropping on the top half of another reorders them: ' + JSON.stringify(saved()[2][1]));
   await page.hover(sticky('Lava flow.md')); await page.click(sticky('Lava flow.md') + ' [data-ib=pin]'); await sleep(500);
   assert(JSON.stringify(saved()[0]) === '["Pinned",["Lava flow.md"]]', '📌 pins a sticky');
   await page.hover(sticky('Lava flow.md')); await page.click(sticky('Lava flow.md') + ' [data-color="4"]'); await sleep(500);
   assert(saved()[0][1][0] === 'Lava flow.md:4' && await page.$eval(sticky('Lava flow.md'), c => c.classList.contains('c-4')), 'a colour dot colours it');
+  // A sticky is a card in the theme's own colours; its colour is an edge down the left, the canvas's own green here.
+  const look = await page.$eval(sticky('Lava flow.md'), c => {
+    const probe = document.createElement('div'); probe.style.cssText = 'background: var(--bg2); color: var(--cv-green)'; c.parentNode.append(probe);
+    const cs = getComputedStyle(c), ps = getComputedStyle(probe), out = { bg: cs.backgroundColor, edge: getComputedStyle(c, '::after').borderLeftColor, themeBg: ps.backgroundColor, green: ps.color };
+    probe.remove(); return out;
+  });
+  assert(look.bg === look.themeBg && look.edge === look.green, 'coloured stickies are theme cards with a coloured edge: ' + JSON.stringify(look));
+  assert(await page.$eval(sticky('Ash sample.md'), c => getComputedStyle(c, '::after').content === 'none'), 'plain stickies have no edge');
+  assert(await page.$(sticky('Lava flow.md') + ' [data-ib=pin] svg'), 'the pin is an icon, not an emoji');
   assert(await badge() === '3', 'the badge counts only what’s left in New');
 
   console.log('editing in place');

@@ -1,7 +1,7 @@
 /* Cinder app — the Inbox: a sticky-note board for things you jot or capture away from here. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
 
 // Everything in the inbox folder (Settings; "Inbox" by default) is a sticky: notes show their
-// text on coloured paper, photos as polaroids, other files as tiles. Stickies sit in lanes:
+// text on a card with a coloured edge, photos and other files as tiles. Stickies sit in lanes:
 // 📌 Pinned, New (where everything arriving lands) and lanes you name. The arrangement is kept in
 // <inbox>/Inbox.canvas (ui/inboxboard.js), a JSON Canvas file Obsidian opens as the same board;
 // it's only written when you arrange something, so arrivals don't touch it. Any selection, or a
@@ -114,17 +114,19 @@ const stickyTime = t => {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() !== now.getFullYear() ? { year: 'numeric' } : {}) });
 };
 
-const STICKY_COLORS = [['1', 'Pink'], ['2', 'Orange'], ['3', 'Yellow'], ['4', 'Green'], ['5', 'Blue'], ['6', 'Purple']];
+// Obsidian's canvas colours, named as the canvas view names them.
+const STICKY_COLORS = [['1', 'Red'], ['2', 'Orange'], ['3', 'Yellow'], ['4', 'Green'], ['5', 'Cyan'], ['6', 'Purple']];
+const PIN_ICON = '<svg viewBox="0 0 24 24"><path d="M9 3h6l-1 6 4 4v2H6v-2l4-4z"/><path d="M12 15v6"/></svg>';
 function stickyHtml(s, lane, seen) {
   const p = s.path, sel = inboxSel.has(p), isNew = arrivedOf(p) > seen, pinned = lane.kind === 'pinned';
   const preset = /^[1-6]$/.test(s.color || '') ? ` c-${s.color}` : '';
-  const paper = s.color && !preset ? ` style="--paper:${esc(s.color)}"` : '';
+  const tint = s.color && !preset ? ` style="--sticky:${esc(s.color)}"` : '';
   let kind, body;
   if (IMG_EXT.test(p)) { kind = 'picture'; body = `<div class="ib-thumb"><img src="${rawUrl(p)}" alt="" loading="lazy" draggable="false"></div>`; }
   else if (isMd(p)) { kind = 'text'; body = '<div class="ib-text markdown"></div>'; }
   else { kind = 'file'; body = `<div class="ib-file"><span>${esc((p.split('.').pop() || '').toUpperCase())}</span></div>`; }
-  return `<div class="ib-card ib-st is-${kind}${preset}${sel ? ' sel' : ''}${isNew ? ' new' : ''}${p === inboxFocus ? ' focus' : ''}" data-path="${esc(p)}" draggable="true" tabindex="${p === inboxFocus ? 0 : -1}" role="option" aria-selected="${sel}"${paper}>
-    <div class="ib-tools"><button class="ib-pin${pinned ? ' on' : ''}" data-ib="pin" tabindex="-1" title="${pinned ? 'Unpin' : 'Pin'} (P)">📌</button>${STICKY_COLORS.map(([c, name]) => `<button class="ib-dot c-${c}" data-ib="color" data-color="${c}" tabindex="-1" title="${name}"></button>`).join('')}<button class="ib-dot plain" data-ib="color" data-color="" tabindex="-1" title="Plain"></button><button class="ib-check" tabindex="-1" title="Select (Space)">${sel ? '✓' : ''}</button></div>
+  return `<div class="ib-card ib-st is-${kind}${preset}${s.color ? ' tinted' : ''}${sel ? ' sel' : ''}${isNew ? ' new' : ''}${p === inboxFocus ? ' focus' : ''}" data-path="${esc(p)}" draggable="true" tabindex="${p === inboxFocus ? 0 : -1}" role="option" aria-selected="${sel}"${tint}>
+    <div class="ib-tools"><button class="ib-pin${pinned ? ' on' : ''}" data-ib="pin" tabindex="-1" title="${pinned ? 'Unpin' : 'Pin'} (P)">${PIN_ICON}</button>${STICKY_COLORS.map(([c, name]) => `<button class="ib-dot c-${c}" data-ib="color" data-color="${c}" tabindex="-1" title="${name}"></button>`).join('')}<button class="ib-dot plain" data-ib="color" data-color="" tabindex="-1" title="Plain"></button><button class="ib-check" tabindex="-1" title="Select (Space)">${sel ? '✓' : ''}</button></div>
     ${body}
     <div class="ib-meta"><span class="ib-name">${kind === 'text' ? '' : esc(displayName(p))}</span><span class="ib-time">${esc(stickyTime(whenOf(p)))}</span></div>
   </div>`;
