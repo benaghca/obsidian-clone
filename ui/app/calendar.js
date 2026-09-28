@@ -14,11 +14,12 @@ const PERIODS = {
 const periodPath = (kind, d) => join(PERIODS[kind].folder(), CinderTemplater.formatDate(d, PERIODS[kind].format()) + '.md');
 
 // The date a periodic note's name stands for (null if it isn't one). Handles the formats'
-// usual tokens; anything else in the format has to match as written.
+// usual tokens; anything else in the format has to match as written. The format can hold folders
+// ("YYYY/MM-MMMM/YYYY-MM-DD", as Obsidian allows), so it's the path below the folder that's matched.
 function periodDate(kind, path) {
-  const P = PERIODS[kind];
-  if (!isMd(path) || dirname(path) !== P.folder()) return null;
-  const name = noteName(path), fmt = P.format();
+  const P = PERIODS[kind], folder = P.folder() || '';
+  if (!isMd(path) || (folder && !path.startsWith(folder + '/'))) return null;
+  const name = path.slice(folder ? folder.length + 1 : 0).replace(/\.md$/i, ''), fmt = P.format();
   const parts = [];
   let re = '';
   const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december'];

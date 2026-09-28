@@ -53,6 +53,16 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   await page.click('[data-cmd=daily]'); await sleep(700);
   assert(await page.evaluate(() => S.cur) === `Daily/${T0.slice(8)}.${T0.slice(5, 7)}.${T0.slice(0, 4)}.md`, 'and the daily note uses it');
   assert(await page.$(`.cal-day.cur[data-day="${T0}"]`), 'the calendar recognises the new format');
+  // A format with folders in it, as Obsidian allows.
+  await page.evaluate(() => { cfg.dailyFormat = 'YYYY/MM-MMMM/YYYY-MM-DD-dddd'; saveCfg(); });
+  await page.click('[data-cmd=daily]'); await sleep(700);
+  const nested = await page.evaluate(() => S.cur);
+  assert(/^Daily\/\d{4}\/\d\d-[A-Za-z]+\/\d{4}-\d\d-\d\d-[A-Za-z]+\.md$/.test(nested), 'a format with folders files the note in them: ' + nested);
+  assert(await page.evaluate(p => !!periodDate('day', p), nested) && await page.$(`.cal-day.cur[data-day="${T0}"]`), 'and it’s recognised as that day’s note');
+  const back3 = await page.evaluate(async () => { const d = new Date(); d.setDate(d.getDate() - 3); await openDaily(d); return S.cur; }); await sleep(500);
+  await page.click('[data-cmd=daily]'); await sleep(500);
+  await page.evaluate(() => stepDaily(-1)); await sleep(600);
+  assert(await page.evaluate(() => S.cur) === back3, 'Previous daily note finds notes in those folders');
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));
   await browser.close();
 })().catch(e => { console.log(e.message); process.exit(1); });
