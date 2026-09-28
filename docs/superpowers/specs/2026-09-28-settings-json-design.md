@@ -26,6 +26,7 @@ The user asked for "a settings.json" and left the design calls to Claude (2026-0
 - **The file wins; browser storage is a cache.** At start-up the settings come from the cache at once, then from the file. If the file differs, it's applied: theme, tree, CSS snippets, calendar, editor and hotkeys are refreshed.
 - **Outside edits.** The vault watcher already reports changes inside `.cinder/`. So when the page checks the vault (on a change, and when the window comes back into view), it also reads the file. If the file changed, it's applied.
 - **Changes made in Settings** are written to the file shortly after, on a 400 ms debounce, and flushed before the window closes. While a write is pending, reading the file doesn't undo the change.
+- **A change not yet written survives a reload or crash.** Until the file has it, the cache is marked as newer, and at the next start-up the cache is written to the file rather than replaced by it.
 - **A file with a JSON mistake is never overwritten.** Cinder shows what's wrong once, keeps using the last good settings, and doesn't write until the file reads again.
 
 ## First run

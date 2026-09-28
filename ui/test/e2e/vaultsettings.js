@@ -38,6 +38,10 @@ const file = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8'
   await page.evaluate(() => { cfg.taskDoneDate = false; saveCfg(); }); await sleep(900);
   assert(file().taskDoneDate === false && file().futureSetting?.keep === true && !('inboxFolder' in file()), 'keys Cinder doesn’t know are kept, and a setting back at its default leaves the file');
 
+  console.log('a change, then a reload straight away');
+  await page.evaluate(() => { cfg.palette = 'nord'; saveCfg(); }); await page.reload(); await sleep(1500);
+  assert(await page.evaluate(() => cfg.palette === 'nord') && file().palette === 'nord', 'a change not yet written when the window reloads isn’t lost: it goes to the file');
+
   console.log('a file with a mistake');
   fs.writeFileSync(FILE, '{ "theme": "dark", '); await sleep(2800);
   assert(await page.evaluate(() => [...document.querySelectorAll('.toast')].some(t => /settings\.json has a mistake/.test(t.textContent))), 'says so');

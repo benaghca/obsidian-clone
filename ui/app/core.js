@@ -118,7 +118,9 @@ const DEFAULTS = {
   screenshotAfter: 'insert', // or 'annotate': open the screenshot in a drawing
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
-const saveCfg = () => { store('settings', cfg); scheduleSettingsWrite(); };
+// 'settingsUnsaved' marks the cache as newer than the file until the change is written, so a
+// reload (or a crash) before then writes it rather than losing it to the older file.
+const saveCfg = () => { store('settings', cfg); store('settingsUnsaved', true); scheduleSettingsWrite(); };
 
 // ------------------------------------------------------------ the vault's settings file
 
@@ -137,12 +139,16 @@ let settingsTimer = 0, settingsWriting = false, settingsBooted = false;
 function scheduleSettingsWrite() { clearTimeout(settingsTimer); settingsTimer = setTimeout(writeVaultSettings, 400); }
 async function writeVaultSettings() {
   clearTimeout(settingsTimer); settingsTimer = 0;
-  if (vaultFile.broken) return;
+  if (vaultFile.broken) { store('settingsUnsaved', false); return; } // the file wins once it's fixed
   const obj = CinderVaultSettings.forFile(cfg, DEFAULTS, vaultFile.obj || {}), text = JSON.stringify(obj);
   // No file until a setting differs from its default; after that, keep it up to date.
-  if (text === vaultFile.text || (vaultFile.text == null && text === '{}')) return;
+  if (text === vaultFile.text || (vaultFile.text == null && text === '{}')) { if (!settingsTimer) store('settingsUnsaved', false); return; }
   settingsWriting = true;
-  try { await api('/api/settings', { method: 'PUT', body: text }); vaultFile.text = text; vaultFile.obj = obj; syncSettingsDoc(vaultFile.doc); }
+  try {
+    await api('/api/settings', { method: 'PUT', body: text }); vaultFile.text = text; vaultFile.obj = obj;
+    if (!settingsTimer) store('settingsUnsaved', false);
+    syncSettingsDoc(vaultFile.doc);
+  }
   catch (e) { toast('Couldn’t save the settings to the vault: ' + e.message); }
   finally { settingsWriting = false; }
 }
@@ -152,7 +158,7 @@ async function loadVaultSettings() {
   try { r = await api('/api/settings'); } catch { return; }
   if (settingsTimer || settingsWriting) return;
   if (r.exists && !r.settings) {
-    vaultFile.broken = true;
+    vaultFile.broken = true; store('settingsUnsaved', false); // once it's fixed, the file is what counts
     if (vaultFile.told !== r.error) { vaultFile.told = r.error; toast(`.cinder/settings.json has a mistake (${r.error}). Cinder is keeping its last good settings and won’t change the file until it reads again.`, 9000); }
     return;
   }
@@ -170,6 +176,7 @@ async function loadVaultSettings() {
   const text = JSON.stringify(r.settings);
   if (text === vaultFile.text) return;
   vaultFile.text = text; vaultFile.obj = r.settings;
+  if (store('settingsUnsaved')) return writeVaultSettings(); // a change here the file hasn't had yet
   const next = CinderVaultSettings.fromFile(r.settings, DEFAULTS);
   if (Object.keys(next).every(k => JSON.stringify(cfg[k]) === JSON.stringify(next[k]))) return;
   Object.assign(cfg, next); store('settings', cfg);
