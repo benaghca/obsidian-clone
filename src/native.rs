@@ -158,6 +158,8 @@ pub fn run(ctx: Ctx) -> ! {
     });
 
     let mut closing = false;
+    // Whether the window was maximized when a presentation made it full screen (see "fullscreen:on").
+    let mut max_before_fullscreen = false;
     let mut acked = false;
     let debug = std::env::var_os("CINDER_DEBUG").is_some();
     event_loop.run(move |event, _, control_flow| {
@@ -199,8 +201,22 @@ pub fn run(ctx: Ctx) -> ! {
                         c["window"]["frame"] = json!(if native { "native" } else { "custom" });
                         crate::config::save(&c);
                     }
-                    "fullscreen:on" => window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None))),
-                    "fullscreen:off" => window.set_fullscreen(None),
+                    // On Windows, tao keeps a maximized window without a native frame inside the work
+                    // area (so it doesn't cover the taskbar) even when full screen, which cuts the page
+                    // off where the taskbar was. Leave maximized first, and go back to it afterwards.
+                    "fullscreen:on" => {
+                        max_before_fullscreen = cfg!(windows) && window.is_maximized();
+                        if max_before_fullscreen {
+                            window.set_maximized(false);
+                        }
+                        window.set_fullscreen(Some(tao::window::Fullscreen::Borderless(None)));
+                    }
+                    "fullscreen:off" => {
+                        window.set_fullscreen(None);
+                        if std::mem::take(&mut max_before_fullscreen) {
+                            window.set_maximized(true);
+                        }
+                    }
                     "theme:dark" => window.set_theme(Some(Theme::Dark)),
                     "theme:light" => window.set_theme(Some(Theme::Light)),
                     c => {
