@@ -263,7 +263,7 @@ async function clipboardImage() {
 // Settings can add a delay for catching menus.
 let shooting = false;
 async function insertScreenshot(o = {}) {
-  if (S.view !== 'note' && S.view !== 'canvas') return toast('Open a note or canvas first');
+  if (S.view !== 'note' && S.view !== 'canvas' && S.view !== 'inbox') return toast('Open a note or canvas first');
   if (shooting) return;
   const into = S.view, cur = S.cur;
   const annotate = o.annotate ?? cfg.screenshotAfter === 'annotate';
@@ -287,6 +287,11 @@ async function insertScreenshot(o = {}) {
   if (S.cur !== cur || S.view !== into) return toast('The screenshot wasn’t inserted because another file was opened');
   const d = new Date(), pad = n => String(n).padStart(2, '0');
   const file = new File([blob], `Screenshot ${fmtDate(d, 'YYYY-MM-DD')} ${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}.png`, { type: 'image/png' });
+  if (into === 'inbox') {
+    const [p] = await addToInbox([file]);
+    if (p && annotate) annotateImage(p);
+    return;
+  }
   if (into === 'note') {
     setMode('edit');
     const got = await attachAndLink(file, false);

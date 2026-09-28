@@ -135,6 +135,28 @@ const saved = () => {
   await page.click('[data-cmd=inbox]'); await sleep(500);
   assert((await lanes())[1][1][0] === jotted, 'at the top of New');
 
+  console.log('pasting and screenshots');
+  const newTop = async () => (await lanes())[1][1][0];
+  const pasteImage = sel => page.evaluate(async sel => {
+    const c = document.createElement('canvas'); c.width = 40; c.height = 30; c.getContext('2d').fillRect(0, 0, 40, 30);
+    const blob = await new Promise(r => c.toBlob(r)); const dt = new DataTransfer(); dt.items.add(new File([blob], 'image.png', { type: 'image/png' }));
+    document.querySelector(sel).dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+  }, sel);
+  await page.click('.ib-head h2'); await pasteImage('#view-inbox .ib-lanes'); await sleep(800);
+  assert(/^Pasted image \d{14}\.png$/.test(await newTop()), 'pasting an image on the board adds it to the top of New: ' + await newTop());
+  await page.evaluate(() => { const dt = new DataTransfer(); dt.setData('text/plain', 'Pasted: check the gate code'); document.querySelector('#view-inbox .ib-lanes').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); }); await sleep(800);
+  assert(fs.readFileSync(path.join(VAULT, 'Inbox', await newTop()), 'utf8').startsWith('Pasted: check the gate code'), 'and pasting text there jots it as a sticky');
+  await page.fill('.ib-capture input', ''); await page.focus('.ib-capture input'); await pasteImage('.ib-capture input'); await sleep(800);
+  assert(/^Pasted image/.test(await newTop()) && await page.$eval('.ib-capture input', i => i.value) === '', 'an image pasted into the jot box becomes a sticky too');
+  await page.evaluate(() => openPath('Trip log.md')); await sleep(500);
+  await page.keyboard.press('Control+Shift+j'); await sleep(250);
+  const before2 = fs.readdirSync(path.join(VAULT, 'Inbox')).length;
+  await pasteImage('.ib-jot textarea'); await sleep(800);
+  assert(fs.readdirSync(path.join(VAULT, 'Inbox')).length === before2 + 1 && !(await page.$('.ib-jot')) && await page.evaluate(() => S.view === 'note'), 'pasting a screenshot into the Ctrl+Shift+J box adds it and leaves you where you were');
+  await page.click('[data-cmd=inbox]'); await sleep(500);
+  await page.keyboard.press('Control+Shift+S'); await sleep(1500);
+  assert(/^Screenshot .*\.png$/.test(await newTop()), 'Ctrl+Shift+S on the inbox takes a screenshot into New: ' + await newTop());
+
   console.log('arrivals and a damaged board');
   await page.click('[data-cmd=inbox]'); await sleep(500);
   const before = boardText();

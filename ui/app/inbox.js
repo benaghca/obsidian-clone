@@ -150,7 +150,7 @@ function renderInbox() {
   box.innerHTML = `<div class="inbox ib-board">
     <header class="ib-head">
       <div><h2>Inbox</h2><p>${items.length ? `${items.length} ${items.length === 1 ? 'sticky' : 'stickies'}${fresh ? ` · <b>${fresh} new</b>` : ''} in <code>${esc(inboxDir())}/</code>` : `Things you jot or capture away from here land in <code>${esc(inboxDir())}/</code>.`}</p></div>
-      <form class="ib-capture"><input class="field" placeholder="Jot a thought… (Enter adds a sticky to New)" spellcheck="true"><span class="ib-hint">or drop photos and files here · ${esc(fmtKey('Mod-Shift-j'))} jots from anywhere</span></form>
+      <form class="ib-capture"><input class="field" placeholder="Jot a thought… (Enter adds a sticky to New)" spellcheck="true"><span class="ib-hint">or paste or drop screenshots and files here · ${esc(fmtKey('Mod-Shift-j'))} jots from anywhere</span></form>
     </header>
     ${board.broken ? `<p class="ib-broken">${esc(inboxBoardPath())} couldn’t be read, so everything is shown in New. It’ll be written afresh the next time you arrange the board (its version history keeps the old one).</p>` : ''}
     <div class="ib-bar"${inboxSel.size ? '' : ' hidden'}><b>${inboxSel.size} selected</b>
@@ -236,6 +236,15 @@ function jotSticky() {
       close();
       if (text.trim()) inboxCapture(text).then(() => { if (S.view !== 'inbox') toast('Added to the Inbox'); });
     }
+  });
+  ta.addEventListener('paste', async e => {
+    const files = await pastedFiles(e);
+    if (!files) return;
+    const text = ta.value;
+    close();
+    if (text.trim()) await inboxCapture(text);
+    await addToInbox(files);
+    if (S.view !== 'inbox') toast('Added to the Inbox');
   });
   back.addEventListener('mousedown', e => { if (e.target === back) close(); });
 }
@@ -356,7 +365,49 @@ async function inboxCapture(text) {
   if (S.view === 'inbox') $('#view-inbox .ib-capture input')?.focus();
 }
 
+// Files dropped, pasted or captured: each becomes a sticky at the top of New. Returns their paths.
+async function addToInbox(files) {
+  const added = [];
+  for (const f of files) { try { added.push(await importFile(f, inboxDir())); } catch (err) { toast(`Couldn’t add ${f.name}: ${err.message}`); } }
+  if (!added.length) return added;
+  S.dirs.add(inboxDir());
+  store('inboxSeen', Date.now());
+  renderTree(); renderInbox();
+  return added;
+}
+// A pasted image arrives as "image.png": name it for the moment, as pasting into a note does.
+function pastedFile(f) {
+  if (f.name && !/^image\.\w+$/i.test(f.name)) return f;
+  const d = new Date(), ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+  return new File([f], `Pasted image ${fmtDate(d, 'YYYYMMDDHHmm')}${String(d.getSeconds()).padStart(2, '0')}.${ext}`, { type: f.type });
+}
+// What a paste holds for the inbox: its files, else (WebKitGTK gives an image as an empty paste) the
+// clipboard's image, read by the app; null when it's text or nothing we can use.
+async function pastedFiles(e) {
+  const files = [...(e.clipboardData?.files || [])];
+  if (files.length) { e.preventDefault(); return files.map(pastedFile); }
+  if (e.clipboardData?.types.length) return null;
+  const f = await clipboardImage();
+  return f ? [f] : null;
+}
+
 // ------------------------------------------------------------ events
+
+// Paste on the board: images and files become stickies, text a jotted sticky. In the jot field an
+// image becomes a sticky too while text pastes as usual; a sticky being edited pastes like any note.
+document.addEventListener('paste', async e => {
+  if (S.view !== 'inbox' || e.defaultPrevented) return;
+  const t = e.target instanceof Element ? e.target : document.body;
+  if (t.closest('.ib-card.editing, .backdrop') || !(t === document.body || $('#view-inbox').contains(t))) return;
+  const text = e.clipboardData?.getData('text/plain');
+  if (text && !e.clipboardData.files.length) {
+    if (t.matches('input, textarea')) return;
+    e.preventDefault();
+    return inboxCapture(text);
+  }
+  const files = await pastedFiles(e);
+  if (files) addToInbox(files);
+});
 
 $('#view-inbox').addEventListener('click', async e => {
   const act = e.target.closest('[data-ib]');
@@ -514,8 +565,5 @@ $('#view-inbox').addEventListener('drop', async e => {
   const files = [...(e.dataTransfer?.files || [])];
   if (!files.length) return;
   e.preventDefault();
-  for (const f of files) { try { await importFile(f, inboxDir()); } catch (err) { toast(`Couldn’t add ${f.name}: ${err.message}`); } }
-  S.dirs.add(inboxDir());
-  store('inboxSeen', Date.now());
-  renderTree(); renderInbox();
+  addToInbox(files);
 });
