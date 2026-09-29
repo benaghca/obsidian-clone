@@ -32,6 +32,7 @@ VAULT_DIR   folder of .md notes. Default: the last vault you opened,
   --app       open a chromeless Edge/Chrome window";
 
 fn main() {
+    disable_dmabuf_on_nvidia();
     attach_console();
     let mut vault_arg: Option<PathBuf> = None;
     let mut browser = false;
@@ -91,6 +92,26 @@ fn message_box(msg: &str) {
         MessageBoxW(std::ptr::null_mut(), text.as_ptr(), title.as_ptr(), MB_OK | MB_ICONERROR);
     }
 }
+
+/// WebKitGTK renders through a DMABUF buffer it allocates with GBM, which the NVIDIA
+/// driver refuses ("Failed to create GBM buffer ... Invalid argument"). On X11 that only
+/// costs us the accelerated path, but on Wayland the failed buffer is still handed to the
+/// compositor, which answers with a protocol error that kills Cinder before its window is
+/// up. Asking WebKit to composite the old way avoids the allocation entirely. Only when an
+/// NVIDIA driver is actually loaded, and never over a setting the user chose themselves.
+#[cfg(target_os = "linux")]
+fn disable_dmabuf_on_nvidia() {
+    const VAR: &str = "WEBKIT_DISABLE_DMABUF_RENDERER";
+    if std::env::var_os(VAR).is_some() || !std::path::Path::new("/sys/module/nvidia").exists() {
+        return;
+    }
+    // SAFETY: this is the first line of main, so no other thread exists to read the
+    // environment while it's written.
+    unsafe { std::env::set_var(VAR, "1") };
+}
+
+#[cfg(not(target_os = "linux"))]
+fn disable_dmabuf_on_nvidia() {}
 
 /// A GUI-subsystem exe has no console; if started from a terminal, print there.
 fn attach_console() {
