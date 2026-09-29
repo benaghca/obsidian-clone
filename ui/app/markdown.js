@@ -177,6 +177,12 @@ function renderInto(el, content, from, depth) {
     code.parentElement.replaceWith(div);
     renderBaseBlock(div, code.textContent.replace(/\n$/, ''), from);
   }
+  // ```mermaid blocks become diagrams.
+  for (const code of $$('pre > code.language-mermaid', el)) {
+    const div = document.createElement('div');
+    code.parentElement.replaceWith(div);
+    renderMermaidBlock(div, code.textContent.replace(/\n$/, ''));
+  }
   // Note embeds (transclusion), limited depth.
   for (const sp of $$('span.embed[data-embed]', el)) {
     if (depth >= 2 || sp.dataset.embed === from) { sp.textContent = '(embed depth limit)'; continue; }
@@ -292,4 +298,48 @@ document.addEventListener('auxclick', e => {
   const target = a.dataset.path ? name : resolveLink(name, a.dataset.from || S.cur);
   if (target) openInNewTab(target, { heading: a.dataset.sub || undefined });
 });
+
+// ============================================================ Mermaid diagrams
+
+// ```mermaid blocks, drawn by Mermaid (ui/vendor/mermaid.min.js, loaded the first time a note has
+// one) in its strict mode (no scripts, no click handlers), in the light or dark theme to match.
+// A diagram with a mistake shows Mermaid's message and its source. Exports wait for mermaidPending.
+// A theme change redraws them: applyTheme re-renders the reading view and the editor's blocks.
+let mermaidReady = null, mermaidSeq = 0, mermaidTheme = '';
+const mermaidPending = new Set();
+function loadMermaid() {
+  if (!mermaidReady) mermaidReady = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/vendor/mermaid.min.js';
+    s.onload = () => window.mermaid ? resolve(window.mermaid) : reject(new Error('Mermaid didn’t start'));
+    s.onerror = () => { mermaidReady = null; s.remove(); reject(new Error('Mermaid didn’t load')); };
+    document.head.append(s);
+  });
+  return mermaidReady;
+}
+function renderMermaidBlock(el, code) {
+  el.classList.add('mermaid-block');
+  el.dataset.src = code;
+  if (!el.querySelector('svg')) el.innerHTML = '<div class="mermaid-wait">Drawing the diagram…</div>';
+  const job = (async () => {
+    let m;
+    try { m = await loadMermaid(); } catch (e) { return mermaidError(el, code, e.message); }
+    const theme = document.documentElement.dataset.theme === 'light' ? 'default' : 'dark';
+    if (theme !== mermaidTheme) {
+      m.initialize({ startOnLoad: false, securityLevel: 'strict', theme, fontFamily: getComputedStyle(document.body).fontFamily });
+      mermaidTheme = theme;
+    }
+    const id = 'mermaid-' + ++mermaidSeq;
+    try { el.innerHTML = (await m.render(id, code)).svg; }
+    catch (e) { mermaidError(el, code, e?.message || String(e)); }
+    finally { document.getElementById('d' + id)?.remove(); } // what Mermaid leaves behind after a mistake
+  })();
+  mermaidPending.add(job);
+  job.finally(() => mermaidPending.delete(job));
+  return job;
+}
+function mermaidError(el, code, msg) {
+  const lines = String(msg).split('\n').filter(l => l.trim()).slice(0, 4).join('\n');
+  el.innerHTML = `<div class="mermaid-error">This diagram has a mistake: <pre>${esc(lines)}</pre></div><pre class="mermaid-src"><code>${esc(code)}</code></pre>`;
+}
 

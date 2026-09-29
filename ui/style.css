@@ -445,6 +445,14 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .modal:has(.dr-help) { width: min(820px, calc(100vw - 32px)); }
 /* drawings embedded in notes: ![[Drawing.excalidraw]] */
 .drawing-embed { display: block; margin: .5em 0 1em; cursor: pointer; border-radius: var(--radius-sm); }
+/* ```mermaid diagrams */
+.mermaid-block { margin: .8em 0; overflow-x: auto; text-align: center; }
+/* The icon rule for every svg (18px, no fill, a stroke) mustn't reach a diagram; Mermaid styles its own. */
+.mermaid-block svg { width: 100%; height: auto; fill: initial; stroke: initial; stroke-width: initial; stroke-linecap: initial; stroke-linejoin: initial; }
+.mermaid-wait { padding: 1em; color: var(--faint); font-size: var(--text-sm); }
+.mermaid-error { text-align: left; color: var(--muted); font-size: var(--text-sm); }
+.mermaid-error pre { margin: .3em 0 .6em; white-space: pre-wrap; color: var(--danger); }
+.mermaid-block .mermaid-src { text-align: left; }
 /* Video and audio: in notes, canvases and split panes (.media-embed), and opened on their own (.media-view). */
 .media-embed { display: block; margin: .5em 0 1em; }
 .media-embed video, .media-view video { display: block; max-width: 100%; border-radius: var(--radius-md); background: #000; }

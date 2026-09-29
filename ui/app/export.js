@@ -19,6 +19,7 @@ async function renderForExport(path) {
   host.style.cssText = 'position:fixed;left:-10000px;top:0;width:780px;visibility:hidden';
   host.append(box); document.body.append(host);
   await new Promise(r => setTimeout(r, 400));
+  await Promise.allSettled([...mermaidPending]); // diagrams can take longer (Mermaid's first load)
   host.remove();
   for (const f of $$('iframe', box)) {
     const u = f.dataset.url || f.src, a = document.createElement('a');

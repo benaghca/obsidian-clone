@@ -289,7 +289,7 @@ function assistantGuide() {
     '',
     '- **Notes** are `.md` files. `[[Note]]`, `[[Note#Heading]]`, `[[Note|shown text]]` link; `![[Note]]` embeds a note, `![[image.png|300]]` an image 300 px wide, `![[clip.mov]]` a video player. `#tag` and `#nested/tag` are tags.',
     `- **Properties** are YAML frontmatter between \`---\` lines. Their types: ${CinderProps.TYPES.map(([t, n]) => `\`${t}\` (${n})`).join(', ')}. With an \`.obsidian/types.json\`, types are kept there, as Obsidian does.`,
-    '- **Callouts**: `> [!note] Title`, also `tip`, `warning`, `question` and the rest of Obsidian’s. **Math**: `$…$` inline, `$$…$$` on its own lines.',
+    '- **Callouts**: `> [!note] Title`, also `tip`, `warning`, `question` and the rest of Obsidian’s. **Math**: `$…$` inline, `$$…$$` on its own lines. **Diagrams**: ```` ```mermaid ```` blocks, drawn by Mermaid 12.',
     '- **Tasks** use the Obsidian Tasks plugin’s format: `- [ ] Call Sam 📅 2026-10-02 ⏫ 🔁 every week`, with 📅 due, ⏳ scheduled, 🛫 start, ✅ done, priorities 🔺 ⏫ 🔼 🔽 ⏬ and 🔁 repeats. A ```` ```tasks ```` block is a live list (`not done`, `due before tomorrow`, `path includes Projects`, `sort by due`, `group by tags`…).',
     '- **Flashcards** use the Spaced Repetition plugin’s format, in notes tagged `#flashcards` (or `#flashcards/deck`): `Question::Answer`, `Question:::Answer` (both ways), several lines with `?` or `??` between, and `==clozes==`. Cinder writes each card’s schedule after it as `<!--SR:…-->`; leave those alone.',
     '- **Bases** are database views of notes in Obsidian’s `.base` YAML format (filters, formulas, table, cards, list and board views), as files or in ```` ```base ```` blocks.',
