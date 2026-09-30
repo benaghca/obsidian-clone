@@ -24,6 +24,8 @@ const splitOnce = (s, ch) => { const i = s.indexOf(ch); return i < 0 ? [s, null]
 const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 const VIDEO_EXT = /\.(mp4|m4v|mov|webm|ogv)$/i, AUDIO_EXT = /\.(mp3|m4a|aac|wav|ogg|oga|opus|flac)$/i;
 const isMedia = p => VIDEO_EXT.test(p) || AUDIO_EXT.test(p);
+// Files that "Open in default app" may hand over, besides video and audio (as src/api.rs's DOC_EXTS).
+const OPEN_EXT = /\.(pdf|docx?|xlsx?|pptx?|od[tsp]|rtf|txt|csv|tsv|epub|zip|7z|tar|gz)$/i;
 const DRAWING_EXT = /\.excalidraw(\.md)?$/i;
 // Drawings: .excalidraw (Excalidraw JSON) or Obsidian Excalidraw plugin notes (.excalidraw.md / frontmatter flag).
 const isDrawing = p => !!p && (DRAWING_EXT.test(p) || (isMd(p) && S.notes.get(p)?.fm?.['excalidraw-plugin'] != null));

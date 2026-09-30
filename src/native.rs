@@ -127,8 +127,12 @@ pub fn run(ctx: Ctx) -> ! {
         })
         .with_navigation_handler(move |url| {
             // Web pages embedded in notes load in sandboxed frames; the page registers each one's
-            // origin first. Anything else leaves for the user's browser.
-            if is_app_url(&url) || origin_of(&url).is_some_and(|o| nav_frames.lock().is_ok_and(|s| s.contains(&o))) {
+            // origin first. Anything else leaves for the user's browser. The API is fetched, never
+            // navigated to: a vault file loaded as the page (a spreadsheet, say) left only an error
+            // page, with no way back to Cinder.
+            if is_app_url(&url) {
+                !is_api_url(&url)
+            } else if origin_of(&url).is_some_and(|o| nav_frames.lock().is_ok_and(|s| s.contains(&o))) {
                 true
             } else {
                 open_external(&url);
@@ -290,6 +294,11 @@ fn origin_of(url: &str) -> Option<String> {
     Some(format!("{scheme}://{}", host.to_ascii_lowercase()))
 }
 
+/// An app URL under /api/ (only ever fetched by the page).
+fn is_api_url(url: &str) -> bool {
+    url.split_once("://").and_then(|(_, rest)| rest.find('/').map(|i| &rest[i..])).is_some_and(|path| path.starts_with("/api/"))
+}
+
 fn is_app_url(url: &str) -> bool {
     url.starts_with(&format!("{PROTOCOL}://")) || url.starts_with(&format!("http://{PROTOCOL}.localhost")) || url.starts_with(&format!("https://{PROTOCOL}.localhost")) || url == "about:blank"
 }
@@ -404,7 +413,7 @@ fn resource_icon(metric: windows_sys::Win32::UI::WindowsAndMessaging::SYSTEM_MET
 
 #[cfg(test)]
 mod tests {
-    use super::origin_of;
+    use super::{is_api_url, origin_of};
 
     #[test]
     fn origins() {
@@ -413,5 +422,14 @@ mod tests {
         assert_eq!(origin_of("https://user@evil.com/").as_deref(), None);
         assert_eq!(origin_of("folio://localhost/").as_deref(), None);
         assert_eq!(origin_of("javascript:alert(1)").as_deref(), None);
+    }
+
+    #[test]
+    fn api_urls() {
+        assert!(is_api_url("folio://localhost/api/raw?path=Budget.xlsx&t=x"));
+        assert!(is_api_url("http://folio.localhost/api/raw?path=a.zip"));
+        assert!(!is_api_url("folio://localhost/"));
+        assert!(!is_api_url("folio://localhost/?vault=x"));
+        assert!(!is_api_url("folio://localhost/vendor/api/x.js"));
     }
 }

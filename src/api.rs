@@ -421,12 +421,19 @@ fn parse_range(h: &str, len: u64) -> Option<Result<(u64, u64), ()>> {
     Some(Ok((start, end)))
 }
 
-/// A vault file that may be handed to its default app: video or audio only, so a stray program or
-/// script in the vault can never be run this way.
+/// Documents Cinder can't show itself that may go to their default app (as ui/app/core.js's
+/// OPEN_EXT). Never macro-enabled Office files: they can run code.
+const DOC_EXTS: &[&str] = &[
+    "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "rtf", "txt", "csv", "tsv", "epub", "zip", "7z", "tar", "gz",
+];
+
+/// A vault file that may be handed to its default app: video, audio or a document from an allow
+/// list, so a stray program or script in the vault can never be run this way.
 fn openable(vault: &Path, p: &str) -> Result<PathBuf, (u16, String)> {
     let full = resolve(vault, p)?;
-    if !is_media(mime_for(p)) {
-        return Err((403, "only video and audio files open in another app".into()));
+    let ext = p.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
+    if !is_media(mime_for(p)) && !DOC_EXTS.contains(&ext.as_str()) {
+        return Err((403, "only video, audio and documents open in another app".into()));
     }
     if !full.is_file() {
         return Err((404, "no such file".into()));
@@ -434,7 +441,7 @@ fn openable(vault: &Path, p: &str) -> Result<PathBuf, (u16, String)> {
     Ok(full)
 }
 
-/// Open a video or audio file in the system's default app for it (VLC, if that's the default).
+/// Open a video, audio or document file in the system's default app for it (VLC, LibreOffice…).
 fn api_open_file(vault: &Path, p: &str) -> ApiResult {
     let full = openable(vault, p)?;
     crate::native::open_file(&full).map_err(|e| (500, e))?;
@@ -983,9 +990,13 @@ mod tests {
         assert_eq!((o.status, o.body.len()), (200, data.len()), "no range: the whole file");
         fs::write(dir.join("a.png"), b"png").unwrap();
         assert_eq!(api_raw(&dir, "a.png", Some("bytes=0-0")).unwrap().body, b"png", "not media: as before");
-        // Opening a file in its default app: media inside the vault only.
-        fs::write(dir.join("run.bat"), b"x").unwrap();
+        // Opening a file in its default app: media and documents inside the vault only.
+        for f in ["run.bat", "Budget.XLSX", "Macro.xlsm"] {
+            fs::write(dir.join(f), b"x").unwrap();
+        }
         assert!(openable(&dir, "clip.mov").is_ok());
+        assert!(openable(&dir, "Budget.XLSX").is_ok(), "a spreadsheet");
+        assert!(openable(&dir, "Macro.xlsm").is_err(), "never one with macros");
         assert!(openable(&dir, "run.bat").is_err(), "never a program or script");
         assert!(openable(&dir, "a.png").is_err());
         assert!(openable(&dir, "../clip.mov").is_err() && openable(&dir, "missing.mp4").is_err());

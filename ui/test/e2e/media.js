@@ -11,6 +11,7 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   const clip = fs.readFileSync(__dirname + '/fixtures/clip.webm');
   w('Inbox/clip.webm', clip);
   w('Inbox/broken.mov', Buffer.from('this is not a video at all, just some bytes '.repeat(40)));
+  w('Budget.xlsx', 'PK not really a spreadsheet'); w('run.sh', 'echo hi');
   w('Videos.md', '# Videos\n\n![[clip.webm]]\n\nText after.\n');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
@@ -45,7 +46,17 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   await page.click('#view-file .media-fail [data-open-default]'); await sleep(400);
   assert(!(await page.evaluate(() => [...document.querySelectorAll('.toast')].some(t => /Couldn’t open/.test(t.textContent)))), 'which the app accepts (a media file in the vault)');
   const refused = await page.evaluate(async () => { try { await api(`/api/open-file?path=${enc('Videos.md')}`, { method: 'POST' }); return 'opened'; } catch (e) { return e.message; } });
-  assert(/only video and audio/.test(refused), 'while anything else is refused: ' + refused);
+  assert(/only video, audio and documents/.test(refused), 'while anything else is refused: ' + refused);
+
+  console.log('other files');
+  await page.evaluate(() => openPath('Budget.xlsx')); await sleep(600);
+  assert(!(await page.$('#view-file a[href*="/api/raw"]')), 'a spreadsheet has no link to its raw file (it replaced the whole window)');
+  await page.click('#view-file [data-open-default="Budget.xlsx"]'); await sleep(400);
+  assert(!(await page.evaluate(() => [...document.querySelectorAll('.toast')].some(t => /Couldn’t open/.test(t.textContent)))), 'it opens in the default app');
+  await page.evaluate(() => openPath('run.sh')); await sleep(600);
+  assert(!(await page.$('#view-file [data-open-default]')) && /can’t open this kind/.test(await page.textContent('#view-file')), 'a script gets no button');
+  const script = await page.evaluate(async () => { try { await api(`/api/open-file?path=${enc('run.sh')}`, { method: 'POST' }); return 'opened'; } catch (e) { return e.message; } });
+  assert(/only video, audio and documents/.test(script), 'and the app won’t open it: ' + script);
 
   console.log('in notes');
   await page.evaluate(() => openPath('Videos.md')); await sleep(800);

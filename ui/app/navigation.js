@@ -99,7 +99,10 @@ function openAttachment(p) {
     fileViewer.focus();
   } else if (isMedia(p)) {
     v.innerHTML = `<div class="media-view">${mediaHtml(p)}<div class="media-bar"><span>${esc(p)} · ${sizeText(f?.size || 0)}</span>${openDefaultButton(p)}</div></div>`;
-  } else v.innerHTML = `<div class="file-info"><p>${esc(p)} · ${kb}</p><p><a class="btn" href="${rawUrl(p)}" target="_blank" rel="noopener">Open in new tab</a></p></div>`;
+  // A document (a spreadsheet, a PDF…) goes to the app the system uses for it; programs and scripts
+  // never do. (A link to the raw file replaced the whole window with the web view's "can't show
+  // this" page, with no way back.)
+  } else v.innerHTML = `<div class="file-info"><p>${esc(p)} · ${kb}</p><p>${OPEN_EXT.test(p) ? openDefaultButton(p) : 'Cinder can’t open this kind of file.'}</p></div>`;
   $('#crumbs').innerHTML = crumbsHtml(p);
   renderTreeActive(true); refreshPanels(); updateStatus();
 }
