@@ -192,8 +192,9 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 :is(#editor, .split-editor) .cm-line { padding: 0; }
 :is(#editor, .split-editor, .cv-cm, .tex-src) .cm-cursor { border-left: 2px solid var(--accent); }
 /* The selection is a translucent layer *over* the text, in the theme's accent: drawn underneath
-   (CodeMirror's default), inline code, highlights, tags and code blocks would hide it. */
-:is(#editor, .split-editor, .cv-cm, .tex-src) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; }
+   (CodeMirror's default), inline code, highlights, tags and code blocks would hide it. Clicks go
+   through it to the text, or a click inside a selection wouldn't reach the editor at all. */
+:is(#editor, .split-editor, .cv-cm, .tex-src) .cm-selectionLayer { z-index: 1 !important; mix-blend-mode: normal; pointer-events: none; }
 :is(#editor, .split-editor, .cv-cm, .tex-src) :is(.cm-selectionBackground, ::selection) { background: color-mix(in srgb, var(--accent) 18%, transparent) !important; }
 :is(#editor, .split-editor, .cv-cm, .tex-src) .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 32%, transparent) !important; }
 :is(#editor, .split-editor, .cv-cm, .tex-src) .cm-placeholder { color: var(--faint); }

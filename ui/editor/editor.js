@@ -160,9 +160,39 @@ const focusField = StateField.define({
   update(v, tr) { for (const e of tr.effects) if (e.is(setFocus)) v = e.value; return v; },
 });
 
+// While the mouse button is down, what's shown stays as it was when it was pressed: revealing a
+// table's or formula's source as a drag-selection reaches it moved the text under the pointer,
+// and the selection jumped (and a click after a long selection landed somewhere else).
+const setDrag = StateEffect.define();
+const dragField = StateField.define({
+  create: () => null,
+  update(v, tr) { for (const e of tr.effects) if (e.is(setDrag)) v = e.value; return v; },
+});
+const dragFreeze = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.view = view;
+    this.end = e => { if (e.type !== 'mousemove' || !(e.buttons & 1)) this.release(); };
+  }
+  release() {
+    for (const t of ['mouseup', 'mousemove', 'blur']) window.removeEventListener(t, this.end, true);
+    if (this.view.state.field(dragField)) this.view.dispatch({ effects: setDrag.of(null) });
+  }
+  destroy() { this.release(); }
+}, {
+  eventHandlers: {
+    mousedown(e, view) {
+      if (e.button !== 0) return;
+      const s = view.state, shown = s.field(focusField) ? s.selection.ranges : [];
+      view.dispatch({ effects: setDrag.of(shown) });
+      // (Capture, and on the window: the button can come up anywhere, even outside the window.)
+      for (const t of ['mouseup', 'mousemove', 'blur']) window.addEventListener(t, this.end, true);
+    },
+  },
+});
+
 // Which parts of the document is the user "inside"? Syntax there stays visible.
 function activity(state) {
-  const ranges = state.field(focusField) ? state.selection.ranges : [];
+  const ranges = state.field(dragField, false) || (state.field(focusField) ? state.selection.ranges : []);
   const doc = state.doc;
   return {
     touches: (from, to) => ranges.some(r => r.from <= to && r.to >= from),
@@ -596,7 +626,7 @@ const livePlugin = ViewPlugin.fromClass(class {
   constructor(view) { this.decorations = buildInline(view); }
   update(u) {
     if (u.docChanged || u.viewportChanged || u.selectionSet || syntaxTree(u.startState) !== syntaxTree(u.state) ||
-      u.transactions.some(tr => tr.effects.some(e => e.is(setFocus) || e.is(refresh))))
+      u.transactions.some(tr => tr.effects.some(e => e.is(setFocus) || e.is(refresh) || e.is(setDrag))))
       this.decorations = buildInline(u.view);
   }
 }, { decorations: v => v.decorations });
@@ -677,7 +707,7 @@ const blockField = StateField.define({
   create: s => buildBlocks(s),
   update(v, tr) {
     if (tr.docChanged || tr.selection || syntaxTree(tr.startState) !== syntaxTree(tr.state) ||
-      tr.effects.some(e => e.is(setFocus) || e.is(refresh))) return buildBlocks(tr.state);
+      tr.effects.some(e => e.is(setFocus) || e.is(refresh) || e.is(setDrag))) return buildBlocks(tr.state);
     return v;
   },
   provide: f => EditorView.decorations.from(f),
@@ -1151,6 +1181,8 @@ function create(parent, hooks, opts = {}) {
     typeComp.of(opts.typewriter ? typewriter : []),
     hooksFacet.of(hooks),
     focusField,
+    dragField,
+    dragFreeze,
     EditorView.focusChangeEffect.of((_s, focusing) => setFocus.of(focusing)),
     history(),
     drawSelection(),
