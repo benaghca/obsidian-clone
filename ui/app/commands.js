@@ -201,6 +201,9 @@ function rebuildHotkeys() {
     const k = keyFor(c), base = el.title.replace(/\s*\([^)]*\)$/, '');
     el.title = k ? `${base} (${fmtKey(k)})` : base;
   }
+  const sk = keyFor(CMD_BY_ID.get('switcher'));
+  $('#cmdbox kbd').textContent = sk ? fmtKey(sk) : '';
+  $('#cmdbox kbd').hidden = !sk;
 }
 
 // Punctuation keys by position, so Shift+key names the key rather than the shifted character.
@@ -230,6 +233,9 @@ function fmtKey(k) {
 const typingIn = t => t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName));
 // Registered at boot, after the canvas and drawing views, so their own keys (Ctrl+G to group,
 // Alt+arrows between cards…) win while they're open.
+// With Vim on, the editor keeps the Ctrl keys Vim uses (CinderEditor.vimKeys) for Vim.
+const vimTakes = k => !!k && CinderEditor.vimKeys.includes(MAC ? k : k.replace(/^Mod-/, 'Ctrl-'));
+
 function onHotkey(e) {
   if ($('#modal-root').children.length || e.defaultPrevented) return;
   const k = keyOf(e);
@@ -258,7 +264,8 @@ function mountHotkeys(box, filter, close) {
   const conflictsOf = c => {
     const k = keyFor(c);
     if (!k) return [];
-    return COMMANDS.filter(o => o !== c && keyFor(o) === k && (!!o.editor === !!c.editor || !o.editor || !c.editor)).map(o => o.name);
+    const vim = cfg.vim && vimTakes(k) ? ['Vim, in the editor'] : [];
+    return COMMANDS.filter(o => o !== c && keyFor(o) === k && (!!o.editor === !!c.editor || !o.editor || !c.editor)).map(o => o.name).concat(vim);
   };
   const draw = () => {
     const f = q.value.trim().toLowerCase();

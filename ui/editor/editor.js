@@ -1167,6 +1167,13 @@ const theme = EditorView.theme({
 });
 
 // opts: {keys: {command: key}, extraKeys: [{key, run}], placeholder, vim, live}
+// With Vim on, the Ctrl keys Vim uses belong to Vim in the editor, in every mode. Vim sees keys
+// first; one it lets through (Ctrl+N in insert mode, say) stops here, before Cinder's formatting
+// keys, CodeMirror's own (Ctrl+A selects all) and the app's shortcuts (Ctrl+N made a new note and
+// left this one). Ctrl+C, Ctrl+V and Ctrl+X still copy, paste and cut.
+const VIM_KEYS = [...'abdefghijklmnoprtuwy', '[', ']'].map(k => 'Ctrl-' + k);
+const vimMode = () => [vim(), Prec.high(keymap.of(VIM_KEYS.map(key => ({ key, run: () => true }))))];
+
 function create(parent, hooks, opts = {}) {
   const liveComp = new Compartment();
   const spellComp = new Compartment();
@@ -1176,7 +1183,7 @@ function create(parent, hooks, opts = {}) {
 
   let liveOn = opts.live ?? true, keys = opts.keys || {}, vimOn = !!opts.vim;
   const extensions = () => [
-    vimComp.of(vimOn ? vim() : []),
+    vimComp.of(vimOn ? vimMode() : []),
     focusComp.of(opts.focus ? focusPara : []),
     typeComp.of(opts.typewriter ? typewriter : []),
     hooksFacet.of(hooks),
@@ -1282,7 +1289,7 @@ function create(parent, hooks, opts = {}) {
     getState() { return view.state; },
     setState(st) {
       view.setState(st);
-      view.dispatch({ effects: [setFocus.of(view.hasFocus), liveComp.reconfigure(liveOn ? livePreview : []), keysComp.reconfigure(keymap.of(keyBindings(keys))), vimComp.reconfigure(vimOn ? vim() : [])] });
+      view.dispatch({ effects: [setFocus.of(view.hasFocus), liveComp.reconfigure(liveOn ? livePreview : []), keysComp.reconfigure(keymap.of(keyBindings(keys))), vimComp.reconfigure(vimOn ? vimMode() : [])] });
     },
     // Replace content without marking the note dirty (reload from disk).
     setSilently(text) {
@@ -1320,7 +1327,7 @@ function create(parent, hooks, opts = {}) {
       const st = vimOn && getCM(view)?.state.vim;
       return completionStatus(view.state) === 'active' || searchPanelOpen(view.state) || (!!st && (st.insertMode || st.visualMode));
     },
-    setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vim() : []) }); },
+    setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vimMode() : []) }); },
     setFocusMode(on) { opts.focus = !!on; view.dispatch({ effects: focusComp.reconfigure(on ? focusPara : []) }); },
     setTypewriter(on) { opts.typewriter = !!on; view.dispatch({ effects: typeComp.reconfigure(on ? typewriter : []) }); },
     // Where the cursor is: {line, col, selected (characters), words (in the selection)}.
@@ -1422,4 +1429,4 @@ function scanMarkdown(text) {
   return { code, urls, headings, links };
 }
 
-window.CinderEditor = { create, mathField, scanMarkdown, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
+window.CinderEditor = { create, mathField, scanMarkdown, vimKeys: VIM_KEYS, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
