@@ -44,7 +44,7 @@ window.__cinderWinState = max => {
   if (b) { b.title = max ? 'Restore' : 'Maximize'; b.innerHTML = max ? '<svg viewBox="0 0 24 24"><rect x="5.5" y="8.5" width="10" height="10" rx="1"/><path d="M8.5 8.5v-3h10v10h-3"/></svg>' : '<svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1"/></svg>'; }
 };
 // Empty parts of the top bars drag the window; a double-click maximizes.
-const DRAG_AREAS = '#tabbar, #left .panel-head, #right .tabs, #viewbar';
+const DRAG_AREAS = '#topbar, #tabbar, #left .panel-head, #right .tabs, #viewbar';
 document.addEventListener('mousedown', e => {
   if (!document.body.classList.contains('frame-custom') || e.button !== 0) return;
   const win = e.target.closest('#win-controls [data-win]');

@@ -87,7 +87,20 @@ button { font: inherit; color: inherit; }
 svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
 kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--muted); background: var(--bg2); }
 
-#app { display: flex; height: 100vh; }
+body { display: flex; flex-direction: column; height: 100vh; }
+#app { display: flex; flex: 1; min-height: 0; }
+
+/* The top bar: the window's title bar, with the quick switcher's box in the middle (it opens the
+   switcher; > in it lists commands). In Cinder's own frame it moves the window, and the window
+   buttons sit at its right. */
+#topbar { flex: none; height: 36px; display: flex; align-items: center; justify-content: center; padding: 0 12px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+#cmdbox { display: flex; align-items: center; gap: 8px; width: min(480px, 100%); height: 26px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); color: var(--faint); font-size: var(--text-ui); cursor: pointer; }
+#cmdbox:hover { border-color: var(--muted); color: var(--muted); }
+#cmdbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+#cmdbox svg { width: 14px; height: 14px; flex: none; }
+#cmdbox span { flex: 1; min-width: 0; text-align: left; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#cmdbox kbd { flex: none; }
+.frame-custom #topbar { padding-right: 126px; padding-left: 126px; }
 
 /* ribbon */
 #ribbon { width: 44px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 8px 0; background: var(--bg2); border-right: 1px solid var(--border); }
@@ -1054,7 +1067,6 @@ body.has-split .pane-grip { display: grid; }
 #win-controls button.close:hover { background: #e81123; color: #fff; }
 #win-controls svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.4; }
 /* keep the bars under the buttons clear of them */
-.frame-custom.app-no-right #tabbar { padding-right: 120px; }
 .win-edge { position: fixed; z-index: 45; }
 .win-max .win-edge, body:not(.frame-custom) .win-edge { display: none; }
 .win-n, .win-s { left: 8px; right: 8px; height: 4px; cursor: ns-resize; } .win-n { top: 0; } .win-s { bottom: 0; }
@@ -1064,7 +1076,7 @@ body.has-split .pane-grip { display: grid; }
 .tabs button svg { display: none; }
 /* Cinder's frame: the top rows line up at 36px, the right sidebar's tabs become icons, and the
    window buttons sit at the top right. */
-.frame-custom #right .tabs { height: 36px; padding: 0 116px 0 8px; align-items: stretch; background: var(--bg2); }
+.frame-custom #right .tabs { height: 36px; padding: 0 8px; align-items: stretch; background: var(--bg2); }
 .frame-custom #right .tabs button { display: grid; place-items: center; padding: 0 9px; }
 .frame-custom #right .tabs button svg { display: block; width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .frame-custom #right .tabs button span { display: none; }
@@ -1121,7 +1133,7 @@ body.has-split .pane-grip { display: grid; }
 .gi-file i { background: var(--c-yellow, #d9a53f); } .gi-unresolved i { background: var(--faint); }
 
 /* ---------------------------------------------------------------- presenting a canvas */
-body.presenting :is(#ribbon, #left, #right, #tabbar, #viewbar, #statusbar, .resizer, #win-controls, .win-edge) { display: none !important; }
+body.presenting :is(#topbar, #ribbon, #left, #right, #tabbar, #viewbar, #statusbar, .resizer, #win-controls, .win-edge) { display: none !important; }
 body.presenting #main { border: 0; }
 .cv-tsep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; align-self: center; }
 .cv-presenting :is(.cv-toolbar, .cv-bottom, .cv-minimap, .cv-selbar, .cv-hint) { display: none !important; }
@@ -1596,7 +1608,7 @@ body.presenting #main { border: 0; }
 @container (max-width: 300px) { #statusbar [data-sb=count] { display: none; } }
 
 /* ---------------------------------------------------------------- focus mode */
-body.focus-mode :is(#ribbon, #left, #right, .resizer, #tabbar) { display: none !important; }
+body.focus-mode :is(#topbar, #ribbon, #left, #right, .resizer, #tabbar) { display: none !important; }
 body.focus-mode #viewbar { opacity: 0; transition: opacity var(--dur) var(--ease); }
 body.focus-mode #viewbar:hover, body.focus-mode #viewbar:focus-within { opacity: 1; }
 body.focus-mode #statusbar { border-top-color: transparent; }
