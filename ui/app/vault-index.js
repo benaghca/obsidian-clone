@@ -215,9 +215,10 @@ function reloadEditorFromDisk(content) {
   if (S.mode === 'read') renderPreview();
 }
 
-// Changes on disk: the server says when something changed (it watches the vault folder), and
-// the page then looks. If it can't watch, the page looks every two seconds instead. Either way
-// it also looks now and then, in case a change slipped by.
+// Changes on disk: the server says when something changed (it watches the vault folder) and,
+// when it can, which files, so the page looks at just those. Otherwise (a folder changed, or the
+// server can't say), the page lists the vault. If it can't watch, the page looks every two
+// seconds instead. Either way it also lists the vault now and then, in case a change slipped by.
 let pollTimer = null;
 async function watchVault() {
   let since = 0, fails = 0;
@@ -229,7 +230,7 @@ async function watchVault() {
       fails = 0;
       if (!r.watching) { every(2000); return; } // no watcher here: keep polling
       every(30000);
-      if (since && r.version !== since) setTimeout(poll, 120); // let a burst of changes settle
+      if (since && r.version !== since) { if (r.changes) applyChanges(r.changes); else poll(); }
       since = r.version;
     } catch {
       // The server is gone or restarting: poll, and try again later.
@@ -237,6 +238,22 @@ async function watchVault() {
       await new Promise(r => setTimeout(r, Math.min(30000, 1000 * 2 ** fails++)));
     }
   }
+}
+
+// The files the server says changed ([{path, mtime, ctime, size} or {path, gone}]), applied to the
+// list the page has. A folder that went needs the whole list.
+async function applyChanges(changes) {
+  if (S.saving) await S.savePromise?.catch(() => { }); // then look, rather than wait for the next full look
+  if (document.hidden || changes.some(c => c.gone && S.dirs.has(c.path))) return poll(); // hidden: it looks when shown
+  const gen = S.gen, files = new Map(S.files);
+  for (const c of changes) {
+    if (c.gone) files.delete(c.path);
+    else files.set(c.path, { mtime: c.mtime, ctime: c.ctime, size: c.size });
+  }
+  try {
+    if (changes.length) await applyList({ files: [...files].map(([path, f]) => ({ path, ...f })), dirs: [...S.dirs] }, gen);
+    loadVaultSettings(); // .cinder/settings.json may have changed too
+  } catch { /* server gone; ignore */ }
 }
 
 async function poll() {

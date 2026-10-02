@@ -257,8 +257,9 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         }),
         ("GET", "/api/changes") => {
             let since = q("since").and_then(|v| v.parse().ok()).unwrap_or(0);
-            let (version, watching) = crate::watch::wait(&vault, since, std::time::Duration::from_secs(25));
-            Ok(json_out(200, json!({ "version": version, "watching": watching })))
+            let w = crate::watch::wait(&vault, since, std::time::Duration::from_secs(25));
+            let changes = w.paths.and_then(|ps| changed_files(&vault, &ps));
+            Ok(json_out(200, json!({ "version": w.version, "watching": w.watching, "changes": changes })))
         }
         ("GET", "/api/history") => api_history(&vault, &q("path").unwrap_or_default()),
         ("GET", "/api/history/read") => api_history_read(&vault, &q("path").unwrap_or_default(), &q("id").unwrap_or_default()),
@@ -342,6 +343,29 @@ fn walk(root: &Path, dir: &Path, files: &mut Vec<Value>, dirs: &mut Vec<String>)
             files.push(json!({ "path": rel, "mtime": mtime_ms(&md), "ctime": ctime_ms(&md), "size": md.len() }));
         }
     }
+}
+
+/// The files among `paths` (which changed), as /api/list describes them, or `{path, gone}` for
+/// those no longer there, so the page needn't list the whole vault. Hidden ones are left out, as
+/// /api/list leaves them out. None when only a whole listing will do: a folder changed.
+fn changed_files(vault: &Path, paths: &[PathBuf]) -> Option<Vec<Value>> {
+    let mut out = Vec::new();
+    for p in paths {
+        if !p.starts_with(vault) {
+            return None;
+        }
+        let rel = rel_path(vault, p);
+        if rel.is_empty() || rel.split('/').any(|c| c.starts_with('.')) {
+            continue;
+        }
+        match fs::symlink_metadata(p) {
+            Ok(md) if md.is_dir() => return None,
+            Ok(md) if md.is_file() => out.push(json!({ "path": rel, "mtime": mtime_ms(&md), "ctime": ctime_ms(&md), "size": md.len() })),
+            Ok(_) => {} // a symlink, which /api/list skips
+            Err(_) => out.push(json!({ "path": rel, "gone": true })),
+        }
+    }
+    Some(out)
 }
 
 fn api_read(vault: &Path, paths: Vec<String>) -> ApiResult {
