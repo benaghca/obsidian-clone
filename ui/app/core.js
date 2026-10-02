@@ -216,6 +216,9 @@ function applyFonts() {
   if (cfg.fontMono.trim()) root.setProperty('--font-mono', `${cssFontName(cfg.fontMono)}, ${FONT_MONO_DEFAULT}`); else root.removeProperty('--font-mono');
 }
 
+// Whether Vim was on at the last applyTheme: the vimrc loads when it comes on (and when the window
+// comes back, see loadVimrc), not on every theme change, such as each palette swatch hovered.
+let vimWasOn = false;
 function applyTheme() {
   const t = cfg.theme || (matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
   document.documentElement.dataset.theme = t;
@@ -224,7 +227,7 @@ function applyTheme() {
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
-  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); ed.setFocusMode(cfg.focusMode); ed.setTypewriter(cfg.typewriter); if (cfg.vim) loadVimrc(); else vimNow = null; }
+  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); ed.setFocusMode(cfg.focusMode); ed.setTypewriter(cfg.typewriter); if (cfg.vim && !vimWasOn) loadVimrc(); if (!cfg.vim) vimNow = null; vimWasOn = !!cfg.vim; }
   document.body.classList.toggle('focus-mode', !!cfg.focusMode);
   if (window.CinderGraph) CinderGraph.restyle();
   if (window.CinderDraw) CinderDraw.restyle();

@@ -72,6 +72,11 @@ const TEXT = `${LONG}\nshort one\nshort two\nshort three\n`;
   for (let i = 0; i < 2; i++) { await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await sleep(300); }
   assert(await page.evaluate(() => [...document.querySelectorAll('.toast')].filter(t => /Couldn’t read/.test(t.textContent)).length) === 1, 'a vimrc that can’t be read says so once, not on every focus');
 
+  let vimrcReads = 0;
+  page.on('request', q => { if (q.url().includes('/api/vimrc')) vimrcReads++; });
+  await page.evaluate(() => { for (let i = 0; i < 5; i++) applyTheme(); }); await sleep(300);
+  assert(vimrcReads === 0, 'theme changes with Vim on (a palette hovered…) don’t read the vimrc again: ' + vimrcReads);
+
   console.log('the mode in the status bar');
   await reset();
   assert(await page.textContent('#statusbar .sb-vim') === 'NORMAL', 'NORMAL');
