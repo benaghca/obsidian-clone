@@ -62,6 +62,15 @@ const TEXT = `${LONG}\nshort one\nshort two\nshort three\n`;
   await page.keyboard.type('Ajk'); await sleep(150);
   assert(await page.evaluate(() => ed.value.includes('short one\n') && !ed.value.includes('jk')), 'imap jk <Esc> leaves insert mode');
   assert(/NORMAL/.test(await page.textContent('#statusbar')), 'back in normal mode');
+  w('.obsidian.vimrc', 'imap jk <Esc>\nnmap L $\n');
+  await page.evaluate(() => { loadVimrc(); cfg.vim = false; applyTheme(); }); await sleep(300);
+  await page.evaluate(() => { cfg.vim = true; applyTheme(); }); await sleep(300);
+  await reset(TEXT.indexOf('short one'));
+  await page.keyboard.press('L'); await sleep(100);
+  assert(await pos() >= TEXT.indexOf('short one') + 'short one'.length - 1, 'a vimrc read while Vim went off is applied when it comes back on');
+  w('.obsidian.vimrc', 'nmap H ^\n'.repeat(8000));
+  for (let i = 0; i < 2; i++) { await page.evaluate(() => window.dispatchEvent(new Event('focus'))); await sleep(300); }
+  assert(await page.evaluate(() => [...document.querySelectorAll('.toast')].filter(t => /Couldn’t read/.test(t.textContent)).length) === 1, 'a vimrc that can’t be read says so once, not on every focus');
 
   console.log('the mode in the status bar');
   await reset();

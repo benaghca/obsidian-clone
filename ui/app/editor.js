@@ -57,12 +57,22 @@ const vimStatusHtml = () => vimNow ? `<span class="sb-t sb-vim" title="Vim mode"
 // Mappings and options from the vault's .obsidian.vimrc (as Obsidian's Vimrc Support plugin reads
 // it), applied when Vim comes on and again when the file has changed. Mappings are added, so one
 // taken out of the file stays until Cinder restarts.
+// A read that fails says so once, not on every focus; only the latest read is applied, and only
+// while Vim is still on (or the file would count as applied without having been).
+let vimrcApplied = '', vimrcError = '', vimrcReads = 0;
 async function loadVimrc() {
   if (!cfg.vim) return;
+  const read = ++vimrcReads;
   let text = '';
-  try { text = await api('/api/vimrc'); } catch (e) { return toast('Couldn’t read .obsidian.vimrc: ' + e.message, 5000); }
-  if (!text || text === loadVimrc.applied) return;
-  loadVimrc.applied = text;
+  try { text = await api('/api/vimrc'); } catch (e) {
+    if (read !== vimrcReads || e.message === vimrcError) return;
+    vimrcError = e.message;
+    return toast('Couldn’t read .obsidian.vimrc: ' + e.message, 5000);
+  }
+  if (read !== vimrcReads || !cfg.vim) return;
+  vimrcError = '';
+  if (!text || text === vimrcApplied) return;
+  vimrcApplied = text;
   const skipped = ed.applyVimrc(text);
   if (skipped.length) toast(`.obsidian.vimrc: skipped ${skipped.length === 1 ? 'a line' : skipped.length + ' lines'} Cinder doesn’t run (only mappings and set): ${skipped.slice(0, 3).join(' · ')}`, 8000);
 }
