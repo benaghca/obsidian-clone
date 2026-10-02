@@ -331,6 +331,28 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
 .markdown sup.fn-ref { line-height: 0; }
 .markdown a.fn-ref, .markdown a.fn-back { color: var(--accent); cursor: pointer; text-decoration: none; padding: 0 1px; }
+#preview:has(.kb-root) { --col: 100000px; } /* a board takes the whole width */
+.kb-board { display: flex; gap: 12px; align-items: flex-start; overflow-x: auto; padding: 4px 2px 16px; }
+.kb-lane { flex: 0 0 272px; background: var(--bg2); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 75vh; }
+.kb-head { display: flex; align-items: baseline; gap: 8px; padding: 2px 4px; }
+.markdown .kb-title { margin: 0; font-size: 1em; font-weight: 600; cursor: text; }
+.kb-count, .kb-done { color: var(--muted); font-size: var(--text-sm); }
+.kb-cards { display: flex; flex-direction: column; gap: 6px; overflow-y: auto; min-height: 24px; }
+.kb-card { position: relative; display: flex; gap: 8px; align-items: flex-start; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 8px 26px 8px 10px; cursor: grab; overflow-wrap: anywhere; }
+.kb-card:hover { border-color: var(--faint); }
+.kb-card:focus-visible, .kb-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.kb-card.dragging { opacity: .4; }
+.kb-card.done .kb-text { color: var(--muted); text-decoration: line-through; }
+.kb-check { margin: 3px 0 0; accent-color: var(--accent); cursor: pointer; flex: none; }
+.kb-text { flex: 1; min-width: 0; white-space: pre-wrap; }
+.kb-del { position: absolute; top: 4px; right: 4px; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 5px; border-radius: var(--radius-xs); opacity: 0; }
+.kb-card:hover .kb-del, .kb-card:focus-within .kb-del { opacity: 1; }
+.kb-del:hover { color: var(--text); background: var(--bg-hover); }
+.kb-add, .kb-add-lane { border: 0; background: none; color: var(--muted); text-align: left; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; font: inherit; }
+.kb-add:hover, .kb-add-lane:hover { background: var(--bg-hover); color: var(--text); }
+.kb-add-lane { flex: 0 0 auto; border: 1px dashed var(--border); }
+.kb-edit { width: 100%; resize: vertical; font: inherit; }
+.kb-drop { height: 3px; border-radius: 2px; background: var(--accent); }
 .dataview-block { margin: 0 0 1em; overflow-x: auto; }
 .dv-table { border-collapse: collapse; width: 100%; }
 .dv-table th, .dv-table td { border-bottom: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }

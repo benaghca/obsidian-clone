@@ -24,6 +24,7 @@
     "flashcards.js",
     "bases.js",
     "dataview.js",
+    "kanban.js",
     "diff.js",
     "related.js",
     "search.js",

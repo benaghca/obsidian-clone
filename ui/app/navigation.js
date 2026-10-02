@@ -61,7 +61,11 @@ async function openPath(p, opts = {}) {
   applyNoteClasses();
   setSaveState('');
   const pos = S.pos.get(p);
-  setMode(opts.mode || S.mode, true);
+  // A Kanban board opens as a board (reading view draws it), without changing the mode other notes open in.
+  const board = !!n && CinderKanban.isBoard(n.fm);
+  if (board && !opts.mode && S.mode !== 'read') S.modeBeforeBoard = S.mode;
+  else if (!board && S.modeBeforeBoard) { S.mode = S.modeBeforeBoard; S.modeBeforeBoard = null; }
+  setMode(opts.mode || (board ? 'read' : S.mode), true);
   if (pos && pos.a != null) {
     ed.setSelectionRange(pos.a, pos.b); editWrap.scrollTop = pos.scroll; preview.scrollTop = pos.pscroll;
     requestAnimationFrame(() => { editWrap.scrollTop = pos.scroll; });

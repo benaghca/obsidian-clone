@@ -249,6 +249,7 @@ const S = {
   cur: null,             // current path (note or file)
   view: 'empty',
   mode: cfg.defaultMode,
+  modeBeforeBoard: null, // the mode notes open in, while a Kanban board shows as a board
   dirty: false,
   saving: false,
   hist: [], histIdx: -1,

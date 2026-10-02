@@ -173,6 +173,14 @@ function markdownToHtml(md, from, depth = 0) {
 // Renders `md` (a note body) into container element `el` and wires up everything.
 function renderInto(el, content, from, depth) {
   const { fm, fmLen } = splitFrontmatter(content);
+  // A Kanban plugin board, in the note's own reading view: a board whose changes edit the note.
+  if (depth === 0 && el === preview && CinderKanban.isBoard(fm)) {
+    CinderKanban.mount(el, content, {
+      inline: text => taskHooks().inline(text, from),
+      change: next => { if (next !== ed.value) { ed.value = next; renderPreview(); } },
+    });
+    return;
+  }
   let html = '';
   const liveProps = depth === 0 && el === preview && fmLen && cfg.properties !== 'source' && propsOf(content.slice(0, fmLen)) != null;
   if (liveProps) html += '<div class="props pp-host"></div>';
