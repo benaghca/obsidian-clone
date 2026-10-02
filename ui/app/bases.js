@@ -178,3 +178,106 @@ async function saveBaseBlock(notePath, oldCode, newCode) {
   try { await writeFile(notePath, n.content.slice(0, i) + newCode + n.content.slice(i + oldCode.length), n.mtime); resolveNote(notePath); } catch (e) { toast('Couldn’t save the base block: ' + e.message); }
 }
 
+
+// ============================================================ Dataview
+
+// Rows for Dataview queries: as for bases, plus each note's inline fields (key:: value) as
+// properties (its frontmatter wins where both have a key).
+let dvRowsCache = { gen: -1, rows: [] };
+function dataviewRows() {
+  if (dvRowsCache.gen === S.dataGen) return dvRowsCache.rows;
+  const rows = baseRows().map(r => {
+    const n = S.notes.get(r.path);
+    if (!n || !n.content.includes('::')) return r;
+    return { ...r, props: { ...CinderDataview.inlineFields(blankCode(n.content.slice(n.fmLen))), ...r.props } };
+  });
+  dvRowsCache = { gen: S.dataGen, rows };
+  return rows;
+}
+
+// What a query needs besides the rows: the note it's in, backlinks, and Dataview's functions.
+function dataviewContext(from) {
+  const rows = dataviewRows();
+  return {
+    rows, thisRow: rows.find(r => r.path === from) || null,
+    backlinks: p => [...backlinksOf(p).keys()],
+    funcs: { ...CinderDataview.FUNCS, outgoing: name => { const p = resolveLink(name, from); return (S.notes.get(p)?.out || []).filter(Boolean).map(x => new CinderBases.Link(x)); } },
+  };
+}
+
+// A value as Dataview shows it: notes and [[links]] as links, dates formatted, lists as lists,
+// text as Markdown.
+function dataviewValueHtml(v, from) {
+  const B = CinderBases;
+  if (v == null || v === '') return '';
+  if (Array.isArray(v)) return v.length > 1 ? `<ul class="dv-ul">${v.map(x => `<li>${dataviewValueHtml(x, from)}</li>`).join('')}</ul>` : dataviewValueHtml(v[0], from);
+  if (v && v.__file) v = new B.Link(v.__file.path);
+  if (v instanceof B.Link) {
+    const p = resolveLink(v.path.replace(/\.md$/, ''), from) || v.path;
+    return `<a class="internal-link${S.files.has(p) ? '' : ' unresolved'}" data-href="${esc(S.files.has(p) ? p : v.path)}"${S.files.has(p) ? ' data-path="1"' : ''}>${esc(v.display || noteName(p))}</a>`;
+  }
+  if (typeof v === 'string') return taskHooks().inline(v, from);
+  return esc(B.display(v));
+}
+
+// A ```dataview block: its LIST or TABLE, or its TASK list.
+function renderDataviewBlock(el, code, from) {
+  el.className = 'dataview-block';
+  let q;
+  try { q = CinderDataview.parse(code); } catch (e) { el.innerHTML = `<div class="dv-error">Dataview: ${esc(e.message)}</div>`; return; }
+  const cx = dataviewContext(from);
+  if (q.type === 'task') return renderDataviewTasks(el, q, cx);
+  let r;
+  try { r = CinderBases.query(q.base, 0, cx.rows, cx); } catch (e) { el.innerHTML = `<div class="dv-error">Dataview: ${esc(e.message)}</div>`; return; }
+  const cell = (id, row) => { try { return dataviewValueHtml(CinderBases.valueOf(id, row, r.ctx), from); } catch (e) { return `<span class="dv-error" title="${esc(e.message)}">⚠</span>`; } };
+  const nameCell = row => `<a class="internal-link" data-href="${esc(row.path)}" data-path="1">${esc(row.basename)}</a>`;
+  const value = (c, row) => c.id === 'file.name' ? nameCell(row) : cell(c.id, row);
+  const sections = r.groups ? r.groups.map(g => ({ title: g.value == null ? '—' : dataviewValueHtml(g.value, from), rows: g.rows })) : [{ title: null, rows: r.rows }];
+  let html;
+  if (q.type === 'table') {
+    const head = q.columns.map((c, k) => `<th>${esc(c.name)}${k === 0 && !q.withoutId ? ` <span class="dv-count">${r.rows.length}</span>` : ''}</th>`).join('');
+    html = sections.map(s => (s.title != null ? `<h4 class="dv-group">${s.title}</h4>` : '') + `<table class="dv-table"><thead><tr>${head}</tr></thead><tbody>${s.rows.map(row => `<tr>${q.columns.map(c => `<td>${value(c, row)}</td>`).join('')}</tr>`).join('')}</tbody></table>`).join('');
+  } else {
+    html = sections.map(s => (s.title != null ? `<h4 class="dv-group">${s.title}</h4>` : '') + `<ul class="dv-list">${s.rows.map(row => `<li>${q.columns.map(c => value(c, row)).filter(Boolean).join(': ')}</li>`).join('')}</ul>`).join('');
+  }
+  el.innerHTML = (r.rows.length ? html : '<div class="dv-none">No results.</div>') + (r.errors.length ? `<div class="dv-error">${r.errors.map(esc).join('<br>')}</div>` : '');
+}
+
+// TASK: the tasks in the notes FROM picks that WHERE holds for (with Dataview's task fields:
+// completed, checked, status, text, due…), grouped by note, ticked as in a ```tasks block.
+function renderDataviewTasks(el, q, cx) {
+  const where = q.where;
+  const tasks = () => {
+    const files = new Map(CinderBases.query(q.base, 0, cx.rows, cx).rows.map(r => [r.path, r]));
+    const ctx = { thisRow: cx.thisRow, backlinks: cx.backlinks, funcs: cx.funcs };
+    return allTasks().filter(x => {
+      const row = files.get(x.path);
+      if (!row) return false;
+      if (!where) return true;
+      const props = { ...row.props, completed: x.done, checked: x.status !== ' ', fullyCompleted: x.done, status: x.status, text: x.text, due: x.due, scheduled: x.scheduled, start: x.start, completion: x.doneDate, created: x.created, line: x.line, tags: x.tags };
+      try { const v = CinderBases.evaluate(where, { ...row, props }, ctx); return Array.isArray(v) ? v.length > 0 : !!v && v !== 'false'; } catch { return false; }
+    });
+  };
+  el.classList.add('tasks-embed');
+  CinderTasks.mountQuery(el, 'group by filename', { ...taskHooks(), tasks });
+}
+
+// Inline `= expr` (Dataview's inline query): the value, for the note it's in.
+function dataviewInline(expr, from) {
+  const span = document.createElement('span');
+  span.className = 'dv-inline';
+  const cx = dataviewContext(from);
+  try {
+    if (!cx.thisRow) throw new Error('not in a note');
+    span.innerHTML = dataviewValueHtml(CinderBases.evaluate(CinderDataview.translate(expr), cx.thisRow, { thisRow: cx.thisRow, backlinks: cx.backlinks, funcs: cx.funcs }), from) || '<span class="dv-none">—</span>';
+  } catch (e) { span.classList.add('dv-error'); span.textContent = '= ' + expr; span.title = 'Dataview: ' + e.message; }
+  return span;
+}
+
+// A ```dataviewjs block runs JavaScript, which Cinder doesn't run from notes: it says so, and the
+// code shows below it.
+function renderDataviewJsBlock(el) {
+  el.className = 'dv-none dv-js';
+  el.textContent = 'This dataviewjs block isn’t run: Cinder doesn’t run JavaScript from notes. A dataview block can often do the same.';
+  return el;
+}

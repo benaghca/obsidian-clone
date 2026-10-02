@@ -331,6 +331,17 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
 .markdown sup.fn-ref { line-height: 0; }
 .markdown a.fn-ref, .markdown a.fn-back { color: var(--accent); cursor: pointer; text-decoration: none; padding: 0 1px; }
+.dataview-block { margin: 0 0 1em; overflow-x: auto; }
+.dv-table { border-collapse: collapse; width: 100%; }
+.dv-table th, .dv-table td { border-bottom: 1px solid var(--border); padding: 5px 10px; text-align: left; vertical-align: top; }
+.dv-table th { font-weight: 600; background: none; border-top: 0; border-left: 0; border-right: 0; }
+.dv-table td { border-left: 0; border-right: 0; }
+.dv-count { color: var(--muted); font-weight: normal; font-size: var(--text-sm); }
+.dv-list { margin: 0; }
+.dv-ul { margin: 0; padding-left: 1.2em; }
+.dv-group { margin: .8em 0 .3em; }
+.dv-none { color: var(--muted); font-style: italic; }
+.dv-error { color: var(--c-red, #e05555); font-size: var(--text-sm); }
 .query-block { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 10px; margin: 0 0 1em; }
 .query-head { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; font-weight: 600; }
 .query-head small { color: var(--muted); font-weight: normal; }

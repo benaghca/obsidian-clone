@@ -351,7 +351,7 @@
     return null;
   }
 
-  // Evaluate expression `src` for a row. ctx: {formulas, thisRow, backlinks, depth}
+  // Evaluate expression `src` for a row. ctx: {formulas, thisRow, backlinks, funcs, depth}
   function evaluate(src, row, ctx = {}) {
     const ast = typeof src === 'string' ? parseExpr(src) : src;
     const fcache = ctx.fcache || (ctx.fcache = new Map());
@@ -391,6 +391,8 @@
             if (o && o.__formula) throw new Error('formulas are values, not functions');
             return method(o, e.f.n, e.args.map(ev), ctx);
           }
+          // ctx.funcs: more functions from whoever runs the query (Dataview's, see ui/dataview.js).
+          if (e.f.k === 'id' && !Object.prototype.hasOwnProperty.call(FUNCS, e.f.n) && ctx.funcs && Object.prototype.hasOwnProperty.call(ctx.funcs, e.f.n)) return ctx.funcs[e.f.n](...e.args.map(ev));
           if (e.f.k !== 'id' || !Object.prototype.hasOwnProperty.call(FUNCS, e.f.n)) throw new Error(`${e.f.n || 'that'} is not a function`);
           if (e.f.n === 'if') return truthy(ev(e.args[0])) ? ev(e.args[1]) : (e.args[2] ? ev(e.args[2]) : null);
           return FUNCS[e.f.n](...e.args.map(ev));
@@ -473,7 +475,7 @@
   // Run a view. Returns {rows, groups: [{key, value, rows}], columns, errors, total}.
   function query(base, viewIndex, allRows, opts = {}) {
     const view = base.views[viewIndex] || base.views[0];
-    const ctx = { formulas: base.formulas || {}, thisRow: opts.thisRow || null, backlinks: opts.backlinks, fcache: new Map() };
+    const ctx = { formulas: base.formulas || {}, thisRow: opts.thisRow || null, backlinks: opts.backlinks, funcs: opts.funcs, fcache: new Map() };
     const errors = new Set();
     const safe = (fn, dflt) => { try { return fn(); } catch (e) { errors.add(e.message); return dflt; } };
     let rows = allRows.filter(r => safe(() => passes(base.filters, r, ctx) && passes(view.filters, r, ctx), false));

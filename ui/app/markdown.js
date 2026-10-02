@@ -277,6 +277,17 @@ function renderInto(el, content, from, depth) {
     code.parentElement.replaceWith(div);
     renderTasksBlock(div, code.textContent.replace(/\n$/, ''));
   }
+  for (const code of $$('pre > code.language-dataview', el)) {
+    const div = document.createElement('div');
+    code.parentElement.replaceWith(div);
+    renderDataviewBlock(div, code.textContent, from);
+  }
+  for (const code of $$('pre > code.language-dataviewjs', el)) code.parentElement.before(renderDataviewJsBlock(document.createElement('div')));
+  // Dataview's inline queries: `= expr`
+  for (const code of $$('code', el)) {
+    const m = !code.closest('pre') && /^=\s+(\S[\s\S]*)$/.exec(code.textContent);
+    if (m) code.replaceWith(dataviewInline(m[1], from));
+  }
   for (const code of $$('pre > code.language-query', el)) {
     const div = document.createElement('div');
     code.parentElement.replaceWith(div);

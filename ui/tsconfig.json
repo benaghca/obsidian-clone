@@ -23,6 +23,7 @@
     "tasks.js",
     "flashcards.js",
     "bases.js",
+    "dataview.js",
     "diff.js",
     "related.js",
     "search.js",

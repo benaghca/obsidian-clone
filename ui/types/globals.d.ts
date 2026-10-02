@@ -5,6 +5,7 @@ declare var CinderThemes: any;
 declare var CinderTemplater: any;
 declare var CinderTasks: any;
 declare var CinderBases: any;
+declare var CinderDataview: any;
 declare var CinderCanvas: any;
 declare var CinderInboxBoard: any;
 declare var CinderVaultSettings: any;

@@ -313,6 +313,12 @@ class CheckboxWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 
+class InlineQueryWidget extends WidgetType {
+  constructor(expr, version, h) { super(); this.expr = expr; this.version = version; this.h = h; }
+  eq(o) { return o.expr === this.expr && o.version === this.version; }
+  toDOM() { return this.h.inlineQuery(this.expr); }
+}
+
 class TextWidget extends WidgetType {
   constructor(text, cls) { super(); this.text = text; this.cls = cls; }
   eq(o) { return o.text === this.text && o.cls === this.cls; }
@@ -554,7 +560,12 @@ function buildInline(view) {
           case 'StrongEmphasis': out.push(markCls('cm-strong').range(nf, nt)); return;
           case 'Strikethrough': out.push(markCls('cm-strike').range(nf, nt)); return;
           case 'Highlight': out.push(markCls('cm-hl').range(nf, nt)); return;
-          case 'InlineCode': out.push(markCls('cm-icode').range(nf, nt)); return;
+          case 'InlineCode': {
+            // `= expr`: a Dataview inline query, shown as its value (hooks.inlineQuery) until the cursor comes in.
+            const q = h.inlineQuery && /^`=\s+(\S[^`]*)`$/.exec(doc.sliceString(nf, nt));
+            if (q && !A.touches(nf, nt)) { out.push(Decoration.replace({ widget: new InlineQueryWidget(q[1], h.version(), h) }).range(nf, nt)); return false; }
+            out.push(markCls('cm-icode').range(nf, nt)); return;
+          }
           case 'EmphasisMark': case 'StrikethroughMark': case 'HighlightMark': {
             const p = node.node.parent;
             if (p && !A.touches(p.from, p.to)) hide(nf, nt); else out.push(markCls('cm-faint').range(nf, nt));
