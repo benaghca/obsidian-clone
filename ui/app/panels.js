@@ -426,7 +426,7 @@ function updateStatus() {
     const mins = Math.max(1, Math.round(words / 230));
     const bl = backlinkCount(S.cur);
     const tasks = allTasks().filter(x => x.path === S.cur && !x.done && !x.cancelled).length;
-    left.innerHTML = b('backlinks', plural(bl, 'backlink'), 'Show backlinks') + (tasks ? b('tasks', plural(tasks, 'open task'), 'Show this note’s tasks') : '');
+    left.innerHTML = (S.mode === 'edit' ? vimStatusHtml() : '') + b('backlinks', plural(bl, 'backlink'), 'Show backlinks') + (tasks ? b('tasks', plural(tasks, 'open task'), 'Show this note’s tasks') : '');
     const c = S.mode === 'edit' ? ed.cursorInfo() : null;
     const count = cfg.statusChars ? plural(text.length, 'character') : `${plural(words, 'word')}<span class="sb-read"> · ${mins} min read</span>`;
     right.innerHTML = (c && c.selected ? s(`${plural(c.words, 'word')} selected`, `${c.selected.toLocaleString()} characters selected`, 'sb-sel') : '')

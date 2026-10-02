@@ -10,7 +10,7 @@ import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDes
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { parser as mdParser } from '@lezer/markdown';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField, startCompletion } from '@codemirror/autocomplete';
-import { vim, getCM } from '@replit/codemirror-vim';
+import { vim, getCM, Vim, CodeMirror } from '@replit/codemirror-vim';
 import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, searchPanelOpen } from '@codemirror/search';
 import { classHighlighter, tags as t } from '@lezer/highlight';
 import { javascript } from '@codemirror/lang-javascript';
@@ -1166,13 +1166,100 @@ const theme = EditorView.theme({
   '.cm-content': { caretColor: 'var(--accent)' },
 });
 
-// opts: {keys: {command: key}, extraKeys: [{key, run}], placeholder, vim, live}
+// ------------------------------------------------------------------ Vim
+
 // With Vim on, the Ctrl keys Vim uses belong to Vim in the editor, in every mode. Vim sees keys
 // first; one it lets through (Ctrl+N in insert mode, say) stops here, before Cinder's formatting
 // keys, CodeMirror's own (Ctrl+A selects all) and the app's shortcuts (Ctrl+N made a new note and
 // left this one). Ctrl+C, Ctrl+V and Ctrl+X still copy, paste and cut.
 const VIM_KEYS = [...'abdefghijklmnoprtuwy', '[', ']'].map(k => 'Ctrl-' + k);
-const vimMode = () => [vim(), Prec.high(keymap.of(VIM_KEYS.map(key => ({ key, run: () => true }))))];
+
+// j and k (and ↓ ↑) go a row on screen, through a wrapped paragraph rather than over it (Vim's
+// gj/gk); with a count (5j) or after an operator (dj) they count whole lines, as Vim's own do.
+// (Vim's j/k aren't reachable from here, so both are rebuilt from vim.js's moveByLines and
+// moveByDisplayLines; VERTICAL is their "keep the column from the last up/down" check, by name.)
+const VERTICAL = ['moveByLines', 'moveByDisplayLines', 'moveByScroll', 'moveToColumn', 'moveToEol', 'rowOrLine'];
+function rowOrLine(cm, head, args, vim, inputState) {
+  const keep = VERTICAL.includes(vim.lastMotion?.name), n = Math.round(args.repeat), dir = args.forward ? 1 : -1;
+  if (inputState.getRepeat() > 0 || inputState.operator) {
+    const ch = keep ? vim.lastHPos : (vim.lastHPos = head.ch);
+    const line = Math.min(Math.max(head.line + dir * n, cm.firstLine()), cm.lastLine());
+    vim.lastHSPos = cm.charCoords(new CodeMirror.Pos(line, ch), 'div').left;
+    return new CodeMirror.Pos(line, ch);
+  }
+  if (!keep) vim.lastHSPos = cm.charCoords(head, 'div').left;
+  let cur = head;
+  for (let i = 0; i < n; i++) {
+    const r = cm.findPosV(cur, dir, 'line', vim.lastHSPos);
+    if (r.hitSide) break;
+    cur = r;
+  }
+  if (cur !== head) vim.lastHPos = cur.ch;
+  return cur;
+}
+
+// The system clipboard is Vim's unnamed register (Vim's `set clipboard=unnamedplus`, which
+// `set clipboard=` in the vimrc turns off): yanks and deletes go to it, and what was copied
+// elsewhere is what p pastes, once the app hands it over (vimClipboard, when the window regains
+// focus).
+let vimSetUp = false;
+function setUpVim() {
+  if (vimSetUp) return;
+  vimSetUp = true;
+  Vim.defineMotion('rowOrLine', rowOrLine);
+  Vim.mapCommand('j', 'motion', 'rowOrLine', { forward: true, linewise: true });
+  Vim.mapCommand('k', 'motion', 'rowOrLine', { forward: false, linewise: true });
+  // (Vim's ↓ ↑ type its own j and k, not these.)
+  Vim.mapCommand('<Down>', 'motion', 'rowOrLine', { forward: true, linewise: true });
+  Vim.mapCommand('<Up>', 'motion', 'rowOrLine', { forward: false, linewise: true });
+  Vim.defineOption('clipboard', 'unnamedplus', 'string');
+  const rc = Vim.getRegisterController(), push = rc.pushText.bind(rc);
+  rc.pushText = (name, ...rest) => {
+    push(name, ...rest);
+    if ((!name || name === '"') && /unnamed/.test(Vim.getOption('clipboard'))) navigator.clipboard?.writeText(rc.unnamedRegister.toString()).catch(() => { });
+  };
+}
+// Text copied outside Vim becomes what p pastes (a line or more when it ends in a newline).
+function vimClipboard(text) {
+  if (!vimSetUp || !text || !/unnamed/.test(Vim.getOption('clipboard'))) return;
+  const reg = Vim.getRegisterController().unnamedRegister;
+  if (reg.toString() !== text) reg.setText(text, text.endsWith('\n'));
+}
+// Lines of a vimrc (Obsidian's .obsidian.vimrc): mappings and options only, so a vimrc can't edit
+// the note it's applied in. Returns the lines it couldn't use.
+const VIMRC_CMDS = /^([nvio]?(nore)?map|[nvio]?unmap|set|se)$/;
+function applyVimrc(view, text) {
+  const cm = getCM(view), bad = [];
+  if (!cm) return bad;
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('"')) continue;
+    if (!VIMRC_CMDS.test(line.split(/\s/)[0])) { bad.push(line); continue; }
+    try { Vim.handleEx(cm, line); } catch { bad.push(line); }
+  }
+  return bad;
+}
+
+// Vim's mode and the keys of a command being typed (d2…), for the host's status bar.
+const vimStatus = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.view = view;
+    this.cm = getCM(view);
+    this.send = () => { const st = this.cm?.state.vim; if (st) hooksOf(view.state).onVimStatus?.({ mode: st.mode || 'normal', pending: st.status || '' }); };
+    // (Vim updates its own status after these events, so this reads it a moment later.)
+    this.later = () => setTimeout(this.send, 0);
+    for (const ev of ['vim-mode-change', 'vim-keypress', 'vim-command-done']) this.cm?.on(ev, this.later);
+    this.later();
+  }
+  destroy() {
+    for (const ev of ['vim-mode-change', 'vim-keypress', 'vim-command-done']) this.cm?.off(ev, this.later);
+    hooksOf(this.view.state).onVimStatus?.(null);
+  }
+});
+
+const vimMode = () => { setUpVim(); return [vim(), vimStatus, Prec.high(keymap.of(VIM_KEYS.map(key => ({ key, run: () => true }))))]; };
+
+// opts: {keys: {command: key}, extraKeys: [{key, run}], placeholder, vim, live}
 
 function create(parent, hooks, opts = {}) {
   const liveComp = new Compartment();
@@ -1328,6 +1415,8 @@ function create(parent, hooks, opts = {}) {
       return completionStatus(view.state) === 'active' || searchPanelOpen(view.state) || (!!st && (st.insertMode || st.visualMode));
     },
     setVim(on) { vimOn = !!on; view.dispatch({ effects: vimComp.reconfigure(vimOn ? vimMode() : []) }); },
+    // A vimrc's mappings and options (they apply to every editor); returns the lines it skipped.
+    applyVimrc(text) { return vimOn ? applyVimrc(view, text) : []; },
     setFocusMode(on) { opts.focus = !!on; view.dispatch({ effects: focusComp.reconfigure(on ? focusPara : []) }); },
     setTypewriter(on) { opts.typewriter = !!on; view.dispatch({ effects: typeComp.reconfigure(on ? typewriter : []) }); },
     // Where the cursor is: {line, col, selected (characters), words (in the selection)}.
@@ -1429,4 +1518,4 @@ function scanMarkdown(text) {
   return { code, urls, headings, links };
 }
 
-window.CinderEditor = { create, mathField, scanMarkdown, vimKeys: VIM_KEYS, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };
+window.CinderEditor = { create, mathField, scanMarkdown, vimKeys: VIM_KEYS, vimClipboard, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };

@@ -46,3 +46,37 @@ async function attachAndLink(file, pasted, editor = ed) {
   return { path, from: at, to: at + link.length };
 }
 
+
+// ------------------------------------------------------------ Vim
+
+// Vim's mode (and a command being typed, d2…) for the status bar; null with Vim off.
+let vimNow = null;
+const VIM_MODES = { normal: 'NORMAL', insert: 'INSERT', replace: 'REPLACE', visual: 'VISUAL', 'visual line': 'VISUAL LINE', 'visual block': 'VISUAL BLOCK' };
+const vimStatusHtml = () => vimNow ? `<span class="sb-t sb-vim" title="Vim mode">${VIM_MODES[vimNow.mode] || esc(vimNow.mode.toUpperCase())}${vimNow.pending ? ` <kbd>${esc(vimNow.pending)}</kbd>` : ''}</span>` : '';
+
+// Mappings and options from the vault's .obsidian.vimrc (as Obsidian's Vimrc Support plugin reads
+// it), applied when Vim comes on and again when the file has changed. Mappings are added, so one
+// taken out of the file stays until Cinder restarts.
+async function loadVimrc() {
+  if (!cfg.vim) return;
+  let text = '';
+  try { text = await api('/api/vimrc'); } catch (e) { return toast('Couldn’t read .obsidian.vimrc: ' + e.message, 5000); }
+  if (!text || text === loadVimrc.applied) return;
+  loadVimrc.applied = text;
+  const skipped = ed.applyVimrc(text);
+  if (skipped.length) toast(`.obsidian.vimrc: skipped ${skipped.length === 1 ? 'a line' : skipped.length + ' lines'} Cinder doesn’t run (only mappings and set): ${skipped.slice(0, 3).join(' · ')}`, 8000);
+}
+
+// What was copied in other apps is what Vim's p pastes: the clipboard is handed to Vim when the
+// window comes back (how other apps' copies arrive) and after a copy in Cinder. In a browser tab,
+// only once the page may read the clipboard (it never asks).
+async function syncVimClipboard() {
+  if (!cfg.vim) return;
+  if (!NATIVE) {
+    const p = await navigator.permissions?.query({ name: /** @type {PermissionName} */ ('clipboard-read') }).catch(() => null);
+    if (p?.state !== 'granted') return;
+  }
+  try { CinderEditor.vimClipboard(await navigator.clipboard.readText()); } catch { }
+}
+window.addEventListener('focus', () => { syncVimClipboard(); loadVimrc(); });
+for (const t of ['copy', 'cut']) document.addEventListener(t, () => setTimeout(syncVimClipboard, 50));

@@ -1600,6 +1600,8 @@ body.presenting #main { border: 0; }
 #statusbar .sb:hover { background: var(--bg-hover); color: var(--text); }
 #statusbar .sb svg { width: 13px; height: 13px; }
 #statusbar .sb-t { font-variant-numeric: tabular-nums; }
+#statusbar .sb-vim { color: var(--accent); font-weight: 600; letter-spacing: .04em; }
+#statusbar .sb-vim kbd { font-weight: 400; letter-spacing: 0; }
 #statusbar { container-type: inline-size; }
 /* A narrow pane drops the least useful items first, so the two ends never run into each other */
 @container (max-width: 560px) { #statusbar :is(.sb-pos, .sb-sel) { display: none; } }

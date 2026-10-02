@@ -262,6 +262,7 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
         }
         ("GET", "/api/history") => api_history(&vault, &q("path").unwrap_or_default()),
         ("GET", "/api/history/read") => api_history_read(&vault, &q("path").unwrap_or_default(), &q("id").unwrap_or_default()),
+        ("GET", "/api/vimrc") => api_vimrc(&vault),
         ("GET", "/api/prop-types") => api_prop_types(&vault, None),
         ("PUT", "/api/prop-types") => parse(&body).and_then(|v| api_prop_types(&vault, Some(v))),
         ("GET", "/api/bookmarks") => api_bookmarks(&vault, None),
@@ -470,6 +471,18 @@ fn api_write(vault: &Path, p: &str, body: &[u8], base: Option<u64>) -> ApiResult
     })?;
     let md = fs::metadata(&full).map_err(io_err)?;
     Ok(json_out(200, json!({ "mtime": mtime_ms(&md) })))
+}
+
+/// Vim mappings and options from .obsidian.vimrc at the vault's root, where Obsidian's Vimrc
+/// Support plugin keeps them. Read only (the page applies mappings and options, nothing else);
+/// 204 when there's none.
+fn api_vimrc(vault: &Path) -> ApiResult {
+    let file = vault.join(".obsidian.vimrc");
+    match fs::symlink_metadata(&file) {
+        Ok(m) if m.is_file() && m.len() <= 64 * 1024 => Ok(out(200, "text/plain; charset=utf-8", fs::read(&file).map_err(io_err)?)),
+        Ok(m) if m.is_file() => Err((413, ".obsidian.vimrc is over 64 KB".into())),
+        _ => Ok(out(204, "text/plain", Vec::new())),
+    }
 }
 
 /// Obsidian keeps property types (text, number, date…) in .obsidian/types.json. This is the one
@@ -995,6 +1008,9 @@ mod tests {
             fs::write(dir.join(f), b"x").unwrap();
         }
         assert!(openable(&dir, "clip.mov").is_ok());
+        assert_eq!(api_vimrc(&dir).unwrap().status, 204, "no vimrc");
+        fs::write(dir.join(".obsidian.vimrc"), b"imap jk <Esc>\n").unwrap();
+        assert_eq!(api_vimrc(&dir).unwrap().body, b"imap jk <Esc>\n");
         assert!(openable(&dir, "Budget.XLSX").is_ok(), "a spreadsheet");
         assert!(openable(&dir, "Macro.xlsm").is_err(), "never one with macros");
         assert!(openable(&dir, "run.bat").is_err(), "never a program or script");

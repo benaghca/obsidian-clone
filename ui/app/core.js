@@ -224,7 +224,7 @@ function applyTheme() {
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
-  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); ed.setFocusMode(cfg.focusMode); ed.setTypewriter(cfg.typewriter); }
+  if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); ed.setFocusMode(cfg.focusMode); ed.setTypewriter(cfg.typewriter); if (cfg.vim) loadVimrc(); else vimNow = null; }
   document.body.classList.toggle('focus-mode', !!cfg.focusMode);
   if (window.CinderGraph) CinderGraph.restyle();
   if (window.CinderDraw) CinderDraw.restyle();
@@ -310,6 +310,7 @@ function editorHooks(from, extra) {
 const ed = CinderEditor.create($('#editor'), editorHooks(() => S.cur, {
   onChange: () => markDirty(),
   onCursor: () => cursorMoved(),
+  onVimStatus: st => { vimNow = st; updateStatus(); },
   // Ctrl+Alt+click opens the link in the other pane (the canvas-card editors don't have one).
   follow: (name, sub, o) => followLink(name, sub, S.cur, { split: !!o?.other }),
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
