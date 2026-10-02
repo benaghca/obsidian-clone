@@ -710,6 +710,10 @@
   function mountView(el, h) {
     const st = Object.assign({ list: 'today', group: {}, showDone: false, target: null }, h.saved || {});
     let search = '', focusAdd = false;
+    // A long section shows its first SECTION_ROWS tasks until "Show more" (thousands of rows take
+    // the browser a second or more to lay out). The sections shown in full, by list and section.
+    const SECTION_ROWS = 150;
+    const full = new Set();
     const keep = () => h.save?.({ list: st.list, group: st.group, showDone: st.showDone });
 
     const LISTS = [
@@ -766,6 +770,7 @@
       const recent = st.showDone && !logbook ? all.filter(x => x.done && (x.doneDate || '') >= addDays(t, -7) && (st.list === 'today' ? x.doneDate === t : st.list.startsWith('note:') ? x.path === st.list.slice(5) : tg ? x.tags.some(g => g === tg || g.startsWith(tg + '/')) : true)).sort((a, b) => (b.doneDate || '').localeCompare(a.doneDate || '')) : [];
       const addVal = el.querySelector('.tk-add')?.value || '';
       const target = st.target || (st.list.startsWith('note:') ? st.list.slice(5) : null);
+      const shown = sec => full.has(st.list + '\u0000' + sec.id) || search ? sec.tasks : sec.tasks.slice(0, SECTION_ROWS);
       const navItem = (id, name, icon, n, extra = '') => `<button class="tk-li${st.list === id ? ' on' : ''}" data-list="${esc(id)}"${extra}>${ICON(icon)}<span>${esc(name)}</span>${n ? `<b>${n}</b>` : ''}</button>`;
 
       el.innerHTML = `<div class="tk-app">
@@ -787,7 +792,7 @@
             ${logbook ? '' : `<div class="seg tk-group" role="radiogroup" aria-label="Group by">${[['date', 'Date'], ['note', 'Note'], ['priority', 'Priority'], ...(st.list.startsWith('note:') ? [['heading', 'Heading']] : [])].map(([v, l]) => `<button data-group="${v}" class="${group === v ? 'on' : ''}" role="radio" aria-checked="${group === v}">${l}</button>`).join('')}</div>
             <label class="tk-showdone"><input type="checkbox"${st.showDone ? ' checked' : ''}> Show done</label>`}</div>
           ${st.list === 'today' && secs.some(s => s.id === 'overdue') ? `<div class="tk-rollover">${secs.find(s => s.id === 'overdue').tasks.length} overdue <button class="btn" data-roll>Move them all to today</button></div>` : ''}
-          ${secs.map(s => `<section class="tk-section${s.tone ? ' tk-' + s.tone : ''}"${s.date !== undefined ? ` data-date="${esc(s.date)}"` : ''}><h3>${s.path ? `<a data-open="${esc(s.path)}" data-line="0">${esc(s.title)}</a>` : esc(s.title)} <span>${s.tasks.length}</span></h3>${s.tasks.map(x => rowHtml(x, h, { drag: !logbook, source: !(group === 'note' || st.list.startsWith('note:')), heading: group !== 'heading', actions: !logbook })).join('') || (s.date !== undefined ? '<div class="tk-empty">Nothing here. Drag a task onto this day, or add one above.</div>' : '')}</section>`).join('')}
+          ${secs.map(s => `<section class="tk-section${s.tone ? ' tk-' + s.tone : ''}"${s.date !== undefined ? ` data-date="${esc(s.date)}"` : ''}><h3>${s.path ? `<a data-open="${esc(s.path)}" data-line="0">${esc(s.title)}</a>` : esc(s.title)} <span>${s.tasks.length}</span></h3>${shown(s).map(x => rowHtml(x, h, { drag: !logbook, source: !(group === 'note' || st.list.startsWith('note:')), heading: group !== 'heading', actions: !logbook })).join('') || (s.date !== undefined ? '<div class="tk-empty">Nothing here. Drag a task onto this day, or add one above.</div>' : '')}${shown(s).length < s.tasks.length ? `<button class="btn tk-more" data-more="${esc(s.id)}">Show ${(s.tasks.length - shown(s).length).toLocaleString()} more</button>` : ''}</section>`).join('')}
           ${recent.length ? `<section class="tk-section tk-done"><h3>Done this week <span>${recent.length}</span></h3>${recent.map(x => rowHtml(x, h, { actions: false })).join('')}</section>` : ''}
           ${!secs.length && all.length ? `<div class="tk-blank">${ICON(st.list === 'today' ? I.sun : I.check)}<p>${st.list === 'today' ? 'Nothing left for today.' : logbook ? 'Nothing done in the last 30 days.' : 'No tasks here.'}</p></div>` : ''}
           ${!all.length ? `<div class="tk-blank">${ICON(I.check)}<p>No tasks in the vault yet. Add one above, or write <code>- [ ] something</code> in any note.</p></div>` : ''}
@@ -820,6 +825,8 @@
       if (li) { st.list = li.dataset.list; st.target = null; search = ''; keep(); render(); return; }
       const g = e.target.closest('[data-group]');
       if (g) { st.group = { ...st.group, [st.list]: g.dataset.group }; keep(); render(); return; }
+      const more = e.target.closest('[data-more]');
+      if (more) { full.add(st.list + '\u0000' + more.dataset.more); render(); return; }
       if (e.target.closest('[data-roll]')) { const t = today(); for (const x of listTasks(h.tasks(), 'today', t).filter(x => dateOf(x) < t)) await h.setField(x, x.due || !x.scheduled ? 'due' : 'scheduled', t); return; }
       if (e.target.closest('.tk-target')) { const p = await h.pickTarget(); if (p) { st.target = p; render(); el.querySelector('.tk-add')?.focus(); } }
     });

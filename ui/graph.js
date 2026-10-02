@@ -11,7 +11,7 @@ window.CinderGraph = (() => {
   // stays near where it lands. A new layout cools slowly enough to come fully to rest; one that
   // stopped short would lurch the rest of the way the moment anything is grabbed.
   const LINK = 90, REPEL = 400, GRAVITY = 0.02, LINK_SOFTNESS = 0.2, DRAG_HEAT = 0.1;
-  const SETTLE_TICKS = 1200, SETTLE_MS = 300, SETTLE_DECAY = 1 - Math.pow(0.001, 1 / SETTLE_TICKS);
+  const SETTLE_TICKS = 1200, SETTLE_MS = 300, COOL_MS = 15000;
   const pull = n => adj.get(n)?.size ? GRAVITY : GRAVITY * 2.5; // unlinked notes stay closer in
   const linkForce = d3Force.forceLink([]).distance(LINK);
   const linkStrength = linkForce.strength(); // d3's own: weaker for links to well-linked notes
@@ -22,6 +22,12 @@ window.CinderGraph = (() => {
     .force('x', d3Force.forceX(0).strength(pull))
     .force('y', d3Force.forceY(0).strength(pull));
   const DECAY = sim.alphaDecay();
+  // How long a tick takes here, as they run (a big vault's are slow: ~60ms for 15,000 notes).
+  let tickMs = 0;
+  const tick = () => { const t = performance.now(); sim.tick(); const d = performance.now() - t; tickMs = tickMs ? tickMs * 0.9 + d * 0.1 : d; };
+  // How fast a warmed-up layout cools: over SETTLE_TICKS, but within COOL_MS when ticks are slow
+  // (never in fewer than d3's own 300), so a big graph doesn't keep the processor busy for minutes.
+  const settleDecay = () => 1 - Math.pow(0.001, 1 / (tickMs ? Math.max(300, Math.min(SETTLE_TICKS, COOL_MS / tickMs)) : SETTLE_TICKS));
   let hover = null, drag = null, pan = null, moved = false;
   // A clicked node stays selected: it and its links stay lit (opts.onSelect gets its details).
   let selected = null;
@@ -222,7 +228,7 @@ window.CinderGraph = (() => {
     sim.nodes(nodes);
     linkForce.links(edges.map(([source, target]) => ({ source, target })));
     const fresh = refit || !fitted || old.size === 0;
-    sim.alphaDecay(SETTLE_DECAY).alpha(fresh ? 1 : Math.max(sim.alpha(), 0.3));
+    sim.alphaDecay(settleDecay()).alpha(fresh ? 1 : Math.max(sim.alpha(), 0.3));
     if (fresh) { settle(); fit(); fitted = true; }
     dirty = true; kick();
   }
@@ -231,7 +237,8 @@ window.CinderGraph = (() => {
   // plays out on screen.
   function settle() {
     const t0 = performance.now();
-    for (let s = 0; s < SETTLE_TICKS && performance.now() - t0 < SETTLE_MS; s++) sim.tick();
+    for (let s = 0; s < SETTLE_TICKS && performance.now() - t0 < SETTLE_MS; s++) tick();
+    sim.alphaDecay(settleDecay()); // now that it's known how long ticks take
   }
 
   function fit() {
@@ -377,7 +384,7 @@ window.CinderGraph = (() => {
   function frame() {
     raf = 0;
     if (!visible) return;
-    if (hot()) { sim.tick(); dirty = true; }
+    if (hot()) { tick(); dirty = true; }
     else sim.alphaDecay(DECAY); // settled: later warm-ups (a drag) cool at the usual pace
     const spinning = mode3d && spin && !drag && !pan;
     if (spinning) { cam.yaw += 0.0035; dirty = true; }
@@ -404,7 +411,7 @@ window.CinderGraph = (() => {
       mode3d = on;
       for (const n of nodes) { n.z = on ? (Math.random() - .5) * 300 : 0; n.vz = 0; }
       sim.numDimensions(on ? 3 : 2).force('z', on ? d3Force.forceZ(0).strength(pull) : null);
-      sim.alphaDecay(SETTLE_DECAY).alpha(1);
+      sim.alphaDecay(settleDecay()).alpha(1);
       settle(); fit(); dirty = true; kick();
     },
     is3d: () => mode3d,

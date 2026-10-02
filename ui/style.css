@@ -746,6 +746,7 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .tk-section h3 span, .tk-query h4 span { color: var(--faint); font-weight: 400; font-size: var(--text-sm); }
 .tk-section.tk-danger h3 { color: var(--danger); }
 .tk-empty { color: var(--faint); font-size: var(--text-sm); padding: 6px 34px; }
+.tk-more { margin: 6px 0 4px 34px; }
 .tk-blank { color: var(--faint); text-align: center; padding: 56px 0; }
 .tk-blank svg { width: 40px; height: 40px; stroke-width: 1.2; color: var(--border); }
 .tk-blank p { margin: 8px 0 0; }

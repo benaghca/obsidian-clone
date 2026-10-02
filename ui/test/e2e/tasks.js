@@ -169,6 +169,13 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   await page.keyboard.press('Control+Shift+T'); await sleep(400);
   await page.evaluate(() => CMD['note-menu']()); await sleep(200);
   assert(!(await moreShown()) && !(await page.$('.menu')), 'and back on Tasks after a note, the hidden note’s menu can’t be opened');
+  w('Many.md', Array.from({ length: 160 }, (_, i) => `- [ ] Bulk task ${i + 1}`).join('\n') + '\n'); await sleep(2600);
+  await page.keyboard.press('Control+Shift+T'); await sleep(400);
+  await page.click('.tk-li[data-list="anytime"]'); await sleep(300);
+  const bulk = () => page.$$eval('.tk-row', r => r.filter(x => x.textContent.includes('Bulk task')).length);
+  assert(await bulk() < 160 && await page.$('.tk-more'), 'a long list shows its first tasks and a Show more button: ' + await bulk());
+  await page.click('.tk-more'); await sleep(300);
+  assert(await bulk() === 160 && !(await page.$('.tk-more')), 'which shows the rest');
   console.log('ERRORS:', errors.join('\n') || 'none');
   assert(!errors.length, 'no page errors');
   await browser.close();

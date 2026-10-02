@@ -16,7 +16,9 @@ mkdir -p "$WORK/xdg"
 XDG_DATA_HOME="$WORK/xdg" "$ROOT/target/release/cinder" "$WORK/vault" --browser --port 43399 --no-open >"$WORK/server.log" 2>&1 &
 SRV=$!; trap 'kill $SRV 2>/dev/null' EXIT; sleep 2
 if [ $# -gt 0 ]; then SUITES=("$@"); else SUITES=(actions search-tabs graph scroll save); fi
+# As the app does on NVIDIA (src/main.rs): WebKit's DMABUF renderer dies on Wayland there.
+[ -e /sys/module/nvidia ] && export WEBKIT_DISABLE_DMABUF_RENDERER=${WEBKIT_DISABLE_DMABUF_RENDERER:-1}
 for s in "${SUITES[@]}"; do
   echo "== $s"
-  python3 "$HERE/webkit.py" http://127.0.0.1:43399/ "$HERE/$s.js" 2>/dev/null | grep -v '^DONE$'
+  python3 "$HERE/webkit.py" http://127.0.0.1:43399/ "$HERE/$s.js" 2>"$WORK/webkit.log" | grep -v '^DONE$' || { echo "  no results; WebKit said:"; grep -v Deprecation "$WORK/webkit.log" | tail -3 | sed 's/^/    /'; }
 done
