@@ -112,6 +112,7 @@ const DEFAULTS = {
   windowFrame: 'custom',  // desktop app: Cinder's own title bar, or the system's ('native'); lives in the app config
   properties: 'visible', // frontmatter as a Properties table, or 'source' for plain YAML
   mathSnippets: true,     // LaTeX Suite-style shortcuts while typing math
+  pasteHtml: true,        // paste rich text (a web page, a document) as Markdown
   autoReveal: true,       // opening a file expands its folders in the file tree and scrolls to it
   inboxFolder: 'Inbox',   // where things captured elsewhere arrive (the Inbox view)
   webEmbeds: 'auto',      // ![](https://…) pages: 'auto' load, 'click' to load, 'off' (show the link)
@@ -293,6 +294,7 @@ function editorHooks(from, extra) {
     version: () => S.version,
     linkOptions: q => linkOptions(q),
     taskSuggest: (line, pos) => cfg.taskSuggest ? CinderTasks.suggestFor(line, pos) : null,
+    pasteHtml: () => cfg.pasteHtml,
     tagOptions: () => allTags(),
     visualEmbed: p => visualEmbed(p),
     renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),

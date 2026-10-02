@@ -33,6 +33,7 @@ const SETTINGS = [
   { k: 'focusMode', page: 'editor', name: 'Focus mode', desc: 'Hide the side bars and tabs, and dim everything but the paragraph you’re writing. The ◎ in the status bar switches it too.', type: 'toggle', apply: 'theme' },
   { k: 'typewriter', page: 'editor', name: 'Typewriter scrolling', desc: 'Keep the line you’re typing on in the middle of the window.', type: 'toggle', apply: 'theme' },
   { k: 'vim', page: 'editor', name: 'Vim key bindings', desc: 'Edit with Vim’s modes and motions.', type: 'toggle', apply: 'theme' },
+  { k: 'pasteHtml', page: 'editor', name: 'Paste rich text as Markdown', desc: 'Text copied from a web page or a document keeps its headings, lists, links and bold as Markdown. <kbd>Ctrl+Shift+V</kbd> pastes plain text either way.', type: 'toggle' },
   { k: 'mathSnippets', page: 'editor', name: 'Math shortcuts', desc: 'While typing an equation: <code>//</code> makes a fraction, <code>@a</code> α, <code>mk</code>+Tab starts inline math, and more.', type: 'toggle' },
   { k: 'properties', page: 'editor', name: 'Properties at the top of notes', desc: 'Show the frontmatter as a table you can edit, or as its YAML text.', type: 'select', options: [['visible', 'Table'], ['source', 'YAML text']], apply: 'editor' },
   { k: 'webEmbeds', page: 'editor', name: 'Embedded web pages', desc: 'What <code>![](https://…)</code> and canvas link cards show.', type: 'select', options: [['auto', 'The live page'], ['click', 'The page, once clicked'], ['off', 'Just the link']], apply: 'editor' },

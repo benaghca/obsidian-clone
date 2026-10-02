@@ -318,7 +318,7 @@ function showShortcuts() {
   const M = MAC ? '⌘' : 'Ctrl+', A = MAC ? '⌥' : 'Alt+', S_ = MAC ? '⇧' : 'Shift+';
   const back = modal(`<div class="dr-help shortcuts"><h3>Keyboard shortcuts</h3><div class="dr-help-cols">
     <div><h4>App</h4>${bound(APP_COMMANDS.filter(c => !/^tab-(\d|last)$/.test(c.id)))}${fixed([['Go to tab 1–8 / the last', `${A}1…${A}8 / ${A}9`]])}</div>
-    <div><h4>Editing</h4>${bound(EDITOR_COMMANDS)}${fixed([['Move line up / down', `${A}↑ / ${A}↓`], ['Copy line', `${S_}${A}↑ / ${S_}${A}↓`], ['Select next match', `${M}D`], ['Indent / outdent list', `Tab / ${S_}Tab`], ['Follow link under cursor', `${M}click`], ['Undo / redo', `${M}Z / ${M}${S_}Z`]])}</div>
+    <div><h4>Editing</h4>${bound(EDITOR_COMMANDS)}${fixed([['Move line up / down', `${A}↑ / ${A}↓`], ['Move list item (with its children)', `${M}${S_}↑ / ${M}${S_}↓`], ['Next / previous table cell', `Tab / ${S_}Tab`], ['Copy line', `${S_}${A}↑ / ${S_}${A}↓`], ['Select next match', `${M}D`], ['Indent / outdent list', `Tab / ${S_}Tab`], ['Follow link under cursor', `${M}click`], ['Undo / redo', `${M}Z / ${M}${S_}Z`]])}</div>
     <div><h4>File tree</h4>${fixed([['Move', '↑ / ↓'], ['Expand / collapse', '→ / ←'], ['Open', 'Enter'], ['Open in a new tab', `${M}Enter / middle-click`], ['Select several', `${S_}↑↓ / ${M}click / ${S_}click`], ['Rename', 'F2'], ['Delete', 'Del'], ['New note here', `${M}N`], ['Back to the page', 'Esc']])}
       <h4>Lists (search, tasks)</h4>${fixed([['Move', '↑ / ↓'], ['Open', 'Enter'], ['Tick a task', 'Space / X'], ['Due today / tomorrow', 'T / M']])}
       <h4>Backlinks / outline pane</h4>${fixed([['Switch tab', '← / →'], ['Preview a heading', 'Space'], ['Link an unlinked mention', 'L']])}

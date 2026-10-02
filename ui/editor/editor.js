@@ -5,9 +5,10 @@
 
 import { EditorState, EditorSelection, StateField, StateEffect, Compartment, Prec, Annotation, Facet } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, drawSelection, dropCursor, rectangularSelection } from '@codemirror/view';
-import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab, insertNewline } from '@codemirror/commands';
+import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab, insertNewline, moveLineUp, moveLineDown } from '@codemirror/commands';
 import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
-import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
+import { markdown, markdownLanguage, insertNewlineContinueMarkupCommand, deleteMarkupBackward } from '@codemirror/lang-markdown';
+import { htmlToMarkdown } from './html-markdown.js';
 import { parser as mdParser } from '@lezer/markdown';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField, startCompletion } from '@codemirror/autocomplete';
 import { vim, getCM, Vim, CodeMirror } from '@replit/codemirror-vim';
@@ -208,6 +209,40 @@ const markStyle = HighlightStyle.define([
   { tag: t.quote, class: 'tok-quote' },
   { tag: t.contentSeparator, class: 'tok-mark' },
 ]);
+
+// Rich text pasted from a web page or a document comes in as Markdown, as in Obsidian. Plain text
+// instead with Ctrl/Cmd+Shift+V, into code, or with hooks.pasteHtml() saying no.
+let plainPaste = false;
+const plainPasteKeys = EditorView.domEventHandlers({
+  keydown(e) { plainPaste = (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'v'; return false; },
+});
+function pasteRichText(e, view, hooks) {
+  const plain = plainPaste;
+  plainPaste = false;
+  const html = e.clipboardData?.getData('text/html');
+  if (!html || plain || hooks.pasteHtml?.() === false) return false;
+  for (let n = syntaxTree(view.state).resolveInner(view.state.selection.main.from, -1); n; n = n.parent) {
+    if (/^(FencedCode|CodeBlock|InlineCode|BlockMath|InlineMath|Frontmatter)$/.test(n.name)) return false;
+  }
+  const md = htmlToMarkdown(html);
+  if (md == null) return false;
+  e.preventDefault();
+  view.dispatch(view.state.replaceSelection(md), { userEvent: 'input.paste', scrollIntoView: true });
+  return true;
+}
+
+// Typing a Markdown mark over a selection wraps it rather than replacing it, as in Obsidian: * twice
+// makes it bold, ` code, = twice highlights it. The selection stays on the text.
+const WRAP_MARKS = new Set(['*', '_', '~', '=', '`', '$']);
+function wrapSelectionInput(view, from, to, text) {
+  const { state } = view;
+  if (!WRAP_MARKS.has(text) || state.selection.ranges.some(r => r.empty)) return false;
+  view.dispatch(state.changeByRange(r => ({
+    changes: [{ from: r.from, insert: text }, { from: r.to, insert: text }],
+    range: EditorSelection.range(r.anchor + 1, r.head + 1),
+  })), { userEvent: 'input.type' });
+  return true;
+}
 
 // ------------------------------------------------------------------ state: focus & refresh
 
@@ -893,6 +928,131 @@ function smartTab(view) {
   return insertTab(view);
 }
 
+const continueMarkup = insertNewlineContinueMarkupCommand({ nonTightLists: false });
+
+// ------------------------------------------------------------------ tables, as Advanced Tables does
+
+// A table row's cells: split at | (not \| nor one in `code`), without the edge pipes, trimmed.
+function tableCells(text) {
+  const cells = [];
+  let cur = '', code = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '\\') { cur += c + (text[i + 1] ?? ''); i++; continue; }
+    if (c === '`') code = !code;
+    if (c === '|' && !code) { cells.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  cells.push(cur);
+  if (cells.length > 1 && /^\s*\|/.test(text)) cells.shift();
+  if (cells.length > 1 && /\|\s*$/.test(text) && !cells[cells.length - 1].trim()) cells.pop();
+  return cells.map(x => x.trim());
+}
+// Which cell of row `text` column `col` is in.
+function cellAt(text, col) {
+  let n = /^\s*\|/.test(text) ? -1 : 0, code = false;
+  for (let i = 0; i < col && i < text.length; i++) {
+    if (text[i] === '\\') { i++; continue; }
+    if (text[i] === '`') code = !code;
+    if (text[i] === '|' && !code) n++;
+  }
+  return Math.max(0, n);
+}
+// How wide text shows: East Asian wide characters and emoji take two columns.
+const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}]/u;
+const textWidth = s => [...s].reduce((w, ch) => w + (WIDE.test(ch) ? 2 : 1), 0);
+
+// The rows of a table laid out in columns: [lines, starts], where starts[r][c] is where cell c of
+// row r's text begins in its line. Row 1 is the |---| row, which keeps its alignment colons.
+function layoutTable(rows) {
+  const cols = Math.max(...rows.map(r => r.length));
+  const align = Array.from({ length: cols }, (_, c) => { const d = rows[1]?.[c] || ''; return d.startsWith(':') && d.endsWith(':') && d.length > 1 ? 'c' : d.endsWith(':') ? 'r' : d.startsWith(':') ? 'l' : ''; });
+  const width = Array.from({ length: cols }, (_, c) => Math.max(3, ...rows.filter((_, r) => r !== 1).map(r => textWidth(r[c] || ''))));
+  const pad = (t, c) => {
+    const room = width[c] - textWidth(t);
+    if (align[c] === 'r') return ' '.repeat(room) + t;
+    if (align[c] === 'c') return ' '.repeat(room >> 1) + t + ' '.repeat(room - (room >> 1));
+    return t + ' '.repeat(room);
+  };
+  const starts = [], lines = rows.map((r, ri) => {
+    const cells = Array.from({ length: cols }, (_, c) => ri === 1
+      ? (align[c] === 'l' || align[c] === 'c' ? ':' : '-') + '-'.repeat(width[c] - 2) + (align[c] === 'r' || align[c] === 'c' ? ':' : '-')
+      : pad(r[c] || '', c));
+    const st = [];
+    let at = 2;
+    for (const cell of cells) { st.push(at + (ri === 1 || !cell.trim() ? 0 : cell.length - cell.trimStart().length)); at += cell.length + 3; }
+    starts.push(st);
+    return '| ' + cells.join(' | ') + ' |';
+  });
+  return [lines, starts];
+}
+
+// Tab / Shift+Tab in a table: tidy its columns and go to the next / previous cell (Tab past the
+// last cell starts a new row). Enter: the same column in the next row. Elsewhere, false.
+function tableMove(view, how) {
+  const { state } = view, sel = state.selection.main;
+  if (state.selection.ranges.length > 1) return false;
+  let node = syntaxTree(state).resolveInner(sel.head, -1);
+  while (node && node.name !== 'Table') node = node.parent;
+  if (!node) return false;
+  const doc = state.doc, first = doc.lineAt(node.from), last = doc.lineAt(node.to), line = doc.lineAt(sel.head);
+  if (doc.lineAt(sel.anchor).number !== line.number) return false;
+  const rows = [];
+  for (let n = first.number; n <= last.number; n++) rows.push(tableCells(doc.line(n).text));
+  const cols = Math.max(...rows.map(r => r.length));
+  let r = line.number - first.number, c = Math.min(cellAt(line.text, sel.head - line.from), cols - 1);
+  if (how === 'next') { c++; if (c >= cols) { c = 0; r++; } }
+  else if (how === 'prev') { c--; if (c < 0) { c = cols - 1; r--; } }
+  else r++;
+  if (r === 1) r = how === 'prev' ? 0 : 2; // never into the |---| row
+  if (r < 0) { r = 0; c = 0; }
+  if (r >= rows.length) rows.push([]);
+  const [lines, starts] = layoutTable(rows);
+  let pos = first.from;
+  for (let k = 0; k < r; k++) pos += lines[k].length + 1;
+  const cell = rows[r][c] || '';
+  const at = pos + starts[r][c];
+  view.dispatch({ changes: { from: first.from, to: last.to, insert: lines.join('\n') }, selection: how === 'down' ? { anchor: at } : { anchor: at, head: at + cell.length }, scrollIntoView: true, userEvent: 'input' });
+  return true;
+}
+
+// ------------------------------------------------------------------ moving list items, as Outliner does
+
+const indentOf = text => /^\s*/.exec(text)[0].replace(/\t/g, '    ').length;
+// The lines of the list item on line n: it and the lines under it that are indented further.
+function itemLines(doc, n) {
+  const base = indentOf(doc.line(n).text);
+  let end = n;
+  while (end < doc.lines) { const t = doc.line(end + 1).text; if (!t.trim() || indentOf(t) <= base) break; end++; }
+  return [n, end];
+}
+const LIST_TEXT = /^\s*(?:[-*+]|\d+[.)])\s/;
+// Ctrl+Shift+↑/↓: move the list item under the cursor, children and all, past its neighbour at the
+// same level. Off a list, the line moves, as with Alt+↑/↓.
+function moveItem(view, dir) {
+  const { state } = view, doc = state.doc, sel = state.selection.main, line = doc.lineAt(sel.head);
+  if (!LIST_TEXT.test(line.text)) return (dir < 0 ? moveLineUp : moveLineDown)(view);
+  const base = indentOf(line.text), [a, b] = itemLines(doc, line.number);
+  let other;
+  if (dir < 0) {
+    let p = a - 1;
+    while (p >= 1 && doc.line(p).text.trim() && indentOf(doc.line(p).text) > base) p--;
+    if (p < 1 || !LIST_TEXT.test(doc.line(p).text) || indentOf(doc.line(p).text) !== base) return true;
+    other = itemLines(doc, p);
+  } else {
+    const n = b + 1;
+    if (n > doc.lines || !LIST_TEXT.test(doc.line(n).text) || indentOf(doc.line(n).text) !== base) return true;
+    other = itemLines(doc, n);
+  }
+  const text = (x, y) => doc.sliceString(doc.line(x).from, doc.line(y).to);
+  const mine = text(a, b), theirs = text(other[0], other[1]), off = sel.head - doc.line(a).from;
+  const from = doc.line(Math.min(a, other[0])).from, to = doc.line(Math.max(b, other[1])).to;
+  const insert = dir < 0 ? mine + '\n' + theirs : theirs + '\n' + mine;
+  const head = dir < 0 ? from + off : from + theirs.length + 1 + off;
+  view.dispatch({ changes: { from, to, insert }, selection: { anchor: head }, scrollIntoView: true, userEvent: 'move.line' });
+  return true;
+}
+
 // Insert a $$ … $$ block around the selection (or an empty one), cursor inside.
 function blockMath(view) {
   view.dispatch(view.state.changeByRange(r => {
@@ -1359,7 +1519,12 @@ function create(parent, hooks, opts = {}) {
     EditorView.inputHandler.of(mathSnippetInput),
     indentUnit.of('\t'),
     EditorState.tabSize.of(4),
-    markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown, ObsidianComments] }),
+    markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown, ObsidianComments], addKeymap: false }),
+    // Enter carries a list or quote on; on an empty item it ends the list, as in Obsidian (not
+    // CodeMirror's default, which first makes a tight list loose).
+    Prec.high(keymap.of([{ key: 'Enter', run: v => tableMove(v, 'down') || continueMarkup(v) }, { key: 'Backspace', run: deleteMarkupBackward }])),
+    EditorView.inputHandler.of(wrapSelectionInput),
+    plainPasteKeys,
     EditorState.languageData.of(() => [{ closeBrackets: { brackets: ['(', '[', '{'] } }]),
     closeBrackets(),
     autocompletion({ override: [completions], icons: false, activateOnTyping: true }),
@@ -1374,7 +1539,9 @@ function create(parent, hooks, opts = {}) {
     Prec.highest(keymap.of(opts.extraKeys || [])),
     Prec.high(keysComp.of(keymap.of(keyBindings(keys)))),
     Prec.high(keymap.of([
-      { key: 'Tab', run: v => mathTab(v) || smartTab(v), shift: indentLess },
+      { key: 'Tab', run: v => mathTab(v) || tableMove(v, 'next') || smartTab(v), shift: v => tableMove(v, 'prev') || indentLess(v) },
+      { key: 'Mod-Shift-ArrowUp', run: v => moveItem(v, -1) },
+      { key: 'Mod-Shift-ArrowDown', run: v => moveItem(v, 1) },
       {
         key: 'ArrowUp', run(view) {
           const r = view.state.selection.main;
@@ -1412,7 +1579,7 @@ function create(parent, hooks, opts = {}) {
           hooks.clipboardImage().then(f => f && hooks.onFiles([f], true));
           return true;
         }
-        if (!files.length) return false;
+        if (!files.length) return pasteRichText(e, view, hooks);
         e.preventDefault();
         if (!hooks.onFiles) return false;
         hooks.onFiles(files, true);
