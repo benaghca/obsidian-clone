@@ -75,6 +75,48 @@ async function moveDialog(path) {
   await renamePath(path, join(dest, basename(path)));
 }
 
+// ============================================================ note composer (as Obsidian's)
+
+// The selection becomes a note of its own, next to this one, and a link to it takes its place.
+async function extractSelection() {
+  if (S.view !== 'note' || S.mode !== 'edit' || ed.selectionStart === ed.selectionEnd) return toast('Select the text to extract first');
+  const a = ed.selectionStart, b = ed.selectionEnd, text = ed.value.slice(a, b);
+  const firstLine = (text.split('\n').find(l => l.trim()) || '').replace(/^[\s#>*+-]+|^\s*\d+[.)]\s*|^\[.\]\s*/g, '');
+  const name = await promptModal('Extract to a new note', 'Name of the new note', firstLine.replace(/[\\/:*?"<>|#^[\]]/g, '').trim().slice(0, 60) || 'Untitled');
+  if (!name) return;
+  if (BAD_NAME.test(name)) return toast('A note’s name can’t have \\ / : * ? " < > | # ^ [ or ]');
+  const path = join(dirname(S.cur), name.replace(/\.md$/i, '') + '.md');
+  if (S.files.has(path)) return toast(`There’s already a note called ${noteName(path)} there`);
+  try { await writeFile(path, text.replace(/^\n+|\s+$/g, '') + '\n'); } catch (e) { return toast('Couldn’t make the note: ' + e.message); }
+  reindexAll(); renderTree();
+  ed.insert(a, b, `[[${linkNameFor(path, [...S.files.keys()])}]]`);
+  toast(`Moved the selection to ${noteName(path)}`);
+}
+
+// This note goes onto the end of another, links to it then point there, and it goes to .trash.
+async function mergeInto() {
+  if (S.view !== 'note' || !S.cur) return toast('Open the note to merge first');
+  const from = S.cur, notes = [...S.notes.keys()].filter(p => p !== from && !isDrawing(p));
+  const dest = await picker({
+    placeholder: `Merge “${noteName(from)}” into…`,
+    items: q => rank(notes, q, p => p).map(p => ({ main: noteName(p), sub: dirname(p), value: p })),
+  });
+  if (!dest) return;
+  if (!(await confirmModal(`Merge “${noteName(from)}” into “${noteName(dest)}”?`, `Its text goes at the end of “${noteName(dest)}”, links to it then lead there, and it goes to the vault's .trash folder.`, { ok: 'Merge' }))) return;
+  await save();
+  const src = S.notes.get(from);
+  const edits = new Map(linkRewrites(new Map([[from, dest]]), [...S.files.keys()].filter(p => p !== from)).filter(e => e[2] !== from).map(([p, text]) => [p, text]));
+  const base = edits.get(dest) ?? S.notes.get(dest).content;
+  edits.set(dest, base.replace(/\s+$/, '') + '\n\n' + src.content.slice(src.fmLen).replace(/^\s+|\s+$/g, '') + '\n');
+  for (const [p, content] of edits) {
+    try { await writeFile(p, content, S.notes.get(p)?.mtime); } catch (e) { return toast(`Couldn’t update ${noteName(p)}: ${e.message}`); }
+  }
+  await deletePath(from, { confirm: false });
+  reindexAll();
+  await openPath(dest);
+  toast(`Merged into ${noteName(dest)}`);
+}
+
 function relPath(fromDir, to) {
   const a = fromDir ? fromDir.split('/') : [], b = to.split('/');
   let i = 0;
@@ -90,17 +132,11 @@ function linkNameFor(path, files) {
   return count > 1 ? (isMd(path) ? path.slice(0, -3) : path) : noteName(path);
 }
 
-async function renamePath(from, to) {
-  if (from === to) return;
-  await save();
-  const isDir = S.dirs.has(from);
-  if (!isDir && S.files.has(to) && from.toLowerCase() !== to.toLowerCase()) return toast('A file with that name already exists');
-  const moved = new Map(isDir
-    ? [...S.files.keys()].filter(p => p.startsWith(from + '/')).map(p => [p, to + p.slice(from.length)])
-    : [[from, to]]);
-  const afterFiles = [...S.files.keys()].map(p => moved.get(p) || p);
-
-  // Work out link rewrites using the pre-move index.
+// The notes whose links have to change when the files in `moved` (old path -> new path) move:
+// [[note's path after the move, its new text, its path before]], from the index as it is before the move.
+// afterFiles: every file's path after the move (for the shortest link that still resolves).
+function linkRewrites(moved, afterFiles) {
+  /** @type {[string, string, string][]} */
   const edits = [];
   for (const [q, n] of S.notes) {
     const reps = [];
@@ -119,16 +155,31 @@ async function renamePath(from, to) {
         const href = relPath(dirname(newQ), np).split('/').map(enc).join('/');
         txt = `${l.embed ? '!' : ''}[${l.text}](${href}${sub})`;
       } else {
-        txt = `${l.embed ? '!' : ''}[[${linkNameFor(np, afterFiles)}${sub}${l.alias != null ? '|' + l.alias : ''}]]`;
+        txt = `${l.embed ? '!' : ''}[[${linkNameFor(np, afterFiles)}${sub}${l.alias != null ? (l.pipeEsc ? '\\|' : '|') + l.alias : ''}]]`;
       }
       if (txt !== n.content.slice(l.index, l.index + l.len)) reps.push({ l, txt });
     });
     if (reps.length) {
       let s = n.content;
       for (const { l, txt } of reps.sort((a, b) => b.l.index - a.l.index)) s = s.slice(0, l.index) + txt + s.slice(l.index + l.len);
-      edits.push([moved.get(q) || q, s]);
+      edits.push([newQ, s, q]);
     }
   }
+  return edits;
+}
+
+async function renamePath(from, to) {
+  if (from === to) return;
+  await save();
+  const isDir = S.dirs.has(from);
+  if (!isDir && S.files.has(to) && from.toLowerCase() !== to.toLowerCase()) return toast('A file with that name already exists');
+  const moved = new Map(isDir
+    ? [...S.files.keys()].filter(p => p.startsWith(from + '/')).map(p => [p, to + p.slice(from.length)])
+    : [[from, to]]);
+  const afterFiles = [...S.files.keys()].map(p => moved.get(p) || p);
+
+  // Work out link rewrites using the pre-move index.
+  const edits = linkRewrites(moved, afterFiles);
 
   try {
     await api('/api/rename', { method: 'POST', body: JSON.stringify({ from, to }) });
