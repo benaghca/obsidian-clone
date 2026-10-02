@@ -171,6 +171,11 @@ function renderInto(el, content, from, depth) {
     code.parentElement.replaceWith(div);
     renderTasksBlock(div, code.textContent.replace(/\n$/, ''));
   }
+  for (const code of $$('pre > code.language-query', el)) {
+    const div = document.createElement('div');
+    code.parentElement.replaceWith(div);
+    renderQueryBlock(div, code.textContent, from);
+  }
   // ```base blocks become live views.
   for (const code of $$('pre > code.language-base', el)) {
     const div = document.createElement('div');
@@ -225,6 +230,16 @@ function linkifyTags(el) {
     }
     if (any) { frag.append(t.data.slice(last)); t.replaceWith(frag); }
   }
+}
+
+// A ```query block (Obsidian's embedded search): what the search finds, listed as in the Search panel.
+// The note it's in isn't listed (its own query text would always match).
+function renderQueryBlock(el, code, from) {
+  const q = code.trim(), found = q ? searchVault(q) : { results: [], also: [] };
+  const results = found.results.filter(r => r.p !== from), also = found.also;
+  el.className = 'query-block';
+  el.innerHTML = `<div class="query-head"><span>${esc(q || 'Empty search')}</span><small>${searchCount(results, also)}</small></div>${searchResultsHtml(results)}`;
+  el.onclick = openSearchResult;
 }
 
 function extractSection(n, sub) {

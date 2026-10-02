@@ -56,16 +56,21 @@ function propMatches(fm, k, v) {
   const vals = [fm[key]].flat().filter(x => x != null && x !== '').map(x => String(x).toLowerCase());
   return v ? vals.some(x => x.includes(v) || x.replace(/^#/, '') === v.replace(/^#/, '')) : true;
 }
+// Search terms: words, "phrases", /regex/, op:value with op one of tag, path, file, line, content,
+// task, task-todo and task-done (line:(a b) for several words on one line), [property] or
+// [property:value], any of them negated with a leading -.
+const SEARCH_OPS = 'tag|path|file|line|content|task|task-todo|task-done';
 function parseQuery(q) {
   const terms = [];
-  // [key] or [key:value] (Obsidian's property search), or op:"text" / op:text / plain words.
-  const re = /(-?)(?:\[([^\]:]+)(?::\s*(?:"([^"]*)"|([^\]]*)))?\]|(?:(tag|path|file|line):)?(?:"([^"]*)"|(\S+)))/g; let m;
+  const re = new RegExp(`(-?)(?:\\[([^\\]:]+)(?::\\s*(?:"([^"]*)"|([^\\]]*)))?\\]|/((?:\\\\.|[^/\\\\])+)/|(${SEARCH_OPS}):(?:"([^"]*)"|\\(([^)]*)\\)|(\\S*))|"([^"]*)"|(\\S+))`, 'g');
+  let m;
   while ((m = re.exec(q))) {
-    if (m[2] != null) { terms.push({ neg: !!m[1], op: 'prop', k: m[2].trim().toLowerCase(), v: (m[3] ?? m[4] ?? '').trim().toLowerCase() }); continue; }
-    m = [m[0], m[1], m[5], m[6], m[7]];
-    const v = (m[3] ?? m[4] ?? '').toLowerCase();
-    if (!v) continue;
-    terms.push({ neg: !!m[1], op: m[2] || 'text', v: m[2] === 'tag' ? v.replace(/^#/, '') : v });
+    const neg = !!m[1];
+    if (m[2] != null) { terms.push({ neg, op: 'prop', k: m[2].trim().toLowerCase(), v: (m[3] ?? m[4] ?? '').trim().toLowerCase() }); continue; }
+    if (m[5] != null) { try { terms.push({ neg, op: 'regex', re: new RegExp(m[5], 'm'), v: m[5] }); } catch { /* not a pattern yet, while typing */ } continue; }
+    const op = m[6] || 'text', v = (m[7] ?? m[8] ?? m[9] ?? m[10] ?? m[11] ?? '').toLowerCase();
+    if (!v && !op.startsWith('task')) continue; // task-todo: alone finds notes with open tasks
+    terms.push({ neg, op, v: op === 'tag' ? v.replace(/^#/, '') : v, words: m[8] != null ? v.split(/\s+/).filter(Boolean) : null });
   }
   return terms;
 }
@@ -79,11 +84,23 @@ function syncSearchIndex() {
   for (const id of [...searchIx.docs.keys()]) if (!S.notes.has(id)) searchIx.remove(id);
 }
 
-function runSearch() {
-  const q = $('#search-input').value.trim();
-  const out = $('#search-results'), meta = $('#search-meta');
-  if (!q) { out.innerHTML = ''; meta.textContent = ''; return; }
+// The notes a search query finds, best first, with where each matched: {results: [{p, pos, used}],
+// also: the other words that matched (prefixes, near misses)}.
+function searchVault(q) {
+  // a OR b: what either finds, best of each first.
+  const alts = q.split(/\s+OR\s+/).filter(x => x.trim());
+  if (alts.length > 1) {
+    const seen = new Set(), results = [], also = new Set();
+    for (const a of alts) { const r = searchVault(a); r.also.forEach(x => also.add(x)); for (const x of r.results) if (!seen.has(x.p)) { seen.add(x.p); results.push(x); } }
+    return { results, also: [...also].slice(0, 5) };
+  }
   const terms = parseQuery(q);
+  // Each note's tasks, once, if a task: term needs them.
+  let tasksOf = null;
+  const noteTasks = p => {
+    if (!tasksOf) { tasksOf = new Map(); for (const x of allTasks()) { if (!tasksOf.has(x.path)) tasksOf.set(x.path, []); tasksOf.get(x.path).push(x); } }
+    return tasksOf.get(p) || [];
+  };
   // Plain words go to the index (ranked, with prefixes and near misses); phrases and the
   // operators (tag:, path:, file:, [prop], -word) then have to hold as well.
   const plain = terms.filter(t => t.op === 'text' && !t.neg && !/\s/.test(t.v));
@@ -99,7 +116,13 @@ function runSearch() {
       else if (t.op === 'path') hit = pl.includes(t.v);
       else if (t.op === 'file') hit = noteName(p).toLowerCase().includes(t.v);
       else if (t.op === 'prop') hit = propMatches(n.fm, t.k, t.v);
-      else hit = low.includes(t.v) || noteName(p).toLowerCase().includes(t.v);
+      else if (t.op === 'regex') hit = t.re.test(searchBody(p, n));
+      else if (t.op === 'content') hit = low.includes(t.v);
+      else if (t.op === 'line') { const ws = t.words || [t.v]; hit = low.split('\n').some(l => ws.every(w => l.includes(w))); }
+      else if (t.op.startsWith('task')) {
+        const ws = t.words || (t.v ? [t.v] : []);
+        hit = noteTasks(p).some(x => (t.op === 'task' || (t.op === 'task-todo') === !(x.done || x.cancelled)) && ws.every(w => x.text.toLowerCase().includes(w)));
+      } else hit = low.includes(t.v) || noteName(p).toLowerCase().includes(t.v);
       if (hit === t.neg) return false;
     }
     return true;
@@ -111,15 +134,22 @@ function runSearch() {
   } else {
     results = [...S.notes.keys()].filter(passes).sort(collator.compare).map(p => ({ p, pos: [], used: [] }));
   }
-  // Where the phrases are, too.
+  // Where the phrases, the patterns and the words of line:, content: and task: terms are, too.
+  const marks = [...phrases, ...rest.filter(t => !t.neg && /^(line|content|task)/.test(t.op)).flatMap(t => t.words || (t.v ? [t.v] : []))];
+  const patterns = rest.filter(t => t.op === 'regex' && !t.neg).map(t => new RegExp(t.re.source, 'gm'));
   for (const r of results) {
-    if (!phrases.length) continue;
-    const low = S.notes.get(r.p).content.toLowerCase();
-    for (const ph of phrases) { let i = low.indexOf(ph); while (i >= 0 && r.pos.length < 60) { r.pos.push([i, ph.length]); i = low.indexOf(ph, i + ph.length); } }
+    if (!marks.length && !patterns.length) continue;
+    const c = S.notes.get(r.p).content, low = c.toLowerCase();
+    for (const ph of marks) { let i = low.indexOf(ph); while (i >= 0 && r.pos.length < 60) { r.pos.push([i, ph.length]); i = low.indexOf(ph, i + ph.length); } }
+    for (const re of patterns) for (const m of c.matchAll(re)) { if (r.pos.length >= 60) break; if (m[0]) r.pos.push([m.index, m[0].length]); }
   }
   const also = [...new Set(results.flatMap(r => r.used))].filter(t => !words.includes(t)).slice(0, 5);
-  meta.innerHTML = `${results.length} note${results.length === 1 ? '' : 's'}${also.length ? ` · also matching <i>${also.map(esc).join(', ')}</i>` : ''}`;
-  out.innerHTML = results.slice(0, 300).map(r => {
+  return { results, also };
+}
+
+// Search results as the Search panel lists them: each note with up to four snippets.
+function searchResultsHtml(results) {
+  return results.slice(0, 300).map(r => {
     const c = S.notes.get(r.p).content;
     const snips = [];
     for (const [i, len] of r.pos.sort((a, b) => a[0] - b[0])) if (snips.length < 4 && !snips.some(s => Math.abs(s.i - i) < 60)) snips.push({ i, len });
@@ -130,13 +160,25 @@ function runSearch() {
     return `<div class="s-file"><div class="s-file-name" tabindex="-1" data-path="${esc(r.p)}">${esc(noteName(r.p))}<small>${esc(dirname(r.p))}</small>${r.pos.length ? `<small>${r.pos.length}</small>` : ''}</div>${sn}</div>`;
   }).join('');
 }
-$('#search-input').addEventListener('input', debounce(runSearch, 120));
-$('#search-results').addEventListener('click', e => {
+const searchCount = (results, also) => `${results.length} note${results.length === 1 ? '' : 's'}${also.length ? ` · also matching <i>${also.map(esc).join(', ')}</i>` : ''}`;
+// A click on a result: a snippet opens the note there, a name opens the note.
+function openSearchResult(e) {
   const s = e.target.closest('.s-snip');
   if (s) { const i = +s.dataset.i; return openPath(s.dataset.path, { mode: 'edit', select: [i, i + +s.dataset.len] }); }
   const f = e.target.closest('.s-file-name');
   if (f) openPath(f.dataset.path);
-});
+}
+
+function runSearch() {
+  const q = $('#search-input').value.trim();
+  const out = $('#search-results'), meta = $('#search-meta');
+  if (!q) { out.innerHTML = ''; meta.textContent = ''; return; }
+  const { results, also } = searchVault(q);
+  meta.innerHTML = searchCount(results, also);
+  out.innerHTML = searchResultsHtml(results);
+}
+$('#search-input').addEventListener('input', debounce(runSearch, 120));
+$('#search-results').addEventListener('click', openSearchResult);
 
 // Focusable items in the right pane (backlinks, outgoing links, outline).
 const RIGHT_ITEMS = '.bl-file, .bl-ctx, .o-item, a.tag, .rl-item';

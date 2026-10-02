@@ -9,6 +9,7 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   w('Notes/Compost bins.md', 'How to build compost bins for the garden.');
   w('Recipes.md', 'Basil pesto. Receive the café crème.');
   w('Work log.md', '---\nstatus: open\n---\nMeeting about the garden project budget.');
+  w('Todo.md', '- [ ] call the plumber\n- [x] buy seeds\nThe colour of the shed is red.\nIt is blue inside.');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
   const errors = [];
@@ -34,6 +35,24 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   assert(r.join() === 'Garden' && await page.$eval('.s-snip mark', m => m.textContent.toLowerCase()) === 'raised beds', 'exact phrases');
   r = await search('tag:home');
   assert(r.join() === 'Garden', 'tag only');
+  r = await search('pesto OR budget');
+  assert(r.sort().join() === 'Recipes,Work log', 'OR finds either: ' + r.join());
+  r = await search('/colou?r of/');
+  assert(r.join() === 'Todo' && await page.$eval('.s-snip mark', m => m.textContent) === 'colour of', '/regex/ matches the text, and the snippet marks it');
+  r = await search('line:(shed red)');
+  assert(r.join() === 'Todo', 'line:(a b) finds words on one line');
+  r = await search('line:(shed blue)');
+  assert(!r.length, 'but not words on different lines');
+  r = await search('task-todo:plumber');
+  assert(r.join() === 'Todo', 'task-todo: searches open tasks');
+  r = await search('task-todo:seeds');
+  assert(!r.length, 'not done ones');
+  r = await search('task-done:');
+  assert(r.join() === 'Todo', 'task-done: alone finds notes with done tasks');
+  r = await search('content:compost');
+  assert(r.join() === 'Compost bins', 'content: looks in the text');
+  r = await search('content:recipes');
+  assert(!r.length, 'and not the file name');
   // New text is found without a reload.
   await page.evaluate(() => openPath('Recipes.md')); await sleep(300);
   await page.evaluate(() => { setMode('edit'); ed.setSelectionRange(ed.value.length); ed.focus(); });
