@@ -3,6 +3,9 @@
 
 const slug = s => s.toLowerCase().trim().replace(/[^\p{L}\p{N}\s-]/gu, '').replace(/\s+/g, '-');
 let RC = { from: null, depth: 0 }; // render context for link resolution
+// Footnotes of the note being rendered: labels with a definition, labels in the order they're first
+// referenced (their numbers), and the definitions' HTML. Null outside markdownToHtml.
+let FN = null;
 
 marked.use({
   gfm: true,
@@ -13,6 +16,20 @@ marked.use({
       const href = typeof t === 'object' ? t.href : t, alt = typeof t === 'object' ? t.text : arguments[2];
       if (isWebPage(href) && cfg.webEmbeds !== 'off') return `<div class="web-embed-ph" data-url="${esc(href)}" data-alt="${esc(alt || '')}"></div>`;
       return false; // marked's own <img>
+    },
+    // An obsidian://open link to a note here is an internal link (DOMPurify would drop its href).
+    link(t) {
+      const href = typeof t === 'object' ? t.href : t, target = obsidianUrlTarget(href);
+      if (!target) return false;
+      const text = typeof t === 'object' ? this.parser.parseInline(t.tokens) : arguments[2];
+      return `<a class="internal-link" data-href="${esc(target)}" data-path="1">${text}</a>`;
+    },
+  },
+  // Obsidian strikes through ~~text~~ only; a single ~ (H~2~O) stays as typed.
+  tokenizer: {
+    del(src) {
+      const m = /^~~(?=[^\s~])([\s\S]*?[^\s~])~~(?!~)/.exec(src);
+      if (m) return { type: 'del', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1]) };
     },
   },
   extensions: [
@@ -48,6 +65,38 @@ marked.use({
       renderer(t) { return renderWiki(t); },
     },
     {
+      // [^label]: text, with indented lines carrying on. Drawn in the list at the end, not here.
+      name: 'footnoteDef', level: 'block',
+      start(src) { const i = src.search(/^ {0,3}\[\^[^\]\s]+\]:/m); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        const m = /^ {0,3}\[\^([^\]\s]+)\]:[ \t]*([^\n]*(?:\n(?: {2,}|\t)[^\n]*)*)(?:\n|$)/.exec(src);
+        if (!m) return;
+        const tokens = [];
+        this.lexer.blockTokens(m[2].replace(/\n(?: {2,4}|\t)/g, '\n'), tokens);
+        return { type: 'footnoteDef', raw: m[0], label: m[1], tokens };
+      },
+      renderer(t) { if (FN && !FN.defs.has(t.label)) FN.defs.set(t.label, this.parser.parse(t.tokens)); return ''; },
+    },
+    {
+      // [^label] (when the note defines it) and inline ^[footnotes], numbered as they come.
+      name: 'footnoteRef', level: 'inline',
+      start(src) { const i = src.search(/\[\^|\^\[/); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        let m = /^\[\^([^\]\s]+)\]/.exec(src);
+        if (m) return { type: 'footnoteRef', raw: m[0], label: m[1] };
+        m = /^\^\[((?:[^\[\]\n]|\[[^\[\]\n]*\])+)\]/.exec(src);
+        if (m) return { type: 'footnoteRef', raw: m[0], tokens: this.lexer.inlineTokens(m[1]) };
+      },
+      renderer(t) {
+        if (!FN || (t.label && !FN.defined.has(t.label))) return esc(t.raw);
+        const label = t.label ?? `^inline-${FN.order.length}`;
+        if (!t.label) FN.defs.set(label, this.parser.parseInline(t.tokens));
+        let n = FN.order.indexOf(label) + 1;
+        if (!n) n = FN.order.push(label);
+        return `<sup class="fn-ref"><a class="fn-ref" data-fn="${n}">${n}</a></sup>`;
+      },
+    },
+    {
       name: 'hl', level: 'inline',
       start(src) { const i = src.indexOf('=='); return i < 0 ? undefined : i; },
       tokenizer(src) {
@@ -59,8 +108,21 @@ marked.use({
   ],
 });
 
+// The note an obsidian://open?vault=…&file=… link (Obsidian's "Copy Obsidian URL") points at, when
+// it's in this vault, so it opens here; null for other links.
+function obsidianUrlTarget(url) {
+  const m = /^obsidian:\/\/open\/?\?(.*)$/i.exec(url || '');
+  if (!m) return null;
+  const q = new URLSearchParams(m[1]), file = q.get('file');
+  if (file) return resolveLink(file.replace(/\.md$/i, ''), RC.from || S.cur) || (S.files.has(file) ? file : null);
+  const abs = q.get('path')?.replace(/\\/g, '/');
+  if (!abs) return null;
+  const p = [...S.files.keys()].find(f => abs.endsWith('/' + f));
+  return p || null;
+}
+
 function renderWiki(t) {
-  const [tgt, alias] = splitOnce(t.inner, '|');
+  const [tgt, alias] = splitOnce(t.inner.replace(/^([^|]*)\\\|/, '$1|'), '|'); // [[Note\|alias]] too, as tables write it
   const [name, sub] = splitOnce(tgt, '#');
   const target = resolveLink(name.trim(), RC.from);
   if (t.embed) {
@@ -81,13 +143,31 @@ function renderWiki(t) {
   return `<a class="internal-link${target ? '' : ' unresolved'}" data-href="${esc(name.trim())}" data-sub="${esc(sub || '')}" data-from="${esc(RC.from || '')}">${esc(label)}</a>`;
 }
 
+// Obsidian's %%comments%% are for editing only. Their line breaks stay, so the lines around one don't join.
+function dropComments(md) {
+  if (!md.includes('%%')) return md;
+  let out = '', at = 0;
+  for (const [a, b] of CinderEditor.scanMarkdown(md).comments) { out += md.slice(at, a) + md.slice(a, b).replace(/[^\n]/g, ''); at = b; }
+  return out + md.slice(at);
+}
+
+function footnotesHtml() {
+  if (!FN.order.length) return '';
+  return '<section class="footnotes"><ol>' + FN.order.map((label, i) => {
+    const body = (FN.defs.get(label) || '').trim().replace(/^<p>([\s\S]*)<\/p>$/, '$1');
+    return `<li data-fn-def="${i + 1}">${body} <a class="fn-back" data-fn="${i + 1}" title="Back to the text">↩</a></li>`;
+  }).join('') + '</ol></section>';
+}
+
 function markdownToHtml(md, from, depth = 0) {
-  const prev = RC;
+  const prev = RC, prevFN = FN;
   RC = { from, depth };
+  md = dropComments(md);
+  FN = { defined: new Set([...md.matchAll(/^ {0,3}\[\^([^\]\s]+)\]:/gm)].map(m => m[1])), order: [], defs: new Map() };
   try {
-    const html = marked.parse(md);
+    const html = marked.parse(md) + footnotesHtml();
     return DOMPurify.sanitize(html, { ADD_ATTR: ['target'], FORBID_TAGS: ['style', 'form', 'button', 'iframe', 'object', 'embed'] });
-  } finally { RC = prev; }
+  } finally { RC = prev; FN = prevFN; }
 }
 
 // Renders `md` (a note body) into container element `el` and wires up everything.
@@ -142,12 +222,36 @@ function renderInto(el, content, from, depth) {
     const w = /^(.*?)\|(\d+)(?:x\d+)?$/.exec(img.alt); // ![alt|300](img.png)
     if (w) { img.alt = w[1]; img.width = +w[2]; }
   }
-  // Task list items (only the top-level note is toggleable).
-  $$('li > input[type=checkbox]', el).forEach((cb, i) => {
-    const li = cb.parentElement;
-    li.classList.add('task'); li.classList.toggle('done', cb.checked);
+  // Task list items: [ ] and [x], and the other statuses Obsidian draws as tasks too ([/] in progress,
+  // [-] cancelled…), in tight lists and loose ones (where the checkbox sits in a paragraph). Each item
+  // gets data-task="<status>" as in Obsidian, which themes style. Only the top-level note is toggleable.
+  for (const li of $$('li', el)) {
+    const host = li.firstElementChild?.tagName === 'P' ? li.firstElementChild : li, t = host.firstChild;
+    const m = t?.nodeType === Node.TEXT_NODE && /^\[([^\]\n])\][ \t]/.exec(t.data);
+    if (!m) continue;
+    t.data = t.data.slice(m[0].length);
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = true; cb.dataset.status = m[1];
+    host.prepend(cb, ' ');
+  }
+  $$('li > input[type=checkbox], li > p:first-child > input[type=checkbox]', el).forEach((cb, i) => {
+    const li = cb.closest('li'), status = cb.dataset.status || (cb.checked ? 'x' : ' ');
+    li.classList.add('task'); li.dataset.task = status;
+    li.classList.toggle('done', status === 'x' || status === 'X'); li.classList.toggle('cancelled', status === '-');
     if (depth === 0) { cb.disabled = false; cb.dataset.task = i; } else cb.disabled = true;
   });
+  // Block ids: ^id ending a paragraph or list item is hidden and marks its block, for [[Note#^id]];
+  // a ^id paragraph of its own marks the block above it.
+  for (const p of $$('p', el)) {
+    const id = /^\^([A-Za-z0-9-]+)$/.exec(p.textContent.trim());
+    if (id && p.previousElementSibling && !p.closest('li')) { p.previousElementSibling.setAttribute('data-block-id', id[1].toLowerCase()); p.remove(); }
+  }
+  for (const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT); tw.nextNode();) {
+    const t = /** @type {Text} */ (tw.currentNode), m = /[ \t]\^([A-Za-z0-9-]+)[ \t]*$/.exec(t.data);
+    if (!m || t.parentElement.closest('code, pre') || (t.nextSibling && t.nextSibling.nodeName !== 'BR' && t.nextSibling.nodeName !== 'UL' && t.nextSibling.nodeName !== 'OL')) continue;
+    t.data = t.data.slice(0, m.index);
+    t.parentElement.closest('li, p, td, th, h1, h2, h3, h4, h5, h6')?.setAttribute('data-block-id', m[1].toLowerCase());
+  }
   // Callouts: > [!note] Title
   for (const bq of $$('blockquote', el)) {
     const p = bq.firstElementChild;
@@ -155,11 +259,13 @@ function renderInto(el, content, from, depth) {
     const m = /^\[!([\w-]+)\]([+-]?)[ \t]*([^\n<]*)(?:<br>\n?)?/.exec(p.innerHTML);
     if (!m) continue;
     const type = m[1].toLowerCase();
-    const box = document.createElement('div');
+    // [!faq]- starts folded and [!faq]+ open; either folds when its title is clicked.
+    const box = document.createElement(m[2] ? 'details' : 'div');
     box.className = `callout c-${type}`;
-    const title = document.createElement('div');
+    if (m[2] === '+') box.setAttribute('open', '');
+    const title = document.createElement(m[2] ? 'summary' : 'div');
     title.className = 'callout-title';
-    title.textContent = m[3].trim() || type;
+    title.textContent = m[3].trim() || type[0].toUpperCase() + type.slice(1); // a title of its own stays as written
     p.innerHTML = p.innerHTML.slice(m[0].length);
     if (!p.innerHTML.trim()) p.remove();
     box.append(title, ...bq.childNodes);
@@ -244,6 +350,10 @@ function renderQueryBlock(el, code, from) {
 
 function extractSection(n, sub) {
   const want = sub.trim().toLowerCase();
+  if (want.startsWith('^')) {
+    const b = n.blocks?.find(x => x.id.toLowerCase() === want.slice(1));
+    return b ? n.content.slice(b.from, b.to) : `*Block "${sub}" not found.*`;
+  }
   const i = n.headings.findIndex(h => h.text.trim().toLowerCase() === want);
   if (i < 0) return `*Heading "${sub}" not found.*`;
   const h = n.headings[i];
@@ -267,8 +377,9 @@ function renderPreview() {
 
 // Tick the i-th checkbox in reading view (adds the done date; recurring tasks roll forward).
 function toggleTask(i) {
-  const body = blankCode(ed.value);
-  const re = /^[ \t]*(?:>[ \t]?)*(?:[-*+]|\d+[.)])[ \t]+\[([ xX])\]/gm;
+  const { code, comments } = CinderEditor.scanMarkdown(ed.value);
+  const body = blankRanges(ed.value, [...code, ...comments]); // as reading view counts them
+  const re = /^[ \t]*(?:>[ \t]?)*(?:[-*+]|\d+[.)])[ \t]+\[[^\]\n]\][ \t]/gm;
   let m, k = 0;
   while ((m = re.exec(body))) {
     if (k++ === i) {
@@ -284,6 +395,14 @@ function toggleTask(i) {
 
 // Clicks on links anywhere (preview, embeds, panels).
 document.addEventListener('click', e => {
+  // A footnote's number goes to the footnote, and its ↩ back to the text (in the same note or embed).
+  const fn = e.target.closest('a.fn-ref, a.fn-back');
+  if (fn) {
+    e.preventDefault();
+    const sel = fn.classList.contains('fn-ref') ? `[data-fn-def="${fn.dataset.fn}"]` : `a.fn-ref[data-fn="${fn.dataset.fn}"]`;
+    fn.closest('.markdown')?.querySelector(sel)?.scrollIntoView({ block: 'center' });
+    return;
+  }
   const cb = e.target.closest('#preview input[data-task]');
   if (cb) { toggleTask(+cb.dataset.task); return; }
   const de = e.target.closest('.drawing-embed[data-drawing], .canvas-embed[data-canvas]');

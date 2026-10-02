@@ -98,12 +98,13 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - Switch vaults from **Settings**, the command palette or by clicking the vault name above the file tree
 - A reading view (**Ctrl+E**), plus an inline title you can edit to rename the note. **↑** on the first line jumps to the title.
 - Proper undo and redo, multiple cursors, find and replace in the note (**Ctrl+F**), and syntax highlighting for code blocks (Python, JS/TS, JSON, Rust, SQL, shell, PowerShell)
-- `[[wikilinks]]`, `[[Note|alias]]`, `[[Note#Heading]]` and relative `[md](links.md)`. Clicking a link to a missing note creates it.
+- `[[wikilinks]]`, `[[Note|alias]]`, `[[Note#Heading]]`, `[[Note#^block]]` and relative `[md](links.md)`. Clicking a link to a missing note creates it. An `obsidian://open?…&file=…` link (Obsidian's *Copy Obsidian URL*) to a note in this vault opens it here.
+- **Block references**, as in Obsidian: end a paragraph or list item with `^id` (or put `^id` on its own line below a table, quote or list), then link to it with `[[Note#^id]]` or embed it with `![[Note#^id]]`. Reading view hides the ids.
 - Autocomplete as you type `[[` (add `#` to pick a heading) or a `#tag`
 - Clicking a rendered link follows it. **Ctrl+click** follows a link while its source is showing.
-- Renaming or moving a note rewrites the links that point to it across the vault
+- Renaming or moving a note rewrites the links that point to it across the vault (in properties and in tables' `[[Note\|alias]]` too)
 - **Note composer**, like Obsidian's: *Extract selection to a new note…* moves the selection into a note of its own beside this one (named after its first line) and leaves a link in its place; *Merge current note into another…* puts this note's text at the end of another, points the links to it there, and moves it to `.trash`.
-- Embeds: `![[image.png|300]]`, `![[Other note]]` and `![[Other note#Section]]`
+- Embeds: `![[image.png|300]]`, `![[Other note]]`, `![[Other note#Section]]` and `![[Other note#^block]]`
 - **Embedded web pages**: `![](https://example.com)` on its own line shows the live page in a sandboxed frame, in live preview and reading view. Drag the page's bottom-right corner to resize it. That writes `![|600x400](…)` into the note, which you can also type, and double-clicking the corner goes back to the default size. YouTube and Vimeo links become their players. The bar above the page reloads it or opens it in your browser. Canvas link cards show the live page too (click a card to use its page). **Settings** can load pages on click instead, or show just the link.
 - **Embed any link**: right-click a link in the editor and choose **Embed** to turn `[[Note]]`, `[text](url)` or a bare address into its embed, or **Show as a link** to turn it back. *Embed the link under the cursor* is a command too.
 - **Hover previews**: hover a link in reading view to preview the note, or just the `#section` it points to. In the editor, hold **Ctrl/Cmd** while hovering. Ctrl/Cmd+hover a web link to see the live page. **Esc** closes the preview. It can be turned off in Settings.
@@ -129,7 +130,9 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
   - Search understands Obsidian's property syntax: `[status]`, `[status:done]`, `[status:"in progress"]` and `-[status]`.
   - `cssclasses` works as in Obsidian: the note's classes go on its view. Built in: `wide`, `narrow`, `small`, `large`, `serif`, `no-title` and `center-images`. **Settings → CSS snippets folder** applies every `.css` file in a vault folder of your choice, reloading as you edit them, so your own classes can do anything.
   - Frontmatter that isn't valid YAML stays as text. **Settings → Properties** can show the YAML instead.
-- Callouts (`> [!warning] Title`), `==highlights==`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing)
+- Callouts (`> [!warning] Title`), which fold like Obsidian's (`[!faq]-` starts folded, `[!faq]+` open; click the title) and nest, `==highlights==`, `~~strikethrough~~`, GFM tables, and task lists you can tick in reading view (**Ctrl+Enter** toggles one while editing). Tasks with other statuses (`[/]` in progress, `[-]` cancelled, and so on) show as tasks too, with the status in `data-task` for themes.
+- `%%Comments%%`, inline or across lines: shown dimmed while editing and left out of reading view and exports, as in Obsidian.
+- Footnotes: `[^1]` with `[^1]: The note.` anywhere in the note, and inline `^[like this]`. Reading view numbers them and lists them at the end; click a number to jump to its footnote and ↩ to come back. While editing, a reference shows as its raised label.
 - A backlinks panel with context, including unlinked mentions and a one-click **Link** button, plus outgoing links and an outline
 - **Related notes** (a tab in the right side bar): notes about the same things as the open one, found from the words, tags and links they share. Each shows what it has in common. Those not linked yet come first, with a **Link** button. It all happens on this computer, with no AI service and no network.
 - **One launcher** for everything: **Ctrl+O** finds notes by name (**Shift+Enter** creates one), and a prefix switches what it finds: `>` commands (**Ctrl+P** opens it with `>` typed), `@` headings in the open note, `#` tags, `/` text in any note (it opens the note with the text selected). Deleting the prefix goes back to notes.

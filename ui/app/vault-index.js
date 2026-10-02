@@ -38,11 +38,16 @@ function parseNote(content) {
   const links = [], tags = new Set();
   let m;
   const wre = /(!?)\[\[([^\[\]\n]+?)\]\]/g;
-  while ((m = wre.exec(body))) {
-    const [tgt, alias] = splitOnce(m[2], '|');
+  // [[Note|alias]], and [[Note\|alias]] as written in a table (pipeEsc, kept when it's rewritten).
+  const wiki = (m, at, extra) => {
+    const pipeEsc = /^[^|]*\\\|/.test(m[2]);
+    const [tgt, alias] = splitOnce(pipeEsc ? m[2].replace('\\|', '|') : m[2], '|');
     const [name, sub] = splitOnce(tgt, '#');
-    links.push({ embed: !!m[1], name: name.trim(), sub: (sub || '').trim(), alias, index: m.index + fmLen, len: m[0].length });
-  }
+    links.push({ embed: !!m[1], name: name.trim(), sub: (sub || '').trim(), alias, index: m.index + at, len: m[0].length, ...(pipeEsc && { pipeEsc }), ...extra });
+  };
+  // Links in properties (related: "[[Note]]") count too, as in Obsidian.
+  if (fmLen) for (const fm of content.slice(0, fmLen).matchAll(wre)) wiki(fm, 0, { prop: true });
+  while ((m = wre.exec(body))) wiki(m, fmLen);
   for (const l of scan.links) {
     let href = l.url.trim().replace(/^<([\s\S]*)>$/, '$1');
     if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href) || href.startsWith('#')) continue;
@@ -62,7 +67,28 @@ function parseNote(content) {
   }
   // Where the code is (whole-note offsets, sorted), so searches can skip it without parsing again.
   const code = scan.code.map(([a, b]) => [a + fmLen, b + fmLen]).sort((x, y) => x[0] - y[0]);
-  return { links, headings, tags, aliases, fm, fmLen, fmValid, code };
+  return { links, headings, tags, aliases, fm, fmLen, fmValid, code, blocks: blockIds(body, fmLen) };
+}
+
+// Obsidian's block ids, for [[Note#^id]] links and embeds: ^id ending a paragraph or a list item, or
+// on a line of its own just below a table, quote or list (a blank line between is allowed).
+// from/to: the block's text without its id, as whole-note offsets.
+function blockIds(body, offset) {
+  const blocks = [], lines = body.split('\n'), starts = [];
+  for (let i = 0, at = 0; i < lines.length; at += lines[i++].length + 1) starts.push(at);
+  const ITEM = /^\s*(?:[-*+]|\d+[.)])\s/, HEADING = /^#{1,6}\s/;
+  lines.forEach((line, i) => {
+    const m = /(^|[ \t])\^([A-Za-z0-9-]+)[ \t]*$/.exec(line);
+    if (!m) return;
+    const own = !line.slice(0, m.index).trim();
+    let last = own ? i - 1 : i;
+    if (own && last > 0 && !lines[last].trim()) last--;
+    if (last < 0 || !lines[last].trim()) return;
+    let first = last;
+    if (!(!own && (ITEM.test(line) || HEADING.test(line)))) while (first > 0 && lines[first - 1].trim() && !HEADING.test(lines[first - 1])) first--;
+    blocks.push({ id: m[2], from: offset + starts[first], to: offset + (own ? starts[last] + lines[last].length : starts[i] + m.index) });
+  });
+  return blocks;
 }
 
 function setNote(path, content, mtime) {

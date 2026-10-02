@@ -134,7 +134,8 @@ mark { background: #fff1a8; }
 .props { display: grid; gap: 2px; margin: 0 0 1.5em; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: .9em; }
 .props > div { display: flex; gap: 12px; } .props .k { min-width: 120px; color: var(--muted); }
 .callout { border-left: 3px solid var(--accent); background: #fbf4f0; border-radius: 8px; padding: 10px 14px; margin: 0 0 1em; }
-.callout-title { font-weight: 600; color: var(--accent); text-transform: capitalize; margin-bottom: 4px; }
+.callout-title { font-weight: 600; color: var(--accent); margin-bottom: 4px; }
+summary.callout-title { cursor: pointer; }
 .callout > :last-child { margin-bottom: 0; }
 li.task { list-style: none; } li.task input { margin: 0 6px 0 -20px; }
 .math-block { display: block; text-align: center; margin: 1em 0; overflow-x: auto; }

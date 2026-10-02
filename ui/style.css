@@ -248,6 +248,8 @@ mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs);
 .cm-strong { font-weight: 700; }
 .cm-strike { text-decoration: line-through; color: var(--muted); }
 .cm-hl { background: var(--mark); border-radius: var(--radius-xs); }
+.cm-fn-ref { vertical-align: super; font-size: .72em; line-height: 0; color: var(--accent); padding: 0 1px; }
+.cm-fn-def { color: var(--muted); }
 .cm-icode { font-family: var(--font-mono); font-size: .88em; background: var(--code-bg); padding: .1em .3em; border-radius: var(--radius-sm); }
 .cm-link, .cm-wikilink { color: var(--link); cursor: pointer; }
 .cm-link:hover, .cm-wikilink:hover { text-decoration: underline; }
@@ -327,9 +329,13 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .markdown pre code { background: none; padding: 0; font-size: .86em; line-height: 1.55; }
 .markdown blockquote { border-left: 3px solid var(--accent); margin-left: 0; padding: 2px 0 2px 16px; color: var(--muted); }
 .markdown hr { border: 0; border-top: 1px solid var(--border); margin: 2em 0; }
+.markdown sup.fn-ref { line-height: 0; }
+.markdown a.fn-ref, .markdown a.fn-back { color: var(--accent); cursor: pointer; text-decoration: none; padding: 0 1px; }
 .query-block { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 10px; margin: 0 0 1em; }
 .query-head { display: flex; gap: 10px; align-items: baseline; justify-content: space-between; margin-bottom: 6px; font-weight: 600; }
 .query-head small { color: var(--muted); font-weight: normal; }
+.markdown .footnotes { margin-top: 2em; padding-top: .8em; border-top: 1px solid var(--border); font-size: .9em; color: var(--muted); }
+.markdown .footnotes ol { padding-left: 1.6em; }
 .markdown img { max-width: 100%; border-radius: var(--radius-sm); }
 .markdown table { border-collapse: collapse; }
 .markdown .table-wrap { overflow-x: auto; margin: 0 0 1em; }
@@ -337,7 +343,8 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .markdown th { background: var(--bg2); }
 .markdown li.task { list-style: none; margin-left: -1.4em; }
 .markdown li.task > input { margin: 0 .5em 0 0; accent-color: var(--accent); transform: translateY(1px); cursor: pointer; }
-.markdown li.task.done { color: var(--muted); text-decoration: line-through; }
+.markdown li.task.done, .markdown li.task.cancelled { color: var(--muted); text-decoration: line-through; }
+.markdown li.task > p:first-child > input { margin: 0 .5em 0 0; accent-color: var(--accent); cursor: pointer; }
 .markdown .props:not(.pp-host) { font-size: var(--text-ui); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 8px 12px; margin-bottom: 1.5em; background: var(--bg2); }
 .markdown .props:not(.pp-host) div { display: flex; gap: 12px; padding: 2px 0; }
 .markdown .props .k { color: var(--muted); min-width: 110px; }
@@ -345,7 +352,12 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .embed-head { font-size: var(--text-sm); color: var(--muted); margin-bottom: 4px; }
 .embed .markdown { font-size: 1em; }
 .callout { border-radius: var(--radius-md); padding: 10px 14px; margin: 0 0 1em; background: var(--accent-soft); border-left: 3px solid var(--c, var(--accent)); color: var(--text); }
-.callout-title { font-weight: 600; color: var(--c, var(--accent)); margin-bottom: 4px; text-transform: capitalize; }
+.callout-title { font-weight: 600; color: var(--c, var(--accent)); margin-bottom: 4px; }
+summary.callout-title { cursor: pointer; list-style: none; }
+summary.callout-title::-webkit-details-marker { display: none; }
+summary.callout-title::after { content: ''; display: inline-block; width: 6px; height: 6px; margin: 0 0 3px 9px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); transition: transform .15s; }
+details.callout:not([open]) > summary.callout-title { margin-bottom: 0; }
+details.callout:not([open]) > summary.callout-title::after { transform: rotate(-45deg); margin-bottom: 1px; }
 .callout > :last-child { margin-bottom: 0; }
 .callout.c-warning, .callout.c-caution, .callout.c-attention { --c: var(--c-orange, #e0a030); background: color-mix(in srgb, var(--c) 10%, transparent); }
 .callout.c-danger, .callout.c-error, .callout.c-bug, .callout.c-failure { --c: var(--c-red, #e05555); background: color-mix(in srgb, var(--c) 10%, transparent); }

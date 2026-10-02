@@ -252,6 +252,12 @@ function setMode(m, silent = false) {
 
 function scrollToHeading(h) {
   const n = S.notes.get(S.cur); if (!n) return;
+  if (h.trim().startsWith('^')) { // a block: [[Note#^id]]
+    const id = h.trim().slice(1).toLowerCase(), b = n.blocks?.find(x => x.id.toLowerCase() === id);
+    if (S.mode === 'read') preview.querySelector(`[data-block-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'center' });
+    else if (b) selectRange(b.from, b.from);
+    return;
+  }
   const want = h.replace(/^\^/, '').trim().toLowerCase();
   const hd = n.headings.find(x => x.text.trim().toLowerCase() === want) || n.headings.find(x => slug(x.text) === slug(want));
   if (S.mode === 'read') {

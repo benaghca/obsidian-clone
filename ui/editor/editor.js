@@ -12,7 +12,7 @@ import { parser as mdParser } from '@lezer/markdown';
 import { autocompletion, completionKeymap, closeBrackets, closeBracketsKeymap, snippetCompletion, completionStatus, snippet, hasNextSnippetField, startCompletion } from '@codemirror/autocomplete';
 import { vim, getCM, Vim, CodeMirror } from '@replit/codemirror-vim';
 import { search, searchKeymap, highlightSelectionMatches, openSearchPanel, searchPanelOpen } from '@codemirror/search';
-import { classHighlighter, tags as t } from '@lezer/highlight';
+import { classHighlighter, styleTags, tags as t } from '@lezer/highlight';
 import { javascript } from '@codemirror/lang-javascript';
 import { python } from '@codemirror/lang-python';
 import { json } from '@codemirror/lang-json';
@@ -26,12 +26,31 @@ import { powerShell } from '@codemirror/legacy-modes/mode/powershell';
 const Punct = /[!"#$%&'()*+,\-.\/:;<=>?@\[\\\]^_`{|}~\p{P}\p{S}]/u;
 const HighlightDelim = { resolve: 'Highlight', mark: 'HighlightMark' };
 
+// As GFM's own task parser: a Task node holding the [?] marker and the item's text.
+class StatusTaskParser {
+  nextLine() { return false; }
+  finish(cx, leaf) {
+    cx.addLeafElement(leaf, cx.elt('Task', leaf.start, leaf.start + leaf.content.length,
+      [cx.elt('TaskMarker', leaf.start, leaf.start + 3), ...cx.parser.parseInline(leaf.content.slice(3), leaf.start + 3)]));
+    return true;
+  }
+}
+
 // Obsidian extras on top of GFM: [[wikilinks]], ![[embeds]], ==highlights==, #tags, frontmatter, $math$.
 const BLOCK_MATH_START = /^(\s{0,3})\$\$/;
 const ObsidianMarkdown = {
   defineNodes: ['WikiLink', 'Embed', 'WikiMark', 'Highlight', 'HighlightMark', 'Tag', { name: 'Frontmatter', block: true }, 'FrontmatterMark',
-    'InlineMath', 'InlineMathMark', { name: 'BlockMath', block: true }, 'BlockMathMark'],
+    'InlineMath', 'InlineMathMark', { name: 'BlockMath', block: true }, 'BlockMathMark', 'FootnoteRef'],
   parseInline: [
+    {
+      // [^label]: a footnote's reference, or its definition's label at the start of a line.
+      name: 'FootnoteRef', before: 'Link',
+      parse(cx, next, pos) {
+        if (next !== 91 || cx.char(pos + 1) !== 94) return -1;
+        const m = /^\[\^([^\]\s]+)\]/.exec(cx.slice(pos, cx.end));
+        return m ? cx.addElement(cx.elt('FootnoteRef', pos, pos + m[0].length)) : -1;
+      },
+    },
     {
       // $x^2$ (not "$5 and $10": the opening $ can't be followed by a space, nor the closing one
       // preceded by a space or followed by a digit) and $$display$$ inside a paragraph.
@@ -82,6 +101,10 @@ const ObsidianMarkdown = {
     },
   ],
   parseBlock: [{
+    // Tasks with Obsidian's other statuses ([/] in progress, [-] cancelled…): GFM reads only [ ] and [x].
+    name: 'StatusTask', after: 'TaskList',
+    leaf: (cx, leaf) => /^\[[^ xX\]\n]\][ \t]/.test(leaf.content) && cx.parentType().name === 'ListItem' ? new StatusTaskParser() : null,
+  }, {
     // $$ … $$ on their own lines (the closing $$ may end a line of the formula).
     name: 'BlockMath', before: 'FencedCode',
     parse(cx, line) {
@@ -128,6 +151,43 @@ const ObsidianMarkdown = {
       cx.addElement(cx.elt('Frontmatter', start, cx.prevLineEnd(), marks));
       return true;
     },
+  }],
+};
+
+// Obsidian's %%comments%%: inline, or from a line that opens with %% to the next %% (or the end of
+// the note). Shown dimmed while editing and left out of reading view, as in Obsidian.
+const COMMENT_OPEN = /^(\s{0,3})%%/;
+const opensComment = text => { const m = COMMENT_OPEN.exec(text); return m && !text.includes('%%', m[0].length) ? m : null; };
+const ObsidianComments = {
+  defineNodes: ['ObsidianComment', { name: 'ObsidianCommentBlock', block: true }, 'ObsidianCommentMark'],
+  props: [styleTags({ 'ObsidianComment ObsidianCommentBlock': t.comment })],
+  parseInline: [{
+    name: 'ObsidianComment', before: 'Emphasis',
+    parse(cx, next, pos) {
+      if (next !== 37 || cx.char(pos + 1) !== 37) return -1;
+      const close = cx.slice(pos + 2, cx.end).indexOf('%%');
+      if (close < 0) return -1;
+      const end = pos + close + 4;
+      return cx.addElement(cx.elt('ObsidianComment', pos, end, [cx.elt('ObsidianCommentMark', pos, pos + 2), cx.elt('ObsidianCommentMark', end - 2, end)]));
+    },
+  }],
+  parseBlock: [{
+    name: 'ObsidianCommentBlock', before: 'FencedCode',
+    parse(cx, line) {
+      const m = opensComment(line.text);
+      if (!m) return false;
+      const start = cx.lineStart + m[1].length;
+      const marks = [cx.elt('ObsidianCommentMark', start, start + 2)];
+      let end = cx.lineStart + line.text.length;
+      while (cx.nextLine()) {
+        end = cx.lineStart + line.text.length;
+        const i = line.text.indexOf('%%');
+        if (i >= 0) { marks.push(cx.elt('ObsidianCommentMark', cx.lineStart + i, cx.lineStart + i + 2)); cx.nextLine(); break; }
+      }
+      cx.addElement(cx.elt('ObsidianCommentBlock', start, end, marks));
+      return true;
+    },
+    endLeaf: (cx, line) => !!opensComment(line.text),
   }],
 };
 
@@ -205,12 +265,14 @@ function activity(state) {
 
 // ------------------------------------------------------------------ widgets
 
+// A task's checkbox: ticked for any status but a space, as Obsidian draws them, with the status in
+// data-task for themes.
 class CheckboxWidget extends WidgetType {
-  constructor(checked) { super(); this.checked = checked; }
-  eq(o) { return o.checked === this.checked; }
+  constructor(status) { super(); this.status = status; }
+  eq(o) { return o.status === this.status; }
   toDOM() {
     const el = document.createElement('input');
-    el.type = 'checkbox'; el.checked = this.checked; el.className = 'cm-task-cb'; el.tabIndex = -1;
+    el.type = 'checkbox'; el.checked = this.status !== ' '; el.className = 'cm-task-cb'; el.tabIndex = -1; el.dataset.task = this.status;
     return el;
   }
   ignoreEvent() { return false; }
@@ -404,7 +466,8 @@ const IMG_EXT = /\.(png|jpe?g|gif|webp|bmp|svg)$/i;
 
 function parseWiki(inner) {
   const bar = inner.indexOf('|');
-  const tgt = bar < 0 ? inner : inner.slice(0, bar);
+  // [[Note\|alias]], as a table cell has to write it.
+  const tgt = bar < 0 ? inner : inner.slice(0, bar > 0 && inner[bar - 1] === '\\' ? bar - 1 : bar);
   const alias = bar < 0 ? null : inner.slice(bar + 1);
   const hash = tgt.indexOf('#');
   return { name: (hash < 0 ? tgt : tgt.slice(0, hash)).trim(), sub: hash < 0 ? '' : tgt.slice(hash + 1).trim(), alias, bar };
@@ -445,6 +508,13 @@ function buildInline(view) {
             else hide(doc.sliceString(nf - 1, nf) === ' ' ? nf - 1 : nf, nt);
             return;
           }
+          case 'FootnoteRef': {
+            // A reference shows as its label, raised; a definition's label is dimmed.
+            if (doc.sliceString(nt, nt + 1) === ':' && doc.lineAt(nf).from === nf) { out.push(markCls('cm-fn-def').range(nf, nt)); return; }
+            if (A.touches(nf, nt)) { out.push(markCls('cm-faint').range(nf, nt)); return; }
+            out.push(Decoration.replace({ widget: new TextWidget(doc.sliceString(nf + 2, nt - 1), 'cm-fn-ref') }).range(nf, nt));
+            return;
+          }
           case 'Emphasis': out.push(markCls('cm-em').range(nf, nt)); return;
           case 'StrongEmphasis': out.push(markCls('cm-strong').range(nf, nt)); return;
           case 'Strikethrough': out.push(markCls('cm-strike').range(nf, nt)); return;
@@ -473,7 +543,10 @@ function buildInline(view) {
           case 'CodeInfo': out.push(markCls('cm-codeinfo').range(nf, nt)); return;
           case 'Blockquote': {
             const firstLine = doc.lineAt(nf);
-            const cm = /^(\s*>\s*)\[!([\w-]+)\]([+-]?)[ \t]*(.*)$/.exec(firstLine.text);
+            // A callout's [!type] follows as many > as it is deep (> > [!warning] in a quote).
+            let depth = 1;
+            for (let p = node.node.parent; p; p = p.parent) if (p.name === 'Blockquote') depth++;
+            const cm = new RegExp(`^(\\s*(?:>\\s*){${depth}})\\[!([\\w-]+)\\]([+-]?)[ \\t]*(.*)$`).exec(firstLine.text);
             eachLine(nf, nt, l => out.push(lineCls(cm ? `cm-callout c-${cm[2].toLowerCase()}` + (l.number === firstLine.number ? ' cm-callout-title' : '') : 'cm-quote').range(l.from)));
             if (cm && !A.lines(firstLine.from, firstLine.from)) {
               const s = firstLine.from + cm[1].length;
@@ -499,13 +572,12 @@ function buildInline(view) {
           }
           case 'Task': {
             const marker = node.node.firstChild;
-            if (marker && /x/i.test(doc.sliceString(marker.from, marker.to))) out.push(markCls('cm-task-done').range(marker.to, nt));
+            if (marker && /^\[[xX-]\]$/.test(doc.sliceString(marker.from, marker.to))) out.push(markCls('cm-task-done').range(marker.to, nt));
             return;
           }
           case 'TaskMarker': {
             if (A.touches(nf, nt)) return;
-            const checked = /x/i.test(doc.sliceString(nf, nt));
-            out.push(Decoration.replace({ widget: new CheckboxWidget(checked) }).range(nf, nt));
+            out.push(Decoration.replace({ widget: new CheckboxWidget(doc.sliceString(nf + 1, nf + 2)) }).range(nf, nt));
             return;
           }
           case 'HorizontalRule': {
@@ -1287,7 +1359,7 @@ function create(parent, hooks, opts = {}) {
     EditorView.inputHandler.of(mathSnippetInput),
     indentUnit.of('\t'),
     EditorState.tabSize.of(4),
-    markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown] }),
+    markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown, ObsidianComments] }),
     EditorState.languageData.of(() => [{ closeBrackets: { brackets: ['(', '[', '{'] } }]),
     closeBrackets(),
     autocompletion({ override: [completions], icons: false, activateOnTyping: true }),
@@ -1481,15 +1553,18 @@ function mathField(parent, o = {}) {
 // the inline syntax it doesn't need. Returns, as offsets into `text`:
 //   code: [[from, to]] (fenced and indented code, inline code, HTML blocks and comments),
 //   urls: [[from, to]] (the targets of Markdown links, so "#anchor" isn't read as a tag),
-//   headings: [{level, text, from}], links: [{from, to, url, text, image}].
-const scanParser = mdParser.configure([{ remove: ['Emphasis', 'HardBreak', 'Entity', 'HTMLTag', 'Autolink'] }]);
+//   headings: [{level, text, from}], links: [{from, to, url, text, image}],
+//   comments: [[from, to]] (Obsidian's %%comments%%, which reading view leaves out).
+const scanParser = mdParser.configure([ObsidianComments, { remove: ['Emphasis', 'HardBreak', 'Entity', 'HTMLTag', 'Autolink'] }]);
 function scanMarkdown(text) {
-  const code = [], urls = [], headings = [], links = [];
+  const code = [], urls = [], headings = [], links = [], comments = [];
   scanParser.parse(text).iterate({
     enter(n) {
       switch (n.name) {
         case 'FencedCode': case 'CodeBlock': case 'InlineCode': case 'HTMLBlock': case 'CommentBlock': case 'Comment':
           code.push([n.from, n.to]); return false;
+        case 'ObsidianComment': case 'ObsidianCommentBlock':
+          comments.push([n.from, n.to]); return false;
         case 'ATXHeading1': case 'ATXHeading2': case 'ATXHeading3': case 'ATXHeading4': case 'ATXHeading5': case 'ATXHeading6': {
           if (n.node.parent?.name !== 'Document') return; // not headings inside quotes or lists, as in Obsidian's outline
           const raw = text.slice(n.from, n.to);
@@ -1515,7 +1590,7 @@ function scanMarkdown(text) {
       }
     },
   });
-  return { code, urls, headings, links };
+  return { code, urls, headings, links, comments };
 }
 
 window.CinderEditor = { create, mathField, scanMarkdown, vimKeys: VIM_KEYS, vimClipboard, commands: Object.fromEntries(Object.entries(COMMANDS).map(([id, c]) => [id, { name: c.name, key: c.key }])) };

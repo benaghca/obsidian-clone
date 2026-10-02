@@ -286,7 +286,7 @@ function editorHooks(from, extra) {
     clipboardImage: () => clipboardImage(),
     imageUrl: src => { const t = /^[a-z][a-z0-9+.-]*:/i.test(src) ? null : resolveLink(safeDecode(src), from()); return t ? rawUrl(t) : null; },
     follow: (name, sub) => followLink(name, sub, from()),
-    openUrl: url => window.open(url, '_blank', 'noopener'),
+    openUrl: url => { const t = obsidianUrlTarget(url); if (t) openPath(t); else window.open(url, '_blank', 'noopener'); },
     tag: tag => searchFor(`tag:${tag}`),
     renderEmbed: (el, path, sub) => renderEmbedInto(el, path, sub),
     renderMarkdown: (el, text) => { el.innerHTML = markdownToHtml(text, from(), 1); linkifyTags(el); },
