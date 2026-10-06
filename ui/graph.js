@@ -22,6 +22,30 @@ window.CinderGraph = (() => {
     .force('x', d3Force.forceX(0).strength(pull))
     .force('y', d3Force.forceY(0).strength(pull));
   const DECAY = sim.alphaDecay();
+  // Rings by depth (local graph): the open note is pinned in the middle and every other node is
+  // pulled to RING × its link depth from it, a circle in 2D and a sphere's shell in 3D. The link
+  // and charge forces still choose where on the ring, so linked notes end up side by side.
+  const RING = 150, RING_PULL = 0.5;
+  let rings = false, pinned = null;
+  function ringForce(alpha) {
+    if (!rings || !current) return;
+    const cx = current.x, cy = current.y, cz = current.z || 0;
+    for (const n of nodes) {
+      if (n === current || !(n.ring > 0)) continue;
+      let dx = n.x - cx, dy = n.y - cy, dz = mode3d ? (n.z || 0) - cz : 0, d = Math.hypot(dx, dy, dz);
+      if (d < 1e-6) { dx = Math.random() - .5; dy = Math.random() - .5; d = Math.hypot(dx, dy); }
+      const k = (n.ring * RING - d) / d * RING_PULL * alpha;
+      n.vx += dx * k; n.vy += dy * k; if (mode3d) n.vz += dz * k;
+    }
+  }
+  sim.force('rings', ringForce);
+  // Pins the open note at the origin while rings are on (and lets go of one pinned before).
+  function pin() {
+    const want = rings ? current : null;
+    if (pinned && pinned !== want && pinned !== drag) pinned.fx = pinned.fy = pinned.fz = null;
+    pinned = want;
+    if (want && want !== drag) { want.x = want.y = want.z = 0; want.vx = want.vy = want.vz = 0; want.fx = want.fy = want.fz = 0; }
+  }
   // How long a tick takes here, as they run (a big vault's are slow: ~60ms for 15,000 notes).
   let tickMs = 0;
   const tick = () => { const t = performance.now(); sim.tick(); const d = performance.now() - t; tickMs = tickMs ? tickMs * 0.9 + d * 0.1 : d; };
@@ -113,6 +137,7 @@ window.CinderGraph = (() => {
       if (drag) {
         const n = drag; drag = null;
         n.fx = n.fy = n.fz = null; n.grab = null; sim.alphaTarget(0);
+        if (n === pinned) { pinned = null; pin(); } // a dragged middle goes back to the middle
         // A click selects (again: clears); with "click opens" on, or Ctrl/Cmd-click, it opens.
         if (!moved) { if (opts.clickOpens?.() || e.ctrlKey || e.metaKey) opts.open(n.id, e); else select(selected === n ? null : n); }
       } else if (pan && !moved && selected) select(null); // a click on empty space
@@ -207,7 +232,7 @@ window.CinderGraph = (() => {
     byId = new Map();
     nodes = d.nodes.map(n => {
       const o = old.get(n.id);
-      const node = o ? Object.assign(o, { label: n.label, kind: n.kind, deg: n.deg }) : { ...n, x: NaN, y: NaN, z: 0, vx: 0, vy: 0, vz: 0 };
+      const node = o ? Object.assign(o, { label: n.label, kind: n.kind, deg: n.deg, ring: n.ring }) : { ...n, x: NaN, y: NaN, z: 0, vx: 0, vy: 0, vz: 0 };
       byId.set(n.id, node);
       return node;
     });
@@ -223,6 +248,7 @@ window.CinderGraph = (() => {
       else { const a = i * 2.4, r = 12 * Math.sqrt(i + 1); n.x = Math.cos(a) * r; n.y = Math.sin(a) * r; n.z = mode3d ? (Math.random() - .5) * r : 0; i++; }
     }
     current = d.current ? byId.get(d.current) : null;
+    pin();
     if (hover && !byId.has(hover.id)) hover = null;
     if (selected) { const again = byId.get(selected.id); selected = null; if (again) select(again); else opts.onSelect?.(null); }
     sim.nodes(nodes);
@@ -278,6 +304,12 @@ window.CinderGraph = (() => {
     const focus = drag || selected || hover;
     const near = focus ? adj.get(focus) : null;
     const dim = n => focus && n !== focus && !near.has(n);
+    if (rings && current && current._p.s > 0) {
+      // The rings' outlines: each shell's silhouette, near enough a circle around the middle.
+      ctx.strokeStyle = colors.faint; ctx.lineWidth = 1; ctx.globalAlpha = 0.4; ctx.setLineDash([4, 6]);
+      for (let d = 1; d <= maxRing(); d++) { ctx.beginPath(); ctx.arc(current._p.sx, current._p.sy, d * RING * current._p.s, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
     // Edges in a few fog bands (one path each), then the focused node's in the accent.
     const bands = [[], [], [], [], []];
     for (const e of edges) {
@@ -339,6 +371,11 @@ window.CinderGraph = (() => {
     const near = focus ? adj.get(focus) : null;
     const dim = n => focus && n !== focus && !near.has(n);
 
+    if (rings && current) {
+      ctx.strokeStyle = colors.faint; ctx.lineWidth = 1 / view.k; ctx.globalAlpha = 0.4; ctx.setLineDash([4 / view.k, 6 / view.k]);
+      for (let d = 1; d <= maxRing(); d++) { ctx.beginPath(); ctx.arc(current.x, current.y, d * RING, 0, Math.PI * 2); ctx.stroke(); }
+      ctx.setLineDash([]);
+    }
     ctx.lineWidth = 1 / view.k;
     ctx.strokeStyle = colors.faint; ctx.globalAlpha = focus ? 0.15 : 0.45;
     ctx.beginPath();
@@ -380,6 +417,8 @@ window.CinderGraph = (() => {
     dirty = false;
   }
 
+  const maxRing = () => nodes.reduce((m, n) => Math.max(m, n.ring || 0), 0);
+
   const hot = () => sim.alpha() >= sim.alphaMin() || sim.alphaTarget() > 0;
   function frame() {
     raf = 0;
@@ -415,6 +454,19 @@ window.CinderGraph = (() => {
       settle(); fit(); dirty = true; kick();
     },
     is3d: () => mode3d,
+    // Rings by depth on or off. Re-settles the layout, like switching to 3D, unless the caller is
+    // about to refresh it anyway (quiet).
+    setRings(on, quiet = false) {
+      on = !!on;
+      if (on === rings) return;
+      rings = on; pin();
+      if (!visible || quiet) return;
+      sim.alphaDecay(settleDecay()).alpha(1);
+      settle(); fit(); dirty = true; kick();
+    },
+    rings: () => rings,
+    // Where a node is in the layout itself (for tests), or null when it isn't shown.
+    worldPos: id => { const n = byId.get(id); return n ? [n.x, n.y, n.z || 0] : null; },
     setSpin(on) { spin = !!on; kick(); },
     show() { visible = true; resize(); },
     hide() { visible = false; hover = null; },
