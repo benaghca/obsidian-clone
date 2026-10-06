@@ -10,6 +10,10 @@ const w = (p, s) => fs.writeFileSync(path.join(VAULT, p), s);
   w('A.md', '# A\n[[A1]] [[A2]]\n'); w('B.md', '# B\n[[B1]]\n'); w('C.md', '# C\n[[C1]]\n'); w('D.md', '# D\n[[D1]]\n'); w('E.md', '# E\n[[E1]]\n');
   for (const n of ['A2', 'B1', 'C1', 'D1', 'E1']) w(n + '.md', `# ${n}\n`);
   w('A1.md', '# A1\n[[Far]]\n'); w('Far.md', '# Far\n'); w('Lone.md', '# Lone\n');
+  // A busy note: more direct links than fit on the first ring.
+  const busy = Array.from({ length: 60 }, (_, i) => 'Spoke' + String(i).padStart(2, '0'));
+  w('Busy.md', '# Busy\n' + busy.map(n => `[[${n}]]`).join(' ') + '\n');
+  for (const n of busy) w(n + '.md', `# ${n}\n`);
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 900 }, colorScheme: 'dark' });
   const errors = [];
@@ -81,6 +85,20 @@ const w = (p, s) => fs.writeFileSync(path.join(VAULT, p), s);
   assert(await page.isDisabled('#g-rings') && !(await page.evaluate(() => CinderGraph.rings())), 'the global graph has no rings (the box is disabled)');
   await page.check('#g-local'); await page.dispatchEvent('#g-local', 'input'); await sleep(300);
   assert(await page.evaluate(() => CinderGraph.rings()), 'and they come back on the local graph');
+
+  // A busy note's first ring grows lanes instead of spilling its notes all over the place.
+  await page.evaluate(() => openPath('Busy.md')); await sleep(400);
+  await page.evaluate(() => openGraph(true)); await sleep(300);
+  await page.fill('#g-depth', '1'); await page.dispatchEvent('#g-depth', 'input'); await sleep(2500);
+  const [[r0, r1]] = await page.evaluate(() => CinderGraph.ringBands());
+  const spokes = await page.evaluate(ids => {
+    const c = CinderGraph.worldPos('Busy.md');
+    return ids.map(id => { const p = CinderGraph.worldPos(id); return Math.hypot(p[0] - c[0], p[1] - c[1]); });
+  }, busy.map(n => n + '.md'));
+  assert(r1 > r0, `a crowded ring gets lanes (${Math.round(r0)}–${Math.round(r1)})`);
+  assert(spokes.every(d => d > r0 * 0.85 && d < r1 * 1.15), `and its notes stay in them (${Math.round(Math.min(...spokes))}–${Math.round(Math.max(...spokes))})`);
+  await page.screenshot({ path: SP + '/shots/graphrings-busy.png' });
+
   await page.uncheck('#g-rings'); await sleep(200);
   assert(!(await page.evaluate(() => CinderGraph.rings())), 'unticking it turns rings off');
 

@@ -23,10 +23,29 @@ window.CinderGraph = (() => {
     .force('y', d3Force.forceY(0).strength(pull));
   const DECAY = sim.alphaDecay();
   // Rings by depth (local graph): the open note is pinned in the middle and every other node is
-  // pulled to RING × its link depth from it, a circle in 2D and a sphere's shell in 3D. The link
-  // and charge forces still choose where on the ring, so linked notes end up side by side.
-  const RING = 150, RING_PULL = 0.5;
-  let rings = false, pinned = null;
+  // pulled to its ring's radius, a circle in 2D and a sphere's shell in 3D. The link and (softened)
+  // charge forces still choose where on the ring, so linked notes end up side by side.
+  // Each ring starts RING beyond the last. One with more notes than fit SPACING apart grows lanes
+  // (up to MAX_LANES, LANE apart) and then a larger radius, so a busy note's ring stays a ring.
+  const RING = 150, RING_PULL = 0.9, RING_REPEL = 0.3, SPACING = 30, LANE = 28, MAX_LANES = 4;
+  let rings = false, pinned = null, ringRadii = [];
+  function layoutRings() {
+    ringRadii = [];
+    if (!rings) return;
+    const byRing = [];
+    for (const n of nodes) if (n.ring > 0) (byRing[n.ring] ||= []).push(n);
+    const fits = r => mode3d ? 4 * Math.PI * r * r / (SPACING * SPACING) : 2 * Math.PI * r / SPACING;
+    let edge = 0;
+    for (let d = 1; d < byRing.length; d++) {
+      const list = (byRing[d] || []).sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+      let r = edge + RING;
+      const lanes = Math.min(MAX_LANES, Math.max(1, Math.ceil(list.length / fits(r))));
+      while (list.length > lanes * fits(r)) r += SPACING;
+      list.forEach((n, i) => { n.ringR = r + (i % lanes) * LANE; });
+      ringRadii.push([r, r + (lanes - 1) * LANE]);
+      edge = r + (lanes - 1) * LANE;
+    }
+  }
   function ringForce(alpha) {
     if (!rings || !current) return;
     const cx = current.x, cy = current.y, cz = current.z || 0;
@@ -34,7 +53,7 @@ window.CinderGraph = (() => {
       if (n === current || !(n.ring > 0)) continue;
       let dx = n.x - cx, dy = n.y - cy, dz = mode3d ? (n.z || 0) - cz : 0, d = Math.hypot(dx, dy, dz);
       if (d < 1e-6) { dx = Math.random() - .5; dy = Math.random() - .5; d = Math.hypot(dx, dy); }
-      const k = (n.ring * RING - d) / d * RING_PULL * alpha;
+      const k = ((n.ringR || n.ring * RING) - d) / d * RING_PULL * alpha;
       n.vx += dx * k; n.vy += dy * k; if (mode3d) n.vz += dz * k;
     }
   }
@@ -248,7 +267,7 @@ window.CinderGraph = (() => {
       else { const a = i * 2.4, r = 12 * Math.sqrt(i + 1); n.x = Math.cos(a) * r; n.y = Math.sin(a) * r; n.z = mode3d ? (Math.random() - .5) * r : 0; i++; }
     }
     current = d.current ? byId.get(d.current) : null;
-    pin();
+    pin(); layoutRings();
     if (hover && !byId.has(hover.id)) hover = null;
     if (selected) { const again = byId.get(selected.id); selected = null; if (again) select(again); else opts.onSelect?.(null); }
     sim.nodes(nodes);
@@ -307,7 +326,7 @@ window.CinderGraph = (() => {
     if (rings && current && current._p.s > 0) {
       // The rings' outlines: each shell's silhouette, near enough a circle around the middle.
       ctx.strokeStyle = colors.faint; ctx.lineWidth = 1; ctx.globalAlpha = 0.4; ctx.setLineDash([4, 6]);
-      for (let d = 1; d <= maxRing(); d++) { ctx.beginPath(); ctx.arc(current._p.sx, current._p.sy, d * RING * current._p.s, 0, Math.PI * 2); ctx.stroke(); }
+      for (const b of ringRadii) for (const r of new Set(b)) { ctx.beginPath(); ctx.arc(current._p.sx, current._p.sy, r * current._p.s, 0, Math.PI * 2); ctx.stroke(); }
       ctx.setLineDash([]);
     }
     // Edges in a few fog bands (one path each), then the focused node's in the accent.
@@ -373,7 +392,7 @@ window.CinderGraph = (() => {
 
     if (rings && current) {
       ctx.strokeStyle = colors.faint; ctx.lineWidth = 1 / view.k; ctx.globalAlpha = 0.4; ctx.setLineDash([4 / view.k, 6 / view.k]);
-      for (let d = 1; d <= maxRing(); d++) { ctx.beginPath(); ctx.arc(current.x, current.y, d * RING, 0, Math.PI * 2); ctx.stroke(); }
+      for (const b of ringRadii) for (const r of new Set(b)) { ctx.beginPath(); ctx.arc(current.x, current.y, r, 0, Math.PI * 2); ctx.stroke(); }
       ctx.setLineDash([]);
     }
     ctx.lineWidth = 1 / view.k;
@@ -417,8 +436,6 @@ window.CinderGraph = (() => {
     dirty = false;
   }
 
-  const maxRing = () => nodes.reduce((m, n) => Math.max(m, n.ring || 0), 0);
-
   const hot = () => sim.alpha() >= sim.alphaMin() || sim.alphaTarget() > 0;
   function frame() {
     raf = 0;
@@ -450,6 +467,7 @@ window.CinderGraph = (() => {
       mode3d = on;
       for (const n of nodes) { n.z = on ? (Math.random() - .5) * 300 : 0; n.vz = 0; }
       sim.numDimensions(on ? 3 : 2).force('z', on ? d3Force.forceZ(0).strength(pull) : null);
+      layoutRings(); // a shell holds more than a circle
       sim.alphaDecay(settleDecay()).alpha(1);
       settle(); fit(); dirty = true; kick();
     },
@@ -459,12 +477,15 @@ window.CinderGraph = (() => {
     setRings(on, quiet = false) {
       on = !!on;
       if (on === rings) return;
-      rings = on; pin();
+      rings = on; pin(); layoutRings();
+      sim.force('charge').strength(on ? -REPEL * RING_REPEL : -REPEL);
       if (!visible || quiet) return;
       sim.alphaDecay(settleDecay()).alpha(1);
       settle(); fit(); dirty = true; kick();
     },
     rings: () => rings,
+    // Each ring's inner and outer radius (they differ when a busy ring has lanes).
+    ringBands: () => ringRadii.map(b => [...b]),
     // Where a node is in the layout itself (for tests), or null when it isn't shown.
     worldPos: id => { const n = byId.get(id); return n ? [n.x, n.y, n.z || 0] : null; },
     setSpin(on) { spin = !!on; kick(); },
