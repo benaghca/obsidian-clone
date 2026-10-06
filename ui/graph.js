@@ -58,6 +58,22 @@ window.CinderGraph = (() => {
     }
   }
   sim.force('rings', ringForce);
+  // After each step, a note more than RING_SLACK off its lane is put back on its edge: forces
+  // alone lose to a busy note's links, which drag the inner ring out towards the outer one. A note
+  // being dragged is left alone until it's let go.
+  const RING_SLACK = 8;
+  function clampRings() {
+    if (!rings || !current) return;
+    const cx = current.x, cy = current.y, cz = current.z || 0;
+    for (const n of nodes) {
+      if (n === current || n === drag || !(n.ringR > 0)) continue;
+      const dx = n.x - cx, dy = n.y - cy, dz = mode3d ? (n.z || 0) - cz : 0, d = Math.hypot(dx, dy, dz);
+      const to = d < n.ringR - RING_SLACK ? n.ringR - RING_SLACK : d > n.ringR + RING_SLACK ? n.ringR + RING_SLACK : 0;
+      if (!to || d < 1e-6) continue;
+      const k = to / d;
+      n.x = cx + dx * k; n.y = cy + dy * k; if (mode3d) n.z = cz + dz * k;
+    }
+  }
   // Pins the open note at the origin while rings are on (and lets go of one pinned before).
   function pin() {
     const want = rings ? current : null;
@@ -67,7 +83,7 @@ window.CinderGraph = (() => {
   }
   // How long a tick takes here, as they run (a big vault's are slow: ~60ms for 15,000 notes).
   let tickMs = 0;
-  const tick = () => { const t = performance.now(); sim.tick(); const d = performance.now() - t; tickMs = tickMs ? tickMs * 0.9 + d * 0.1 : d; };
+  const tick = () => { const t = performance.now(); sim.tick(); clampRings(); const d = performance.now() - t; tickMs = tickMs ? tickMs * 0.9 + d * 0.1 : d; };
   // How fast a warmed-up layout cools: over SETTLE_TICKS, but within COOL_MS when ticks are slow
   // (never in fewer than d3's own 300), so a big graph doesn't keep the processor busy for minutes.
   const settleDecay = () => 1 - Math.pow(0.001, 1 / (tickMs ? Math.max(300, Math.min(SETTLE_TICKS, COOL_MS / tickMs)) : SETTLE_TICKS));
