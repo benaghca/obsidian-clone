@@ -307,16 +307,74 @@ function toggleTag(tag, open = !tagOpen.has(tag)) {
   store('tagOpen', [...tagOpen]);
   renderTags();
 }
+// Renaming a tag everywhere, as the Tag Wrangler plugin does: each #tag in the notes' text and each
+// entry in their tags: property, with the tags inside it (#project/cinder follows #project). Code
+// and links' targets are left alone, as they don't hold tags.
+function retag(content, from, to) {
+  const { fmLen } = splitFrontmatter(content), raw = content.slice(fmLen), scan = CinderEditor.scanMarkdown(raw);
+  const words = blankRanges(blankRanges(raw, scan.code), scan.urls); // (same length: offsets still hold)
+  const ours = t => { const l = t.toLowerCase(); return l === from || l.startsWith(from + '/'); };
+  const at = [];
+  for (const m of words.matchAll(/(^|[\s(,;])#([\p{L}\p{N}_\-\/]+)/gu)) if (ours(m[2])) at.push(m.index + m[1].length + 1);
+  let body = raw;
+  for (const i of at.reverse()) body = body.slice(0, i) + to + body.slice(i + from.length);
+  let fm = content.slice(0, fmLen);
+  if (fmLen) {
+    const name = new RegExp(`(^|[\\s\\[,'"#])${from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|[\\s\\],'"]|$)`, 'gi');
+    let inTags = false;
+    fm = fm.split('\n').map(line => {
+      const key = /^(tags?\s*:)(.*)$/i.exec(line);
+      if (key) { inTags = true; return key[1] + key[2].replace(name, (_, b) => b + to); }
+      if (inTags && /^\s*-\s/.test(line)) return line.replace(/^(\s*-\s+)(.*)$/, (_, a, v) => a + v.replace(name, (_m, b) => b + to));
+      if (/^\S/.test(line)) inTags = false;
+      return line;
+    }).join('\n');
+  }
+  return fm + body;
+}
+async function renameTag(from) {
+  const name = await promptModal('Rename tag', `New name for #${from} (and the tags inside it)`, from);
+  if (name == null) return;
+  const to = name.trim().replace(/^#/, '');
+  if (!to || to.toLowerCase() === from) return;
+  if (!/^[\p{L}\p{N}_\-\/]+$/u.test(to) || /^[\d\/]+$/.test(to) || /^\/|\/$|\/\//.test(to)) return toast('A tag is letters, numbers, _ - and /, not only numbers, and no spaces');
+  await save();
+  let n = 0;
+  for (const [p, note] of [...S.notes]) {
+    if (![...note.tags].some(t => t === from || t.startsWith(from + '/'))) continue;
+    const next = retag(note.content, from, to);
+    if (next === note.content) continue;
+    try { await writeFile(p, next, note.mtime); n++; } catch (e) { toast(`Couldn’t change ${p}: ${e.message}`); continue; }
+    if (p === S.cur && S.view === 'note') reloadEditorFromDisk(next);
+  }
+  // The tree stays open where it was.
+  const low = to.toLowerCase();
+  for (const t of [...tagOpen]) if (t === from || t.startsWith(from + '/')) { tagOpen.delete(t); tagOpen.add(low + t.slice(from.length)); }
+  store('tagOpen', [...tagOpen]);
+  reindexAll(); syncSplitPane(); refreshPanels(); renderTags();
+  toast(n ? `#${from} is #${to} now, in ${n} note${n === 1 ? '' : 's'}` : `No note has #${from}`);
+}
 $('#tag-list').addEventListener('click', e => {
   const r = e.target.closest('.tag-row');
   if (!r) return;
   if (e.target.closest('[data-tag-toggle]')) return toggleTag(r.dataset.tag);
   searchFor(`tag:${r.dataset.tag}`);
 });
+$('#tag-list').addEventListener('contextmenu', e => {
+  const r = e.target.closest('.tag-row');
+  if (!r) return;
+  e.preventDefault();
+  const t = r.dataset.tag;
+  menu(e.clientX, e.clientY, [
+    ['Search for it', () => searchFor(`tag:${t}`)],
+    ['Rename tag…', () => renameTag(t)],
+  ]);
+});
 $('#tag-list').addEventListener('keydown', e => {
   const r = e.target.closest('.tag-row');
   if (!r || e.ctrlKey || e.metaKey || e.altKey) return;
   const t = r.dataset.tag, open = r.getAttribute('aria-expanded');
+  if (e.key === 'F2') { e.preventDefault(); return renameTag(t); }
   if (e.key === 'ArrowRight' && open === 'false') { e.preventDefault(); toggleTag(t, true); }
   else if (e.key === 'ArrowLeft' && open === 'true') { e.preventDefault(); toggleTag(t, false); }
   else if (e.key === 'ArrowLeft' && t.includes('/')) { e.preventDefault(); $$('#tag-list .tag-row').find(x => x.dataset.tag === t.slice(0, t.lastIndexOf('/')))?.focus(); }

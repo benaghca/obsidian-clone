@@ -11,6 +11,8 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   w('Work log.md', '---\nstatus: open\n---\nMeeting about the garden project budget.');
   w('Projects/Cinder.md', 'The notes app. #project/cinder #project/cinder/ui');
   w('Projects/Shed.md', 'Paint it. #project/shed');
+  w('Projects/Meta.md', '---\ntags:\n  - project\n  - projects\nalso: [project]\n---\nKeep `#project` and [this](Shed.md#project) and #projects as they are.');
+  w('Projects/Inline.md', '---\ntags: [project/shed, diy]\n---\nshed notes');
   w('Todo.md', '- [ ] call the plumber\n- [x] buy seeds\nThe colour of the shed is red.\nIt is blue inside.');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
@@ -67,16 +69,27 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   // Nested tags in the tags panel, as in Obsidian.
   await page.evaluate(() => showPanel('tags', true)); await sleep(300);
   const tagRows = () => page.$$eval('#tag-list .tag-row', rs => rs.map(x => x.querySelector('.tag-name').textContent + ' ' + x.querySelector('.n').textContent).join(', '));
-  assert((await tagRows()) === '#project 2, #home 1', 'nested tags show under their parent, which counts every note in it: ' + await tagRows());
+  assert((await tagRows()) === '#project 4, #diy 1, #home 1, #projects 1', 'nested tags show under their parent, which counts every note in it: ' + await tagRows());
   await page.click('#tag-list .tag-row[data-tag="project"] [data-tag-toggle]'); await sleep(200);
-  assert((await tagRows()) === '#project 2, cinder 1, shed 1, #home 1', 'its › opens it: ' + await tagRows());
+  assert((await tagRows()) === '#project 4, shed 2, cinder 1, #diy 1, #home 1, #projects 1', 'its › opens it: ' + await tagRows());
   await page.focus('#tag-list .tag-row[data-tag="project/cinder"]'); await page.keyboard.press('ArrowRight'); await sleep(200);
-  assert((await tagRows()).startsWith('#project 2, cinder 1, ui 1, shed 1'), '→ opens one from the keyboard: ' + await tagRows());
+  assert((await tagRows()).startsWith('#project 4, shed 2, cinder 1, ui 1'), '→ opens one from the keyboard: ' + await tagRows());
   await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await sleep(200);
   assert(await page.evaluate(() => document.activeElement.dataset.tag) === 'project', '← closes it, then goes up to its parent');
   await page.click('#tag-list .tag-row[data-tag="project"] .tag-name'); await sleep(300);
   r = await page.$$eval('.s-file-name', r => r.map(x => x.childNodes[0].textContent));
-  assert(r.sort().join() === 'Cinder,Shed', 'and clicking a parent finds the notes with any tag inside it: ' + r.join());
+  assert(r.sort().join() === 'Cinder,Inline,Meta,Shed', 'and clicking a parent finds the notes with any tag inside it: ' + r.join());
+
+  // Renaming a tag, as Tag Wrangler does.
+  const rd = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
+  await page.evaluate(() => showPanel('tags', true)); await sleep(200);
+  await page.click('#tag-list .tag-row[data-tag="project"]', { button: 'right' }); await sleep(150);
+  await page.click('#menu-root .menu div:has-text("Rename tag")'); await sleep(200);
+  await page.fill('#modal-root input', 'work'); await page.keyboard.press('Enter'); await sleep(1500);
+  assert(rd('Projects/Cinder.md') === 'The notes app. #work/cinder #work/cinder/ui' && rd('Projects/Shed.md') === 'Paint it. #work/shed', 'Rename tag… changes it in the notes, the tags inside it too');
+  assert(rd('Projects/Meta.md') === '---\ntags:\n  - work\n  - projects\nalso: [project]\n---\nKeep `#project` and [this](Shed.md#project) and #projects as they are.', 'and in tags: lists, leaving other tags, other properties, code and links alone: ' + JSON.stringify(rd('Projects/Meta.md')));
+  assert(rd('Projects/Inline.md').startsWith('---\ntags: [work/shed, diy]\n'), 'and in a [tags, like, this] property');
+  assert((await tagRows()).startsWith('#work 4, shed 2, cinder 1'), 'the tags pane shows it, still open: ' + await tagRows());
 
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));
   await browser.close();
