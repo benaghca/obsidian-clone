@@ -118,6 +118,14 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   assert(await val() === 'bold', 'and so does any paste with the setting off');
   await page.evaluate(() => { cfg.pasteHtml = true; });
 
+  console.log('quotes and callouts');
+  await set('> [!tip] Remember'); await page.keyboard.press('Enter'); await page.keyboard.type('bring snacks'); await page.keyboard.press('Enter');
+  assert(await val() === '> [!tip] Remember\n> bring snacks\n> ', 'Enter in a callout carries on in it: ' + JSON.stringify(await val()));
+  await page.keyboard.press('Enter'); await page.keyboard.type('After');
+  assert(await val() === '> [!tip] Remember\n> bring snacks\n\nAfter', 'and Enter on its empty line ends it (with a blank line, so what follows isn’t still in it): ' + JSON.stringify(await val()));
+  await set('> outer\n> > inner'); await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
+  assert(await val() === '> outer\n> > inner\n>\n> ', 'a quote in a quote ends a level at a time: ' + JSON.stringify(await val()));
+
   console.log('bold and italic together');
   await set('a word here', 2, 6); await page.keyboard.press('Control+b'); await page.keyboard.press('Control+i');
   assert(await val() === 'a ***word*** here', 'Ctrl+I on bold makes it bold italic, not italic: ' + await val());

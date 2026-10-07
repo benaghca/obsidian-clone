@@ -970,6 +970,20 @@ function smartTab(view) {
 }
 
 const continueMarkup = insertNewlineContinueMarkupCommand({ nonTightLists: false });
+// Enter on an empty line of a quote or callout ends it, a level at a time, as in Obsidian.
+// (CodeMirror's own waits for a second empty quoted line, so it took three Enters to get out.) A
+// blank line is left after it: text right below a quote's last line would still be in the quote.
+function endQuote(view) {
+  const { state } = view, r = state.selection.main;
+  if (state.selection.ranges.length > 1 || !r.empty) return false;
+  const line = state.doc.lineAt(r.head), m = /^((?:[ \t]*>)+)[ \t]*$/.exec(line.text);
+  if (!m || r.head !== line.to || line.number === 1 || !/^[ \t]*>/.test(state.doc.line(line.number - 1).text)) return false;
+  for (let n = syntaxTree(state).resolveInner(r.head, -1); n; n = n.parent) if (n.name === 'FencedCode' || n.name === 'CodeBlock') return false;
+  const keep = m[1].replace(/[ \t]*>$/, '');
+  const insert = keep + '\n' + (keep ? keep + ' ' : '');
+  view.dispatch({ changes: { from: line.from, to: line.to, insert }, selection: { anchor: line.from + insert.length }, userEvent: 'delete' });
+  return true;
+}
 
 // ------------------------------------------------------------------ fenced code blocks
 
@@ -1635,7 +1649,7 @@ function create(parent, hooks, opts = {}) {
     markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown, ObsidianComments], addKeymap: false }),
     // Enter carries a list or quote on; on an empty item it ends the list, as in Obsidian (not
     // CodeMirror's default, which first makes a tight list loose).
-    Prec.high(keymap.of([{ key: 'Enter', run: v => fenceEnter(v) || tableMove(v, 'down') || continueMarkup(v) }, { key: 'Backspace', run: deleteMarkupBackward }])),
+    Prec.high(keymap.of([{ key: 'Enter', run: v => fenceEnter(v) || tableMove(v, 'down') || endQuote(v) || continueMarkup(v) }, { key: 'Backspace', run: deleteMarkupBackward }])),
     EditorView.inputHandler.of(wrapSelectionInput),
     plainPasteKeys,
     EditorState.languageData.of(() => [{ closeBrackets: { brackets: ['(', '[', '{'] } }]),
