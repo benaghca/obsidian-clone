@@ -1755,3 +1755,27 @@ body.sticky-layout #preview { padding-left: 16px; padding-right: 16px; }
 .sk-tools { display: flex; align-items: center; gap: 2px; padding: 4px 8px; flex: none; border-top: 1px solid var(--border); background: var(--bg2); }
 .sk-when { font-size: var(--text-sm); color: var(--faint); padding-right: 4px; }
 .sk-cards:focus { outline: none; }
+.sk-list { position: relative; }
+.sk-lane { display: flex; flex-direction: column; gap: 8px; }
+.sk-selbar .sk-count { padding: 0 6px; font-size: var(--text-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sk-btn.sk-all { width: auto; padding: 0 8px; font-size: var(--text-sm); font-weight: 600; }
+.sk-btn:disabled { opacity: .4; cursor: default; background: none; }
+.sk-danger:not(:disabled):hover { color: var(--danger); }
+.sk-card-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity var(--dur-fast); }
+.sk-card:is(:hover, :focus-visible, .sel) .sk-card-tools, .sk-list.selecting .sk-card-tools { opacity: 1; }
+.sk-list.selecting .sk-card-tools .sk-danger, .sk-list.dragging .sk-card-tools { display: none; }
+.sk-mini { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--muted); cursor: pointer; }
+.sk-mini svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sk-mini:hover { color: var(--text); border-color: var(--faint); }
+.sk-check svg { opacity: 0; }
+.sk-check:hover svg { opacity: .5; }
+.sk-card.sel .sk-check { background: var(--accent); border-color: var(--accent); color: #fff; }
+.sk-card.sel .sk-check svg { opacity: 1; }
+.sk-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.sk-card.dragging { opacity: .35; }
+.sk-drop { flex: none; height: 4px; margin: -2px 0; border-radius: 2px; background: var(--accent); }
+.sk-trash { display: none; position: absolute; left: 10px; right: 10px; bottom: 10px; height: 56px; align-items: center; justify-content: center; gap: 8px; border: 2px dashed var(--danger); border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger) 8%, var(--bg)); color: var(--danger); font-weight: 600; box-shadow: var(--shadow); }
+.sk-trash svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
+.sk-list.dragging .sk-trash { display: flex; }
+.sk-trash.over { background: color-mix(in srgb, var(--danger) 22%, var(--bg)); border-style: solid; }
+.sk-list.dragging .sk-cards { padding-bottom: 76px; }

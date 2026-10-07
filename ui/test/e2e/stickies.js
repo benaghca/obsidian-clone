@@ -1,6 +1,6 @@
 // The sticky layout: a thin window becomes a OneNote-style list of the Inbox's stickies; a sticky
 // opens to fill it, with its colour, pin, delete and a formatting bar; notes still open full width;
-// widening brings everything back.
+// widening brings everything back. Stickies can be picked, dragged and deleted from the list.
 const { chromium } = require('playwright-core');
 const fs = require('fs'), path = require('path');
 const SP = process.env.SP, VAULT = SP + '/vault', OUT = SP + '/shots';
@@ -12,6 +12,9 @@ const r = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
 const has = p => fs.existsSync(path.join(VAULT, p));
 (async () => {
   const now = Date.now();
+  w('Inbox/Stamps.md', 'Stamps for the letters\n', now - 6e5);
+  w('Inbox/Bins.md', 'Bins out on Tuesday\n', now - 5e5);
+  w('Inbox/Keys.md', 'Spare keys at the neighbours\n', now - 4e5);
   w('Inbox/Groceries.md', '# Groceries\n\n- [ ] milk\n- [ ] eggs\n', now - 3e5);
   w('Inbox/Call Sam.md', 'Call Sam about the invoice\n', now - 2e5);
   w('Inbox/Garden.md', 'Where the beds go\n', now - 1e5);
@@ -29,7 +32,7 @@ const has = p => fs.existsSync(path.join(VAULT, p));
   await page.setViewportSize({ width: 380, height: 900 }); await sleep(600);
   assert(await page.evaluate(() => document.body.classList.contains('sticky-layout') && S.view === 'stickies'), 'becomes the sticky layout, showing the stickies');
   assert(!(await shown('#ribbon')) && !(await shown('#left')) && !(await shown('#tabbar')), 'with no ribbon, side bars or tabs');
-  assert((await cards()).join() === 'Garden,Call Sam,Groceries', 'newest first, as in New: ' + (await cards()).join());
+  assert((await cards()).join() === 'Garden,Call Sam,Groceries,Keys,Bins,Stamps', 'newest first, as in New: ' + (await cards()).join());
   assert(await page.evaluate(() => !document.activeElement.closest('.sk-card')), 'no sticky looks selected to begin with');
   await page.keyboard.press('ArrowDown'); await sleep(150);
   assert(await page.evaluate(() => document.activeElement.matches('.sk-card') && document.activeElement.textContent.includes('beds')), '↓ goes to the first sticky');
@@ -75,6 +78,52 @@ const has = p => fs.existsSync(path.join(VAULT, p));
   assert(editW > 300, 'and room to write in: ' + Math.round(editW) + 'px');
   await page.click('#sk-home'); await sleep(400);
   assert(await page.evaluate(() => S.view === 'stickies'), '← Stickies goes home');
+
+  console.log('picking and deleting, without opening');
+  const card = t => `#view-stickies .sk-card:has-text("${t}")`;
+  const count = () => page.$eval('#view-stickies .sk-head', h => h.textContent.replace(/\s+/g, ' ').trim());
+  const picked = () => page.$$eval('#view-stickies .sk-card.sel', cs => cs.map(c => c.dataset.path.replace(/^Inbox\//, '').replace(/\.md$/, '')).join());
+  await page.hover(card('neighbours')); await page.click(card('neighbours') + ' .sk-check'); await sleep(200);
+  assert(await picked() === 'Keys' && (await count()).includes('1 selected'), 'the ✓ on a sticky picks it, and the header says so');
+  await page.click(card('letters'), { modifiers: ['Shift'] }); await sleep(200);
+  assert(await picked() === 'Keys,Bins,Stamps', 'Shift-click picks the run: ' + await picked());
+  await page.click(card('Tuesday')); await sleep(200);
+  assert(await picked() === 'Keys,Stamps' && !(await page.$('#view-stickies .sk-page')), 'while picking, a click picks or unpicks, not opens');
+  await page.click('[data-sk=sel-delete]'); await sleep(300);
+  await page.click('.confirm [data-c="1"]'); await sleep(700);
+  assert(!has('Inbox/Keys.md') && !has('Inbox/Stamps.md') && has('Inbox/Bins.md'), 'Delete in the bar deletes the picked ones, after asking');
+  assert(!(await picked()) && !(await page.$('.sk-selbar')) && !(await cards()).includes('Keys'), 'and the list is back to normal');
+  await page.click(card('Tuesday'), { button: 'right' }); await sleep(200);
+  await page.click('#menu-root .menu div:has-text("Delete")'); await sleep(300);
+  await page.click('.confirm [data-c="1"]'); await sleep(700);
+  assert(!has('Inbox/Bins.md') && !(await cards()).includes('Bins'), 'right-click → Delete deletes one');
+  await page.focus(card('beds')); await page.keyboard.press('Control+a'); await sleep(200);
+  assert((await picked()).split(',').length === (await cards()).length, 'Ctrl+A picks them all');
+  await page.keyboard.press('Escape'); await sleep(200);
+  assert(!(await picked()) && !(await page.$('.sk-selbar')), 'and Esc lets them go');
+
+  console.log('dragging');
+  const box = async t => (await page.$(card(t))).boundingBox();
+  const drag = async (from, x, y) => {
+    const a = await box(from);
+    await page.mouse.move(a.x + 20, a.y + 20); await page.mouse.down();
+    await page.mouse.move(a.x + 24, a.y + 30, { steps: 3 }); await sleep(100);
+    await page.mouse.move(x, y, { steps: 8 });
+    await page.mouse.move(x + 2, y + 2); await sleep(400); // (the last drag events arrive late)
+  };
+  const sam = await box('invoice');
+  await drag('milk', sam.x + 40, sam.y + 6);
+  assert(await page.$eval('#view-stickies .sk-list', l => l.classList.contains('dragging')) && await shown('#view-stickies .sk-trash'), 'a drag shows where it will go, and a bin to drop it on');
+  await page.mouse.up(); await sleep(800);
+  const order = (await cards()).join();
+  assert(order.indexOf('Groceries') < order.indexOf('Call Sam'), 'dropped above another, it moves there: ' + order);
+  assert(/Groceries/.test(r('Inbox/Inbox.canvas')), 'and the board keeps the order');
+  await drag('milk', 190, 860);
+  assert(await page.$eval('#view-stickies .sk-trash', t => t.classList.contains('over')), 'over the bin, it lights up');
+  await page.mouse.up(); await sleep(300);
+  await page.click('.confirm [data-c="1"]'); await sleep(700);
+  assert(!has('Inbox/Groceries.md') && !(await cards()).includes('Groceries'), 'dropped on the bin, it’s deleted');
+  await page.screenshot({ path: OUT + '/stickies-picked.png' });
 
   console.log('widening');
   await page.click('.sk-card:has-text("beds")'); await sleep(400);
