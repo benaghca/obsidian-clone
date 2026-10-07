@@ -165,7 +165,12 @@ body { display: flex; flex-direction: column; height: 100vh; }
 .s-snip { font-size: var(--text-sm); color: var(--muted); padding: 3px 8px 3px 14px; border-radius: var(--radius-sm); cursor: pointer; overflow-wrap: anywhere; }
 .s-snip:hover { background: var(--bg-hover); color: var(--text); }
 mark { background: var(--mark); color: inherit; border-radius: var(--radius-xs); padding: 0 1px; }
-.tag-row { display: flex; justify-content: space-between; padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); }
+.tag-row { display: flex; align-items: center; gap: 2px; padding: 3px 8px 3px calc(4px + var(--depth, 0) * 16px); border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); }
+.tag-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tag-chev { width: 16px; height: 16px; flex: none; display: grid; place-items: center; border-radius: var(--radius-xs); }
+.tag-chev[data-tag-toggle]:hover { background: var(--bg-hover); }
+.tag-chev .chev { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; color: var(--faint); transition: transform var(--dur-fast); }
+.tag-row[aria-expanded="true"] .chev { transform: rotate(90deg); }
 .tag-row:hover { background: var(--bg-hover); color: var(--text); }
 .tag-row .n { color: var(--faint); font-size: var(--text-sm); }
 

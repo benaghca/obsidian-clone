@@ -9,6 +9,8 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   w('Notes/Compost bins.md', 'How to build compost bins for the garden.');
   w('Recipes.md', 'Basil pesto. Receive the café crème.');
   w('Work log.md', '---\nstatus: open\n---\nMeeting about the garden project budget.');
+  w('Projects/Cinder.md', 'The notes app. #project/cinder #project/cinder/ui');
+  w('Projects/Shed.md', 'Paint it. #project/shed');
   w('Todo.md', '- [ ] call the plumber\n- [x] buy seeds\nThe colour of the shed is red.\nIt is blue inside.');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
@@ -61,6 +63,21 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   assert(r.join() === 'Recipes', 'what was just typed is searchable');
   await page.click('.s-snip'); await sleep(300);
   assert(await page.evaluate(() => ed.value.slice(ed.selectionStart, ed.selectionEnd)) === 'Zucchini', 'clicking a snippet selects the match');
+
+  // Nested tags in the tags panel, as in Obsidian.
+  await page.evaluate(() => showPanel('tags', true)); await sleep(300);
+  const tagRows = () => page.$$eval('#tag-list .tag-row', rs => rs.map(x => x.querySelector('.tag-name').textContent + ' ' + x.querySelector('.n').textContent).join(', '));
+  assert((await tagRows()) === '#project 2, #home 1', 'nested tags show under their parent, which counts every note in it: ' + await tagRows());
+  await page.click('#tag-list .tag-row[data-tag="project"] [data-tag-toggle]'); await sleep(200);
+  assert((await tagRows()) === '#project 2, cinder 1, shed 1, #home 1', 'its › opens it: ' + await tagRows());
+  await page.focus('#tag-list .tag-row[data-tag="project/cinder"]'); await page.keyboard.press('ArrowRight'); await sleep(200);
+  assert((await tagRows()).startsWith('#project 2, cinder 1, ui 1, shed 1'), '→ opens one from the keyboard: ' + await tagRows());
+  await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowLeft'); await sleep(200);
+  assert(await page.evaluate(() => document.activeElement.dataset.tag) === 'project', '← closes it, then goes up to its parent');
+  await page.click('#tag-list .tag-row[data-tag="project"] .tag-name'); await sleep(300);
+  r = await page.$$eval('.s-file-name', r => r.map(x => x.childNodes[0].textContent));
+  assert(r.sort().join() === 'Cinder,Shed', 'and clicking a parent finds the notes with any tag inside it: ' + r.join());
+
   assert(errors.length === 0, 'no page errors ' + errors.join('; '));
   await browser.close();
 })().catch(e => { console.log(e.message); process.exit(1); });

@@ -275,15 +275,52 @@ function recentSwitcher(step) {
   draw();
 }
 
+// Nested tags (#project/cinder) make a tree, as in Obsidian: a tag counts the notes with it or with
+// a tag inside it, and one with tags inside opens and closes (its ›, or → and ←). A click searches.
+const tagOpen = new Set(store('tagOpen') || []);
 function renderTags() {
-  const counts = new Map();
-  for (const n of S.notes.values()) for (const t of n.tags) counts.set(t, (counts.get(t) || 0) + 1);
-  const list = [...counts].sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]));
-  $('#tag-list').innerHTML = list.length
-    ? list.map(([t, c]) => `<div class="tag-row" tabindex="-1" data-tag="${esc(t)}"><span>#${esc(t)}</span><span class="n">${c}</span></div>`).join('')
-    : '<div class="none">No tags yet. Add #tags to notes or a <code>tags:</code> list in frontmatter.</div>';
+  const root = { kids: new Map() };
+  for (const [p, n] of S.notes) for (const t of n.tags) {
+    let node = root, at = '';
+    for (const part of t.split('/')) {
+      at = at ? at + '/' + part : part;
+      if (!node.kids.has(part)) node.kids.set(part, { tag: at, name: part, kids: new Map(), notes: new Set() });
+      node = node.kids.get(part);
+      node.notes.add(p);
+    }
+  }
+  const rows = [];
+  const walk = (node, depth) => {
+    for (const k of [...node.kids.values()].sort((a, b) => b.notes.size - a.notes.size || collator.compare(a.name, b.name))) {
+      const kids = k.kids.size > 0, open = kids && tagOpen.has(k.tag);
+      rows.push(`<div class="tag-row" tabindex="-1" data-tag="${esc(k.tag)}" style="--depth:${depth}"${kids ? ` aria-expanded="${open}"` : ''}><span class="tag-chev"${kids ? ' data-tag-toggle' : ''}>${kids ? CHEV : ''}</span><span class="tag-name">${depth ? '' : '#'}${esc(k.name)}</span><span class="n">${k.notes.size}</span></div>`);
+      if (open) walk(k, depth + 1);
+    }
+  };
+  walk(root, 0);
+  const had = document.activeElement?.closest?.('#tag-list .tag-row')?.dataset.tag;
+  $('#tag-list').innerHTML = rows.join('') || '<div class="none">No tags yet. Add #tags to notes or a <code>tags:</code> list in frontmatter.</div>';
+  if (had) $$('#tag-list .tag-row').find(r => r.dataset.tag === had)?.focus();
 }
-$('#tag-list').addEventListener('click', e => { const r = e.target.closest('.tag-row'); if (r) searchFor(`tag:${r.dataset.tag}`); });
+function toggleTag(tag, open = !tagOpen.has(tag)) {
+  if (open) tagOpen.add(tag); else tagOpen.delete(tag);
+  store('tagOpen', [...tagOpen]);
+  renderTags();
+}
+$('#tag-list').addEventListener('click', e => {
+  const r = e.target.closest('.tag-row');
+  if (!r) return;
+  if (e.target.closest('[data-tag-toggle]')) return toggleTag(r.dataset.tag);
+  searchFor(`tag:${r.dataset.tag}`);
+});
+$('#tag-list').addEventListener('keydown', e => {
+  const r = e.target.closest('.tag-row');
+  if (!r || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = r.dataset.tag, open = r.getAttribute('aria-expanded');
+  if (e.key === 'ArrowRight' && open === 'false') { e.preventDefault(); toggleTag(t, true); }
+  else if (e.key === 'ArrowLeft' && open === 'true') { e.preventDefault(); toggleTag(t, false); }
+  else if (e.key === 'ArrowLeft' && t.includes('/')) { e.preventDefault(); $$('#tag-list .tag-row').find(x => x.dataset.tag === t.slice(0, t.lastIndexOf('/')))?.focus(); }
+});
 
 // ============================================================ right panel
 
