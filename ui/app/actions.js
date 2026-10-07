@@ -30,6 +30,7 @@ const CMD = {
   'auto-reveal': () => toggleAutoReveal(),
   'toggle-left': () => toggleSide('left'),
   back: () => goHist(-1),
+  stickies: () => openStickies(),
   forward: () => goHist(1),
   'toggle-mode': () => setMode(S.mode === 'edit' ? 'read' : 'edit'),
   'toggle-right': () => toggleSide('right'),

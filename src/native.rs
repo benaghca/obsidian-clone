@@ -65,7 +65,7 @@ pub fn run(ctx: Ctx) -> ! {
     let mut wb = WindowBuilder::new()
         .with_title(title_for(&ctx))
         .with_inner_size(LogicalSize::new(w, h))
-        .with_min_inner_size(LogicalSize::new(480.0, 360.0))
+        .with_min_inner_size(LogicalSize::new(280.0, 360.0))
         .with_maximized(win["maximized"].as_bool().unwrap_or(false))
         .with_decorations(!custom_frame())
         .with_window_icon(Some(icon()));
@@ -200,6 +200,7 @@ pub fn run(ctx: Ctx) -> ! {
                 match cmd.as_str() {
                     "drag" => drop(window.drag_window()),
                     "min" => window.set_minimized(true),
+                    "ontop:on" | "ontop:off" => window.set_always_on_top(cmd == "ontop:on"),
                     "max" => window.set_maximized(!window.is_maximized()),
                     "frame:native" | "frame:custom" => {
                         let native = cmd == "frame:native";

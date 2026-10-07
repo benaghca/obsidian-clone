@@ -122,6 +122,7 @@ async function boot() {
     return;
   }
   await restoreTabs();
+  await applyStickyLayout(); // a thin window starts as the stickies list
 }
 
 document.addEventListener('visibilitychange', () => { if (document.hidden) save(); else poll(); });

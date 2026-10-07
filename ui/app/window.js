@@ -56,4 +56,5 @@ document.addEventListener('mousedown', e => {
   winCmd(e.detail === 2 ? 'max' : 'drag');
 });
 setFrame(cfg.windowFrame);
+if (cfg.keepOnTop) winCmd('ontop:on'); // as it was left
 

@@ -84,6 +84,7 @@
   <main id="main">
     <header id="viewbar">
       <span class="pane-grip" data-pane="left" draggable="true" title="Drag onto the tab bar to give this note its own tab">⠿</span>
+      <button class="ib" id="sk-home" data-cmd="stickies" title="Back to the stickies" aria-label="Back to the stickies"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/><path d="M15 6h4v12h-4"/></svg></button>
       <button class="ib" data-cmd="back" title="Back (Alt+←)"><svg viewBox="0 0 24 24"><path d="m14 6-6 6 6 6"/></svg></button>
       <button class="ib" data-cmd="forward" title="Forward (Alt+→)"><svg viewBox="0 0 24 24"><path d="m10 6 6 6-6 6"/></svg></button>
       <div id="crumbs"></div>
@@ -114,6 +115,7 @@
     <div id="view-tasks" class="view" hidden></div>
     <div id="view-flashcards" class="view" hidden></div>
     <div id="view-inbox" class="view" hidden></div>
+    <div id="view-stickies" class="view" hidden></div>
 
     <div id="view-graph" class="view" hidden>
       <canvas id="graph-canvas"></canvas>

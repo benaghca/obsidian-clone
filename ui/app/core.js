@@ -103,6 +103,8 @@ const DEFAULTS = {
   vim: false,            // Vim key bindings in the editor
   focusMode: false,      // hide the side bars and dim all but the paragraph being written
   focusOutline: false,   // in focus mode, a quiet outline of the note beside the text
+  stickyLayout: true,    // a thin window becomes a list of stickies (ui/app/stickies.js)
+  keepOnTop: false,      // desktop app: the window stays on top of others
   typewriter: false,     // keep the line being typed on in the middle of the window
   statusChars: false,    // the status bar counts characters rather than words
   folderTemplates: '',

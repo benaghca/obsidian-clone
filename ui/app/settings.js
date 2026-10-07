@@ -31,6 +31,7 @@ const SETTINGS = [
   { k: 'livePreview', page: 'editor', name: 'Live preview', desc: 'Hide Markdown syntax except on the line you’re editing. Off shows plain source.', type: 'toggle', apply: 'theme' },
   { k: 'readable', page: 'editor', name: 'Readable line length', desc: 'Keep lines to a comfortable width instead of filling the window.', type: 'toggle', apply: 'theme' },
   { k: 'focusMode', page: 'editor', name: 'Focus mode', desc: 'Hide the side bars and tabs, and dim everything but the paragraph you’re writing. The ◎ in the status bar switches it too.', type: 'toggle', apply: 'theme' },
+  { k: 'stickyLayout', page: 'inbox', name: 'Sticky layout in a thin window', desc: 'Narrow the window (to sit at the side of the screen, say) and it becomes a list of your stickies, as a sticky-notes app. Widen it and everything comes back.', type: 'toggle', apply: 'layout' },
   { k: 'focusOutline', page: 'editor', name: 'Outline in focus mode', desc: 'A quiet outline of the note beside the text, its current section lit with the paragraph. The ☰ in the status bar (in focus mode) switches it too.', type: 'toggle', apply: 'theme' },
   { k: 'typewriter', page: 'editor', name: 'Typewriter scrolling', desc: 'Keep the line you’re typing on in the middle of the window.', type: 'toggle', apply: 'theme' },
   { k: 'vim', page: 'editor', name: 'Vim key bindings', desc: 'Edit with Vim’s modes and motions.', type: 'toggle', apply: 'theme' },
@@ -341,6 +342,7 @@ function applySetting(s) {
   const what = s.apply;
   if (what === 'theme') { applyTheme(); $('.st-fp')?.dispatchEvent(new Event('refresh')); }
   if (what === 'frame') setFrame(cfg.windowFrame);
+  if (what === 'layout') applyStickyLayout();
   if (what === 'tree') { updateTreeButtons(); if (cfg.autoReveal) renderTreeActive(true); }
   if (what === 'css') { userCssKey = null; loadUserCss(); }
   if (what === 'calendar') refreshCalendar();

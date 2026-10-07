@@ -78,6 +78,7 @@ function changeBoard(change) {
       }
     }
     renderInbox();
+    if (S.view === 'stickies') renderStickies();
   });
   return boardChain;
 }
@@ -175,7 +176,7 @@ function renderInbox() {
 }
 // A photo elsewhere in the vault, below the board.
 const orphanCard = p => `<div class="ib-card" data-path="${esc(p)}" tabindex="-1" role="option"><div class="ib-thumb"><img src="${rawUrl(p)}" alt="" loading="lazy" draggable="false"></div><div class="ib-meta"><span class="ib-name">${esc(displayName(p))}</span><span class="ib-time">${esc(stickyTime(whenOf(p)))}</span></div></div>`;
-const refreshInboxSoon = debounce(() => { if (S.view === 'inbox') renderInbox(); else updateInboxBadge(); }, 150);
+const refreshInboxSoon = debounce(() => { if (S.view === 'inbox') renderInbox(); else { if (S.view === 'stickies') renderStickies(); updateInboxBadge(); } }, 150);
 
 // Editing a text sticky right on the board, with the live-preview editor canvas cards use.
 let stickyEdit = null, inboxRenderPending = false;

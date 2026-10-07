@@ -11,8 +11,8 @@ const closedTabs = [];      // { key, split }, for "Reopen closed tab"
 let tabSeq = 0;
 const newTabObj = key => ({ id: ++tabSeq, key, split: null, splitMode: 'edit', hist: key ? [key] : [], histIdx: key ? 0 : -1 });
 const curTab = () => S.tabs[S.tab];
-const viewKey = () => S.view === 'graph' ? ':graph' : S.view === 'tasks' ? ':tasks' : S.view === 'flashcards' ? ':flashcards' : S.view === 'inbox' ? ':inbox' : S.view === 'empty' ? null : S.cur;
-const tabName = k => k == null ? 'New tab' : k === ':graph' ? 'Graph' : k === ':tasks' ? 'Tasks' : k === ':flashcards' ? 'Flashcards' : k === ':inbox' ? 'Inbox' : displayName(k);
+const viewKey = () => S.view === 'graph' ? ':graph' : S.view === 'tasks' ? ':tasks' : S.view === 'flashcards' ? ':flashcards' : S.view === 'inbox' ? ':inbox' : S.view === 'stickies' ? ':stickies' : S.view === 'empty' ? null : S.cur;
+const tabName = k => k == null ? 'New tab' : k === ':graph' ? 'Graph' : k === ':tasks' ? 'Tasks' : k === ':flashcards' ? 'Flashcards' : k === ':inbox' ? 'Inbox' : k === ':stickies' ? 'Stickies' : displayName(k);
 
 // The page changed what it shows (see showView): the current tab follows.
 function syncTab() {
@@ -41,6 +41,7 @@ async function openKey(k, opts = {}) {
   if (k === ':tasks') return openTasks();
   if (k === ':flashcards') return openFlashcards();
   if (k === ':inbox') return openInbox();
+  if (k === ':stickies') return openStickies();
   if (k && S.files.has(k)) return openPath(k, { push: false, ...opts });
   flushDocViews(); await save(); rememberPos();
   S.cur = null; showEmpty();
