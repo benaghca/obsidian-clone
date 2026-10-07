@@ -1,7 +1,8 @@
 // Editing habits from Obsidian: Enter on an empty list item ends the list, a mark typed over a
 // selection wraps it, rich text pastes as Markdown (plain with Ctrl+Shift+V, in code, or with
 // the setting off), Tab and Enter in tables (as Advanced Tables), and moving list items with
-// their children (as Outliner).
+// their children (as Outliner), and fenced code blocks: fences hidden until the cursor comes in,
+// closed on Enter, and a way out below one that ends the note.
 const { chromium } = require('playwright-core');
 const fs = require('fs'), path = require('path');
 const SP = process.env.SP, VAULT = SP + '/vault';
@@ -71,6 +72,21 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   await set('- a\n\t- a1\n- b', 0); await page.keyboard.press('Control+Shift+ArrowDown'); await sleep(60);
   assert(await val() === '- b\n- a\n\t- a1', 'an item takes its children along: ' + JSON.stringify(await val()));
   assert(await page.evaluate(() => ed.value.slice(ed.selectionStart).startsWith('- a')), 'the cursor stays on it');
+
+  console.log('fenced code blocks');
+  const fenceLines = () => page.$$eval('.cm-content .cm-line.cm-codeblock', ls => ls.map(l => l.textContent));
+  await set('Before\n\n```js\nlet a = 1;\n```\n\nAfter', 0); await sleep(150);
+  assert((await fenceLines()).join('|') === 'js|let a = 1;|', 'with the cursor elsewhere, the ``` lines are hidden and the language shows: ' + (await fenceLines()).join('|'));
+  await page.evaluate(() => ed.setSelectionRange(ed.value.indexOf('let a'))); await sleep(150);
+  assert((await fenceLines()).join('|') === '```js|let a = 1;|```', 'with it in the block, they show: ' + (await fenceLines()).join('|'));
+  await set('Intro\n'); await page.keyboard.type('```py'); await page.keyboard.press('Enter'); await page.keyboard.type('x = 1');
+  assert(await val() === 'Intro\n```py\nx = 1\n```', 'Enter on an opening fence closes the block, the cursor inside: ' + JSON.stringify(await val()));
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown'); await page.keyboard.type('after');
+  assert(await val() === 'Intro\n```py\nx = 1\n```\nafter', '↓ at the end of the note leaves the block: ' + JSON.stringify(await val()));
+  await set('```\nno closing fence', 18); await page.keyboard.press('ArrowDown'); await page.keyboard.type('out');
+  assert(await val() === '```\nno closing fence\n```\nout', 'and closes one that wasn’t closed: ' + JSON.stringify(await val()));
+  await set('```js\na\n```\n\n```', 5); await page.keyboard.press('Enter'); await sleep(60);
+  assert(await val() === '```js\n\na\n```\n\n```', 'Enter on a fence that’s already closed is just a new line: ' + JSON.stringify(await val()));
 
   console.log('pasting rich text');
   const html = '<meta charset="utf-8"><h2>Title</h2><p>Some <b>bold</b>, <em>italic</em> and <a href="https://x.org/a b">a link</a>. Price: 5*3_x</p>'

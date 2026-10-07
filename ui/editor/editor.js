@@ -578,12 +578,22 @@ function buildInline(view) {
           }
           case 'FencedCode': case 'CodeBlock': {
             const first = doc.lineAt(nf).number, last = doc.lineAt(nt).number;
+            // A fenced block's ``` lines are hidden (the opening one showing the language) until the
+            // cursor comes into the block, as in Obsidian.
+            const fence = name === 'FencedCode' && !A.lines(nf, nt) ? fenceOf(state, nf) : null;
             eachLine(nf, nt, l => {
               let cls = 'cm-codeblock';
               if (l.number === first) cls += ' cm-codeblock-first';
               if (l.number === last) cls += ' cm-codeblock-last';
+              if (fence && (l.number === first || (fence.closed && l.number === last))) cls += ' cm-codeblock-fence';
               out.push(lineCls(cls).range(l.from));
             });
+            if (fence) {
+              const open = doc.line(first);
+              out.push((fence.lang ? Decoration.replace({ widget: new TextWidget(fence.lang, 'cm-codeblock-lang') }) : hideDeco).range(open.from, open.to));
+              if (fence.closed) { const close = doc.line(last); hide(close.from, close.to); }
+              return false;
+            }
             return;
           }
           case 'CodeInfo': out.push(markCls('cm-codeinfo').range(nf, nt)); return;
@@ -940,6 +950,49 @@ function smartTab(view) {
 }
 
 const continueMarkup = insertNewlineContinueMarkupCommand({ nonTightLists: false });
+
+// ------------------------------------------------------------------ fenced code blocks
+
+// The fenced code block whose opening line is at or around `pos`: {from, to (its node), open and
+// close (line numbers), mark (``` or ~~~…), lang, closed}, or null outside one.
+function fenceOf(state, pos) {
+  let n = syntaxTree(state).resolveInner(pos, 1);
+  while (n && n.name !== 'FencedCode') n = n.parent;
+  if (!n) { n = syntaxTree(state).resolveInner(pos, -1); while (n && n.name !== 'FencedCode') n = n.parent; }
+  if (!n) return null;
+  const doc = state.doc, open = doc.lineAt(n.from), close = doc.lineAt(n.to);
+  const m = /^(\s*)(`{3,}|~{3,})\s*([^\s`]*)/.exec(open.text);
+  if (!m) return null;
+  const ct = close.text.trim();
+  const closed = close.number > open.number && ct.length >= m[2].length && ct === m[2][0].repeat(ct.length);
+  return { from: n.from, to: n.to, open: open.number, close: close.number, indent: m[1], mark: m[2], lang: m[3], closed };
+}
+
+// Enter at the end of an opening fence that has no closing one: the closing fence goes in too, and
+// the cursor between them (otherwise everything after it would be code).
+function fenceEnter(view) {
+  const { state } = view, r = state.selection.main;
+  if (!r.empty || state.selection.ranges.length > 1) return false;
+  const line = state.doc.lineAt(r.head);
+  if (r.head !== line.to || !/^\s*(`{3,}|~{3,})[^`]*$/.test(line.text)) return false;
+  const f = fenceOf(state, line.from);
+  if (!f || f.open !== line.number || f.closed) return false;
+  const insert = `\n${f.indent}\n${f.indent}${f.mark}`;
+  view.dispatch({ changes: { from: r.head, insert }, selection: { anchor: r.head + 1 + f.indent.length }, scrollIntoView: true, userEvent: 'input' });
+  return true;
+}
+
+// ↓ on a code block's last line when nothing comes after it: a line after the block (closing it
+// first if it has no closing fence), so there's always a way out.
+function fenceExit(view) {
+  const { state } = view, r = state.selection.main, doc = state.doc;
+  if (!r.empty || doc.lineAt(r.head).number !== doc.lines) return false;
+  const f = fenceOf(state, r.head);
+  if (!f || f.close !== doc.lines) return false;
+  const insert = f.closed ? '\n' : `\n${f.indent}${f.mark}\n`;
+  view.dispatch({ changes: { from: doc.length, insert }, selection: { anchor: doc.length + insert.length }, scrollIntoView: true, userEvent: 'input' });
+  return true;
+}
 
 // ------------------------------------------------------------------ tables, as Advanced Tables does
 
@@ -1533,7 +1586,7 @@ function create(parent, hooks, opts = {}) {
     markdown({ base: markdownLanguage, codeLanguages, extensions: [ObsidianMarkdown, ObsidianComments], addKeymap: false }),
     // Enter carries a list or quote on; on an empty item it ends the list, as in Obsidian (not
     // CodeMirror's default, which first makes a tight list loose).
-    Prec.high(keymap.of([{ key: 'Enter', run: v => tableMove(v, 'down') || continueMarkup(v) }, { key: 'Backspace', run: deleteMarkupBackward }])),
+    Prec.high(keymap.of([{ key: 'Enter', run: v => fenceEnter(v) || tableMove(v, 'down') || continueMarkup(v) }, { key: 'Backspace', run: deleteMarkupBackward }])),
     EditorView.inputHandler.of(wrapSelectionInput),
     plainPasteKeys,
     EditorState.languageData.of(() => [{ closeBrackets: { brackets: ['(', '[', '{'] } }]),
@@ -1551,6 +1604,7 @@ function create(parent, hooks, opts = {}) {
     Prec.high(keysComp.of(keymap.of(keyBindings(keys)))),
     Prec.high(keymap.of([
       { key: 'Tab', run: v => mathTab(v) || tableMove(v, 'next') || smartTab(v), shift: v => tableMove(v, 'prev') || indentLess(v) },
+      { key: 'ArrowDown', run: v => fenceExit(v) },
       { key: 'Mod-Shift-ArrowUp', run: v => moveItem(v, -1) },
       { key: 'Mod-Shift-ArrowDown', run: v => moveItem(v, 1) },
       {
