@@ -251,6 +251,17 @@ function onHotkey(e) {
   e.preventDefault();
   c.run();
 }
+// Some app keys never reach onHotkey from the editor: with nothing bound to Ctrl+Shift+F, the
+// editor tries it as Ctrl+F (so the vault search opened the note's find bar instead, and Ctrl+Shift+B
+// made bold rather than showing the backlinks), and it has Ctrl+Alt+\ to indent. So the app's
+// Ctrl+Shift and Ctrl+Alt keys go first, unless a Format command or Vim has that very key.
+function onHotkeyBeforeEditor(e) {
+  if (!(e.shiftKey || e.altKey) || $('#modal-root').children.length || !e.target.closest?.('.cm-editor')) return;
+  const k = keyOf(e), c = k && HOTKEYS.get(k);
+  if (!c || !/(^|-)(Mod|Ctrl|Meta)-/.test(k) || (cfg.vim && vimTakes(k)) || EDITOR_COMMANDS.some(x => keyFor(x) === k)) return;
+  e.preventDefault(); e.stopPropagation();
+  c.run();
+}
 
 rebuildHotkeys();
 

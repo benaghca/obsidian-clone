@@ -61,4 +61,5 @@ document.addEventListener('click', e => {
 });
 
 window.addEventListener('keydown', onHotkey);
+window.addEventListener('keydown', onHotkeyBeforeEditor, true);
 

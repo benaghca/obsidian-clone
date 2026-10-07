@@ -118,6 +118,14 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   assert(await val() === 'bold', 'and so does any paste with the setting off');
   await page.evaluate(() => { cfg.pasteHtml = true; });
 
+  console.log('the app’s keys from the editor');
+  await set('Some text', 4);
+  await page.keyboard.press('Control+Shift+f'); await sleep(300);
+  assert(await page.evaluate(() => document.activeElement.closest('#left') !== null) && !(await page.$('#editor .cm-search')), 'Ctrl+Shift+F in a note opens the search in all notes, not the note’s find bar');
+  await set('Some text', 4);
+  await page.keyboard.press('Control+Shift+b'); await sleep(300);
+  assert(await val() === 'Some text' && await page.evaluate(() => !$('#right').hidden && /backlink/i.test($('#right .active, #right [aria-selected=true]')?.textContent || $('#right-body').textContent)), 'Ctrl+Shift+B shows the backlinks rather than making bold');
+
   assert(!errors.length, 'no page errors: ' + errors.join(' | '));
   await browser.close();
 })().catch(e => { console.error(e.message); process.exit(1); });
