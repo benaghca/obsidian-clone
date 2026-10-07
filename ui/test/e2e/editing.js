@@ -145,6 +145,16 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   await page.keyboard.press('Control+Alt+BracketRight'); await sleep(150);
   assert((await lines()).includes('sketch'), 'and Ctrl+Alt+] opens it all');
 
+  console.log('clicking a rendered table');
+  await set('# T\n\n| Name | Qty |\n|---|---|\n| apples | 3 |\n\nafter', 0);
+  await page.evaluate(() => ed.view.contentDOM.blur()); await sleep(150);
+  const cellAt = async t => { const b = await (await page.$(`#editor .cm-table-widget :is(td,th):text-is("${t}")`)).boundingBox(); await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2); await sleep(150); };
+  const caret = () => page.evaluate(() => { const v = ed.view, h = v.state.selection.main.head, l = v.state.doc.lineAt(h); return l.text.slice(0, h - l.from) + '‸' + l.text.slice(h - l.from); });
+  await cellAt('3');
+  assert(await caret() === '| apples | 3‸ |', 'a click on a table’s cell puts the cursor at the end of that cell: ' + await caret());
+  await page.keyboard.type('0');
+  assert((await val()).includes('| apples | 30 |'), 'ready to type there');
+
   console.log('bold and italic together');
   await set('a word here', 2, 6); await page.keyboard.press('Control+b'); await page.keyboard.press('Control+i');
   assert(await val() === 'a ***word*** here', 'Ctrl+I on bold makes it bold italic, not italic: ' + await val());

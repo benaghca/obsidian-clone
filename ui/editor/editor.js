@@ -421,6 +421,22 @@ class CodeBlockWidget extends WidgetType {
   }
 }
 
+// Where the cursor goes for a cell of a rendered table (the table's Markdown starts at `from`).
+function tableCellPos(state, from, tw, cell) {
+  const doc = state.doc, first = doc.lineAt(from);
+  const rows = [...tw.querySelectorAll('tr')], ri = cell ? rows.indexOf(cell.parentElement) : 0;
+  const line = doc.line(Math.min(doc.lines, first.number + (ri <= 0 ? 0 : ri + 1))); // (the |---| line under the header)
+  const pipes = [];
+  for (let i = 0; i < line.text.length; i++) { if (line.text[i] === '\\') i++; else if (line.text[i] === '|') pipes.push(i); }
+  const ci = cell ? [...cell.parentElement.children].indexOf(cell) : 0, lead = /^\s*\|/.test(line.text);
+  const start = lead ? pipes[ci] + 1 : ci ? pipes[ci - 1] + 1 : 0;
+  const end = (lead ? pipes[ci + 1] : pipes[ci]) ?? line.length;
+  if (!(start >= 0) || end < start) return Math.min(from + 2, first.to);
+  let at = end;
+  while (at > start && /\s/.test(line.text[at - 1])) at--;
+  return line.from + Math.max(at, Math.min(start + 1, end));
+}
+
 class TableWidget extends WidgetType {
   constructor(text, version, h) { super(); this.text = text; this.version = version; this.h = h; }
   eq(o) { return o.text === this.text && o.version === this.version; }
@@ -430,6 +446,9 @@ class TableWidget extends WidgetType {
     this.h.renderMarkdown(el, this.text);
     return el;
   }
+  // A press on the table is the editor's (to put the cursor in the cell clicked); one on a link in
+  // it is the link's. (Widgets' events are otherwise left alone, so a click on a table did nothing.)
+  ignoreEvent(e) { return !(e.type === 'mousedown' && !e.target.closest?.('a')); }
 }
 
 // The note's frontmatter as a table of properties (app.js draws it with CinderProps). Edits come
@@ -857,13 +876,13 @@ const clickHandler = EditorView.domEventHandlers({
       if (/^\[[ xX]\]$/.test(cur)) view.dispatch({ changes: { from: pos + 1, to: pos + 2, insert: cur[1] === ' ' ? 'x' : ' ' } });
       return true;
     }
-    // Clicking a rendered table drops the cursor into it, revealing the Markdown.
+    // Clicking a rendered table drops the cursor into it, revealing the Markdown: at the end of the
+    // text of the cell clicked.
     const tw = e.target.closest?.('.cm-table-widget');
     if (tw && e.button === 0) {
       e.preventDefault();
-      const pos = view.posAtDOM(tw);
       view.focus();
-      view.dispatch({ selection: { anchor: Math.min(pos + 2, view.state.doc.lineAt(pos).to) } });
+      view.dispatch({ selection: { anchor: tableCellPos(view.state, view.posAtDOM(tw), tw, e.target.closest('td, th')) } });
       return true;
     }
     const el = e.target.closest?.('[data-link],[data-url],[data-tag]');
