@@ -901,6 +901,9 @@ const livePreview = [livePlugin, blockField, clickHandler, skipProps,
 
 // ------------------------------------------------------------------ commands
 
+// The find bar's words, in the app's sentence case.
+const SEARCH_PHRASES = { 'next': 'Next', 'previous': 'Previous', 'all': 'All', 'match case': 'Match case', 'regexp': 'Regex', 'by word': 'Whole word', 'replace': 'Replace', 'replace all': 'Replace all', 'close': 'Close' };
+
 // Bold, italic and the like toggle: off when the selection is already wrapped (just outside it, or
 // at its own ends), on otherwise. Runs of * and _ are counted, so Ctrl+I on **bold** makes
 // ***bold italic*** rather than taking a * off each side, and Ctrl+B on that gives back *italic*.
@@ -1656,6 +1659,7 @@ function create(parent, hooks, opts = {}) {
     closeBrackets(),
     autocompletion({ override: [completions], icons: false, activateOnTyping: true }),
     search({ top: true }),
+    EditorState.phrases.of(SEARCH_PHRASES),
     highlightSelectionMatches(),
     syntaxHighlighting(classHighlighter),
     syntaxHighlighting(markStyle),
