@@ -324,7 +324,10 @@ const ed = CinderEditor.create($('#editor'), editorHooks(() => S.cur, {
   onCursor: () => cursorMoved(),
   onVimStatus: st => { vimNow = st; updateStatus(); },
   // Ctrl+Alt+click opens the link in the other pane (the canvas-card editors don't have one).
-  follow: (name, sub, o) => followLink(name, sub, S.cur, { split: !!o?.other }),
+  follow: (name, sub, o) => {
+    const t = o?.tab && resolveLink(name, S.cur);
+    return t ? openInNewTab(t, { heading: sub || undefined }) : followLink(name, sub, S.cur, { split: !!o?.other });
+  },
   onFiles: (files, pasted) => { (async () => { for (const f of files) await attachAndLink(f, pasted); })(); },
   focusTitle: () => { titleEl.focus(); titleEl.setSelectionRange(titleEl.value.length, titleEl.value.length); },
 }), { vim: cfg.vim, focus: cfg.focusMode, typewriter: cfg.typewriter });

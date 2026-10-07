@@ -11,6 +11,8 @@ const ex = p => fs.existsSync(path.join(VAULT, p));
   w('Gamma.md', '# Gamma\nsee [[Delta]]\n');
   w('Delta.md', '# Delta\n');
   w('Docs/Old.md', '# Old\n');
+  w('Links.md', '# Links\ngo to [[Target]]\n');
+  w('Target.md', '# Target\n');
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 900 } });
   const errors = [];
@@ -95,6 +97,17 @@ const ex = p => fs.existsSync(path.join(VAULT, p));
   await page.click(row('Grouped/Alpha.md'), { button: 'right' }); await page.click('.menu >> text=Delete 2 items'); await sleep(1200);
   assert(!ex('Grouped/Beta.md') && !ex('Grouped/Alpha.md') && ex('Grouped/Gamma.md'), 'Delete N items (after one confirmation)');
   assert(await page.evaluate(() => S.tabs.every(t => t.key === null || S.files.has(t.key))), 'tabs of deleted files close');
+
+  console.log('Ctrl+click on a link');
+  await page.evaluate(async () => { while (S.tabs.length > 1) await closeTab(S.tabs.length - 1); await openPath('Links.md'); }); await sleep(400);
+  await page.evaluate(() => setMode('edit')); await sleep(200);
+  await page.click('#editor .cm-content [data-link="Target"]', { modifiers: ['Control'] }); await sleep(500);
+  assert(JSON.stringify(await tabs()) === '["Links","*Target"]', 'Ctrl+click on a link in the editor opens it in a new tab: ' + JSON.stringify(await tabs()));
+  await page.evaluate(async () => { await closeTab(1); await openPath('Links.md'); }); await sleep(400);
+  await page.evaluate(() => setMode('read')); await sleep(300);
+  await page.click('#preview a.internal-link', { modifiers: ['Control'] }); await sleep(500);
+  assert(JSON.stringify(await tabs()) === '["Links","*Target"]', 'and in reading view: ' + JSON.stringify(await tabs()));
+  await page.evaluate(async () => { await closeTab(1); setMode('edit'); }); await sleep(300);
 
   if (errors.length) { console.log(errors.join('\n')); process.exitCode = 1; }
   await browser.close();

@@ -269,10 +269,13 @@ const dragFreeze = ViewPlugin.fromClass(class {
     this.end = e => { if (e.type !== 'mousemove' || !(e.buttons & 1)) this.release(); };
   }
   release() {
-    for (const t of ['mouseup', 'mousemove', 'blur']) window.removeEventListener(t, this.end, true);
+    this.unlisten();
     if (this.view.state.field(dragField)) this.view.dispatch({ effects: setDrag.of(null) });
   }
-  destroy() { this.release(); }
+  unlisten() { for (const t of ['mouseup', 'mousemove', 'blur']) window.removeEventListener(t, this.end, true); }
+  // (Going with the state it belongs to, as when Ctrl+click on a link opens another note, there's
+  // nothing to put back, and dispatching then would be in the middle of that update.)
+  destroy() { this.unlisten(); }
 }, {
   eventHandlers: {
     mousedown(e, view) {
@@ -868,7 +871,9 @@ const clickHandler = EditorView.domEventHandlers({
     if (!el.dataset.live && !(e.ctrlKey || e.metaKey)) return false;
     e.preventDefault();
     const h = hooksOf(view.state);
-    if (el.dataset.link != null) h.follow(el.dataset.link, el.dataset.sub || '', { other: e.altKey && (e.ctrlKey || e.metaKey) });
+    // Ctrl+click: in a new tab; Ctrl+Alt+click: in the other pane.
+    const mod = e.ctrlKey || e.metaKey;
+    if (el.dataset.link != null) h.follow(el.dataset.link, el.dataset.sub || '', { other: e.altKey && mod, tab: mod && !e.altKey });
     else if (el.dataset.url) h.openUrl(el.dataset.url);
     else if (el.dataset.tag) h.tag(el.dataset.tag);
     return true;

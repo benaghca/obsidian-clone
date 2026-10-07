@@ -431,8 +431,13 @@ document.addEventListener('click', e => {
   const a = e.target.closest('a.internal-link');
   if (a) {
     e.preventDefault();
-    // Ctrl+Alt+click: the other pane. From the split pane the other pane is the main one, where links open anyway.
-    const split = e.altKey && (e.ctrlKey || e.metaKey) && !a.closest('#split');
+    // Ctrl+click: a new tab, as a middle-click. Ctrl+Alt+click: the other pane (from the split pane
+    // the other pane is the main one, where links open anyway).
+    const mod = e.ctrlKey || e.metaKey, split = e.altKey && mod && !a.closest('#split');
+    if (mod && !e.altKey) {
+      const t = a.dataset.path ? a.dataset.href : resolveLink(a.dataset.href, a.dataset.from || S.cur);
+      if (t) return openInNewTab(t, { heading: a.dataset.sub || undefined });
+    }
     if (a.dataset.path) return split && canSplit(a.dataset.href) ? openSplit(a.dataset.href) : openPath(a.dataset.href);
     return followLink(a.dataset.href, a.dataset.sub, a.dataset.from || S.cur, { split });
   }
