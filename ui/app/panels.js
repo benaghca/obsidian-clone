@@ -1,13 +1,17 @@
 /* Cinder app — the sidebars: search, tags, backlinks, outline. (One of the ui/app/*.js pieces that src/api.rs joins, in order, into /app.js.) */
 // ============================================================ left panels: search & tags
 
+// Which panel the left side bar shows (without opening it).
+function selectPanel(name) {
+  for (const p of $$('#left .panel')) p.hidden = p.id !== 'panel-' + name;
+  for (const b of $$('#ribbon .rb[data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
+}
 function showPanel(name, focus = false) {
   const hidden = document.body.classList.contains('app-no-left');
   const current = $$('#left .panel').find(p => !p.hidden)?.id;
   if (!focus && !hidden && current === 'panel-' + name) { toggleSide('left'); return; }
   if (hidden) toggleSide('left');
-  for (const p of $$('#left .panel')) p.hidden = p.id !== 'panel-' + name;
-  for (const b of $$('#ribbon .rb[data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
+  selectPanel(name);
   if (name === 'search') { const i = $('#search-input'); i.focus(); i.select(); }
   if (name === 'tags') renderTags();
   if (name === 'bookmarks') { loadBookmarks(); if (focus) $('#bookmark-list').focus(); }

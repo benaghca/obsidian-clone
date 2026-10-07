@@ -102,8 +102,8 @@ async function boot() {
   if (layout && !layout.right) document.body.classList.add('app-no-right');
   makeResizer($('#resize-left'), 'left');
   makeResizer($('#resize-right'), 'right');
+  selectPanel('files'); // not showPanel: that opens the side bar, undoing the saved layout and fitSides
   fitSides();
-  showPanel('files', true);
   await loadVaultSettings(); // the vault's .cinder/settings.json, before anything uses the settings
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   settingsBooted = true;
