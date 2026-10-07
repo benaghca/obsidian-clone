@@ -1715,7 +1715,7 @@ body.sticky-layout:has(#view-stickies:not([hidden])) :is(#viewbar, #statusbar) {
 body.sticky-layout #sk-home { display: inline-grid; }
 body.sticky-layout .page { padding-left: 16px; padding-right: 16px; }
 body.sticky-layout #preview { padding-left: 16px; padding-right: 16px; }
-#view-stickies { display: flex; flex-direction: column; }
+#view-stickies { position: relative; display: flex; flex-direction: column; }
 #view-stickies[hidden] { display: none; }
 
 .sk-list, .sk-page { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -1744,8 +1744,16 @@ body.sticky-layout #preview { padding-left: 16px; padding-right: 16px; }
 .sk-empty { color: var(--faint); font-style: italic; }
 .sk-thumb img { display: block; width: 100%; max-height: 180px; object-fit: cover; border-radius: var(--radius-sm); }
 .sk-file { color: var(--muted); }
-.sk-time { margin-top: 6px; font-size: var(--text-sm); color: var(--faint); text-align: right; }
+.sk-foot { display: flex; align-items: center; gap: 6px; margin-top: 6px; min-height: 24px; }
+.sk-time { margin-left: auto; font-size: var(--text-sm); color: var(--faint); }
 
+/* An open sticky lies over the list, which keeps its place underneath. */
+.sk-page { position: absolute; inset: 0; z-index: 3; background: var(--bg); }
+.sk-page.sk-enter { animation: sk-page-in var(--dur) var(--ease); }
+.sk-page.sk-leave { animation: sk-page-out var(--dur-fast) ease-in forwards; pointer-events: none; }
+@keyframes sk-page-in { from { opacity: 0; transform: translateY(14px); } }
+@keyframes sk-page-out { to { opacity: 0; transform: translateY(10px); } }
+.sk-list.covered { visibility: hidden; }
 .sk-page.tinted { background: color-mix(in srgb, var(--sticky) 9%, var(--bg)); }
 .sk-page-head { background: var(--bg2); border-bottom: 1px solid var(--border); }
 .sk-page.tinted .sk-page-head { background: color-mix(in srgb, var(--sticky) 30%, var(--bg2)); border-bottom-color: color-mix(in srgb, var(--sticky) 40%, var(--border)); }
@@ -1761,7 +1769,7 @@ body.sticky-layout #preview { padding-left: 16px; padding-right: 16px; }
 .sk-btn.sk-all { width: auto; padding: 0 8px; font-size: var(--text-sm); font-weight: 600; }
 .sk-btn:disabled { opacity: .4; cursor: default; background: none; }
 .sk-danger:not(:disabled):hover { color: var(--danger); }
-.sk-card-tools { position: absolute; top: 6px; right: 6px; display: flex; gap: 4px; opacity: 0; transition: opacity var(--dur-fast); }
+.sk-card-tools { display: flex; gap: 4px; opacity: 0; transition: opacity var(--dur-fast); }
 .sk-card:is(:hover, :focus-visible, .sel) .sk-card-tools, .sk-list.selecting .sk-card-tools { opacity: 1; }
 .sk-list.selecting .sk-card-tools .sk-danger, .sk-list.dragging .sk-card-tools { display: none; }
 .sk-mini { width: 24px; height: 24px; padding: 0; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 50%; background: var(--bg); color: var(--muted); cursor: pointer; }
@@ -1772,8 +1780,14 @@ body.sticky-layout #preview { padding-left: 16px; padding-right: 16px; }
 .sk-card.sel .sk-check { background: var(--accent); border-color: var(--accent); color: #fff; }
 .sk-card.sel .sk-check svg { opacity: 1; }
 .sk-card.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-.sk-card.dragging { opacity: .35; }
-.sk-drop { flex: none; height: 4px; margin: -2px 0; border-radius: 2px; background: var(--accent); }
+.sk-cards { -webkit-user-select: none; user-select: none; }
+.sk-card.lifted { z-index: 20; cursor: grabbing; pointer-events: none; box-shadow: 0 12px 28px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .12); scale: 1.02; rotate: -1deg; transition: scale var(--dur-fast) var(--ease), rotate var(--dur-fast) var(--ease), opacity var(--dur-fast); }
+.sk-card.lifted .sk-card-tools { opacity: 0; }
+.sk-card.lifted.to-bin { scale: .9; opacity: .85; }
+.sk-card.binned { opacity: 0; scale: .7; }
+.sk-ph { flex: none; border: 2px dashed color-mix(in srgb, var(--accent) 45%, transparent); border-radius: var(--radius-md); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.sk-card.sk-arrive { animation: sk-arrive var(--dur) var(--ease); }
+@keyframes sk-arrive { from { opacity: 0; transform: scale(.96); } }
 .sk-trash { display: none; position: absolute; left: 10px; right: 10px; bottom: 10px; height: 56px; align-items: center; justify-content: center; gap: 8px; border: 2px dashed var(--danger); border-radius: var(--radius-md); background: color-mix(in srgb, var(--danger) 8%, var(--bg)); color: var(--danger); font-weight: 600; box-shadow: var(--shadow); }
 .sk-trash svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; }
 .sk-list.dragging .sk-trash { display: flex; }

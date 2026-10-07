@@ -70,14 +70,14 @@ const stickyPinned = () => new Set(currentBoard().lanes[0].stickies.map(s => s.p
 // for a run, Space, a long press on a touch screen, or "Select" in ⋯. While picking, a click
 // picks too, and the header becomes a bar to pin, colour or delete them all.
 const stickySelecting = () => stickySelMode || stickySel.size > 0;
-const listedStickies = () => $$('#view-stickies .sk-card').map(c => c.dataset.path);
+const listedStickies = () => $$('#view-stickies .sk-cards .sk-card').map(c => c.dataset.path);
 const pickedStickies = () => listedStickies().filter(p => stickySel.has(p));
 function syncStickySel() {
   const list = $('#view-stickies .sk-list');
   if (!list) return;
   for (const c of $$('.sk-card', list)) { const on = stickySel.has(c.dataset.path); c.classList.toggle('sel', on); c.setAttribute('aria-selected', String(on)); }
   list.classList.toggle('selecting', stickySelecting());
-  $('.sk-head', list).outerHTML = stickyHeadHtml();
+  syncStickyHead(list);
 }
 function pickSticky(p, how = 'toggle') {
   const listed = listedStickies(), a = listed.indexOf(stickyAnchor), b = listed.indexOf(p);
@@ -90,18 +90,42 @@ function stopPicking() {
   syncStickySel();
 }
 
-// To .trash, after asking; the key focus goes on to the sticky after them.
+// Deleting goes straight ahead (to .trash), with Undo on the note that says so (or Ctrl+Z), which
+// puts the stickies back where they were on the board, in their colours. The key focus goes on to
+// the sticky after them.
+let stickyUndo = null;
 async function deleteStickies(paths) {
   paths = paths.filter(p => S.files.has(p));
   if (!paths.length) return;
-  const one = paths.length === 1;
-  if (!(await confirmModal(one ? 'Delete this sticky?' : `Delete ${paths.length} stickies?`, `${one ? 'It goes' : 'They go'} to the vault’s .trash folder.`, { ok: 'Delete', danger: true }))) return;
+  const board = currentBoard(), kept = [];
+  for (const p of paths) {
+    const lane = board.lanes.find(l => l.stickies.some(s => s.path === p)), i = lane ? lane.stickies.findIndex(s => s.path === p) : -1;
+    let data = S.notes.get(p)?.content ?? null;
+    if (data == null) data = await fetch(rawUrl(p), { cache: 'no-store' }).then(r => r.ok ? r.blob() : null, () => null);
+    kept.push({ path: p, data, lane: lane?.id, index: i, color: lane?.stickies[i].color || null });
+  }
   const listed = listedStickies(), rest = listed.filter(p => !paths.includes(p));
   const next = listed.slice(listed.indexOf(paths[paths.length - 1]) + 1).find(p => rest.includes(p)) || rest[rest.length - 1];
   for (const p of paths) { await deletePath(p, { confirm: false }); stickySel.delete(p); }
   if (!stickySel.size) stickySelMode = false;
   renderStickies();
-  if (next) focusStickyCard(next); else $('#view-stickies .sk-cards')?.focus();
+  if (S.view === 'stickies' && !stickyOpen) { if (next) focusStickyCard(next); else $('#view-stickies .sk-cards')?.focus(); }
+  const undo = stickyUndo = () => { stickyUndo = null; $$('.toast.has-action').forEach(t => t.remove()); return restoreStickies(kept); };
+  toast(paths.length === 1 ? 'Sticky deleted' : `${paths.length} stickies deleted`, 8000, { label: 'Undo', run: () => { if (stickyUndo === undo) undo(); } });
+}
+async function restoreStickies(kept) {
+  for (const k of kept) {
+    if (k.data == null || S.files.has(k.path)) continue;
+    try { await writeFile(k.path, k.data); } catch (e) { toast('Couldn’t put it back: ' + e.message); }
+  }
+  reindexAll(); renderTree();
+  for (const k of [...kept].sort((a, b) => a.index - b.index)) {
+    if (!S.files.has(k.path)) continue;
+    if (k.lane) await changeBoard({ move: k.path, to: k.lane, index: k.index });
+    if (k.color) await changeBoard({ color: k.path, value: k.color });
+  }
+  renderStickies();
+  if (S.view === 'stickies' && !stickyOpen && S.files.has(kept[0].path)) focusStickyCard(kept[0].path);
 }
 // Pin them all (keeping their order), or unpin them if they all are.
 async function pinStickies(paths) {
@@ -130,53 +154,118 @@ function stickyHeadHtml() {
   }
   return `<header class="sk-head">
       <button class="sk-btn sk-new" data-sk="new" title="New sticky (${esc(fmtKey('Mod-n'))})" aria-label="New sticky"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
-      <input class="field sk-search" type="search" placeholder="Search stickies" value="${esc(stickySearch)}" spellcheck="false" aria-label="Search stickies">
+      <input class="field sk-search" type="search" placeholder="Search stickies" spellcheck="false" aria-label="Search stickies">
       ${NATIVE ? `<button class="sk-btn sk-ontop${cfg.keepOnTop ? ' on' : ''}" data-sk="ontop" title="${cfg.keepOnTop ? 'Stop keeping the window on top' : 'Keep the window on top of others'}" aria-pressed="${!!cfg.keepOnTop}" aria-label="Keep on top">${PIN_ICON}</button>` : ''}
       <button class="sk-btn" data-sk="menu" title="More" aria-label="More"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg></button>
     </header>`;
 }
+// The header is only rebuilt when it changes, so the search keeps its focus and caret.
+let stickyHeadNow = '';
+function syncStickyHead(list) {
+  const html = stickyHeadHtml(), head = $('.sk-head', list);
+  if (html === stickyHeadNow && head.childElementCount) return;
+  stickyHeadNow = html;
+  const searching = head.contains(document.activeElement);
+  head.outerHTML = html;
+  const s = $('.sk-search', list);
+  if (s) { s.value = stickySearch; if (searching) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); } }
+}
 
-function renderStickies() {
+// The list stays in the view while a sticky is open (covered by it, keeping its place). Redrawing
+// keeps each card that hasn't changed, and what moved slides to its new place.
+function stickyListEl() {
   const box = $('#view-stickies');
-  if (stickyOpen) return; // the open sticky has the window; the list redraws on the way back
+  let list = $('.sk-list', box);
+  if (!list) {
+    box.insertAdjacentHTML('afterbegin', `<div class="sk-list"><header class="sk-head"></header>
+      <div class="sk-cards" role="listbox" aria-label="Stickies" aria-multiselectable="true" tabindex="-1"></div>
+      <div class="sk-trash" aria-hidden="true">${TRASH_ICON}<span>Drop here to delete</span></div></div>`);
+    list = $('.sk-list', box);
+  }
+  return list;
+}
+const stickySig = s => `${s.color || ''}|${whenOf(s.path)}|${S.notes.get(s.path)?.content ?? S.files.get(s.path)?.mtime}`;
+
+function renderStickies({ slide = true } = {}) {
+  if (skDragging) return; // (it redraws when the drag ends)
+  const list = stickyListEl(), cardsEl = $('.sk-cards', list);
   for (const p of [...stickySel]) if (!S.files.has(p)) stickySel.delete(p);
   const sections = stickySections(), total = inboxItems().length;
-  const act = box.contains(document.activeElement) ? document.activeElement : null;
-  const searching = act?.matches('.sk-search'), focusedCard = act?.closest('.sk-card')?.dataset.path, onList = act?.matches('.sk-cards');
-  const top = $('.sk-cards', box)?.scrollTop || 0;
-  box.innerHTML = `<div class="sk-list${stickySelecting() ? ' selecting' : ''}">
-    ${stickyHeadHtml()}
-    <div class="sk-cards" role="listbox" aria-label="Stickies" aria-multiselectable="true" tabindex="-1">${sections.map(({ lane, stickies }) =>
-      `<section class="sk-lane" data-lane="${esc(lane.id)}">${lane.kind === 'new' && sections.length === 1 ? '' : `<h3 class="sk-sec">${lane.kind === 'pinned' ? '📌 ' : ''}${esc(lane.name)}</h3>`}${stickies.map(s => stickyCardHtml(s)).join('')}</section>`).join('')
-      || `<div class="sk-none">${total ? 'No stickies match.' : `No stickies yet. <b>+</b> makes one; they live in <code>${esc(inboxDir())}/</code>.`}</div>`}</div>
-    <div class="sk-trash" aria-hidden="true">${TRASH_ICON}Drop here to delete</div>
-  </div>`;
-  // Text stickies show their note rendered, faded out where it runs long.
-  for (const el of $$('.sk-card .sk-text', box)) {
-    const p = el.closest('.sk-card').dataset.path, n = S.notes.get(p);
-    if (!n || !n.content.slice(n.fmLen).trim()) { el.innerHTML = '<span class="sk-empty">Empty sticky</span>'; continue; }
-    renderInto(el, n.content, p, 1);
-    if (el.scrollHeight > el.clientHeight + 2) el.classList.add('clipped');
+  const act = list.contains(document.activeElement) ? document.activeElement : null;
+  const focusedCard = act?.closest('.sk-card')?.dataset.path, onList = act === cardsEl;
+  const shown = slide && !stickyOpen && list.offsetParent !== null;
+  const old = new Map($$('.sk-card', cardsEl).map(c => [c.dataset.path, c]));
+  const before = shown ? new Map([...old.values()].map(c => [c, c.getBoundingClientRect()])) : null;
+  const top = cardsEl.scrollTop;
+  list.classList.toggle('selecting', stickySelecting());
+  syncStickyHead(list);
+  const frag = document.createDocumentFragment(), fresh = [];
+  for (const { lane, stickies } of sections) {
+    const sec = document.createElement('section');
+    sec.className = 'sk-lane'; sec.dataset.lane = lane.id;
+    if (!(lane.kind === 'new' && sections.length === 1)) sec.innerHTML = `<h3 class="sk-sec">${lane.kind === 'pinned' ? '📌 ' : ''}${esc(lane.name)}</h3>`;
+    for (const s of stickies) {
+      const sig = stickySig(s);
+      let c = old.get(s.path);
+      if (!c || c.dataset.sig !== sig) { c = stickyCardEl(s); c.dataset.sig = sig; fresh.push(c); }
+      const sel = stickySel.has(s.path);
+      c.classList.toggle('sel', sel); c.setAttribute('aria-selected', String(sel));
+      c.tabIndex = s.path === stickyFocus ? 0 : -1;
+      sec.append(c);
+    }
+    frag.append(sec);
   }
-  // Redrawing keeps the place in the list, and the key focus where it was.
-  const cardsEl = $('.sk-cards', box);
+  if (!sections.length) frag.append(Object.assign(document.createElement('div'), { className: 'sk-none', innerHTML: total ? 'No stickies match.' : `No stickies yet. <b>+</b> makes one; they live in <code>${esc(inboxDir())}/</code>.` }));
+  cardsEl.replaceChildren(frag);
+  for (const c of fresh) fillStickyCard(c);
   cardsEl.scrollTop = top;
-  if (searching) { const i = $('.sk-search', box); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
-  else if (focusedCard && $$('.sk-card', box).some(c => c.dataset.path === focusedCard)) focusStickyCard(focusedCard, false);
+  if (focusedCard && old.has(focusedCard) && $$('.sk-card', cardsEl).some(c => c.dataset.path === focusedCard)) focusStickyCard(focusedCard, false);
   else if (focusedCard || onList) cardsEl.focus({ preventScroll: true });
+  if (before) slideStickies(before, fresh.filter(c => !old.has(c.dataset.path)));
 }
-function stickyCardHtml(s) {
-  const p = s.path, sel = stickySel.has(p);
+function stickyCardEl(s) {
+  const p = s.path;
   let body;
   if (IMG_EXT.test(p)) body = `<div class="sk-thumb"><img src="${rawUrl(p)}" alt="" loading="lazy" draggable="false"></div>`;
   else if (isMd(p)) body = '<div class="sk-text markdown"></div>';
   else body = `<div class="sk-file">${esc(displayName(p))}</div>`;
-  return `<div class="sk-card${stickyColorClass(s.color)}${s.color ? ' tinted' : ''}${sel ? ' sel' : ''}" data-path="${esc(p)}" role="option" aria-selected="${sel}" draggable="true" tabindex="${p === stickyFocus ? 0 : -1}"${stickyTint(s.color)}>
-    ${body}<div class="sk-time">${esc(stickyTime(whenOf(p)))}</div>
-    <div class="sk-card-tools"><button class="sk-mini sk-danger" data-sk="card-delete" tabindex="-1" title="Delete" aria-label="Delete">${TRASH_ICON}</button><button class="sk-mini sk-check" data-sk="check" tabindex="-1" title="Select (Space)" aria-label="Select">${CHECK_ICON}</button></div></div>`;
+  const t = document.createElement('template');
+  t.innerHTML = `<div class="sk-card${stickyColorClass(s.color)}${s.color ? ' tinted' : ''}" data-path="${esc(p)}" role="option" aria-selected="false" tabindex="-1"${stickyTint(s.color)}>
+    ${body}<div class="sk-foot"><span class="sk-card-tools"><button class="sk-mini sk-check" data-sk="check" tabindex="-1" title="Select (Space)" aria-label="Select">${CHECK_ICON}</button><button class="sk-mini sk-danger" data-sk="card-delete" tabindex="-1" title="Delete (Del)" aria-label="Delete">${TRASH_ICON}</button></span><span class="sk-time">${esc(stickyTime(whenOf(p)))}</span></div></div>`;
+  return /** @type {HTMLElement} */ (t.content.firstElementChild);
+}
+// Text stickies show their note rendered, faded out where it runs long.
+function fillStickyCard(c) {
+  const el = $('.sk-text', c);
+  if (!el) return;
+  const p = c.dataset.path, n = S.notes.get(p);
+  if (!n || !n.content.slice(n.fmLen).trim()) { el.innerHTML = '<span class="sk-empty">Empty sticky</span>'; return; }
+  renderInto(el, n.content, p, 1);
+  el.classList.toggle('clipped', el.scrollHeight > el.clientHeight + 2);
+}
+// Each element in `before` (element → where it was) slides from there to where it is now; `arrived`
+// ones fade in.
+function slideStickies(before, arrived = []) {
+  const moving = [];
+  for (const [el, was] of before) {
+    if (!el.isConnected || el.classList.contains('lifted')) continue;
+    const r = el.getBoundingClientRect(), dx = was.left - r.left, dy = was.top - r.top;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
+    el.style.transition = 'none';
+    el.style.transform = `translate(${dx}px, ${dy}px)`;
+    moving.push(el);
+  }
+  for (const el of arrived) { el.classList.remove('sk-arrive'); el.classList.add('sk-arrive'); }
+  if (!moving.length) return;
+  void document.body.offsetWidth; // (they start from where they were)
+  for (const el of moving) {
+    el.style.transition = 'transform var(--dur) var(--ease)';
+    el.style.transform = '';
+    el.addEventListener('transitionend', () => { el.style.transition = ''; }, { once: true });
+  }
 }
 function focusStickyCard(p = stickyFocus, scroll = true) {
-  const cards = $$('#view-stickies .sk-card');
+  const cards = $$('#view-stickies .sk-cards .sk-card');
   const c = cards.find(x => x.dataset.path === p) || cards[0];
   if (!c) return $('#view-stickies .sk-search')?.focus();
   stickyFocus = c.dataset.path;
@@ -196,21 +285,21 @@ async function newSticky() {
   await openSticky(path);
 }
 
-// A sticky filling the window: its colour as the header (back, colours, pin, delete), the note in
-// the live-preview editor, and a formatting bar.
+// A sticky filling the window, over the list: its colour as the header (back, colours, pin,
+// delete), the note in the live-preview editor, and a formatting bar.
 async function openSticky(p) {
   if (S.view !== 'stickies') await openStickies();
   await closeSticky(false);
   if (!isMd(p)) return openPath(p); // a photo or a file opens as itself
   const s = currentBoard().lanes.flatMap(l => l.stickies.map(x => ({ ...x, pinned: l.kind === 'pinned' }))).find(x => x.path === p) || { path: p, color: null, pinned: false };
-  const box = $('#view-stickies');
-  box.innerHTML = `<div class="sk-page${stickyColorClass(s.color)}${s.color ? ' tinted' : ''}"${stickyTint(s.color)} data-path="${esc(p)}">
+  const box = $('#view-stickies'), list = stickyListEl();
+  box.insertAdjacentHTML('beforeend', `<div class="sk-page sk-enter${stickyColorClass(s.color)}${s.color ? ' tinted' : ''}"${stickyTint(s.color)} data-path="${esc(p)}">
     <header class="sk-page-head">
       <button class="sk-btn" data-sk="back" title="Back to the stickies (Esc)" aria-label="Back to the stickies"><svg viewBox="0 0 24 24"><path d="m15 6-6 6 6 6"/></svg></button>
       <span class="sk-grow"></span>
       <span class="sk-colors">${STICKY_COLORS.map(([c, name]) => `<button class="ib-dot c-${c}${s.color === c ? ' on' : ''}" data-sk="color" data-color="${c}" title="${name}" aria-label="${name}"></button>`).join('')}<button class="ib-dot plain${s.color ? '' : ' on'}" data-sk="color" data-color="" title="Plain" aria-label="Plain"></button></span>
       <button class="sk-btn${s.pinned ? ' on' : ''}" data-sk="pin" title="${s.pinned ? 'Unpin' : 'Pin to the top'}" aria-pressed="${s.pinned}" aria-label="Pin">${PIN_ICON}</button>
-      <button class="sk-btn" data-sk="delete" title="Delete sticky" aria-label="Delete sticky"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12"/></svg></button>
+      <button class="sk-btn" data-sk="delete" title="Delete sticky" aria-label="Delete sticky">${TRASH_ICON}</button>
     </header>
     <div class="sk-page-body markdown"></div>
     <footer class="sk-tools" aria-label="Formatting">
@@ -223,13 +312,30 @@ async function openSticky(p) {
       <span class="sk-grow"></span>
       <span class="sk-when">${esc(stickyTime(whenOf(p)))}</span>
     </footer>
-  </div>`;
-  const editor = mountCardEditor($('.sk-page-body', box), { notePath: p, onExit: () => closeSticky() });
-  if (!editor) return renderStickies();
+  </div>`);
+  const page = /** @type {HTMLElement} */ (box.lastElementChild);
+  const editor = mountCardEditor($('.sk-page-body', page), { notePath: p, onExit: () => closeSticky() });
+  if (!editor) { page.remove(); return; }
   stickyOpen = { path: p, editor };
   stickyFocus = p;
+  // The list goes out of reach under it (and out of sight once the sticky has come in).
+  list.inert = true;
+  page.addEventListener('animationend', () => { page.classList.remove('sk-enter'); if (stickyOpen?.path === p) list.classList.add('covered'); }, { once: true });
+  setTimeout(() => { if (stickyOpen?.path === p) list.classList.add('covered'); }, 400);
   editor.focus();
   document.title = `${noteName(p)} — Stickies — Cinder`;
+}
+// Takes the open sticky's page away (fading it out), uncovering the list.
+function dropStickyPage(fade = true) {
+  const box = $('#view-stickies'), list = $('.sk-list', box);
+  if (list) { list.inert = false; list.classList.remove('covered'); }
+  for (const page of $$('.sk-page', box)) {
+    if (!fade) { page.remove(); continue; }
+    page.classList.add('sk-leave');
+    const gone = () => page.remove();
+    page.addEventListener('animationend', gone, { once: true });
+    setTimeout(gone, 400);
+  }
 }
 
 // Back to the list (saving what was typed; a sticky still empty goes to .trash).
@@ -238,21 +344,22 @@ async function closeSticky(redraw = true) {
   const { path, editor } = stickyOpen;
   stickyOpen = null;
   await editor.destroy();
+  dropStickyPage(redraw);
   const n = S.notes.get(path);
   if (n && !n.content.trim()) await deletePath(path, { confirm: false });
-  if (redraw && S.view === 'stickies') { renderStickies(); document.title = `Stickies — ${VAULT} — Cinder`; requestAnimationFrame(() => focusStickyCard(S.files.has(path) ? path : null)); }
+  if (redraw && S.view === 'stickies') { renderStickies(); document.title = `Stickies — ${VAULT} — Cinder`; focusStickyCard(S.files.has(path) ? path : null); }
 }
 
 function setKeepOnTop(on) {
   cfg.keepOnTop = !!on; saveCfg();
   winCmd('ontop:' + (cfg.keepOnTop ? 'on' : 'off'));
-  if (S.view === 'stickies' && !stickyOpen) renderStickies();
+  if (S.view === 'stickies') renderStickies();
   toast(cfg.keepOnTop ? 'Cinder stays on top of other windows' : 'Cinder no longer stays on top');
 }
 
 $('#view-stickies').addEventListener('click', async e => {
-  const b = e.target.closest('[data-sk]'), card = e.target.closest('.sk-card');
-  if (skLongPressed) { skLongPressed = false; return; } // (the long press picked it)
+  const b = e.target.closest('[data-sk]'), card = e.target.closest('.sk-cards .sk-card');
+  if (skLongPressed || skJustDragged) { skLongPressed = skJustDragged = false; return; } // (the long press picked it; the drag moved it)
   if (!b && card && !e.target.closest('a')) {
     const cp = card.dataset.path;
     if (e.shiftKey) { focusStickyCard(cp, false); return pickSticky(cp, 'range'); }
@@ -262,7 +369,7 @@ $('#view-stickies').addEventListener('click', async e => {
   if (!b) return;
   const what = b.dataset.sk, p = stickyOpen?.path;
   if (what === 'check') { const cp = card.dataset.path; focusStickyCard(cp, false); return pickSticky(cp, e.shiftKey ? 'range' : 'toggle'); }
-  if (what === 'card-delete') return deleteStickies([card.dataset.path]);
+  if (what === 'card-delete') return deleteStickies(stickySel.has(card.dataset.path) ? pickedStickies() : [card.dataset.path]);
   if (what === 'unselect') { stopPicking(); return $('#view-stickies .sk-cards')?.focus(); }
   if (what === 'sel-all') { for (const x of listedStickies()) stickySel.add(x); return syncStickySel(); }
   if (what === 'sel-delete') return deleteStickies(pickedStickies());
@@ -298,13 +405,12 @@ $('#view-stickies').addEventListener('click', async e => {
     return;
   }
   if (what === 'delete') {
-    if (!(await confirmModal('Delete this sticky?', 'It goes to the vault’s .trash folder.', { ok: 'Delete', danger: true }))) return;
     const { editor } = stickyOpen;
     stickyOpen = null;
     await editor.destroy();
-    await deletePath(p, { confirm: false });
-    renderStickies(); focusStickyCard();
-    return;
+    dropStickyPage();
+    document.title = `Stickies — ${VAULT} — Cinder`;
+    return deleteStickies([p]);
   }
   if (what === 'image') {
     const inp = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*', multiple: true });
@@ -315,21 +421,22 @@ $('#view-stickies').addEventListener('click', async e => {
 $('#view-stickies').addEventListener('input', debounce(e => {
   if (!e.target.matches('.sk-search')) return;
   stickySearch = e.target.value;
-  renderStickies();
+  renderStickies({ slide: false });
 }, 120));
 $('#view-stickies').addEventListener('keydown', e => {
   if (stickyOpen) {
     if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); closeSticky(); }
     return;
   }
-  const card = e.target.closest('.sk-card'), cards = $$('#view-stickies .sk-card');
+  const card = e.target.closest('.sk-cards .sk-card'), cards = $$('#view-stickies .sk-cards .sk-card');
+  const mod = e.ctrlKey || e.metaKey;
   if (e.key === 'Escape' && stickySelecting() && !e.target.matches('.sk-search')) { e.preventDefault(); stopPicking(); $('#view-stickies .sk-cards')?.focus(); return; }
   if (e.target.matches('.sk-search')) {
     if (e.key === 'ArrowDown' || e.key === 'Enter') { e.preventDefault(); focusStickyCard(cards[0]?.dataset.path); }
-    else if (e.key === 'Escape' && stickySearch) { e.preventDefault(); stickySearch = ''; renderStickies(); }
+    else if (e.key === 'Escape' && stickySearch) { e.preventDefault(); stickySearch = ''; e.target.value = ''; renderStickies({ slide: false }); }
     return;
   }
-  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.shiftKey && e.key.toLowerCase() === 'z' && stickyUndo) { e.preventDefault(); stickyUndo(); return; }
   if (mod && e.key.toLowerCase() === 'a' && (card || e.target.matches('.sk-cards'))) { e.preventDefault(); for (const x of listedStickies()) stickySel.add(x); return syncStickySel(); }
   if (!card) {
     if (e.target.matches('.sk-cards') && e.key === 'ArrowDown') { e.preventDefault(); focusStickyCard(cards[0]?.dataset.path); }
@@ -365,7 +472,7 @@ function stickyCardMenu(card, x, y) {
   ]);
 }
 $('#view-stickies').addEventListener('contextmenu', e => {
-  const card = !stickyOpen && e.target.closest('.sk-card');
+  const card = !stickyOpen && e.target.closest('.sk-cards .sk-card');
   if (!card || e.target.closest('a')) return;
   e.preventDefault();
   focusStickyCard(card.dataset.path, false);
@@ -375,7 +482,7 @@ $('#view-stickies').addEventListener('contextmenu', e => {
 // A long press on a touch screen picks a sticky (and starts picking).
 let skPress = null, skLongPressed = false;
 $('#view-stickies').addEventListener('pointerdown', e => {
-  const card = e.pointerType === 'touch' && !stickyOpen && !e.target.closest('button, a') && e.target.closest('.sk-card');
+  const card = e.pointerType === 'touch' && !stickyOpen && !e.target.closest('button, a') && e.target.closest('.sk-cards .sk-card');
   if (!card) return;
   const x0 = e.clientX, y0 = e.clientY;
   const done = () => { clearTimeout(skPress?.t); skPress = null; removeEventListener('pointerup', done); removeEventListener('pointercancel', done); removeEventListener('pointermove', moved); };
@@ -384,56 +491,104 @@ $('#view-stickies').addEventListener('pointerdown', e => {
   addEventListener('pointerup', done); addEventListener('pointercancel', done); addEventListener('pointermove', moved);
 });
 
-// Dragging a sticky: up or down the list to move it (into another section too: onto 📌 Pinned pins
-// it), or onto the bin that shows at the bottom to delete it (with the others picked, if it's one).
-let skDrag = null;
-function skDropAt(e) {
-  const lanes = $$('#view-stickies .sk-lane');
-  if (!lanes.length) return null;
-  const lane = e.target.closest?.('.sk-lane') || lanes.filter(l => l.getBoundingClientRect().top <= e.clientY).pop() || lanes[0];
-  const others = $$('.sk-card', lane).filter(c => c.dataset.path !== skDrag);
-  const before = others.find(c => { const r = c.getBoundingClientRect(); return e.clientY < r.top + r.height / 2; }) || null;
-  // Where among all the lane's stickies (the search may be hiding some) it goes.
-  const all = currentBoard().lanes.find(l => l.id === lane.dataset.lane)?.stickies.map(s => s.path).filter(q => q !== skDrag) || [];
-  const index = before ? all.indexOf(before.dataset.path) : others.length ? all.indexOf(others[others.length - 1].dataset.path) + 1 : all.length;
-  return { lane, before, index };
+// Dragging a sticky with the mouse: it lifts and follows the pointer up and down, and the others make room
+// where it would land (in another section too: under 📌 Pinned pins it). A bin shows at the bottom
+// to drop it on to delete it (with the others picked, if it's one of them). Near the top or the
+// bottom the list scrolls; Esc puts it back.
+let skDragging = null, skJustDragged = false;
+$('#view-stickies').addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch' || e.button !== 0 || stickyOpen || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const card = e.target.closest('.sk-cards .sk-card');
+  if (!card || e.target.closest('button, a, input')) return;
+  const x0 = e.clientX, y0 = e.clientY;
+  const move = ev => {
+    if (!skDragging && Math.hypot(ev.clientX - x0, ev.clientY - y0) > 6) startStickyDrag(card, x0, y0);
+    if (skDragging) { ev.preventDefault(); dragStickyTo(ev.clientX, ev.clientY); }
+  };
+  const off = () => { removeEventListener('pointermove', move); removeEventListener('pointerup', up); removeEventListener('pointercancel', up); removeEventListener('keydown', esc, true); };
+  const up = ev => { off(); if (skDragging) endStickyDrag(ev.type === 'pointerup'); };
+  const esc = ev => { if (ev.key === 'Escape' && skDragging) { ev.preventDefault(); ev.stopPropagation(); off(); endStickyDrag(false); } };
+  addEventListener('pointermove', move); addEventListener('pointerup', up); addEventListener('pointercancel', up); addEventListener('keydown', esc, true);
+});
+function startStickyDrag(card, x0, y0) {
+  const r = card.getBoundingClientRect(), list = $('#view-stickies .sk-list');
+  const ph = Object.assign(document.createElement('div'), { className: 'sk-ph' });
+  ph.style.height = r.height + 'px';
+  card.before(ph);
+  Object.assign(card.style, { position: 'fixed', left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', margin: '0', transition: 'none', transform: '' });
+  card.classList.add('lifted');
+  list.classList.add('dragging');
+  skDragging = { card, ph, path: card.dataset.path, oy: y0 - r.top, x: x0, y: y0, scroll: 0 };
+  const tick = () => {
+    const d = skDragging;
+    if (!d) return;
+    if (d.scroll) { $('#view-stickies .sk-cards').scrollTop += d.scroll; placeStickyDrag(); }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
-const skClearDrag = () => {
-  $('#view-stickies .sk-drop')?.remove();
-  $('#view-stickies .sk-list')?.classList.remove('dragging');
-  $('#view-stickies .sk-trash')?.classList.remove('over');
-  $$('#view-stickies .sk-card.dragging').forEach(c => c.classList.remove('dragging'));
-};
-$('#view-stickies').addEventListener('dragstart', e => {
-  const card = !stickyOpen && e.target.closest?.('.sk-card');
-  if (!card) return;
-  skDrag = card.dataset.path;
-  e.dataTransfer.effectAllowed = 'move';
-  e.dataTransfer.setData(STICKY_DRAG, skDrag);
-  e.dataTransfer.setData('text/plain', displayName(skDrag)); // WebKitGTK only tracks drags that carry text
-  requestAnimationFrame(() => { card.classList.add('dragging'); $('#view-stickies .sk-list')?.classList.add('dragging'); });
-});
-$('#view-stickies').addEventListener('dragover', e => {
-  if (!skDrag) return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect = 'move';
-  const trash = e.target.closest?.('.sk-trash');
-  $('#view-stickies .sk-trash')?.classList.toggle('over', !!trash);
-  const at = !trash && skDropAt(e);
-  if (!at) { $('#view-stickies .sk-drop')?.remove(); return; }
-  const mark = $('#view-stickies .sk-drop') || Object.assign(document.createElement('div'), { className: 'sk-drop' });
-  if (at.before) { if (mark.nextSibling !== at.before) at.lane.insertBefore(mark, at.before); } else if (at.lane.lastElementChild !== mark) at.lane.append(mark);
-});
-$('#view-stickies').addEventListener('drop', e => {
-  if (!skDrag) return;
-  e.preventDefault(); e.stopImmediatePropagation();
-  const p = skDrag, trash = e.target.closest?.('.sk-trash'), at = !trash && skDropAt(e);
-  skDrag = null;
-  skClearDrag();
-  if (trash) deleteStickies(stickySel.has(p) ? pickedStickies() : [p]);
-  else if (at) changeBoard({ move: p, to: at.lane.dataset.lane, index: at.index });
-});
-$('#view-stickies').addEventListener('dragend', () => { if (skDrag === null && !$('#view-stickies .sk-drop')) return; skDrag = null; skClearDrag(); });
+function dragStickyTo(x, y) {
+  const d = skDragging;
+  d.x = x; d.y = y;
+  d.card.style.top = y - d.oy + 'px'; // (it stays in its column)
+  // Near the edges the list scrolls, faster the nearer.
+  const cr = $('#view-stickies .sk-cards').getBoundingClientRect(), bin = $('#view-stickies .sk-trash').getBoundingClientRect();
+  const lo = Math.min(cr.bottom, bin.top), edge = 48;
+  d.scroll = y < cr.top + edge ? -Math.ceil((cr.top + edge - y) / 4) : y > lo - edge && y < bin.top ? Math.ceil((y - (lo - edge)) / 4) : 0;
+  placeStickyDrag();
+}
+// Moves the gap to where the dragged sticky would land, the others sliding out of its way.
+function placeStickyDrag() {
+  const d = skDragging, { x, y } = d;
+  const bin = $('#view-stickies .sk-trash'), b = bin.getBoundingClientRect();
+  const overBin = x >= b.left && x <= b.right && y >= b.top && y <= b.bottom;
+  bin.classList.toggle('over', overBin);
+  d.card.classList.toggle('to-bin', overBin);
+  if (overBin) return;
+  const lanes = $$('#view-stickies .sk-lane');
+  const lane = lanes.find(l => y < l.getBoundingClientRect().bottom) || lanes[lanes.length - 1];
+  if (!lane) return;
+  const others = $$('.sk-card', lane).filter(c => c !== d.card);
+  const before = others.find(c => { const r = c.getBoundingClientRect(); return y < r.top + r.height / 2; }) || null;
+  if (d.ph.parentElement === lane && nextCardAfter(d.ph, d.card) === before) return;
+  const els = $$('#view-stickies .sk-cards .sk-card, #view-stickies .sk-sec').filter(el => el !== d.card);
+  const at = new Map(els.map(el => [el, el.getBoundingClientRect()]));
+  if (before) lane.insertBefore(d.ph, before); else lane.append(d.ph);
+  slideStickies(at);
+}
+const nextCardAfter = (el, skip) => { let n = el.nextElementSibling; while (n && (n === skip || !n.matches('.sk-card'))) n = n.nextElementSibling; return n; };
+const prevCardBefore = (el, skip) => { let n = el.previousElementSibling; while (n && (n === skip || !n.matches('.sk-card'))) n = n.previousElementSibling; return n; };
+function endStickyDrag(commit) {
+  const d = skDragging;
+  skDragging = null;
+  skJustDragged = true; setTimeout(() => { skJustDragged = false; }, 0);
+  const list = $('#view-stickies .sk-list'), bin = $('.sk-trash', list), binned = commit && bin.classList.contains('over');
+  list.classList.remove('dragging'); bin.classList.remove('over');
+  const { card, ph, path } = d;
+  if (binned) {
+    card.classList.add('binned');
+    const at = new Map($$('.sk-cards .sk-card, .sk-sec', list).filter(el => el !== card).map(el => [el, el.getBoundingClientRect()]));
+    ph.remove();
+    slideStickies(at);
+    return deleteStickies(stickySel.has(path) ? pickedStickies() : [path]).finally(() => { if (card.isConnected && S.files.has(path)) { settleSticky(card, null); renderStickies(); } });
+  }
+  // Where it lands among all its lane's stickies (a search may be hiding some).
+  const lane = ph.closest('.sk-lane'), next = nextCardAfter(ph, card), prev = prevCardBefore(ph, card);
+  const all = currentBoard().lanes.find(l => l.id === lane?.dataset.lane)?.stickies.map(s => s.path).filter(q => q !== path) || [];
+  const index = next ? all.indexOf(next.dataset.path) : prev ? all.indexOf(prev.dataset.path) + 1 : 0;
+  if (!commit) { const home = ph; settleSticky(card, null); home.remove(); renderStickies(); return; }
+  settleSticky(card, ph);
+  if (lane) changeBoard({ move: path, to: lane.dataset.lane, index });
+}
+// Puts the dragged sticky down (in the gap, or back where it came from), gliding into place.
+function settleSticky(card, gap) {
+  const from = card.getBoundingClientRect();
+  card.classList.remove('lifted', 'binned');
+  Object.assign(card.style, { position: '', left: '', top: '', width: '', margin: '', transition: '', transform: '' });
+  if (gap) gap.replaceWith(card);
+  slideStickies(new Map([[card, from]]));
+}
+
 // Pasting or dropping pictures and files on the list adds them as stickies, as on the board.
 $('#view-stickies').addEventListener('paste', async e => {
   if (stickyOpen || e.target.matches('.sk-search')) return;
