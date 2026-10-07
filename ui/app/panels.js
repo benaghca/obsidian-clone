@@ -431,8 +431,13 @@ function unlinkedMentions(p) {
   return res;
 }
 
+let outlineDrag = null; // the Outline's heading being dragged (see moveSection)
+let outlineDrawn = '';
 function refreshPanels(light = false) {
   const body = $('#right-body');
+  // (Not while a heading is being dragged in the Outline: redrawing it would drop the drag. It's
+  // redrawn when the drag ends.)
+  if (outlineDrag) return;
   // Redrawing the pane shouldn't throw the keyboard out of it.
   const had = body.contains(document.activeElement) ? $$(RIGHT_ITEMS, body).indexOf(document.activeElement) : -1;
   renderFocusOutline();
@@ -492,9 +497,13 @@ function drawRight(body, light) {
         `<div class="r-sec markdown" style="font-size:13px"><h4>Tags</h4>${tags || '<div class="none">None.</div>'}</div>`;
     }
   } else {
-    body.innerHTML = n && n.headings.length
-      ? '<div class="r-sec">' + n.headings.map(h => `<div class="o-item" style="padding-left:${6 + (h.level - 1) * 14}px" data-heading="${esc(h.text)}">${esc(h.text)}</div>`).join('') + '</div>'
+    const html = n && n.headings.length
+      ? '<div class="r-sec">' + n.headings.map((h, i) => `<div class="o-item" style="padding-left:${6 + (h.level - 1) * 14}px" data-heading="${esc(h.text)}" data-hi="${i}" draggable="${S.view === 'note'}">${esc(h.text)}</div>`).join('') + '</div>'
       : '<div class="none">No headings.</div>';
+    // Only redrawn when it changes: a press on a heading saves the note (the editor loses the focus),
+    // and redrawing then would take the row away from under a drag starting.
+    if (!(body.dataset.tab === 'outline' && body.dataset.for === S.cur && outlineDrawn === html)) body.innerHTML = html;
+    outlineDrawn = html;
   }
   body.dataset.tab = rtab; body.dataset.for = S.cur;
 }
@@ -531,6 +540,74 @@ $('#right-body').addEventListener('contextmenu', e => {
   if (!h || !S.cur) return;
   e.preventDefault();
   menu(e.clientX, e.clientY, [['Go to heading', () => scrollToHeading(h.dataset.heading)], ['Bookmark heading', () => bookmarkHeading(h.dataset.heading)]]);
+});
+
+// Dragging a heading in the Outline moves its section (the heading and all under it, the headings
+// inside it too), as in Obsidian: dropped on the top half of another heading it goes before it, on
+// the bottom half after that heading's section. One change in the editor, so Ctrl+Z puts it back.
+function noteSections(text) {
+  const { fmLen } = splitFrontmatter(text);
+  const hs = CinderEditor.scanMarkdown(text.slice(fmLen)).headings.map(h => ({ ...h, from: h.from + fmLen }));
+  return hs.map((h, i) => {
+    const next = hs.slice(i + 1).find(x => x.level <= h.level);
+    return { level: h.level, text: h.text, from: h.from, to: next ? next.from : text.length };
+  });
+}
+// (Rows name a heading by its text and which of that name it is: the Outline is drawn from the
+// saved note, the move made in the editor's text, which may have more.)
+function moveSection(fromRow, ontoRow, below) {
+  const text = ed.value, secs = noteSections(text), rows = $$('#right-body .o-item[data-hi]');
+  const sec = row => {
+    const t = row.dataset.heading, k = rows.slice(0, rows.indexOf(row)).filter(r => r.dataset.heading === t).length;
+    return secs.filter(s => s.text === t)[k];
+  };
+  const a = sec(fromRow), b = sec(ontoRow);
+  if (!a || !b || a === b) return false;
+  const dest = below ? b.to : b.from;
+  if (dest >= a.from && dest <= a.to) return false; // (into itself)
+  // A blank line between sections, wherever this one lands; the note still ends with one newline.
+  const atEnd = dest === text.length, before = text.slice(0, dest);
+  const piece = text.slice(a.from, a.to).replace(/\s+$/, '') + (atEnd ? '\n' : '\n\n');
+  const lead = atEnd ? (before.endsWith('\n\n') ? '' : before.endsWith('\n') ? '\n' : '\n\n') : '';
+  let cut = a.from;
+  if (a.to === text.length) while (cut > 1 && text[cut - 1] === '\n' && text[cut - 2] === '\n') cut--;
+  ed.view.dispatch({ changes: [{ from: cut, to: a.to }, { from: dest, insert: lead + piece }], userEvent: 'move.section', scrollIntoView: true });
+  return true;
+}
+const outlineDrop = () => $('#right-body .o-drop') || Object.assign(document.createElement('div'), { className: 'o-drop' });
+$('#right-body').addEventListener('dragstart', e => {
+  const h = e.target.closest?.('.o-item[data-hi]');
+  if (!h || S.view !== 'note') return;
+  outlineDrag = h;
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', h.dataset.heading); // (WebKitGTK only tracks drags that carry text)
+  requestAnimationFrame(() => h.classList.add('dragging'));
+});
+$('#right-body').addEventListener('dragover', e => {
+  const h = outlineDrag != null && e.target.closest?.('.o-item[data-hi]');
+  if (!h) return;
+  e.preventDefault();
+  const r = h.getBoundingClientRect(), below = e.clientY > r.top + r.height / 2, mark = outlineDrop();
+  mark.style.marginLeft = h.style.paddingLeft;
+  if (below) h.after(mark); else h.before(mark);
+  mark.dataset.onto = h.dataset.hi; mark.dataset.below = String(below);
+});
+$('#right-body').addEventListener('drop', async e => {
+  const mark = $('#right-body .o-drop');
+  if (outlineDrag == null || !mark) return;
+  e.preventDefault();
+  const from = outlineDrag;
+  outlineDrag = null;
+  if (S.mode !== 'edit') setMode('edit');
+  const moved = moveSection(from, $(`#right-body .o-item[data-hi="${mark.dataset.onto}"]`), mark.dataset.below === 'true');
+  mark.remove();
+  if (moved) await save();
+  refreshPanels();
+});
+$('#right-body').addEventListener('dragend', () => {
+  if (outlineDrag == null && !$('#right-body .o-drop')) return;
+  outlineDrag = null;
+  refreshPanels();
 });
 
 // Backlink counts, redone only when the vault changes.

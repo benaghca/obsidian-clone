@@ -928,6 +928,8 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .o-item { padding: 2px 6px; border-radius: var(--radius-sm); cursor: pointer; color: var(--muted); font-size: var(--text-ui); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .o-item:hover { background: var(--bg-hover); color: var(--text); }
 .o-item.unresolved { opacity: .6; font-style: italic; }
+.o-item.dragging { opacity: .4; }
+.o-drop { height: 2px; margin: -1px 0; border-radius: 1px; background: var(--accent); pointer-events: none; }
 .none { color: var(--faint); font-size: var(--text-sm); padding: 4px 6px; }
 
 /* modals & pickers */

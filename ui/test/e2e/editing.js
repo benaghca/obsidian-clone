@@ -172,6 +172,20 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   const id = /#\^(\w+)\]\]$/.exec(await val())?.[1];
   assert(id && fs.readFileSync(path.join(VAULT, 'Project Plan.md'), 'utf8').includes('and simple. ^' + id), 'or by its text, and one without an id gets one: ' + await val());
 
+  console.log('moving sections in the Outline');
+  await set('# Plan\n\n## A\n\na text\n\n### A1\n\na1\n\n## B\n\nb text\n\n## C\n\nc text', 0);
+  await page.evaluate(async () => { await save(); showRight('outline'); }); await sleep(300);
+  const orow = t => `#right-body .o-item[data-heading="${t}"]`;
+  await page.dragAndDrop(orow('A'), orow('C'), { targetPosition: { x: 20, y: 18 } }); await sleep(600);
+  assert(await val() === '# Plan\n\n## B\n\nb text\n\n## C\n\nc text\n\n## A\n\na text\n\n### A1\n\na1\n', 'dragging a heading below another moves its section, the headings inside it too: ' + JSON.stringify(await val()));
+  assert(await page.$$eval('#right-body .o-item', r => r.map(x => x.textContent).join()) === 'Plan,B,C,A,A1', 'and the Outline follows');
+  await page.click('#editor .cm-content'); await page.keyboard.press('Control+z'); await sleep(200);
+  assert((await val()).startsWith('# Plan\n\n## A\n'), 'Ctrl+Z puts it back');
+  await page.evaluate(async () => { await save(); refreshPanels(); }); await sleep(300);
+  await page.dragAndDrop(orow('C'), orow('A'), { targetPosition: { x: 20, y: 2 } }); await sleep(600);
+  assert(await val() === '# Plan\n\n## C\n\nc text\n\n## A\n\na text\n\n### A1\n\na1\n\n## B\n\nb text\n', 'dropped on the top half, it goes before: ' + JSON.stringify(await val()));
+  await page.evaluate(() => showRight('backlinks'));
+
   console.log('bold and italic together');
   await set('a word here', 2, 6); await page.keyboard.press('Control+b'); await page.keyboard.press('Control+i');
   assert(await val() === 'a ***word*** here', 'Ctrl+I on bold makes it bold italic, not italic: ' + await val());
