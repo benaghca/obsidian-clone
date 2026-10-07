@@ -118,6 +118,18 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   assert(await val() === 'bold', 'and so does any paste with the setting off');
   await page.evaluate(() => { cfg.pasteHtml = true; });
 
+  console.log('bold and italic together');
+  await set('a word here', 2, 6); await page.keyboard.press('Control+b'); await page.keyboard.press('Control+i');
+  assert(await val() === 'a ***word*** here', 'Ctrl+I on bold makes it bold italic, not italic: ' + await val());
+  await page.keyboard.press('Control+b');
+  assert(await val() === 'a *word* here', 'Ctrl+B then takes the bold off, leaving it italic: ' + await val());
+  await page.keyboard.press('Control+i');
+  assert(await val() === 'a word here', 'and Ctrl+I the italic: ' + await val());
+  await set('a **word** here', 2, 10); await page.keyboard.press('Control+b');
+  assert(await val() === 'a word here', 'Ctrl+B on a selection that has the ** in it takes them off: ' + await val());
+  await set('a ~~word~~ here', 4, 8); await page.evaluate(() => ed.run('strikethrough'));
+  assert(await val() === 'a word here', 'and strikethrough still toggles off: ' + await val());
+
   console.log('the app’s keys from the editor');
   await set('Some text', 4);
   await page.keyboard.press('Control+Shift+f'); await sleep(300);

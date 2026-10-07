@@ -901,7 +901,12 @@ const livePreview = [livePlugin, blockField, clickHandler, skipProps,
 
 // ------------------------------------------------------------------ commands
 
+// Bold, italic and the like toggle: off when the selection is already wrapped (just outside it, or
+// at its own ends), on otherwise. Runs of * and _ are counted, so Ctrl+I on **bold** makes
+// ***bold italic*** rather than taking a * off each side, and Ctrl+B on that gives back *italic*.
 const wrap = (before, after = before) => view => {
+  const ch = before[0], n = before.length;
+  if (after === before && before === ch.repeat(n)) return wrapRun(view, ch, n);
   view.dispatch(view.state.changeByRange(r => {
     const s = view.state.sliceDoc(r.from - before.length, r.from), e = view.state.sliceDoc(r.to, r.to + after.length);
     if (s === before && e === after) {
@@ -911,6 +916,21 @@ const wrap = (before, after = before) => view => {
   }));
   return true;
 };
+function wrapRun(view, ch, n) {
+  const st = view.state, mark = ch.repeat(n);
+  const lead = s => { let i = 0; while (s[i] === ch) i++; return i; };
+  const back = s => lead([...s].reverse().join(''));
+  // How many of `ch` in a row mean this one is on: * alone is italic, ** bold, *** both.
+  const on = k => n === 1 && (ch === '*' || ch === '_') ? k === 1 || k >= 3 : k >= n;
+  view.dispatch(st.changeByRange(r => {
+    const out = Math.min(back(st.sliceDoc(Math.max(0, r.from - 8), r.from)), lead(st.sliceDoc(r.to, r.to + 8)));
+    if (on(out)) return { changes: [{ from: r.from - n, to: r.from }, { from: r.to, to: r.to + n }], range: EditorSelection.range(r.from - n, r.to - n) };
+    const inner = st.sliceDoc(r.from, r.to), inn = Math.min(lead(inner), back(inner));
+    if (!out && inner.length > 2 * n && 2 * inn < inner.length && on(inn)) return { changes: [{ from: r.from, to: r.from + n }, { from: r.to - n, to: r.to }], range: EditorSelection.range(r.from, r.to - 2 * n) };
+    return { changes: [{ from: r.from, insert: mark }, { from: r.to, insert: mark }], range: EditorSelection.range(r.from + n, r.to + n) };
+  }));
+  return true;
+}
 
 // app.js decides how a task line toggles (done date, next occurrence of a recurring task).
 function toggledLine(h, text) {
