@@ -38,6 +38,37 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   const p2 = ops.find(o => o[0] === 'Paragraph 2'), p1 = ops.find(o => o[0] === 'Paragraph 1');
   assert(p2[1] === 1 && p1[1] < 0.5, 'and dims all but the paragraph being written: ' + JSON.stringify(ops));
   await page.screenshot({ path: OUT + '/focus.png' });
+  // Scrolling: the light follows the middle of the window, and comes back to the cursor on a key.
+  const box = await page.$eval('#edit-wrap', e => { const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+  await page.mouse.move(box.x, box.y);
+  await page.mouse.wheel(0, 700); await sleep(500);
+  const lit = await page.evaluate(() => {
+    const w = $('#edit-wrap').getBoundingClientRect(), mid = (w.top + w.bottom) / 2;
+    const on = [...document.querySelectorAll('#view-note .cm-line.cm-focus-para')];
+    return { texts: on.map(l => l.textContent), near: on.some(l => { const r = l.getBoundingClientRect(); return Math.abs((r.top + r.bottom) / 2 - mid) < 60; }), cursorAt: ed.selectionStart === ed.value.indexOf('Paragraph 2') };
+  });
+  assert(lit.near && !lit.texts.some(t => t.startsWith('Paragraph 2')) && lit.cursorAt, 'scrolling lights the paragraph in the middle of the window, the cursor staying put: ' + JSON.stringify(lit.texts));
+  await page.keyboard.press('ArrowRight'); await sleep(400);
+  const back = await page.$$eval('#view-note .cm-line.cm-focus-para', ls => ls.map(l => l.textContent.slice(0, 11)));
+  assert(back.length === 1 && back[0] === 'Paragraph 2', 'moving the cursor brings the light back to its paragraph: ' + back.join());
+  await page.keyboard.type('x'); await sleep(400);
+  const typed = await page.$$eval('#view-note .cm-line.cm-focus-para', ls => ls.map(l => l.textContent));
+  assert(typed.length === 1 && typed[0].startsWith('Pxaragraph 2'), 'and typing keeps it there (the editor scrolling to the cursor doesn’t move it): ' + typed.map(t => t.slice(0, 12)).join());
+  await page.keyboard.press('Backspace');
+  // With Cinder's own window frame (the desktop app's), the window's buttons stay clear of the note's bar.
+  await page.evaluate(() => {
+    document.body.classList.add('frame-custom');
+    const bar = document.createElement('div'); bar.id = 'win-controls';
+    bar.innerHTML = '<button data-win="min">_</button><button data-win="max">□</button><button data-win="close" class="close">×</button>';
+    document.body.append(bar);
+  }); await sleep(200);
+  await page.mouse.move(400, 15); await sleep(300);
+  const hits = await page.$$eval('#viewbar button', bs => bs.filter(b => b.offsetParent).map(b => { const r = b.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return [b.title || b.textContent.trim(), !!hit && b.contains(hit)]; }));
+  assert(hits.length > 1 && hits.every(h => h[1]), 'in focus mode, each of the note bar’s buttons is clicked where it shows, not a window button over it: ' + JSON.stringify(hits));
+  assert(await page.$eval('#win-controls', e => +getComputedStyle(e).opacity) === 1, 'and the window’s buttons show along with the bar');
+  await page.mouse.move(600, 500); await sleep(400);
+  assert(await page.$eval('#win-controls', e => +getComputedStyle(e).opacity) === 0, 'and hide with it');
+  await page.evaluate(() => { document.body.classList.remove('frame-custom'); $('#win-controls').remove(); });
   await page.keyboard.press('Control+Alt+z'); await sleep(200);
   assert(await page.evaluate(() => !document.body.classList.contains('focus-mode')), 'Ctrl+Alt+Z leaves it');
 

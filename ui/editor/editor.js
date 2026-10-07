@@ -1432,14 +1432,40 @@ function completions(context) {
 
 // ------------------------------------------------------------------ focus mode and typewriter scrolling
 
-// Focus mode: the lines of the paragraph (or list item, or block) the cursor is in get
-// .cm-focus-para, so CSS can dim the rest.
+// Focus mode: the lines of one paragraph (or list item, or block) get .cm-focus-para, so CSS can
+// dim the rest. It's the cursor's paragraph, except while scrolling: then the one in the middle of
+// the window, so the light follows what's being read. Typing or moving the cursor brings it back.
+const focusAt = StateEffect.define();
 const focusPara = ViewPlugin.fromClass(class {
-  constructor(view) { this.deco = this.build(view); }
-  update(u) { if (u.docChanged || u.selectionSet || u.viewportChanged) this.deco = this.build(u.view); }
-  build(view) {
-    const doc = view.state.doc, head = view.state.selection.main.head;
-    let a = doc.lineAt(head).number, b = a;
+  constructor(view) {
+    this.view = view;
+    this.at = null; // the scrolled-to position, while the light follows the scrolling
+    this.quietUntil = 0; // scrolls just after an edit or a cursor move are the editor keeping the cursor in view
+    this.frame = 0;
+    this.deco = this.build();
+    this.onScroll = () => {
+      if (performance.now() < this.quietUntil || this.frame) return;
+      this.frame = requestAnimationFrame(() => {
+        this.frame = 0;
+        const box = this.scroller.getBoundingClientRect(), content = this.view.contentDOM.getBoundingClientRect();
+        const pos = this.view.posAtCoords({ x: content.left + 4, y: (Math.max(box.top, 0) + Math.min(box.bottom, innerHeight)) / 2 }, false);
+        this.view.dispatch({ effects: focusAt.of(pos) });
+      });
+    };
+    // What scrolls: the editor itself, or the page it sits in.
+    this.scroller = view.scrollDOM;
+    for (let el = view.dom.parentElement; el; el = el.parentElement) if (/(auto|scroll)/.test(getComputedStyle(el).overflowY)) { this.scroller = el; break; }
+    this.scroller.addEventListener('scroll', this.onScroll, { passive: true });
+  }
+  update(u) {
+    const moved = u.docChanged || u.selectionSet;
+    if (moved) { this.at = null; this.quietUntil = performance.now() + 250; }
+    for (const tr of u.transactions) for (const e of tr.effects) if (e.is(focusAt)) this.at = e.value;
+    if (moved || u.viewportChanged || u.transactions.some(tr => tr.effects.some(e => e.is(focusAt)))) this.deco = this.build();
+  }
+  build() {
+    const doc = this.view.state.doc, head = this.at ?? this.view.state.selection.main.head;
+    let a = doc.lineAt(Math.min(head, doc.length)).number, b = a;
     const blank = n => !doc.line(n).text.trim();
     if (!blank(a)) {
       while (a > 1 && !blank(a - 1)) a--;
@@ -1449,6 +1475,7 @@ const focusPara = ViewPlugin.fromClass(class {
     for (let n = a; n <= b; n++) out.push(Decoration.line({ class: 'cm-focus-para' }).range(doc.line(n).from));
     return Decoration.set(out);
   }
+  destroy() { this.scroller.removeEventListener('scroll', this.onScroll); cancelAnimationFrame(this.frame); }
 }, { decorations: v => v.deco });
 
 // Typewriter scrolling: the line being typed on stays in the middle of the window.

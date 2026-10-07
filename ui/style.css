@@ -1670,8 +1670,13 @@ body.focus-mode #statusbar > * { opacity: .5; transition: opacity var(--dur); }
 body.focus-mode #statusbar:hover > * { opacity: 1; }
 body.focus-mode #view-note .cm-line { opacity: .32; transition: opacity var(--dur) var(--ease); }
 body.focus-mode #view-note .cm-line.cm-focus-para, body.focus-mode #view-note .cm-editor:not(.cm-focused) .cm-line { opacity: 1; }
-body.focus-mode.frame-custom #win-controls { opacity: 0; transition: opacity var(--dur); }
-body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }
+/* In focus mode the window's buttons sit at the end of the note's bar (the top bar is hidden): the
+   bar's own buttons stop short of them, and the two show together, so no button is ever invisible
+   under the pointer (a click on ⋯ used to close the window). */
+body.focus-mode.frame-custom #viewbar { padding-right: 124px; }
+body.focus-mode.frame-custom #win-controls { height: 40px; opacity: 0; transition: opacity var(--dur); }
+body.focus-mode.frame-custom:is(:has(#viewbar:hover), :has(#viewbar:focus-within)) #win-controls, body.focus-mode.frame-custom #win-controls:hover { opacity: 1; }
+body.focus-mode.frame-custom:has(#win-controls:hover) #viewbar { opacity: 1; }
 
 /* ---------------------------------------------------------------- split pane */
 #split { flex: 1 1 0; min-width: 260px; display: flex; flex-direction: column; min-height: 0; background: var(--bg); }
