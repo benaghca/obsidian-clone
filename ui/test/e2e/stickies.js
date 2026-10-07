@@ -71,6 +71,14 @@ const has = p => fs.existsSync(path.join(VAULT, p));
   await page.click('[data-sk=back]'); await sleep(400);
   await page.fill('.sk-search', ''); await sleep(400);
 
+  console.log('leaving a sticky for a note');
+  await page.click('#view-stickies .sk-card:has-text("beds")'); await sleep(400);
+  await page.keyboard.press('End'); await page.keyboard.type(' by the fence');
+  await page.evaluate(() => openPath('Inbox/Garden.md')); await sleep(500);
+  assert(await page.evaluate(() => S.view === 'note' && ed.value.includes('by the fence')) && r('Inbox/Garden.md').includes('by the fence'), 'opening the sticky’s own note straight away shows what was just typed in it');
+  await page.click('#sk-home'); await sleep(400);
+  assert(!(await page.$('#view-stickies .sk-page')) && !(await page.$eval('#view-stickies .sk-list', l => l.classList.contains('covered') || l.inert)), 'and coming back finds the list, not a sticky left open out of sight');
+
   console.log('a note, and back');
   await page.evaluate(() => openPath('Project.md')); await sleep(500);
   assert(await page.evaluate(() => S.view === 'note') && await shown('#sk-home') && !(await shown('#left')), 'a note opens full width, with ← Stickies');

@@ -6,6 +6,9 @@
 const FILE_VIEWS = ['note', 'file', 'drawing', 'canvas', 'base'];
 function showView(v) {
   if (S.view === 'inbox' && v !== 'inbox') store('inboxSeen', Date.now()); // leaving the inbox: it's all been seen
+  // Going to another view puts away a sticky open in the sticky layout or being edited on the board.
+  if (v !== 'stickies' && stickyOpen) closeSticky(false);
+  if (v !== 'inbox' && stickyEdit) stopStickyEdit();
   S.view = v;
   for (const id of ['note', 'file', 'graph', 'drawing', 'canvas', 'base', 'tasks', 'flashcards', 'inbox', 'stickies', 'empty']) $(`#view-${id}`).hidden = id !== v;
   $('#mode-btn').hidden = v !== 'note';
@@ -41,6 +44,10 @@ async function openPath(p, opts = {}) {
   if (!p) return;
   flushDocViews();
   await save();
+  // A sticky being written in (in the sticky layout, or on the inbox board) is saved and closed
+  // first: the note may be that very sticky, and it should open with what was just typed.
+  if (stickyOpen) await closeSticky(false);
+  if (stickyEdit) await stopStickyEdit();
   rememberPos();
   if (!S.files.has(p)) { toast(`Not found: ${p}`); return; }
   if (opts.push !== false && S.hist[S.histIdx] !== p) {
