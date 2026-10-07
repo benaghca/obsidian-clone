@@ -126,6 +126,25 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   await set('> outer\n> > inner'); await page.keyboard.press('Enter'); await page.keyboard.press('Enter');
   assert(await val() === '> outer\n> > inner\n>\n> ', 'a quote in a quote ends a level at a time: ' + JSON.stringify(await val()));
 
+  console.log('folding');
+  await set('# Plan\n\n## Goals\n\nShip it.\nMore.\n\n## Tasks\n\n- Design\n  - sketch\n- Build\n', 0);
+  const lines = () => page.$$eval('#editor .cm-line', ls => ls.map(l => l.textContent).filter(Boolean).join(' / '));
+  assert(await page.$$eval('#editor .cm-fold-arrow', a => a.length) === 4, 'headings and a list item with sub-items get a fold arrow');
+  await page.hover('#editor .cm-line:has-text("Goals")'); await page.click('#editor .cm-line:has-text("Goals") .cm-fold-arrow'); await sleep(150);
+  assert(!(await lines()).includes('Ship it') && (await lines()).includes('Tasks') && (await val()).includes('Ship it.'), 'its arrow folds a heading’s section away (just from view): ' + await lines());
+  await page.hover('#editor .cm-line:has-text("Design")'); await page.click('#editor .cm-line:has-text("Design") .cm-fold-arrow'); await sleep(150);
+  assert(!(await lines()).includes('sketch') && (await lines()).includes('Build'), 'and a list item’s sub-items: ' + await lines());
+  await page.click('#editor .cm-foldPlaceholder >> nth=0'); await sleep(150);
+  assert((await lines()).includes('Ship it'), 'clicking … opens it again');
+  await page.click('#editor .cm-line:has-text("More.")'); await page.keyboard.press('Control+Shift+BracketLeft'); await sleep(150);
+  assert(!(await lines()).includes('More.'), 'Ctrl+Shift+[ folds the section the cursor is in');
+  await page.keyboard.press('Control+Shift+BracketRight'); await sleep(150);
+  assert((await lines()).includes('More.'), 'Ctrl+Shift+] unfolds it');
+  await page.keyboard.press('Control+Alt+BracketLeft'); await sleep(150);
+  assert((await lines()) === 'Plan…', 'Ctrl+Alt+[ folds everything: ' + await lines());
+  await page.keyboard.press('Control+Alt+BracketRight'); await sleep(150);
+  assert((await lines()).includes('sketch'), 'and Ctrl+Alt+] opens it all');
+
   console.log('bold and italic together');
   await set('a word here', 2, 6); await page.keyboard.press('Control+b'); await page.keyboard.press('Control+i');
   assert(await val() === 'a ***word*** here', 'Ctrl+I on bold makes it bold italic, not italic: ' + await val());

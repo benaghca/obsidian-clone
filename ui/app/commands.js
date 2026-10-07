@@ -187,7 +187,7 @@ const APP_COMMANDS = [
   ['settings', 'Settings', 'Mod-,', () => openSettings()],
 ].map((/** @type {[string, string, string, () => any]} */ [id, name, key, run]) => ({ id, name, key, run }));
 const EDITOR_COMMANDS = Object.entries(CinderEditor.commands).map(([id, c]) => ({
-  id: 'editor:' + id, name: id === 'add-property' ? c.name : `Format: ${c.name}`, key: c.key, editor: id,
+  id: 'editor:' + id, name: /^(add-property|fold|unfold|fold-all|unfold-all)$/.test(id) ? c.name : `Format: ${c.name}`, key: c.key, editor: id,
   run: inNote(() => { setMode('edit'); ed.run(id); }),
 }));
 const COMMANDS = [...APP_COMMANDS, ...EDITOR_COMMANDS];

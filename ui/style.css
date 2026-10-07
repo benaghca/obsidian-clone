@@ -303,6 +303,15 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 /* source mode shows raw markdown, lightly styled */
 .source-mode :is(#editor, .split-editor, .sk-page-body) .cm-editor { font: 14.5px/1.65 var(--font-mono); }
 
+/* folding (ui/editor/editor.js): an arrow in the margin beside a heading or list item */
+.cm-fold-arrow { position: absolute; transform: translateX(calc(-100% - 6px)); display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 1.5em; color: var(--faint); opacity: 0; cursor: pointer; border-radius: var(--radius-xs); transition: opacity var(--dur-fast); }
+.cm-fold-arrow svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; transition: transform var(--dur-fast); }
+.cm-line:hover .cm-fold-arrow, .cm-fold-arrow.folded { opacity: 1; }
+.cm-fold-arrow:hover { color: var(--text); background: var(--bg-hover); }
+.cm-fold-arrow.folded svg { transform: rotate(-90deg); }
+.cm-foldPlaceholder { background: var(--bg3) !important; border: 1px solid var(--border) !important; color: var(--muted) !important; border-radius: var(--radius-sm) !important; padding: 0 6px !important; margin: 0 4px !important; cursor: pointer; }
+.cm-foldPlaceholder:hover { color: var(--text) !important; }
+
 /* search panel & autocomplete */
 .cm-panels { background: var(--bg2) !important; color: var(--text) !important; border-color: var(--border) !important; }
 .cm-panels-top { position: sticky; top: 0; z-index: 5; }

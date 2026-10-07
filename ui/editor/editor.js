@@ -6,7 +6,7 @@
 import { EditorState, EditorSelection, StateField, StateEffect, Compartment, Prec, Annotation, Facet } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, ViewPlugin, keymap, placeholder, drawSelection, dropCursor, rectangularSelection } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentMore, indentLess, insertTab, insertNewline, moveLineUp, moveLineDown } from '@codemirror/commands';
-import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage } from '@codemirror/language';
+import { syntaxTree, syntaxHighlighting, HighlightStyle, indentUnit, LanguageDescription, LanguageSupport, StreamLanguage, foldable, foldEffect, unfoldEffect, foldedRanges, codeFolding, unfoldAll } from '@codemirror/language';
 import { markdown, markdownLanguage, insertNewlineContinueMarkupCommand, deleteMarkupBackward } from '@codemirror/lang-markdown';
 import { htmlToMarkdown } from './html-markdown.js';
 import { parser as mdParser } from '@lezer/markdown';
@@ -899,6 +899,115 @@ const enterBlock = forward => view => {
 const livePreview = [livePlugin, blockField, clickHandler, skipProps,
   Prec.high(keymap.of([{ key: 'ArrowUp', run: enterBlock(false) }, { key: 'ArrowDown', run: enterBlock(true) }]))];
 
+// ------------------------------------------------------------------ folding
+
+// Headings fold their section and list items their sub-items, as in Obsidian. An arrow shows in
+// the margin beside such a line while the pointer is on it, and stays, turned, while it's folded;
+// the hidden part shows as … (a click opens it again). Ctrl+Shift+[ and ] fold and unfold where the
+// cursor is, Ctrl+Alt+[ and ] everything.
+function foldRangeOf(state, line) {
+  if (/^#{1,6}[ \t]/.test(line.text)) {
+    const r = foldable(state, line.from, line.to);
+    return r && trimFold(state, r);
+  }
+  const m = /^[ \t]*(?:[-*+]|\d+[.)])[ \t]/.exec(line.text);
+  if (!m) return null;
+  for (let n = syntaxTree(state).resolveInner(line.from + m[0].length - 1, 1); n; n = n.parent) {
+    if (n.name !== 'ListItem') continue;
+    if (state.doc.lineAt(n.from).number !== line.number) return null;
+    return n.to > line.to ? trimFold(state, { from: line.to, to: n.to }) : null;
+  }
+  return null;
+}
+// (Blank lines at the end of a section stay visible.)
+function trimFold(state, r) {
+  let to = r.to;
+  while (to > r.from && /\s/.test(state.sliceDoc(to - 1, to))) to--;
+  return to > r.from ? { from: r.from, to } : null;
+}
+function foldedAt(state, line) {
+  let found = null;
+  foldedRanges(state).between(line.to, line.to, (from, to) => { if (from === line.to) found = { from, to }; });
+  return found;
+}
+function toggleFoldLine(view, line) {
+  const open = foldedAt(view.state, line);
+  if (open) { view.dispatch({ effects: unfoldEffect.of(open) }); return true; }
+  const r = foldRangeOf(view.state, line);
+  if (!r) return false;
+  view.dispatch({ effects: foldEffect.of(r) });
+  return true;
+}
+// The heading or list item the cursor is on, or else the section it's in.
+function foldTarget(state) {
+  const head = state.selection.main.head, here = state.doc.lineAt(head);
+  if (foldRangeOf(state, here)) return here;
+  for (let n = here.number - 1; n >= 1; n--) {
+    const l = state.doc.line(n), r = /^#{1,6}[ \t]/.test(l.text) && foldRangeOf(state, l);
+    if (r && r.to >= head) return l;
+  }
+  return null;
+}
+const foldHere = view => { const l = foldTarget(view.state); return !!l && !foldedAt(view.state, l) && toggleFoldLine(view, l); };
+const unfoldHere = view => {
+  const head = view.state.selection.main.head, line = view.state.doc.lineAt(head), effects = [];
+  foldedRanges(view.state).between(line.from, line.to, (from, to) => { effects.push(unfoldEffect.of({ from, to })); });
+  if (!effects.length) { const l = foldTarget(view.state), open = l && foldedAt(view.state, l); if (open) effects.push(unfoldEffect.of(open)); }
+  if (effects.length) view.dispatch({ effects });
+  return effects.length > 0;
+};
+const foldEverything = view => {
+  const effects = [], { doc } = view.state;
+  for (let n = 1; n <= doc.lines; n++) {
+    const line = doc.line(n), r = !foldedAt(view.state, line) && foldRangeOf(view.state, line);
+    if (r) effects.push(foldEffect.of(r));
+  }
+  if (effects.length) view.dispatch({ effects });
+  return true;
+};
+class FoldArrow extends WidgetType {
+  constructor(folded) { super(); this.folded = folded; }
+  eq(o) { return o.folded === this.folded; }
+  toDOM() {
+    const s = document.createElement('span');
+    s.className = 'cm-fold-arrow' + (this.folded ? ' folded' : '');
+    s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>';
+    return s;
+  }
+  ignoreEvent() { return false; }
+}
+const FOLDABLE_LINE = /^(?:#{1,6}[ \t]|[ \t]*(?:[-*+]|\d+[.)])[ \t])/;
+const foldArrows = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = this.build(view); }
+  update(u) {
+    if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state) || foldedRanges(u.startState) !== foldedRanges(u.state)) this.decorations = this.build(u.view);
+  }
+  build(view) {
+    const out = [], { state } = view;
+    for (const { from, to } of view.visibleRanges) {
+      for (let pos = from; pos <= to;) {
+        const line = state.doc.lineAt(pos);
+        if (FOLDABLE_LINE.test(line.text) && foldRangeOf(state, line)) out.push(Decoration.widget({ widget: new FoldArrow(!!foldedAt(state, line)), side: -1 }).range(line.from));
+        pos = line.to + 1;
+      }
+    }
+    return Decoration.set(out);
+  }
+}, {
+  decorations: v => v.decorations,
+  eventHandlers: {
+    mousedown(e, view) {
+      const a = e.target.closest?.('.cm-fold-arrow');
+      if (!a) return false;
+      e.preventDefault();
+      toggleFoldLine(view, view.state.doc.lineAt(view.posAtDOM(a)));
+      return true;
+    },
+  },
+});
+const folding = [codeFolding({ placeholderText: '…' }), foldArrows];
+
 // ------------------------------------------------------------------ commands
 
 // The find bar's words, in the app's sentence case.
@@ -1233,6 +1342,10 @@ const COMMANDS = {
   'bullet-list': { name: 'Bullet list', run: toggleList('bullet'), key: 'Mod-Shift-8' },
   'numbered-list': { name: 'Numbered list', run: toggleList('numbered'), key: 'Mod-Shift-7' },
   'task-list': { name: 'Task list', run: toggleList('task'), key: 'Mod-Shift-9' },
+  fold: { name: 'Fold heading or list item', run: foldHere, key: 'Mod-Shift-[' },
+  unfold: { name: 'Unfold', run: unfoldHere, key: 'Mod-Shift-]' },
+  'fold-all': { name: 'Fold all headings and lists', run: foldEverything, key: 'Mod-Alt-[' },
+  'unfold-all': { name: 'Unfold all', run: unfoldAll, key: 'Mod-Alt-]' },
 };
 const keyBindings = keys => Object.entries(COMMANDS).flatMap(([id, c]) => {
   const k = keys && id in keys ? keys[id] : c.key;
@@ -1661,6 +1774,7 @@ function create(parent, hooks, opts = {}) {
     search({ top: true }),
     EditorState.phrases.of(SEARCH_PHRASES),
     highlightSelectionMatches(),
+    folding,
     syntaxHighlighting(classHighlighter),
     syntaxHighlighting(markStyle),
     placeholder(opts.placeholder ?? 'Start writing…'),
