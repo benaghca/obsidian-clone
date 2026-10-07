@@ -248,6 +248,7 @@ function setMode(m, silent = false) {
   $('#mode-btn').title = reading ? 'Edit (Ctrl+E)' : 'Reading view (Ctrl+E)';
   if (reading) renderPreview();
   else { ed.refresh(); if (!silent) ed.focus(); }
+  renderFocusOutline();
 }
 
 function scrollToHeading(h) {

@@ -102,6 +102,7 @@ const DEFAULTS = {
   fontMono: '',          // '' = JetBrains Mono (bundled)
   vim: false,            // Vim key bindings in the editor
   focusMode: false,      // hide the side bars and dim all but the paragraph being written
+  focusOutline: false,   // in focus mode, a quiet outline of the note beside the text
   typewriter: false,     // keep the line being typed on in the middle of the window
   statusChars: false,    // the status bar counts characters rather than words
   folderTemplates: '',
@@ -232,7 +233,7 @@ function applyTheme() {
   document.body.classList.toggle('focus-mode', !!cfg.focusMode);
   if (window.CinderGraph) CinderGraph.restyle();
   if (window.CinderDraw) CinderDraw.restyle();
-  if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
+  if (typeof S !== 'undefined') { S.version++; refreshEditorSoon(); if (S.view === 'note' && S.mode === 'read') renderPreview(); renderFocusOutline(); }
   // The desktop window's own frame (when the system draws it) follows light / dark too.
   if (window.ipc && $('meta[name=cinder-mode]')?.content === 'native') window.ipc.postMessage('win:theme:' + t);
 }
@@ -250,6 +251,7 @@ const S = {
   view: 'empty',
   mode: cfg.defaultMode,
   modeBeforeBoard: null, // the mode notes open in, while a Kanban board shows as a board
+  focusPos: 0,           // where focus mode's light is in the note (see renderFocusOutline)
   dirty: false,
   saving: false,
   hist: [], histIdx: -1,
@@ -315,6 +317,7 @@ function editorHooks(from, extra) {
 }
 
 const ed = CinderEditor.create($('#editor'), editorHooks(() => S.cur, {
+  onFocusPos: pos => { S.focusPos = pos; markFocusOutline(); },
   onChange: () => markDirty(),
   onCursor: () => cursorMoved(),
   onVimStatus: st => { vimNow = st; updateStatus(); },

@@ -1669,6 +1669,15 @@ body.focus-mode #statusbar { border-top-color: transparent; }
 body.focus-mode #statusbar > * { opacity: .5; transition: opacity var(--dur); }
 body.focus-mode #statusbar:hover > * { opacity: 1; }
 body.focus-mode #view-note .cm-line { opacity: .32; transition: opacity var(--dur) var(--ease); }
+/* The outline beside the text in focus mode: dimmed as the text is, its current section lit */
+#view-note { position: relative; }
+#focus-outline { position: absolute; left: 16px; top: 56px; width: 200px; max-height: calc(100% - 112px); overflow-y: auto; scrollbar-width: none; display: flex; flex-direction: column; gap: 1px; z-index: 2; }
+#focus-outline[hidden] { display: none; }
+.fo-item { text-align: left; border: 0; background: none; color: var(--muted); font: inherit; font-size: var(--text-sm); line-height: 1.35; padding: 3px 8px 3px calc(8px + var(--lv) * 12px); border-radius: var(--radius-sm); cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: none; opacity: .32; transition: opacity var(--dur) var(--ease), color var(--dur); }
+.fo-item.on { color: var(--text); opacity: 1; }
+#focus-outline:hover .fo-item, #focus-outline:focus-within .fo-item { opacity: 1; }
+.fo-item:hover { background: var(--bg-hover); color: var(--text); }
+.fo-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 body.focus-mode #view-note .cm-line.cm-focus-para, body.focus-mode #view-note .cm-editor:not(.cm-focused) .cm-line { opacity: 1; }
 /* In focus mode the window's buttons sit at the end of the note's bar (the top bar is hidden): the
    bar's own buttons stop short of them, and the two show together, so no button is ever invisible

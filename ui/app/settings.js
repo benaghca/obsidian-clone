@@ -31,6 +31,7 @@ const SETTINGS = [
   { k: 'livePreview', page: 'editor', name: 'Live preview', desc: 'Hide Markdown syntax except on the line you’re editing. Off shows plain source.', type: 'toggle', apply: 'theme' },
   { k: 'readable', page: 'editor', name: 'Readable line length', desc: 'Keep lines to a comfortable width instead of filling the window.', type: 'toggle', apply: 'theme' },
   { k: 'focusMode', page: 'editor', name: 'Focus mode', desc: 'Hide the side bars and tabs, and dim everything but the paragraph you’re writing. The ◎ in the status bar switches it too.', type: 'toggle', apply: 'theme' },
+  { k: 'focusOutline', page: 'editor', name: 'Outline in focus mode', desc: 'A quiet outline of the note beside the text, its current section lit with the paragraph. The ☰ in the status bar (in focus mode) switches it too.', type: 'toggle', apply: 'theme' },
   { k: 'typewriter', page: 'editor', name: 'Typewriter scrolling', desc: 'Keep the line you’re typing on in the middle of the window.', type: 'toggle', apply: 'theme' },
   { k: 'vim', page: 'editor', name: 'Vim key bindings', desc: 'Edit with Vim’s modes and motions.', type: 'toggle', apply: 'theme' },
   { k: 'pasteHtml', page: 'editor', name: 'Paste rich text as Markdown', desc: 'Text copied from a web page or a document keeps its headings, lists, links and bold as Markdown. <kbd>Ctrl+Shift+V</kbd> pastes plain text either way.', type: 'toggle' },

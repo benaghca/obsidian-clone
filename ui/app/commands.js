@@ -173,6 +173,7 @@ const APP_COMMANDS = [
   ['find', 'Find in current note', 'Mod-f', inNote(() => { setMode('edit'); ed.openSearch(); })],
   ['toggle-theme', 'Toggle light / dark theme', '', () => toggleTheme()],
   ['focus-mode', 'Toggle focus mode', 'Mod-Alt-z', () => toggleFocusMode()],
+  ['focus-outline', 'Toggle the outline in focus mode', 'Mod-Alt-o', () => toggleFocusOutline()],
   ['typewriter', 'Toggle typewriter scrolling', '', () => { cfg.typewriter = !cfg.typewriter; saveCfg(); applyTheme(); toast(cfg.typewriter ? 'Typewriter scrolling' : 'Typewriter scrolling off'); }],
   ['insert-icon', 'Insert icon (Nerd Fonts)…', '', () => insertIcon()],
   ['choose-theme', 'Change colour theme…', '', () => chooseTheme()],

@@ -336,6 +336,7 @@ function refreshPanels(light = false) {
   const body = $('#right-body');
   // Redrawing the pane shouldn't throw the keyboard out of it.
   const had = body.contains(document.activeElement) ? $$(RIGHT_ITEMS, body).indexOf(document.activeElement) : -1;
+  renderFocusOutline();
   try { drawRight(body, light); } finally {
     for (const x of $$(RIGHT_ITEMS, body)) x.tabIndex = -1;
     if (had >= 0) { const items = $$(RIGHT_ITEMS, body); items[Math.min(had, items.length - 1)]?.focus({ preventScroll: true }); }
@@ -440,6 +441,45 @@ function backlinkCount(p) {
   if (blCountCache.key !== key) blCountCache = { key, n: [...backlinksOf(p).values()].reduce((a, b) => a + b.length, 0) };
   return blCountCache.n;
 }
+// ============================================================ the outline in focus mode
+
+// A quiet outline beside the text in focus mode (cfg.focusOutline). It's dimmed as the text is,
+// but for the heading of the section that's lit: the cursor's, or while scrolling the one in the
+// middle of the window (the editor reports it, see onFocusPos). Hovering it brings it all up;
+// clicking a heading goes there. It shows only where there's room left of the text.
+function renderFocusOutline() {
+  let el = $('#focus-outline');
+  const n = cfg.focusMode && cfg.focusOutline && S.view === 'note' && S.mode === 'edit' && S.cur ? S.notes.get(S.cur) : null;
+  if (!n?.headings.length) { if (el) el.hidden = true; return; }
+  if (!el) {
+    el = document.createElement('nav');
+    el.id = 'focus-outline'; el.setAttribute('aria-label', 'Outline');
+    el.addEventListener('mousedown', e => { if (e.target.closest('.fo-item')) e.preventDefault(); }); // the editor keeps the focus
+    el.addEventListener('click', e => { const b = e.target.closest('.fo-item'); if (b) selectRange(+b.dataset.at, +b.dataset.at); });
+    $('#view-note').append(el);
+  }
+  const top = Math.min(...n.headings.map(h => h.level));
+  el.innerHTML = n.headings.map(h => `<button class="fo-item" type="button" data-at="${h.index}" style="--lv:${h.level - top}" title="${esc(h.text)}">${esc(h.text)}</button>`).join('');
+  // Room for it: the space left of the text column.
+  const page = $('#edit-wrap .page').getBoundingClientRect(), view = $('#view-note').getBoundingClientRect();
+  el.hidden = page.left + 28 - view.left < 232;
+  markFocusOutline();
+}
+function markFocusOutline() {
+  const el = $('#focus-outline');
+  if (!el || el.hidden) return;
+  let cur = null;
+  for (const b of el.children) if (+b.dataset.at <= S.focusPos) cur = b;
+  for (const b of el.children) b.classList.toggle('on', b === cur);
+  if (cur && !el.matches(':hover')) cur.scrollIntoView({ block: 'nearest' });
+}
+addEventListener('resize', debounce(() => renderFocusOutline(), 150));
+function toggleFocusOutline() {
+  cfg.focusOutline = !cfg.focusOutline; saveCfg();
+  if (cfg.focusOutline && !cfg.focusMode) toggleFocusMode(); else { renderFocusOutline(); updateStatus(); }
+  if (cfg.focusOutline && $('#focus-outline')?.hidden !== false) toast(S.notes.get(S.cur)?.headings.length ? 'The outline shows when the window is wide enough to fit it beside the text' : 'The outline shows once the note has headings');
+}
+
 function toggleFocusMode() {
   cfg.focusMode = !cfg.focusMode; saveCfg(); applyTheme(); fitSides(); updateStatus();
   toast(cfg.focusMode ? `Focus mode. ${fmtKey(keyFor(CMD_BY_ID.get('focus-mode'))) || 'The ◎ in the status bar'} brings the side bars back.` : 'Focus mode off');
@@ -451,7 +491,8 @@ function updateStatus() {
   const b = (act, text, title) => `<button class="sb" data-sb="${act}"${title ? ` title="${esc(title)}"` : ''}>${text}</button>`;
   const s = (text, title, cls = '') => `<span class="sb-t${cls && ' ' + cls}"${title ? ` title="${esc(title)}"` : ''}>${text}</span>`;
   const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
-  const focus = b('focus', `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"${cfg.focusMode ? ' fill="currentColor"' : ''}/></svg>`, cfg.focusMode ? 'Leave focus mode' : 'Focus mode: hide the side bars, dim all but the current paragraph');
+  const focus = (cfg.focusMode ? b('outline', `<svg viewBox="0 0 24 24"><path d="M5 7h14M8 12h11M11 17h8"/></svg>`, cfg.focusOutline ? 'Hide the outline' : 'Show an outline beside the text') : '')
+    + b('focus', `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"${cfg.focusMode ? ' fill="currentColor"' : ''}/></svg>`, cfg.focusMode ? 'Leave focus mode' : 'Focus mode: hide the side bars, dim all but the current paragraph');
   if (S.view === 'tasks') {
     const open = allTasks().filter(x => !x.done && !x.cancelled).length;
     left.innerHTML = '';
@@ -489,6 +530,7 @@ $('#statusbar').addEventListener('click', e => {
   else if (a === 'count') { cfg.statusChars = !cfg.statusChars; saveCfg(); updateStatus(); }
   else if (a === 'mode') { if (S.view === 'note') setMode(S.mode === 'edit' ? 'read' : 'edit'); updateStatus(); }
   else if (a === 'focus') toggleFocusMode();
+  else if (a === 'outline') toggleFocusOutline();
 });
 $('#statusbar').addEventListener('contextmenu', e => {
   if (!e.target.closest('[data-sb=mode]')) return;

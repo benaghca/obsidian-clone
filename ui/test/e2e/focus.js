@@ -8,6 +8,8 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   const para = n => Array.from({ length: 6 }, (_, i) => `Paragraph ${n} sentence ${i} goes on for a while.`).join(' ');
   w('Essay.md', `# Essay\n\n${para(1)}\n\n${para(2)}\n\n${para(3)}\n\n- [ ] fix intro\n- [ ] add sources\n` + '\nfiller\n'.repeat(60));
   w('Ref.md', 'See [[Essay]] and [[Essay]].');
+  const sec = (h, n) => `${h}\n\n` + Array.from({ length: n }, (_, i) => `${h.replace(/#+ /, '')} paragraph ${i} with some words in it.`).join('\n\n') + '\n\n';
+  w('Outlined.md', sec('# Alpha', 3) + sec('## Beta', 12) + sec('### Beta detail', 3) + sec('## Gamma', 30));
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 850 } });
   const errors = [];
@@ -69,6 +71,29 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   await page.mouse.move(600, 500); await sleep(400);
   assert(await page.$eval('#win-controls', e => +getComputedStyle(e).opacity) === 0, 'and hide with it');
   await page.evaluate(() => { document.body.classList.remove('frame-custom'); $('#win-controls').remove(); });
+  // The outline beside the text.
+  await page.evaluate(async () => { await openPath('Outlined.md'); setMode('edit'); const i = ed.value.indexOf('Beta paragraph 2'); ed.setSelectionRange(i); ed.focus(); }); await sleep(400);
+  assert(!(await page.$('#focus-outline:not([hidden])')), 'the outline is off to begin with');
+  await page.keyboard.press('Control+Alt+o'); await sleep(400);
+  const fo = () => page.$$eval('#focus-outline .fo-item', bs => bs.map(b => [b.textContent, b.classList.contains('on'), +getComputedStyle(b).opacity]));
+  let items = await fo();
+  assert(items.map(x => x[0]).join('|') === 'Alpha|Beta|Beta detail|Gamma', 'Ctrl+Alt+O shows an outline of the note’s headings: ' + items.map(x => x[0]).join('|'));
+  assert(await page.$eval('#focus-outline', el => { const r = el.getBoundingClientRect(), t = document.querySelector('#editor .cm-content').getBoundingClientRect(); return r.right <= t.left; }), 'beside the text, not over it');
+  assert(items.filter(x => x[1]).map(x => x[0]).join() === 'Beta' && items.find(x => x[0] === 'Beta')[2] === 1 && items.find(x => x[0] === 'Alpha')[2] < 0.5, 'its current section is lit and the rest dimmed, as the text is: ' + JSON.stringify(items));
+  await page.mouse.move(box.x, box.y); await page.mouse.wheel(0, 1600); await sleep(500);
+  assert((await fo()).filter(x => x[1]).map(x => x[0]).join() === 'Gamma', 'scrolling moves the light in the outline too: ' + JSON.stringify(await fo()));
+  await page.hover('#focus-outline .fo-item >> nth=0'); await sleep(300);
+  assert((await fo()).every(x => x[2] === 1), 'hovering the outline brings it all up');
+  await page.click('#focus-outline .fo-item:has-text("Alpha")'); await sleep(400);
+  assert(await page.evaluate(() => ed.value.slice(ed.selectionStart).startsWith('# Alpha') && ed.hasFocus()), 'clicking a heading goes there, typing can go on: ' + await page.evaluate(() => ed.value.slice(ed.selectionStart, ed.selectionStart + 10)));
+  assert((await fo()).filter(x => x[1]).map(x => x[0]).join() === 'Alpha', 'and lights it');
+  await page.setViewportSize({ width: 900, height: 850 }); await sleep(500);
+  assert(await page.$eval('#focus-outline', el => el.hidden), 'it hides where there’s no room for it beside the text');
+  await page.setViewportSize({ width: 1300, height: 850 }); await sleep(500);
+  assert(await page.$eval('#focus-outline', el => !el.hidden), 'and comes back where there is');
+  await page.click('[data-sb=outline]'); await sleep(300);
+  assert(await page.$eval('#focus-outline', el => el.hidden) && await page.evaluate(() => cfg.focusOutline === false), 'the ☰ in the status bar turns it off');
+  await page.evaluate(() => openPath('Essay.md')); await sleep(300);
   await page.keyboard.press('Control+Alt+z'); await sleep(200);
   assert(await page.evaluate(() => !document.body.classList.contains('focus-mode')), 'Ctrl+Alt+Z leaves it');
 

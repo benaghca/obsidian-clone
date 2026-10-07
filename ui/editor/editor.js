@@ -1465,6 +1465,8 @@ const focusPara = ViewPlugin.fromClass(class {
   }
   build() {
     const doc = this.view.state.doc, head = this.at ?? this.view.state.selection.main.head;
+    const report = hooksOf(this.view.state).onFocusPos;
+    if (report) queueMicrotask(() => report(head)); // the host's outline follows the light
     let a = doc.lineAt(Math.min(head, doc.length)).number, b = a;
     const blank = n => !doc.line(n).text.trim();
     if (!blank(a)) {
