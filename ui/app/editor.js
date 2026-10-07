@@ -5,10 +5,11 @@ function insertText(a, b, text, selA, selB) { ed.insert(a, b, text, selA, selB);
 
 const cursorMoved = debounce(() => updateStatus(), 150);
 
-// [[ completion: notes and attachments, aliases, and headings after '#'.
+// [[ completion: notes and attachments, aliases, headings after '#', and blocks after '#^'.
 function linkOptions(q) {
   const files = [...S.files.keys()];
   const [nm, hd] = splitOnce(q, '#');
+  if (hd?.startsWith('^')) return blockOptions(nm, hd.slice(1));
   if (hd != null) {
     const target = nm ? resolveLink(nm, S.cur) : S.cur;
     const n = target && S.notes.get(target);
@@ -19,9 +20,55 @@ function linkOptions(q) {
     .map(p => ({ label: noteName(p), detail: dirname(p), insert: linkNameFor(p, files) }));
   if (q) for (const [a, p] of S.byAlias) {
     if (out.length >= 40) break;
-    if (a.includes(q.toLowerCase())) out.push({ label: a, detail: '→ ' + noteName(p), insert: `${linkNameFor(p, files)}|${a}` });
+    if (!a.includes(q.toLowerCase())) continue;
+    const as = (S.notes.get(p)?.aliases || []).find(x => x.toLowerCase() === a) || a; // (as the note writes it)
+    out.push({ label: as, detail: '→ ' + noteName(p), insert: `${linkNameFor(p, files)}|${as}` });
   }
   return out;
+}
+
+// [[Note#^ lists the note's paragraphs and list items, as in Obsidian. One with a ^id links to it;
+// picking one without gives it an id first, at the end of its last line.
+function blockOptions(nm, q) {
+  const target = nm ? resolveLink(nm, S.cur) : S.cur, n = target && S.notes.get(target);
+  if (!n) return [];
+  const here = target === S.cur && S.view === 'note';
+  const content = here ? ed.value : n.content, lines = content.split('\n');
+  const cursorLine = here ? content.slice(0, ed.selectionStart).split('\n').length - 1 : -1;
+  const blocks = [];
+  let para = null, inCode = false;
+  const flush = () => { if (para) blocks.push(para); para = null; };
+  for (let i = content.slice(0, splitFrontmatter(content).fmLen).split('\n').length - 1; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^\s*(```|~~~)/.test(l)) { flush(); inCode = !inCode; continue; }
+    if (inCode) continue;
+    if (!l.trim() || /^#{1,6}\s/.test(l) || /^\s*\|/.test(l) || /^\s*\^[\w-]+\s*$/.test(l) || /^\s*([-*_])(\s*\1){2,}\s*$/.test(l)) { flush(); continue; }
+    if (/^\s*([-*+]|\d+[.)])\s/.test(l)) { flush(); blocks.push({ text: l, line: i }); continue; }
+    if (para) { para.text += ' ' + l.trim(); para.line = i; } else para = { text: l.trim(), line: i };
+  }
+  flush();
+  const ql = q.toLowerCase(), taken = new Set([...content.matchAll(/\s\^([\w-]+)\s*$/gm)].map(m => m[1]));
+  const newId = () => { let id; do id = Math.random().toString(36).slice(2, 8); while (taken.has(id)); taken.add(id); return id; };
+  return blocks
+    .map(b => ({ line: b.line, id: /\s\^([\w-]+)\s*$/.exec(lines[b.line])?.[1], text: b.text.replace(/\s\^[\w-]+\s*$/, '').replace(/^\s*([-*+]|\d+[.)])\s+(\[.\]\s+)?/, '').trim() }))
+    .filter(b => b.text && b.line !== cursorLine && (!ql || b.text.toLowerCase().includes(ql) || b.id?.toLowerCase().startsWith(ql)))
+    .slice(0, 30)
+    .map(b => {
+      const id = b.id || newId();
+      const label = b.text.length > 70 ? b.text.slice(0, 69) + '…' : b.text;
+      if (b.id) return { label, detail: '^' + id, insert: `${nm}#^${id}` };
+      return { label, detail: '', insert: `${nm}#^${id}`, ...(here ? { addId: { line: b.line, id } } : { onPick: () => addBlockId(target, lines[b.line], b.line, id) }) };
+    });
+}
+// Gives a block in another note its ^id (the line found again by its text, if the note has changed).
+async function addBlockId(path, text, at, id) {
+  const n = S.notes.get(path);
+  if (!n) return;
+  const lines = n.content.split('\n'), i = lines[at] === text ? at : lines.indexOf(text);
+  if (i < 0) return toast(`Couldn’t add ^${id} to ${noteName(path)}: the line has changed`);
+  lines[i] = lines[i].replace(/\s*$/, '') + ' ^' + id;
+  try { await writeFile(path, lines.join('\n'), n.mtime); } catch (e) { return toast(`Couldn’t add ^${id} to ${noteName(path)}: ${e.message}`); }
+  syncSplitPane();
 }
 
 function allTags() {

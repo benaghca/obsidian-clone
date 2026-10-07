@@ -101,7 +101,7 @@ On Linux, the native window uses WebKitGTK (`libwebkit2gtk-4.1`).
 - Proper undo and redo, multiple cursors, find and replace in the note (**Ctrl+F**), and syntax highlighting for code blocks (Python, JS/TS, JSON, Rust, SQL, shell, PowerShell)
 - `[[wikilinks]]`, `[[Note|alias]]`, `[[Note#Heading]]`, `[[Note#^block]]` and relative `[md](links.md)`. Clicking a link to a missing note creates it. An `obsidian://open?…&file=…` link (Obsidian's *Copy Obsidian URL*) to a note in this vault opens it here.
 - **Folding**, as in Obsidian: headings fold their section and list items their sub-items. An arrow shows in the margin beside such a line when the pointer is on it, and the hidden part shows as … (click to open it again). **Ctrl+Shift+[** and **]** fold and unfold where the cursor is, **Ctrl+Alt+[** and **]** everything.
-- **Block references**, as in Obsidian: end a paragraph or list item with `^id` (or put `^id` on its own line below a table, quote or list), then link to it with `[[Note#^id]]` or embed it with `![[Note#^id]]`. Reading view hides the ids.
+- **Block references**, as in Obsidian: end a paragraph or list item with `^id` (or put `^id` on its own line below a table, quote or list), then link to it with `[[Note#^id]]` or embed it with `![[Note#^id]]`. Typing `[[Note#^` lists the note's paragraphs and list items to pick from, and one picked without an id gets one. Reading view hides the ids.
 - Autocomplete as you type `[[` (add `#` to pick a heading) or a `#tag`
 - Clicking a rendered link follows it. **Ctrl+click** follows a link while its source is showing.
 - Renaming or moving a note rewrites the links that point to it across the vault (in properties and in tables' `[[Note\|alias]]` too)

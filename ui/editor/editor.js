@@ -1588,8 +1588,15 @@ function completions(context) {
         label: o.label, detail: o.detail, boost: -i,
         apply(view, _c, f, to) {
           const close = view.state.sliceDoc(to, to + 2) === ']]' ? 2 : 0;
-          const text = o.insert + ']]';
-          view.dispatch({ changes: { from: f, to: to + close, insert: text }, selection: { anchor: f + text.length } });
+          // In a table, an alias's | is written \| (or it would end the cell).
+          const inTable = /^\s*\|/.test(view.state.doc.lineAt(f).text);
+          const text = (inTable ? o.insert.replace(/(?<!\\)\|/g, '\\|') : o.insert) + ']]';
+          const changes = [{ from: f, to: to + close, insert: text }];
+          // A block of this note picked without an id gets one.
+          if (o.addId) changes.push({ from: view.state.doc.line(o.addId.line + 1).to, insert: ' ^' + o.addId.id });
+          const cs = view.state.changes(changes);
+          view.dispatch({ changes: cs, selection: { anchor: cs.mapPos(to + close, 1) } });
+          o.onPick?.();
         },
       })),
     };

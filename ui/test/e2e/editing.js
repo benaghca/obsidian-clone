@@ -10,6 +10,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log('  ✓', m); };
 (async () => {
   fs.writeFileSync(path.join(VAULT, 'Scratch.md'), '');
+  fs.writeFileSync(path.join(VAULT, 'Project Plan.md'), '---\naliases: [Roadmap]\n---\n# Project Plan\n\nShip it soon. ^goal1\n\nKeep it small\nand simple.\n');
   const browser = await chromium.launch();
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 800 } })).newPage();
   const errors = [];
@@ -154,6 +155,22 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   assert(await caret() === '| apples | 3‸ |', 'a click on a table’s cell puts the cursor at the end of that cell: ' + await caret());
   await page.keyboard.type('0');
   assert((await val()).includes('| apples | 30 |'), 'ready to type there');
+
+  console.log('link completion');
+  const complete = async (text, typed, keys = ['Enter']) => {
+    await set(text); await page.keyboard.type(typed); await sleep(400);
+    for (const k of keys) await page.keyboard.press(k);
+    await sleep(700);
+  };
+  await complete('', '[[Road');
+  assert(await val() === '[[Project Plan|Roadmap]]', 'an alias goes in as the note writes it: ' + await val());
+  await complete('| a | b |\n|---|---|\n| ', '[[Road');
+  assert((await val()).endsWith('| [[Project Plan\\|Roadmap]]'), 'and in a table its | is written \\| so the cell holds: ' + JSON.stringify(await val()));
+  await complete('', '[[Project Plan#^goal');
+  assert(await val() === '[[Project Plan#^goal1]]', '#^ finds a block by its id');
+  await complete('', '[[Project Plan#^small');
+  const id = /#\^(\w+)\]\]$/.exec(await val())?.[1];
+  assert(id && fs.readFileSync(path.join(VAULT, 'Project Plan.md'), 'utf8').includes('and simple. ^' + id), 'or by its text, and one without an id gets one: ' + await val());
 
   console.log('bold and italic together');
   await set('a word here', 2, 6); await page.keyboard.press('Control+b'); await page.keyboard.press('Control+i');
