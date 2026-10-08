@@ -242,7 +242,7 @@ $('#tree').addEventListener('click', e => {
     S.expanded.has(d) ? S.expanded.delete(d) : S.expanded.add(d);
     store('expanded', [...S.expanded]);
     renderTree();
-  } else openPath(row.dataset.path);
+  } else openPath(row.dataset.path, { focus: false }).then(() => $('#tree').focus({ preventScroll: true })); // (like Space: Del, F2 and the arrows still work)
 });
 
 $('#tree').addEventListener('auxclick', e => { const row = e.target.closest('.t-row[data-path]'); if (row && e.button === 1) { e.preventDefault(); openInNewTab(row.dataset.path); } });
