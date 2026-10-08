@@ -26,13 +26,14 @@ function graphData({ local, depth, tags, unresolved, orphans, attach, filter }) 
   if (local && S.cur && nodes.has(S.cur)) {
     const adj = new Map();
     for (const [a, b] of edges) { (adj.get(a) || adj.set(a, []).get(a)).push(b); (adj.get(b) || adj.set(b, []).get(b)).push(a); }
-    const keep = new Set([S.cur]); let frontier = [S.cur];
+    // How many links away from the open note each kept node is (the rings layout uses it).
+    const keep = new Map([[S.cur, 0]]); let frontier = [S.cur];
     for (let d = 0; d < depth; d++) {
       const nx = [];
-      for (const x of frontier) for (const y of adj.get(x) || []) if (!keep.has(y)) { keep.add(y); nx.push(y); }
+      for (const x of frontier) for (const y of adj.get(x) || []) if (!keep.has(y)) { keep.set(y, d + 1); nx.push(y); }
       frontier = nx;
     }
-    for (const id of [...nodes.keys()]) if (!keep.has(id)) nodes.delete(id);
+    for (const [id, nd] of [...nodes]) if (keep.has(id)) nd.ring = keep.get(id); else nodes.delete(id);
   } else if (!orphans) {
     for (const [id, nd] of [...nodes]) if (!nd.deg) nodes.delete(id);
   }
@@ -52,6 +53,7 @@ async function openGraph(local) {
   await save();
   rememberPos();
   $('#g-local').checked = !!local;
+  applyRings(true);
   showView('graph');
   setSaveState('');
   $('#crumbs').innerHTML = `<b>${local && S.cur ? 'Local graph · ' + esc(noteName(S.cur)) : 'Graph view'}</b>`;
@@ -103,6 +105,18 @@ $('#g-3d').checked = !!store('graph3d'); $('#g-spin').checked = !!store('graphSp
 $('#g-3d').addEventListener('change', e => { store('graph3d', e.target.checked); apply3d(); });
 $('#g-spin').addEventListener('change', e => { store('graphSpin', e.target.checked); apply3d(); });
 apply3d();
+// Rings by depth (remembered): the local graph's open note in the middle, the rest on rings by
+// how many links away they are. Only the local graph has a middle, so the box is off otherwise.
+// quiet: the graph is about to be refreshed (and re-settled) anyway.
+function applyRings(quiet = false) {
+  const local = $('#g-local').checked;
+  $('#g-rings').disabled = !local;
+  CinderGraph.setRings(local && $('#g-rings').checked, quiet);
+}
+$('#g-rings').checked = !!store('graphRings');
+$('#g-rings').addEventListener('change', e => { store('graphRings', e.target.checked); applyRings(); });
+$('#g-local').addEventListener('input', () => applyRings(true));
+applyRings();
 $('#g-clickopen').addEventListener('change', e => store('graphClickOpens', e.target.checked));
 // A live-preview editor inside a canvas card. A text card's editor reports its text through
 // onChange; a note card's edits the note itself and saves it as you type, like the main editor.
