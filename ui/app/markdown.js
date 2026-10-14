@@ -6,6 +6,8 @@ let RC = { from: null, depth: 0 }; // render context for link resolution
 // Footnotes of the note being rendered: labels with a definition, labels in the order they're first
 // referenced (their numbers), and the definitions' HTML. Null outside markdownToHtml.
 let FN = null;
+// `%% class: a b %%` alone on a line: classes for the table under it.
+const TABLE_CLASS = /^ {0,3}%%[ \t]*class:[ \t]*([\w -]*?)[ \t]*%%[ \t]*$/;
 
 marked.use({
   gfm: true,
@@ -33,6 +35,22 @@ marked.use({
     },
   },
   extensions: [
+    {
+      // `%% class: nowrap compact %%` on the line above a table: those classes go on the table, for the
+      // built-in table classes or a CSS snippet. (Obsidian reads the line as a comment, so the note
+      // still opens there.)
+      name: 'tableClass', level: 'block',
+      start(src) { const i = src.search(/^ {0,3}%%[ \t]*class:/m); return i < 0 ? undefined : i; },
+      tokenizer(src) {
+        const line = /^[^\n]*(?:\n|$)/.exec(src)[0], m = TABLE_CLASS.exec(line.replace(/\n$/, ''));
+        if (!m) return;
+        const rest = src.slice(line.length), end = rest.search(/\n[ \t]*(?:\n|$)/);
+        const tokens = this.lexer.blockTokens(end < 0 ? rest : rest.slice(0, end + 1), []);
+        const table = tokens[0]?.type === 'table' ? tokens[0] : null;
+        return { type: 'tableClass', raw: line + (table ? table.raw : ''), classes: m[1].trim().split(/\s+/).filter(Boolean), tokens: table ? [table] : [] };
+      },
+      renderer(t) { return this.parser.parse(t.tokens).replace('<table>', `<table class="${t.classes.join(' ')}">`); },
+    },
     {
       // $$ … $$ on their own lines
       name: 'blockMath', level: 'block',
@@ -144,10 +162,15 @@ function renderWiki(t) {
 }
 
 // Obsidian's %%comments%% are for editing only. Their line breaks stay, so the lines around one don't join.
+// A `%% class: … %%` line right above a table stays, for the tableClass extension to put on the table.
 function dropComments(md) {
   if (!md.includes('%%')) return md;
   let out = '', at = 0;
-  for (const [a, b] of CinderEditor.scanMarkdown(md).comments) { out += md.slice(at, a) + md.slice(a, b).replace(/[^\n]/g, ''); at = b; }
+  for (const [a, b] of CinderEditor.scanMarkdown(md).comments) {
+    const ls = md.lastIndexOf('\n', a - 1) + 1, le = md.indexOf('\n', b);
+    if (le >= 0 && TABLE_CLASS.test(md.slice(ls, le)) && md.slice(le + 1).split('\n', 1)[0].includes('|')) continue;
+    out += md.slice(at, a) + md.slice(a, b).replace(/[^\n]/g, ''); at = b;
+  }
   return out + md.slice(at);
 }
 

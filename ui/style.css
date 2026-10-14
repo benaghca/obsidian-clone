@@ -406,6 +406,11 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .markdown .table-wrap { overflow-x: auto; margin: 0 0 1em; }
 .markdown th, .markdown td { border: 1px solid var(--border); padding: 6px 12px; }
 .markdown th { background: var(--bg2); }
+/* Built-in table classes, given with `%% class: … %%` on the line above a table. */
+.markdown table.nowrap :is(th, td) { white-space: nowrap; }
+.markdown table.compact { font-size: var(--text-sm); }
+.markdown table.compact :is(th, td) { padding: 2px 8px; }
+.markdown table.full-width { width: 100%; }
 .markdown li.task { list-style: none; margin-left: -1.4em; }
 .markdown li.task > input { margin: 0 .5em 0 0; accent-color: var(--accent); transform: translateY(1px); cursor: pointer; }
 .markdown li.task.done, .markdown li.task.cancelled { color: var(--muted); text-decoration: line-through; }

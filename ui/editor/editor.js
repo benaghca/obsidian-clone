@@ -437,13 +437,17 @@ function tableCellPos(state, from, tw, cell) {
   return line.from + Math.max(at, Math.min(start + 1, end));
 }
 
+// `%% class: nowrap compact %%` alone on the line above a table gives the table those classes.
+const TABLE_CLASS = /^ {0,3}%%[ \t]*class:[ \t]*([\w -]*?)[ \t]*%%[ \t]*$/;
 class TableWidget extends WidgetType {
-  constructor(text, version, h) { super(); this.text = text; this.version = version; this.h = h; }
-  eq(o) { return o.text === this.text && o.version === this.version; }
+  constructor(text, version, h, classes = '') { super(); this.text = text; this.version = version; this.h = h; this.classes = classes; }
+  eq(o) { return o.text === this.text && o.version === this.version && o.classes === this.classes; }
   toDOM() {
     const el = document.createElement('div');
     el.className = 'cm-embed-block cm-table-widget markdown';
     this.h.renderMarkdown(el, this.text);
+    const table = el.querySelector('table');
+    if (table && this.classes) table.classList.add(...this.classes.split(/\s+/).filter(Boolean));
     return el;
   }
   // A press on the table is the editor's (to put the cursor in the cell clicked); one on a link in
@@ -815,8 +819,8 @@ function buildBlocks(state) {
       if (node.name === 'Table') {
         const from = doc.lineAt(nf).from, to = doc.lineAt(nt).to;
         if (!A.lines(from, to)) {
-          const text = doc.sliceString(from, to);
-          out.push(Decoration.replace({ widget: new TableWidget(text, h.version(), h), block: true }).range(from, to));
+          const text = doc.sliceString(from, to), above = doc.lineAt(from).number > 1 ? doc.line(doc.lineAt(from).number - 1).text : '';
+          out.push(Decoration.replace({ widget: new TableWidget(text, h.version(), h, TABLE_CLASS.exec(above)?.[1].trim()), block: true }).range(from, to));
         }
         return false;
       }

@@ -33,6 +33,21 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
   assert(await page.$eval('#preview p', p => getComputedStyle(p).color === 'rgb(0, 0, 255)'), 'editing the snippet file restyles right away');
   await page.evaluate(() => { setMode('edit'); ed.value = ed.value.replace('  - wide\n', ''); }); await sleep(500);
   assert(await page.$eval('#view-note', v => !v.classList.contains('wide') && v.classList.contains('no-title')), 'editing cssclasses updates the classes');
+
+  console.log('classes on one table');
+  w('Snippets/table.css', 'table.money td:last-child { color: rgb(0, 128, 0); }\n');
+  w('Tables.md', '%% class: nowrap money %%\n| Item | Notes | Cost |\n|---|---|---|\n| Rent | a long description that would otherwise wrap onto several lines | 1200 |\n\n%% class: compact %%\nnot a table\n\n| A | B |\n|---|---|\n| 1 | 2 |\n');
+  await sleep(50); await page.evaluate(() => loadAll()); await sleep(600);
+  await open('Tables');
+  await page.evaluate(() => setMode('read')); await sleep(400);
+  const classes = sel => page.$$eval(sel, ts => ts.map(t => t.className));
+  assert(JSON.stringify(await classes('#preview table')) === '["nowrap money",""]', '%% class: … %% above a table puts the classes on it, and only on it: ' + await classes('#preview table'));
+  assert(await page.$eval('#preview', p => !p.textContent.includes('class:') && p.textContent.includes('not a table')), 'the line itself stays hidden, like any comment');
+  assert(await page.$eval('#preview table.money td:last-child', td => getComputedStyle(td).color === 'rgb(0, 128, 0)'), 'a CSS snippet styles the table by its class');
+  assert(await page.$eval('#preview table.nowrap td', td => getComputedStyle(td).whiteSpace === 'nowrap'), 'nowrap keeps its cells on one line');
+  await page.evaluate(() => { setMode('edit'); ed.view.contentDOM.blur(); }); await sleep(400);
+  assert(JSON.stringify(await classes('#editor .cm-table-widget table')) === '["nowrap money",""]', 'and in live preview too: ' + await classes('#editor .cm-table-widget table'));
+  assert(await page.$eval('#editor .cm-table-widget table.money td:last-child', td => getComputedStyle(td).color === 'rgb(0, 128, 0)'), 'styled by the snippet there as well');
   if (errors.length) { console.log(errors.join('\n')); process.exitCode = 1; }
   await browser.close();
 })().catch(e => { console.log(e.message); process.exit(1); });
