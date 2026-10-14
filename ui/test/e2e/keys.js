@@ -11,7 +11,6 @@ const d = new Date(), TODAY = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad
   w('Notes/Alpha.md', '# Alpha\nhello world\n');
   w('Notes/Beta.md', '# Beta\n');
   w('Zeta.md', '# Zeta\nhello again\n');
-  w('Scrap.md', 'to be deleted\n');
   w('Todo.md', `- [ ] first 📅 ${TODAY}\n- [ ] second 📅 ${TODAY}\n- [ ] third 📅 ${TODAY}\n`);
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1300, height: 900 } });
@@ -50,15 +49,10 @@ const d = new Date(), TODAY = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad
   await page.keyboard.press('Escape'); await sleep(150);
   await page.keyboard.press('Escape'); await sleep(150);
   assert(/cm-content|preview/.test(await active()), 'Esc goes back to the page');
-  await page.click('#tree .t-row[data-path="Scrap.md"]'); await sleep(600);
-  assert(await page.evaluate(() => S.cur === 'Scrap.md') && await active() === 'tree', 'clicking a file opens it but stays in the tree');
-  await page.keyboard.press('Delete'); await sleep(200);
-  assert(await page.$eval('#modal-root', m => m.textContent.includes('Delete “Scrap.md”?')), 'so Del asks to delete that file');
-  await page.keyboard.press('Enter'); await sleep(500);
-  assert(!fs.existsSync(path.join(VAULT, 'Scrap.md')) && fs.existsSync(path.join(VAULT, '.trash/Scrap.md')), 'and moves it to .trash');
-  await page.click('#tree .t-row[data-path="Zeta.md"]'); await sleep(600);
-  await page.keyboard.press('Escape'); await sleep(150);
-  assert(/cm-content|preview/.test(await active()), 'Esc after a click goes to the page');
+  await page.click('#tree .t-row[data-path="Notes/Alpha.md"]'); await sleep(600);
+  assert(await page.evaluate(() => S.cur === 'Notes/Alpha.md') && /cm-content|preview/.test(await active()), 'clicking a file opens it and puts the keyboard in the page (as Obsidian)');
+  await page.keyboard.press('Control+a'); await sleep(100);
+  assert(await page.evaluate(() => document.querySelectorAll('#tree .t-row.sel, #tree .t-row[aria-selected=true]').length <= 1), 'so Ctrl+A there doesn’t select the whole tree');
 
   console.log('shortcuts sheet and sidebars');
   await page.keyboard.press('Control+/'); await sleep(200);
