@@ -299,6 +299,8 @@ html[data-theme=dark] [data-cmd=theme] .i-sun { display: inline; }
 .cm-table-widget th, .cm-table-widget td { border: 1px solid var(--border); padding: 6px 12px; }
 .cm-table-widget th { background: var(--bg2); }
 .cm-table-widget { cursor: text; overflow-x: auto; }
+/* CodeMirror's wrapping (overflow-wrap: anywhere) lets a column shrink to a letter; a table's cells break between words, and a too-wide table scrolls. */
+.cm-table-widget { white-space: normal; word-break: normal; overflow-wrap: break-word; }
 
 /* source mode shows raw markdown, lightly styled */
 .source-mode :is(#editor, .split-editor, .sk-page-body) .cm-editor { font: 14.5px/1.65 var(--font-mono); }

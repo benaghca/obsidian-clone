@@ -155,6 +155,16 @@ const assert = (c, m) => { if (!c) throw new Error('ASSERT: ' + m); console.log(
   assert(await caret() === '| apples | 3‸ |', 'a click on a table’s cell puts the cursor at the end of that cell: ' + await caret());
   await page.keyboard.type('0');
   assert((await val()).includes('| apples | 30 |'), 'ready to type there');
+  const long = 'a fairly long sentence about reconciliation that has to wrap somewhere';
+  await set(`# T\n\n| ${Array(6).fill('Heading').join(' | ')} |\n|${'---|'.repeat(6)}\n| ${Array(6).fill(long).join(' | ')} |\n\nafter`, 0);
+  await page.evaluate(() => ed.view.contentDOM.blur()); await sleep(150);
+  const split = await page.evaluate(() => [...document.querySelectorAll('#editor .cm-table-widget td')].map(td => {
+    const r = document.createRange(); r.selectNodeContents(td);
+    // Each word on a line of its own still reads; a word broken across lines doesn't.
+    const words = td.textContent.trim().split(/\s+/).length, lines = new Set([...r.getClientRects()].map(b => Math.round(b.top))).size;
+    return lines > words ? td.getBoundingClientRect().width : 0;
+  }).filter(Boolean));
+  assert(!split.length, 'a wide table wraps its cells between words, not through them: ' + split.join(', '));
 
   console.log('link completion');
   const complete = async (text, typed, keys = ['Enter']) => {
