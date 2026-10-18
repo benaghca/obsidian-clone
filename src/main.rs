@@ -1,4 +1,4 @@
-//! Cinder — a local, plugin-free, Obsidian-compatible notes app.
+//! Cinder — a local, Obsidian-compatible notes app.
 //!
 //! By default it opens its own desktop window (WebView2 on Windows) and serves
 //! the embedded UI to it through an in-process `folio://` protocol, so nothing

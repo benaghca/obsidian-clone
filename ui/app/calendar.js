@@ -54,6 +54,8 @@ const periodOf = path => { for (const k of ['day', 'week', 'month']) { const d =
 
 // Open (making it first, from its template) the periodic note for `date`.
 async function openPeriodic(kind, date = new Date(), opts = {}) {
+  const need = kind === 'day' ? 'daily-notes' : 'periodic-notes';
+  if (!pluginOn(need)) return pluginOff(need);
   const path = periodPath(kind, date);
   if (S.files.has(path)) return openPath(path, opts);
   const tname = PERIODS[kind].template();

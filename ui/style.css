@@ -113,6 +113,13 @@ body { display: flex; flex-direction: column; height: 100vh; }
 /* sidebars */
 #left, #right { flex: none; background: var(--bg2); display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
 #left { width: 260px; }
+/* Icon tabs along the top of the left sidebar, as in Obsidian (Files, Search, Bookmarks…). */
+.side-tabs { flex: none; display: flex; align-items: stretch; gap: 2px; padding: 4px 8px 0; border-bottom: 1px solid var(--border); }
+.side-tabs button { width: 32px; height: 30px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); border-radius: var(--radius-sm) var(--radius-sm) 0 0; cursor: pointer; display: grid; place-items: center; }
+.side-tabs button svg { width: 16px; height: 16px; }
+.side-tabs button:hover { color: var(--text); background: var(--bg-hover); }
+.side-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+.side-tabs button:focus-visible { outline: none; box-shadow: var(--ring); }
 #right { width: 280px; border-left: 1px solid var(--border); }
 .app-no-left #left, .app-no-left #resize-left { display: none; }
 .app-no-right #right, .app-no-right #resize-right { display: none; }
@@ -140,6 +147,9 @@ body { display: flex; flex-direction: column; height: 100vh; }
 .t-row .chev { width: 14px; height: 14px; flex: none; transition: transform var(--dur-fast); color: var(--faint); }
 .t-row.open .chev { transform: rotate(90deg); }
 .t-row .spacer { width: 14px; flex: none; }
+.t-row .tic { width: 15px; height: 15px; flex: none; color: var(--faint); }
+.t-row.folder .tic { color: var(--muted); }
+.t-row.active .tic, .t-row:hover .tic { color: var(--text); }
 .t-row .name { overflow: hidden; text-overflow: ellipsis; }
 .t-row .ext { font-size: 10px; color: var(--faint); border: 1px solid var(--border); border-radius: var(--radius-xs); padding: 0 3px; margin-left: 4px; text-transform: uppercase; }
 .t-row.folder { color: var(--text); }
@@ -918,7 +928,7 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .empty a { color: var(--link); cursor: pointer; margin-right: 6px; }
 
 /* status */
-#statusbar { height: 24px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 12px; font-size: var(--text-sm); color: var(--faint); border-top: 1px solid var(--border); }
+#statusbar { height: 24px; flex: none; display: flex; justify-content: space-between; align-items: center; padding: 0 12px; font-size: var(--text-sm); color: var(--faint); background: var(--bg2); border-top: 1px solid var(--border); }
 
 /* right panel */
 .tabs { display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); }
@@ -1417,6 +1427,8 @@ body.presenting #main { border: 0; }
 .st-page { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--muted); font-size: var(--text-ui-lg); text-align: left; cursor: pointer; }
 .st-page svg { width: 17px; height: 17px; flex: none; }
 .st-page:hover { background: var(--bg-hover); color: var(--text); }
+.st-page.st-split { margin-top: 10px; position: relative; }
+.st-page.st-split::before { content: ""; position: absolute; left: 10px; right: 10px; top: -6px; height: 1px; background: var(--border); }
 .st-page.active { background: var(--accent-soft); color: var(--text); }
 .st-page.active svg { color: var(--accent); }
 .st-page:focus-visible { outline: none; box-shadow: var(--ring); }
@@ -1430,6 +1442,7 @@ body.presenting #main { border: 0; }
 .st-row.wide, .st-row.tall { flex-direction: column; align-items: stretch; gap: var(--space-3); }
 .st-info { flex: 1; min-width: 0; }
 .st-name { display: block; font-size: var(--text-md); color: var(--text); font-weight: 500; }
+.st-plug-intro { margin: 2px 0 8px; color: var(--muted); font-size: var(--text-ui); line-height: 1.5; }
 .st-desc { margin-top: 3px; font-size: var(--text-sm); color: var(--muted); line-height: 1.45; }
 .st-desc code, .st-none code { font-size: .92em; background: var(--code-bg); padding: 0 4px; border-radius: var(--radius-xs); }
 .st-ctl { flex: none; display: flex; align-items: center; gap: var(--space-1); }

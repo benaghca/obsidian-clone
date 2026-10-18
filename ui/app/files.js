@@ -17,7 +17,7 @@ const BAD_NAME = /[\\/:*?"<>|#^\[\]]/;
 async function createNote(path, content = '', opts = {}) {
   if (S.files.has(path)) return openPath(path, opts);
   let tpl = opts.template;
-  if (!tpl && !content && isMd(path) && !DRAWING_EXT.test(path)) {
+  if (!tpl && !content && isMd(path) && !DRAWING_EXT.test(path) && (pluginOn('templates') || pluginOn('templater'))) {
     const t = folderTemplateFor(path);
     if (t) tpl = { text: S.notes.get(t).content, from: t, optional: true };
   }

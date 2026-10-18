@@ -197,7 +197,7 @@ function markdownToHtml(md, from, depth = 0) {
 function renderInto(el, content, from, depth) {
   const { fm, fmLen } = splitFrontmatter(content);
   // A Kanban plugin board, in the note's own reading view: a board whose changes edit the note.
-  if (depth === 0 && el === preview && CinderKanban.isBoard(fm)) {
+  if (depth === 0 && el === preview && pluginOn('kanban') && CinderKanban.isBoard(fm)) {
     CinderKanban.mount(el, content, {
       inline: text => taskHooks().inline(text, from),
       change: next => { if (next !== ed.value) { ed.value = next; renderPreview(); } },
@@ -205,7 +205,7 @@ function renderInto(el, content, from, depth) {
     return;
   }
   let html = '';
-  const liveProps = depth === 0 && el === preview && fmLen && cfg.properties !== 'source' && propsOf(content.slice(0, fmLen)) != null;
+  const liveProps = depth === 0 && el === preview && fmLen && pluginOn('properties') && cfg.properties !== 'source' && propsOf(content.slice(0, fmLen)) != null;
   if (liveProps) html += '<div class="props pp-host"></div>';
   else if (fm && depth === 0 && Object.keys(fm).length) {
     html += '<div class="props">' + Object.entries(fm).map(([k, v]) => {
@@ -303,19 +303,19 @@ function renderInto(el, content, from, depth) {
     bq.replaceWith(box);
   }
   for (const sp of $$('span.visual-embed[data-path]', el)) renderVisualEmbed(sp, sp.dataset.path, +sp.dataset.width || null, sp.dataset.sub);
-  for (const code of $$('pre > code.language-tasks', el)) {
+  if (pluginOn('tasks')) for (const code of $$('pre > code.language-tasks', el)) {
     const div = document.createElement('div');
     code.parentElement.replaceWith(div);
     renderTasksBlock(div, code.textContent.replace(/\n$/, ''));
   }
-  for (const code of $$('pre > code.language-dataview', el)) {
+  if (pluginOn('dataview')) for (const code of $$('pre > code.language-dataview', el)) {
     const div = document.createElement('div');
     code.parentElement.replaceWith(div);
     renderDataviewBlock(div, code.textContent, from);
   }
-  for (const code of $$('pre > code.language-dataviewjs', el)) code.parentElement.before(renderDataviewJsBlock(document.createElement('div')));
+  if (pluginOn('dataview')) for (const code of $$('pre > code.language-dataviewjs', el)) code.parentElement.before(renderDataviewJsBlock(document.createElement('div')));
   // Dataview's inline queries: `= expr`
-  for (const code of $$('code', el)) {
+  if (pluginOn('dataview')) for (const code of $$('code', el)) {
     const m = !code.closest('pre') && /^=\s+(\S[\s\S]*)$/.exec(code.textContent);
     if (m) code.replaceWith(dataviewInline(m[1], from));
   }
@@ -325,7 +325,7 @@ function renderInto(el, content, from, depth) {
     renderQueryBlock(div, code.textContent, from);
   }
   // ```base blocks become live views.
-  for (const code of $$('pre > code.language-base', el)) {
+  if (pluginOn('bases')) for (const code of $$('pre > code.language-base', el)) {
     const div = document.createElement('div');
     code.parentElement.replaceWith(div);
     renderBaseBlock(div, code.textContent.replace(/\n$/, ''), from);

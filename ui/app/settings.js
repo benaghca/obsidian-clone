@@ -9,14 +9,19 @@ const SETTINGS_PAGES = [
   { id: 'editor', name: 'Editor', icon: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/>' },
   { id: 'appearance', name: 'Appearance', icon: '<circle cx="12" cy="12" r="8.5"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17z" fill="currentColor"/>' },
   { id: 'files', name: 'Files & links', icon: '<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>' },
-  { id: 'daily', name: 'Daily & weekly notes', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>' },
-  { id: 'templates', name: 'Templates', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>' },
-  { id: 'tasks', name: 'Tasks', icon: '<rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/>' },
-  { id: 'inbox', name: 'Inbox', icon: '<path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/>' },
+  { id: 'daily', name: 'Daily & weekly notes', icon: '<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>', needs: ['daily-notes', 'periodic-notes', 'calendar'] },
+  { id: 'templates', name: 'Templates', icon: '<rect x="4" y="3.5" width="16" height="17" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>', needs: ['templates', 'templater'] },
+  { id: 'tasks', name: 'Tasks', icon: '<rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/>', needs: ['tasks'] },
+  { id: 'inbox', name: 'Inbox', icon: '<path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/>', needs: ['inbox'] },
   { id: 'media', name: 'Images & screenshots', icon: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m4 17 5-4.5 3.5 3 3-2.5 4.5 4"/>' },
-  { id: 'drawings', name: 'Drawings', icon: '<rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/>' },
+  { id: 'drawings', name: 'Drawings', icon: '<rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/>', needs: ['excalidraw'] },
   { id: 'hotkeys', name: 'Hotkeys', icon: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/>' },
+  { id: 'plugins', name: 'Core plugins', icon: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5"/>', split: true },
+  { id: 'community', name: 'Community plugins', icon: '<path d="M12 3.5 14.2 8l5 .7-3.6 3.5.9 5L12 15.8 7.5 17.2l.9-5L4.8 8.7 9.8 8z"/>' },
 ];
+// A settings page for a plugin shows only while that plugin (or one of `needs`) is on, as in Obsidian.
+const pageOn = p => !p?.needs || p.needs.some(pluginOn);
+const visiblePages = () => SETTINGS_PAGES.filter(pageOn);
 
 // type: toggle | select | text | textarea | font | custom. `folder` trims slashes from the value.
 // `apply` names what has to be redrawn after a change (see applySetting).
@@ -86,14 +91,14 @@ function openSettings(page = 'general', filter = '') {
   const back = settingsBack = modal(`<div class="st" role="dialog" aria-label="Settings">
     <nav class="st-nav">
       <input class="field st-q" type="search" placeholder="Search settings…" spellcheck="false" aria-label="Search settings">
-      <div class="st-pages" role="tablist" aria-orientation="vertical">${SETTINGS_PAGES.map(p => `<button class="st-page" role="tab" data-page="${p.id}"><svg viewBox="0 0 24 24">${p.icon}</svg><span>${esc(p.name)}</span></button>`).join('')}</div>
+      <div class="st-pages" role="tablist" aria-orientation="vertical">${visiblePages().map(p => `<button class="st-page${p.split ? ' st-split' : ''}" role="tab" data-page="${p.id}"><svg viewBox="0 0 24 24">${p.icon}</svg><span>${esc(p.name)}</span></button>`).join('')}</div>
     </nav>
     <section class="st-body"><header class="st-head"><h2></h2><button class="ib" data-x title="Close (Esc)" aria-label="Close settings"><svg viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button></header><div class="st-content"></div></section>
   </div>`);
   back.querySelector('.modal').classList.add('settings-modal');
   const q = $('.st-q', back), content = $('.st-content', back), title = $('.st-head h2', back);
   let cur = page;
-  const close = () => { back.remove(); if (settingsBack === back) settingsBack = null; };
+  const close = () => { back.remove(); if (settingsBack === back) { settingsBack = null; showSettingsPage = null; } };
 
   const show = (id, hkFilter = '') => {
     cur = id;
@@ -101,6 +106,7 @@ function openSettings(page = 'general', filter = '') {
     title.textContent = SETTINGS_PAGES.find(p => p.id === id)?.name || '';
     content.scrollTop = 0;
     if (id === 'hotkeys') { content.innerHTML = '<div class="st-hk"></div>'; mountHotkeys($('.st-hk', content), hkFilter, close); return; }
+    if (id === 'plugins' || id === 'community') { content.innerHTML = ''; mountPluginPage(content, id === 'plugins'); return; }
     content.innerHTML = '';
     for (const s of SETTINGS.filter(s => s.page === id && (!s.when || s.when()))) content.append(settingRow(s, content));
   };
@@ -111,28 +117,35 @@ function openSettings(page = 'general', filter = '') {
     title.textContent = 'Search results';
     content.innerHTML = ''; content.scrollTop = 0;
     const hay = s => `${s.name} ${(s.desc || '').replace(/<[^>]+>/g, '')} ${SETTINGS_PAGES.find(p => p.id === s.page).name}`.toLowerCase();
-    const found = SETTINGS.filter(s => s.search !== false && (!s.when || s.when()) && words.every(w => hay(s).includes(w)));
+    const found = SETTINGS.filter(s => { const pg = SETTINGS_PAGES.find(p => p.id === s.page); return pageOn(pg) && s.search !== false && (!s.when || s.when()) && words.every(w => hay(s).includes(w)); });
     let last = null;
     for (const s of found) {
       if (s.page !== last) { last = s.page; const h = document.createElement('h4'); h.className = 'st-group'; h.textContent = SETTINGS_PAGES.find(p => p.id === s.page).name; content.append(h); }
       content.append(settingRow(s, content, words));
     }
     // Commands whose name matches send the search on to Hotkeys.
-    const cmds = COMMANDS.filter(c => words.every(w => c.name.toLowerCase().includes(w))).length;
+    const cmds = COMMANDS.filter(c => (!c.plugin || pluginOn(c.plugin)) && words.every(w => c.name.toLowerCase().includes(w))).length;
+    const plugs = CinderVaultSettings.PLUGINS.filter(p => words.every(w => `${p.name} ${p.desc} ${p.core ? 'core' : 'community'} plugin`.includes(w)));
+    let plugGroup = null;
+    for (const p of plugs) {
+      const g = p.core ? 'Core plugins' : 'Community plugins';
+      if (g !== plugGroup) { plugGroup = g; const h = document.createElement('h4'); h.className = 'st-group'; h.textContent = g; content.append(h); }
+      content.append(pluginRow(p));
+    }
     if (cmds) {
       const a = document.createElement('button'); a.className = 'st-more';
       a.innerHTML = `<span>${cmds} command${cmds === 1 ? '' : 's'} in Hotkeys match</span><svg viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>`;
       a.onclick = () => { const f = q.value.trim(); q.value = ''; show('hotkeys', f); };
       content.append(a);
     }
-    if (!found.length && !cmds) content.innerHTML = `<div class="st-none">No settings match “${esc(q.value.trim())}”.</div>`;
+    if (!found.length && !cmds && !plugs.length) content.innerHTML = `<div class="st-none">No settings match “${esc(q.value.trim())}”.</div>`;
   };
 
   $('.st-pages', back).addEventListener('click', e => { const b = e.target.closest('.st-page'); if (b) { q.value = ''; show(b.dataset.page); } });
   $('.st-pages', back).addEventListener('keydown', e => {
     if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
     e.preventDefault();
-    const bs = $$('.st-page', back), i = bs.indexOf(document.activeElement);
+    const bs = $$('.st-page', back).filter(b => !b.hidden), i = bs.indexOf(document.activeElement);
     const b = bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length];
     b.focus(); q.value = ''; show(b.dataset.page);
   });
@@ -145,6 +158,7 @@ function openSettings(page = 'general', filter = '') {
     e.preventDefault();
     if (q.value && document.activeElement === q) { q.value = ''; search(); } else close();
   });
+  showSettingsPage = id => { if (settingsBack === back) show(id); };
   if (filter && page !== 'hotkeys') { q.value = filter; search(); } else show(page, filter);
   if (page !== 'hotkeys') q.focus();
   return back;
@@ -240,8 +254,11 @@ function settingsReference() {
     }
     out.push('');
   }
-  const unlisted = Object.keys(DEFAULTS).filter(k => !local.includes(k) && !SETTINGS.some(s => s.k === k));
+  const unlisted = Object.keys(DEFAULTS).filter(k => !local.includes(k) && !SETTINGS.some(s => s.k === k) && k !== 'plugins');
   if (unlisted.length) out.push('## Set elsewhere in Cinder', '', ...unlisted.map(k => `- \`${k}\`: default ${js(DEFAULTS[k])}.`), '');
+  out.push('## Plugins', '',
+    '- `plugins`: which built-in plugins are on, as `{ "plugin id": true }` for each one that differs from a fresh vault. A fresh vault matches a new Obsidian vault: the everyday core plugins are on, and Daily notes, Templates, Random note, Bases and every community plugin are off. Turn them on in Settings → Core plugins or Community plugins. Ids: ' + CinderVaultSettings.PLUGINS.map(p => '`' + p.id + '` (' + (p.on ? 'on' : 'off') + ')').join(', ') + '.',
+    '');
   out.push('## Other keys', '',
     '- `hotkeys`: custom shortcuts, as `{ "command id": "key" }`, overriding a command’s default key. A key is written `Mod-Shift-k` (Mod is Ctrl, or Cmd on a Mac; then Ctrl-/Meta-, Alt-, Shift-, and the key: a lower-case letter, a digit, or a name like `ArrowLeft`, `Enter`, `F5`). An empty string removes a command’s key.',
     '- `propTypes`: property types, as `{ "property": "text" | "multitext" (a list) | "number" | "checkbox" | "date" | "datetime" | "tags" | "aliases" }`. Only used when the vault has no `.obsidian/types.json`; Obsidian’s file is used when it does.', '',
@@ -279,6 +296,7 @@ function assistantGuide() {
     `- Monthly notes: in ${cfg.monthlyFolder ? q(cfg.monthlyFolder) : 'the daily notes folder'}, named \`${cfg.monthlyFormat}\`, template ${cfg.monthlyTemplate ? '`' + cfg.monthlyTemplate + '`' : 'none'}.`,
     `- Folder templates (a new note in the folder starts from the template): ${folderTemplates.length ? folderTemplates.map(l => '`' + l + '`').join(', ') : 'none'}.`,
     `- New notes go to ${q(cfg.newNoteFolder)}; pasted and dropped files to ${q(cfg.attachFolder)}; the Inbox is ${q(cfg.inboxFolder)}; quick-added tasks go to ${cfg.taskInbox ? '`' + cfg.taskInbox + '`' : 'today’s daily note'}.`,
+    `- Plugins turned on: ${CinderVaultSettings.PLUGINS.filter(p => pluginOn(p.id)).map(p => p.name).join(', ')}. The rest stay in the app and come on from Settings → Core plugins or Community plugins (the \`plugins\` key in settings.json).`,
     '',
     '## Setting it up for someone',
     '',
@@ -347,6 +365,72 @@ function applySetting(s) {
   if (what === 'css') { userCssKey = null; loadUserCss(); }
   if (what === 'calendar') refreshCalendar();
   if (what === 'editor') { S.version++; ed.refresh(); if (S.view === 'note' && S.mode === 'read') renderPreview(); }
+}
+
+// One plugin's row: name, what it does, and the switch. The choice is kept in the vault's settings.
+function pluginRow(p) {
+  const row = document.createElement('div');
+  row.className = 'st-row';
+  row.dataset.plugin = p.id;
+  const id = 'plug-' + p.id;
+  row.innerHTML = `<div class="st-info"><label class="st-name" for="${id}">${esc(p.name)}</label><div class="st-desc">${esc(p.desc)}</div></div><div class="st-ctl"><label class="switch"><input type="checkbox" id="${id}" ${pluginOn(p.id) ? 'checked' : ''}><span></span></label></div>`;
+  $('input', row).addEventListener('change', e => setPlugin(p.id, e.target.checked));
+  return row;
+}
+function mountPluginPage(content, core) {
+  const list = CinderVaultSettings.PLUGINS.filter(p => p.core === core);
+  const intro = document.createElement('p');
+  intro.className = 'st-plug-intro';
+  intro.textContent = core
+    ? 'These are built into Cinder, the same set Obsidian ships as core plugins. A fresh vault turns on only the ones a new Obsidian vault does. Turning one off hides it; turning it back on brings it back, including its commands.'
+    : 'These are built into Cinder too, in the formats of the Obsidian plugins people usually add. They’re off until you turn them on, the way a fresh vault has no community plugins. Nothing here is downloaded, and none of it runs code from outside the app.';
+  content.append(intro);
+  for (const p of list) content.append(pluginRow(p));
+}
+// Turn a plugin on or off and redraw everything that depends on it. While the test runner is
+// forcing every plugin on, the first change records that whole set, then applies this one.
+function setPlugin(id, on) {
+  const base = pluginsForcedAll() ? Object.fromEntries(CinderVaultSettings.PLUGINS.map(p => [p.id, true])) : cfg.plugins;
+  cfg.plugins = CinderVaultSettings.normalizePlugins({ ...base, [id]: !!on });
+  saveCfg();
+  applyPlugins();
+  if (id === 'inbox') applyStickyLayout();
+}
+function refreshSettingsNav() {
+  if (!settingsBack) return;
+  const nav = $('.st-pages', settingsBack);
+  const current = $('.st-page.active', settingsBack)?.dataset.page;
+  nav.innerHTML = visiblePages().map(p => `<button class="st-page${p.split ? ' st-split' : ''}${p.id === current ? ' active' : ''}" role="tab" data-page="${p.id}" aria-selected="${p.id === current}"><svg viewBox="0 0 24 24">${p.icon}</svg><span>${esc(p.name)}</span></button>`).join('');
+  if (current && !pageOn(SETTINGS_PAGES.find(p => p.id === current))) {
+    const q = $('.st-q', settingsBack); if (q) q.value = '';
+    showSettingsPage?.('plugins');
+  }
+}
+let showSettingsPage = null;
+function applyPlugins() {
+  for (const el of $$('[data-plugin]')) el.hidden = !pluginOn(el.dataset.plugin);
+  const curPanel = $$('#left .panel').find(p => !p.hidden);
+  const curId = curPanel ? curPanel.id.replace(/^panel-/, '') : '';
+  const curBtn = curId && $(`#left .side-tabs [data-cmd="panel-${curId}"]`);
+  if (!curBtn || curBtn.hidden) {
+    const next = $$('#left .side-tabs [data-cmd]').find(b => !b.hidden);
+    if (next && typeof selectPanel === 'function') selectPanel(next.dataset.cmd.replace(/^panel-/, ''));
+  }
+  if (typeof rtab !== 'undefined') {
+    const tabBtn = $(`#right .tabs [data-rtab="${rtab}"]`);
+    if (tabBtn?.hidden) {
+      const next = $$('#right .tabs button').find(b => !b.hidden);
+      if (next) { rtab = next.dataset.rtab; store('rtab', rtab); }
+    }
+    if (typeof refreshPanels === 'function') refreshPanels();
+  }
+  if (typeof rebuildHotkeys === 'function') rebuildHotkeys();
+  refreshSettingsNav();
+  const viewPlugin = { tasks: 'tasks', flashcards: 'spaced-repetition', inbox: 'inbox', stickies: 'inbox', graph: 'graph', drawing: 'excalidraw', canvas: 'canvas', base: 'bases' };
+  if (viewPlugin[S.view] && !pluginOn(viewPlugin[S.view]) && typeof showEmpty === 'function') showEmpty();
+  else if (S.view === 'note' && typeof ed !== 'undefined') { S.version++; ed.refresh(); if (S.mode === 'read' && typeof renderPreview === 'function') renderPreview(); }
+  if (typeof updateStatus === 'function') updateStatus();
+  if (!pluginOn('inbox') && document.body.classList.contains('sticky-layout')) document.body.classList.remove('sticky-layout');
 }
 
 function settingVault(ctl) {

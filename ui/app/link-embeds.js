@@ -240,7 +240,7 @@ function settleHover(target) {
   if (keep < pops.length) hoverHide = setTimeout(() => closePops(keep), 280);
 }
 function maybeHover(a, mod) {
-  if (!cfg.hoverPreview || !a || pops.some(p => p.anchor === a)) return;
+  if (!pluginOn('page-preview') || !cfg.hoverPreview || !a || pops.some(p => p.anchor === a)) return;
   const t = hoverTarget(a);
   if (!t) return;
   const needMod = !!t.web || (!!a.closest('.cm-editor, .cv-node') && !a.closest('.hover-pop'));

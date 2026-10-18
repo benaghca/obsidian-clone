@@ -4,9 +4,11 @@
 // Which panel the left side bar shows (without opening it).
 function selectPanel(name) {
   for (const p of $$('#left .panel')) p.hidden = p.id !== 'panel-' + name;
-  for (const b of $$('#ribbon .rb[data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
+  for (const b of $$('#ribbon .rb[data-cmd^=panel-], #left .side-tabs [data-cmd^=panel-]')) b.classList.toggle('active', b.dataset.cmd === 'panel-' + name);
 }
+const PANEL_PLUGIN = { files: 'file-explorer', search: 'global-search', bookmarks: 'bookmarks', props: 'properties', tags: 'tag-pane' };
 function showPanel(name, focus = false) {
+  if (PANEL_PLUGIN[name] && !pluginOn(PANEL_PLUGIN[name])) return pluginOff(PANEL_PLUGIN[name]);
   const hidden = document.body.classList.contains('app-no-left');
   const current = $$('#left .panel').find(p => !p.hidden)?.id;
   if (!focus && !hidden && current === 'panel-' + name) { toggleSide('left'); return; }
@@ -209,7 +211,10 @@ listKeys($('#right-body'), RIGHT_ITEMS, () => focusMain());
 // In the right pane: ←/→ switch between Backlinks, Outgoing and Outline; Space previews a
 // heading; L links an unlinked mention.
 const RTABS = ['backlinks', 'outgoing', 'outline', 'related', 'calendar'];
+const RTAB_PLUGIN = { backlinks: 'backlink', outgoing: 'outgoing-link', outline: 'outline', related: 'related-notes', calendar: 'calendar' };
+const visibleRtabs = () => RTABS.filter(t => !$(`#right .tabs [data-rtab="${t}"]`)?.hidden);
 function showRight(tab) {
+  if (RTAB_PLUGIN[tab] && !pluginOn(RTAB_PLUGIN[tab])) return pluginOff(RTAB_PLUGIN[tab]);
   if (document.body.classList.contains('app-no-right')) toggleSide('right');
   rtab = tab; store('rtab', rtab); refreshPanels();
   const first = $(`#right-body :is(${RIGHT_ITEMS})`);
@@ -219,7 +224,8 @@ $('#right').addEventListener('keydown', e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && !typingIn(e.target)) {
     e.preventDefault();
-    showRight(RTABS[(RTABS.indexOf(rtab) + (e.key === 'ArrowRight' ? 1 : RTABS.length - 1)) % RTABS.length]);
+    const tabs = visibleRtabs();
+    showRight(tabs[(Math.max(0, tabs.indexOf(rtab)) + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]);
   } else if (e.key === ' ' && e.target.matches?.('.o-item[data-heading]')) {
     // Space scrolls the page to a heading without leaving the outline (Enter goes there).
     e.preventDefault();
@@ -367,14 +373,14 @@ $('#tag-list').addEventListener('contextmenu', e => {
   const t = r.dataset.tag;
   menu(e.clientX, e.clientY, [
     ['Search for it', () => searchFor(`tag:${t}`)],
-    ['Rename tag…', () => renameTag(t)],
+    ...(pluginOn('tag-wrangler') ? [['Rename tag…', () => renameTag(t)]] : []),
   ]);
 });
 $('#tag-list').addEventListener('keydown', e => {
   const r = e.target.closest('.tag-row');
   if (!r || e.ctrlKey || e.metaKey || e.altKey) return;
   const t = r.dataset.tag, open = r.getAttribute('aria-expanded');
-  if (e.key === 'F2') { e.preventDefault(); return renameTag(t); }
+  if (e.key === 'F2') { e.preventDefault(); return pluginOn('tag-wrangler') ? renameTag(t) : pluginOff('tag-wrangler'); }
   if (e.key === 'ArrowRight' && open === 'false') { e.preventDefault(); toggleTag(t, true); }
   else if (e.key === 'ArrowLeft' && open === 'true') { e.preventDefault(); toggleTag(t, false); }
   else if (e.key === 'ArrowLeft' && t.includes('/')) { e.preventDefault(); $$('#tag-list .tag-row').find(x => x.dataset.tag === t.slice(0, t.lastIndexOf('/')))?.focus(); }
@@ -677,7 +683,7 @@ function updateStatus() {
     left.innerHTML = ''; right.innerHTML = s('Base');
   } else if ((S.view === 'canvas' || S.view === 'drawing') && S.cur) {
     const bl = backlinkCount(S.cur), n = S.view === 'canvas' ? CinderCanvas.count() : CinderDraw.count();
-    left.innerHTML = b('backlinks', plural(bl, 'backlink'), 'Show backlinks');
+    left.innerHTML = pluginOn('backlink') ? b('backlinks', plural(bl, 'backlink'), 'Show backlinks') : '';
     right.innerHTML = s(S.view === 'canvas' ? `Canvas · ${plural(n, 'card')}` : `Drawing · ${plural(n, 'element')}`);
   } else if (S.view === 'note' && S.cur) {
     const text = ed.value.slice(splitFrontmatter(ed.value).fmLen);
@@ -685,13 +691,16 @@ function updateStatus() {
     const mins = Math.max(1, Math.round(words / 230));
     const bl = backlinkCount(S.cur);
     const tasks = allTasks().filter(x => x.path === S.cur && !x.done && !x.cancelled).length;
-    left.innerHTML = (S.mode === 'edit' ? vimStatusHtml() : '') + b('backlinks', plural(bl, 'backlink'), 'Show backlinks') + (tasks ? b('tasks', plural(tasks, 'open task'), 'Show this note’s tasks') : '');
+    left.innerHTML = (S.mode === 'edit' ? vimStatusHtml() : '')
+      + (pluginOn('backlink') ? b('backlinks', plural(bl, 'backlink'), 'Show backlinks') : '')
+      + (pluginOn('tasks') && tasks ? b('tasks', plural(tasks, 'open task'), 'Show this note’s tasks') : '');
     const c = S.mode === 'edit' ? ed.cursorInfo() : null;
     const count = cfg.statusChars ? plural(text.length, 'character') : `${plural(words, 'word')}<span class="sb-read"> · ${mins} min read</span>`;
-    right.innerHTML = (c && c.selected ? s(`${plural(c.words, 'word')} selected`, `${c.selected.toLocaleString()} characters selected`, 'sb-sel') : '')
-      + (c ? s(`Ln ${c.line}, Col ${c.col}`, '', 'sb-pos') : '')
-      + b('count', count, cfg.statusChars ? 'Show words' : 'Show characters')
-      + b('mode', S.mode === 'read' ? 'Reading' : cfg.livePreview ? 'Live preview' : 'Source', 'Switch between reading and editing (Ctrl+E); right-click for source mode')
+    const statusOn = pluginOn('editor-status'), wordsOn = pluginOn('word-count');
+    right.innerHTML = (wordsOn && c && c.selected ? s(`${plural(c.words, 'word')} selected`, `${c.selected.toLocaleString()} characters selected`, 'sb-sel') : '')
+      + (statusOn && c ? s(`Ln ${c.line}, Col ${c.col}`, '', 'sb-pos') : '')
+      + (wordsOn ? b('count', count, cfg.statusChars ? 'Show words' : 'Show characters') : '')
+      + (statusOn ? b('mode', S.mode === 'read' ? 'Reading' : cfg.livePreview ? 'Live preview' : 'Source', 'Switch between reading and editing (Ctrl+E); right-click for source mode') : '')
       + focus;
   } else {
     left.innerHTML = '';

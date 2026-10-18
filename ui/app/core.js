@@ -124,8 +124,28 @@ const DEFAULTS = {
   screenshotHide: true,   // the desktop window steps aside while you capture
   screenshotDelay: '0',   // seconds before capturing
   screenshotAfter: 'insert', // or 'annotate': open the screenshot in a drawing
+  plugins: CinderVaultSettings.defaultPlugins(), // which built-in plugins are on (Settings → Core / Community plugins)
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
+cfg.plugins = CinderVaultSettings.normalizePlugins(cfg.plugins);
+// Browser tests boot with <meta name="cinder-plugins" content="all"> so every existing check still
+// finds its feature. That override applies only while the saved choice is still the fresh-vault
+// default (and the test hasn't asked for the real defaults). A choice the user makes is saved
+// and honoured, in the app and in the tests.
+function pluginsForcedAll() {
+  if ($('meta[name=cinder-plugins]')?.content !== 'all') return false;
+  try { if (localStorage.getItem('cinder:plugins-mode') === 'default') return false; } catch { /* private mode */ }
+  const d = CinderVaultSettings.defaultPlugins();
+  return CinderVaultSettings.PLUGINS.every(p => !!cfg.plugins[p.id] === !!d[p.id]);
+}
+function pluginOn(id) {
+  if (pluginsForcedAll()) return true;
+  return !!cfg.plugins[id];
+}
+function pluginOff(id) {
+  const p = CinderVaultSettings.PLUGINS.find(x => x.id === id);
+  toast(`${p ? p.name : id} is off. Turn it on in Settings → ${p?.core ? 'Core plugins' : 'Community plugins'}.`);
+}
 // 'settingsUnsaved' marks the cache as newer than the file until the change is written, so a
 // reload (or a crash) before then writes it rather than losing it to the older file.
 const saveCfg = () => { store('settings', cfg); store('settingsUnsaved', true); scheduleSettingsWrite(); };
@@ -181,7 +201,9 @@ async function loadVaultSettings() {
     vaultFile.text = null; vaultFile.obj = null;
     if (!store('settings')) {
       const seed = CinderVaultSettings.fromObsidian(r.obsidian);
-      if (Object.keys(seed).length) { Object.assign(cfg, seed); store('settings', cfg); applyAllSettings(); }
+      const hadPlugins = !!seed.plugins;
+      if (hadPlugins) { cfg.plugins = CinderVaultSettings.normalizePlugins({ ...cfg.plugins, ...seed.plugins }); delete seed.plugins; }
+      if (hadPlugins || Object.keys(seed).length) { Object.assign(cfg, seed); store('settings', cfg); applyAllSettings(); }
     }
     return writeVaultSettings();
   }
@@ -191,6 +213,7 @@ async function loadVaultSettings() {
   vaultFile.text = text; vaultFile.obj = r.settings;
   if (store('settingsUnsaved')) return writeVaultSettings(); // a change here the file hasn't had yet
   const next = CinderVaultSettings.fromFile(r.settings, DEFAULTS);
+  if (next.plugins) next.plugins = CinderVaultSettings.normalizePlugins(next.plugins);
   if (Object.keys(next).every(k => JSON.stringify(cfg[k]) === JSON.stringify(next[k]))) return;
   Object.assign(cfg, next); store('settings', cfg);
   applyAllSettings();
@@ -209,6 +232,7 @@ function applyAllSettings() {
   S.dataGen++; updateTaskBadge(); updateInboxBadge();
   if (S.view === 'tasks') refreshTasks();
   if (S.view === 'inbox') renderInbox();
+  if (typeof applyPlugins === 'function') applyPlugins();
 }
 
 // A chosen font goes first; the default stack (with the Nerd Fonts symbols) stays behind it.
@@ -298,13 +322,13 @@ function editorHooks(from, extra) {
     renderMarkdown: (el, text) => { el.innerHTML = markdownToHtml(text, from(), 1); linkifyTags(el); },
     version: () => S.version,
     linkOptions: q => linkOptions(q),
-    taskSuggest: (line, pos) => cfg.taskSuggest ? CinderTasks.suggestFor(line, pos) : null,
+    taskSuggest: (line, pos) => pluginOn('tasks') && cfg.taskSuggest ? CinderTasks.suggestFor(line, pos) : null,
     pasteHtml: () => cfg.pasteHtml,
-    inlineQuery: expr => dataviewInline(expr, from()),
+    get inlineQuery() { return pluginOn('dataview') ? expr => dataviewInline(expr, from()) : null; },
     tagOptions: () => allTags(),
     visualEmbed: p => visualEmbed(p),
     renderVisualEmbed: (el, p, width, sub) => renderVisualEmbed(el, p, width, sub),
-    codeBlock: lang => lang === 'base' || lang === 'tasks' || lang === 'mermaid' || lang === 'query' || lang === 'dataview' || lang === 'dataviewjs',
+    codeBlock: lang => (lang === 'base' && pluginOn('bases')) || (lang === 'tasks' && pluginOn('tasks')) || lang === 'mermaid' || lang === 'query' || ((lang === 'dataview' || lang === 'dataviewjs') && pluginOn('dataview')),
     renderCodeBlock: (el, lang, code) => lang === 'tasks' ? renderTasksBlock(el, code) : lang === 'mermaid' ? renderMermaidBlock(el, code) : lang === 'query' ? renderQueryBlock(el, code, from()) : lang === 'dataview' ? renderDataviewBlock(el, code, from()) : lang === 'dataviewjs' ? renderDataviewJsBlock(el) : renderBaseBlock(el, code, from()),
     toggleTaskLine: text => CinderTasks.parseLine(text) ? CinderTasks.toggle(text, { date: CinderTasks.today(), doneDate: cfg.taskDoneDate }) : null,
     renderMath: (el, tex, display) => renderMath(el, tex, display),
@@ -312,7 +336,7 @@ function editorHooks(from, extra) {
     mathSnippets: () => cfg.mathSnippets,
     renderWebEmbed: (el, url, alt) => cfg.webEmbeds === 'off' ? (el.innerHTML = `<a class="cm-url" data-url="${esc(url)}">${esc(url)}</a>`) : renderWebEmbed(el, url, alt),
     sizeWebEmbed: (el, alt) => sizeWebEmbed(el, alt),
-    propertiesFor: text => cfg.properties !== 'source' && propsOf(text) != null,
+    propertiesFor: text => pluginOn('properties') && cfg.properties !== 'source' && propsOf(text) != null,
     renderProperties: (el, text, ctl) => mountProps(el, text, { ...ctl, from }),
     ...extra,
   };

@@ -24,12 +24,24 @@ if [ $# -gt 0 ]; then SUITES=("$@"); else SUITES=($(cd "$HERE" && ls *.js | sed 
 fail=0
 for t in "${SUITES[@]}"; do
   rm -rf "$WORK/vault" "$WORK/xdg"; mkdir -p "$WORK/vault" "$WORK/xdg"
-  CINDER_HISTORY_SESSION_MS=1500 CINDER_FOLDER_PICKER=none CINDER_OPEN_FILE=none CINDER_SCREENSHOT_CMD="cat $HERE/fixtures/pic.png" XDG_DATA_HOME="$WORK/xdg" \
+  CINDER_E2E=1 CINDER_HISTORY_SESSION_MS=1500 CINDER_FOLDER_PICKER=none CINDER_OPEN_FILE=none CINDER_SCREENSHOT_CMD="cat $HERE/fixtures/pic.png" XDG_DATA_HOME="$WORK/xdg" \
     "$BIN" "$WORK/vault" --browser --port 43199 --no-open >"$WORK/server.log" 2>&1 &
   SRV=$!
-  for _ in $(seq 50); do up && break; sleep 0.1; done
+  # A real request, closed afterwards: a bare TCP connect would sit on this single-threaded server.
+  ready=0
+  for _ in $(seq 100); do
+    if curl -sf -o /dev/null --max-time 1 -H 'Connection: close' "http://127.0.0.1:43199/"; then ready=1; break; fi
+    if ! kill -0 "$SRV" 2>/dev/null; then break; fi
+    sleep 0.1
+  done
+  if [ "$ready" -ne 1 ]; then
+    echo "✗ $t (server did not start)"; tail -5 "$WORK/server.log" | sed 's/^/    /'; fail=1
+    kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; continue
+  fi
   out=$(cd "$HERE" && SP="$WORK" timeout 240 node "$t.js" 2>&1); code=$?
   kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
+  # A timed-out suite can leave its browser running, which then starves the next one.
+  pkill -f 'ms-playwright/chromium' 2>/dev/null || true
   n=$(grep -c '✓' <<<"$out")
   if [ $code -ne 0 ] || grep -qE '^ASSERT|pageerror' <<<"$out"; then
     fail=1; echo "✗ $t ($n passed before it failed)"; grep -E 'ASSERT|Error|Timeout|pageerror' <<<"$out" | head -3 | sed 's/^/    /'
