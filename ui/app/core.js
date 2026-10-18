@@ -84,7 +84,7 @@ function toast(msg, ms = 2600, action) {
 
 const DEFAULTS = {
   newNoteFolder: '',
-  dailyFolder: 'Daily',
+  dailyFolder: '',             // '' = the top of the vault, as in Obsidian
   dailyFormat: 'YYYY-MM-DD',      // daily notes' names (moment.js format)
   weeklyFolder: '', weeklyFormat: 'GGGG-[W]WW', weeklyTemplate: '',   // '' folder = the daily notes folder
   monthlyFolder: '', monthlyFormat: 'YYYY-MM', monthlyTemplate: '',
@@ -124,6 +124,7 @@ const DEFAULTS = {
   screenshotHide: true,   // the desktop window steps aside while you capture
   screenshotDelay: '0',   // seconds before capturing
   screenshotAfter: 'insert', // or 'annotate': open the screenshot in a drawing
+  showQuickSearch: false,    // the "Search notes…" bar across the top (Obsidian has none)
   plugins: CinderVaultSettings.defaultPlugins(), // which built-in plugins are on (Settings → Core / Community plugins)
 };
 const cfg = Object.assign({}, DEFAULTS, store('settings') || {});
@@ -254,6 +255,7 @@ function applyTheme() {
   applyFonts();
   document.body.classList.toggle('wide', !cfg.readable);
   document.body.classList.toggle('mono', cfg.mono);
+  document.body.classList.toggle('show-quick-search', !!cfg.showQuickSearch);
   document.body.classList.toggle('source-mode', !cfg.livePreview);
   if (typeof ed !== 'undefined') { ed.setLive(cfg.livePreview); ed.setVim(cfg.vim); ed.setFocusMode(cfg.focusMode); ed.setTypewriter(cfg.typewriter); if (cfg.vim && !vimWasOn) loadVimrc(); if (!cfg.vim) vimNow = null; vimWasOn = !!cfg.vim; }
   document.body.classList.toggle('focus-mode', !!cfg.focusMode);

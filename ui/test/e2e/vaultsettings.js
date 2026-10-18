@@ -26,7 +26,7 @@ const file = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8'
 
   await sleep(500);
   const ref = fs.existsSync(path.join(VAULT, '.cinder/settings.md')) ? fs.readFileSync(path.join(VAULT, '.cinder/settings.md'), 'utf8') : '';
-  assert(ref.includes('- `dailyFolder` (Daily notes folder): ') && ref.includes('default "Daily"') && ref.includes('`note-from-template`: Create new note from template ("Alt-n")') && !ref.includes('`fontText`: '), 'next to it, settings.md lists every setting, its values and default, and the command ids for hotkeys');
+  assert(ref.includes('- `dailyFolder` (Daily notes folder): a folder path in the vault; default "".') && ref.includes('`note-from-template`: Create new note from template ("Alt-n")') && !ref.includes('`fontText`: '), 'next to it, settings.md lists every setting, its values and default, and the command ids for hotkeys');
   console.log('a guide for assistants');
   const guide = () => fs.readFileSync(path.join(VAULT, '.cinder/README.md'), 'utf8');
   const g = guide();
@@ -65,7 +65,7 @@ const file = () => fs.existsSync(FILE) ? JSON.parse(fs.readFileSync(FILE, 'utf8'
   await page.evaluate(() => { cfg.statusChars = true; saveCfg(); }); await sleep(900);
   assert(fs.readFileSync(FILE, 'utf8') === '{ "theme": "dark", ', 'and doesn’t overwrite it');
   fs.writeFileSync(FILE, JSON.stringify({ theme: 'dark' })); await sleep(2800);
-  assert(await page.evaluate(() => cfg.theme === 'dark' && cfg.statusChars === false && cfg.dailyFolder === 'Daily'), 'once it reads again, it’s the settings (what it leaves out is the default)');
+  assert(await page.evaluate(() => cfg.theme === 'dark' && cfg.statusChars === false && cfg.dailyFolder === ''), 'once it reads again, it’s the settings (what it leaves out is the default)');
 
   console.log('a vault Cinder already has settings for');
   await page.close(); // (an open window would put the file straight back from its own settings)

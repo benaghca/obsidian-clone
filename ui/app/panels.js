@@ -452,6 +452,25 @@ function refreshPanels(light = false) {
     if (had >= 0) { const items = $$(RIGHT_ITEMS, body); items[Math.min(had, items.length - 1)]?.focus({ preventScroll: true }); }
   }
 }
+// The source line an unlinked mention sits on, with the inline marks shown rather than left as
+// Markdown (**bold**, `code`, and the rest). The matched word itself is unchanged. Linked
+// mentions stay as the source line, so a [[link]] still reads as one.
+function mentionLineHtml(line) {
+  let s = String(line).replace(/^\s*(?:#{1,6}\s+|>\s*)+/, '');
+  s = esc(s);
+  const code = [];
+  s = s.replace(/`([^`]+)`/g, (_, t) => { code.push(t); return `\uE000${code.length - 1}\uE001`; });
+  s = s.replace(/!?\[\[([^\]|#]+)(?:#[^\]|]*)?(?:\|([^\]]+))?\]\]/g, (_, name, shown) => shown || name.split('/').pop());
+  s = s.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  s = s.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
+  s = s.replace(/~~([^~\n]+)~~/g, '<s>$1</s>');
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[\s(])\*([^*\n]+)\*(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
+  s = s.replace(/(^|[\s(])_([^_\n]+)_(?=$|[\s).,;:!?])/g, '$1<em>$2</em>');
+  s = s.replace(/\$([^$\n]+)\$/g, '$1');
+  return s.replace(/\uE000(\d+)\uE001/g, (_, i) => `<code>${code[+i]}</code>`);
+}
 function drawRight(body, light) {
   for (const b of $$('#right .tabs button')) { b.classList.toggle('active', b.dataset.rtab === rtab); b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(b.dataset.rtab === rtab)); }
   body.setAttribute('role', 'tabpanel');
@@ -478,7 +497,7 @@ function drawRight(body, light) {
         html += `<div class="r-sec"><h4>Unlinked mentions <span>${um.size}</span></h4>`;
         html += um.size ? [...um].map(([q, items]) =>
           `<div class="bl-file" data-path="${esc(q)}">${esc(noteName(q))}</div>` +
-          items.map(it => `<div class="bl-ctx" data-path="${esc(q)}" data-i="${it.index}" data-len="${it.len}"><button data-link>Link</button>${esc(it.line)}</div>`).join('')).join('')
+          items.map(it => `<div class="bl-ctx" data-path="${esc(q)}" data-i="${it.index}" data-len="${it.len}"><button data-link>Link</button>${mentionLineHtml(it.line)}</div>`).join('')).join('')
           : '<div class="none">None.</div>';
         html += '</div>';
       } else if (body.dataset.tab === 'backlinks' && body.dataset.for === S.cur) {

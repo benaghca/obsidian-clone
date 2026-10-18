@@ -90,10 +90,13 @@ kbd { font: 11px var(--font-mono); padding: 1px 5px; border: 1px solid var(--bor
 body { display: flex; flex-direction: column; height: 100vh; }
 #app { display: flex; flex: 1; min-height: 0; }
 
-/* The top bar: the window's title bar, with the quick switcher's box in the middle (it opens the
-   switcher; > in it lists commands). In Cinder's own frame it moves the window, and the window
-   buttons sit at its right. */
+/* The top bar. The search box is off unless Settings turns it on (Obsidian has no bar across the
+   top). Cinder's own window frame still keeps the strip, so the window buttons have somewhere to
+   sit and the window can be dragged from it. */
 #topbar { flex: none; height: 36px; display: flex; align-items: center; justify-content: center; padding: 0 12px; background: var(--bg2); border-bottom: 1px solid var(--border); }
+body:not(.show-quick-search) #cmdbox { display: none; }
+body:not(.show-quick-search):not(.frame-custom) #topbar { display: none; }
+body:not(.show-quick-search).frame-custom #topbar > * { display: none; }
 #cmdbox { display: flex; align-items: center; gap: 8px; width: min(480px, 100%); height: 26px; padding: 0 6px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--bg); color: var(--faint); font-size: var(--text-ui); cursor: pointer; }
 #cmdbox:hover { border-color: var(--muted); color: var(--muted); }
 #cmdbox:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
@@ -939,6 +942,10 @@ button.tk-chip:hover { border-color: var(--accent); color: var(--text); }
 .bl-file { font-weight: 600; font-size: var(--text-ui); padding: 3px 6px; border-radius: var(--radius-sm); cursor: pointer; }
 .bl-file:hover { background: var(--bg-hover); }
 .bl-ctx { font-size: var(--text-sm); color: var(--muted); padding: 3px 8px 3px 14px; border-radius: var(--radius-sm); cursor: pointer; overflow-wrap: anywhere; }
+.bl-ctx strong { color: var(--text); font-weight: 600; }
+.bl-ctx em { font-style: italic; }
+.bl-ctx code { font-family: var(--font-mono); font-size: 0.92em; }
+.bl-ctx mark { background: var(--accent-soft); color: inherit; padding: 0 2px; border-radius: 2px; }
 .bl-ctx:hover { background: var(--bg-hover); color: var(--text); }
 .bl-ctx button { float: right; font-size: var(--text-xs); background: var(--bg3); border: 0; border-radius: var(--radius-sm); padding: 1px 6px; color: var(--muted); cursor: pointer; }
 .bl-ctx button:hover { color: var(--text); }

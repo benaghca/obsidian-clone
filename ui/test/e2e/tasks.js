@@ -18,7 +18,7 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   page.on('pageerror', e => errors.push('pageerror: ' + e.message + '\n' + e.stack));
   page.on('console', m => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto('http://127.0.0.1:43199/'); await sleep(900);
-  await page.evaluate(() => { cfg.dailyTemplate = 'Templates/Daily'; });
+  await page.evaluate(() => { cfg.dailyFolder = 'Daily'; cfg.dailyTemplate = 'Templates/Daily'; saveCfg(); });
   assert((await page.textContent('[data-cmd=tasks] .rb-badge')) === '3', 'ribbon badge counts overdue + today (3)');
   await page.keyboard.press('Control+Shift+T'); await sleep(400);
   const secs = () => page.$$eval('.tk-section h3', h => h.map(x => x.textContent.trim()));

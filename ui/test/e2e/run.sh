@@ -38,10 +38,15 @@ for t in "${SUITES[@]}"; do
     echo "✗ $t (server did not start)"; tail -5 "$WORK/server.log" | sed 's/^/    /'; fail=1
     kill $SRV 2>/dev/null; wait $SRV 2>/dev/null; continue
   fi
+  # Chromium this suite starts (Playwright's browser). Only those, so a timeout doesn't leave them
+  # running, and an unrelated browser that happens to use the same cache is left alone.
+  chrome_pids() { pgrep -f 'ms-playwright/chromium' 2>/dev/null | sort -u || true; }
+  before=$(chrome_pids)
   out=$(cd "$HERE" && SP="$WORK" timeout 240 node "$t.js" 2>&1); code=$?
   kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
-  # A timed-out suite can leave its browser running, which then starves the next one.
-  pkill -f 'ms-playwright/chromium' 2>/dev/null || true
+  after=$(chrome_pids)
+  new=$(comm -13 <(printf '%s\n' "$before" | sed '/^$/d') <(printf '%s\n' "$after" | sed '/^$/d') || true)
+  if [ -n "$new" ]; then kill $new 2>/dev/null || true; fi
   n=$(grep -c '✓' <<<"$out")
   if [ $code -ne 0 ] || grep -qE '^ASSERT|pageerror' <<<"$out"; then
     fail=1; echo "✗ $t ($n passed before it failed)"; grep -E 'ASSERT|Error|Timeout|pageerror' <<<"$out" | head -3 | sed 's/^/    /'

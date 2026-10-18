@@ -51,13 +51,14 @@ const SETTINGS = [
   { k: 'fontMono', page: 'appearance', name: 'Code font', desc: 'Empty uses JetBrains Mono, which comes with Cinder.', type: 'font', list: ['JetBrains Mono', 'JetBrainsMono Nerd Font', 'FiraCode Nerd Font', 'Hack Nerd Font', 'Iosevka', 'Fira Code', 'Cascadia Code', 'Consolas', 'Menlo', 'Ubuntu Mono'], placeholder: 'JetBrains Mono', apply: 'theme' },
   { k: 'fontPreview', page: 'appearance', name: 'Font preview', type: 'custom', render: settingFontPreview, wide: true, search: false },
   { k: 'mono', page: 'appearance', name: 'Monospace editor', desc: 'Write in the code font.', type: 'toggle', apply: 'theme' },
+  { k: 'showQuickSearch', page: 'appearance', name: 'Search box in the title bar', desc: 'A bar across the top. Click it to search notes, or type <code>&gt;</code> for commands. Off, as in Obsidian; <kbd>Ctrl+O</kbd> opens the same search.', type: 'toggle', apply: 'theme' },
   { k: 'cssFolder', page: 'appearance', name: 'CSS snippets folder', desc: 'Every <code>.css</code> file in this vault folder styles Cinder, and reloads as you edit it. Pair with a note’s <code>cssclasses</code>.', type: 'text', folder: true, placeholder: 'e.g. Snippets', apply: 'css' },
   // Files & links
   { k: 'newNoteFolder', page: 'files', name: 'Folder for new notes', desc: 'Where Ctrl+N and new links put notes.', type: 'text', folder: true, placeholder: 'The vault’s top folder' },
   { k: 'attachFolder', page: 'files', name: 'Attachments folder', desc: 'Where pasted and dropped images and files are saved.', type: 'text', folder: true },
   // Daily notes
   { k: 'periodicPreview', page: 'daily', name: 'Today’s notes would be', type: 'custom', render: settingPeriodicPreview, wide: true, search: false },
-  { k: 'dailyFolder', page: 'daily', name: 'Daily notes folder', type: 'text', folder: true },
+  { k: 'dailyFolder', page: 'daily', name: 'Daily notes folder', desc: 'Empty puts daily notes at the top of the vault, as Obsidian does.', type: 'text', folder: true, placeholder: 'The vault’s top folder' },
   { k: 'dailyFormat', page: 'daily', name: 'Daily note name', desc: 'A date format: <code>YYYY-MM-DD</code>, <code>dddd, MMMM Do YYYY</code>… (as in Obsidian).', type: 'text', placeholder: 'YYYY-MM-DD' },
   { k: 'dailyTemplate', page: 'daily', name: 'Daily note template', desc: 'A note name or path. Its text starts each new daily note, with that day’s date in its date commands.', type: 'text', placeholder: 'e.g. Templates/Daily' },
   { k: 'weeklyFolder', page: 'daily', name: 'Weekly notes folder', desc: 'Empty uses the daily notes folder.', type: 'text', folder: true, placeholder: 'The daily notes folder' },
@@ -371,7 +372,9 @@ function applySetting(s) {
 function pluginRow(p) {
   const row = document.createElement('div');
   row.className = 'st-row';
-  row.dataset.plugin = p.id;
+  // Not data-plugin: applyPlugins hides every [data-plugin] whose plugin is off, which would
+  // remove this row (and every other off plugin's row) the moment a switch is flipped.
+  row.dataset.plug = p.id;
   const id = 'plug-' + p.id;
   row.innerHTML = `<div class="st-info"><label class="st-name" for="${id}">${esc(p.name)}</label><div class="st-desc">${esc(p.desc)}</div></div><div class="st-ctl"><label class="switch"><input type="checkbox" id="${id}" ${pluginOn(p.id) ? 'checked' : ''}><span></span></label></div>`;
   $('input', row).addEventListener('change', e => setPlugin(p.id, e.target.checked));
@@ -408,7 +411,10 @@ function refreshSettingsNav() {
 }
 let showSettingsPage = null;
 function applyPlugins() {
-  for (const el of $$('[data-plugin]')) el.hidden = !pluginOn(el.dataset.plugin);
+  for (const el of $$('[data-plugin]')) {
+    if (el.closest('.st')) continue; // settings rows stay, so a plugin can be turned back on
+    el.hidden = !pluginOn(el.dataset.plugin);
+  }
   const curPanel = $$('#left .panel').find(p => !p.hidden);
   const curId = curPanel ? curPanel.id.replace(/^panel-/, '') : '';
   const curBtn = curId && $(`#left .side-tabs [data-cmd="panel-${curId}"]`);

@@ -9,11 +9,13 @@ const w = (p, s) => { fs.mkdirSync(path.dirname(path.join(VAULT, p)), { recursiv
 const TEXT = Array.from({ length: 200 }, (_, i) => `line ${i} word 7`).join('\n') + '\n';
 (async () => {
   w('Page.md', TEXT);
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ args: ['--no-proxy-server', '--disable-dev-shm-usage'] });
   const page = await browser.newPage({ viewport: { width: 1300, height: 900 } });
   const errors = []; global.PAGE = page;
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
-  await page.goto('http://127.0.0.1:43199/'); await sleep(800);
+  await page.goto('http://127.0.0.1:43199/', { waitUntil: 'domcontentloaded', timeout: 45000 });
+  await page.waitForFunction(() => typeof openPath === 'function' && typeof cfg === 'object', null, { timeout: 20000 });
+  await sleep(400);
   await page.evaluate(() => openPath('Page.md')); await sleep(600);
   const snap = () => page.evaluate(() => ({ modal: $('#modal-root').children.length, view: S.view, mode: S.mode, cur: S.cur, val: ed.value }));
   // Press `key` in the editor (after `prep`, e.g. 'i' for insert mode); what changed in the app.
@@ -67,6 +69,7 @@ const TEXT = Array.from({ length: 200 }, (_, i) => `line ${i} word 7`).join('\n'
   await page.evaluate(() => { while ($('#modal-root').children.length) $('#modal-root').lastChild.remove(); cfg.vim = false; ed.setVim(false); });
 
   console.log('the top bar');
+  await page.evaluate(() => { cfg.showQuickSearch = true; applyTheme(); }); await sleep(100);
   const bar = await page.$eval('#topbar', b => { const r = b.getBoundingClientRect(); return { top: r.top, w: r.width }; });
   assert(bar.top === 0 && bar.w === 1300, 'runs across the top of the window');
   assert(await page.textContent('#cmdbox kbd') === 'Ctrl+O', 'its box shows the quick switcher’s key');

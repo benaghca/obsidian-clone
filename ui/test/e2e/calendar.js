@@ -19,7 +19,7 @@ const day = k => { const d = new Date(); d.setDate(d.getDate() + k); return `${d
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   await page.goto('http://127.0.0.1:43199/'); await sleep(900);
-  await page.evaluate(() => { cfg.dailyTemplate = 'Templates/Daily'; cfg.weeklyTemplate = 'Templates/Weekly'; saveCfg(); });
+  await page.evaluate(() => { cfg.dailyFolder = 'Daily'; cfg.dailyTemplate = 'Templates/Daily'; cfg.weeklyTemplate = 'Templates/Weekly'; saveCfg(); });
   await page.keyboard.press('Control+p'); await page.keyboard.type('show calendar'); await page.keyboard.press('Enter'); await sleep(300);
   assert(await page.$('#right-body .cal'), 'Show calendar opens the calendar tab');
   assert(await page.$(`.cal-day.today[data-day="${T0}"]`), 'today is marked');
