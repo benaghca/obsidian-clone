@@ -47,6 +47,31 @@ t('first run from Obsidian’s settings', () => {
   assert.deepEqual(V.fromObsidian({ periodic: { daily: { enabled: true, folder: 'P', format: 'DD.MM.YYYY' } }, daily: { folder: 'D' } }), { dailyFolder: 'P', dailyFormat: 'DD.MM.YYYY' }, 'Periodic Notes’ daily settings win when it’s on');
   assert.deepEqual(V.fromObsidian(null), {});
   assert.deepEqual(V.fromObsidian({ daily: 'junk', app: 5 }), {});
+  assert.ok(!('plugins' in V.fromObsidian(o)), 'files that don’t mention plugins don’t add a plugins key');
+});
+
+t('a fresh vault matches Obsidian’s core plugins, and Obsidian’s lists seed the rest', () => {
+  const d = V.defaultPlugins();
+  for (const id of ['file-explorer', 'global-search', 'switcher', 'graph', 'backlink', 'canvas', 'outgoing-link', 'tag-pane', 'properties', 'page-preview', 'note-composer', 'command-palette', 'editor-status', 'bookmarks', 'outline', 'word-count', 'file-recovery']) assert.equal(d[id], true, id);
+  for (const id of ['daily-notes', 'templates', 'random-note', 'bases', 'calendar', 'dataview', 'tasks', 'kanban', 'templater', 'excalidraw', 'spaced-repetition', 'periodic-notes', 'related-notes', 'inbox', 'tag-wrangler']) assert.equal(d[id], false, id);
+  const fromArray = V.pluginsFromObsidian({ corePlugins: ['file-explorer', 'graph', 'daily-notes'] });
+  assert.equal(fromArray['file-explorer'], true);
+  assert.equal(fromArray['daily-notes'], true);
+  assert.equal(fromArray.switcher, false, 'an array lists only the plugins that are on, so the others are off');
+  assert.equal(fromArray.canvas, false);
+  const fromMap = V.pluginsFromObsidian({ corePluginsMigration: { 'daily-notes': true, 'file-explorer': false }, corePlugins: ['graph'] });
+  assert.equal(fromMap['daily-notes'], true);
+  assert.equal(fromMap['file-explorer'], false);
+  assert.equal(fromMap.graph, undefined, 'the migration map is the list; the array is not also applied');
+  const comm = V.pluginsFromObsidian({ communityPlugins: ['dataview', 'obsidian-tasks', 'templater-obsidian', 'not-a-plugin'] });
+  assert.deepEqual(comm, { dataview: true, tasks: true, templater: true });
+  assert.deepEqual(V.fromObsidian({ communityPlugins: ['calendar'], corePlugins: { 'random-note': true } }).plugins, { calendar: true, 'random-note': true });
+  const defs = { theme: '', plugins: d };
+  assert.ok(!('plugins' in V.forFile({ theme: '', plugins: d }, defs)), 'the default set is left out of the file');
+  const changed = V.forFile({ theme: '', plugins: { ...d, tasks: true } }, defs);
+  assert.equal(changed.plugins.tasks, true);
+  assert.equal(V.fromFile(changed, defs).plugins.tasks, true);
+  assert.equal(V.fromFile({ plugins: { tasks: 'yes' } }, defs).plugins.tasks, false, 'a mistyped value falls back to the default');
 });
 
 console.log(`ok ${n} tests`);

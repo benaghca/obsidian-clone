@@ -39,12 +39,9 @@ Cinder is a local notes app. Your notes are plain Markdown files in this folder,
 - Math works too: $E = mc^2$. Inside math, \`//\` makes a fraction and \`@a\` makes α.
 
 ## More than notes
-The icons down the left make:
-- **Drawings**: a hand-drawn whiteboard. Embed one in a note with \`![[Drawing name.excalidraw]]\`.
-- **Canvases**: cards and arrows on an endless board. Press **F5** to present one, with each group as a slide.
-- **Bases**: tables, cards and kanban boards made from your notes' properties.
-- **Tasks**: every \`- [ ]\` in the vault in one place (**Ctrl+Shift+T**), with due dates, repeats and quick add.
-- **The graph** (**Ctrl+G**): click a note to light up its links, or tick **3D** and fly around it.
+The graph (**Ctrl+G**) shows how notes link. A canvas is an endless board of cards and arrows; press **F5** to present one, with each group as a slide.
+
+Drawings, bases, tasks, daily notes and the calendar are in the app too, and off until you want them. Turn one on in **Settings → Core plugins** or **Community plugins** and its icon appears on the left.
 
 ## Getting around
 | Keys | Does |
@@ -62,11 +59,11 @@ The icons down the left make:
 Every shortcut can be changed in **Settings → Hotkeys**. Click the vault's name above the file tree to switch vaults.
 
 - [ ] Tick this box (or put the cursor on it and press Ctrl+Enter)
-- [ ] Open today's daily note from the calendar icon
+- [ ] Open the graph with Ctrl+G
 - [ ] Try another colour theme in Settings (Volcanic is the default)
 
 > [!tip] Nothing leaves this machine
-> Cinder has no accounts, no telemetry and no plugins, and it doesn't reach the network. The one exception is a web page you embed yourself, like \`![](https://example.com)\`.
+> Cinder has no accounts and no telemetry. It doesn't reach the network, and it doesn't load code from outside the app. The one exception is a web page you embed yourself, like \`![](https://example.com)\`.
 `;
 
 // The welcome note, made again (or brought up to date, if it's an older one).
@@ -107,6 +104,7 @@ async function boot() {
   await loadVaultSettings(); // the vault's .cinder/settings.json, before anything uses the settings
   try { await loadAll(); } catch (e) { document.body.innerHTML = `<p style="padding:2em">Couldn't reach the Cinder server: ${esc(e.message)}. Is it still running?</p>`; return; }
   settingsBooted = true;
+  applyPlugins(); // hide ribbon icons, sidebar tabs and commands for plugins that are off
   if (vaultFile.text != null) syncSettingsDoc(vaultFile.doc, vaultFile.guide);
   renderTree();
   watchVault();

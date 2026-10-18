@@ -21,6 +21,10 @@ function buildTree() {
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 const CHEV = '<svg class="chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></svg>';
+const TIC = d => `<svg class="tic" viewBox="0 0 24 24" aria-hidden="true">${d}</svg>`;
+const TIC_FOLDER = TIC('<path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/>');
+const TIC_NOTE = TIC('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>');
+const TIC_FILE = TIC('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M8 13h8M8 17h5"/>');
 
 function renderTree() {
   const root = buildTree();
@@ -31,7 +35,7 @@ function renderTree() {
     const dirs = [...node.dirs.values()].sort((a, b) => collator.compare(a.name, b.name));
     for (const d of dirs) {
       const open = S.expanded.has(d.path);
-      rows.push(`<div class="t-row folder${open ? ' open' : ''}" id="tr-${n++}" role="treeitem" aria-level="${level}" aria-expanded="${open}" draggable="true" data-dir="${esc(d.path)}">${CHEV}<span class="name">${esc(d.name)}</span></div>`);
+      rows.push(`<div class="t-row folder${open ? ' open' : ''}" id="tr-${n++}" role="treeitem" aria-level="${level}" aria-expanded="${open}" draggable="true" data-dir="${esc(d.path)}">${CHEV}${TIC_FOLDER}<span class="name">${esc(d.name)}</span></div>`);
       if (open) { rows.push('<div class="t-kids" role="group">'); walk(d, level + 1); rows.push('</div>'); }
     }
     const files = node.files.sort((a, b) => collator.compare(noteName(a), noteName(b)));
@@ -39,7 +43,7 @@ function renderTree() {
       const drawing = isDrawing(f), canvas = isCanvas(f), base = isBase(f);
       const ext = drawing ? '<span class="ext">draw</span>' : canvas ? '<span class="ext">canvas</span>' : base ? '<span class="ext">base</span>' : isMd(f) ? '' : `<span class="ext">${esc(f.split('.').pop())}</span>`;
       const name = drawing || canvas || base ? displayName(f) : noteName(isMd(f) ? f : f.replace(/\.[^.]+$/, ''));
-      rows.push(`<div class="t-row file" id="tr-${n++}" role="treeitem" aria-level="${level}" draggable="true" data-path="${esc(f)}"><span class="spacer"></span><span class="name">${esc(name)}</span>${ext}</div>`);
+      rows.push(`<div class="t-row file" id="tr-${n++}" role="treeitem" aria-level="${level}" draggable="true" data-path="${esc(f)}"><span class="spacer"></span>${isMd(f) ? TIC_NOTE : TIC_FILE}<span class="name">${esc(name)}</span>${ext}</div>`);
     }
   };
   walk(root);
@@ -266,9 +270,9 @@ $('#tree').addEventListener('contextmenu', e => {
   /** @type {any[]} */
   const items = [
     ['New note', () => newNote(folder)],
-    ['New drawing', () => newDrawing(folder)],
-    ['New canvas', () => newCanvas(folder)],
-    ['New base', () => newBase(folder)],
+    ...(pluginOn('excalidraw') ? [['New drawing', () => newDrawing(folder)]] : []),
+    ...(pluginOn('canvas') ? [['New canvas', () => newCanvas(folder)]] : []),
+    ...(pluginOn('bases') ? [['New base', () => newBase(folder)]] : []),
     ['New folder', () => newFolder(folder)],
   ];
   if (path || dir) {
@@ -276,12 +280,12 @@ $('#tree').addEventListener('contextmenu', e => {
     items.push(null,
       ['Rename…', () => renameDialog(target)],
       ['Move to…', () => moveDialog(target)],
-      [isBookmarked(target) ? 'Remove bookmark' : 'Bookmark', () => toggleBookmark(target)],
+      ...(pluginOn('bookmarks') ? [[isBookmarked(target) ? 'Remove bookmark' : 'Bookmark', () => toggleBookmark(target)]] : []),
     );
     if (path) items.unshift(['Open in new tab', () => openInNewTab(path)], ...(canSplit(path) ? [['Open to the right', () => openSplit(path)]] : []), null);
     if (path && isMd(path) && !isDrawing(path)) items.push(['Open in reading view', () => openPath(path, { mode: 'read' })]);
     if (path && isMd(path) && isDrawing(path)) items.push(['Open as Markdown', () => openPath(path, { raw: true })]);
-    if (path) items.push(['Version history…', () => openHistory(path)]);
+    if (path && pluginOn('file-recovery')) items.push(['Version history…', () => openHistory(path)]);
     items.push(null, ['Delete', () => deletePath(target), 'danger']);
   }
   menu(e.clientX, e.clientY, items);

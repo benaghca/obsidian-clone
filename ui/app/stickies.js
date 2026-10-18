@@ -15,7 +15,7 @@ const stickySel = new Set();   // stickies picked in the list, to pin, colour or
 let stickySelMode = false, stickyAnchor = null;
 
 const stickyLayoutOn = () => document.body.classList.contains('sticky-layout');
-const stickyWanted = () => cfg.stickyLayout !== false && innerWidth < STICKY_WIDTH;
+const stickyWanted = () => pluginOn('inbox') && cfg.stickyLayout !== false && innerWidth < STICKY_WIDTH;
 
 // Turn the sticky layout on or off to fit the window.
 async function applyStickyLayout() {

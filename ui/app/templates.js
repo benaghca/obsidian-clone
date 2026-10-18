@@ -58,7 +58,7 @@ function templateEnv(path, selection, templatePath, now) {
 async function applyTemplate(text, path, opts = {}) {
   const { selection = '', templatePath = '', now } = opts;
   text = fillTemplate(text, noteName(path), now);
-  if (!CinderTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
+  if (!pluginOn('templater') || !CinderTemplater.hasTemplaterSyntax(text)) return { text, cursor: -1, actions: [] };
   try {
     const r = await CinderTemplater.render(text, templateEnv(path, selection, templatePath, now));
     if (r.aborted) { toast('Template cancelled'); return null; }

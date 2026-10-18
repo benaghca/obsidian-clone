@@ -7,6 +7,7 @@
 <meta name="cinder-vault" content="{{VAULT}}">
 <meta name="cinder-mode" content="{{MODE}}">
 <meta name="cinder-frame" content="{{FRAME}}">
+<meta name="cinder-plugins" content="{{PLUGINS}}">
 <title>{{VAULT}} — Cinder</title>
 <link rel="icon" href="/logo.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/vendor/katex/katex.min.css">
@@ -14,34 +15,41 @@
 </head>
 <body>
 <header id="topbar">
-  <button id="cmdbox" type="button" data-cmd="switcher" title="Search notes, or type &gt; for commands"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>Search notes, or type &gt; for commands</span><kbd></kbd></button>
+  <button id="cmdbox" type="button" data-cmd="switcher" data-plugin="switcher" title="Search notes, or type &gt; for commands"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><span>Search notes, or type &gt; for commands</span><kbd></kbd></button>
 </header>
 <div id="app">
   <nav id="ribbon">
     <button class="rb" data-cmd="toggle-left" title="Toggle left sidebar (Ctrl+\)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
     <div class="rb-sep"></div>
-    <button class="rb" data-cmd="panel-files" title="Files"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></button>
-    <button class="rb" data-cmd="panel-search" data-hk="search" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
-    <button class="rb" data-cmd="panel-bookmarks" title="Bookmarks"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/></svg></button>
-    <button class="rb" data-cmd="panel-props" data-hk="all-properties" title="All properties"><svg viewBox="0 0 24 24"><path d="M4 6.5h4M4 12h4M4 17.5h4M11 6.5h9M11 12h9M11 17.5h9"/></svg></button>
-    <button class="rb" data-cmd="panel-tags" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
+    <button class="rb" data-cmd="panel-files" data-plugin="file-explorer" title="Files"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></button>
+    <button class="rb" data-cmd="panel-search" data-plugin="global-search" data-hk="search" title="Search (Ctrl+Shift+F)"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+    <button class="rb" data-cmd="panel-bookmarks" data-plugin="bookmarks" title="Bookmarks"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/></svg></button>
+    <button class="rb" data-cmd="panel-props" data-plugin="properties" data-hk="all-properties" title="All properties"><svg viewBox="0 0 24 24"><path d="M4 6.5h4M4 12h4M4 17.5h4M11 6.5h9M11 12h9M11 17.5h9"/></svg></button>
+    <button class="rb" data-cmd="panel-tags" data-plugin="tag-pane" title="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
     <div class="rb-sep"></div>
-    <button class="rb" data-cmd="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
-    <button class="rb" data-cmd="inbox" title="Inbox"><svg viewBox="0 0 24 24"><path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/></svg><span class="rb-badge" hidden></span></button>
-    <button class="rb" data-cmd="tasks" title="Tasks (Ctrl+Shift+T)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/></svg><span class="rb-badge" hidden></span></button>
-    <button class="rb" data-cmd="flashcards" title="Flashcards (Ctrl+Shift+Y)"><svg viewBox="0 0 24 24"><rect x="3.5" y="7" width="13" height="13" rx="2"/><path d="M7.5 3.5h11a2 2 0 0 1 2 2v11M7.5 13.5h5"/></svg><span class="rb-badge" hidden></span></button>
-    <button class="rb" data-cmd="daily" title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
-    <button class="rb" data-cmd="new-drawing" title="New drawing"><svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/></svg></button>
-    <button class="rb" data-cmd="new-canvas" title="New canvas"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/><path d="M11 7h3a2 2 0 0 1 2 2v5"/></svg></button>
-    <button class="rb" data-cmd="new-base" title="New base (database view of notes)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10"/></svg></button>
-    <button class="rb" data-cmd="graph" title="Graph view (Ctrl+G)"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="m8.3 7.2 7.4.6M7 8.3l1.4 7.3M16.4 10l-5.6 6.3"/></svg></button>
-    <button class="rb" data-cmd="palette" title="Command palette (Ctrl+P)"><svg viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M11 17h8"/></svg></button>
+    <button class="rb" data-cmd="switcher" data-plugin="switcher" title="Quick switcher (Ctrl+O)"><svg viewBox="0 0 24 24"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg></button>
+    <button class="rb" data-cmd="inbox" data-plugin="inbox" hidden title="Inbox"><svg viewBox="0 0 24 24"><path d="M3.5 13.5l2.6-7.2A2 2 0 0 1 8 5h8a2 2 0 0 1 1.9 1.3l2.6 7.2V18a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M3.5 13.5H8l1.5 2.5h5l1.5-2.5h4.5"/></svg><span class="rb-badge" hidden></span></button>
+    <button class="rb" data-cmd="tasks" data-plugin="tasks" hidden title="Tasks (Ctrl+Shift+T)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><path d="m8 12 3 3 5-6"/></svg><span class="rb-badge" hidden></span></button>
+    <button class="rb" data-cmd="flashcards" data-plugin="spaced-repetition" hidden title="Flashcards (Ctrl+Shift+Y)"><svg viewBox="0 0 24 24"><rect x="3.5" y="7" width="13" height="13" rx="2"/><path d="M7.5 3.5h11a2 2 0 0 1 2 2v11M7.5 13.5h5"/></svg><span class="rb-badge" hidden></span></button>
+    <button class="rb" data-cmd="daily" data-plugin="daily-notes" hidden title="Open today's daily note"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+    <button class="rb" data-cmd="new-drawing" data-plugin="excalidraw" hidden title="New drawing"><svg viewBox="0 0 24 24"><rect x="3.5" y="12.5" width="8" height="8" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/><path d="M13.5 20.5l7-7"/></svg></button>
+    <button class="rb" data-cmd="new-canvas" data-plugin="canvas" title="New canvas"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="6" rx="1.5"/><rect x="13" y="14" width="8" height="6" rx="1.5"/><path d="M11 7h3a2 2 0 0 1 2 2v5"/></svg></button>
+    <button class="rb" data-cmd="new-base" data-plugin="bases" hidden title="New base (database view of notes)"><svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M3.5 9.5h17M3.5 14.5h17M9.5 9.5v10"/></svg></button>
+    <button class="rb" data-cmd="graph" data-plugin="graph" title="Graph view (Ctrl+G)"><svg viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="8" r="2.5"/><circle cx="9" cy="18" r="2.5"/><path d="m8.3 7.2 7.4.6M7 8.3l1.4 7.3M16.4 10l-5.6 6.3"/></svg></button>
+    <button class="rb" data-cmd="palette" data-plugin="command-palette" title="Command palette (Ctrl+P)"><svg viewBox="0 0 24 24"><path d="m5 8 4 4-4 4M11 17h8"/></svg></button>
     <div class="rb-grow"></div>
     <button class="rb" data-cmd="theme" title="Switch between light and dark"><svg class="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></svg></button>
     <button class="rb" data-cmd="settings" title="Settings (Ctrl+,)"><svg viewBox="0 0 24 24"><path d="M10.36 4.89L10.60 2.60L13.40 2.60L13.64 4.89L15.87 5.81L17.65 4.36L19.64 6.35L18.19 8.13L19.11 10.36L21.40 10.60L21.40 13.40L19.11 13.64L18.19 15.87L19.64 17.65L17.65 19.64L15.87 18.19L13.64 19.11L13.40 21.40L10.60 21.40L10.36 19.11L8.13 18.19L6.35 19.64L4.36 17.65L5.81 15.87L4.89 13.64L2.60 13.40L2.60 10.60L4.89 10.36L5.81 8.13L4.36 6.35L6.35 4.36L8.13 5.81Z"/><circle cx="12" cy="12" r="2.8"/></svg></button>
   </nav>
 
   <aside id="left">
+    <div class="side-tabs" role="tablist" aria-label="Left sidebar">
+      <button type="button" data-cmd="panel-files" data-plugin="file-explorer" title="Files" aria-label="Files"><svg viewBox="0 0 24 24"><path d="M3 6.5A1.5 1.5 0 0 1 4.5 5H9l2 2h8.5A1.5 1.5 0 0 1 21 8.5v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></svg></button>
+      <button type="button" data-cmd="panel-search" data-plugin="global-search" title="Search" aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
+      <button type="button" data-cmd="panel-bookmarks" data-plugin="bookmarks" title="Bookmarks" aria-label="Bookmarks"><svg viewBox="0 0 24 24"><path d="M7 3.5h10a1 1 0 0 1 1 1v16l-6-4-6 4v-16a1 1 0 0 1 1-1z"/></svg></button>
+      <button type="button" data-cmd="panel-tags" data-plugin="tag-pane" title="Tags" aria-label="Tags"><svg viewBox="0 0 24 24"><path d="M9 4 7 20M17 4l-2 16M4 9h16M3.5 15h16"/></svg></button>
+      <button type="button" data-cmd="panel-props" data-plugin="properties" title="All properties" aria-label="All properties"><svg viewBox="0 0 24 24"><path d="M4 6.5h4M4 12h4M4 17.5h4M11 6.5h9M11 12h9M11 17.5h9"/></svg></button>
+    </div>
     <section id="panel-files" class="panel">
       <header class="panel-head">
         <button id="vault-name" class="vault-btn" title="Switch vault"><img src="/logo.svg" alt="" width="18" height="18"><span class="vault-label"></span><svg class="vault-chev" viewBox="0 0 24 24"><path d="m7 10 5 5 5-5"/></svg></button>
@@ -136,19 +144,18 @@
     <div id="view-empty" class="view">
       <div class="empty">
         <img class="empty-logo" src="/logo.svg" alt="" width="72" height="72">
-        <h2>No note open</h2>
+        <h2>No file is open</h2>
         <p><a data-cmd="new-note">Create a new note</a> <kbd>Ctrl N</kbd></p>
-        <p><a data-cmd="switcher">Open a note</a> <kbd>Ctrl O</kbd></p>
-        <p><a data-cmd="new-drawing">New drawing</a></p>
-        <p><a data-cmd="new-canvas">New canvas</a></p>
-        <p><a data-cmd="new-base">New base</a></p>
-        <p><a data-cmd="daily">Today's daily note</a></p>
-        <p><a data-cmd="tasks">Tasks</a> <kbd>Ctrl Shift T</kbd></p>
-        <p><a data-cmd="graph">Graph view</a> <kbd>Ctrl G</kbd></p>
+        <p data-plugin="switcher"><a data-cmd="switcher">Open a note</a> <kbd>Ctrl O</kbd></p>
+        <p data-plugin="command-palette"><a data-cmd="palette">Command palette</a> <kbd>Ctrl P</kbd></p>
+        <p data-plugin="graph"><a data-cmd="graph">Graph view</a> <kbd>Ctrl G</kbd></p>
+        <p data-plugin="canvas"><a data-cmd="new-canvas">New canvas</a></p>
+        <p data-plugin="bases" hidden><a data-cmd="new-base">New base</a></p>
+        <p data-plugin="excalidraw" hidden><a data-cmd="new-drawing">New drawing</a></p>
+        <p data-plugin="daily-notes" hidden><a data-cmd="daily">Today’s daily note</a></p>
+        <p data-plugin="tasks" hidden><a data-cmd="tasks">Tasks</a> <kbd>Ctrl Shift T</kbd></p>
       </div>
     </div>
-
-    <footer id="statusbar"><span id="status-left"></span><span id="status-right"></span></footer>
   </main>
     </div>
   </div>
@@ -156,15 +163,16 @@
   <div class="resizer" id="resize-right"></div>
   <aside id="right">
     <div class="tabs" role="tablist" aria-label="Side panel">
-      <button data-rtab="backlinks" class="active" title="Backlinks"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Backlinks</span></button>
-      <button data-rtab="outgoing" title="Outgoing links"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Outgoing</span></button>
-      <button data-rtab="outline" title="Outline"><svg viewBox="0 0 24 24"><path d="M4 6h16M8 12h12M12 18h8"/></svg><span>Outline</span></button>
-      <button data-rtab="related" title="Related notes"><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><circle cx="17" cy="6" r="2"/><path d="M9.5 9 14.5 15M9.8 6.6l5.3-.4"/></svg><span>Related</span></button>
-      <button data-rtab="calendar" title="Calendar"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Calendar</span></button>
+      <button data-rtab="backlinks" data-plugin="backlink" class="active" title="Backlinks"><svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg><span>Backlinks</span></button>
+      <button data-rtab="outgoing" data-plugin="outgoing-link" title="Outgoing links"><svg viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg><span>Outgoing</span></button>
+      <button data-rtab="outline" data-plugin="outline" title="Outline"><svg viewBox="0 0 24 24"><path d="M4 6h16M8 12h12M12 18h8"/></svg><span>Outline</span></button>
+      <button data-rtab="related" data-plugin="related-notes" hidden title="Related notes"><svg viewBox="0 0 24 24"><circle cx="7" cy="7" r="3"/><circle cx="17" cy="17" r="3"/><circle cx="17" cy="6" r="2"/><path d="M9.5 9 14.5 15M9.8 6.6l5.3-.4"/></svg><span>Related</span></button>
+      <button data-rtab="calendar" data-plugin="calendar" hidden title="Calendar"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><span>Calendar</span></button>
     </div>
     <div id="right-body" class="panel-body"></div>
   </aside>
 </div>
+<footer id="statusbar"><span id="status-left"></span><span id="status-right"></span></footer>
 
 <div id="modal-root"></div>
 <div id="menu-root"></div>

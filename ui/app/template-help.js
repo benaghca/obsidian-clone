@@ -47,6 +47,7 @@ const TP_MEMBERS = {
 
 // The editor's hook: options for "<%" (kind 'open') or for a "tp.…" path (kind 'member').
 function templaterOptions(kind, path) {
+  if (!pluginOn('templater')) return [];
   if (kind === 'open') {
     // Sections keep the list's order (the editor would otherwise sort them by name).
     const secs = new Map([...new Set(TP_COMMANDS.map(c => c.section))].map((name, rank) => [name, { name, rank }]));

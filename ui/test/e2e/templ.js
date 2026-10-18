@@ -22,6 +22,7 @@ const rd = p => fs.readFileSync(path.join(VAULT, p), 'utf8');
   await page.evaluate(() => openSettings('templates'));
   await page.fill('textarea[name=folderTemplates]', 'Meetings: Templates/Meeting'); await page.keyboard.press('Tab');
   await page.click('.st-page[data-page=daily]');
+  await page.fill('input[name=dailyFolder]', 'Daily'); await page.keyboard.press('Tab');
   await page.fill('input[name=dailyTemplate]', 'Templates/Daily'); await page.keyboard.press('Tab');
   await page.click('.st [data-x]');
   const p = page.evaluate(() => newNote('Meetings'));

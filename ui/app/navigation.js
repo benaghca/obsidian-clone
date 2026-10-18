@@ -56,9 +56,12 @@ async function openPath(p, opts = {}) {
   S.cur = p; S.dirty = false; S.drawing = null; S.canvasDoc = null; S.baseDoc = null;
   store('last', p);
   S.recent = [p, ...S.recent.filter(x => x !== p)].slice(0, 40); store('recentFiles', S.recent);
-  if (isDrawing(p) && !opts.raw) return openDrawing(p);
-  if (isCanvas(p)) return openCanvas(p);
-  if (isBase(p)) return openBase(p);
+  if (isDrawing(p) && !opts.raw) {
+    if (!pluginOn('excalidraw')) return isMd(p) ? openPath(p, { ...opts, raw: true, push: false }) : openDisabledFile(p, 'excalidraw');
+    return openDrawing(p);
+  }
+  if (isCanvas(p)) return pluginOn('canvas') ? openCanvas(p) : openDisabledFile(p, 'canvas');
+  if (isBase(p)) return pluginOn('bases') ? openBase(p) : openDisabledFile(p, 'bases');
   if (!isMd(p)) return openAttachment(p);
   const n = S.notes.get(p);
   showView('note');
@@ -69,7 +72,7 @@ async function openPath(p, opts = {}) {
   setSaveState('');
   const pos = S.pos.get(p);
   // A Kanban board opens as a board (reading view draws it), without changing the mode other notes open in.
-  const board = !!n && CinderKanban.isBoard(n.fm);
+  const board = !!n && pluginOn('kanban') && CinderKanban.isBoard(n.fm);
   if (board && !opts.mode && S.mode !== 'read') S.modeBeforeBoard = S.mode;
   else if (!board && S.modeBeforeBoard) { S.mode = S.modeBeforeBoard; S.modeBeforeBoard = null; }
   setMode(opts.mode || (board ? 'read' : S.mode), true);
@@ -95,6 +98,18 @@ function crumbsHtml(p) {
 }
 
 let fileViewer = null;
+// A canvas, base or drawing whose plugin is off: the file stays put, with a way to turn the plugin on.
+function openDisabledFile(p, id) {
+  showView('file');
+  const plug = CinderVaultSettings.PLUGINS.find(x => x.id === id);
+  const v = $('#view-file');
+  fileViewer?.destroy(); fileViewer = null;
+  v.innerHTML = `<div class="file-info"><p><b>${esc(displayName(p))}</b></p><p>${esc(plug ? plug.name : 'The plugin for this file')} is turned off, so Cinder is leaving the file as it is.</p><p><button type="button" class="btn" data-enable-plugin="${esc(id)}">Turn on ${esc(plug ? plug.name : 'it')}</button></p></div>`;
+  $('#crumbs').innerHTML = crumbsHtml(p);
+  document.title = `${displayName(p)} — ${VAULT} — Cinder`;
+  renderTreeActive(true); refreshPanels(); updateStatus();
+  $('[data-enable-plugin]', v).onclick = () => { setPlugin(id, true); openPath(p, { push: false }); };
+}
 function openAttachment(p) {
   showView('file');
   const v = $('#view-file');

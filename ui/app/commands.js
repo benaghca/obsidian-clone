@@ -3,8 +3,8 @@
 // the open note (@), tags (#) and text in any note (/). Ctrl+O opens it on files, Ctrl+P on
 // commands; deleting the prefix switches back.
 const LAUNCH_MODES = [['', 'Files'], ['>', 'Commands'], ['@', 'Headings'], ['#', 'Tags'], ['/', 'Text']];
-function openSwitcher() { return openLauncher(''); }
-function openPalette() { return openLauncher('>'); }
+function openSwitcher() { return pluginOn('switcher') ? openLauncher('') : pluginOff('switcher'); }
+function openPalette() { return pluginOn('command-palette') ? openLauncher('>') : pluginOff('command-palette'); }
 
 function openLauncher(prefix = '') {
   const files = [...S.files.keys()];
@@ -13,8 +13,12 @@ function openLauncher(prefix = '') {
   const modeOf = q => LAUNCH_MODES.find(([p]) => p && q.startsWith(p))?.[0] || '';
   const items = q => {
     const mode = modeOf(q), t = q.slice(mode.length).trim();
-    if (mode === '>') return (t ? rank(COMMANDS, t, c => c.name) : [...COMMANDS].sort((a, b) => order(a) - order(b)))
-      .map(c => ({ main: c.name, sub: fmtKey(keyFor(c)), value: { kind: 'cmd', c } }));
+    if (mode === '>') {
+      if (!pluginOn('command-palette')) return [];
+      const cmds = COMMANDS.filter(c => !c.plugin || pluginOn(c.plugin));
+      return (t ? rank(cmds, t, c => c.name) : [...cmds].sort((a, b) => order(a) - order(b)))
+        .map(c => ({ main: c.name, sub: fmtKey(keyFor(c)), value: { kind: 'cmd', c } }));
+    }
     if (mode === '@') {
       const n = S.cur && S.notes.get(S.cur);
       if (!n) return [];
@@ -63,7 +67,7 @@ function openLauncher(prefix = '') {
   }).then(v => {
     if (!v) return;
     if (v.kind === 'file') return pickedWithMod ? openInNewTab(v.path) : openPath(v.path);
-    if (v.kind === 'cmd') { store('recentCmds', [v.c.id, ...recentCmds.filter(x => x !== v.c.id)].slice(0, 12)); return v.c.run(); }
+    if (v.kind === 'cmd') { if (!commandAllowed(v.c)) return; store('recentCmds', [v.c.id, ...recentCmds.filter(x => x !== v.c.id)].slice(0, 12)); return v.c.run(); }
     if (v.kind === 'heading') return scrollToHeading(v.text);
     if (v.kind === 'tag') return searchFor(`tag:${v.tag}`);
     if (v.kind === 'text') return openPath(v.path, { mode: 'edit', select: [v.index, v.index + v.len] });
@@ -186,6 +190,28 @@ const APP_COMMANDS = [
   ['welcome', 'Open the welcome note', '', () => showWelcome()],
   ['settings', 'Settings', 'Mod-,', () => openSettings()],
 ].map((/** @type {[string, string, string, () => any]} */ [id, name, key, run]) => ({ id, name, key, run }));
+// Which built-in plugin a command belongs to. With that plugin off, it leaves the palette,
+// the hotkeys and the ribbon, and comes back when the plugin is turned on.
+const COMMAND_PLUGIN = {
+  switcher: 'switcher', palette: 'command-palette', search: 'global-search', files: 'file-explorer',
+  graph: 'graph', 'local-graph': 'graph', backlinks: 'backlink', outgoing: 'outgoing-link', outline: 'outline',
+  'all-properties': 'properties', bookmark: 'bookmarks', bookmarks: 'bookmarks', 'bookmark-search': 'bookmarks', 'bookmark-group': 'bookmarks',
+  'new-canvas': 'canvas', present: 'canvas', 'new-base': 'bases',
+  'new-drawing': 'excalidraw', 'drawing-in-note': 'excalidraw', 'export-svg': 'excalidraw', 'export-png': 'excalidraw', 'copy-drawing': 'excalidraw', 'drawing-md': 'excalidraw',
+  daily: 'daily-notes', 'daily-prev': 'daily-notes', 'daily-next': 'daily-notes', 'daily-tomorrow': 'daily-notes',
+  weekly: 'periodic-notes', monthly: 'periodic-notes', calendar: 'calendar', related: 'related-notes',
+  'insert-template': 'templates', 'note-from-template': 'templates', 'new-template': 'templates',
+  'run-templates': 'templater', 'templater-insert': 'templater', 'templater-help': 'templater', 'template-preview': 'templater',
+  extract: 'note-composer', merge: 'note-composer', history: 'file-recovery', random: 'random-note',
+  tasks: 'tasks', 'add-task': 'tasks', flashcards: 'spaced-repetition', 'flashcards-note': 'spaced-repetition',
+  inbox: 'inbox', 'inbox-capture': 'inbox', jot: 'inbox', stickies: 'inbox', 'new-sticky': 'inbox',
+};
+for (const c of APP_COMMANDS) if (COMMAND_PLUGIN[c.id]) c.plugin = COMMAND_PLUGIN[c.id];
+function commandAllowed(c) {
+  if (!c?.plugin || pluginOn(c.plugin)) return true;
+  pluginOff(c.plugin);
+  return false;
+}
 const EDITOR_COMMANDS = Object.entries(CinderEditor.commands).map(([id, c]) => ({
   id: 'editor:' + id, name: /^(add-property|fold|unfold|fold-all|unfold-all)$/.test(id) ? c.name : `Format: ${c.name}`, key: c.key, editor: id,
   run: inNote(() => { setMode('edit'); ed.run(id); }),
@@ -199,7 +225,7 @@ const editorKeys = () => Object.fromEntries(EDITOR_COMMANDS.map(c => [c.editor, 
 let HOTKEYS = new Map(); // key -> app command
 function rebuildHotkeys() {
   HOTKEYS = new Map();
-  for (const c of APP_COMMANDS) { const k = keyFor(c); if (k && !HOTKEYS.has(k)) HOTKEYS.set(k, c); }
+  for (const c of APP_COMMANDS) { if (c.plugin && !pluginOn(c.plugin)) continue; const k = keyFor(c); if (k && !HOTKEYS.has(k)) HOTKEYS.set(k, c); }
   ed.setKeys(editorKeys());
   for (const el of $$('[data-cmd][title]')) {
     const c = CMD_BY_ID.get(el.dataset.hk || el.dataset.cmd);
@@ -249,7 +275,7 @@ function onHotkey(e) {
   if (!c) return;
   if (!/(^|-)(Mod|Ctrl|Meta|Alt)-/.test(k) && !/^(Shift-)?F\d+$/.test(k) && typingIn(e.target)) return;
   e.preventDefault();
-  c.run();
+  if (commandAllowed(c)) c.run();
 }
 // Some app keys never reach onHotkey from the editor: with nothing bound to Ctrl+Shift+F, the
 // editor tries it as Ctrl+F (so the vault search opened the note's find bar instead, and Ctrl+Shift+B
@@ -260,7 +286,7 @@ function onHotkeyBeforeEditor(e) {
   const k = keyOf(e), c = k && HOTKEYS.get(k);
   if (!c || !/(^|-)(Mod|Ctrl|Meta)-/.test(k) || (cfg.vim && vimTakes(k)) || EDITOR_COMMANDS.some(x => keyFor(x) === k)) return;
   e.preventDefault(); e.stopPropagation();
-  c.run();
+  if (commandAllowed(c)) c.run();
 }
 
 rebuildHotkeys();
@@ -286,7 +312,7 @@ function mountHotkeys(box, filter, close) {
   };
   const draw = () => {
     const f = q.value.trim().toLowerCase();
-    const rows = COMMANDS.filter(c => !f || c.name.toLowerCase().includes(f) || fmtKey(keyFor(c)).toLowerCase().includes(f));
+    const rows = COMMANDS.filter(c => (!c.plugin || pluginOn(c.plugin)) && (!f || c.name.toLowerCase().includes(f) || fmtKey(keyFor(c)).toLowerCase().includes(f)));
     list.innerHTML = rows.map(c => {
       const k = keyFor(c), custom = cfg.hotkeys && c.id in cfg.hotkeys, clash = conflictsOf(c);
       return `<div class="hk-row${clash.length ? ' clash' : ''}" data-id="${esc(c.id)}"><span class="hk-name">${esc(c.name)}${clash.length ? `<small>Also used by: ${esc(clash.join(', '))}</small>` : ''}</span>
@@ -332,7 +358,7 @@ function showShortcuts() {
   const fixed = rows => rows.map(([n, k]) => `<p><span>${esc(n)}</span><span class="keys">${k.split(' / ').map(x => `<kbd>${esc(x)}</kbd>`).join(' ')}</span></p>`).join('');
   const M = MAC ? '⌘' : 'Ctrl+', A = MAC ? '⌥' : 'Alt+', S_ = MAC ? '⇧' : 'Shift+';
   const back = modal(`<div class="dr-help shortcuts"><h3>Keyboard shortcuts</h3><div class="dr-help-cols">
-    <div><h4>App</h4>${bound(APP_COMMANDS.filter(c => !/^tab-(\d|last)$/.test(c.id)))}${fixed([['Go to tab 1–8 / the last', `${A}1…${A}8 / ${A}9`]])}</div>
+    <div><h4>App</h4>${bound(APP_COMMANDS.filter(c => !/^tab-(\d|last)$/.test(c.id) && (!c.plugin || pluginOn(c.plugin))))}${fixed([['Go to tab 1–8 / the last', `${A}1…${A}8 / ${A}9`]])}</div>
     <div><h4>Editing</h4>${bound(EDITOR_COMMANDS)}${fixed([['Move line up / down', `${A}↑ / ${A}↓`], ['Move list item (with its children)', `${M}${S_}↑ / ${M}${S_}↓`], ['Next / previous table cell', `Tab / ${S_}Tab`], ['Copy line', `${S_}${A}↑ / ${S_}${A}↓`], ['Select next match', `${M}D`], ['Indent / outdent list', `Tab / ${S_}Tab`], ['Follow link under cursor', `${M}click`], ['Undo / redo', `${M}Z / ${M}${S_}Z`]])}</div>
     <div><h4>File tree</h4>${fixed([['Move', '↑ / ↓'], ['Expand / collapse', '→ / ←'], ['Open', 'Enter'], ['Open in a new tab', `${M}Enter / middle-click`], ['Select several', `${S_}↑↓ / ${M}click / ${S_}click`], ['Rename', 'F2'], ['Delete', 'Del'], ['New note here', `${M}N`], ['Back to the page', 'Esc']])}
       <h4>Lists (search, tasks)</h4>${fixed([['Move', '↑ / ↓'], ['Open', 'Enter'], ['Tick a task', 'Space / X'], ['Due today / tomorrow', 'T / M']])}

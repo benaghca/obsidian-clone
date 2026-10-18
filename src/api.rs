@@ -176,7 +176,10 @@ pub fn dispatch(ctx: &Ctx, method: &str, path: &str, query: &str, header: &dyn F
                     .replace("{{TOKEN}}", &ctx.token)
                     .replace("{{VAULT}}", &html_escape(&name))
                     .replace("{{MODE}}", if ctx.native { "native" } else { "browser" })
-                    .replace("{{FRAME}}", if ctx.native && crate::native::custom_frame() { "custom" } else { "native" });
+                    .replace("{{FRAME}}", if ctx.native && crate::native::custom_frame() { "custom" } else { "native" })
+                    // Browser tests set CINDER_E2E so every built-in plugin starts on. A normal
+                    // launch uses the fresh-vault defaults (see ui/vaultsettings.js).
+                    .replace("{{PLUGINS}}", if std::env::var_os("CINDER_E2E").is_some() { "all" } else { "default" });
                 let mut o = out(200, "text/html; charset=utf-8", html.into_bytes());
                 o.csp = true;
                 return o;
@@ -598,12 +601,23 @@ fn api_settings(vault: &Path, update: Option<Value>) -> ApiResult {
     };
     let ob = vault.join(".obsidian");
     if fs::symlink_metadata(&ob).is_ok_and(|m| m.is_dir()) {
-        let read = |rel: &str| fs::read(ob.join(rel)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).filter(Value::is_object);
+        let read = |rel: &str| fs::read(ob.join(rel)).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok());
         let mut o = serde_json::Map::new();
         for (k, rel) in [("daily", "daily-notes.json"), ("templates", "templates.json"), ("app", "app.json"), ("templater", "plugins/templater-obsidian/data.json"), ("periodic", "plugins/periodic-notes/data.json")] {
-            if let Some(v) = read(rel) {
+            if let Some(v) = read(rel).filter(Value::is_object) {
                 o.insert(k.into(), v);
             }
+        }
+        // Which plugins Obsidian has on, so a vault's first Cinder settings can match.
+        // core-plugins.json is a boolean map, or (in current Obsidian) an array of the ids that are on.
+        if let Some(v) = read("core-plugins.json").filter(|v| v.is_object() || v.is_array()) {
+            o.insert("corePlugins".into(), v);
+        }
+        if let Some(v) = read("core-plugins-migration.json").filter(Value::is_object) {
+            o.insert("corePluginsMigration".into(), v);
+        }
+        if let Some(v) = read("community-plugins.json").filter(Value::is_array) {
+            o.insert("communityPlugins".into(), v);
         }
         out["obsidian"] = Value::Object(o);
     }
@@ -1049,6 +1063,16 @@ mod tests {
     }
 
     #[test]
+    fn index_uses_the_fresh_vault_plugin_mode() {
+        let ctx = Ctx { vault: RwLock::new(std::env::temp_dir()), token: "t".into(), native: false, hide_window: OnceLock::new() };
+        let o = dispatch(&ctx, "GET", "/", "", &|_| None, vec![]);
+        let html = String::from_utf8(o.body).unwrap();
+        let mode = if std::env::var_os("CINDER_E2E").is_some() { "all" } else { "default" };
+        assert!(html.contains(&format!(r#"name="cinder-plugins" content="{mode}""#)), "the page says which plugin set to start with");
+        assert!(!html.contains("{{PLUGINS}}"), "the placeholder is filled in");
+    }
+
+    #[test]
     fn vault_settings_file() {
         let dir = std::env::temp_dir().join(format!("cinder-settings-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -1077,6 +1101,17 @@ mod tests {
         assert_eq!(v["obsidian"]["daily"]["folder"], json!("Days"));
         assert_eq!(v["obsidian"]["periodic"]["weekly"]["enabled"], json!(true));
         assert!(v["obsidian"]["app"].is_null() && v["obsidian"]["templates"].is_null(), "unreadable or missing files are left out");
+        assert!(v["obsidian"]["corePlugins"].is_null() && v["obsidian"]["communityPlugins"].is_null(), "plugin lists are left out until the files exist");
+        fs::write(dir.join(".obsidian/core-plugins.json"), r#"["file-explorer","graph","daily-notes"]"#).unwrap();
+        fs::write(dir.join(".obsidian/community-plugins.json"), r#"["dataview","obsidian-tasks"]"#).unwrap();
+        let v = get(&dir);
+        assert_eq!(v["obsidian"]["corePlugins"], json!(["file-explorer", "graph", "daily-notes"]));
+        assert_eq!(v["obsidian"]["communityPlugins"], json!(["dataview", "obsidian-tasks"]));
+        fs::write(dir.join(".obsidian/core-plugins.json"), r#"{"file-explorer":false}"#).unwrap();
+        fs::write(dir.join(".obsidian/core-plugins-migration.json"), r#"{"daily-notes":true,"switcher":false}"#).unwrap();
+        let v = get(&dir);
+        assert_eq!(v["obsidian"]["corePlugins"]["file-explorer"], json!(false), "a boolean map is read too");
+        assert_eq!(v["obsidian"]["corePluginsMigration"]["daily-notes"], json!(true));
         assert!(v["doc"].is_null());
         api_settings_doc(&dir, "settings.md", "# Settings\n".as_bytes()).unwrap();
         assert_eq!(get(&dir)["doc"], json!("# Settings\n"), "the reference next to it");
