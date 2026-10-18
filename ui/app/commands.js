@@ -80,7 +80,7 @@ function openLauncher(prefix = '') {
 // the editor's own keymap, so they work while typing and never leak out of it.
 const MAC = /Mac|iP(hone|ad)/.test(navigator.platform);
 const inNote = f => () => S.view === 'note' ? f() : toast('Open a note first');
-/** @typedef {{id: string, name: string, key: string, run: () => any, editor?: string}} Command */
+/** @typedef {{id: string, name: string, key: string, run: () => any, editor?: string, plugin?: string}} Command */
 /** @type {Command[]} */
 const APP_COMMANDS = [
   ['switcher', 'Open quick switcher', 'Mod-o', () => openSwitcher()],
@@ -212,6 +212,7 @@ function commandAllowed(c) {
   pluginOff(c.plugin);
   return false;
 }
+/** @type {Command[]} */
 const EDITOR_COMMANDS = Object.entries(CinderEditor.commands).map(([id, c]) => ({
   id: 'editor:' + id, name: /^(add-property|fold|unfold|fold-all|unfold-all)$/.test(id) ? c.name : `Format: ${c.name}`, key: c.key, editor: id,
   run: inNote(() => { setMode('edit'); ed.run(id); }),
