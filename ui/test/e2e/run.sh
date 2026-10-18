@@ -20,7 +20,7 @@ python3 -m http.server 43200 --bind 127.0.0.1 --directory "$HERE/fixtures/web" >
 WEB=$!
 SRV=
 trap 'kill $WEB $SRV 2>/dev/null' EXIT
-if [ $# -gt 0 ]; then SUITES=("$@"); else SUITES=($(cd "$HERE" && ls *.js | sed 's/\.js$//')); fi
+if [ $# -gt 0 ]; then SUITES=("$@"); else SUITES=($(cd "$HERE" && ls *.js | sed 's/\.js$//' | grep -vx reliable-page)); fi
 fail=0
 for t in "${SUITES[@]}"; do
   rm -rf "$WORK/vault" "$WORK/xdg"; mkdir -p "$WORK/vault" "$WORK/xdg"
@@ -42,7 +42,8 @@ for t in "${SUITES[@]}"; do
   # running, and an unrelated browser that happens to use the same cache is left alone.
   chrome_pids() { pgrep -f 'ms-playwright/chromium' 2>/dev/null | sort -u || true; }
   before=$(chrome_pids)
-  out=$(cd "$HERE" && SP="$WORK" timeout 240 node "$t.js" 2>&1); code=$?
+  # reliable-page.js: don't wait for the load event, and don't use a proxy. See that file.
+  out=$(cd "$HERE" && SP="$WORK" NODE_OPTIONS="--require ./reliable-page.js" timeout 240 node "$t.js" 2>&1); code=$?
   kill $SRV 2>/dev/null; wait $SRV 2>/dev/null
   after=$(chrome_pids)
   new=$(comm -13 <(printf '%s\n' "$before" | sed '/^$/d') <(printf '%s\n' "$after" | sed '/^$/d') || true)
