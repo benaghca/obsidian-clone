@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Margin</title>
+  <meta name="description" content="A notebook that answers in the margin while you write.">
+  <meta name="theme-color" content="#e9dfcf">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-inner">
+      <button type="button" class="brand" id="brand">Margin</button>
+      <nav class="views" aria-label="Notebook">
+        <button type="button" id="nav-page" data-view="page" aria-current="page">Page</button>
+        <button type="button" id="nav-gatherings" data-view="gatherings">Gatherings</button>
+        <button type="button" id="nav-open" data-view="open">Open</button>
+      </nav>
+      <div class="tools">
+        <button type="button" id="find-btn">Find</button>
+        <button type="button" id="theme-btn">Night</button>
+        <div class="more-wrap" id="more-wrap">
+          <button type="button" id="more-btn" aria-expanded="false" aria-controls="more-menu">More</button>
+          <div class="menu" id="more-menu" hidden>
+            <button type="button" data-more="help">How the pen works</button>
+            <button type="button" data-more="export">Take the notebook as text</button>
+            <button type="button" data-more="restore">Restore the sample</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <form class="find" id="find-form" hidden role="search">
+      <div class="top-inner find-inner">
+        <label class="sr" for="find-input">Find a sentence</label>
+        <input id="find-input" type="search" placeholder="Find a sentence" autocomplete="off" enterkeyhint="search">
+        <span id="find-count" aria-live="polite"></span>
+        <button type="button" id="find-close">Close</button>
+      </div>
+    </form>
+  </header>
+
+  <main id="view-page">
+    <div class="sheet">
+      <div id="banner"></div>
+      <div id="stream" aria-label="Sentences, oldest first"><p class="loading">Opening the notebook…</p></div>
+      <div id="resurface"></div>
+    </div>
+  </main>
+
+  <form id="composer" class="composer">
+    <div class="sheet composer-sheet">
+      <div id="following"></div>
+      <div id="draft-ties"></div>
+      <aside id="echoes" class="echoes" aria-label="In the margin"></aside>
+      <div class="pen-line">
+        <label class="sr" for="draft">Write the next sentence</label>
+        <textarea id="draft" rows="1" placeholder="The next sentence" autocomplete="off" autocapitalize="sentences" spellcheck="true" enterkeyhint="done"></textarea>
+      </div>
+      <p class="hint" id="hint">Enter keeps it · Follow continues a sentence · / finds</p>
+    </div>
+  </form>
+
+  <main id="view-gatherings" hidden></main>
+  <main id="view-open" hidden></main>
+
+  <button type="button" id="pen" class="pen" hidden>Back to the pen</button>
+  <div id="toast" class="toast" hidden role="status"></div>
+
+  <dialog id="help">
+    <h2>How the pen works</h2>
+    <p>Margin keeps one page, not a stack of notes. You write a sentence and press Enter. There is nothing to name and nowhere to file it.</p>
+    <p>While you write, the margin offers sentences you already kept, when they share uncommon words with the line under the pen. Click one and the new sentence will sit with it. That is a link, made by choosing.</p>
+    <p>Click any sentence and choose Follow to answer it or continue it. A question stays under Open until you do. Gatherings are not folders. They are the words that have come back at least three times.</p>
+    <p>What you change stays in this browser. Take the notebook as text if you want a file. Restore the sample puts the original sentences back.</p>
+    <p class="help-keys">Enter keeps a sentence. Shift+Enter breaks a line. / finds. Esc lets go.</p>
+    <form method="dialog">
+      <button type="submit" class="help-close">Close</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
