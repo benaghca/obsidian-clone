@@ -18,6 +18,7 @@ const state = {
   undo: [],
   confirmRestore: false,
   dirtyEdit: false,
+  engaged: false,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -282,7 +283,7 @@ function tieHtml(ownerId, target, label, showRelease) {
 
 function renderResurface() {
   const host = $("resurface");
-  if (state.view !== "page" || state.gathering || state.find.trim() || state.followingId) {
+  if (state.engaged || state.view !== "page" || state.gathering || state.find.trim() || state.followingId) {
     host.innerHTML = "";
     return;
   }
@@ -418,6 +419,7 @@ function resizeDraft() {
 function commit() {
   const text = draftEl().value.trim();
   if (!text) return;
+  state.engaged = true;
   const ties = [];
   if (state.followingId && findFragment(state.followingId)) ties.push(state.followingId);
   for (const id of state.draftTies) {
@@ -450,6 +452,7 @@ function commit() {
 
 function follow(id) {
   if (!findFragment(id)) return;
+  state.engaged = true;
   state.followingId = id;
   state.draftTies = state.draftTies.filter((tie) => tie !== id);
   state.view = "page";
