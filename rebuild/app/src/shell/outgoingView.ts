@@ -13,9 +13,10 @@ import { icon } from "./icons";
 import { wikilinkTargets } from "./linksTags";
 import { snippetParts } from "./mentions";
 import { afterPaint, type SideView } from "./outlineView";
-import { type UnlinkedMention, unlinkedMentions } from "./unlinked";
+import { scanUnlinked, type UnlinkedMention } from "./unlinked";
 
 const DELAY = 300;
+const SLICE_MS = 6;
 /** Mentions drawn before a "Show more" row. */
 const PAGE = 50;
 
@@ -104,12 +105,30 @@ export function createOutgoingView(ws: Workspace): SideView {
 
   function schedule(ms: number) {
     clearTimeout(timer);
+    run++;
     if (active && unlinkedOpen) timer = window.setTimeout(renderUnlinked, ms);
   }
 
+  // Worked out in slices of a few ms, so even a long note never blocks a frame.
+  let run = 0;
   function renderUnlinked() {
+    const mine = ++run;
     const path = ws.active.path;
-    const mentions = path ? unlinkedMentions(ws.view.state.doc.toString(), ws.notes, path) : [];
+    const mentions: UnlinkedMention[] = [];
+    const scan = path ? scanUnlinked(ws.view.state.doc.toString(), ws.notes, path, mentions) : null;
+    const step = () => {
+      if (mine !== run || !active) return;
+      const until = performance.now() + SLICE_MS;
+      while (scan && performance.now() < until) {
+        if (scan.next().done) return show(path, mentions);
+      }
+      if (!scan) return show(path, mentions);
+      setTimeout(step, 0);
+    };
+    step();
+  }
+
+  function show(path: string | null, mentions: UnlinkedMention[]) {
     const key = `${path}\n${mentions.map((m) => `${m.line}:${m.from}:${m.to}:${m.path}:${m.text}`).join("\n")}`;
     if (key === shownUnlinked) return;
     shownUnlinked = key;
