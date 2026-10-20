@@ -145,8 +145,11 @@ export class Workspace {
 
   // ----- navigation -----
 
-  /** Open a note in the active tab (or a new one), optionally at a 1-based line or a heading. */
-  async open(path: string, opts: { newTab?: boolean; line?: number; heading?: string } = {}) {
+  /**
+   * Open a note in the active tab (or a new one), optionally at a 1-based
+   * line (selecting columns `ch` of it) or at a heading.
+   */
+  async open(path: string, opts: { newTab?: boolean; line?: number; ch?: [number, number]; heading?: string } = {}) {
     const state = await this.load(path);
     if (!state) return;
     const alreadyShown = !opts.newTab && this.active.path === path;
@@ -163,22 +166,25 @@ export class Workspace {
       this.show();
     }
     const doc = this.view.state.doc;
-    const pos = opts.line
-      ? doc.line(Math.min(opts.line, doc.lines)).from
-      : opts.heading
-        ? headingPos(doc, opts.heading)
-        : null;
-    if (pos !== null) {
-      // Within the note on screen the jump glides; into a just-switched note
-      // it lands at once, so the first frame already shows the target.
-      if (alreadyShown) {
-        this.view.dispatch({ selection: { anchor: pos } });
-        void this.glideTo(pos);
-      } else {
-        this.view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
-      }
+    const line = opts.line ? doc.line(Math.min(opts.line, doc.lines)) : null;
+    const pos = line ? line.from : opts.heading ? headingPos(doc, opts.heading) : null;
+    if (pos === null) return;
+    const clamp = (ch: number) => Math.min(line!.to, line!.from + ch);
+    const selection = line && opts.ch ? { anchor: clamp(opts.ch[0]), head: clamp(opts.ch[1]) } : { anchor: pos };
+    // Within the note on screen the jump glides; into a just-switched note
+    // it lands at once, so the first frame already shows the target.
+    if (alreadyShown) this.jumpTo(selection);
+    else {
+      this.view.dispatch({ selection, effects: EditorView.scrollIntoView(selection.anchor, { y: "center" }) });
       this.view.focus();
     }
+  }
+
+  /** Put the caret (or a selection) in the open note and glide it into view. */
+  jumpTo(selection: { anchor: number; head?: number }) {
+    this.view.dispatch({ selection });
+    void this.glideTo(selection.anchor);
+    this.view.focus();
   }
 
   /** Follow a link target: "Note", "Note#Heading", or "#Heading" in the open note. */

@@ -68,6 +68,7 @@ const daily = `## Today
 - [ ] Review [[Project roadmap]]
 - [ ] Sketch the graph view #planning
 - Talked about \`CodeMirror\` decorations
+- Went over the project roadmap with the team
 
 ## Notes
 

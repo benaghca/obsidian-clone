@@ -5,7 +5,7 @@ Vite + TypeScript + CodeMirror 6, no UI framework. See `../CONTRACT.md` and `../
 ```sh
 npm install
 npm run dev     # http://localhost:1420, runs against the in-memory mock vault
-npm test        # unit tests (parser, counts, fuzzy matching)
+npm test        # unit tests (parser, counts, fuzzy matching, outline, mentions)
 npm run build   # type-check + production bundle in dist/ (no source maps)
 npm run audit:offline  # build, then fail on any network API, remote URL or networking dependency
 ```
@@ -17,7 +17,8 @@ Outside Tauri, `src/api.ts` loads `src/mock/backend.ts` instead of calling `invo
 - `src/api.ts`: the only module that talks to the backend (contract commands and the `vault-changed` event).
 - `src/workspace.ts`: tabs, back/forward history, one `EditorState` per open note, debounced saves.
 - `src/editor/`: CodeMirror setup, Live Preview decorations, wikilink/tag parsing, `[[` suggester, word counts.
-- `src/shell/`: ribbon, sidebar, pane (tab strip, sub-header, inline title), quick switcher, menus.
+- `src/shell/`: ribbon, left sidebar, pane (tab strip, sub-header, inline title), right sidebar (backlinks, outline), the side-dock motion and resizing (`sidedock.ts`), quick switcher, menus.
+- `src/links.ts`: which links may leave the app (http, https, mailto).
 - `src/styles/`: theme tokens, chrome, editor styles.
 
 ## Notes for `src-tauri/` (owned by the backend)

@@ -2,7 +2,7 @@
 // styles/theme.css, which collapse to 0ms under prefers-reduced-motion, so
 // nothing here hard-codes timing. None of this runs on a keystroke.
 
-type Speed = "fast" | "moderate" | "slow";
+type Speed = "fast" | "moderate" | "slow" | "sidebar";
 type Curve = "out" | "in" | "in-out";
 
 const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
