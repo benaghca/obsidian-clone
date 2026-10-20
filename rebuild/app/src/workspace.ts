@@ -16,7 +16,8 @@ export interface Tab {
   forward: string[];
 }
 
-export type Change = "files" | "tabs" | "doc" | "links";
+/** "show" fires when the view swaps to a different note (or tab), before "tabs". */
+export type Change = "files" | "tabs" | "doc" | "links" | "show";
 
 const SAVE_DELAY = 300;
 const LINK_INDEX_DELAY = 1000;
@@ -219,6 +220,7 @@ export class Workspace {
       const state = this.states.get(path)!;
       if (this.view.state !== state) this.view.setState(state);
     }
+    this.emit("show");
     this.emit("tabs");
     if (path && this.scroller) this.scroller.scrollTop = this.scrollTops.get(path) ?? 0;
     if (path) this.view.focus();
