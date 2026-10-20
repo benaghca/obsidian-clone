@@ -1,15 +1,10 @@
 {
+  "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window can call vault commands and listen for vault-changed.",
+  "description": "The main window, on the app's own origin only, can call the vault commands, listen for vault-changed, drive its own frameless window, and hand http, https and mailto links to the system opener.",
   "windows": [
     "main"
   ],
-  "remote": {
-    "urls": [
-      "http://localhost:1420/*",
-      "http://127.0.0.1:1420/*"
-    ]
-  },
   "permissions": [
     "core:default",
     "core:event:default",
@@ -26,6 +21,14 @@
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
-    "core:window:allow-close"
+    "core:window:allow-close",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "http://*" },
+        { "url": "https://*" },
+        { "url": "mailto:*" }
+      ]
+    }
   ]
 }

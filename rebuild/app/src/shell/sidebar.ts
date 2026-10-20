@@ -37,7 +37,7 @@ export function createSidebar(ws: Workspace, newNote: () => void): HTMLElement {
 
   const sidebar = h(
     "div",
-    { class: "workspace-split mod-left-split" },
+    { class: "workspace-split mod-sidedock mod-left-split" },
     h(
       "div",
       { class: "workspace-tab-header-container", "data-tauri-drag-region": "" },

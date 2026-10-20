@@ -2,19 +2,20 @@
 // back/forward and breadcrumb, and the scrolling note view with its inline
 // title above the editor in a centered readable column.
 
-import { isTauri } from "../api";
-import { animateOut } from "../motion";
+import { duration, easing } from "../motion";
 import { noteName, parentDir, type Tab, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
+import type { ColumnHolder } from "./sidedock";
 
 export interface PaneCommands {
   quickSwitcher(): void;
   newNote(): void;
+  toggleRightSidebar(): void;
 }
 
-export interface Pane {
+export interface Pane extends ColumnHolder {
   el: HTMLElement;
   /** Focus the inline title, selecting it for a rename. */
   focusTitle(selectAll: boolean): void;
@@ -42,8 +43,8 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
     iconButton(icon("plus", 16), "New tab", () => ws.newTab(), "workspace-tab-header-new-tab"),
     h("div", { class: "workspace-tab-header-spacer", "data-tauri-drag-region": "" }),
     h("div", { class: "workspace-tab-header-tab-list" }, tabListButton),
+    iconButton(icon("panel-right"), "Toggle right sidebar", () => commands.toggleRightSidebar(), "sidebar-toggle-button mod-right"),
   );
-  if (isTauri) void addWindowControls(strip);
 
   // Tab headers are kept per tab id and updated in place, so a switch only
   // flips classes, and opening/closing a tab can animate its own header.
@@ -87,9 +88,7 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
     for (const [id, { el }] of tabHeaders) {
       if (open.has(id)) continue;
       tabHeaders.delete(id);
-      // Pin the current width so the shrink starts from what is on screen.
-      el.style.maxWidth = `${el.getBoundingClientRect().width}px`;
-      void animateOut(el);
+      closeTabHeader(el);
     }
     let prev: Element | null = null;
     const added: HTMLElement[] = [];
@@ -110,20 +109,50 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
       if (at !== el) tabList.insertBefore(el, at);
       prev = el;
     }
-    // New tabs grow from nothing to their content width: the strip shares its
-    // width out by content, so that is what lands the last frame exactly on
-    // the settled layout.
-    for (const el of added) el.style.flex = "none";
-    const widths = added.map((el) => el.getBoundingClientRect().width);
-    added.forEach((el, i) => {
-      el.style.flex = "";
-      el.style.setProperty("--tab-width", `${widths[i]}px`);
-    });
-    for (const el of added) {
-      el.classList.add("mod-entering");
-      el.addEventListener("animationend", () => el.classList.remove("mod-entering"), { once: true });
-    }
+    for (const el of added) openTabHeader(el);
     tabsRendered = true;
+  }
+
+  // A new tab grows from nothing to the width it has in the settled strip,
+  // which is measured first, so the last frame lands exactly on the layout
+  // and the neighbours give up their room smoothly as it grows. Only this
+  // tab's max-width animates; the strip is a small fixed-height box.
+  function openTabHeader(el: HTMLElement) {
+    const ms = duration("moderate");
+    if (ms <= 0) return;
+    const width = el.getBoundingClientRect().width;
+    el.style.overflow = "hidden";
+    el.animate(
+      [
+        { maxWidth: "0px", minWidth: "0px", opacity: 0 },
+        { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
+      ],
+      { duration: ms, easing: easing("out") },
+    ).finished.then(
+      () => (el.style.overflow = ""),
+      () => {},
+    );
+  }
+
+  // A closed tab shrinks from its current width to nothing, then goes. Like
+  // a closing folder it eases in and out: a plain ease-in would leave the
+  // last third of the width to vanish in a single frame.
+  function closeTabHeader(el: HTMLElement) {
+    el.classList.add("is-closing");
+    const ms = duration("moderate");
+    if (ms <= 0) return el.remove();
+    const width = el.getBoundingClientRect().width;
+    el.style.overflow = "hidden";
+    el.animate(
+      [
+        { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
+        { maxWidth: "0px", minWidth: "0px", opacity: 0 },
+      ],
+      { duration: ms, easing: easing("in-out"), fill: "forwards" },
+    ).finished.then(
+      () => el.remove(),
+      () => el.remove(),
+    );
   }
 
   // ----- sub-header -----
@@ -211,6 +240,48 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
     fadeFlip = !fadeFlip;
   }
 
+  // While a side dock opens or closes, the column keeps the narrower of its
+  // start and end widths, so the text never re-wraps mid-move, and its left
+  // margin eases from where it is to its final centred value in step with
+  // the dock (same timing, same start time). Margin and pane edge then move
+  // on the same curve, so the column's left edge travels straight from its
+  // old place to its new one, and the one re-wrap at the end (or start) only
+  // moves line ends.
+  let hold: Animation | null = null;
+  function holdColumn(delta: number, dock?: Animation) {
+    hold?.cancel();
+    hold = null;
+    sizer.style.width = "";
+    sizer.style.marginLeft = "";
+    const timing = dock?.effect?.getComputedTiming();
+    const ms = typeof timing?.duration === "number" ? timing.duration : duration("sidebar");
+    if (scroller.hidden || ms <= 0) return;
+    const style = getComputedStyle(scroller);
+    const padLeft = parseFloat(style.paddingLeft);
+    const avail = scroller.clientWidth - padLeft - parseFloat(style.paddingRight);
+    const rect = sizer.getBoundingClientRect();
+    const fromMargin = rect.left - scroller.getBoundingClientRect().left - padLeft;
+    const endWidth = Math.min(parseFloat(getComputedStyle(sizer).maxWidth) || Infinity, avail + delta);
+    const toMargin = Math.max(0, (avail + delta - endWidth) / 2);
+    sizer.style.width = `${Math.min(rect.width, endWidth)}px`;
+    sizer.style.marginLeft = `${toMargin}px`;
+    const anim = sizer.animate([{ marginLeft: `${fromMargin}px` }, { marginLeft: `${toMargin}px` }], {
+      duration: ms,
+      easing: (dock?.effect?.getTiming().easing as string | undefined) ?? easing("out"),
+    });
+    if (dock?.startTime != null) anim.startTime = dock.startTime;
+    hold = anim;
+    anim.finished.then(
+      () => {
+        if (hold !== anim) return;
+        hold = null;
+        sizer.style.width = "";
+        sizer.style.marginLeft = "";
+      },
+      () => {},
+    );
+  }
+
   function focusTitle(selectAll: boolean) {
     title.focus();
     const range = document.createRange();
@@ -264,19 +335,5 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
   renderHeader();
   renderView();
 
-  return { el: h("div", { class: "workspace-leaf" }, strip, header, scroller, empty), focusTitle };
-}
-
-async function addWindowControls(strip: HTMLElement) {
-  const { getCurrentWindow } = await import("@tauri-apps/api/window");
-  const win = getCurrentWindow();
-  strip.append(
-    h(
-      "div",
-      { class: "titlebar-buttons" },
-      iconButton(icon("minus", 16), "Minimize", () => void win.minimize(), "titlebar-button"),
-      iconButton(icon("square", 14), "Maximize", () => void win.toggleMaximize(), "titlebar-button"),
-      iconButton(icon("x", 16), "Close", () => void win.close(), "titlebar-button mod-close"),
-    ),
-  );
+  return { el: h("div", { class: "workspace-leaf" }, strip, header, scroller, empty), focusTitle, holdColumn };
 }

@@ -17,6 +17,7 @@
 mod config;
 mod fsutil;
 mod index;
+mod lockdown;
 mod model;
 mod vault;
 mod watch;
@@ -47,6 +48,7 @@ pub fn run() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
             let (tx, rx) = mpsc::channel();
             let config_dir = app
@@ -66,6 +68,8 @@ pub fn run() {
                 .name("vault-watch".into())
                 .spawn(move || watch::run(handle, tx, rx))
                 .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
+            // Last, so the state its commands use is in place before the page loads.
+            lockdown::create_main_window(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

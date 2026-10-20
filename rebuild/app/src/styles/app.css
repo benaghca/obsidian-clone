@@ -90,41 +90,78 @@ body {
   height: 16px;
 }
 
-/* ----- left sidebar ----- */
+/* ----- side docks (left: files; right: backlinks, outline) ----- */
 
-.mod-left-split {
-  width: var(--sidebar-width);
+/* Each dock animates its width, the one layout property animated in the
+   app, over --anim-duration-sidebar. The edge line is an inset shadow, so no
+   border width has to animate with it. The contents keep the dock's full
+   width and are clipped (anchored to the outer edge), so nothing inside
+   re-wraps; they fade out as the dock closes and back in as it opens. */
+.mod-sidedock {
+  --dock-width: var(--sidebar-width);
+  width: var(--dock-width);
   flex: none;
+  position: relative;
   display: flex;
   flex-direction: column;
-  background: var(--background-secondary);
-  border-right: 1px solid var(--background-modifier-border);
   min-width: 0;
   overflow: hidden;
-  transition:
-    width var(--anim-duration-slow) var(--anim-ease-in-out),
-    border-right-width var(--anim-duration-slow) var(--anim-ease-in-out);
+  background: var(--background-secondary);
+  transition: width var(--anim-duration-sidebar) var(--anim-ease-out);
 }
-/* The width is the only layout property animated anywhere; the children keep
-   their full width (clipped) so nothing inside re-wraps while it moves. */
-.mod-left-split > * {
-  min-width: calc(var(--sidebar-width) - 1px);
-  transition: opacity var(--anim-duration-moderate) var(--anim-ease-out) var(--anim-duration-fast);
+.mod-left-split {
+  --dock-width: var(--left-sidebar-width, var(--sidebar-width));
+  box-shadow: inset -1px 0 0 var(--background-modifier-border);
 }
-.is-left-sidebar-collapsed .mod-left-split {
+.mod-right-split {
+  --dock-width: var(--right-sidebar-width, 260px);
+  align-items: flex-end;
+  box-shadow: inset 1px 0 0 var(--background-modifier-border);
+}
+.mod-sidedock > * {
+  min-width: var(--dock-width);
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-out) calc(var(--anim-duration-sidebar) / 3);
+}
+.is-left-sidebar-collapsed .mod-left-split,
+.is-right-sidebar-collapsed .mod-right-split {
   width: 0;
-  border-right-width: 0;
   visibility: hidden;
   transition:
-    width var(--anim-duration-slow) var(--anim-ease-in-out),
-    border-right-width var(--anim-duration-slow) var(--anim-ease-in-out),
-    visibility 0s linear var(--anim-duration-slow);
+    width var(--anim-duration-sidebar) var(--anim-ease-out),
+    visibility 0s linear var(--anim-duration-sidebar);
 }
-.is-left-sidebar-collapsed .mod-left-split > * {
+.is-left-sidebar-collapsed .mod-left-split > *,
+.is-right-sidebar-collapsed .mod-right-split > * {
   opacity: 0;
   transition: opacity var(--anim-duration-fast) var(--anim-ease-in);
 }
-.mod-left-split > .workspace-tab-header-container {
+/* restoring a saved layout, or dragging the edge: follow at once */
+.is-sidedock-instant .mod-sidedock,
+.is-sidedock-instant .mod-sidedock > *,
+.is-sidedock-resizing .mod-sidedock,
+.is-sidedock-resizing .mod-root .workspace-tab-header-container {
+  transition: none;
+}
+.is-sidedock-resizing {
+  cursor: ew-resize;
+  user-select: none;
+}
+.mod-sidedock > .workspace-leaf-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  min-width: 0;
+  z-index: 5;
+  cursor: ew-resize;
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.mod-sidedock > .workspace-leaf-resize-handle:hover,
+.is-sidedock-resizing .workspace-leaf-resize-handle {
+  background: linear-gradient(to right, var(--background-modifier-border-hover) 2px, transparent 2px);
+}
+.mod-sidedock > .workspace-tab-header-container {
   height: var(--header-height);
   display: flex;
   align-items: center;
@@ -132,7 +169,7 @@ body {
   padding: 0 8px;
   flex: none;
 }
-.mod-left-split .workspace-tab-header.is-active {
+.mod-sidedock .workspace-tab-header.is-active {
   background: var(--background-modifier-hover);
   color: var(--icon-color-hover);
   opacity: 1;
@@ -320,6 +357,86 @@ body {
   border-radius: 2px;
 }
 
+/* ----- right sidebar views ----- */
+
+.outline-view,
+.backlink-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* room to scroll the last rows above the floating status bar */
+  padding: 4px 8px 32px;
+}
+.outline-item {
+  padding-left: calc(8px + var(--depth, 0) * 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: var(--cursor, default);
+}
+.outline-item.is-active {
+  color: var(--text-accent);
+}
+.backlink-header {
+  padding-left: 22px;
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.backlink-header .collapse-icon {
+  left: 4px;
+}
+.backlink-section + .backlink-section {
+  margin-top: 8px;
+}
+.tree-item-flair {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+.search-result-container {
+  padding: 2px 0 4px;
+}
+.backlink-pane .search-result-file-title {
+  position: relative;
+  padding-left: 22px;
+}
+.backlink-pane .search-result-file-title .collapse-icon {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.search-result-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backlink-pane .search-result-file-match {
+  margin-left: 12px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+.search-result-more {
+  margin: 2px 0 4px 12px;
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+  cursor: var(--cursor, default);
+}
+.search-result-more:hover {
+  text-decoration: underline;
+}
+.search-empty-state {
+  padding: 4px 6px 4px 22px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
 /* ----- main pane ----- */
 
 .mod-root {
@@ -346,33 +463,31 @@ body {
   padding: 0 4px 0 8px;
   -webkit-app-region: drag;
 }
+/* Tabs share the strip like Obsidian's: each is a full tab width while
+   there is room, and they all shrink evenly when there is not, instead of
+   shrinking to fit their titles. The + button follows the last tab. */
 .workspace-tab-header-container-inner {
   display: flex;
   align-items: flex-end;
+  flex: 0 1 auto;
   min-width: 0;
   height: 100%;
   padding-top: 7px;
+  overflow: hidden;
 }
 .mod-root .workspace-tab-header {
   height: 28px;
-  min-width: 60px;
-  max-width: 200px;
-  flex: 0 1 200px;
+  width: var(--tab-width);
+  min-width: var(--tab-min-width);
+  flex: 0 1 auto;
   position: relative;
   padding: 0 1px;
   margin-bottom: -1px;
   -webkit-app-region: no-drag;
 }
-/* opening and closing tabs grow and shrink; the strip is a small fixed-height
-   box, so this layout work stays inside it */
-.mod-root .workspace-tab-header.mod-entering {
-  overflow: hidden;
-  animation: grove-tab-in var(--anim-duration-moderate) var(--anim-ease-out);
-}
+/* opening and closing tabs grow and shrink (Web Animations in pane.ts) */
 .mod-root .workspace-tab-header.is-closing {
-  overflow: hidden;
   pointer-events: none;
-  animation: grove-tab-out var(--anim-duration-moderate) var(--anim-ease-in) forwards;
 }
 .workspace-tab-header-inner {
   display: flex;
@@ -436,10 +551,11 @@ body {
   background: var(--background-modifier-hover);
   color: var(--icon-color-hover);
 }
+/* centred on the tabs' 28px row, so they line up with the tab titles */
 .workspace-tab-header-new-tab,
 .workspace-tab-header-tab-list {
-  align-self: center;
-  margin-top: 4px;
+  align-self: flex-end;
+  margin-bottom: 2px;
   -webkit-app-region: no-drag;
 }
 .workspace-tab-header-new-tab {
@@ -449,11 +565,37 @@ body {
   flex: 1;
   height: 100%;
 }
-.titlebar-buttons {
-  display: flex;
-  align-self: center;
-  margin-left: 8px;
+.mod-root .sidebar-toggle-button.mod-right {
+  align-self: flex-end;
+  margin: 0 0 2px 2px;
   -webkit-app-region: no-drag;
+}
+
+/* Frameless window (Tauri): the window buttons float in the top-right
+   corner, and the rightmost header leaves room for them. */
+.is-frameless {
+  --titlebar-buttons-width: 92px;
+}
+.titlebar-buttons {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  -webkit-app-region: no-drag;
+}
+.is-frameless .mod-root .workspace-tab-header-container {
+  transition: padding-right var(--anim-duration-sidebar) var(--anim-ease-out);
+}
+.is-frameless.is-right-sidebar-collapsed .mod-root .workspace-tab-header-container {
+  padding-right: calc(4px + var(--titlebar-buttons-width));
+}
+.is-frameless .mod-right-split > .workspace-tab-header-container {
+  padding-right: var(--titlebar-buttons-width);
 }
 .titlebar-button.mod-close:hover {
   background: var(--text-error);

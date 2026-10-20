@@ -37,6 +37,22 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
   return { score: score - indices[0] - t.length * 0.1, indices };
 }
 
+/**
+ * A match someone plausibly meant: one contiguous run of letters, or runs
+ * that each start a word ("proj road", "rl" for "Reading list"). Letters
+ * scattered through the middle of words are a weak match.
+ */
+export function isStrongMatch(text: string, indices: number[]): boolean {
+  let runs = 0;
+  let allAtWordStarts = true;
+  for (let i = 0; i < indices.length; i++) {
+    if (i > 0 && indices[i] === indices[i - 1] + 1) continue;
+    runs++;
+    if (!isWordStart(text, indices[i])) allAtWordStarts = false;
+  }
+  return runs <= 1 || allAtWordStarts;
+}
+
 /** Render text with matched indices wrapped in <span class="suggestion-highlight">. */
 export function highlight(text: string, indices: number[]): DocumentFragment {
   const frag = document.createDocumentFragment();

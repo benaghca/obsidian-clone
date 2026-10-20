@@ -1,5 +1,7 @@
 # Motion pass: notes
 
+> Round 3 changed two things described below: the side docks now use their own `--anim-duration-sidebar` (130ms, ease-out both ways) with the note column held so it never re-wraps mid-move, and tabs grow and shrink with the Web Animations API at their settled width. See `LOCKDOWN_SIDEBAR_NOTES.md`.
+
 Grove now has one small motion system: tokens in `app/src/styles/theme.css`, shared keyframes in `app/src/styles/motion.css`, and helpers in `app/src/motion.ts`. All animations below use them. Typing and note switching are as fast as before (numbers at the end).
 
 Everything is local CSS and TypeScript. There are no new dependencies, fonts, CDN assets, telemetry or network requests. The verification run saw zero requests to anything other than the local dev server.

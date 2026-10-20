@@ -2,16 +2,19 @@ import "./styles/theme.css";
 import "./styles/app.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
+import { isTauri } from "./api";
 import { countsField } from "./editor/counts";
 import { h, iconButton } from "./shell/dom";
 import { icon } from "./shell/icons";
 import { createPane } from "./shell/pane";
+import { loadLayout, saveLayout } from "./shell/prefs";
 import { openQuickSwitcher } from "./shell/quickSwitcher";
+import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
+import { createSidedocks } from "./shell/sidedock";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
-if (import.meta.env.DEV) Object.assign(window, { ws }); // for poking at from devtools
 
 async function newNote() {
   await ws.newNote();
@@ -24,18 +27,29 @@ async function dailyNote() {
   await ws.openLink(name);
 }
 
+function showRightView(view: "backlinks" | "outline") {
+  rightSidebar.select(view);
+  docks.setCollapsed("right", false);
+}
+
 const commands = {
   quickSwitcher: () => openQuickSwitcher(ws),
   newNote: () => void newNote(),
+  toggleLeftSidebar: () => docks.toggle("left"),
+  toggleRightSidebar: () => docks.toggle("right"),
+  showBacklinks: () => showRightView("backlinks"),
+  showOutline: () => showRightView("outline"),
 };
+if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands }); // for poking at from devtools
 
 const pane = createPane(ws, commands);
 const sidebar = createSidebar(ws, commands.newNote);
+const rightSidebar = createRightSidebar(ws, () => !docks.isCollapsed("right"));
 
 const ribbon = h(
   "div",
   { class: "workspace-ribbon mod-left" },
-  iconButton(icon("panel-left"), "Toggle left sidebar", () => app.classList.toggle("is-left-sidebar-collapsed"), "sidebar-toggle-button"),
+  iconButton(icon("panel-left"), "Toggle left sidebar", commands.toggleLeftSidebar, "sidebar-toggle-button"),
   h(
     "div",
     { class: "side-dock-actions" },
@@ -71,8 +85,53 @@ ws.on((change) => {
   if (change === "links" || change === "tabs") renderBacklinks();
 });
 
-const app = h("div", { class: "app-container" }, ribbon, sidebar, h("div", { class: "workspace-split mod-root" }, pane.el), statusBar);
+// The right sidebar starts closed; the vault's saved layout is applied once it is open.
+const app = h(
+  "div",
+  { class: "app-container is-right-sidebar-collapsed" },
+  ribbon,
+  sidebar,
+  h("div", { class: "workspace-split mod-root" }, pane.el),
+  rightSidebar.el,
+  statusBar,
+);
 document.getElementById("app")!.replaceWith(app);
+
+const docks = createSidedocks(app, pane);
+rightSidebar.el.append(docks.resizeHandle("right"));
+
+function rememberLayout() {
+  if (!ws.vault.path) return;
+  saveLayout(ws.vault.path, {
+    rightOpen: !docks.isCollapsed("right"),
+    rightWidth: docks.width("right"),
+    rightView: rightSidebar.view,
+  });
+}
+docks.onChange((side) => {
+  if (side !== "right") return;
+  rightSidebar.sync();
+  rememberLayout();
+});
+rightSidebar.onSelect(rememberLayout);
+
+// Frameless window: the controls float over the top-right corner, above
+// whichever header is rightmost (the tab strip, or the open right sidebar).
+if (isTauri) void addWindowControls();
+async function addWindowControls() {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  const win = getCurrentWindow();
+  app.classList.add("is-frameless");
+  app.append(
+    h(
+      "div",
+      { class: "titlebar-buttons" },
+      iconButton(icon("minus", 16), "Minimize", () => void win.minimize(), "titlebar-button"),
+      iconButton(icon("square", 14), "Maximize", () => void win.toggleMaximize(), "titlebar-button"),
+      iconButton(icon("x", 16), "Close", () => void win.close(), "titlebar-button mod-close"),
+    ),
+  );
+}
 
 // Global shortcuts (Obsidian defaults). Editor keys are handled by CodeMirror.
 document.addEventListener("keydown", (e) => {
@@ -86,10 +145,16 @@ document.addEventListener("keydown", (e) => {
   else if (mod && key === "tab") ws.cycleTab(e.shiftKey ? -1 : 1);
   else if (mod && e.altKey && key === "arrowleft") void ws.goBack();
   else if (mod && e.altKey && key === "arrowright") void ws.goForward();
+  else if (mod && e.altKey && e.code === "BracketLeft") commands.toggleLeftSidebar();
+  else if (mod && e.altKey && e.code === "BracketRight") commands.toggleRightSidebar();
   else handled = false;
   if (handled) e.preventDefault();
 });
 window.addEventListener("beforeunload", () => void ws.flushAll());
 
 await ws.init();
+const layout = loadLayout(ws.vault.path);
+docks.setWidth("right", layout.rightWidth);
+rightSidebar.select(layout.rightView);
+docks.setCollapsed("right", !layout.rightOpen, false);
 await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");

@@ -45,23 +45,3 @@
     opacity: var(--anim-note-opacity-from);
   }
 }
-
-/* tabs: grow from nothing, shrink away on close */
-@keyframes grove-tab-in {
-  from {
-    min-width: 0;
-    max-width: 0;
-    opacity: 0;
-  }
-  to {
-    min-width: 0;
-    max-width: var(--tab-width);
-  }
-}
-@keyframes grove-tab-out {
-  to {
-    min-width: 0;
-    max-width: 0;
-    opacity: 0;
-  }
-}
