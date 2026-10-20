@@ -537,9 +537,11 @@ body {
   display: flex;
   position: relative;
 }
+.mod-root.mod-vertical,
 .mod-root .workspace-split.mod-vertical {
   flex-direction: row;
 }
+.mod-root.mod-horizontal,
 .mod-root .workspace-split.mod-horizontal {
   flex-direction: column;
 }
@@ -564,11 +566,11 @@ body {
 /* Dividers between panes: a 1px line on the boundary with a wider grab
    area, like Obsidian's. Hovering a moment or dragging lights it in the
    accent (an opacity fade on a second bar, nothing else moves). */
-.mod-root .workspace-leaf-resize-handle {
+.workspace-leaf-resize-handle.mod-split {
   position: absolute;
   z-index: 6;
 }
-.mod-root .workspace-split.mod-vertical > .workspace-leaf-resize-handle {
+.mod-vertical > .workspace-leaf-resize-handle.mod-split {
   top: 0;
   bottom: 0;
   left: var(--at);
@@ -576,7 +578,7 @@ body {
   margin-left: -3px;
   cursor: col-resize;
 }
-.mod-root .workspace-split.mod-horizontal > .workspace-leaf-resize-handle {
+.mod-horizontal > .workspace-leaf-resize-handle.mod-split {
   left: 0;
   right: 0;
   top: var(--at);
@@ -584,40 +586,40 @@ body {
   margin-top: -3px;
   cursor: row-resize;
 }
-.mod-root .workspace-leaf-resize-handle::before,
-.mod-root .workspace-leaf-resize-handle::after {
+.workspace-leaf-resize-handle.mod-split::before,
+.workspace-leaf-resize-handle.mod-split::after {
   content: "";
   position: absolute;
   inset: 0;
 }
-.mod-root .mod-vertical > .workspace-leaf-resize-handle::before {
+.mod-vertical > .workspace-leaf-resize-handle.mod-split::before {
   left: 3px;
   width: 1px;
   background: var(--background-modifier-border);
 }
-.mod-root .mod-horizontal > .workspace-leaf-resize-handle::before {
+.mod-horizontal > .workspace-leaf-resize-handle.mod-split::before {
   top: 3px;
   height: 1px;
   background: var(--background-modifier-border);
 }
-.mod-root .mod-vertical > .workspace-leaf-resize-handle::after {
+.mod-vertical > .workspace-leaf-resize-handle.mod-split::after {
   left: 2px;
   width: 3px;
 }
-.mod-root .mod-horizontal > .workspace-leaf-resize-handle::after {
+.mod-horizontal > .workspace-leaf-resize-handle.mod-split::after {
   top: 2px;
   height: 3px;
 }
-.mod-root .workspace-leaf-resize-handle::after {
+.workspace-leaf-resize-handle.mod-split::after {
   background: var(--interactive-accent);
   opacity: 0;
   transition: opacity var(--anim-duration-fast) var(--anim-ease-out);
 }
-.mod-root .workspace-leaf-resize-handle:hover::after {
+.workspace-leaf-resize-handle.mod-split:hover::after {
   opacity: 1;
   transition-delay: 0.3s;
 }
-.mod-root .workspace-leaf-resize-handle.is-dragging::after {
+.workspace-leaf-resize-handle.mod-split.is-dragging::after {
   opacity: 1;
   transition-delay: 0s;
 }

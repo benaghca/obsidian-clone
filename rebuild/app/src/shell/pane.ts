@@ -65,11 +65,20 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
 
   // ----- the split tree -----
 
+  // The top split is drawn by the root element itself, so splitting a lone
+  // pane (or adding to the top row) never moves the panes already there.
+  // Moving an element in the DOM resets its scroll, so whatever does move is
+  // noted and gets its scroll position back.
+  const splitIds = new WeakMap<HTMLElement, number>();
+  let moved: HTMLElement[] = [];
+
   /** Put `wanted` in `parent` in order, moving only what is out of place. */
   function arrange(parent: HTMLElement, wanted: HTMLElement[]) {
     wanted.forEach((el, i) => {
       const at = parent.children[i] ?? null;
-      if (at !== el) parent.insertBefore(el, at);
+      if (at === el) return;
+      if (el.isConnected) moved.push(el);
+      parent.insertBefore(el, at);
     });
     while (parent.children.length > wanted.length) parent.lastElementChild!.remove();
   }
@@ -80,9 +89,9 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     return el;
   }
 
-  function splitEl(split: Split<Tab>): HTMLElement {
-    let el = splitEls.get(split.id);
+  function splitEl(split: Split<Tab>, el = splitEls.get(split.id)): HTMLElement {
     if (!el) splitEls.set(split.id, (el = h("div", { class: "workspace-split" })));
+    splitIds.set(el, split.id);
     el.classList.toggle("mod-vertical", split.direction === "vertical");
     el.classList.toggle("mod-horizontal", split.direction === "horizontal");
     const kids = split.children.map((c, i) => nodeEl(c, split.sizes[i]));
@@ -108,22 +117,19 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     handleEls.set(container, list);
     let handle = list[index];
     if (!handle) {
-      handle = list[index] = h("div", { class: "workspace-leaf-resize-handle" });
+      handle = list[index] = h("div", { class: "workspace-leaf-resize-handle mod-split" });
       handle.addEventListener("pointerdown", (e) => onResizeStart(e, container, index));
     }
     return handle;
   }
 
-  // The split each container element draws (looked up at drag time, so a
+  // The split a container element draws (looked up at drag time, so a
   // handle always resizes the tree as it is now).
   function splitOf(container: HTMLElement): Split<Tab> | null {
-    for (const [id, el] of splitEls) {
-      if (el !== container) continue;
-      const find = (n: LayoutNode<Tab>): Split<Tab> | null =>
-        n.kind === "group" ? null : n.id === id ? n : n.children.reduce<Split<Tab> | null>((f, c) => f ?? find(c), null);
-      return find(ws.layout.root);
-    }
-    return null;
+    const id = splitIds.get(container);
+    const find = (n: LayoutNode<Tab>): Split<Tab> | null =>
+      n.kind === "group" ? null : n.id === id ? n : n.children.reduce<Split<Tab> | null>((f, c) => f ?? find(c), null);
+    return id === undefined ? null : find(ws.layout.root);
   }
 
   // Dragging a divider: the container's size is read once; each frame then
@@ -139,7 +145,7 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     const total = vertical ? rect.width : rect.height;
     const start = [...split.sizes];
     const from = vertical ? down.clientX : down.clientY;
-    const kids = split.children.map((c) => (c.kind === "group" ? viewFor(c).el : splitEls.get(c.id)!));
+    const kids = split.children.map((c) => (c.kind === "group" ? viewFor(c).el : (splitEls.get(c.id) ?? container)));
     const handles = handleEls.get(container) ?? [];
     let pos = from;
     let frame = 0;
@@ -173,26 +179,32 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
   }
 
   function renderLayout() {
-    // Moving an element in the DOM resets its scroll position: note where
-    // every pane is, and put back any that moved.
+    // Scroll positions are read before anything moves (cheap: nothing has
+    // changed the layout since it was last computed).
     const scrolls = new Map<GroupView, number>();
-    for (const v of views.values()) {
-      const scroller = v.el.querySelector<HTMLElement>(".view-content");
-      if (scroller && scroller.scrollTop) scrolls.set(v, scroller.scrollTop);
+    for (const v of views.values()) if (v.scroller.scrollTop) scrolls.set(v, v.scroller.scrollTop);
+    moved = [];
+    const top = ws.layout.root;
+    if (top.kind === "split") {
+      splitEls.set(top.id, root);
+      splitEl(top, root);
+    } else {
+      root.classList.add("mod-vertical");
+      root.classList.remove("mod-horizontal");
+      arrange(root, [nodeEl(top, 1)]);
     }
+    root.classList.add("workspace-split", "mod-root");
     const live = new Set(ws.groups());
-    const top = nodeEl(ws.layout.root, 1);
-    arrange(root, [top]);
     for (const [group, v] of views) {
       if (live.has(group)) continue;
       v.dispose();
       views.delete(group);
     }
-    for (const [id, el] of splitEls) if (!el.isConnected) splitEls.delete(id);
+    for (const [id, el] of splitEls) if (!el.isConnected || splitIds.get(el) !== id) splitEls.delete(id);
     for (const [v, top] of scrolls) {
-      const scroller = v.el.querySelector<HTMLElement>(".view-content");
-      if (scroller && views.get(v.group) === v && scroller.scrollTop !== top) scroller.scrollTop = top;
+      if (views.get(v.group) === v && moved.some((el) => el.contains(v.el))) v.scroller.scrollTop = top;
     }
+    moved = [];
     for (const v of fresh) if (views.get(v.group) === v) ws.setScroller(v.group, v.scroller);
     fresh.clear();
     renderPlaces();

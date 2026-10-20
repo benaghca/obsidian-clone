@@ -17,6 +17,7 @@ import { redo, undo } from "@codemirror/commands";
 import { Annotation, EditorSelection, type EditorState, Prec, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
+import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef } from "./editor/host";
@@ -38,7 +39,8 @@ export interface Tab {
 
 export interface TabMemory {
   path: string;
-  scrollTop: number;
+  /** null: no position to restore (a split places its pane by a line instead). */
+  scrollTop: number | null;
   selection: EditorSelection | null;
 }
 
@@ -222,7 +224,7 @@ export class Workspace {
     const pane = this.pane(group);
     pane.scroller = el;
     const memory = pane.tab?.memory;
-    if (memory && memory.path === pane.path) el.scrollTop = memory.scrollTop;
+    if (memory && memory.path === pane.path && memory.scrollTop !== null) el.scrollTop = memory.scrollTop;
   }
 
   /** The tab group's editor, created with the group. */
@@ -341,6 +343,7 @@ export class Workspace {
             history: false,
             extensions: this.mirrorKeys,
             selection: clampSelection(memory?.selection ?? owner.state.selection, doc.length),
+            counts: owner.state.field(countsField, false),
           }),
         );
       }
@@ -349,7 +352,8 @@ export class Workspace {
     }
     this.emit("pane", group);
     if (path && pane.scroller) {
-      pane.scroller.scrollTop = memoryOf(tab, path)?.scrollTop ?? this.scrollTops.get(path) ?? 0;
+      const top = memoryOf(tab, path)?.scrollTop;
+      if (top !== null) pane.scroller.scrollTop = top ?? this.scrollTops.get(path) ?? 0;
     }
     return true;
   }
@@ -596,12 +600,33 @@ export class Workspace {
     if (!group) return;
     const pane = this.panes.get(group);
     if (pane?.tab === tab) this.remember(pane);
-    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, memory: tab.memory ? { ...tab.memory } : null };
+    // The new pane is narrower or shorter, so the same scroll offset would
+    // show other text: it starts at the line at the top of the old one.
+    const topLine = pane?.tab === tab ? this.topLine(pane) : null;
+    const memory = tab.memory ? { ...tab.memory, scrollTop: topLine === null ? tab.memory.scrollTop : null } : null;
+    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, memory };
     const added = this.layout.split(group, edge, [copy]);
     this.layout.activeGroup = added;
     this.present(added);
+    const view = this.pane(added).view;
+    if (topLine !== null) {
+      // Both panes keep that line at the top, though both now wrap narrower.
+      const keep = EditorView.scrollIntoView(topLine, { y: "start", yMargin: 0 });
+      view.dispatch({ effects: keep });
+      pane!.view.dispatch({ effects: keep });
+    }
     this.settle(true);
-    if (copy.path) this.pane(added).view.focus();
+    if (copy.path) requestAnimationFrame(() => view.focus());
+  }
+
+  /** The start of the first line in view in a pane, or null at the very top. */
+  private topLine(pane: Pane): number | null {
+    const scroller = pane.scroller;
+    if (!scroller || scroller.scrollTop <= 0) return null;
+    const view = pane.view;
+    const docTop = view.documentTop - scroller.getBoundingClientRect().top;
+    if (docTop >= 0) return null; // the title is still in view
+    return view.lineBlockAtHeight(-docTop).from;
   }
 
   /** Move a tab to another group (or elsewhere in its own) at a tab-bar position. */
@@ -616,7 +641,8 @@ export class Workspace {
     else this.present(from);
     this.present(to);
     this.settle(collapsed);
-    if (tab.path) this.pane(to).view.focus();
+    const view = this.pane(to).view;
+    if (tab.path) requestAnimationFrame(() => view.focus());
   }
 
   /**
@@ -639,7 +665,8 @@ export class Workspace {
     } else this.present(from);
     this.present(added);
     this.settle(true);
-    if (tab.path) this.pane(added).view.focus();
+    const view = this.pane(added).view;
+    if (tab.path) requestAnimationFrame(() => view.focus());
   }
 
   private dropPane(group: Group) {
@@ -831,7 +858,7 @@ export class Workspace {
     if (pane) this.remember(pane);
     const memory = tab.memory?.path === tab.path ? tab.memory : null;
     if (memory) {
-      saved.scroll = Math.round(memory.scrollTop);
+      if (memory.scrollTop !== null) saved.scroll = Math.round(memory.scrollTop);
       if (memory.selection) saved.sel = [memory.selection.main.anchor, memory.selection.main.head];
     }
     return saved;

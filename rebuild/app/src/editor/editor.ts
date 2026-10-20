@@ -8,7 +8,7 @@ import { indentUnit } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
 import { Compartment, type EditorSelection, EditorState, type Extension, Prec, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
-import { countsField } from "./counts";
+import { type Counts, countsField } from "./counts";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
 import { sourceMode } from "./sourceMode";
@@ -99,9 +99,11 @@ export interface NoteStateOptions {
    */
   history?: boolean;
   selection?: EditorSelection;
+  /** The word and character counts, when already known (a mirror copies its main state's). */
+  counts?: Counts;
 }
 
-export function createNoteState({ doc, host, extensions = [], history: withHistory = true, selection }: NoteStateOptions): EditorState {
+export function createNoteState({ doc, host, extensions = [], history: withHistory = true, selection, counts }: NoteStateOptions): EditorState {
   return EditorState.create({
     doc,
     selection,
@@ -119,7 +121,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       viewModeCompartment.of(VIEW_MODES.live),
       contextMenu,
       wikilinkCompletion,
-      countsField,
+      counts ? countsField.init(() => counts) : countsField,
       keymap.of([
         ...closeBracketsKeymap,
         ...completionKeymap,
