@@ -19,6 +19,8 @@ interface Mention {
   from: string;
   line: number;
   text: string;
+  /** Mentions on this line (one row shows them all). */
+  count: number;
   /** Highlighted columns, worked out only when the row is drawn. */
   spans: () => Span[];
 }
@@ -67,6 +69,7 @@ export function createBacklinksView(ws: Workspace): SideView {
     return { el: h("div", { class: "backlink-section" }, header, body), body, count };
   }
 
+  /** Rows grouped per note; returns the number of mentions shown (Obsidian's count). */
   function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string) {
     const byFile = new Map<string, Mention[]>();
     for (const m of mentions) byFile.set(m.from, [...(byFile.get(m.from) ?? []), m]);
@@ -112,15 +115,17 @@ export function createBacklinksView(ws: Workspace): SideView {
             { class: "search-result-file-title", onclick: () => void ws.open(path) },
             chevron,
             h("div", { class: "search-result-file-name" }, noteName(path)),
-            h("span", { class: "search-result-count" }, String(byFile.get(path)!.length)),
+            h("span", { class: "search-result-count" }, total(all).toLocaleString()),
           ),
           matches,
         );
       }),
     );
     if (!files.length) into.append(h("div", { class: "search-empty-state" }, emptyText));
-    return files.length;
+    return total(mentions);
   }
+
+  const total = (mentions: Mention[]) => mentions.reduce((n, m) => n + m.count, 0);
 
   function matchRow(m: Mention) {
     const spans = m.spans();
@@ -152,15 +157,15 @@ export function createBacklinksView(ws: Workspace): SideView {
       if (here === undefined) resolved.set(target, (here = ws.resolve(target) === path));
       return here;
     };
-    const seen = new Set<string>();
-    const mentions: Mention[] = [];
+    // One row per line, however many links it has; the count is every link.
+    const byLine = new Map<string, Mention>();
     for (const b of entries) {
-      if (seen.has(`${b.from}:${b.line}`)) continue; // one row per line, however many links it has
-      seen.add(`${b.from}:${b.line}`);
-      mentions.push({ ...b, spans: () => linkSpans(b.text, isHere) });
+      const row = byLine.get(`${b.from}:${b.line}`);
+      if (row) row.count++;
+      else byLine.set(`${b.from}:${b.line}`, { ...b, count: 1, spans: () => linkSpans(b.text, isHere) });
     }
-    const files = renderGroups(linked.body, mentions, path ? "No backlinks found." : "No file is open.");
-    linked.count.textContent = files ? String(files) : "";
+    const n = renderGroups(linked.body, [...byLine.values()], path ? "No backlinks found." : "No file is open.");
+    linked.count.textContent = n ? n.toLocaleString() : "";
   }
 
   function scheduleUnlinked(ms: number) {
@@ -188,10 +193,10 @@ export function createBacklinksView(ws: Workspace): SideView {
     for (const hit of hits) {
       if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md")) continue;
       const spans = mentionSpans(hit.text, title);
-      if (spans.length) mentions.push({ from: hit.path, line: hit.line, text: hit.text, spans: () => spans });
+      if (spans.length) mentions.push({ from: hit.path, line: hit.line, text: hit.text, count: spans.length, spans: () => spans });
     }
-    const files = renderGroups(unlinked.body, mentions, "No unlinked mentions found.");
-    unlinked.count.textContent = files ? String(files) : "";
+    const n = renderGroups(unlinked.body, mentions, "No unlinked mentions found.");
+    unlinked.count.textContent = n ? n.toLocaleString() : "";
   }
 
   function refresh() {

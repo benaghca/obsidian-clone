@@ -2,7 +2,7 @@ import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import type { MarkdownParser } from "@lezer/markdown";
 import { expect, test } from "vitest";
-import { headingAt, headingsFromTree, outlineDepths, plainText } from "./outline";
+import { headingsFromTree, outlineDepths, plainText } from "./outline";
 import { Tag, WikiLink } from "./syntax";
 
 const parser = (markdownLanguage.parser as MarkdownParser).configure([WikiLink, Tag]);
@@ -40,7 +40,3 @@ test("depths nest under the nearest smaller level", () => {
   expect(outlineDepths([{ level: 2, text: "", from: 0 }, { level: 1, text: "", from: 1 }])).toEqual([0, 0]);
 });
 
-test("the heading at a position is the last one at or before it", () => {
-  const hs = [10, 50, 90].map((from) => ({ level: 1, text: "", from }));
-  expect([0, 10, 49, 50, 1000].map((p) => headingAt(hs, p))).toEqual([-1, 0, 0, 1, 2]);
-});

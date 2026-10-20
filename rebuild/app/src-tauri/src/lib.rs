@@ -48,7 +48,14 @@ pub fn run() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     tauri::Builder::default()
-        .plugin(tauri_plugin_opener::init())
+        // Only the front end's own trusted-click handler may open links. The
+        // plugin's injected page script would also send any <a target=_blank>
+        // click (even a scripted one) to the system browser, so it is off.
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .setup(|app| {
             let (tx, rx) = mpsc::channel();
             let config_dir = app
@@ -79,6 +86,7 @@ pub fn run() {
             read_note,
             write_note,
             create_note,
+            create_folder,
             rename_path,
             delete_path,
             search,
@@ -158,6 +166,12 @@ fn create_note(
 ) -> Result<FileEntry, String> {
     let mut inner = vault_mut(&state)?;
     inner.vault.as_mut().unwrap().create_note(&path, &content)
+}
+
+#[tauri::command]
+fn create_folder(state: State<'_, AppState>, path: String) -> Result<FileEntry, String> {
+    let mut inner = vault_mut(&state)?;
+    inner.vault.as_mut().unwrap().create_folder(&path)
 }
 
 #[tauri::command]

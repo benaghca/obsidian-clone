@@ -2,18 +2,14 @@
 // back/forward and breadcrumb, and the scrolling note view with its inline
 // title above the editor in a centered readable column.
 
+import { commands } from "../commands";
 import { duration, easing } from "../motion";
 import { noteName, parentDir, type Tab, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
+import type { Menus } from "./menus";
 import type { ColumnHolder } from "./sidedock";
-
-export interface PaneCommands {
-  quickSwitcher(): void;
-  newNote(): void;
-  toggleRightSidebar(): void;
-}
 
 export interface Pane extends ColumnHolder {
   el: HTMLElement;
@@ -21,38 +17,36 @@ export interface Pane extends ColumnHolder {
   focusTitle(selectAll: boolean): void;
 }
 
-export function createPane(ws: Workspace, commands: PaneCommands): Pane {
+/** `menus` is read when a menu opens (it is built after the pane). */
+export function createPane(ws: Workspace, menus: () => Menus): Pane {
   // ----- tab strip -----
   const tabList = h("div", { class: "workspace-tab-header-container-inner" });
-  const tabListButton = iconButton(icon("chevron-down", 16), "Show tab list", (e) => {
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    showMenu(
-      ws.tabs.map((tab) => ({
-        title: tab.path ? noteName(tab.path) : "New tab",
-        checked: tab === ws.active,
-        action: () => ws.activate(tab),
-      })),
-      rect.left,
-      rect.bottom + 4,
-    );
-  });
+  const tabListButton = iconButton(icon("chevron-down"), "Show tab list", () =>
+    showMenu(menus().tabList(), tabListButton, { align: "right" }),
+  );
   const strip = h(
     "div",
     { class: "workspace-tab-header-container", "data-tauri-drag-region": "" },
     tabList,
-    iconButton(icon("plus", 16), "New tab", () => ws.newTab(), "workspace-tab-header-new-tab"),
+    iconButton(icon("plus"), "New tab", () => commands.run("workspace:new-tab"), "workspace-tab-header-new-tab"),
     h("div", { class: "workspace-tab-header-spacer", "data-tauri-drag-region": "" }),
     h("div", { class: "workspace-tab-header-tab-list" }, tabListButton),
-    iconButton(icon("panel-right"), "Toggle right sidebar", () => commands.toggleRightSidebar(), "sidebar-toggle-button mod-right"),
+    iconButton(icon("panel-right"), "Toggle right sidebar", () => commands.run("app:toggle-right-sidebar"), "sidebar-toggle-button mod-right"),
   );
 
   // Tab headers are kept per tab id and updated in place, so a switch only
   // flips classes, and opening/closing a tab can animate its own header.
-  const tabHeaders = new Map<number, { el: HTMLElement; title: HTMLElement }>();
+  const tabHeaders = new Map<number, { el: HTMLElement; title: HTMLElement; close: HTMLElement }>();
   let tabsRendered = false;
 
   function tabHeader(tab: Tab) {
     const title = h("div", { class: "workspace-tab-header-inner-title" });
+    // Close button; on a pinned tab, a pin that unpins it (as in Obsidian).
+    const close = h("div", {
+      class: "workspace-tab-header-inner-close-button",
+      onmousedown: (e: MouseEvent) => e.stopPropagation(),
+      onclick: () => (tab.pinned ? ws.togglePin(tab) : ws.closeTab(tab)),
+    });
     const el = h(
       "div",
       {
@@ -63,24 +57,14 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
             ws.closeTab(tab);
           } else if (e.button === 0) ws.activate(tab);
         },
+        oncontextmenu: (e: MouseEvent) => {
+          e.preventDefault();
+          showMenu(menus().tab(tab), { x: e.clientX, y: e.clientY });
+        },
       },
-      h(
-        "div",
-        { class: "workspace-tab-header-inner" },
-        title,
-        h(
-          "div",
-          {
-            class: "workspace-tab-header-inner-close-button",
-            "aria-label": "Close",
-            onmousedown: (e: MouseEvent) => e.stopPropagation(),
-            onclick: () => ws.closeTab(tab),
-          },
-          icon("x", 14),
-        ),
-      ),
+      h("div", { class: "workspace-tab-header-inner" }, title, close),
     );
-    return { el, title };
+    return { el, title, close };
   }
 
   function renderTabs() {
@@ -98,11 +82,16 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
         tabHeaders.set(tab.id, (header = tabHeader(tab)));
         if (tabsRendered) added.push(header.el);
       }
-      const { el, title } = header;
+      const { el, title, close } = header;
       const name = tab.path ? noteName(tab.path) : "New tab";
       if (title.textContent !== name) title.textContent = name;
       el.setAttribute("aria-label", tab.path ?? "New tab");
       el.classList.toggle("is-active", tab === ws.active);
+      if (el.classList.contains("is-pinned") !== tab.pinned || !close.firstChild) {
+        el.classList.toggle("is-pinned", tab.pinned);
+        close.replaceChildren(icon(tab.pinned ? "pin" : "x", 14));
+        close.setAttribute("aria-label", tab.pinned ? "Unpin" : "Close");
+      }
       // Headers still shrinking away keep their place; order around them.
       let at: Element | null = prev ? prev.nextElementSibling : tabList.firstElementChild;
       while (at && at !== el && at.classList.contains("is-closing")) at = at.nextElementSibling;
@@ -156,39 +145,42 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
   }
 
   // ----- sub-header -----
-  const back = iconButton(icon("arrow-left", 16), "Navigate back", () => void ws.goBack());
-  const forward = iconButton(icon("arrow-right", 16), "Navigate forward", () => void ws.goForward());
+  const back = iconButton(icon("arrow-left"), "Navigate back", () => commands.run("app:go-back"));
+  const forward = iconButton(icon("arrow-right"), "Navigate forward", () => commands.run("app:go-forward"));
   const breadcrumb = h("div", { class: "view-header-title-container" });
-  const more = iconButton(icon("more-vertical", 16), "More options", (e) => {
-    const path = ws.active.path;
-    if (!path) return;
-    showMenu(
-      [
-        { title: "Rename...", action: () => focusTitle(true) },
-        { title: "Open in new tab", action: () => void ws.open(path, { newTab: true }) },
-        { title: "Delete file", danger: true, action: () => void ws.remove(path) },
-      ],
-      e.clientX - 150,
-      e.clientY + 12,
-    );
-  });
+  // Obsidian's mode button shows where a click takes you: the book while
+  // editing, the pen while reading.
+  const modeButton = iconButton(icon("book-open"), "", () => commands.run("markdown:toggle-preview"));
+  const more = iconButton(icon("ellipsis-vertical"), "More options", () =>
+    showMenu(menus().moreOptions(), more, { align: "right" }),
+  );
+  const actions = h("div", { class: "view-actions" }, modeButton, more);
   const header = h(
     "div",
     { class: "view-header" },
     h("div", { class: "view-header-nav-buttons" }, back, forward),
     breadcrumb,
-    h(
-      "div",
-      { class: "view-actions" },
-      iconButton(icon("book-open", 16), "Reading view is not available yet", undefined, "is-disabled"),
-      more,
-    ),
+    actions,
   );
+
+  let shownMode = "";
+  function renderMode() {
+    const reading = ws.active.mode === "reading";
+    const mode = reading ? "reading" : "editing";
+    if (mode === shownMode) return;
+    shownMode = mode;
+    modeButton.replaceChildren(icon(reading ? "pen-line" : "book-open"));
+    const label = reading ? "Current view: reading\nClick to edit" : "Current view: editing\nClick to read";
+    modeButton.setAttribute("aria-label", label);
+    modeButton.title = label;
+  }
 
   function renderHeader() {
     const path = ws.active.path;
     back.classList.toggle("is-disabled", ws.active.back.length === 0);
     forward.classList.toggle("is-disabled", ws.active.forward.length === 0);
+    actions.hidden = !path;
+    renderMode();
     breadcrumb.replaceChildren();
     if (!path) return;
     const dir = parentDir(path);
@@ -209,15 +201,17 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
   const scroller = h("div", { class: "view-content" }, sizer);
   ws.scroller = scroller;
 
-  const emptyAction = (label: string, hotkey: string, action: () => void) =>
-    h("div", { class: "empty-state-action", onclick: action }, `${label}${hotkey ? ` (${hotkey})` : ""}`);
+  const emptyAction = (label: string, id: string) => {
+    const hotkey = commands.hotkey(id);
+    return h("div", { class: "empty-state-action", onclick: () => commands.run(id) }, `${label}${hotkey ? ` (${hotkey})` : ""}`);
+  };
   const empty = h(
     "div",
     { class: "empty-state" },
     h("div", { class: "empty-state-title" }, "No file is open"),
-    emptyAction("Create new note", "Ctrl + N", () => commands.newNote()),
-    emptyAction("Go to file", "Ctrl + O", () => commands.quickSwitcher()),
-    emptyAction("Close", "", () => ws.closeTab(ws.active)),
+    emptyAction("Create new note", "file-explorer:new-file"),
+    emptyAction("Go to file", "switcher:open"),
+    h("div", { class: "empty-state-action", onclick: () => ws.closeTab(ws.active) }, "Close"),
   );
 
   function renderView() {
@@ -325,6 +319,7 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
 
   ws.on((change) => {
     if (change === "show") fadeInNote();
+    if (change === "mode") renderMode();
     if (change === "tabs" || change === "files") {
       renderTabs();
       renderHeader();

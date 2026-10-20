@@ -5,7 +5,7 @@
 // with document length.
 
 import { syntaxTree } from "@codemirror/language";
-import type { Range, Text } from "@codemirror/state";
+import { Facet, type Range, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -17,6 +17,9 @@ import {
 import type { SyntaxNode } from "@lezer/common";
 import { isRemoteUrl } from "../links";
 import { editorHost } from "./host";
+
+/** Reading view: render everything, as if the selection touched nothing. */
+export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
 
 class BulletWidget extends WidgetType {
   eq() {
@@ -152,7 +155,7 @@ const INLINE_FORMATS: Record<string, string> = {
 function build(view: EditorView): DecorationSet {
   const { state } = view;
   const doc = state.doc;
-  const sel = state.selection.ranges;
+  const sel = state.facet(readingMode) ? [] : state.selection.ranges;
   const touches = (from: number, to: number) => sel.some((r) => r.from <= to && r.to >= from);
   const touchesLines = (from: number, to: number) => touches(doc.lineAt(from).from, doc.lineAt(to).to);
   const decos: Range<Decoration>[] = [];
@@ -366,7 +369,8 @@ const livePreviewPlugin = ViewPlugin.fromClass(
         u.docChanged ||
         u.viewportChanged ||
         u.selectionSet ||
-        syntaxTree(u.startState) !== syntaxTree(u.state)
+        syntaxTree(u.startState) !== syntaxTree(u.state) ||
+        u.startState.facet(readingMode) !== u.state.facet(readingMode)
       ) {
         this.decorations = build(u.view);
       }

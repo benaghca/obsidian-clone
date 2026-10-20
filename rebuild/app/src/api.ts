@@ -89,6 +89,7 @@ export const api = {
   readNote: (path: string) => call<string>("read_note", { path }),
   writeNote: (path: string, content: string) => call<void>("write_note", { path, content }),
   createNote: (path: string, content: string) => call<FileEntry>("create_note", { path, content }),
+  createFolder: (path: string) => call<FileEntry>("create_folder", { path }),
   renamePath: (from: string, to: string) => call<void>("rename_path", { from, to }),
   deletePath: (path: string) => call<void>("delete_path", { path }),
   search: (query: string, limit: number) => call<SearchHit[]>("search", { query, limit }),

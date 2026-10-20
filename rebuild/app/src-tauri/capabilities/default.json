@@ -14,6 +14,7 @@
     "allow-read-note",
     "allow-write-note",
     "allow-create-note",
+    "allow-create-folder",
     "allow-rename-path",
     "allow-delete-path",
     "allow-search",

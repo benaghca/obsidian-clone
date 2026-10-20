@@ -51,21 +51,6 @@ export function plainText(md: string): string {
     .trim();
 }
 
-/** Index of the last heading at or before `pos`, or -1 (headings sorted by `from`). */
-export function headingAt(headings: Heading[], pos: number): number {
-  let lo = 0;
-  let hi = headings.length - 1;
-  let found = -1;
-  while (lo <= hi) {
-    const mid = (lo + hi) >> 1;
-    if (headings[mid].from <= pos) {
-      found = mid;
-      lo = mid + 1;
-    } else hi = mid - 1;
-  }
-  return found;
-}
-
 /**
  * Each heading's depth in the tree, like Obsidian's outline: a heading
  * nests under the nearest earlier heading with a smaller level, so an H3

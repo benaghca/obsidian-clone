@@ -2,13 +2,17 @@
 // (on disk in the app's data folder; nothing leaves the machine). Missing
 // or unreadable storage just means defaults.
 
+import { RIGHT_VIEWS, type RightView } from "./rightSidebar";
+import { SORT_ORDERS, type SortOrder } from "./sidebar";
+
 export interface VaultLayout {
   rightOpen: boolean;
   rightWidth: number;
-  rightView: "backlinks" | "outline";
+  rightView: RightView;
+  fileSort: SortOrder;
 }
 
-const DEFAULTS: VaultLayout = { rightOpen: false, rightWidth: 260, rightView: "backlinks" };
+const DEFAULTS: VaultLayout = { rightOpen: false, rightWidth: 260, rightView: "backlinks", fileSort: "alphabetical" };
 const key = (vaultPath: string) => `grove.layout:${vaultPath}`;
 
 export function loadLayout(vaultPath: string): VaultLayout {
@@ -17,7 +21,8 @@ export function loadLayout(vaultPath: string): VaultLayout {
     return {
       rightOpen: typeof saved.rightOpen === "boolean" ? saved.rightOpen : DEFAULTS.rightOpen,
       rightWidth: typeof saved.rightWidth === "number" ? saved.rightWidth : DEFAULTS.rightWidth,
-      rightView: saved.rightView === "outline" ? "outline" : DEFAULTS.rightView,
+      rightView: RIGHT_VIEWS.includes(saved.rightView!) ? saved.rightView! : DEFAULTS.rightView,
+      fileSort: SORT_ORDERS.some(([o]) => o === saved.fileSort) ? saved.fileSort! : DEFAULTS.fileSort,
     };
   } catch {
     return { ...DEFAULTS };

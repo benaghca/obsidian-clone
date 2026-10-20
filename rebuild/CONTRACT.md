@@ -16,6 +16,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - `read_note(path: String) -> String`
 - `write_note(path: String, content: String) -> ()` — atomic write (temp file + rename). Front end debounces saves ~300ms.
 - `create_note(path: String, content: String) -> FileEntry`
+- `create_folder(path: String) -> FileEntry` — creates an empty folder (the file explorer's "New folder"); errors if anything already exists at `path`. Added in round 4.
 - `rename_path(from: String, to: String) -> ()` — and returns nothing; front end updates links itself later.
 - `delete_path(path: String) -> ()` — move to `.trash/` in the vault.
 - `search(query: String, limit: u32) -> Vec<SearchHit { path, line, text }>` — case-insensitive; every word must be on the same line. File-name matches use `line: 0` and come first. Other hits are round-robin across files so one note cannot fill `limit`.

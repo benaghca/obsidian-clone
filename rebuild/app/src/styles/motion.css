@@ -45,3 +45,10 @@
     opacity: var(--anim-note-opacity-from);
   }
 }
+
+/* "Reveal file in navigation": the row lights up and fades back */
+@keyframes grove-reveal {
+  from {
+    opacity: 1;
+  }
+}

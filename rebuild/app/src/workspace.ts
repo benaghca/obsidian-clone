@@ -6,7 +6,7 @@
 import type { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
-import { createNoteState } from "./editor/editor";
+import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef } from "./editor/host";
 import { duration, nextFrame, smoothScrollTo } from "./motion";
@@ -16,10 +16,17 @@ export interface Tab {
   path: string | null;
   back: string[];
   forward: string[];
+  /** Live Preview, Source mode or Reading view, per tab like Obsidian's. */
+  mode: ViewMode;
+  /** A pinned tab keeps its note: links followed from it open in a new tab. */
+  pinned: boolean;
 }
 
-/** "show" fires when the view swaps to a different note (or tab), before "tabs". */
-export type Change = "files" | "tabs" | "doc" | "links" | "show";
+/**
+ * "show" fires when the view swaps to a different note (or tab), before
+ * "tabs". "mode" fires when a tab switches between editing and reading.
+ */
+export type Change = "files" | "tabs" | "doc" | "links" | "show" | "mode";
 
 const SAVE_DELAY = 300;
 const LINK_INDEX_DELAY = 1000;
@@ -39,6 +46,8 @@ export class Workspace {
   readonly view: EditorView;
   /** The element that scrolls the active note (set by the pane). */
   scroller: HTMLElement | null = null;
+  /** Shows the editor's right-click menu (set by the app). */
+  editorMenu: EditorHost["contextMenu"];
 
   private nextTabId = 1;
   private states = new Map<string, EditorState>();
@@ -60,6 +69,7 @@ export class Workspace {
       openLink: (target, newTab) => void this.openLink(target, newTab),
       openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
       notes: () => this.notes,
+      contextMenu: (view, at, pos, keyboard) => this.editorMenu?.(view, at, pos, keyboard),
     };
     this.view = new EditorView();
     this.active = this.addTab();
@@ -111,8 +121,12 @@ export class Workspace {
 
   // ----- tabs -----
 
+  private blankTab(): Tab {
+    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: "live", pinned: false };
+  }
+
   addTab(): Tab {
-    const tab: Tab = { id: this.nextTabId++, path: null, back: [], forward: [] };
+    const tab = this.blankTab();
     const at = this.active ? this.tabs.indexOf(this.active) + 1 : this.tabs.length;
     this.tabs.splice(at, 0, tab);
     return tab;
@@ -123,12 +137,58 @@ export class Workspace {
   }
 
   closeTab(tab: Tab) {
-    const i = this.tabs.indexOf(tab);
-    if (i < 0) return;
-    this.tabs.splice(i, 1);
-    if (this.tabs.length === 0) this.tabs.push({ id: this.nextTabId++, path: null, back: [], forward: [] });
-    if (tab === this.active) this.activate(this.tabs[Math.min(i, this.tabs.length - 1)], true);
-    else this.emit("tabs");
+    this.closeTabs([tab]);
+  }
+
+  /** Close several tabs at once; the active one passes to its nearest open neighbour. */
+  closeTabs(close: Tab[]) {
+    const gone = new Set(close.filter((t) => this.tabs.includes(t)));
+    if (!gone.size) return;
+    const at = this.tabs.indexOf(this.active);
+    const keep = this.tabs.filter((t) => !gone.has(t));
+    if (!gone.has(this.active)) {
+      this.tabs = keep;
+      return this.emit("tabs");
+    }
+    // The nearest survivor to the right of the active tab, else to its left.
+    const next = this.tabs.slice(at + 1).find((t) => !gone.has(t)) ?? [...this.tabs.slice(0, at)].reverse().find((t) => !gone.has(t));
+    this.tabs = keep;
+    if (!next) this.tabs.push(this.blankTab());
+    this.activate(next ?? this.tabs[0], true);
+  }
+
+  /** Obsidian's "Close others", "Close tabs to the right" and "Close all" leave pinned tabs open. */
+  closeOthers(tab: Tab) {
+    this.closeTabs(this.tabs.filter((t) => t !== tab && !t.pinned));
+  }
+
+  closeToRight(tab: Tab) {
+    this.closeTabs(this.tabs.slice(this.tabs.indexOf(tab) + 1).filter((t) => !t.pinned));
+  }
+
+  closeAll() {
+    this.closeTabs(this.tabs.filter((t) => !t.pinned));
+  }
+
+  togglePin(tab: Tab = this.active) {
+    tab.pinned = !tab.pinned;
+    this.emit("tabs");
+  }
+
+  /** Switch a tab between Live Preview, Source mode and Reading view. */
+  setMode(mode: ViewMode, tab: Tab = this.active) {
+    if (tab.mode === mode) return;
+    tab.mode = mode;
+    if (tab === this.active) this.applyMode();
+    this.emit("mode");
+  }
+
+  /** Configure the shown note's state for the active tab's mode (a no-op when it already is). */
+  private applyMode() {
+    const mode = this.active.path ? this.active.mode : "live";
+    if (viewModeOf(this.view.state) !== mode) {
+      this.view.dispatch({ effects: viewModeCompartment.reconfigure(VIEW_MODES[mode]) });
+    }
   }
 
   activate(tab: Tab, force = false) {
@@ -152,6 +212,8 @@ export class Workspace {
   async open(path: string, opts: { newTab?: boolean; line?: number; ch?: [number, number]; heading?: string } = {}) {
     const state = await this.load(path);
     if (!state) return;
+    // A pinned tab keeps its note; anything else opened from it gets a new tab.
+    if (this.active.pinned && this.active.path && this.active.path !== path) opts = { ...opts, newTab: true };
     const alreadyShown = !opts.newTab && this.active.path === path;
     this.rememberScroll();
     let tab = this.active;
@@ -272,6 +334,7 @@ export class Workspace {
       this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
       const state = this.states.get(path)!;
       if (this.view.state !== state) this.view.setState(state);
+      this.applyMode();
     }
     this.emit("show");
     this.emit("tabs");
@@ -287,52 +350,111 @@ export class Workspace {
     return entry;
   }
 
-  /** Create "Untitled.md" (or "Untitled 1.md", ...) at the vault root and open it. */
-  async newNote(): Promise<string> {
-    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
-    let name = "Untitled";
-    for (let i = 1; taken.has(`${name.toLowerCase()}.md`); i++) name = `Untitled ${i}`;
-    const entry = await this.createNote(`${name}.md`);
+  /** Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (the vault root by default) and open it. */
+  async newNote(folder = ""): Promise<string> {
+    const entry = await this.createNote(this.freeName(folder, ".md"));
     await this.open(entry.path, { newTab: this.active.path !== null });
     return entry.path;
   }
 
+  /** Rename a note (keeping its folder and .md) or a folder. */
   async rename(path: string, newName: string) {
     newName = newName.trim().replace(/[\\/:]/g, "");
-    if (!newName || newName === noteName(path)) return;
+    const isDir = this.isFolder(path);
+    if (!newName || newName === (isDir ? path.slice(path.lastIndexOf("/") + 1) : noteName(path))) return;
     const dir = parentDir(path);
-    const to = `${dir ? dir + "/" : ""}${newName}.md`;
-    if (this.files.some((f) => f.path.toLowerCase() === to.toLowerCase())) throw new Error(`"${newName}" already exists`);
-    await this.flush(path);
-    await api.renamePath(path, to);
-    const move = <T>(map: Map<string, T>) => {
-      if (map.has(path)) {
-        map.set(to, map.get(path)!);
-        map.delete(path);
+    await this.relocate(path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
+  }
+
+  /** Move a note or folder into another folder ("" for the vault root). */
+  async moveTo(path: string, folder: string) {
+    const name = path.slice(path.lastIndexOf("/") + 1);
+    const to = folder ? `${folder}/${name}` : name;
+    if (to !== path) await this.relocate(path, to);
+  }
+
+  isFolder(path: string) {
+    return this.files.some((f) => f.path === path && f.is_dir);
+  }
+
+  /**
+   * Move a file or folder, and everything open that points into it: tabs,
+   * their history, loaded notes and recents follow.
+   */
+  private async relocate(from: string, to: string) {
+    const clash = this.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
+    if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
+    const under = (p: string) => p === from || p.startsWith(from + "/");
+    await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
+    await api.renamePath(from, to);
+    const swap = (p: string) => (under(p) ? to + p.slice(from.length) : p);
+    for (const map of [this.states, this.scrollTops] as Map<string, unknown>[]) {
+      for (const [key, value] of [...map]) {
+        if (!under(key)) continue;
+        map.delete(key);
+        map.set(swap(key), value);
       }
-    };
-    move(this.states);
-    move(this.scrollTops);
-    const swap = (p: string) => (p === path ? to : p);
+    }
     for (const tab of this.tabs) {
-      if (tab.path === path) tab.path = to;
+      if (tab.path) tab.path = swap(tab.path);
       tab.back = tab.back.map(swap);
       tab.forward = tab.forward.map(swap);
     }
+    this.recent = this.recent.map(swap);
+    for (const fn of this.moveListeners) fn(swap);
     await this.refreshFiles();
     this.emit("tabs");
     void this.refreshLinks();
   }
 
-  async remove(path: string) {
+  private moveListeners = new Set<(swap: (path: string) => string) => void>();
+
+  /** Called with a path-mapping function after anything is renamed or moved. */
+  onMove(fn: (swap: (path: string) => string) => void) {
+    this.moveListeners.add(fn);
+  }
+
+  /** A free "Untitled" name in a folder: "Untitled", "Untitled 1", ... */
+  private freeName(folder: string, ext: string) {
+    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
+    const at = (name: string) => `${folder ? folder + "/" : ""}${name}${ext}`;
+    let name = "Untitled";
+    for (let i = 1; taken.has(at(name).toLowerCase()); i++) name = `Untitled ${i}`;
+    return at(name);
+  }
+
+  /** Create an empty "Untitled" folder; returns its path. */
+  async newFolder(parent = ""): Promise<string> {
+    const entry = await api.createFolder(this.freeName(parent, ""));
+    await this.refreshFiles();
+    return entry.path;
+  }
+
+  /** Obsidian's "Make a copy": "Name 1.md" beside the note, opened in the active tab. */
+  async makeCopy(path: string): Promise<string> {
     await this.flush(path);
+    const content = this.states.get(path)?.doc.toString() ?? (await api.readNote(path));
+    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
+    const base = path.replace(/\.md$/, "");
+    let n = 1;
+    while (taken.has(`${base} ${n}.md`.toLowerCase())) n++;
+    const entry = await this.createNote(`${base} ${n}.md`, content);
+    await this.open(entry.path);
+    return entry.path;
+  }
+
+  /** Delete a note or folder (the backend moves it to the vault's .trash). */
+  async remove(path: string) {
+    const under = (p: string) => p === path || p.startsWith(path + "/");
+    await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
     await api.deletePath(path);
-    this.states.delete(path);
-    this.scrollTops.delete(path);
+    for (const p of [...this.states.keys()].filter(under)) this.states.delete(p);
+    for (const p of [...this.scrollTops.keys()].filter(under)) this.scrollTops.delete(p);
+    this.recent = this.recent.filter((p) => !under(p));
     for (const tab of this.tabs) {
-      tab.back = tab.back.filter((p) => p !== path);
-      tab.forward = tab.forward.filter((p) => p !== path);
-      if (tab.path === path) tab.path = null;
+      tab.back = tab.back.filter((p) => !under(p));
+      tab.forward = tab.forward.filter((p) => !under(p));
+      if (tab.path && under(tab.path)) tab.path = null;
     }
     await this.refreshFiles();
     this.show();

@@ -79,6 +79,17 @@ impl Vault {
         Ok(self.entry_for(&rel))
     }
 
+    /// Create an empty folder (the file explorer's "New folder"). Fails if anything is already there.
+    pub fn create_folder(&mut self, path: &str) -> Result<FileEntry, String> {
+        let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
+        if full.exists() {
+            return Err(format!("already exists: {rel}"));
+        }
+        fs::create_dir_all(&full).map_err(|e| e.to_string())?;
+        self.index.refresh_path(&self.root, &rel);
+        Ok(self.entry_for(&rel))
+    }
+
     pub fn rename_path(&mut self, from: &str, to: &str) -> Result<(), String> {
         let (from_rel, from_full) = fsutil::resolve_in_vault(&self.root, from)?;
         let (to_rel, to_full) = fsutil::resolve_in_vault(&self.root, to)?;
@@ -378,6 +389,24 @@ mod tests {
             .any(|e| e.path == "fresh/Moved.md"));
         assert!(vault.index.resolve("Old.md", "Renamed").is_none());
         assert!(vault.index.resolve("Old.md", "Moved").is_none());
+    }
+
+    #[test]
+    fn create_folder_makes_an_empty_listed_folder_once() {
+        let dir = tmp_dir("folder");
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let made = vault.create_folder("sub/Untitled").unwrap();
+        assert_eq!(made.path, "sub/Untitled");
+        assert!(made.is_dir);
+        assert!(dir.path.join("sub").join("Untitled").is_dir());
+        assert!(vault
+            .list_files()
+            .iter()
+            .any(|e| e.path == "sub/Untitled" && e.is_dir));
+        assert!(vault.create_folder("sub/Untitled").is_err());
+        assert!(vault.create_folder("../outside").is_err());
+        assert!(vault.create_folder(".obsidian/x").is_err());
     }
 
     #[test]
