@@ -796,8 +796,8 @@ body {
   max-height: calc(100vh - 16px);
   overflow-y: auto;
   padding: var(--menu-padding);
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border-hover);
+  background: var(--menu-background);
+  border: 1px solid var(--menu-border-color);
   border-radius: var(--radius-m);
   box-shadow: var(--menu-shadow);
   font-size: var(--font-ui-small);
