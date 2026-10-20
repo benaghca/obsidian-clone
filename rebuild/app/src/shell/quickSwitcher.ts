@@ -2,11 +2,10 @@
 // dim overlay, fuzzy results with bolded matches, footer key hints).
 
 import { animateOut } from "../motion";
-import { noteName, parentDir, type Workspace } from "../workspace";
+import { parentDir, type Workspace } from "../workspace";
 import { h } from "./dom";
-import { fuzzyMatch, highlight } from "./fuzzy";
-
-const MAX_RESULTS = 50;
+import { highlight } from "./fuzzy";
+import { type SwitcherItem, switcherItems } from "./switcherItems";
 
 export function openQuickSwitcher(ws: Workspace) {
   if (document.querySelector(".modal-container:not(.is-closing)")) return;
@@ -35,32 +34,10 @@ export function openQuickSwitcher(ws: Workspace) {
   );
   const overlay = h("div", { class: "modal-container" }, h("div", { class: "modal-bg", onclick: () => close() }), prompt);
 
-  let items: { path: string | null; name: string; indices: number[] }[] = [];
+  let items: SwitcherItem[] = [];
   let selected = 0;
 
-  function compute(query: string) {
-    if (!query.trim()) {
-      const seen = new Set<string>();
-      const known = new Set(ws.notes.map((n) => n.path));
-      const ordered = [...ws.recent, ...ws.notes.map((n) => n.path)].filter((p) => {
-        if (p === ws.active.path || seen.has(p) || !known.has(p)) return false;
-        seen.add(p);
-        return true;
-      });
-      return ordered.slice(0, MAX_RESULTS).map((path) => ({ path, name: noteName(path), indices: [] }));
-    }
-    const scored = [];
-    for (const note of ws.notes) {
-      const m = fuzzyMatch(query, note.name);
-      if (m) scored.push({ path: note.path as string | null, name: note.name, indices: m.indices, score: m.score });
-    }
-    scored.sort((a, b) => b.score - a.score);
-    const out: { path: string | null; name: string; indices: number[] }[] = scored.slice(0, MAX_RESULTS);
-    if (!out.some((r) => r.name.toLowerCase() === query.trim().toLowerCase())) {
-      out.push({ path: null, name: query.trim(), indices: [] });
-    }
-    return out;
-  }
+  const compute = (query: string) => switcherItems(query, ws.notes, ws.recent, ws.active.path);
 
   function render() {
     results.replaceChildren(
