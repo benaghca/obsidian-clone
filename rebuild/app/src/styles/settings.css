@@ -1,13 +1,14 @@
 /* Settings (src/settings/), drawn after Obsidian 1.14.4's settings as
-   measured on its elements: 1100 × 85vh at most, centred; a 250px
-   navigation column; rows in rounded cards with thin separators; 40 × 22
-   toggles; 30px dropdowns, inputs and buttons. Colours are the theme's
-   tokens, so the dark theme just works. */
+   measured on its elements: 90% of the window's width and 85% of its height,
+   at most 1100 × 1000, centred; a navigation column of a quarter of that, at
+   most 250px; rows in rounded cards with thin separators; 40 × 22 toggles;
+   30px dropdowns, inputs and buttons. Colours are the theme's tokens, so the
+   dark theme just works. */
 
 .modal.mod-settings {
   position: relative;
   align-self: center;
-  width: min(1100px, calc(100vw - 48px));
+  width: min(1100px, 90vw);
   height: min(85vh, 1000px);
   display: flex;
   overflow: hidden;
@@ -63,7 +64,7 @@
 
 /* ----- navigation ----- */
 .vertical-tab-header {
-  width: 250px;
+  width: min(250px, 25%);
   flex: none;
   display: flex;
   flex-direction: column;
@@ -223,7 +224,7 @@
   padding: 20px;
 }
 /* thin separators between rows, inset like Obsidian's */
-.setting-items > .setting-item:not([hidden]) ~ .setting-item::before,
+.setting-items > .setting-item:not([hidden]):not(.is-filtered-out) ~ .setting-item::before,
 .setting-items > .setting-filter-list:not(:empty)::before {
   content: "";
   position: absolute;
@@ -688,4 +689,19 @@
 .modal.mod-confirm button.mod-warning {
   color: var(--text-on-accent);
   background: var(--background-modifier-error);
+}
+
+/* Core plugins: "Search plugins..." above the list */
+.setting-plugin-search {
+  padding: 0;
+  margin-bottom: 16px;
+}
+.setting-items > .setting-item.is-filtered-out {
+  display: none;
+}
+
+/* Appearance: the accent colour as hex beside its picker */
+.setting-input.setting-hex-input {
+  width: 88px;
+  font-family: var(--font-monospace);
 }

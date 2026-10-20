@@ -173,12 +173,38 @@ const backlinks = h(
 );
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
-const statusBar = h("div", { class: "status-bar" }, backlinks, words, chars);
+// The editing mode (Settings → Editor → Show editing mode in status bar), as
+// in Obsidian: its icon, and a click offers the three modes.
+const MODES: { mode: "reading" | "source" | "live"; title: string; icon: IconName }[] = [
+  { mode: "reading", title: "Reading", icon: "book-open" },
+  { mode: "source", title: "Source mode", icon: "code-xml" },
+  { mode: "live", title: "Live Preview", icon: "pen-line" },
+];
+const editorStatus = h("div", { class: "status-bar-item mod-clickable plugin-editor-status" });
+editorStatus.addEventListener("click", () => {
+  const tab = ws.active;
+  showMenu(
+    MODES.map((m) => ({ title: m.title, icon: m.icon, checked: tab.mode === m.mode, action: () => ws.setMode(m.mode, tab) })),
+    editorStatus,
+  );
+});
+let shownMode = "";
+function renderEditorStatus() {
+  const mode = ws.active.path ? ws.active.mode : "";
+  editorStatus.hidden = !mode || !commands.pluginEnabled("editor-status");
+  if (mode === shownMode || !mode) return;
+  shownMode = mode;
+  const m = MODES.find((x) => x.mode === mode)!;
+  editorStatus.replaceChildren(icon(m.icon, 14));
+  editorStatus.setAttribute("aria-label", m.title);
+  editorStatus.title = m.title;
+}
+const statusBar = h("div", { class: "status-bar" }, backlinks, editorStatus, words, chars);
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 function renderCounts() {
   const path = ws.active.path;
-  statusBar.hidden = !path || (backlinks.hidden && words.hidden);
+  statusBar.hidden = !path || (backlinks.hidden && words.hidden && editorStatus.hidden);
   if (!path) return;
   const { words: w, chars: c } = ws.view.state.field(countsField);
   words.textContent = plural(w, "word");
@@ -193,6 +219,7 @@ function renderBacklinks() {
 ws.on((change) => {
   if (change === "doc" || change === "tabs" || change === "show") renderCounts();
   if (change === "links" || change === "tabs" || change === "show") renderBacklinks();
+  if (change === "tabs" || change === "show" || change === "mode") renderEditorStatus();
 });
 
 // ----- layout -----
@@ -295,6 +322,7 @@ function applyPlugins() {
   sidebar.setBookmarksEnabled(on("bookmarks"));
   backlinks.hidden = !on("backlink");
   words.hidden = chars.hidden = !on("word-count");
+  renderEditorStatus();
   panes.setBacklinksAllowed(on("backlink"));
   renderCounts();
   commands.changed();

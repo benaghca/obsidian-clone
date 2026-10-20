@@ -88,6 +88,8 @@ export const CORE_PLUGINS = {
   graph: field(true, bool),
   templates: field(true, bool),
   "word-count": field(true, bool),
+  /** Obsidian keeps "Show editing mode in status bar" (Settings → Editor) as this hidden core plugin. */
+  "editor-status": field(true, bool),
 };
 
 export const DAILY_NOTES = {
