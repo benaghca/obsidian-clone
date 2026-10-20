@@ -165,9 +165,12 @@ function build(view: EditorView): DecorationSet {
 
           case "Emphasis":
           case "StrongEmphasis":
-          case "Strikethrough":
           case "InlineCode":
             mark(INLINE_FORMATS[name], node.from, node.to);
+            return;
+          case "Strikethrough":
+            // Inner text only: a child can't cancel its parent's line-through.
+            mark(INLINE_FORMATS[name], node.from + 2, node.to - 2);
             return;
 
           case "EmphasisMark":

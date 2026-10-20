@@ -13,5 +13,8 @@ export default defineConfig({
   build: {
     target: "es2022",
     sourcemap: true,
+    // lang-markdown brings the HTML/CSS/JS grammars for embedded HTML; the
+    // bundle loads from disk inside Tauri, so ~600 kB is fine.
+    chunkSizeWarningLimit: 1000,
   },
 });
