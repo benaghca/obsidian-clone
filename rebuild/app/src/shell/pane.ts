@@ -237,8 +237,11 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
       const top = r.y < 1e-6;
       v.el.classList.toggle("mod-top", top);
       if (top && r.x + r.w > 1 - 1e-6) corner = group;
-      // The empty parts of a top strip move the window (Tauri reads the attribute on the element pressed).
-      for (const el of [v.strip, v.strip.querySelector(".workspace-tab-header-spacer")!]) el.toggleAttribute("data-tauri-drag-region", top);
+      // The empty parts of a top strip move the window. Tauri only drags on a
+      // press on an element that carries the attribute itself (not on its
+      // children), so it goes on each empty part: the strip, the band above
+      // and between the tabs (the tab row's own box), and the spacer.
+      for (const el of [v.strip, v.tabList, v.strip.querySelector(".workspace-tab-header-spacer")!]) el.toggleAttribute("data-tauri-drag-region", top);
     }
     for (const [group, v] of views) v.el.classList.toggle("mod-top-right-space", group === corner);
   }

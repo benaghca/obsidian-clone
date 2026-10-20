@@ -31,7 +31,7 @@ pub fn create_main_window(app: &App) -> Result<(), Box<dyn std::error::Error>> {
     } else {
         None
     };
-    WebviewWindowBuilder::from_config(app.handle(), &config)?
+    let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
         .on_navigation(move |url| {
             let allowed = is_app_url(url, dev_url.as_ref());
             if !allowed {
@@ -44,8 +44,33 @@ pub fn create_main_window(app: &App) -> Result<(), Box<dyn std::error::Error>> {
             NewWindowResponse::Deny
         })
         .build()?;
+    enable_spellchecker(&window);
     Ok(())
 }
+
+/// WebKitGTK checks spelling with Enchant and the dictionaries installed on the machine; it never
+/// sends text anywhere. wry leaves it off, so `spellcheck="true"` (Settings → Editor → Spellcheck)
+/// would do nothing; this turns it on for the language of the user's locale.
+#[cfg(target_os = "linux")]
+fn enable_spellchecker(window: &tauri::WebviewWindow) {
+    let language = std::env::var("LC_ALL")
+        .ok()
+        .filter(|v| !v.is_empty())
+        .or_else(|| std::env::var("LANG").ok())
+        .and_then(|v| v.split('.').next().map(str::to_owned))
+        .filter(|v| !v.is_empty() && v != "C" && v != "POSIX")
+        .unwrap_or_else(|| "en_US".into());
+    let _ = window.with_webview(move |webview| {
+        use webkit2gtk::{WebContextExt, WebViewExt};
+        if let Some(context) = webview.inner().context() {
+            context.set_spell_checking_enabled(true);
+            context.set_spell_checking_languages(&[language.as_str()]);
+        }
+    });
+}
+
+#[cfg(not(target_os = "linux"))]
+fn enable_spellchecker(_window: &tauri::WebviewWindow) {}
 
 /// True for URLs that belong to the app itself.
 pub fn is_app_url(url: &Url, dev_url: Option<&Url>) -> bool {

@@ -366,6 +366,10 @@ async function addWindowControls() {
       iconButton(icon("x"), "Close", () => void win.close(), "titlebar-button mod-close"),
     ),
   );
+  // The headers under the buttons leave exactly their width free (it varies
+  // with the platform's fonts: 98px in WebKitGTK, where 92 was assumed).
+  const buttons = app.querySelector<HTMLElement>(".titlebar-buttons")!;
+  requestAnimationFrame(() => app.style.setProperty("--titlebar-buttons-width", `${Math.ceil(buttons.getBoundingClientRect().width)}px`));
 }
 
 // Hotkeys go through the command registry. Capture phase, so a command's
