@@ -1,6 +1,8 @@
 //! Tauri shell for the notes vault.
 
 #[allow(dead_code)]
+mod fsutil;
+#[allow(dead_code)]
 mod model;
 
 pub fn run() {
