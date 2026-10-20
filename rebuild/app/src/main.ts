@@ -3,63 +3,119 @@ import "./styles/app.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
 import { isTauri } from "./api";
+import { type AppParts, registerAppCommands } from "./appCommands";
+import { Bookmarks } from "./bookmarks";
+import { commands } from "./commands";
 import { countsField } from "./editor/counts";
 import { h, iconButton } from "./shell/dom";
-import { icon } from "./shell/icons";
+import { icon, type IconName } from "./shell/icons";
+import { type MenuItems, showMenu } from "./shell/menu";
+import { createMenus } from "./shell/menus";
+import { openMovePrompt } from "./shell/movePrompt";
 import { createPane } from "./shell/pane";
+import { warmUpPromptGlyphs } from "./shell/prompt";
 import { loadLayout, saveLayout } from "./shell/prefs";
-import { openQuickSwitcher } from "./shell/quickSwitcher";
 import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
+const bookmarks = new Bookmarks(ws);
 
-async function newNote() {
-  await ws.newNote();
-  pane.focusTitle(true);
-}
-
-async function dailyNote() {
-  const d = new Date();
-  const name = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  await ws.openLink(name);
-}
-
-function showRightView(view: "backlinks" | "outline") {
-  rightSidebar.select(view);
-  docks.setCollapsed("right", false);
-}
-
-const commands = {
-  quickSwitcher: () => openQuickSwitcher(ws),
-  newNote: () => void newNote(),
-  toggleLeftSidebar: () => docks.toggle("left"),
-  toggleRightSidebar: () => docks.toggle("right"),
-  showBacklinks: () => showRightView("backlinks"),
-  showOutline: () => showRightView("outline"),
-};
+// Commands first: the views show their hotkeys. The views are filled into
+// `parts` below; commands only read them when they run.
+const parts = { ws, bookmarks } as AppParts;
+registerAppCommands(parts);
 if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands }); // for poking at from devtools
 
-const pane = createPane(ws, commands);
-const sidebar = createSidebar(ws, commands.newNote);
-const rightSidebar = createRightSidebar(ws, () => !docks.isCollapsed("right"));
+const menus = createMenus({
+  ws,
+  bookmarks,
+  renameInTree: (path) => {
+    docks.setCollapsed("left", false);
+    sidebar.renameInTree(path);
+  },
+  renameActive: () => pane.focusTitle(true),
+  newNoteIn: (folder) =>
+    void ws
+      .newNote(folder)
+      .then(() => pane.focusTitle(true))
+      .catch((err) => console.warn("Could not create a note", err)),
+  newFolderIn: (folder) => {
+    docks.setCollapsed("left", false);
+    sidebar.newFolderIn(folder);
+  },
+  moveFile: (path) => openMovePrompt(ws, path),
+  revealInTree: (path) => {
+    sidebar.select("files");
+    docks.setCollapsed("left", false);
+    sidebar.reveal(path);
+  },
+});
+ws.editorMenu = (view, at, pos, keyboard) => showMenu(menus.editor(view, pos), at, { keyboard });
 
-const ribbon = h(
-  "div",
-  { class: "workspace-ribbon mod-left" },
-  iconButton(icon("panel-left"), "Toggle left sidebar", commands.toggleLeftSidebar, "sidebar-toggle-button"),
-  h(
-    "div",
-    { class: "side-dock-actions" },
-    iconButton(icon("switch-files"), "Open quick switcher", commands.quickSwitcher),
-    iconButton(icon("calendar"), "Open today's daily note", () => void dailyNote()),
-    iconButton(icon("square-pen"), "Create new note", commands.newNote),
-  ),
+const pane = createPane(ws, () => menus);
+const sidebar = createSidebar(ws, bookmarks, () => menus);
+const rightSidebar = createRightSidebar(
+  ws,
+  () => !docks.isCollapsed("right"),
+  (query) => {
+    sidebar.searchFor(query);
+    docks.setCollapsed("left", false);
+  },
 );
 
-// Floating status bar: backlinks, word and character counts for the open note.
+// ----- ribbon -----
+
+// Obsidian's ribbon: its actions are commands, and right-clicking it lists
+// them with a check to show or hide each one.
+const RIBBON: { id: string; label: string; icon: IconName }[] = [
+  { id: "switcher:open", label: "Open quick switcher", icon: "arrow-left-right" },
+  { id: "daily-notes", label: "Open today's daily note", icon: "calendar-days" },
+  { id: "file-explorer:new-file", label: "Create new note", icon: "square-pen" },
+  { id: "command-palette:open", label: "Open command palette", icon: "square-terminal" },
+];
+const RIBBON_HIDDEN = "grove.ribbon.hidden";
+const ribbonHidden = new Set<string>();
+try {
+  for (const id of JSON.parse(localStorage.getItem(RIBBON_HIDDEN) ?? "[]")) ribbonHidden.add(String(id));
+} catch {
+  // no storage: every action shows
+}
+const ribbonActions = RIBBON.map((a) => {
+  const button = iconButton(icon(a.icon), a.label, () => commands.run(a.id), "side-dock-ribbon-action");
+  button.hidden = ribbonHidden.has(a.id);
+  return button;
+});
+function ribbonMenu(e: MouseEvent) {
+  e.preventDefault();
+  const items: MenuItems = RIBBON.map((a, i) => ({
+    title: a.label,
+    icon: a.icon,
+    checked: !ribbonHidden.has(a.id),
+    action: () => {
+      if (ribbonHidden.has(a.id)) ribbonHidden.delete(a.id);
+      else ribbonHidden.add(a.id);
+      ribbonActions[i].hidden = ribbonHidden.has(a.id);
+      try {
+        localStorage.setItem(RIBBON_HIDDEN, JSON.stringify([...ribbonHidden]));
+      } catch {
+        // not remembered
+      }
+    },
+  }));
+  showMenu(items, { x: e.clientX, y: e.clientY });
+}
+const ribbon = h(
+  "div",
+  { class: "workspace-ribbon mod-left", oncontextmenu: ribbonMenu },
+  iconButton(icon("panel-left"), "Toggle left sidebar", () => commands.run("app:toggle-left-sidebar"), "sidebar-toggle-button"),
+  h("div", { class: "side-dock-actions" }, ...ribbonActions),
+);
+
+// ----- status bar: backlinks, word and character counts for the open note -----
+
 const backlinks = h("div", { class: "status-bar-item" });
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
@@ -85,12 +141,14 @@ ws.on((change) => {
   if (change === "links" || change === "tabs") renderBacklinks();
 });
 
+// ----- layout -----
+
 // The right sidebar starts closed; the vault's saved layout is applied once it is open.
 const app = h(
   "div",
   { class: "app-container is-right-sidebar-collapsed" },
   ribbon,
-  sidebar,
+  sidebar.el,
   h("div", { class: "workspace-split mod-root" }, pane.el),
   rightSidebar.el,
   statusBar,
@@ -99,6 +157,7 @@ document.getElementById("app")!.replaceWith(app);
 
 const docks = createSidedocks(app, pane);
 rightSidebar.el.append(docks.resizeHandle("right"));
+Object.assign(parts, { pane, docks, left: sidebar, right: rightSidebar });
 
 function rememberLayout() {
   if (!ws.vault.path) return;
@@ -106,6 +165,7 @@ function rememberLayout() {
     rightOpen: !docks.isCollapsed("right"),
     rightWidth: docks.width("right"),
     rightView: rightSidebar.view,
+    fileSort: sidebar.sortOrder,
   });
 }
 docks.onChange((side) => {
@@ -114,6 +174,7 @@ docks.onChange((side) => {
   rememberLayout();
 });
 rightSidebar.onSelect(rememberLayout);
+sidebar.onSortChange(rememberLayout);
 
 // Frameless window: the controls float over the top-right corner, above
 // whichever header is rightmost (the tab strip, or the open right sidebar).
@@ -126,35 +187,31 @@ async function addWindowControls() {
     h(
       "div",
       { class: "titlebar-buttons" },
-      iconButton(icon("minus", 16), "Minimize", () => void win.minimize(), "titlebar-button"),
-      iconButton(icon("square", 14), "Maximize", () => void win.toggleMaximize(), "titlebar-button"),
-      iconButton(icon("x", 16), "Close", () => void win.close(), "titlebar-button mod-close"),
+      iconButton(icon("minus"), "Minimize", () => void win.minimize(), "titlebar-button"),
+      iconButton(icon("square"), "Maximize", () => void win.toggleMaximize(), "titlebar-button mod-maximize"),
+      iconButton(icon("x"), "Close", () => void win.close(), "titlebar-button mod-close"),
     ),
   );
 }
 
-// Global shortcuts (Obsidian defaults). Editor keys are handled by CodeMirror.
-document.addEventListener("keydown", (e) => {
-  const mod = e.ctrlKey || e.metaKey;
-  const key = e.key.toLowerCase();
-  let handled = true;
-  if (mod && !e.shiftKey && !e.altKey && key === "o") commands.quickSwitcher();
-  else if (mod && !e.shiftKey && !e.altKey && key === "n") commands.newNote();
-  else if (mod && !e.shiftKey && key === "t") ws.newTab();
-  else if (mod && !e.shiftKey && key === "w") ws.closeTab(ws.active);
-  else if (mod && key === "tab") ws.cycleTab(e.shiftKey ? -1 : 1);
-  else if (mod && e.altKey && key === "arrowleft") void ws.goBack();
-  else if (mod && e.altKey && key === "arrowright") void ws.goForward();
-  else if (mod && e.altKey && e.code === "BracketLeft") commands.toggleLeftSidebar();
-  else if (mod && e.altKey && e.code === "BracketRight") commands.toggleRightSidebar();
-  else handled = false;
-  if (handled) e.preventDefault();
+// Hotkeys go through the command registry. Capture phase, so a command's
+// hotkey wins over the editor's own binding for the same keys (Ctrl+I is
+// italics, as in Obsidian, not CodeMirror's select-parent). Plain typing
+// returns at the first check inside.
+window.addEventListener("keydown", (e) => commands.handleKeydown(e), true);
+// No browser context menu anywhere in the app chrome; text fields keep theirs.
+document.addEventListener("contextmenu", (e) => {
+  const target = e.target as HTMLElement;
+  if (!e.defaultPrevented && !target.closest("input, textarea")) e.preventDefault();
 });
 window.addEventListener("beforeunload", () => void ws.flushAll());
 
 await ws.init();
+bookmarks.load();
 const layout = loadLayout(ws.vault.path);
 docks.setWidth("right", layout.rightWidth);
 rightSidebar.select(layout.rightView);
 docks.setCollapsed("right", !layout.rightOpen, false);
+sidebar.setSortOrder(layout.fileSort);
 await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");
+warmUpPromptGlyphs();

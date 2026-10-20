@@ -4,8 +4,9 @@ type Child = Node | string | null | undefined | false;
 type Props = {
   class?: string;
   title?: string;
-  [attr: `data-${string}`]: string;
-  [attr: `aria-${string}`]: string;
+  role?: string;
+  [attr: `data-${string}`]: string | undefined;
+  [attr: `aria-${string}`]: string | undefined;
   [event: `on${string}`]: ((e: any) => void) | undefined;
 };
 
@@ -27,5 +28,5 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 
 /** A clickable icon button, Obsidian's "clickable-icon". */
 export function iconButton(icon: SVGElement, label: string, onClick?: (e: MouseEvent) => void, cls = "") {
-  return h("div", { class: `clickable-icon ${cls}`, "aria-label": label, title: label, onclick: onClick }, icon);
+  return h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, title: label, onclick: onClick }, icon);
 }

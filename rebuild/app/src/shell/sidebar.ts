@@ -1,32 +1,69 @@
-// Left sidebar: icon tabs (Files / Search / Bookmarks), the file explorer,
-// and the vault name footer.
+// Left sidebar: icon tabs (Files / Search / Bookmarks), the file explorer
+// with Obsidian's header buttons (new note, new folder, sort order, collapse
+// all), and the vault name footer.
 
 import { api, type FileEntry } from "../api";
+import type { Bookmarks } from "../bookmarks";
+import { commands } from "../commands";
 import { slideHeight } from "../motion";
 import { noteName, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
-import { showMenu } from "./menu";
+import { type MenuItems, showMenu } from "./menu";
+import type { Menus } from "./menus";
 
-export function createSidebar(ws: Workspace, newNote: () => void): HTMLElement {
+export type LeftView = "files" | "search" | "bookmarks";
+
+export type SortOrder = "alphabetical" | "alphabeticalReverse" | "byModifiedTime" | "byModifiedTimeReverse";
+
+export const SORT_ORDERS: [SortOrder, string][] = [
+  ["alphabetical", "File name (A to Z)"],
+  ["alphabeticalReverse", "File name (Z to A)"],
+  ["byModifiedTime", "Modified time (new to old)"],
+  ["byModifiedTimeReverse", "Modified time (old to new)"],
+];
+
+export interface LeftSidebar {
+  el: HTMLElement;
+  select(view: LeftView): void;
+  /** Expand the folders above a path and scroll it into view. */
+  reveal(path: string): void;
+  collapseAll(): void;
+  /** Start an inline rename of a row. */
+  renameInTree(path: string): void;
+  /** Create an "Untitled" folder and start renaming it. */
+  newFolderIn(parent: string): void;
+  /** Show the search view running this query. */
+  searchFor(query: string): void;
+  readonly sortOrder: SortOrder;
+  setSortOrder(order: SortOrder): void;
+  onSortChange(fn: () => void): void;
+}
+
+/** `menus` is read when a menu opens (it is built after the sidebar). */
+export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => Menus): LeftSidebar {
+  const explorer = createFileExplorer(ws, menus);
+  const searchView = createSearchView(ws);
   const views = {
-    files: createFileExplorer(ws, newNote),
-    search: createSearchView(ws),
-    bookmarks: h("div", { class: "pane-empty" }, "No bookmarks yet."),
+    files: explorer.el,
+    search: searchView.el,
+    bookmarks: createBookmarksView(ws, bookmarks, menus, (path) => {
+      select("files");
+      explorer.reveal(path);
+    }),
   };
-  type ViewName = keyof typeof views;
-  const tabButtons = new Map<ViewName, HTMLElement>();
+  const tabButtons = new Map<LeftView, HTMLElement>();
   const content = h("div", { class: "workspace-leaf-content" });
 
-  const tab = (name: ViewName, iconName: IconName, label: string) => {
-    const button = iconButton(icon(iconName, 16), label, () => select(name), "workspace-tab-header");
+  const tab = (name: LeftView, iconName: IconName, label: string) => {
+    const button = iconButton(icon(iconName), label, () => select(name), "workspace-tab-header");
     tabButtons.set(name, button);
     return button;
   };
 
-  function select(name: ViewName) {
+  function select(name: LeftView) {
     for (const [n, b] of tabButtons) b.classList.toggle("is-active", n === name);
-    content.replaceChildren(views[name]);
+    if (content.firstElementChild !== views[name]) content.replaceChildren(views[name]);
     if (name === "search") views.search.querySelector("input")?.focus();
   }
 
@@ -35,31 +72,43 @@ export function createSidebar(ws: Workspace, newNote: () => void): HTMLElement {
     if (change === "files") vaultName.textContent = ws.vault.name;
   });
 
-  const sidebar = h(
+  const el = h(
     "div",
     { class: "workspace-split mod-sidedock mod-left-split" },
     h(
       "div",
       { class: "workspace-tab-header-container", "data-tauri-drag-region": "" },
-      tab("files", "files", "Files"),
+      tab("files", "folder-closed", "Files"),
       tab("search", "search", "Search"),
       tab("bookmarks", "bookmark", "Bookmarks"),
     ),
     content,
-    h(
-      "div",
-      { class: "workspace-sidedock-vault-profile" },
-      vaultName,
-      h(
-        "div",
-        { class: "vault-profile-actions" },
-        iconButton(icon("help-circle", 16), "Help is not available yet", undefined, "is-disabled"),
-        iconButton(icon("settings", 16), "Settings are not available yet", undefined, "is-disabled"),
-      ),
-    ),
+    // Obsidian's help and settings buttons live here too; Grove has neither
+    // (help would mean the network), so the footer is just the vault name.
+    h("div", { class: "workspace-sidedock-vault-profile" }, vaultName),
   );
   select("files");
-  return sidebar;
+  return {
+    el,
+    select,
+    reveal: (path) => explorer.reveal(path),
+    collapseAll: () => explorer.collapseAll(),
+    renameInTree: (path) => {
+      select("files");
+      explorer.reveal(path);
+      explorer.startRename(path);
+    },
+    newFolderIn: (parent) => void explorer.newFolderIn(parent),
+    searchFor: (query) => {
+      select("search");
+      searchView.search(query);
+    },
+    get sortOrder() {
+      return explorer.sortOrder;
+    },
+    setSortOrder: (order) => explorer.setSortOrder(order),
+    onSortChange: (fn) => explorer.onSortChange(fn),
+  };
 }
 
 interface TreeNode {
@@ -67,7 +116,7 @@ interface TreeNode {
   children: TreeNode[];
 }
 
-function buildTree(files: FileEntry[]): TreeNode[] {
+function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
   const root: TreeNode[] = [];
   const dirs = new Map<string, TreeNode>();
   const sorted = [...files].sort((a, b) => a.path.split("/").length - b.path.split("/").length);
@@ -78,67 +127,96 @@ function buildTree(files: FileEntry[]): TreeNode[] {
     (parent ? parent.children : root).push(node);
     if (entry.is_dir) dirs.set(entry.path, node);
   }
-  const order = (nodes: TreeNode[]) => {
-    nodes.sort(
-      (a, b) =>
-        Number(b.entry.is_dir) - Number(a.entry.is_dir) ||
-        a.entry.name.localeCompare(b.entry.name, undefined, { numeric: true, sensitivity: "base" }),
-    );
-    for (const n of nodes) order(n.children);
+  const byName = (a: TreeNode, b: TreeNode) =>
+    a.entry.name.localeCompare(b.entry.name, undefined, { numeric: true, sensitivity: "base" });
+  // Folders first, by name (reversed for Z to A); files in the chosen order.
+  const compare = (a: TreeNode, b: TreeNode) => {
+    if (a.entry.is_dir !== b.entry.is_dir) return Number(b.entry.is_dir) - Number(a.entry.is_dir);
+    if (a.entry.is_dir || order === "alphabetical") return order === "alphabeticalReverse" ? byName(b, a) : byName(a, b);
+    if (order === "alphabeticalReverse") return byName(b, a);
+    const age = b.entry.mtime_ms - a.entry.mtime_ms;
+    return (order === "byModifiedTime" ? age : -age) || byName(a, b);
   };
-  order(root);
+  const sortNodes = (nodes: TreeNode[]) => {
+    nodes.sort(compare);
+    for (const n of nodes) sortNodes(n.children);
+  };
+  sortNodes(root);
   return root;
 }
 
-function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
+function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
+  const sortListeners = new Set<() => void>();
+  let sortOrder: SortOrder = "alphabetical";
   const list = h("div", { class: "nav-files-container" });
 
+  const sortButton = iconButton(icon("arrow-up-narrow-wide"), "Change sort order", () => {
+    showMenu(
+      SORT_ORDERS.map(([order, title]) => ({ title, checked: order === sortOrder, action: () => setSortOrder(order) })),
+      sortButton,
+    );
+  });
   const actions = h(
     "div",
     { class: "nav-header" },
     h(
       "div",
       { class: "nav-buttons-container" },
-      iconButton(icon("square-pen", 16), "New note", newNote),
-      iconButton(icon("chevrons-down-up", 16), "Collapse all", collapseAll),
+      iconButton(icon("square-pen"), "New note", () => commands.run("file-explorer:new-file")),
+      iconButton(icon("folder-plus"), "New folder", () => commands.run("file-explorer:new-folder")),
+      sortButton,
+      iconButton(icon("chevrons-down-up"), "Collapse all", () => commands.run("file-explorer:collapse-all")),
     ),
   );
 
-  function fileMenu(e: MouseEvent, entry: FileEntry) {
-    e.preventDefault();
-    const items = entry.is_dir
-      ? [{ title: "Delete", danger: true, action: () => void ws.remove(entry.path) }]
-      : [
-          { title: "Open in new tab", action: () => void ws.open(entry.path, { newTab: true }) },
-          { title: "Rename...", action: () => startRename(entry) },
-          { title: "Delete", danger: true, action: () => void ws.remove(entry.path) },
-        ];
-    showMenu(items, e.clientX, e.clientY);
+  function setSortOrder(order: SortOrder) {
+    if (order === sortOrder) return;
+    sortOrder = order;
+    render();
+    for (const fn of sortListeners) fn();
   }
 
-  function startRename(entry: FileEntry) {
-    const label = rows.get(entry.path)?.querySelector<HTMLElement>(".tree-item-inner");
+  function contextMenu(e: MouseEvent, items: MenuItems) {
+    e.preventDefault();
+    e.stopPropagation();
+    showMenu(items, { x: e.clientX, y: e.clientY });
+  }
+  list.addEventListener("contextmenu", (e) => contextMenu(e, menus().vault()));
+
+  function startRename(path: string) {
+    const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
     if (!label) return;
+    const shown = label.textContent ?? "";
     label.contentEditable = "plaintext-only";
     label.focus();
     getSelection()?.selectAllChildren(label);
     const finish = (commit: boolean) => {
       label.contentEditable = "false";
       const name = label.textContent ?? "";
-      label.textContent = noteName(entry.path);
-      if (commit) ws.rename(entry.path, name).catch((err) => console.warn(err));
+      label.textContent = shown;
+      if (commit) ws.rename(path, name).catch((err) => console.warn(err));
     };
     label.addEventListener("blur", () => finish(true), { once: true });
     label.onkeydown = (ev) => {
       if (ev.key === "Enter" || ev.key === "Escape") {
         ev.preventDefault();
         label.onkeydown = null;
-        if (ev.key === "Escape") label.textContent = noteName(entry.path);
+        if (ev.key === "Escape") label.textContent = shown;
         label.blur();
       }
     };
+  }
+
+  async function newFolderIn(parent: string) {
+    try {
+      const path = await ws.newFolder(parent);
+      if (parent) expandTo(path);
+      startRename(path);
+    } catch (err) {
+      console.warn("Could not create a folder", err);
+    }
   }
 
   // Folders are a title row plus, while open, a children box holding their
@@ -160,15 +238,14 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
           class: `tree-item-self${entry.is_dir ? " nav-folder-title mod-collapsible" : " nav-file-title"}`,
           "data-path": entry.path,
           onclick: (e: MouseEvent) => {
+            if ((e.target as HTMLElement).isContentEditable) return;
             if (entry.is_dir) toggleFolder(node, depth, folder!, chevron!);
-            else if (!(e.target as HTMLElement).isContentEditable) {
-              void ws.open(entry.path, { newTab: e.ctrlKey || e.metaKey });
-            }
+            else void ws.open(entry.path, { newTab: e.ctrlKey || e.metaKey });
           },
           onauxclick: (e: MouseEvent) => {
             if (e.button === 1 && !entry.is_dir) void ws.open(entry.path, { newTab: true });
           },
-          oncontextmenu: (e: MouseEvent) => fileMenu(e, entry),
+          oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry)),
         },
         chevron,
         h("div", { class: "tree-item-inner" }, label),
@@ -229,7 +306,7 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
   function render() {
     rows.clear();
     const frag = document.createDocumentFragment() as unknown as HTMLElement;
-    renderNodes(buildTree(ws.files), 0, frag);
+    renderNodes(buildTree(ws.files, sortOrder), 0, frag);
     list.replaceChildren(frag);
     markActive();
   }
@@ -241,23 +318,92 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
     activeRow?.classList.add("is-active");
   }
 
+  /** Expand every folder above a path (re-rendering if one was closed). */
+  function expandTo(path: string) {
+    const parts = path.split("/");
+    let changed = false;
+    for (let i = 1; i < parts.length; i++) {
+      const dir = parts.slice(0, i).join("/");
+      if (expanded.has(dir)) continue;
+      expanded.add(dir);
+      changed = true;
+    }
+    if (changed || !rows.has(path)) render();
+  }
+
+  function reveal(path: string) {
+    expandTo(path);
+    const row = rows.get(path);
+    if (!row) return;
+    row.scrollIntoView({ block: "center" });
+    row.classList.remove("is-revealed");
+    void row.offsetWidth; // restart the flash
+    row.classList.add("is-revealed");
+  }
+
   ws.on((change) => {
     if (change === "files") render();
     if (change === "tabs") {
       // Reveal the active note's folder, as Obsidian does.
       const path = ws.active.path;
-      if (path && !rows.has(path)) {
-        const parts = path.split("/");
-        for (let i = 1; i < parts.length; i++) expanded.add(parts.slice(0, i).join("/"));
-        render();
-      } else markActive();
+      if (path && !rows.has(path)) expandTo(path);
+      else markActive();
     }
   });
 
-  return h("div", { class: "nav-files" }, actions, list);
+  return {
+    el: h("div", { class: "nav-files" }, actions, list),
+    reveal,
+    collapseAll,
+    startRename,
+    newFolderIn,
+    get sortOrder() {
+      return sortOrder;
+    },
+    setSortOrder,
+    onSortChange: (fn: () => void) => void sortListeners.add(fn),
+  };
 }
 
-function createSearchView(ws: Workspace): HTMLElement {
+/** Bookmarked notes and folders: a click opens a note or reveals a folder. */
+function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => Menus, revealFolder: (path: string) => void) {
+  const list = h("div", { class: "nav-files-container bookmarks-list" });
+  function render() {
+    const paths = bookmarks.list();
+    list.replaceChildren(
+      ...paths.map((path) => {
+        const entry = ws.files.find((f) => f.path === path)!;
+        const row = h(
+          "div",
+          {
+            class: "tree-item-self bookmark",
+            "data-path": path,
+            onclick: (e: MouseEvent) => {
+              if (entry.is_dir) revealFolder(path);
+              else void ws.open(path, { newTab: e.ctrlKey || e.metaKey });
+            },
+            oncontextmenu: (e: MouseEvent) => {
+              e.preventDefault();
+              showMenu(menus().file(entry), { x: e.clientX, y: e.clientY });
+            },
+          },
+          h("div", { class: "tree-item-icon" }, icon(entry.is_dir ? "folder-closed" : "file-text", 16)),
+          h("div", { class: "tree-item-inner" }, entry.is_dir ? entry.name : noteName(path)),
+        );
+        row.classList.toggle("is-active", path === ws.active.path);
+        return row;
+      }),
+    );
+    if (!paths.length) list.append(h("div", { class: "pane-empty" }, "No bookmarks yet."));
+  }
+  bookmarks.onChange(render);
+  ws.on((change) => {
+    if (change === "files" || change === "tabs") render();
+  });
+  return h("div", { class: "nav-files" }, list);
+}
+
+function createSearchView(ws: Workspace): { el: HTMLElement; search(query: string): void } {
   const input = h("input", { class: "search-input", "aria-label": "Search" });
   input.placeholder = "Search...";
   input.type = "search";
@@ -295,7 +441,13 @@ function createSearchView(ws: Workspace): HTMLElement {
     if (query && !hits.length) results.append(h("div", { class: "pane-empty" }, "No matches found."));
   });
 
-  return h("div", { class: "search-view" }, h("div", { class: "search-input-container" }, input), results);
+  return {
+    el: h("div", { class: "search-view" }, h("div", { class: "search-input-container" }, input), results),
+    search(query) {
+      input.value = query;
+      input.dispatchEvent(new Event("input"));
+    },
+  };
 }
 
 function markMatch(text: string, query: string): DocumentFragment {

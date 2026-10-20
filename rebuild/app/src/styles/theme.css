@@ -1,13 +1,15 @@
-/* Obsidian default light theme, per rebuild/OBSIDIAN_FEEL_SPEC.md. */
+/* Obsidian default light theme, per rebuild/OBSIDIAN_FEEL_SPEC.md, with the
+   accent moved from Obsidian's violet to a muted forest teal (the owner's
+   colour). Only the accent tokens differ; everything else is Obsidian's. */
 
 :root {
-  --accent-h: 262;
-  --accent-s: 83%;
-  --accent-l: 58%;
-  --interactive-accent: #7c3aed;
-  --interactive-accent-hover: #6d28d9;
-  --text-accent: #7c3aed;
-  --text-accent-hover: #6d28d9;
+  --accent-h: 172;
+  --accent-s: 55%;
+  --accent-l: 34%;
+  --interactive-accent: #27867a;
+  --interactive-accent-hover: #206f64;
+  --text-accent: #27867a;
+  --text-accent-hover: #206f64;
 
   --background-primary: #ffffff;
   --background-primary-alt: #fafafa;
@@ -24,6 +26,7 @@
   --text-faint: #ababab;
   --text-on-accent: #ffffff;
   --text-error: #e93147;
+  --background-modifier-error: #e93147;
   --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
   --text-highlight-bg: rgba(255, 208, 0, 0.4);
 
@@ -45,6 +48,7 @@
   --font-monospace: ui-monospace, SFMono-Regular, "Cascadia Mono", "Noto Sans Mono", "DejaVu Sans Mono", Menlo,
     Consolas, monospace;
   --font-text-size: 16px;
+  --font-ui-medium: 15px;
   --font-ui-small: 13px;
   --font-ui-smaller: 12px;
   --line-height: 1.5;
@@ -65,6 +69,31 @@
   --tab-min-width: 40px;
   --radius-s: 4px;
   --radius-m: 8px;
+  --radius-l: 12px;
+
+  /* Icons: Lucide at Obsidian's sizes. The stroke narrows as the icon grows,
+     so every size draws about the same 1.3px line. --icon-size and
+     --icon-stroke are what an icon uses; each place picks a size. */
+  --icon-xs: 14px;
+  --icon-s: 16px;
+  --icon-m: 18px;
+  --icon-l: 18px;
+  --icon-xs-stroke-width: 2px;
+  --icon-s-stroke-width: 2px;
+  --icon-m-stroke-width: 1.75px;
+  --icon-l-stroke-width: 1.75px;
+  --icon-size: var(--icon-m);
+  --icon-stroke: var(--icon-m-stroke-width);
+
+  /* Menus */
+  --menu-padding: 6px;
+  --menu-item-radius: 6px;
+  --menu-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 6px 18px rgba(0, 0, 0, 0.1);
+
+  /* The quick switcher and the command palette */
+  --prompt-width: 700px;
+  --prompt-max-width: 80vw;
+  --prompt-max-height: 70vh;
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.03), 0 3px 8px rgba(0, 0, 0, 0.07);
   --shadow-l: 0 2px 8px rgba(0, 0, 0, 0.05), 0 12px 40px rgba(0, 0, 0, 0.16);
 

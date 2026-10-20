@@ -237,6 +237,9 @@ const NPM_DEPS = new Set([
   "@lezer/markdown",
   "@tauri-apps/api",
   "@tauri-apps/plugin-opener",
+  // Lucide icon path data (ISC, no dependencies, no runtime code that loads
+  // anything). Only the icons named in src/shell/icons.ts are bundled.
+  "lucide",
   // build and test tooling; never shipped
   "@tauri-apps/cli",
   "typescript",

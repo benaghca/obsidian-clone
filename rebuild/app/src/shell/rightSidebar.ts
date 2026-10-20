@@ -1,14 +1,17 @@
-// Right sidebar: Backlinks and Outline for the open note, switched with icon
-// tabs at the top like Obsidian's. Only the selected view, and only while the
-// sidebar is open, does any work.
+// Right sidebar: Backlinks, Outgoing links, Tags and Outline, switched with
+// icon tabs at the top like Obsidian's. Only the selected view, and only
+// while the sidebar is open, does any work.
 
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
+import { createOutgoingView } from "./outgoingView";
 import { createOutlineView, type SideView } from "./outlineView";
+import { createTagsView } from "./tagsView";
 
-export type RightView = "backlinks" | "outline";
+export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "outline"] as const;
+export type RightView = (typeof RIGHT_VIEWS)[number];
 
 export interface RightSidebar {
   el: HTMLElement;
@@ -19,9 +22,12 @@ export interface RightSidebar {
   onSelect(fn: (view: RightView) => void): void;
 }
 
-export function createRightSidebar(ws: Workspace, isOpen: () => boolean): RightSidebar {
+/** `searchFor` runs a vault search in the left sidebar (a click on a tag). */
+export function createRightSidebar(ws: Workspace, isOpen: () => boolean, searchFor: (query: string) => void): RightSidebar {
   const views: Record<RightView, SideView> = {
     backlinks: createBacklinksView(ws),
+    outgoing: createOutgoingView(ws),
+    tags: createTagsView(ws, searchFor),
     outline: createOutlineView(ws),
   };
   const buttons = new Map<RightView, HTMLElement>();
@@ -30,7 +36,7 @@ export function createRightSidebar(ws: Workspace, isOpen: () => boolean): RightS
   let current: RightView = "backlinks";
 
   const tab = (name: RightView, iconName: IconName, label: string) => {
-    const button = iconButton(icon(iconName, 16), label, () => select(name), "workspace-tab-header");
+    const button = iconButton(icon(iconName), label, () => select(name), "workspace-tab-header");
     buttons.set(name, button);
     return button;
   };
@@ -60,6 +66,8 @@ export function createRightSidebar(ws: Workspace, isOpen: () => boolean): RightS
       "div",
       { class: "workspace-tab-header-container", "data-tauri-drag-region": "" },
       tab("backlinks", "link", "Backlinks"),
+      tab("outgoing", "link-2", "Outgoing links"),
+      tab("tags", "tags", "Tags"),
       tab("outline", "list", "Outline"),
     ),
     content,
