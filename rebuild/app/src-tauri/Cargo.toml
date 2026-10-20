@@ -1,0 +1,27 @@
+[package]
+name = "cinder"
+version = "0.1.0"
+description = "Local Markdown notes in the Obsidian vault format"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "cinder_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+notify = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+
+[features]
+# `tauri build` turns this on so the webview embeds ../dist.
+# A plain `cargo build` leaves it off and loads devUrl instead, so the
+# frontend does not have to be built first.
+default = []
+custom-protocol = ["tauri/custom-protocol"]

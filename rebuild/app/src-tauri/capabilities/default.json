@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "The main window can call vault commands and listen for vault-changed.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:event:default"]
+}
