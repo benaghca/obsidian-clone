@@ -469,6 +469,41 @@ body {
   overflow-wrap: anywhere;
   line-height: 1.45;
 }
+/* Outgoing links, unlinked mentions: a card per mention, its line (up to
+   three lines of it) and under it a small button naming the note that
+   links the mention, as in Obsidian. */
+.backlink-pane .search-result-file-match.unlinked-mention {
+  display: block;
+  margin: 4px 4px 6px 4px;
+  padding: 6px 10px 8px;
+}
+.unlinked-mention-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.unlinked-mention-link {
+  --icon-size: var(--icon-xs);
+  --icon-stroke: var(--icon-xs-stroke-width);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  background: var(--background-primary);
+  transition:
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.unlinked-mention-link:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
 .search-result-more {
   margin: 2px 0 4px 12px;
   padding: 2px 8px;
