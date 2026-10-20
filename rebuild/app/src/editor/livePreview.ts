@@ -281,7 +281,7 @@ function build(view: EditorView): DecorationSet {
         mark("cm-list-number", node.from, node.to);
         decos.push(checkbox[+checked].range(taskMarker.from, taskMarker.to));
       }
-      if (checked) mark("cm-task-done", taskMarker.to, task.to);
+      if (checked) mark("cm-task-done", taskMarker.to + 1, task.to);
       return;
     }
     if (bulleted) decos.push(bullet.range(node.from, node.to));
