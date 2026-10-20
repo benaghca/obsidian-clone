@@ -3,6 +3,7 @@
 
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
+import { isNotePath } from "../links/external";
 
 /** An internal link's target, with where that target text sits (for "Edit link"). */
 export type LinkAt = { kind: "internal"; target: string; from: number; to: number } | { kind: "external"; url: string };
@@ -17,7 +18,10 @@ export function linkAt(state: EditorState, pos: number): LinkAt | null {
       }
       if (node.name === "Link" || node.name === "Image") {
         const url = node.getChild("URL");
-        if (url) return { kind: "external", url: state.sliceDoc(url.from, url.to) };
+        if (!url) continue;
+        const href = state.sliceDoc(url.from, url.to);
+        // A [markdown](link) to a note is an internal link.
+        return isNotePath(href) ? { kind: "internal", target: href, from: url.from, to: url.to } : { kind: "external", url: href };
       }
       if (node.name === "URL") return { kind: "external", url: state.sliceDoc(node.from, node.to) };
     }

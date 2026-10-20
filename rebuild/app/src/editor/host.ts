@@ -17,6 +17,8 @@ export interface EditorHost {
   openLink(target: string, where: LinkTarget, view?: EditorView): void;
   openUrl(url: string): void;
   notes(): NoteRef[];
+  /** A new link to the note at `target` from the note in `view`, as the link settings ask ([[wikilink]] or [markdown](link)). */
+  formatLink(target: string, view: EditorView, display?: string): string;
   /** Show the editor menu at `at` for document position `pos` (the caret is already there). */
   contextMenu?(view: EditorView, at: { x: number; y: number }, pos: number, keyboard: boolean): void;
 }

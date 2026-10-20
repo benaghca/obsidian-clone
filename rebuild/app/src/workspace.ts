@@ -18,10 +18,12 @@ import { Annotation, EditorSelection, type EditorState, Prec, Transaction, type 
 import { EditorView, keymap } from "@codemirror/view";
 import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
 import { countsField } from "./editor/counts";
+import { configEffects } from "./editor/config";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef } from "./editor/host";
 import { type Edge, Layout, type LayoutJSON, type TabGroup } from "./layout";
+import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { duration, nextFrame, smoothScrollTo } from "./motion";
 
 export interface Tab {
@@ -33,6 +35,8 @@ export interface Tab {
   mode: ViewMode;
   /** A pinned tab keeps its note: links followed from it open in a new tab. */
   pinned: boolean;
+  /** Backlinks shown under the note (Obsidian's "Backlinks in document"). */
+  backlinks: boolean;
   /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
   memory: TabMemory | null;
 }
@@ -83,6 +87,7 @@ interface SavedTab {
   path: string | null;
   mode: ViewMode;
   pinned: boolean;
+  backlinks?: boolean;
   back: string[];
   forward: string[];
   scroll?: number;
@@ -129,6 +134,26 @@ export class Workspace {
   recent: string[] = [];
   /** Shows the editor's right-click menu (set by the app). */
   editorMenu: EditorHost["contextMenu"];
+  /** The mode a new tab starts in (Settings → Editor: default view and editing mode). */
+  newTabMode: () => ViewMode = () => "live";
+  /** Whether a new tab shows backlinks under its note (Settings → Backlinks). */
+  newTabBacklinks: () => boolean = () => false;
+  /** The editing mode new notes open in (Live Preview or Source mode). */
+  editingMode: () => ViewMode = () => "live";
+  /** Where "Create new note" puts a note when no folder is given (Settings → Files and links). */
+  newNoteFolder: () => string = () => "";
+  /** Whether deleting removes for good instead of moving to the vault's .trash. */
+  permanentDelete: () => boolean = () => false;
+  /** Asked before a delete that wasn't confirmed already; false cancels it. */
+  confirmDelete: ((path: string) => Promise<boolean>) | null = null;
+  /** How new links are written (Settings → Files and links). */
+  linkStyle: () => LinkStyle = () => ({ format: "shortest", wikilinks: true });
+  /** Asked before merging one note into another; false cancels. */
+  confirmMerge: ((from: string, into: string) => Promise<boolean>) | null = null;
+  /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
+  isExcluded: (path: string) => boolean = () => false;
+  /** Told after a note or folder moved, with the notes as they were before (to update links). */
+  onRenamed: ((from: string, to: string, before: NoteRef[]) => void) | null = null;
 
   private nextTabId = 1;
   private panes = new Map<Group, Pane>();
@@ -158,7 +183,8 @@ export class Workspace {
     this.host = {
       openLink: (target, where, view) => void this.openLink(target, where, view ? this.paneOfView.get(view)?.group : undefined),
       openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
-      notes: () => this.notes,
+      notes: () => this.includedNotes(),
+      formatLink: (target, view, display) => this.linkTo(target, this.paneOfView.get(view)?.path ?? null, display),
       contextMenu: (view, at, pos, keyboard) => {
         const pane = this.paneOfView.get(view);
         if (pane) this.focusGroup(pane.group);
@@ -290,12 +316,12 @@ export class Workspace {
     this.emit("links");
   }
 
-  /** Resolve a link target the way Obsidian does: by note name, case-insensitively. */
-  resolve(target: string): string | null {
-    const name = target.split("#")[0].trim().toLowerCase();
-    if (!name) return null;
-    const byPath = this.notes.find((n) => n.path.toLowerCase() === `${name}.md`);
-    return (byPath ?? this.notes.find((n) => n.name.toLowerCase() === name))?.path ?? null;
+  /**
+   * Resolve a link target the way Obsidian does: a path from the vault
+   * folder or from the linking note's folder, or a note name, any case.
+   */
+  resolve(target: string, from: string | null = this.active.path): string | null {
+    return resolveLink(target, from, this.notes);
   }
 
   // ----- showing notes in panes -----
@@ -348,6 +374,7 @@ export class Workspace {
         );
       }
       this.applyMode(pane.view, tab.mode);
+      this.applyConfig(pane.view);
       this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
     }
     this.emit("pane", group);
@@ -393,12 +420,28 @@ export class Workspace {
     heir.view.setState(state);
     this.owners.set(path, heir.view);
     if (heir.tab) this.applyMode(heir.view, heir.tab.mode);
+    this.applyConfig(heir.view);
     if (heir.scroller && scrollTop !== undefined) heir.scroller.scrollTop = scrollTop;
   }
 
   /** Configure a view's state for its tab's mode (a no-op when it already is). */
   private applyMode(view: EditorView, mode: ViewMode) {
     if (viewModeOf(view.state) !== mode) view.dispatch({ effects: viewModeCompartment.reconfigure(VIEW_MODES[mode]) });
+  }
+
+  /** Bring a view's state up to the current editor settings (a no-op when it already is). */
+  private applyConfig(view: EditorView) {
+    const effects = configEffects(view.state);
+    if (effects.length) view.dispatch({ effects });
+  }
+
+  /**
+   * The editor settings changed: reconfigure every editor on screen in place
+   * (one transaction each, nothing re-created). Notes off screen catch up
+   * when they are next shown.
+   */
+  reconfigureEditors() {
+    for (const pane of this.panes.values()) if (pane.path) this.applyConfig(pane.view);
   }
 
   /** Every transaction of every pane's editor comes through here. */
@@ -444,7 +487,7 @@ export class Workspace {
   // ----- tabs -----
 
   private blankTab(): Tab {
-    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: "live", pinned: false, memory: null };
+    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: this.newTabMode(), pinned: false, backlinks: this.newTabBacklinks(), memory: null };
   }
 
   newTab(group: Group = this.activeGroup) {
@@ -563,6 +606,12 @@ export class Workspace {
     }
   }
 
+  /** Obsidian's "Toggle backlinks in document", per tab. */
+  toggleBacklinks(tab: Tab = this.active) {
+    tab.backlinks = !tab.backlinks;
+    this.emit("tabs");
+  }
+
   togglePin(tab: Tab = this.active) {
     tab.pinned = !tab.pinned;
     this.emit("tabs");
@@ -604,7 +653,7 @@ export class Workspace {
     // show other text: it starts at the line at the top of the old one.
     const topLine = pane?.tab === tab ? this.topLine(pane) : null;
     const memory = tab.memory ? { ...tab.memory, scrollTop: topLine === null ? tab.memory.scrollTop : null } : null;
-    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, memory };
+    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory };
     const added = this.layout.split(group, edge, [copy]);
     this.layout.activeGroup = added;
     this.present(added);
@@ -772,10 +821,16 @@ export class Workspace {
     const hash = target.indexOf("#");
     const name = (hash < 0 ? target : target.slice(0, hash)).trim();
     const heading = hash < 0 ? undefined : target.slice(hash + 1);
-    let path = name ? this.resolve(name) : group.active.path;
+    let path = name ? this.resolve(name, group.active.path) : group.active.path;
     if (!path) {
       if (!name) return;
-      path = (await this.createNote(`${name}.md`)).path;
+      // A link to a note that doesn't exist yet: create it (a bare name goes where new notes go).
+      let file = name.replace(/%20/g, " ").replace(/\.md$/i, "");
+      if (!file.includes("/")) {
+        const folder = this.newNoteFolder();
+        file = folder ? `${folder}/${file}` : file;
+      }
+      path = (await this.createNote(`${file}.md`)).path;
     }
     await this.open(path, { where, heading, group });
   }
@@ -854,6 +909,7 @@ export class Workspace {
 
   private saveTab(tab: Tab): SavedTab {
     const saved: SavedTab = { path: tab.path, mode: tab.mode, pinned: tab.pinned, back: tab.back.slice(-20), forward: tab.forward.slice(-20) };
+    if (tab.backlinks) saved.backlinks = true;
     const pane = [...this.panes.values()].find((p) => p.tab === tab);
     if (pane) this.remember(pane);
     const memory = tab.memory?.path === tab.path ? tab.memory : null;
@@ -873,6 +929,7 @@ export class Workspace {
     tab.path = path;
     tab.mode = saved.mode === "source" || saved.mode === "reading" ? saved.mode : "live";
     tab.pinned = saved.pinned === true;
+    tab.backlinks = saved.backlinks === true;
     tab.back = Array.isArray(saved.back) ? saved.back.filter(exists) : [];
     tab.forward = Array.isArray(saved.forward) ? saved.forward.filter(exists) : [];
     if (path && typeof saved.scroll === "number") {
@@ -914,10 +971,16 @@ export class Workspace {
     return entry;
   }
 
-  /** Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (the vault root by default) and open it. */
-  async newNote(folder = "", where?: OpenWhere): Promise<string> {
+  /**
+   * Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (by default
+   * where Settings → Files and links puts new notes) and open it for editing.
+   */
+  async newNote(folder: string = this.newNoteFolder(), where?: OpenWhere): Promise<string> {
+    if (folder && !this.isFolder(folder)) await api.createFolder(folder).catch(() => {});
     const entry = await this.createNote(this.freeName(folder, ".md"));
     await this.open(entry.path, { where: where ?? (this.active.path !== null ? "tab" : false) });
+    // A new note is for writing in, even when new tabs open in Reading view.
+    if (this.active.path === entry.path && this.active.mode === "reading") this.setMode(this.editingMode());
     return entry.path;
   }
 
@@ -950,6 +1013,7 @@ export class Workspace {
     if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
     const under = (p: string) => p === from || p.startsWith(from + "/");
     await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
+    const before = this.notes;
     await api.renamePath(from, to);
     const swap = (p: string) => (under(p) ? to + p.slice(from.length) : p);
     for (const map of [this.states, this.scrollTops, this.owners] as Map<string, unknown>[]) {
@@ -976,6 +1040,7 @@ export class Workspace {
     this.shownKey = "";
     this.settle();
     void this.refreshLinks();
+    this.onRenamed?.(from, to, before);
   }
 
   private moveListeners = new Set<(swap: (path: string) => string) => void>();
@@ -999,6 +1064,47 @@ export class Workspace {
     const entry = await api.createFolder(this.freeName(parent, ""));
     await this.refreshFiles();
     return entry.path;
+  }
+
+  private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
+
+  /** The notes that aren't excluded (Settings → Files and links → Excluded files). */
+  includedNotes(): NoteRef[] {
+    const c = this.included;
+    if (c && c.notes === this.notes && c.test === this.isExcluded) return c.out;
+    const out = this.notes.filter((n) => !this.isExcluded(n.path));
+    this.included = { notes: this.notes, test: this.isExcluded, out };
+    return out;
+  }
+
+  /** A new link to `target` from the note at `from`, in the style the settings ask for. */
+  linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
+    return formatLink(target, from, this.notes, this.linkStyle(), display, subpath);
+  }
+
+  /**
+   * Change a note's text from outside its editors (link updates after a
+   * rename): only the lines that differ are replaced, through the editor if
+   * the note is loaded (so it is undoable and saved as usual), else on disk.
+   */
+  async updateText(path: string, next: string) {
+    const doc = this.owners.get(path)?.state.doc ?? this.states.get(path)?.doc;
+    if (!doc) {
+      await api.writeNote(path, next);
+      this.touch(path);
+      return;
+    }
+    const lines = next.split("\n");
+    if (lines.length !== doc.lines) {
+      this.change(path, { changes: { from: 0, to: doc.length, insert: next } });
+      return;
+    }
+    const changes: { from: number; to: number; insert: string }[] = [];
+    lines.forEach((text, i) => {
+      const line = doc.line(i + 1);
+      if (line.text !== text) changes.push({ from: line.from, to: line.to, insert: text });
+    });
+    if (changes.length) this.change(path, { changes });
   }
 
   /** Whether a note is loaded in the editor (its text may hold unsaved edits). */
@@ -1037,6 +1143,7 @@ export class Workspace {
    */
   async mergeInto(path: string, into: string) {
     if (path === into) return;
+    if (this.confirmMerge && !(await this.confirmMerge(path, into))) return;
     const [text, target] = await Promise.all([this.text(path), this.load(into)]);
     if (!target) return;
     const doc = this.owners.get(into)?.state.doc ?? this.states.get(into)?.doc ?? target.doc;
@@ -1044,7 +1151,7 @@ export class Workspace {
     this.change(into, { changes: { from: doc.length, insert: sep + text } });
     await this.flush(into);
     const showing = this.layout.tabs().filter((t) => t.path === path);
-    await this.remove(path);
+    await this.remove(path, { confirmed: true });
     for (const tab of showing) {
       tab.path = into;
       tab.memory = null;
@@ -1067,11 +1174,16 @@ export class Workspace {
     if (tr.docChanged && !tr.isUserEvent("external")) this.scheduleSave(path);
   }
 
-  /** Delete a note or folder (the backend moves it to the vault's .trash). */
-  async remove(path: string) {
+  /**
+   * Delete a note or folder: to the vault's .trash, or for good, as Settings
+   * → Files and links says, after asking if it says to ask. Returns whether
+   * it was deleted.
+   */
+  async remove(path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
+    if (!opts.confirmed && this.confirmDelete && !(await this.confirmDelete(path))) return false;
     const under = (p: string) => p === path || p.startsWith(path + "/");
     await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
-    await api.deletePath(path);
+    await api.deletePath(path, this.permanentDelete());
     for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.release(pane);
     for (const p of [...this.states.keys()].filter(under)) this.states.delete(p);
     for (const p of [...this.scrollTops.keys()].filter(under)) this.scrollTops.delete(p);
@@ -1086,6 +1198,7 @@ export class Workspace {
     for (const group of this.layout.groups()) this.present(group);
     this.settle();
     void this.refreshLinks();
+    return true;
   }
 
   // ----- saving notes -----

@@ -11,6 +11,7 @@ import type { StateCommand } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
+import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { linkAt } from "./editor/linkAt";
 import {
   BLOCKS,
@@ -34,6 +35,10 @@ import { openMovePrompt } from "./shell/movePrompt";
 import type { Panes } from "./shell/pane";
 import { isPromptOpen } from "./shell/prompt";
 import { openQuickSwitcher } from "./shell/quickSwitcher";
+import { currentTheme } from "./settings/appearance";
+import { dateNamePattern, fillTemplate, formatDate } from "./settings/dateFormat";
+import { settings } from "./settings/store";
+import { openTemplatePrompt } from "./shell/templatePrompt";
 import type { RightSidebar, RightView } from "./shell/rightSidebar";
 import type { LeftSidebar, LeftView } from "./shell/sidebar";
 import type { Sidedocks } from "./shell/sidedock";
@@ -46,41 +51,23 @@ export interface AppParts {
   left: LeftSidebar;
   right: RightSidebar;
   bookmarks: Bookmarks;
-  /** Show or hide the ribbon. */
-  toggleRibbon(): void;
   /** Show the editor menu at the caret (as from the Menu key). */
   editorMenuAtCaret(): void;
+  /** Open the settings modal (at a section). */
+  openSettings(section?: string): void;
+  /** Show or hide the backlinks under the active tab's note. */
+  toggleBacklinksInDocument(): void;
 }
 
 const mod = (key: string, more: { shift?: boolean; alt?: boolean } = {}) => [{ mod: true, key, ...more }];
 
-const DAILY = /^\d{4}-\d{2}-\d{2}$/;
-const pad = (n: number) => String(n).padStart(2, "0");
-const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-const nowTime = (d = new Date()) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-
-const PREFS = { fontSize: "grove.fontSize", readable: "grove.readableLineLength" };
-const store = (key: string, value: string) => {
-  try {
-    localStorage.setItem(key, value);
-  } catch {
-    // not remembered
-  }
+const templates = () => settings.get("templates.json");
+const today = () => formatDate(new Date(), templates().dateFormat || "YYYY-MM-DD");
+const nowTime = () => formatDate(new Date(), templates().timeFormat || "HH:mm");
+const folderPrefix = (folder: string) => {
+  const f = folder.trim().replace(/^\/+|\/+$/g, "");
+  return f ? `${f}/` : "";
 };
-const stored = (key: string) => {
-  try {
-    return localStorage.getItem(key);
-  } catch {
-    return null;
-  }
-};
-
-/** Apply the remembered font size and readable line length (startup). */
-export function applyViewPrefs() {
-  const size = Number(stored(PREFS.fontSize));
-  if (size >= 10 && size <= 30) document.documentElement.style.setProperty("--font-text-size", `${size}px`);
-  document.body.classList.toggle("is-readable-line-length-off", stored(PREFS.readable) === "off");
-}
 
 /**
  * Register everything. Only `ws` and `bookmarks` must exist yet: the views
@@ -121,23 +108,76 @@ export function registerAppCommands(parts: AppParts) {
     parts.panes.focusTitle(true);
   }
 
-  /** Daily notes, oldest first: notes named YYYY-MM-DD anywhere in the vault. */
-  const dailyNotes = () => ws.notes.filter((n) => DAILY.test(n.name)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  // ----- daily notes (Settings → Daily notes: date format, folder, template) -----
+  const daily = () => settings.get("daily-notes.json");
+  const dailyPath = (d: Date) => `${folderPrefix(daily().folder)}${formatDate(d, daily().format || "YYYY-MM-DD")}.md`;
+  /** Daily notes, oldest first: notes in the daily notes folder whose names fit the date format. */
+  const dailyNotes = () => {
+    const prefix = folderPrefix(daily().folder);
+    const pattern = dateNamePattern(daily().format || "YYYY-MM-DD");
+    const out: { path: string; time: number }[] = [];
+    for (const n of ws.notes) {
+      if (!n.path.startsWith(prefix)) continue;
+      const time = pattern.parse(n.path.slice(prefix.length, -3));
+      if (time !== null) out.push({ path: n.path, time });
+    }
+    return out.sort((a, b) => a.time - b.time);
+  };
   const adjacentDaily = (dir: 1 | -1) => {
     const path = ws.active.path;
-    if (!path || !DAILY.test(noteName(path))) return null;
+    if (!path) return null;
     const list = dailyNotes();
     const i = list.findIndex((n) => n.path === path);
-    return list[i + dir]?.path ?? null;
+    return i < 0 ? null : (list[i + dir]?.path ?? null);
   };
-
-  function setFontSize(delta: number) {
-    const now = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-text-size")) || 16;
-    const next = Math.min(30, Math.max(10, now + delta));
-    document.documentElement.style.setProperty("--font-text-size", `${next}px`);
-    store(PREFS.fontSize, String(next));
-    for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+  /** A template note's text with its variables filled in for a note titled `title`. */
+  const templateText = async (templatePath: string | null, title: string) => {
+    if (!templatePath) return "";
+    const text = await ws.text(templatePath).catch(() => "");
+    return fillTemplate(text, title, new Date(), templates().dateFormat || "YYYY-MM-DD", templates().timeFormat || "HH:mm");
+  };
+  async function openDailyNote() {
+    const path = dailyPath(new Date());
+    const existing = ws.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
+    if (existing) return ws.open(existing.path);
+    const template = daily().template.trim() ? ws.resolve(daily().template.trim(), null) : null;
+    const entry = await ws.createNote(path, await templateText(template, noteName(path)));
+    await ws.open(entry.path);
   }
+
+  // ----- templates -----
+  const templateFolder = () => templates().folder.trim().replace(/^\/+|\/+$/g, "");
+  const templateNotes = () => (templateFolder() ? ws.notes.filter((n) => n.path.startsWith(`${templateFolder()}/`)) : []);
+  async function insertTemplate(path: string) {
+    const view = ws.view;
+    const text = await templateText(path, ws.active.path ? noteName(ws.active.path) : "");
+    const { from, to } = view.state.selection.main;
+    view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, scrollIntoView: true, userEvent: "input.template" });
+    view.focus();
+  }
+
+  // ----- appearance shortcuts, through the settings (so they are saved per vault) -----
+  const appearance = () => settings.get("appearance.json");
+  const setFontSize = (delta: number) => settings.set("appearance.json", "baseFontSize", Math.min(30, Math.max(10, appearance().baseFontSize + delta)));
+  const setZoom = (level: number) => settings.set("appearance.json", "zoomLevel", Math.min(3, Math.max(-2.5, level)));
+  const app = () => settings.get("app.json");
+
+  // Obsidian's "Add file property": a properties block at the top of the
+  // note (created if missing) with the caret on a new, empty line in it.
+  const addProperty = (view: EditorView) => {
+    const doc = view.state.doc;
+    const first = doc.line(1);
+    if (first.text === "---") {
+      for (let i = 2; i <= doc.lines; i++) {
+        const line = doc.line(i);
+        if (line.text !== "---") continue;
+        view.dispatch({ changes: { from: line.from, insert: "\n" }, selection: { anchor: line.from }, scrollIntoView: true, userEvent: "input" });
+        return true;
+      }
+    }
+    view.dispatch({ changes: { from: 0, insert: "---\n\n---\n" }, selection: { anchor: 4 }, scrollIntoView: true, userEvent: "input" });
+    return true;
+  };
 
   const editorCommand = (id: string, name: string, icon: IconName | undefined, run: (view: EditorView) => boolean, hotkeys?: Command["hotkeys"]): Command => ({
     id,
@@ -182,11 +222,21 @@ export function registerAppCommands(parts: AppParts) {
   // While a menu or a prompt has the keyboard, hotkeys wait.
   commands.suspended = () => isPromptOpen() || isMenuOpen();
 
+  const lineAtCaret = () => ws.view.state.doc.lineAt(ws.view.state.selection.main.head);
+
   commands.register(
     // ----- app and workspace -----
     {
+      id: "app:open-settings",
+      name: "Open settings",
+      icon: "settings",
+      hotkeys: mod(","),
+      run: () => parts.openSettings(),
+    },
+    {
       id: "command-palette:open",
       name: "Command palette: Open command palette",
+      plugin: "command-palette",
       icon: "square-terminal",
       hotkeys: mod("p"),
       run: () => openCommandPalette(commands),
@@ -194,6 +244,7 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "switcher:open",
       name: "Quick switcher: Open quick switcher",
+      plugin: "switcher",
       icon: "navigation",
       hotkeys: mod("o"),
       run: () => openQuickSwitcher(ws),
@@ -208,10 +259,11 @@ export function registerAppCommands(parts: AppParts) {
       run: () => newNote("right"),
     },
     { id: "file-explorer:new-folder", name: "Files: Create new folder", icon: "folder-plus", run: () => parts.left.newFolderIn("") },
-    { id: "daily-notes", name: "Daily notes: Open today's daily note", icon: "calendar-days", run: () => ws.openLink(today()) },
+    { id: "daily-notes", name: "Daily notes: Open today's daily note", plugin: "daily-notes", icon: "calendar-days", run: () => openDailyNote() },
     {
       id: "daily-notes:goto-prev",
       name: "Daily notes: Open previous daily note",
+      plugin: "daily-notes",
       icon: "calendar-minus",
       when: () => !!adjacentDaily(-1),
       run: () => ws.open(adjacentDaily(-1)!),
@@ -219,6 +271,7 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "daily-notes:goto-next",
       name: "Daily notes: Open next daily note",
+      plugin: "daily-notes",
       icon: "calendar-plus",
       when: () => !!adjacentDaily(1),
       run: () => ws.open(adjacentDaily(1)!),
@@ -226,11 +279,13 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "random-note",
       name: "Random note: Open random note",
+      plugin: "random-note",
       icon: "dices",
-      when: () => ws.notes.length > 0,
+      when: () => ws.includedNotes().length > 0,
       run: () => {
-        const others = ws.notes.filter((n) => n.path !== ws.active.path);
-        const pick = others[Math.floor(Math.random() * others.length)] ?? ws.notes[0];
+        const notes = ws.includedNotes();
+        const others = notes.filter((n) => n.path !== ws.active.path);
+        const pick = others[Math.floor(Math.random() * others.length)] ?? notes[0];
         void ws.open(pick.path);
       },
     },
@@ -329,7 +384,18 @@ export function registerAppCommands(parts: AppParts) {
       hotkeys: mod("]", { alt: true }),
       run: () => parts.docks.toggle("right"),
     },
-    { id: "app:toggle-ribbon", name: "Toggle ribbon", run: () => parts.toggleRibbon() },
+    { id: "app:toggle-ribbon", name: "Toggle ribbon", run: () => settings.set("appearance.json", "showRibbon", !appearance().showRibbon) },
+    {
+      id: "theme:toggle-light-dark",
+      name: "Toggle light/dark mode",
+      icon: "sun-moon",
+      run: () => settings.set("appearance.json", "theme", currentTheme() === "dark" ? "light" : "dark"),
+    },
+    { id: "window:zoom-in", name: "Zoom in", icon: "zoom-in", hotkeys: [...mod("="), ...mod("+", { shift: true })], run: () => setZoom(appearance().zoomLevel + 0.5) },
+    { id: "window:zoom-out", name: "Zoom out", icon: "zoom-out", hotkeys: mod("-"), run: () => setZoom(appearance().zoomLevel - 0.5) },
+    { id: "window:reset-zoom", name: "Reset zoom", hotkeys: mod("0"), run: () => setZoom(0) },
+    { id: "editor:toggle-line-numbers", name: "Toggle line numbers", icon: "list-ordered", run: () => settings.set("app.json", "showLineNumber", !app().showLineNumber) },
+    { id: "editor:toggle-spellcheck", name: "Toggle spellcheck", icon: "type", run: () => settings.set("app.json", "spellcheck", !app().spellcheck) },
     {
       id: "markdown:toggle-preview",
       name: "Toggle reading view",
@@ -349,11 +415,7 @@ export function registerAppCommands(parts: AppParts) {
       id: "editor:toggle-readable-line-length",
       name: "Toggle readable line length",
       icon: "ruler",
-      run: () => {
-        const off = document.body.classList.toggle("is-readable-line-length-off");
-        store(PREFS.readable, off ? "off" : "on");
-        for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
-      },
+      run: () => settings.set("app.json", "readableLineLength", !app().readableLineLength),
     },
     { id: "app:increase-font-size", name: "Increase font size", icon: "a-large-small", run: () => setFontSize(1) },
     { id: "app:decrease-font-size", name: "Decrease font size", icon: "a-large-small", run: () => setFontSize(-1) },
@@ -391,6 +453,7 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "note-composer:merge-file",
       name: "Note composer: Merge current file with another file...",
+      plugin: "note-composer",
       icon: "git-merge",
       when: () => hasNote() && ws.notes.length > 1,
       run: () => openMergePrompt(ws, note()),
@@ -427,6 +490,7 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "bookmarks:bookmark-current-file",
       name: "Bookmarks: Bookmark current file",
+      plugin: "bookmarks",
       icon: "bookmark",
       when: () => hasNote() && !bookmarks.has(note()),
       run: () => bookmarks.toggle(note()),
@@ -434,6 +498,7 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "bookmarks:unbookmark-current-file",
       name: "Bookmarks: Remove bookmark for current file",
+      plugin: "bookmarks",
       icon: "bookmark-minus",
       when: () => bookmarks.has(ws.active.path),
       run: () => bookmarks.toggle(note()),
@@ -441,6 +506,7 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "bookmarks:bookmark-all-tabs",
       name: "Bookmarks: Bookmark all tabs",
+      plugin: "bookmarks",
       icon: "bookmark-plus",
       when: () => ws.groups().some((g) => g.tabs.some((t) => t.path && !bookmarks.has(t.path))),
       run: () => {
@@ -459,11 +525,20 @@ export function registerAppCommands(parts: AppParts) {
       hotkeys: mod("f", { shift: true }),
       run: () => showLeft("search"),
     },
-    { id: "bookmarks:open", name: "Bookmarks: Show bookmarks", icon: "bookmark", run: () => showLeft("bookmarks") },
-    { id: "backlink:open", name: "Backlinks: Show backlinks", icon: "link", run: () => showRight("backlinks") },
-    { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", icon: "link-2", run: () => showRight("outgoing") },
-    { id: "tag-pane:open", name: "Tags view: Show tags", icon: "tags", run: () => showRight("tags") },
-    { id: "outline:open", name: "Outline: Show outline", icon: "list", run: () => showRight("outline") },
+    { id: "bookmarks:open", name: "Bookmarks: Show bookmarks",
+      plugin: "bookmarks", icon: "bookmark", run: () => showLeft("bookmarks") },
+    { id: "backlink:open", name: "Backlinks: Show backlinks", plugin: "backlink", icon: "link", run: () => showRight("backlinks") },
+    {
+      id: "backlink:toggle-backlinks-in-document",
+      name: "Backlinks: Toggle backlinks in document",
+      plugin: "backlink",
+      icon: "link",
+      when: hasNote,
+      run: () => parts.toggleBacklinksInDocument(),
+    },
+    { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", plugin: "outgoing-link", icon: "link-2", run: () => showRight("outgoing") },
+    { id: "tag-pane:open", name: "Tags view: Show tags", plugin: "tag-pane", icon: "tags", run: () => showRight("tags") },
+    { id: "outline:open", name: "Outline: Show outline", plugin: "outline", icon: "list", run: () => showRight("outline") },
 
     // ----- editing -----
     editorCommand("editor:toggle-bold", "Toggle bold", "bold", toggleWrap("**"), mod("b")),
@@ -502,8 +577,29 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:insert-codeblock", "Insert code block", "square-code", insertBlock(BLOCKS.codeBlock.text, BLOCKS.codeBlock.caret)),
     editorCommand("editor:insert-mathblock", "Insert math block", "square-sigma", insertBlock(BLOCKS.mathBlock.text, BLOCKS.mathBlock.caret)),
     editorCommand("editor:insert-horizontal-rule", "Insert horizontal rule", "separator-horizontal", insertBlock(BLOCKS.rule.text, BLOCKS.rule.caret)),
-    editorCommand("insert-current-date", "Templates: Insert current date", "calendar-days", insertText(() => today())),
-    editorCommand("insert-current-time", "Templates: Insert current time", "clock", insertText(() => nowTime())),
+    { ...editorCommand("insert-current-date", "Templates: Insert current date", "calendar-days", insertText(() => today())), plugin: "templates" },
+    { ...editorCommand("insert-current-time", "Templates: Insert current time", "clock", insertText(() => nowTime())), plugin: "templates" },
+    {
+      id: "templates:insert-template",
+      name: "Templates: Insert template",
+      plugin: "templates",
+      icon: "files",
+      when: canEdit,
+      run: () => {
+        if (!templateFolder()) return parts.openSettings("templates");
+        openTemplatePrompt(templateNotes(), (path) => void insertTemplate(path));
+      },
+    },
+    editorCommand("markdown:add-metadata-property", "Add file property", "list-plus", addProperty, mod(";")),
+    {
+      ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
+      when: () => canEdit() && (app().foldHeading || app().foldIndent),
+    },
+    {
+      ...editorCommand("editor:fold-all", "Fold all headings and lists", "chevrons-down-up", foldAllAllowed),
+      when: () => hasNote() && (app().foldHeading || app().foldIndent),
+    },
+    { ...editorCommand("editor:unfold-all", "Unfold all headings and lists", "chevrons-down-up", unfoldEverything), when: hasNote },
     editorCommand("editor:swap-line-up", "Move line up", "corner-right-up", stateCommand(moveLineUp)),
     editorCommand("editor:swap-line-down", "Move line down", "corner-right-down", stateCommand(moveLineDown)),
     editorCommand("editor:add-cursor-above", "Add cursor above", "mouse-pointer-click", addCursorAbove),

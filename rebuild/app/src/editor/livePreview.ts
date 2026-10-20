@@ -15,7 +15,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
-import { isRemoteUrl } from "../links";
+import { isNotePath, isRemoteUrl } from "../links/external";
 import { editorHost } from "./host";
 
 /** Reading view: render everything, as if the selection touched nothing. */
@@ -155,7 +155,10 @@ const INLINE_FORMATS: Record<string, string> = {
 function build(view: EditorView): DecorationSet {
   const { state } = view;
   const doc = state.doc;
-  const sel = state.facet(readingMode) ? [] : state.selection.ranges;
+  // Markup comes back around the selection only in the focused editor, as in
+  // Obsidian: a pane you're not typing in (or a note just opened elsewhere)
+  // keeps its headings' # hidden, even with its caret on that line.
+  const sel = state.facet(readingMode) || !view.hasFocus ? [] : state.selection.ranges;
   const touches = (from: number, to: number) => sel.some((r) => r.from <= to && r.to >= from);
   const touchesLines = (from: number, to: number) => touches(doc.lineAt(from).from, doc.lineAt(to).to);
   const decos: Range<Decoration>[] = [];
@@ -369,6 +372,7 @@ const livePreviewPlugin = ViewPlugin.fromClass(
         u.docChanged ||
         u.viewportChanged ||
         u.selectionSet ||
+        u.focusChanged ||
         syntaxTree(u.startState) !== syntaxTree(u.state) ||
         u.startState.facet(readingMode) !== u.state.facet(readingMode)
       ) {
@@ -412,7 +416,8 @@ const linkClicks = EditorView.domEventHandlers({
     event.preventDefault();
     const modifier = event.ctrlKey || event.metaKey;
     const href = el.dataset.href!;
-    if (el.classList.contains("cm-wikilink")) host.openLink(href, modifier ? (event.altKey ? "right" : "tab") : false, view);
+    // [[wikilinks]], and [markdown](links) to notes ("Use [[Wikilinks]]" off), open in the app.
+    if (el.classList.contains("cm-wikilink") || isNotePath(href)) host.openLink(href, modifier ? (event.altKey ? "right" : "tab") : false, view);
     else host.openUrl(href);
     return true;
   },

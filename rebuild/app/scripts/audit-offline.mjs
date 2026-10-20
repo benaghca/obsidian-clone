@@ -254,7 +254,9 @@ const NPM_DEPS = new Set([
   "vite",
   "vitest",
 ]);
-const CRATES = new Set(["notify", "serde", "serde_json", "tauri", "tauri-plugin-opener", "tauri-build"]);
+// webkit2gtk: already compiled in through wry (Tauri's Linux webview); named
+// directly only to switch on WebKitGTK's local spellchecker (Enchant).
+const CRATES = new Set(["notify", "serde", "serde_json", "tauri", "tauri-plugin-opener", "tauri-build", "webkit2gtk"]);
 // Names that mean networking, updating, analytics or crash reporting.
 const DENY =
   /(?:^|[/@_-])(?:reqwest|hyper|ureq|isahc|surf|curl|attohttpc|axios|node-fetch|undici|got|superagent|ky|socket\.io|tungstenite|websocket|updater|plugin-http|sentry|bugsnag|posthog|mixpanel|amplitude|segment|analytics|telemetry|datadog|newrelic|crash-?report\w*|opentelemetry)(?:$|[/@_-])/i;

@@ -2,11 +2,21 @@ import "./styles/theme.css";
 import "./styles/app.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
+import "./styles/settings.css";
 import { isTauri } from "./api";
-import { type AppParts, applyViewPrefs, registerAppCommands } from "./appCommands";
+import { type AppParts, registerAppCommands } from "./appCommands";
 import { Bookmarks } from "./bookmarks";
-import { commands } from "./commands";
+import { commands, fromStored } from "./commands";
+import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
+import { updateLinks } from "./links/update";
+import { applyAppearance, applyPageSettings } from "./settings/appearance";
+import { excluder } from "./settings/exclude";
+import { isSettingsOpen, openSettings } from "./settings/modal";
+import type { PluginId } from "./settings/schema";
+import { settingsSections } from "./settings/sections";
+import { type SettingsFile, settings } from "./settings/store";
+import { confirmDialog, isConfirmOpen } from "./shell/confirm";
 import { h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
 import { type MenuItems, showMenu } from "./shell/menu";
@@ -20,7 +30,7 @@ import { pathQuery } from "./shell/searchQuery";
 import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
-import { Workspace } from "./workspace";
+import { noteName, parentDir, Workspace } from "./workspace";
 
 const ws = new Workspace();
 const bookmarks = new Bookmarks(ws);
@@ -30,7 +40,8 @@ const bookmarks = new Bookmarks(ws);
 const parts = {
   ws,
   bookmarks,
-  toggleRibbon: () => setRibbonShown(app.classList.contains("is-ribbon-hidden")),
+  openSettings: (section?: string) => openSettings(sections(), section),
+  toggleBacklinksInDocument: () => ws.toggleBacklinks(),
   editorMenuAtCaret: () => {
     const view = ws.view;
     const head = view.state.selection.main.head;
@@ -39,7 +50,11 @@ const parts = {
   },
 } as AppParts;
 registerAppCommands(parts);
-if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands }); // for poking at from devtools
+// Modals (settings, confirmations) have the keyboard too: hotkeys wait.
+const suspended = commands.suspended;
+commands.suspended = () => suspended() || isSettingsOpen() || isConfirmOpen();
+commands.pluginEnabled = (plugin) => settings.get("core-plugins.json")[plugin as PluginId] ?? true;
+if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands, settings }); // for poking at from devtools
 
 const menus = createMenus({
   ws,
@@ -89,11 +104,13 @@ const rightSidebar = createRightSidebar(
 // them with a check to show or hide each one. These are Obsidian's, in its
 // order and with its glyphs, where Grove has the feature (graph, canvas,
 // templates and bases it doesn't), then "Create new note", which is Grove's.
-const RIBBON: { id: string; label: string; icon: IconName }[] = [
-  { id: "switcher:open", label: "Open quick switcher", icon: "file-search" },
-  { id: "daily-notes", label: "Open today's daily note", icon: "calendar" },
-  { id: "command-palette:open", label: "Open command palette", icon: "terminal" },
-  { id: "random-note", label: "Open random note", icon: "dices" },
+// A core plugin that is off takes its button away too.
+const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[] = [
+  { id: "switcher:open", label: "Open quick switcher", icon: "file-search", plugin: "switcher" },
+  { id: "daily-notes", label: "Open today's daily note", icon: "calendar", plugin: "daily-notes" },
+  { id: "templates:insert-template", label: "Insert template", icon: "files", plugin: "templates" },
+  { id: "command-palette:open", label: "Open command palette", icon: "terminal", plugin: "command-palette" },
+  { id: "random-note", label: "Open random note", icon: "dices", plugin: "random-note" },
   { id: "file-explorer:new-file", label: "Create new note", icon: "square-pen" },
 ];
 const RIBBON_HIDDEN = "grove.ribbon.hidden";
@@ -103,36 +120,42 @@ try {
 } catch {
   // no storage: every action shows
 }
-const ribbonActions = RIBBON.map((a) => {
-  const button = iconButton(icon(a.icon), a.label, () => commands.run(a.id), "side-dock-ribbon-action");
-  button.hidden = ribbonHidden.has(a.id);
-  return button;
-});
+const ribbonActions = RIBBON.map((a) => iconButton(icon(a.icon), a.label, () => commands.run(a.id), "side-dock-ribbon-action"));
+const ribbonPluginOn = (a: (typeof RIBBON)[number]) => !a.plugin || commands.pluginEnabled(a.plugin);
+function renderRibbon() {
+  RIBBON.forEach((a, i) => (ribbonActions[i].hidden = ribbonHidden.has(a.id) || !ribbonPluginOn(a)));
+}
+function setRibbonShown(id: string, shown: boolean) {
+  if (shown) ribbonHidden.delete(id);
+  else ribbonHidden.add(id);
+  renderRibbon();
+  try {
+    localStorage.setItem(RIBBON_HIDDEN, JSON.stringify([...ribbonHidden]));
+  } catch {
+    // not remembered
+  }
+}
 function ribbonMenu(e: MouseEvent) {
   e.preventDefault();
-  const items: MenuItems = RIBBON.map((a, i) => ({
+  const items: MenuItems = RIBBON.filter(ribbonPluginOn).map((a) => ({
     title: a.label,
     icon: a.icon,
     checked: !ribbonHidden.has(a.id),
-    action: () => {
-      if (ribbonHidden.has(a.id)) ribbonHidden.delete(a.id);
-      else ribbonHidden.add(a.id);
-      ribbonActions[i].hidden = ribbonHidden.has(a.id);
-      try {
-        localStorage.setItem(RIBBON_HIDDEN, JSON.stringify([...ribbonHidden]));
-      } catch {
-        // not remembered
-      }
-    },
+    action: () => setRibbonShown(a.id, ribbonHidden.has(a.id)),
   }));
   showMenu(items, { x: e.clientX, y: e.clientY });
 }
+// Settings: Obsidian's gear sits at the right of the vault footer under the
+// left sidebar; while that sidebar is closed, at the foot of the ribbon.
+const settingsButton = () => iconButton(icon("settings"), "Settings", () => commands.run("app:open-settings"), "side-dock-settings-button");
 const ribbon = h(
   "div",
   { class: "workspace-ribbon mod-left", oncontextmenu: ribbonMenu },
   iconButton(icon("panel-left"), "Toggle left sidebar", () => commands.run("app:toggle-left-sidebar"), "sidebar-toggle-button"),
   h("div", { class: "side-dock-actions" }, ...ribbonActions),
+  h("div", { class: "side-dock-settings" }, settingsButton()),
 );
+sidebar.footer.append(h("div", { class: "vault-profile-actions" }, settingsButton()));
 
 // ----- status bar: backlinks, word and character counts for the open note -----
 
@@ -151,7 +174,7 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
 
 function renderCounts() {
   const path = ws.active.path;
-  statusBar.hidden = !path;
+  statusBar.hidden = !path || (backlinks.hidden && words.hidden);
   if (!path) return;
   const { words: w, chars: c } = ws.view.state.field(countsField);
   words.textContent = plural(w, "word");
@@ -186,22 +209,129 @@ const docks = createSidedocks(app, panes);
 rightSidebar.el.append(docks.resizeHandle("right"));
 Object.assign(parts, { panes, docks, left: sidebar, right: rightSidebar });
 
-// The ribbon can be hidden (Obsidian's "Toggle ribbon"), remembered per machine.
-const RIBBON_SHOWN = "grove.ribbon.shown";
-function setRibbonShown(shown: boolean) {
-  app.classList.toggle("is-ribbon-hidden", !shown);
-  try {
-    localStorage.setItem(RIBBON_SHOWN, shown ? "1" : "0");
-  } catch {
-    // not remembered
+// ----- settings -----
+
+const sections = () =>
+  settingsSections({
+    ws,
+    ribbon: { actions: RIBBON.filter(ribbonPluginOn), isShown: (id) => !ribbonHidden.has(id), setShown: setRibbonShown },
+    copyText: (text) => void navigator.clipboard.writeText(text).catch((err) => console.warn("Could not copy", err)),
+  });
+
+const appSettings = () => settings.get("app.json");
+ws.newTabMode = () => (appSettings().defaultViewMode === "preview" ? "reading" : appSettings().livePreview ? "live" : "source");
+ws.editingMode = () => (appSettings().livePreview ? "live" : "source");
+ws.newTabBacklinks = () => commands.pluginEnabled("backlink") && settings.get("backlink.json").backlinkInDocument;
+ws.newNoteFolder = () => {
+  const a = appSettings();
+  if (a.newFileLocation === "current") return ws.active.path ? parentDir(ws.active.path) : "";
+  if (a.newFileLocation === "folder") return a.newFileFolderPath.trim().replace(/^\/+|\/+$/g, "");
+  return "";
+};
+ws.permanentDelete = () => appSettings().trashOption === "none";
+ws.linkStyle = () => ({ format: appSettings().newLinkFormat, wikilinks: !appSettings().useMarkdownLinks });
+ws.confirmDelete = async (path) => {
+  if (!appSettings().promptDelete) return true;
+  const folder = ws.isFolder(path);
+  const name = folder ? path.slice(path.lastIndexOf("/") + 1) : noteName(path);
+  const where = ws.permanentDelete() ? "It will be permanently deleted." : "It will be moved to the vault's .trash folder.";
+  const r = await confirmDialog({
+    title: folder ? "Delete folder" : "Delete file",
+    message: `Are you sure you want to delete “${name}”${folder ? " and everything in it" : ""}? ${where}`,
+    confirm: "Delete",
+    warning: true,
+    dontAskAgain: true,
+  });
+  if (r.dontAskAgain) settings.set("app.json", "promptDelete", false);
+  return r.ok;
+};
+ws.confirmMerge = async (from, into) => {
+  if (!settings.get("note-composer.json").askBeforeMerging) return true;
+  const r = await confirmDialog({
+    title: "Merge file",
+    message: `Merge “${noteName(from)}” into “${noteName(into)}”? Its text is added to the end of “${noteName(into)}”, and “${noteName(from)}” is deleted.`,
+    confirm: "Merge",
+    dontAskAgain: true,
+  });
+  if (r.dontAskAgain) settings.set("note-composer.json", "askBeforeMerging", false);
+  return r.ok;
+};
+ws.onRenamed = (from, to, before) => {
+  const ask = appSettings().alwaysUpdateLinks
+    ? null
+    : async (links: number, notes: number) => {
+        const r = await confirmDialog({
+          title: "Update links?",
+          message: `Update ${links} ${links === 1 ? "link" : "links"} in ${notes} ${notes === 1 ? "file" : "files"} to point at the new name?`,
+          confirm: "Update",
+          cancel: "Don't update",
+          dontAskAgain: true,
+        });
+        if (r.dontAskAgain) settings.set("app.json", "alwaysUpdateLinks", true);
+        return r.ok;
+      };
+  void updateLinks(ws, from, to, before, ws.linkStyle(), ask).catch((err) => console.warn("Could not update links", err));
+};
+
+/** A core plugin turned on or off: its views, ribbon buttons, status bar items and hints follow. */
+function applyPlugins() {
+  const on = (id: PluginId) => commands.pluginEnabled(id);
+  renderRibbon();
+  let anyRight = false;
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["outline", "outline"]] as const) {
+    anyRight = rightSidebar.setEnabled(view, on(plugin));
   }
+  if (!anyRight) docks.setCollapsed("right", true);
+  app.classList.toggle("is-right-sidebar-empty", !anyRight);
+  sidebar.setBookmarksEnabled(on("bookmarks"));
+  backlinks.hidden = !on("backlink");
+  words.hidden = chars.hidden = !on("word-count");
+  panes.setBacklinksAllowed(on("backlink"));
+  renderCounts();
+  commands.changed();
 }
-try {
-  if (localStorage.getItem(RIBBON_SHOWN) === "0") app.classList.add("is-ribbon-hidden");
-} catch {
-  // shown
+
+let shownMetrics = "";
+
+/** Apply one settings file (or all of them, after loading): each change lands in this frame. */
+function applySettings(file: SettingsFile | null) {
+  const all = file === null;
+  if (all || file === "appearance.json") {
+    const a = settings.get("appearance.json");
+    applyAppearance(a);
+    // Text size and fonts change line heights, which CodeMirror re-measures
+    // when asked; a colour change (the scheme, the accent) needs nothing.
+    const metrics = [a.baseFontSize, a.textFontFamily, a.interfaceFontFamily, a.monospaceFontFamily].join("|");
+    if (metrics !== shownMetrics) {
+      shownMetrics = metrics;
+      for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+    }
+  }
+  if (all || file === "app.json") {
+    const a = appSettings();
+    applyPageSettings(a);
+    const changed = setEditorConfig({
+      lineNumbers: a.showLineNumber,
+      foldHeading: a.foldHeading,
+      foldIndent: a.foldIndent,
+      spellcheck: a.spellcheck,
+      autoPairBrackets: a.autoPairBrackets,
+      autoPairMarkdown: a.autoPairMarkdown,
+      smartLists: a.smartIndentList,
+      useTab: a.useTab,
+      tabSize: a.tabSize,
+    });
+    if (changed) ws.reconfigureEditors();
+    const test = excluder(a.userIgnoreFilters);
+    if (ws.isExcluded !== test) ws.isExcluded = test;
+  }
+  if (all || file === "hotkeys.json") {
+    commands.setCustomHotkeys(Object.fromEntries(Object.entries(settings.hotkeys).map(([id, list]) => [id, list.map(fromStored)])));
+  }
+  if (all || file === "core-plugins.json") applyPlugins();
 }
-applyViewPrefs();
+settings.on((file) => applySettings(file));
+applySettings(null);
 
 function rememberLayout() {
   if (!ws.vault.path) return;
@@ -236,6 +366,10 @@ async function addWindowControls() {
       iconButton(icon("x"), "Close", () => void win.close(), "titlebar-button mod-close"),
     ),
   );
+  // The headers under the buttons leave exactly their width free (it varies
+  // with the platform's fonts: 98px in WebKitGTK, where 92 was assumed).
+  const buttons = app.querySelector<HTMLElement>(".titlebar-buttons")!;
+  requestAnimationFrame(() => app.style.setProperty("--titlebar-buttons-width", `${Math.ceil(buttons.getBoundingClientRect().width)}px`));
 }
 
 // Hotkeys go through the command registry. Capture phase, so a command's
@@ -263,10 +397,13 @@ ws.on((change) => {
 });
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();
+  settings.flush();
   void ws.flushAll();
 });
 
 await ws.init();
+// The vault's own settings (its .grove folder) before the first note shows.
+await settings.load();
 bookmarks.load();
 const layout = loadLayout(ws.vault.path);
 docks.setWidth("right", layout.rightWidth);

@@ -2,7 +2,7 @@
 // commands from rebuild/CONTRACT.md; in a plain browser (npm run dev) it loads
 // an in-memory mock vault instead, so the front end runs on its own.
 
-import { isExternalUrl } from "./links";
+import { isExternalUrl } from "./links/external";
 
 export interface VaultInfo {
   path: string;
@@ -91,9 +91,14 @@ export const api = {
   createNote: (path: string, content: string) => call<FileEntry>("create_note", { path, content }),
   createFolder: (path: string) => call<FileEntry>("create_folder", { path }),
   renamePath: (from: string, to: string) => call<void>("rename_path", { from, to }),
-  deletePath: (path: string) => call<void>("delete_path", { path }),
+  /** Move to the vault's .trash, or with `permanent` remove for good. */
+  deletePath: (path: string, permanent = false) => call<void>("delete_path", { path, permanent }),
   search: (query: string, limit: number) => call<SearchHit[]>("search", { query, limit }),
   linkIndex: () => call<LinkIndex>("link_index"),
+  /** A settings file from the vault's .grove folder (null if there is none yet). */
+  readConfig: (name: string) => call<string | null>("read_config", { name }),
+  /** Write a settings file (JSON) into the vault's .grove folder. */
+  writeConfig: (name: string, content: string) => call<void>("write_config", { name, content }),
   openExternal,
   onVaultChanged: async (handler: (change: VaultChange) => void) =>
     (await load()).listen("vault-changed", (p) => handler(p as VaultChange)),

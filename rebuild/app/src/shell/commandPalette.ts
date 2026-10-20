@@ -26,10 +26,9 @@ export function openCommandPalette(registry: CommandRegistry) {
     render({ cmd, indices }, row) {
       row.classList.add("mod-complex");
       row.append(h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(cmd.name, indices))));
-      if (cmd.hotkeys?.length) {
-        row.append(
-          h("div", { class: "suggestion-aux" }, ...cmd.hotkeys.map((hk) => h("kbd", { class: "suggestion-hotkey" }, hotkeyLabel(hk)))),
-        );
+      const hotkeys = registry.hotkeysOf(cmd.id);
+      if (hotkeys.length) {
+        row.append(h("div", { class: "suggestion-aux" }, ...hotkeys.map((hk) => h("kbd", { class: "suggestion-hotkey" }, hotkeyLabel(hk)))));
       }
     },
     choose({ cmd }) {

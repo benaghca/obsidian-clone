@@ -20,6 +20,8 @@ export interface RightSidebar {
   /** Re-check which view should be working (after the sidebar opens or closes). */
   sync(): void;
   onSelect(fn: (view: RightView) => void): void;
+  /** Show or remove a view (its core plugin turned on or off). Returns whether any view is left. */
+  setEnabled(view: RightView, enabled: boolean): boolean;
 }
 
 /** `searchFor` runs a vault search in the left sidebar (a click on a tag). */
@@ -82,5 +84,12 @@ export function createRightSidebar(ws: Workspace, isOpen: () => boolean, searchF
     select,
     sync,
     onSelect: (fn) => void listeners.add(fn),
+    setEnabled(view, enabled) {
+      buttons.get(view)!.hidden = !enabled;
+      const available = RIGHT_VIEWS.filter((v) => !buttons.get(v)!.hidden);
+      if (!enabled && current === view && available.length) select(available[0]);
+      if (!enabled && current === view) views[view].setActive(false);
+      return available.length > 0;
+    },
   };
 }
