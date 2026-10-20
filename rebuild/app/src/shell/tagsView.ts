@@ -1,14 +1,16 @@
 // Tags view for the right sidebar: every #tag in the vault with how often
 // it is used, nested tags ("#project/grove") as a tree, like Obsidian's tag
 // pane. The backend has no tag index, so this asks its search for lines
-// containing "#" and reads the tags from those lines. It runs only while the
-// view is shown, after a vault change settles, never on a keystroke.
+// containing "#" (and for fence lines, to skip tags in code blocks) and reads
+// the tags from those lines. The open note is read from the editor instead,
+// so unsaved text counts. It runs only while the view is shown: the search
+// after a vault change settles, the open note on a debounce after typing.
 
 import { api } from "../api";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
-import { type TagNode, tagsInLine, tagTree } from "./linksTags";
+import { type TagNode, tagsByNote, tagsInText, tagTree } from "./linksTags";
 import type { SideView } from "./outlineView";
 
 const LIMIT = 100_000;
@@ -24,20 +26,34 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
   let stale = true;
   let timer = 0;
   let seq = 0;
+  let docTimer = 0;
   let shown = "";
+  /** Saved tags per note from the last search. */
+  let saved = new Map<string, string[]>();
 
   async function refresh() {
     const mine = ++seq;
-    let hits: { path: string; line: number; text: string }[] = [];
     try {
-      hits = await api.search("#", LIMIT);
+      const [tagLines, ticks, tildes] = await Promise.all([
+        api.search("#", LIMIT),
+        api.search("```", LIMIT),
+        api.search("~~~", LIMIT),
+      ]);
+      if (mine !== seq) return;
+      saved = tagsByNote(tagLines, [...ticks, ...tildes]);
     } catch (err) {
       console.error("Could not read tags", err);
     }
     if (mine !== seq || !active) return;
     stale = false;
+    render();
+  }
+
+  function render() {
+    const open = ws.active.path;
     const tags: string[] = [];
-    for (const hit of hits) if (hit.line > 0 && hit.path.endsWith(".md")) tags.push(...tagsInLine(hit.text));
+    for (const [path, list] of saved) if (path !== open) tags.push(...list);
+    if (open?.endsWith(".md")) tags.push(...tagsInText(ws.view.state.doc.toString()));
     const tree = tagTree(tags);
     const key = JSON.stringify(tree);
     if (key === shown) return;
@@ -85,6 +101,12 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
   }
 
   ws.on((change) => {
+    if (change === "doc" || change === "show") {
+      // The open note's own tags: no backend call, and nothing on the keystroke itself.
+      clearTimeout(docTimer);
+      if (active && !stale) docTimer = window.setTimeout(render, change === "doc" ? DELAY : 0);
+      return;
+    }
     if (change !== "links" && change !== "files") return;
     stale = true;
     schedule();
@@ -96,7 +118,11 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
       if (next === active) return;
       active = next;
       if (active && stale) schedule();
-      else if (!active) clearTimeout(timer);
+      else if (active) render();
+      else {
+        clearTimeout(timer);
+        clearTimeout(docTimer);
+      }
     },
   };
 }
