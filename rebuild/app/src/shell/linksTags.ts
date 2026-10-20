@@ -68,11 +68,76 @@ class Fences {
   }
 }
 
-/** Every tag in a note's text, skipping fenced code blocks. */
-export function tagsInText(text: string): string[] {
+/** A note's YAML frontmatter, as far as tags go. */
+export interface Frontmatter {
+  tags: string[];
+  /** The 1-based line of its closing "---" (0: no frontmatter). */
+  end: number;
+}
+
+const TAG_VALUE = /^[\p{L}\p{N}_/-]+$/u;
+
+/** A frontmatter tag value: quotes and a leading # dropped; null if it isn't a valid tag. */
+function tagValue(raw: string): string | null {
+  const tag = raw.trim().replace(/^(["'])(.*)\1$/, "$2").trim().replace(/^#/, "").replace(/\/+$/, "");
+  return tag && TAG_VALUE.test(tag) && !/^\d+$/.test(tag) ? tag : null;
+}
+
+/**
+ * The `tags:` (or legacy `tag:`) of a note's frontmatter, in any of
+ * Obsidian's forms: a YAML list (`- a`), an inline list (`[a, "#b"]`), or
+ * a plain value (`a, b` or `a b`); with or without the #.
+ */
+export function frontmatterTags(text: string): Frontmatter {
+  const none = { tags: [], end: 0 };
+  if (!text.startsWith("---")) return none;
+  const lines: string[] = [];
+  let at = 0;
+  // Only the frontmatter is split into lines, never a long note's body.
+  for (let n = 0; n < 2000; n++) {
+    const nl = text.indexOf("\n", at);
+    const line = (nl < 0 ? text.slice(at) : text.slice(at, nl)).replace(/\r$/, "");
+    if (n === 0 && line.trim() !== "---") return none;
+    if (n > 0 && (line.trim() === "---" || line.trim() === "...")) return { tags: parseTags(lines), end: n + 1 };
+    if (n > 0) lines.push(line);
+    if (nl < 0) break;
+    at = nl + 1;
+  }
+  return none;
+}
+
+function parseTags(lines: string[]): string[] {
   const out: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(tags?)\s*:(.*)$/i.exec(lines[i]);
+    if (!m) continue;
+    const value = m[2].replace(/\s+#.*$/, "").trim(); // a YAML comment after the value
+    const items: string[] = [];
+    if (value.startsWith("[")) items.push(...value.replace(/^\[|\]$/g, "").split(","));
+    else if (value) items.push(...value.split(/[,\s]+/));
+    else {
+      for (let j = i + 1; j < lines.length; j++) {
+        const item = /^\s*-\s*(.*)$/.exec(lines[j]);
+        if (item) items.push(item[1]);
+        else if (lines[j].trim() && !/^\s/.test(lines[j])) break;
+      }
+    }
+    for (const raw of items) {
+      const tag = tagValue(raw);
+      if (tag) out.push(tag);
+    }
+  }
+  return out;
+}
+
+/** Every tag in a note's text: its frontmatter tags, then #tags in the body, skipping fenced code blocks. */
+export function tagsInText(text: string): string[] {
+  const fm = frontmatterTags(text);
+  const out = [...fm.tags];
   const fences = new Fences();
+  let n = 0;
   for (const line of text.split("\n")) {
+    if (++n <= fm.end) continue;
     if (fences.step(line) || !line.includes("#")) continue;
     out.push(...tagsInLine(line));
   }
@@ -83,9 +148,10 @@ export function tagsInText(text: string): string[] {
  * Tags per note from the search hits for "#", skipping lines in fenced code.
  * `fenceLines` are the hits for "```" and "~~~". Only fence lines can change
  * the fence state, so walking them in order gives each note's code ranges
- * without reading its full text.
+ * without reading its full text. `frontmatter` holds the notes whose
+ * frontmatter has tags: those are added, and "#" lines inside it skipped.
  */
-export function tagsByNote(tagLines: NoteLine[], fenceLines: NoteLine[]): Map<string, string[]> {
+export function tagsByNote(tagLines: NoteLine[], fenceLines: NoteLine[], frontmatter = new Map<string, Frontmatter>()): Map<string, string[]> {
   const fencesByPath = new Map<string, NoteLine[]>();
   for (const hit of fenceLines) {
     if (hit.line <= 0) continue;
@@ -113,8 +179,10 @@ export function tagsByNote(tagLines: NoteLine[], fenceLines: NoteLine[]): Map<st
     if (out.length) ranges.set(path, out);
   }
   const tags = new Map<string, string[]>();
+  for (const [path, fm] of frontmatter) if (fm.tags.length) tags.set(path, [...fm.tags]);
   for (const hit of tagLines) {
     if (hit.line <= 0 || !hit.path.endsWith(".md")) continue;
+    if (hit.line <= (frontmatter.get(hit.path)?.end ?? 0)) continue;
     if (ranges.get(hit.path)?.some(([a, b]) => hit.line >= a && hit.line <= b)) continue;
     const found = tagsInLine(hit.text);
     if (!found.length) continue;

@@ -54,7 +54,12 @@ const ideas = `Loose ideas, most of them for #ideas/later.
 - Faster search ranking
 `;
 
-const reading = `Books and papers to read. #reading
+const reading = `---
+tags:
+  - books
+  - "#queue/later"
+---
+Books and papers to read. #reading
 
 - [ ] *Designing Data-Intensive Applications*
 - [ ] *The Pragmatic Programmer*

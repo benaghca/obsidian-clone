@@ -974,6 +974,17 @@ export class Workspace {
     return entry.path;
   }
 
+  /** Whether a note is loaded in the editor (its text may hold unsaved edits). */
+  isLoaded(path: string) {
+    return this.states.has(path);
+  }
+
+  /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
+  private touch(path: string) {
+    const entry = this.files.find((f) => f.path === path);
+    if (entry) entry.mtime_ms = Date.now();
+  }
+
   /** The text of a note: from the editor if it is loaded (unsaved edits included), else from disk. */
   async text(path: string): Promise<string> {
     return this.states.get(path)?.doc.toString() ?? (await api.readNote(path));
@@ -1067,6 +1078,7 @@ export class Workspace {
       console.error(`Could not save ${path}`, err);
       return;
     }
+    this.touch(path);
     clearTimeout(this.linkTimer);
     this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
   }
@@ -1091,6 +1103,7 @@ export class Workspace {
 
   private async onVaultChanged(kind: string, paths: string[]) {
     if (kind !== "modify") await this.refreshFiles();
+    else for (const path of paths) this.touch(path);
     for (const path of paths) {
       const state = this.states.get(path);
       if (!state || this.saveTimers.has(path)) continue;
