@@ -346,33 +346,31 @@ body {
   padding: 0 4px 0 8px;
   -webkit-app-region: drag;
 }
+/* Tabs share the strip like Obsidian's: each is a full tab width while
+   there is room, and they all shrink evenly when there is not, instead of
+   shrinking to fit their titles. The + button follows the last tab. */
 .workspace-tab-header-container-inner {
   display: flex;
   align-items: flex-end;
+  flex: 0 1 auto;
   min-width: 0;
   height: 100%;
   padding-top: 7px;
+  overflow: hidden;
 }
 .mod-root .workspace-tab-header {
   height: 28px;
-  min-width: 60px;
-  max-width: 200px;
-  flex: 0 1 200px;
+  width: var(--tab-width);
+  min-width: var(--tab-min-width);
+  flex: 0 1 auto;
   position: relative;
   padding: 0 1px;
   margin-bottom: -1px;
   -webkit-app-region: no-drag;
 }
-/* opening and closing tabs grow and shrink; the strip is a small fixed-height
-   box, so this layout work stays inside it */
-.mod-root .workspace-tab-header.mod-entering {
-  overflow: hidden;
-  animation: grove-tab-in var(--anim-duration-moderate) var(--anim-ease-out);
-}
+/* opening and closing tabs grow and shrink (Web Animations in pane.ts) */
 .mod-root .workspace-tab-header.is-closing {
-  overflow: hidden;
   pointer-events: none;
-  animation: grove-tab-out var(--anim-duration-moderate) var(--anim-ease-in) forwards;
 }
 .workspace-tab-header-inner {
   display: flex;
@@ -436,10 +434,11 @@ body {
   background: var(--background-modifier-hover);
   color: var(--icon-color-hover);
 }
+/* centred on the tabs' 28px row, so they line up with the tab titles */
 .workspace-tab-header-new-tab,
 .workspace-tab-header-tab-list {
-  align-self: center;
-  margin-top: 4px;
+  align-self: flex-end;
+  margin-bottom: 2px;
   -webkit-app-region: no-drag;
 }
 .workspace-tab-header-new-tab {

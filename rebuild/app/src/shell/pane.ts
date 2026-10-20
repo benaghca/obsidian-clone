@@ -3,7 +3,7 @@
 // title above the editor in a centered readable column.
 
 import { isTauri } from "../api";
-import { animateOut } from "../motion";
+import { duration, easing } from "../motion";
 import { noteName, parentDir, type Tab, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
@@ -87,9 +87,7 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
     for (const [id, { el }] of tabHeaders) {
       if (open.has(id)) continue;
       tabHeaders.delete(id);
-      // Pin the current width so the shrink starts from what is on screen.
-      el.style.maxWidth = `${el.getBoundingClientRect().width}px`;
-      void animateOut(el);
+      closeTabHeader(el);
     }
     let prev: Element | null = null;
     const added: HTMLElement[] = [];
@@ -110,20 +108,50 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
       if (at !== el) tabList.insertBefore(el, at);
       prev = el;
     }
-    // New tabs grow from nothing to their content width: the strip shares its
-    // width out by content, so that is what lands the last frame exactly on
-    // the settled layout.
-    for (const el of added) el.style.flex = "none";
-    const widths = added.map((el) => el.getBoundingClientRect().width);
-    added.forEach((el, i) => {
-      el.style.flex = "";
-      el.style.setProperty("--tab-width", `${widths[i]}px`);
-    });
-    for (const el of added) {
-      el.classList.add("mod-entering");
-      el.addEventListener("animationend", () => el.classList.remove("mod-entering"), { once: true });
-    }
+    for (const el of added) openTabHeader(el);
     tabsRendered = true;
+  }
+
+  // A new tab grows from nothing to the width it has in the settled strip,
+  // which is measured first, so the last frame lands exactly on the layout
+  // and the neighbours give up their room smoothly as it grows. Only this
+  // tab's max-width animates; the strip is a small fixed-height box.
+  function openTabHeader(el: HTMLElement) {
+    const ms = duration("moderate");
+    if (ms <= 0) return;
+    const width = el.getBoundingClientRect().width;
+    el.style.overflow = "hidden";
+    el.animate(
+      [
+        { maxWidth: "0px", minWidth: "0px", opacity: 0 },
+        { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
+      ],
+      { duration: ms, easing: easing("out") },
+    ).finished.then(
+      () => (el.style.overflow = ""),
+      () => {},
+    );
+  }
+
+  // A closed tab shrinks from its current width to nothing, then goes. Like
+  // a closing folder it eases in and out: a plain ease-in would leave the
+  // last third of the width to vanish in a single frame.
+  function closeTabHeader(el: HTMLElement) {
+    el.classList.add("is-closing");
+    const ms = duration("moderate");
+    if (ms <= 0) return el.remove();
+    const width = el.getBoundingClientRect().width;
+    el.style.overflow = "hidden";
+    el.animate(
+      [
+        { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
+        { maxWidth: "0px", minWidth: "0px", opacity: 0 },
+      ],
+      { duration: ms, easing: easing("in-out"), fill: "forwards" },
+    ).finished.then(
+      () => el.remove(),
+      () => el.remove(),
+    );
   }
 
   // ----- sub-header -----
