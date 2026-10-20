@@ -1,0 +1,68 @@
+/* Obsidian default light theme, per rebuild/OBSIDIAN_FEEL_SPEC.md. */
+
+:root {
+  --accent-h: 262;
+  --accent-s: 83%;
+  --accent-l: 58%;
+  --interactive-accent: #7c3aed;
+  --interactive-accent-hover: #6d28d9;
+  --text-accent: #7c3aed;
+  --text-accent-hover: #6d28d9;
+
+  --background-primary: #ffffff;
+  --background-primary-alt: #fafafa;
+  --background-secondary: #f6f6f6;
+  --background-secondary-alt: #ebebeb;
+  --background-modifier-hover: rgba(0, 0, 0, 0.067);
+  --background-modifier-active-hover: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
+  --background-modifier-border: #e0e0e0;
+  --background-modifier-border-hover: #d4d4d4;
+  --background-modifier-cover: rgba(220, 220, 220, 0.4);
+
+  --text-normal: #222222;
+  --text-muted: #5c5c5c;
+  --text-faint: #ababab;
+  --text-on-accent: #ffffff;
+  --text-error: #e93147;
+  --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
+  --text-highlight-bg: rgba(255, 208, 0, 0.4);
+
+  --icon-color: #6e6e6e;
+  --icon-color-hover: #222222;
+  --icon-opacity: 0.85;
+
+  --tag-color: var(--text-accent);
+  --tag-background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.1);
+  --code-background: #f2f2f2;
+  --blockquote-border: var(--interactive-accent);
+
+  /* Noto Sans leads: on Linux, -apple-system/BlinkMacSystemFont resolve to the
+     fontconfig default (often Liberation Sans), while the spec observed Noto
+     Sans there. macOS and Windows rarely have it and fall through. */
+  --font-interface: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial,
+    sans-serif;
+  --font-text: var(--font-interface);
+  --font-monospace: ui-monospace, SFMono-Regular, "Cascadia Mono", "Noto Sans Mono", "DejaVu Sans Mono", Menlo,
+    Consolas, monospace;
+  --font-text-size: 16px;
+  --font-ui-small: 13px;
+  --font-ui-smaller: 12px;
+  --line-height: 1.5;
+
+  --h1-size: 1.75em;
+  --h2-size: 1.375em;
+  --h3-size: 1.25em;
+  --h4-size: 1.125em;
+  --h5-size: 1em;
+  --h6-size: 1em;
+
+  --file-line-width: 700px;
+  --ribbon-width: 29px;
+  --sidebar-width: 200px;
+  --header-height: 36px;
+  --view-header-height: 32px;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.03), 0 3px 8px rgba(0, 0, 0, 0.07);
+  --shadow-l: 0 2px 8px rgba(0, 0, 0, 0.05), 0 12px 40px rgba(0, 0, 0, 0.16);
+}
