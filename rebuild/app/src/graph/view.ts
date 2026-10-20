@@ -85,6 +85,16 @@ interface Colors {
   font: string;
 }
 
+/** Dev builds only: each frame's work (ms), for the measuring harness. */
+const devStats = import.meta.env.DEV
+  ? (ms: number, nodes: number, running: boolean) => {
+      const w = window as unknown as { __graphWork?: number[]; __graphNodes?: number; __graphRunning?: boolean };
+      (w.__graphWork ??= []).push(ms);
+      w.__graphNodes = nodes;
+      w.__graphRunning = running;
+    }
+  : null;
+
 /** Where the global graph's nodes were, per vault, so reopening it starts from its settled layout. */
 const layouts = new Map<string, Map<string, [number, number]>>();
 
@@ -335,6 +345,7 @@ export function createGraphView(host: GraphHost): GraphView {
   }
 
   function step(now: number) {
+    const started = performance.now();
     frame = 0;
     const dt = lastFrame ? Math.min(64, now - lastFrame) : 16;
     lastFrame = now;
@@ -366,10 +377,12 @@ export function createGraphView(host: GraphHost): GraphView {
     }
     if (hoverFade === 0 && hovered < 0) shownHover = -1;
     if (follow) followFocus();
-    if (pointer && !drag && !pan) updateHover(pointer.x, pointer.y);
+    // Nodes may have moved under a still pointer.
+    if (pointer && !drag && !pan && more) updateHover(pointer.x, pointer.y);
     draw();
     if (more) invalidate();
     else lastFrame = 0;
+    devStats?.(performance.now() - started, model.nodes.length, more);
   }
 
   /**
@@ -668,8 +681,8 @@ export function createGraphView(host: GraphHost): GraphView {
       invalidate();
       return;
     }
-    // Hover is worked out in the next frame (at most once a frame).
-    invalidate();
+    // Hover: one cheap pass over the nodes; a frame is drawn only if it changed.
+    updateHover(p.x, p.y);
   });
 
   const endPointer = (e: PointerEvent, cancelled: boolean) => {
@@ -789,7 +802,17 @@ export function createGraphView(host: GraphHost): GraphView {
   themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
   themeWatch.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
 
+  let excluded = ws.isExcluded;
   const offSettings = settings.on((file) => {
+    // Settings → Files and links → Excluded files: those notes leave the graph
+    // (checked once the app has applied the change, whichever listener runs first).
+    if (file === "app.json" || file === null) {
+      queueMicrotask(() => {
+        if (ws.isExcluded === excluded || disposed) return;
+        excluded = ws.isExcluded;
+        scheduleRebuild(0);
+      });
+    }
     if (file !== "graph.json" && file !== null) return;
     const before = cfg;
     cfg = graphSettings(local);
@@ -833,6 +856,23 @@ export function createGraphView(host: GraphHost): GraphView {
     }
   };
   ws.on(onChange);
+  // For the measuring harness (dev builds): a node's and an empty spot's client coordinates.
+  const probe = () => {
+    const rect = canvas.getBoundingClientRect();
+    const at = (i: number) => [rect.left + width / 2 + offX + sim.x[i] * scale, rect.top + height / 2 + offY + sim.y[i] * scale];
+    // The most linked node on screen (clear of the settings panel).
+    let best = -1;
+    for (let i = 0; i < model.nodes.length; i++) {
+      const [cx, cy] = at(i);
+      if (cx < rect.left + 60 || cx > rect.right - 300 || cy < rect.top + 60 || cy > rect.bottom - 60) continue;
+      if (best < 0 || model.nodes[i].weight > model.nodes[best].weight) best = i;
+    }
+    let empty: number[] | null = null;
+    for (let gy = 40; gy < height - 40 && !empty; gy += 20) {
+      for (let gx = 40; gx < width - 300 && !empty; gx += 20) if (nodeAt(gx, gy) < 0) empty = [rect.left + gx, rect.top + gy];
+    }
+    return { node: best >= 0 ? at(best) : null, empty, scale, nodes: model.nodes.length, links: model.links.length };
+  };
   // The current note: the local graph's middle, or the note last shown in the global graph's place.
   focusId = local ? (host.file?.() ?? null) : (ws.active.path ?? ws.recent[0] ?? null);
 
@@ -849,6 +889,7 @@ export function createGraphView(host: GraphHost): GraphView {
         resize.disconnect();
         return;
       }
+      if (import.meta.env.DEV) (window as unknown as { __graphProbe?: () => unknown }).__graphProbe = probe;
       resize.observe(el);
       colors = null;
       background = "";
