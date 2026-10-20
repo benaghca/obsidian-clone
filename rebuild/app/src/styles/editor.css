@@ -1,0 +1,249 @@
+/* Live Preview styling for the classes added in src/editor/livePreview.ts. */
+
+.cm-editor {
+  font-family: var(--font-text);
+}
+.cm-content {
+  font-family: var(--font-text);
+}
+
+/* syntax markers that stay visible while the selection touches them */
+.cm-formatting {
+  color: var(--text-faint);
+  font-weight: normal;
+  font-style: normal;
+  text-decoration: none;
+}
+
+/* headings */
+.cm-line.cm-h {
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.015em;
+}
+.cm-line.cm-h1 {
+  font-size: var(--h1-size);
+  padding-top: 0.3em;
+}
+.cm-line.cm-h2 {
+  font-size: var(--h2-size);
+  padding-top: 0.3em;
+}
+.cm-line.cm-h3 {
+  font-size: var(--h3-size);
+  font-weight: 600;
+}
+.cm-line.cm-h4 {
+  font-size: var(--h4-size);
+  font-weight: 600;
+}
+.cm-line.cm-h5,
+.cm-line.cm-h6 {
+  font-size: var(--h5-size);
+  font-weight: 600;
+}
+.cm-formatting-header {
+  font-weight: 400;
+  margin-right: 0.05em;
+}
+
+/* inline formatting */
+.cm-strong {
+  font-weight: 700;
+}
+.cm-em {
+  font-style: italic;
+}
+.cm-strikethrough {
+  text-decoration: line-through;
+}
+.cm-strikethrough .cm-formatting {
+  text-decoration: none;
+}
+.cm-inline-code {
+  font-family: var(--font-monospace);
+  font-size: 0.875em;
+  background: var(--code-background);
+  padding: 0.1em 0.25em;
+  border-radius: var(--radius-s);
+}
+.cm-inline-code .cm-formatting {
+  font-family: var(--font-monospace);
+}
+
+/* links */
+.cm-wikilink,
+.cm-link {
+  color: var(--text-accent);
+  text-decoration: underline;
+  text-decoration-color: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
+  text-underline-offset: 2px;
+}
+.cm-rendered-link {
+  cursor: pointer;
+}
+.cm-rendered-link:hover {
+  color: var(--text-accent-hover);
+  text-decoration-color: currentColor;
+}
+.cm-url.cm-formatting {
+  text-decoration: none;
+}
+.cm-external-link {
+  display: inline-block;
+  width: 0.8em;
+  height: 0.8em;
+  margin-left: 2px;
+  vertical-align: -0.05em;
+  background: var(--text-faint);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14 21 3'/%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M15 3h6v6'/%3E%3Cpath d='M10 14 21 3'/%3E%3Cpath d='M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+}
+
+/* tags */
+.cm-tag {
+  color: var(--tag-color);
+  background: var(--tag-background);
+  border-radius: 2em;
+  padding: 0.1em 0.5em;
+  font-size: 0.875em;
+}
+
+/* lists */
+.cm-list-bullet {
+  display: inline-block;
+  position: relative;
+  width: 0.5em;
+  margin-right: 0;
+  vertical-align: middle;
+}
+.cm-list-bullet::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2.5px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.cm-list-number {
+  color: var(--text-muted);
+}
+.cm-task-checkbox {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 0.95em;
+  height: 0.95em;
+  margin: 0 0.2em 0 0.05em;
+  vertical-align: -0.12em;
+  border: 1px solid var(--text-faint);
+  border-radius: 4px;
+  background: var(--background-primary);
+  cursor: pointer;
+  position: relative;
+}
+.cm-task-checkbox:hover {
+  border-color: var(--text-muted);
+}
+.cm-task-checkbox:checked {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+.cm-task-checkbox:checked::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--text-on-accent);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / 80% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E")
+    center / 80% no-repeat;
+}
+.cm-task-done {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+/* blockquotes */
+.cm-line.cm-blockquote {
+  border-left: 2px solid var(--blockquote-border);
+  padding-left: 1em;
+}
+
+/* horizontal rule */
+.cm-hr {
+  display: inline-block;
+  width: 100%;
+  vertical-align: middle;
+  border-top: 1px solid var(--background-modifier-border-hover);
+}
+
+/* fenced code */
+.cm-line.cm-codeblock {
+  font-family: var(--font-monospace);
+  font-size: 0.875em;
+  background: var(--code-background);
+  padding: 0 1em;
+}
+.cm-line.cm-codeblock-begin {
+  border-radius: var(--radius-s) var(--radius-s) 0 0;
+  padding-top: 0.4em;
+}
+.cm-line.cm-codeblock-end {
+  border-radius: 0 0 var(--radius-s) var(--radius-s);
+  padding-bottom: 0.4em;
+}
+.cm-formatting-code-fence {
+  color: var(--text-faint);
+}
+
+/* [[ link suggester */
+.cm-editor .cm-tooltip.cm-link-suggest {
+  width: 300px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  box-shadow: var(--shadow-s);
+  font-family: var(--font-interface);
+  overflow: hidden;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul {
+  max-height: 300px;
+  padding: 4px;
+  font-family: var(--font-interface);
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li {
+  padding: 4px 10px;
+  border-radius: var(--radius-s);
+  font-size: 14px;
+  color: var(--text-normal);
+  display: flex;
+  flex-direction: column;
+  line-height: 1.4;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li[aria-selected] {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.cm-editor .cm-tooltip.cm-link-suggest .cm-completionMatchedText {
+  text-decoration: none;
+  font-weight: 700;
+}
+.cm-editor .cm-tooltip.cm-link-suggest .cm-completionDetail {
+  margin-left: 0;
+  font-style: normal;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.cm-editor .cm-tooltip.cm-link-suggest::after {
+  content: "Type # to link heading, ^ to link blocks, | to change display text";
+  display: block;
+  padding: 6px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
