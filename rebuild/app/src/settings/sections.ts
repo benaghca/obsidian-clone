@@ -88,11 +88,13 @@ function general(ctx: SettingsContext): HTMLElement {
 function appearance(): HTMLElement {
   const fonts = h("datalist");
   fonts.id = "grove-font-list";
-  for (const name of installedFonts()) {
-    const option = h("option");
-    option.value = name;
-    fonts.append(option);
-  }
+  installedFonts((names) => {
+    for (const name of names) {
+      const option = h("option");
+      option.value = name;
+      fonts.append(option);
+    }
+  });
   const fontRow = (key: "interfaceFontFamily" | "textFontFamily" | "monospaceFontFamily", name: string, desc: string) => {
     const input = textInput({
       value: get("appearance.json", key),

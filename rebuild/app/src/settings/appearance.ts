@@ -32,8 +32,25 @@ function applyTheme() {
   const root = document.documentElement;
   const theme = resolvedTheme();
   if (root.classList.contains(`theme-${theme}`)) return;
+  holdTransitions();
   root.classList.toggle("theme-dark", theme === "dark");
   root.classList.toggle("theme-light", theme === "light");
+}
+
+// Hover colours fade (100ms transitions). A scheme or accent change would set
+// all of them fading at once, a style recalc per frame for a tenth of a
+// second; while the change lands they are off, so it is one recalc.
+let holding = 0;
+function holdTransitions() {
+  const root = document.documentElement;
+  if (holding) return;
+  root.classList.add("is-recolouring");
+  holding = requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      holding = 0;
+      root.classList.remove("is-recolouring");
+    }),
+  );
 }
 // "Adapt to system" follows the system's scheme while the app runs.
 dark?.addEventListener("change", () => {
@@ -64,7 +81,9 @@ export function applyAppearance(a: Appearance) {
     "--font-text-size": `${a.baseFontSize}px`,
   };
   for (const [name, value] of Object.entries(vars)) {
-    if (root.style.getPropertyValue(name) !== value) root.style.setProperty(name, value);
+    if (root.style.getPropertyValue(name) === value) continue;
+    if (name.startsWith("--accent")) holdTransitions();
+    root.style.setProperty(name, value);
   }
   themeSetting = a.theme;
   applyTheme();

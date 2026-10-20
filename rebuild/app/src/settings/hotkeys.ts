@@ -147,8 +147,8 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
     empty.hidden = rows.some((r) => !r.el.hidden);
   }
 
-  function renderAll() {
-    for (const r of rows) renderRow(r);
+  function renderAll(only = rows) {
+    for (const r of only) renderRow(r);
     apply();
   }
 
@@ -219,6 +219,14 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
   query.addEventListener("input", apply);
 
   const empty = h("div", { class: "setting-search-empty" }, "No commands match.");
+  // The first screenful of rows is drawn at once, the rest on the next frame,
+  // so the page opens within a frame.
+  const FIRST = 24;
+  const list = h("div", { class: "setting-items" }, ...rows.slice(0, FIRST).map((r) => r.el), empty);
+  requestAnimationFrame(() => {
+    for (const r of rows.slice(FIRST)) renderRow(r);
+    empty.before(...rows.slice(FIRST).map((r) => r.el));
+  });
   const page = h(
     "div",
     { class: "setting-group mod-list mod-hotkeys" },
@@ -228,7 +236,7 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
       h("div", { class: "search-input-container mod-hotkey" }, icon("search", 16), query, byKey),
       filters,
     ),
-    h("div", { class: "setting-items" }, ...rows.map((r) => r.el), empty),
+    list,
   );
 
   // Hotkeys changed (here or by a command): redraw the chips, keep the filter.
@@ -246,6 +254,6 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
       apply();
     },
   };
-  renderAll();
+  renderAll(rows.slice(0, FIRST));
   return page;
 }

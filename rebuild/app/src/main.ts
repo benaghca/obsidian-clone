@@ -291,13 +291,21 @@ function applyPlugins() {
   commands.changed();
 }
 
+let shownMetrics = "";
+
 /** Apply one settings file (or all of them, after loading): each change lands in this frame. */
 function applySettings(file: SettingsFile | null) {
   const all = file === null;
   if (all || file === "appearance.json") {
-    applyAppearance(settings.get("appearance.json"));
-    // Text size changes line heights, which CodeMirror re-measures when asked.
-    for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+    const a = settings.get("appearance.json");
+    applyAppearance(a);
+    // Text size and fonts change line heights, which CodeMirror re-measures
+    // when asked; a colour change (the scheme, the accent) needs nothing.
+    const metrics = [a.baseFontSize, a.textFontFamily, a.interfaceFontFamily, a.monospaceFontFamily].join("|");
+    if (metrics !== shownMetrics) {
+      shownMetrics = metrics;
+      for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+    }
   }
   if (all || file === "app.json") {
     const a = appSettings();

@@ -214,6 +214,14 @@
   --shadow-l: 0 1.8px 7.3px rgba(0, 0, 0, 0.071), 0 6.3px 24.7px rgba(0, 0, 0, 0.112), 0 30px 90px rgba(0, 0, 0, 0.2);
 }
 
+/* While the scheme or accent changes (settings/appearance.ts), nothing fades. */
+.is-recolouring,
+.is-recolouring *,
+.is-recolouring *::before,
+.is-recolouring *::after {
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   :root {
     --anim-duration-fast: 0ms;
