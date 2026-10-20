@@ -1,7 +1,12 @@
 // Lezer markdown extensions for the two Obsidian-only inline elements:
 // [[wikilinks]] (with optional #heading and |display text) and #tags.
 
+import { Tag as HighlightTag, tags as t } from "@lezer/highlight";
 import type { InlineContext, MarkdownConfig } from "@lezer/markdown";
+
+/** Highlight tags for Source mode (Live Preview styles these nodes itself). */
+export const wikiTarget = HighlightTag.define(t.link);
+export const hashtag = HighlightTag.define();
 
 const BRACKET_OPEN = 91; // [
 const BRACKET_CLOSE = 93; // ]
@@ -10,7 +15,12 @@ const HASH = 35; // #
 const NEWLINE = 10;
 
 export const WikiLink: MarkdownConfig = {
-  defineNodes: ["WikiLink", "WikiLinkMark", "WikiLinkTarget", "WikiLinkAlias"],
+  defineNodes: [
+    "WikiLink",
+    { name: "WikiLinkMark", style: t.processingInstruction },
+    { name: "WikiLinkTarget", style: wikiTarget },
+    { name: "WikiLinkAlias", style: wikiTarget },
+  ],
   parseInline: [
     {
       name: "WikiLink",
@@ -46,7 +56,7 @@ const isTagChar = (ch: number) =>
 const isSpace = (ch: number) => ch === 32 || ch === 9 || ch === NEWLINE;
 
 export const Tag: MarkdownConfig = {
-  defineNodes: ["Tag", "TagMark"],
+  defineNodes: [{ name: "Tag", style: hashtag }, "TagMark"],
   parseInline: [
     {
       name: "Tag",

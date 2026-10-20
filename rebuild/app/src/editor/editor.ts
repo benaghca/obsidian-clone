@@ -11,6 +11,7 @@ import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { countsField } from "./counts";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
+import { sourceMode } from "./sourceMode";
 import { Tag, WikiLink } from "./syntax";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
@@ -36,7 +37,7 @@ export const viewModeCompartment = new Compartment();
 
 export const VIEW_MODES: Record<ViewMode, Extension> = {
   live: livePreview,
-  source: EditorView.editorAttributes.of({ class: "is-source-mode" }),
+  source: [EditorView.editorAttributes.of({ class: "is-source-mode" }), sourceMode],
   reading: [
     livePreview,
     readingMode.of(true),
