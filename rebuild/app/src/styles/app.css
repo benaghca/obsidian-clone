@@ -636,11 +636,13 @@ body.is-grabbing * {
   cursor: grabbing !important;
 }
 
-/* The active pane: with more than one, the others' active tab and title
-   read slightly muted, as in Obsidian. Nothing else marks it. */
+/* The active pane: with more than one, the others' active tab and view
+   header chrome read faint (round 5 took this from Grok's pass: a clearer
+   cue than muted text). The note text itself never dims. */
 .mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .workspace-tab-header.is-active .workspace-tab-header-inner,
-.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header-title {
-  color: var(--text-muted);
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header-title,
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header .clickable-icon:not(:hover) {
+  color: var(--text-faint);
 }
 
 /* Dragging a tab: where it will land, and the tab under the pointer. The
