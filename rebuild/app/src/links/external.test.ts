@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { isExternalUrl, isRemoteUrl } from "./links";
+import { isExternalUrl, isRemoteUrl } from "./external";
 
 test("only http, https and mailto links open externally", () => {
   for (const url of ["https://obsidian.md", "http://example.com/a?b", "HTTPS://EXAMPLE.COM", "mailto:me@example.com", " https://x.y "]) {

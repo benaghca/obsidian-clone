@@ -2,7 +2,7 @@
 // commands from rebuild/CONTRACT.md; in a plain browser (npm run dev) it loads
 // an in-memory mock vault instead, so the front end runs on its own.
 
-import { isExternalUrl } from "./links";
+import { isExternalUrl } from "./links/external";
 
 export interface VaultInfo {
   path: string;

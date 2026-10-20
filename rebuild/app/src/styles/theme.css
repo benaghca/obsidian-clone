@@ -1,16 +1,33 @@
-/* Obsidian default light theme, per rebuild/OBSIDIAN_FEEL_SPEC.md, with the
-   accent moved from Obsidian's violet to a muted forest teal (the owner's
-   colour). Only the accent tokens differ; everything else is Obsidian's. */
+/* Obsidian's default theme, light and dark, with the accent moved from
+   Obsidian's violet to a muted forest teal (the owner's colour). The
+   colours were measured on Obsidian 1.14.4's own elements (light and dark),
+   not copied from its CSS; everything but the accent is Obsidian's.
+
+   The theme is a class on <html>: .theme-light (the defaults below) or
+   .theme-dark. public/boot.js puts the saved one there before the first
+   paint; switching only flips the class, so it costs one style recalc.
+
+   The accent is a hue, saturation and lightness (Settings → Appearance →
+   Accent color sets them). The lightness used in each theme comes from the
+   app (settings/appearance.ts) as numbers, so the dark theme can lift a
+   dark accent for contrast without CSS math the webview might lack. */
 
 :root {
   --accent-h: 172;
   --accent-s: 55%;
   --accent-l: 34%;
-  --interactive-accent: #27867a;
-  --interactive-accent-hover: #206f64;
-  --text-accent: #27867a;
-  --text-accent-hover: #206f64;
+  --accent-l-hover: 28%;
+  --accent-l-dark: 39%;
+  --accent-l-dark-text: 50%;
+  --accent-l-dark-hover: 58%;
+  --accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l));
 
+  --interactive-accent: var(--accent);
+  --interactive-accent-hover: hsl(var(--accent-h), var(--accent-s), var(--accent-l-hover));
+  --text-accent: var(--accent);
+  --text-accent-hover: var(--interactive-accent-hover);
+
+  color-scheme: light;
   --background-primary: #ffffff;
   --background-primary-alt: #fafafa;
   --background-secondary: #f6f6f6;
@@ -19,7 +36,10 @@
   --background-modifier-active-hover: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.15);
   --background-modifier-border: #e0e0e0;
   --background-modifier-border-hover: #d4d4d4;
+  --background-modifier-border-focus: #bdbdbd;
   --background-modifier-cover: rgba(220, 220, 220, 0.4);
+  --background-modifier-form-field: #ffffff;
+  --background-modifier-error-tint: rgba(233, 49, 71, 0.1);
 
   --text-normal: #222222;
   --text-muted: #5c5c5c;
@@ -39,14 +59,30 @@
   --code-background: #f2f2f2;
   --blockquote-border: var(--interactive-accent);
 
+  /* Settings: the cards rows sit in, form controls, toggles. */
+  --setting-items-background: #fafafa;
+  --modal-border-color: #dadada;
+  --input-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.12), 0 1px 2px 0 rgba(0, 0, 0, 0.065);
+  --input-shadow-hover: inset 0 0 0 1px rgba(0, 0, 0, 0.17), 0 1px 2px 0 rgba(0, 0, 0, 0.1);
+  --interactive-normal: #ffffff;
+  --interactive-hover: #fafafa;
+  --toggle-off: #dadada;
+  --toggle-thumb: #ffffff;
+  --slider-track: #dadada;
+  --scrollbar-thumb: rgba(0, 0, 0, 0.1);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
+
   /* Noto Sans leads: on Linux, -apple-system/BlinkMacSystemFont resolve to the
      fontconfig default (often Liberation Sans), while the spec observed Noto
      Sans there. macOS and Windows rarely have it and fall through. */
-  --font-interface: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-text: var(--font-interface);
-  --font-monospace: ui-monospace, SFMono-Regular, "Cascadia Mono", "Noto Sans Mono", "DejaVu Sans Mono", Menlo,
+  --font-interface-default: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  --font-monospace-default: ui-monospace, SFMono-Regular, "Cascadia Mono", "Noto Sans Mono", "DejaVu Sans Mono", Menlo,
     Consolas, monospace;
+  /* Settings → Appearance → fonts put the chosen family in front of these. */
+  --font-interface: var(--font-interface-default);
+  --font-text: var(--font-interface);
+  --font-monospace: var(--font-monospace-default);
   --font-text-size: 16px;
   --font-ui-medium: 15px;
   --font-ui-small: 13px;
@@ -118,6 +154,62 @@
   --anim-offset: 4px;
   --anim-scale-from: 0.98;
   --anim-note-opacity-from: 0.6;
+}
+
+/* Obsidian's default dark theme, as measured on its elements. */
+.theme-dark {
+  color-scheme: dark;
+  --interactive-accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l-dark));
+  --interactive-accent-hover: hsl(var(--accent-h), var(--accent-s), var(--accent-l-dark-text));
+  --text-accent: hsl(var(--accent-h), var(--accent-s), var(--accent-l-dark-text));
+  --text-accent-hover: hsl(var(--accent-h), var(--accent-s), var(--accent-l-dark-hover));
+
+  --background-primary: #1c1c1c;
+  --background-primary-alt: #232323;
+  --background-secondary: #282828;
+  --background-secondary-alt: #333333;
+  --background-modifier-hover: rgba(255, 255, 255, 0.067);
+  --background-modifier-active-hover: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.1);
+  --background-modifier-border: #333333;
+  --background-modifier-border-hover: #3f3f3f;
+  --background-modifier-border-focus: #555555;
+  --background-modifier-cover: rgba(10, 10, 10, 0.4);
+  --background-modifier-form-field: #2e2e2e;
+  --background-modifier-error-tint: rgba(251, 70, 76, 0.12);
+
+  --text-normal: #dadada;
+  --text-muted: #b3b3b3;
+  --text-faint: #666666;
+  --text-on-accent: #ffffff;
+  --text-error: #fb464c;
+  --background-modifier-error: #fb464c;
+  --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.33);
+  --text-highlight-bg: rgba(255, 208, 0, 0.4);
+
+  --icon-color: #b3b3b3;
+  --icon-color-hover: #dadada;
+
+  --tag-background: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.1);
+  --code-background: #232323;
+
+  --setting-items-background: #232323;
+  --modal-border-color: #3f3f3f;
+  --input-shadow: inset 0 0.5px 0.5px 0.5px rgba(255, 255, 255, 0.09), 0 2px 4px 0 rgba(0, 0, 0, 0.15),
+    0 1px 1.5px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  --input-shadow-hover: inset 0 0.5px 1px 0.5px rgba(255, 255, 255, 0.16), 0 2px 3px 0 rgba(0, 0, 0, 0.3),
+    0 1px 1.5px 0 rgba(0, 0, 0, 0.2), 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --interactive-normal: #333333;
+  --interactive-hover: #3f3f3f;
+  --toggle-off: #3f3f3f;
+  --slider-track: #3f3f3f;
+  --scrollbar-thumb: rgba(255, 255, 255, 0.1);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+
+  --menu-background: var(--background-secondary);
+  --menu-border-color: #3f3f3f;
+  --menu-shadow: 0 1px 2px rgba(0, 0, 0, 0.121), 0 3.4px 6.7px rgba(0, 0, 0, 0.179), 0 15px 30px rgba(0, 0, 0, 0.3);
+  --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.121), 0 3.4px 6.7px rgba(0, 0, 0, 0.179), 0 15px 30px rgba(0, 0, 0, 0.3);
+  --shadow-l: 0 1.8px 7.3px rgba(0, 0, 0, 0.071), 0 6.3px 24.7px rgba(0, 0, 0, 0.112), 0 30px 90px rgba(0, 0, 0, 0.2);
 }
 
 @media (prefers-reduced-motion: reduce) {

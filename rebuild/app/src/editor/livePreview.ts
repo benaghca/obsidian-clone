@@ -15,7 +15,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
-import { isRemoteUrl } from "../links";
+import { isNotePath, isRemoteUrl } from "../links/external";
 import { editorHost } from "./host";
 
 /** Reading view: render everything, as if the selection touched nothing. */
@@ -412,7 +412,8 @@ const linkClicks = EditorView.domEventHandlers({
     event.preventDefault();
     const modifier = event.ctrlKey || event.metaKey;
     const href = el.dataset.href!;
-    if (el.classList.contains("cm-wikilink")) host.openLink(href, modifier ? (event.altKey ? "right" : "tab") : false, view);
+    // [[wikilinks]], and [markdown](links) to notes ("Use [[Wikilinks]]" off), open in the app.
+    if (el.classList.contains("cm-wikilink") || isNotePath(href)) host.openLink(href, modifier ? (event.altKey ? "right" : "tab") : false, view);
     else host.openUrl(href);
     return true;
   },

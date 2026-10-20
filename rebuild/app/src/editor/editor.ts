@@ -1,13 +1,13 @@
 // Builds the EditorState for a note. Each open note keeps its own state (and
 // undo history); panes swap states with view.setState, which is instant.
 
-import { closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete";
+import { completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { deleteMarkupBackward, insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
-import { indentUnit } from "@codemirror/language";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { searchKeymap } from "@codemirror/search";
-import { Compartment, type EditorSelection, EditorState, type Extension, Prec, type Text } from "@codemirror/state";
+import { Compartment, type EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
+import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
@@ -52,16 +52,6 @@ export function viewModeOf(state: EditorState): ViewMode {
   const ext = viewModeCompartment.get(state);
   return (Object.keys(VIEW_MODES) as ViewMode[]).find((m) => VIEW_MODES[m] === ext) ?? "live";
 }
-
-// Enter on an empty list item ends the list (or steps out one level) without
-// leaving a blank line behind, as Obsidian does. CodeMirror's default would
-// first turn a tight list loose.
-const listKeymap = Prec.high(
-  keymap.of([
-    { key: "Enter", run: insertNewlineContinueMarkupCommand({ nonTightLists: false }) },
-    { key: "Backspace", run: deleteMarkupBackward },
-  ]),
-);
 
 // Right-click: put the caret where the click was (unless it was inside the
 // selection), then let the app show its menu. From the keyboard (the Menu
@@ -113,24 +103,20 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       drawSelection(),
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
-      indentUnit.of("    "),
-      EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{"] } }]),
-      closeBrackets(),
       markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, MarkerStyles], addKeymap: false }),
-      listKeymap,
+      // Settings → Editor: line numbers, folding, spellcheck, pairing, lists, indentation.
+      configExtensions(),
       viewModeCompartment.of(VIEW_MODES.live),
       contextMenu,
       wikilinkCompletion,
       counts ? countsField.init(() => counts) : countsField,
       keymap.of([
-        ...closeBracketsKeymap,
         ...completionKeymap,
         ...defaultKeymap,
         ...historyKeymap,
         ...searchKeymap,
         indentWithTab,
       ]),
-      EditorView.contentAttributes.of({ spellcheck: "true", autocorrect: "on", autocapitalize: "sentences" }),
       baseTheme,
       extensions,
     ],

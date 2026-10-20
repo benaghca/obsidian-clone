@@ -114,7 +114,7 @@
 .cm-link {
   color: var(--text-accent);
   text-decoration: underline;
-  text-decoration-color: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
+  text-decoration-color: color-mix(in srgb, var(--text-accent) 40%, transparent);
   text-underline-offset: 2px;
 }
 .cm-rendered-link {
@@ -333,7 +333,7 @@
 .is-source-mode .cm-s-url {
   color: var(--text-accent);
   text-decoration: underline;
-  text-decoration-color: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
+  text-decoration-color: color-mix(in srgb, var(--text-accent) 40%, transparent);
   text-underline-offset: 2px;
 }
 /* Marks are faint (heading #, list markers, quote >, link brackets), but

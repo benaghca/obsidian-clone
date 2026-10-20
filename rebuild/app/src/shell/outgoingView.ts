@@ -183,7 +183,7 @@ export function createOutgoingView(ws: Workspace): SideView {
     );
   }
 
-  /** Turn a mention into a [[link]] in the open note, if the line still reads the same. */
+  /** Turn a mention into a link (as the link settings write them) in the open note, if the line still reads the same. */
   function linkMention(m: UnlinkedMention) {
     const view = ws.view;
     const doc = view.state.doc;
@@ -191,7 +191,7 @@ export function createOutgoingView(ws: Workspace): SideView {
     const line = doc.line(m.line);
     if (line.text !== m.text) return schedule(0);
     const text = m.text.slice(m.from, m.to);
-    const insert = text.toLowerCase() === m.name.toLowerCase() ? `[[${text}]]` : `[[${m.name}|${text}]]`;
+    const insert = ws.linkTo(m.path, ws.active.path, text);
     view.dispatch({ changes: { from: line.from + m.from, to: line.from + m.to, insert }, userEvent: "input.link" });
     schedule(0);
   }

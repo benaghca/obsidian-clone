@@ -8,3 +8,6 @@ export const isExternalUrl = (url: string) => EXTERNAL.test(url.trim());
 
 /** True for http(s) URLs: things that would be fetched if loaded. */
 export const isRemoteUrl = (url: string) => /^https?:\/\//i.test(url.trim());
+
+/** True for a link destination with no scheme ("Note.md", "../Folder/Note"): a link to a note. */
+export const isNotePath = (href: string) => !/^[a-z][a-z0-9+.-]*:/i.test(href.trim()) && !href.trim().startsWith("#");
