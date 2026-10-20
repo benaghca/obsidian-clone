@@ -1,8 +1,8 @@
-// Every menu in the app, built to Obsidian's item order and grouping
-// (observed in Obsidian; items Grove can't do yet are left out rather than
-// shown dead; see rebuild/ICONS_MENUS_NOTES.md for the comparison). Items
-// that are commands come from the registry, so they carry the command's
-// icon, hotkey and availability.
+// Every menu in the app, built to Obsidian's item order, grouping and icons
+// (observed side by side in Obsidian 1.14.4; items Grove can't do are left
+// out rather than shown dead; see rebuild/SPLITS_PANES_NOTES.md for the
+// comparison). Items that are commands come from the registry, so they carry
+// the command's icon, hotkey and availability.
 
 import { openSearchPanel } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
@@ -11,7 +11,7 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
-import { noteName, type Tab, type Workspace } from "../workspace";
+import { type Group, noteName, type Tab, type Workspace } from "../workspace";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 
 export interface MenuHost {
@@ -24,7 +24,11 @@ export interface MenuHost {
   newNoteIn(folder: string): void;
   newFolderIn(folder: string): void;
   moveFile(path: string): void;
+  /** Pick a note to merge this one into (Obsidian's Note composer). */
+  mergeFile(path: string): void;
   revealInTree(path: string): void;
+  /** Show the search view limited to a folder. */
+  searchInFolder(folder: string): void;
 }
 
 const warn = (what: string) => (err: unknown) => console.warn(`Could not ${what}`, err);
@@ -41,7 +45,7 @@ export function createMenus(host: MenuHost) {
     const sep = ws.vault.path.includes("\\") ? "\\" : "/";
     return {
       title: "Copy path",
-      icon: "copy",
+      icon: "clipboard",
       submenu: [
         { title: "From vault folder", action: () => copyText(path) },
         { title: "From system root", action: () => copyText(`${ws.vault.path}${sep}${path.split("/").join(sep)}`) },
@@ -49,6 +53,7 @@ export function createMenus(host: MenuHost) {
     };
   }
 
+  // Obsidian's "Bookmark..." opens a dialog; Grove bookmarks at once, so no ellipsis.
   function bookmarkItem(path: string): MenuEntry {
     return bookmarks.has(path)
       ? { title: "Remove bookmark", icon: "bookmark-minus", action: () => bookmarks.toggle(path) }
@@ -57,10 +62,21 @@ export function createMenus(host: MenuHost) {
 
   const deleteItem = (path: string, title = "Delete"): MenuEntry => ({
     title,
-    icon: "trash",
+    icon: "trash-2",
     danger: true,
     action: () => ws.remove(path).catch(warn(`delete ${path}`)),
   });
+
+  const renameItem = (action: () => void): MenuEntry => ({ title: "Rename...", icon: "pen-line", action });
+  const moveItem = (path: string, folder = false): MenuEntry => ({
+    title: folder ? "Move folder to..." : "Move file to...",
+    icon: "folder-tree",
+    action: () => host.moveFile(path),
+  });
+  const mergeItem = (path: string): MenuEntry => ({ title: "Merge entire file with...", icon: "git-merge", action: () => host.mergeFile(path) });
+  const revealItem = (path: string): MenuEntry => ({ title: "Reveal file in navigation", icon: "folder-open", action: () => host.revealInTree(path) });
+  const openInNewTab = (open: () => void): MenuEntry => ({ title: "Open in new tab", icon: "file-plus", action: open });
+  const openToRight = (open: () => void): MenuEntry => ({ title: "Open to the right", icon: "separator-vertical", action: open });
 
   /** File explorer (and bookmarks): right-click on a note, a folder, or the empty space. */
   function file(entry: FileEntry): MenuItems {
@@ -70,26 +86,29 @@ export function createMenus(host: MenuHost) {
         { title: "New note", icon: "square-pen", action: () => host.newNoteIn(path) },
         { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn(path) },
         SEPARATOR,
-        { title: "Move folder to...", icon: "folder-input", action: () => host.moveFile(path) },
+        moveItem(path, true),
+        { title: "Search in folder", icon: "folder-search", action: () => host.searchInFolder(path) },
         bookmarkItem(path),
         SEPARATOR,
         copyPath(path),
         SEPARATOR,
-        { title: "Rename...", icon: "pencil", action: () => host.renameInTree(path) },
+        renameItem(() => host.renameInTree(path)),
         deleteItem(path),
       ];
     }
     const isNote = path.endsWith(".md");
     return [
-      isNote && { title: "Open in new tab", icon: "file-plus", action: () => void ws.open(path, { newTab: true }) },
+      isNote && openInNewTab(() => void ws.open(path, { where: "tab" })),
+      isNote && openToRight(() => void ws.open(path, { where: "right" })),
       SEPARATOR,
       isNote && { title: "Make a copy", icon: "files", action: () => ws.makeCopy(path).catch(warn(`copy ${path}`)) },
-      { title: "Move file to...", icon: "folder-input", action: () => host.moveFile(path) },
+      moveItem(path),
       bookmarkItem(path),
+      isNote && mergeItem(path),
       SEPARATOR,
       copyPath(path),
       SEPARATOR,
-      isNote && { title: "Rename...", icon: "pencil", action: () => host.renameInTree(path) },
+      isNote && renameItem(() => host.renameInTree(path)),
       deleteItem(path),
     ];
   }
@@ -101,163 +120,159 @@ export function createMenus(host: MenuHost) {
     ];
   }
 
-  /** The editor's right-click menu: link actions first when on a link, then formatting, then the clipboard. */
+  /**
+   * The editor's right-click menu. On an internal link: where to open it,
+   * then the usual items, then the linked note's file items. On an external
+   * link: open and copy the URL first.
+   */
   function editor(view: EditorView, pos: number): MenuItems {
-    const reading = ws.active.mode === "reading";
+    const group = ws.groupOfView(view) ?? ws.activeGroup;
+    const reading = group.active.mode === "reading";
     const hasSelection = view.state.selection.ranges.some((r) => !r.empty);
     const link = linkAt(view.state, pos);
+    const cmd = (id: string, overrides?: Partial<MenuEntry>) => commands.menuItem(id, overrides);
+    const linked = link?.kind === "internal" ? ws.resolve(link.target) : null;
     const linkItems: MenuItems = !link
       ? []
       : link.kind === "internal"
         ? [
-            { title: "Open link", icon: "file-text", action: () => void ws.openLink(link.target) },
-            { title: "Open in new tab", icon: "file-plus", action: () => void ws.openLink(link.target, true) },
+            openInNewTab(() => void ws.openLink(link.target, "tab", group)),
+            openToRight(() => void ws.openLink(link.target, "right", group)),
           ]
         : [
             { title: "Open link", icon: "external-link", action: () => api.openExternal(link.url).catch(warn(`open ${link.url}`)) },
             { title: "Copy URL", icon: "copy", action: () => copyText(link.url) },
           ];
-    const cmd = (id: string) => commands.menuItem(id);
+    const editLink: MenuItems =
+      link?.kind === "internal" && !reading
+        ? [
+            {
+              title: "Edit link",
+              icon: "text-cursor-input",
+              action: () => {
+                view.focus();
+                view.dispatch({ selection: { anchor: link.from, head: link.to } });
+              },
+            },
+          ]
+        : [];
     return [
       ...linkItems,
       SEPARATOR,
-      !reading && !link && cmd("editor:insert-wikilink"),
-      !reading && !link && cmd("editor:insert-link"),
+      !reading && cmd("editor:insert-wikilink", { title: "Add link", icon: "link" }),
+      !reading && cmd("editor:insert-link", { title: "Add external link", icon: "external-link" }),
       SEPARATOR,
-      !reading && {
-        title: "Format",
-        icon: "type",
-        submenu: () => [
-          cmd("editor:toggle-bold"),
-          cmd("editor:toggle-italics"),
-          cmd("editor:toggle-strikethrough"),
-          cmd("editor:toggle-highlight"),
-          cmd("editor:toggle-code"),
-          cmd("editor:toggle-inline-math"),
-          cmd("editor:toggle-comments"),
-          SEPARATOR,
-          cmd("editor:clear-formatting"),
-        ],
-      },
+      ...editLink,
+      !reading &&
+        link?.kind !== "internal" && {
+          title: "Format",
+          icon: "paintbrush",
+          // Obsidian's short labels here; the palette has the full command names.
+          submenu: () => [
+            cmd("editor:toggle-bold", { title: "Bold" }),
+            cmd("editor:toggle-italics", { title: "Italic" }),
+            cmd("editor:toggle-strikethrough", { title: "Strikethrough" }),
+            cmd("editor:toggle-highlight", { title: "Highlight" }),
+            SEPARATOR,
+            cmd("editor:toggle-code", { title: "Code" }),
+            cmd("editor:toggle-inline-math", { title: "Math" }),
+            cmd("editor:toggle-comments", { title: "Comment" }),
+            SEPARATOR,
+            cmd("editor:clear-formatting"),
+          ],
+        },
       !reading && {
         title: "Paragraph",
         icon: "pilcrow",
         submenu: () => [
-          cmd("editor:toggle-bullet-list"),
-          cmd("editor:toggle-numbered-list"),
-          cmd("editor:toggle-task-list"),
+          cmd("editor:toggle-bullet-list", { title: "Bullet list" }),
+          cmd("editor:toggle-numbered-list", { title: "Numbered list" }),
+          cmd("editor:toggle-task-list", { title: "Task list", icon: "square-check-big" }),
           SEPARATOR,
-          ...[1, 2, 3, 4, 5, 6].map((n) => cmd(`editor:set-heading-${n}`)),
-          cmd("editor:set-body"),
+          ...[1, 2, 3, 4, 5, 6].map((n) => cmd(`editor:set-heading-${n}`, { title: `Heading ${n}` })),
+          cmd("editor:set-heading-0", { title: "Body", icon: "text-align-start" }),
           SEPARATOR,
-          cmd("editor:toggle-blockquote"),
+          cmd("editor:toggle-blockquote", { title: "Quote" }),
         ],
       },
       !reading && {
         title: "Insert",
-        icon: "plus",
+        icon: "list-plus",
         submenu: () => [
-          cmd("editor:insert-table"),
-          cmd("editor:insert-callout"),
-          cmd("editor:insert-codeblock"),
-          cmd("editor:insert-mathblock"),
-          cmd("editor:insert-horizontal-rule"),
+          cmd("editor:insert-footnote", { title: "Footnote" }),
+          cmd("editor:insert-table", { title: "Table" }),
+          cmd("editor:insert-callout", { title: "Callout", icon: "quote" }),
+          cmd("editor:insert-horizontal-rule", { title: "Horizontal rule", icon: "minus" }),
+          SEPARATOR,
+          cmd("editor:insert-codeblock", { title: "Code block", icon: "code" }),
+          cmd("editor:insert-mathblock", { title: "Math block" }),
         ],
       },
       SEPARATOR,
       !reading && { title: "Cut", icon: "scissors", disabled: !hasSelection, action: () => copySelection(view, true).catch(warn("cut")) },
       { title: "Copy", icon: "copy", disabled: !hasSelection, action: () => copySelection(view, false).catch(warn("copy")) },
-      !reading && { title: "Paste", icon: "clipboard-paste", action: () => void paste(view, false) },
+      !reading && { title: "Paste", icon: "clipboard-check", action: () => void paste(view, false) },
       !reading && { title: "Paste as plain text", icon: "clipboard-type", action: () => void paste(view, true) },
       {
         title: "Select all",
-        icon: "square-dashed-text",
+        icon: "square-dashed",
         action: () => {
           view.focus();
           view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
         },
       },
-    ];
-  }
-
-  /** The file items shared by the tab menu and "More options". */
-  function noteItems(path: string): MenuItems {
-    return [
-      { title: "Rename...", icon: "pencil", action: () => host.renameActive() },
-      { title: "Move file to...", icon: "folder-input", action: () => host.moveFile(path) },
-      bookmarkItem(path),
-    ];
-  }
-
-  /** Right-click on a tab header. */
-  function tab(t: Tab): MenuItems {
-    const i = ws.tabs.indexOf(t);
-    const others = ws.tabs.some((o) => o !== t && !o.pinned);
-    const toRight = ws.tabs.slice(i + 1).some((o) => !o.pinned);
-    const path = t.path;
-    const onTab = (fn: () => void) => () => {
-      ws.activate(t);
-      fn();
-    };
-    return [
-      { title: "Close", icon: "x", hotkey: t === ws.active ? commands.hotkey("workspace:close") : undefined, action: () => ws.closeTab(t) },
-      { title: "Close others", icon: "circle-x", disabled: !others, action: () => ws.closeOthers(t) },
-      { title: "Close tabs to the right", icon: "arrow-right-to-line", disabled: !toRight, action: () => ws.closeToRight(t) },
-      { title: "Close all", icon: "square-x", action: () => ws.closeAll() },
-      SEPARATOR,
-      t.pinned
-        ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) }
-        : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
-      SEPARATOR,
-      ...(path
+      ...(linked
         ? [
-            { title: "Rename...", icon: "pencil", action: onTab(() => host.renameActive()) } as MenuEntry,
-            { title: "Move file to...", icon: "folder-input", action: () => host.moveFile(path) } as MenuEntry,
-            bookmarkItem(path),
             SEPARATOR,
-            copyPath(path),
-            { title: "Reveal file in navigation", icon: "folder-open", action: () => host.revealInTree(path) } as MenuEntry,
+            copyPath(linked),
             SEPARATOR,
-            deleteItem(path, "Delete file"),
+            renameItem(() => host.renameInTree(linked)),
+            moveItem(linked),
+            bookmarkItem(linked),
+            SEPARATOR,
+            revealItem(linked),
           ]
         : []),
     ];
   }
 
-  /** The tab bar's chevron: the open tabs, then actions on them. */
-  function tabList(): MenuItems {
-    return [
-      ...ws.tabs.map(
-        (t): MenuEntry => ({
-          title: t.path ? noteName(t.path) : "New tab",
-          icon: t.path ? "file-text" : "file",
-          checked: t === ws.active,
-          action: () => ws.activate(t),
-        }),
-      ),
-      SEPARATOR,
-      { title: "Close all", icon: "square-x", action: () => ws.closeAll() },
-    ];
-  }
-
-  /** The view header's "More options" (three dots). */
-  function moreOptions(): MenuItems {
-    const path = ws.active.path;
-    if (!path) return [];
-    const reading = ws.active.mode === "reading";
+  /**
+   * The file and view items shared by the active tab's menu and "More
+   * options": view modes, splits, file actions, find, linked views.
+   */
+  function viewItems(tab: Tab, path: string): MenuItems {
+    const reading = tab.mode === "reading";
+    const onTab = (fn: () => void) => () => {
+      ws.activate(tab);
+      fn();
+    };
     return [
       commands.menuItem("markdown:toggle-preview", {
         title: reading ? "Editing view" : "Reading view",
         icon: reading ? "pen-line" : "book-open",
+        action: onTab(() => commands.run("markdown:toggle-preview")),
       }),
-      !reading && commands.menuItem("editor:toggle-source", { title: "Source mode", icon: undefined, checked: ws.active.mode === "source" }),
+      !reading &&
+        commands.menuItem("editor:toggle-source", {
+          title: "Source mode",
+          icon: "code-xml",
+          checked: tab.mode === "source",
+          action: onTab(() => commands.run("editor:toggle-source")),
+        }),
       SEPARATOR,
-      ...noteItems(path),
+      commands.menuItem("workspace:split-vertical", { action: () => ws.split(tab, "right") }),
+      commands.menuItem("workspace:split-horizontal", { action: () => ws.split(tab, "bottom") }),
       SEPARATOR,
-      !reading && { title: "Find...", icon: "search", hotkey: commands.hotkey("editor:open-search"), action: () => openSearchPanel(ws.view) },
-      !reading && commands.menuItem("editor:open-search-replace", { title: "Replace..." }),
+      renameItem(onTab(() => host.renameActive())),
+      moveItem(path),
+      bookmarkItem(path),
+      mergeItem(path),
+      SEPARATOR,
+      !reading && { title: "Find...", icon: "file-search", hotkey: commands.hotkey("editor:open-search"), action: onTab(() => openSearchPanel(ws.view)) },
+      !reading && commands.menuItem("editor:open-search-replace", { title: "Replace...", icon: "file-search", action: onTab(() => commands.run("editor:open-search-replace")) }),
       SEPARATOR,
       copyPath(path),
+      SEPARATOR,
       {
         title: "Open linked view",
         icon: "link",
@@ -269,10 +284,70 @@ export function createMenus(host: MenuHost) {
         ],
       },
       SEPARATOR,
-      { title: "Reveal file in navigation", icon: "folder-open", action: () => host.revealInTree(path) },
+      revealItem(path),
       SEPARATOR,
       deleteItem(path, "Delete file"),
     ];
+  }
+
+  /**
+   * Right-click on a tab header. Like Obsidian's, every tab gets the close
+   * and pin items; the active tab of its group also gets the view, split and
+   * file items.
+   */
+  function tab(t: Tab): MenuItems {
+    const group = ws.groupOf(t);
+    const tabs = group?.tabs ?? [t];
+    const i = tabs.indexOf(t);
+    const others = tabs.some((o) => o !== t && !o.pinned);
+    const after = tabs.slice(i + 1).some((o) => !o.pinned);
+    const isActive = group?.active === t;
+    return [
+      { title: "Close", icon: "x", hotkey: t === ws.active ? commands.hotkey("workspace:close") : undefined, action: () => ws.closeTab(t) },
+      { title: "Close others", icon: "x", disabled: !others, action: () => ws.closeOthers(t) },
+      { title: "Close tabs after", icon: "x", disabled: !after, action: () => ws.closeToRight(t) },
+      { title: "Close all", icon: "x", action: () => ws.closeAll(group) },
+      SEPARATOR,
+      t.pinned ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) } : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
+      ...(isActive && t.path ? viewItems(t, t.path) : []),
+      ...(isActive && !t.path
+        ? [
+            SEPARATOR,
+            commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
+            commands.menuItem("workspace:split-horizontal", { action: () => ws.split(t, "bottom") }),
+          ]
+        : []),
+    ];
+  }
+
+  /** The tab bar's chevron: actions on the group's tabs, then the tabs. */
+  function tabList(group: Group = ws.activeGroup): MenuItems {
+    const notes = [...new Set(group.tabs.flatMap((t) => (t.path ? [t.path] : [])))];
+    const unmarked = notes.filter((p) => !bookmarks.has(p));
+    return [
+      unmarked.length > 0 && {
+        title: `Bookmark ${unmarked.length} ${unmarked.length === 1 ? "tab" : "tabs"}`,
+        icon: "bookmark",
+        action: () => unmarked.forEach((p) => bookmarks.toggle(p)),
+      },
+      SEPARATOR,
+      { title: "Close all", icon: "x", action: () => ws.closeAll(group) },
+      SEPARATOR,
+      ...group.tabs.map(
+        (t): MenuEntry => ({
+          title: t.path ? noteName(t.path) : "New tab",
+          icon: t.path ? "file-text" : "file",
+          checked: t === group.active,
+          action: () => ws.activate(t),
+        }),
+      ),
+    ];
+  }
+
+  /** The view header's "More options" (three dots), for the active pane. */
+  function moreOptions(): MenuItems {
+    const t = ws.active;
+    return t.path ? viewItems(t, t.path) : [];
   }
 
   return { file, vault, editor, tab, tabList, moreOptions };

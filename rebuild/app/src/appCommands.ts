@@ -1,46 +1,86 @@
-// Every command Grove has, registered once. Names follow Obsidian's command
-// palette: core actions are plain ("Toggle bold", "Navigate back"), the
-// views and tools are "Group: Action" ("Backlinks: Show backlinks").
-// Hotkeys are Obsidian's defaults where it has one.
+// Every command Grove has, registered once. Names, ids and default hotkeys
+// follow Obsidian's own command list (read from Obsidian 1.14.4's registry):
+// core actions are plain ("Toggle bold", "Split right"), the views and tools
+// are "Group: Action" ("Backlinks: Show backlinks"). Where Obsidian has no
+// default hotkey, neither does Grove (the sidebar toggles keep round 3's).
 
 import { startCompletion } from "@codemirror/autocomplete";
+import { addCursorAbove, addCursorBelow, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
+import type { StateCommand } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
+import { linkAt } from "./editor/linkAt";
 import {
   BLOCKS,
   clearFormatting,
   insertBlock,
+  insertFootnote,
   insertMarkdownLink,
+  insertText,
   insertWikilink,
   type LineKind,
   setLineKind,
   toggleCheckbox,
   toggleWrap,
 } from "./editor/format";
+import type { Edge } from "./layout";
 import { openCommandPalette } from "./shell/commandPalette";
 import type { IconName } from "./shell/icons";
 import { isMenuOpen } from "./shell/menu";
+import { openMergePrompt } from "./shell/mergePrompt";
 import { openMovePrompt } from "./shell/movePrompt";
-import type { Pane } from "./shell/pane";
+import type { Panes } from "./shell/pane";
 import { isPromptOpen } from "./shell/prompt";
 import { openQuickSwitcher } from "./shell/quickSwitcher";
 import type { RightSidebar, RightView } from "./shell/rightSidebar";
 import type { LeftSidebar, LeftView } from "./shell/sidebar";
 import type { Sidedocks } from "./shell/sidedock";
-import type { Workspace } from "./workspace";
+import { noteName, type OpenWhere, type Workspace } from "./workspace";
 
 export interface AppParts {
   ws: Workspace;
-  pane: Pane;
+  panes: Panes;
   docks: Sidedocks;
   left: LeftSidebar;
   right: RightSidebar;
   bookmarks: Bookmarks;
+  /** Show or hide the ribbon. */
+  toggleRibbon(): void;
+  /** Show the editor menu at the caret (as from the Menu key). */
+  editorMenuAtCaret(): void;
 }
 
 const mod = (key: string, more: { shift?: boolean; alt?: boolean } = {}) => [{ mod: true, key, ...more }];
+
+const DAILY = /^\d{4}-\d{2}-\d{2}$/;
+const pad = (n: number) => String(n).padStart(2, "0");
+const today = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const nowTime = (d = new Date()) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+const PREFS = { fontSize: "grove.fontSize", readable: "grove.readableLineLength" };
+const store = (key: string, value: string) => {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // not remembered
+  }
+};
+const stored = (key: string) => {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+};
+
+/** Apply the remembered font size and readable line length (startup). */
+export function applyViewPrefs() {
+  const size = Number(stored(PREFS.fontSize));
+  if (size >= 10 && size <= 30) document.documentElement.style.setProperty("--font-text-size", `${size}px`);
+  document.body.classList.toggle("is-readable-line-length-off", stored(PREFS.readable) === "off");
+}
 
 /**
  * Register everything. Only `ws` and `bookmarks` must exist yet: the views
@@ -60,6 +100,12 @@ export function registerAppCommands(parts: AppParts) {
     return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
   };
   const canEdit = () => hasNote() && ws.active.mode !== "reading" && !typingElsewhere();
+  // An internal link at the caret, for the "link under cursor" commands.
+  const linkUnderCursor = () => {
+    if (!hasNote() || typingElsewhere()) return null;
+    const link = linkAt(ws.view.state, ws.view.state.selection.main.head);
+    return link?.kind === "internal" ? link : null;
+  };
 
   const showLeft = (view: LeftView) => {
     parts.left.select(view);
@@ -70,15 +116,27 @@ export function registerAppCommands(parts: AppParts) {
     parts.docks.setCollapsed("right", false);
   };
 
-  async function dailyNote() {
-    const d = new Date();
-    const name = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    await ws.openLink(name);
+  async function newNote(where?: OpenWhere) {
+    await ws.newNote("", where);
+    parts.panes.focusTitle(true);
   }
 
-  async function newNote() {
-    await ws.newNote();
-    parts.pane.focusTitle(true);
+  /** Daily notes, oldest first: notes named YYYY-MM-DD anywhere in the vault. */
+  const dailyNotes = () => ws.notes.filter((n) => DAILY.test(n.name)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const adjacentDaily = (dir: 1 | -1) => {
+    const path = ws.active.path;
+    if (!path || !DAILY.test(noteName(path))) return null;
+    const list = dailyNotes();
+    const i = list.findIndex((n) => n.path === path);
+    return list[i + dir]?.path ?? null;
+  };
+
+  function setFontSize(delta: number) {
+    const now = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--font-text-size")) || 16;
+    const next = Math.min(30, Math.max(10, now + delta));
+    document.documentElement.style.setProperty("--font-text-size", `${next}px`);
+    store(PREFS.fontSize, String(next));
+    for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
   }
 
   const editorCommand = (id: string, name: string, icon: IconName | undefined, run: (view: EditorView) => boolean, hotkeys?: Command["hotkeys"]): Command => ({
@@ -92,8 +150,34 @@ export function registerAppCommands(parts: AppParts) {
       ws.view.focus();
     },
   });
+  // A StateCommand run on the active pane's editor.
+  const stateCommand = (cmd: StateCommand) => (view: EditorView) => cmd(view);
 
   const lineKind = (id: string, name: string, icon: IconName, kind: LineKind) => editorCommand(id, name, icon, setLineKind(kind));
+
+  const focusPane = (id: string, name: string, edge: Edge): Command => ({
+    id,
+    name,
+    when: () => !!ws.neighbour(edge),
+    run: () => ws.focusNeighbour(edge),
+  });
+  const moveToPane = (id: string, name: string, edge: Edge): Command => ({
+    id,
+    name,
+    when: () => !!ws.neighbour(edge),
+    run: () => ws.moveToNeighbour(edge),
+  });
+  const followLink = (id: string, name: string, where: OpenWhere, hotkeys: Command["hotkeys"]): Command => ({
+    id,
+    name,
+    icon: "link",
+    hotkeys,
+    when: () => !!linkUnderCursor(),
+    run: () => {
+      const link = linkUnderCursor();
+      if (link) void ws.openLink(link.target, where);
+    },
+  });
 
   // While a menu or a prompt has the keyboard, hotkeys wait.
   commands.suspended = () => isPromptOpen() || isMenuOpen();
@@ -110,37 +194,110 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "switcher:open",
       name: "Quick switcher: Open quick switcher",
-      icon: "arrow-left-right",
+      icon: "navigation",
       hotkeys: mod("o"),
       run: () => openQuickSwitcher(ws),
     },
-    { id: "file-explorer:new-file", name: "Create new note", icon: "square-pen", hotkeys: mod("n"), run: newNote },
-    { id: "file-explorer:new-folder", name: "Create new folder", icon: "folder-plus", run: () => parts.left.newFolderIn("") },
-    { id: "daily-notes", name: "Daily notes: Open today's daily note", icon: "calendar-days", run: dailyNote },
-    { id: "workspace:new-tab", name: "New tab", icon: "plus", hotkeys: mod("t"), run: () => ws.newTab() },
+    { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => newNote() },
+    { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => newNote(false) },
+    {
+      id: "file-explorer:new-file-in-new-pane",
+      name: "Create note to the right",
+      icon: "file-plus",
+      hotkeys: mod("n", { shift: true }),
+      run: () => newNote("right"),
+    },
+    { id: "file-explorer:new-folder", name: "Files: Create new folder", icon: "folder-plus", run: () => parts.left.newFolderIn("") },
+    { id: "daily-notes", name: "Daily notes: Open today's daily note", icon: "calendar-days", run: () => ws.openLink(today()) },
+    {
+      id: "daily-notes:goto-prev",
+      name: "Daily notes: Open previous daily note",
+      icon: "calendar-minus",
+      when: () => !!adjacentDaily(-1),
+      run: () => ws.open(adjacentDaily(-1)!),
+    },
+    {
+      id: "daily-notes:goto-next",
+      name: "Daily notes: Open next daily note",
+      icon: "calendar-plus",
+      when: () => !!adjacentDaily(1),
+      run: () => ws.open(adjacentDaily(1)!),
+    },
+    {
+      id: "random-note",
+      name: "Random note: Open random note",
+      icon: "dices",
+      when: () => ws.notes.length > 0,
+      run: () => {
+        const others = ws.notes.filter((n) => n.path !== ws.active.path);
+        const pick = others[Math.floor(Math.random() * others.length)] ?? ws.notes[0];
+        void ws.open(pick.path);
+      },
+    },
+    { id: "workspace:new-tab", name: "New tab", hotkeys: mod("t"), run: () => ws.newTab() },
     { id: "workspace:close", name: "Close current tab", icon: "x", hotkeys: mod("w"), run: () => ws.closeTab(ws.active) },
     {
       id: "workspace:close-others",
       name: "Close all other tabs",
-      icon: "circle-x",
+      icon: "x",
+      when: () => ws.groups().some((g) => g.tabs.some((t) => t !== ws.active && !t.pinned)),
+      run: () => ws.closeAllOthers(),
+    },
+    {
+      id: "workspace:close-others-tab-group",
+      name: "Close others in tab group",
+      icon: "x",
       when: () => ws.tabs.some((t) => t !== ws.active && !t.pinned),
       run: () => ws.closeOthers(ws.active),
+    },
+    { id: "workspace:close-tab-group", name: "Close this tab group", icon: "x", run: () => ws.closeGroup() },
+    {
+      id: "workspace:undo-close-pane",
+      name: "Undo close tab",
+      icon: "undo-2",
+      hotkeys: mod("t", { shift: true }),
+      when: () => ws.canUndoClose(),
+      run: () => ws.undoCloseTab(),
     },
     {
       id: "workspace:next-tab",
       name: "Go to next tab",
-      hotkeys: mod("tab"),
+      icon: "arrow-right",
+      hotkeys: [...mod("tab"), ...mod("pagedown")],
       when: () => ws.tabs.length > 1,
       run: () => ws.cycleTab(1),
     },
     {
       id: "workspace:previous-tab",
       name: "Go to previous tab",
-      hotkeys: mod("tab", { shift: true }),
+      icon: "arrow-left",
+      hotkeys: [...mod("tab", { shift: true }), ...mod("pageup")],
       when: () => ws.tabs.length > 1,
       run: () => ws.cycleTab(-1),
     },
+    ...[1, 2, 3, 4, 5, 6, 7, 8].map(
+      (n): Command => ({
+        id: `workspace:goto-tab-${n}`,
+        name: `Go to tab #${n}`,
+        hotkeys: mod(String(n)),
+        when: () => ws.tabs.length >= n,
+        run: () => ws.gotoTab(n),
+      }),
+    ),
+    { id: "workspace:goto-last-tab", name: "Go to last tab", hotkeys: mod("9"), run: () => ws.gotoTab(0) },
     { id: "workspace:toggle-pin", name: "Toggle pin", icon: "pin", run: () => ws.togglePin() },
+    // Splits. Obsidian has no default hotkeys for these.
+    { id: "workspace:split-vertical", name: "Split right", icon: "separator-vertical", run: () => ws.split(ws.active, "right") },
+    { id: "workspace:split-horizontal", name: "Split down", icon: "separator-horizontal", run: () => ws.split(ws.active, "bottom") },
+    focusPane("editor:focus-left", "Focus on tab group to the left", "left"),
+    focusPane("editor:focus-right", "Focus on tab group to the right", "right"),
+    focusPane("editor:focus-top", "Focus on tab group above", "top"),
+    focusPane("editor:focus-bottom", "Focus on tab group below", "bottom"),
+    // Grove's own (Obsidian moves tabs between groups only by dragging).
+    moveToPane("workspace:move-tab-left", "Move current tab to the tab group to the left", "left"),
+    moveToPane("workspace:move-tab-right", "Move current tab to the tab group to the right", "right"),
+    moveToPane("workspace:move-tab-up", "Move current tab to the tab group above", "top"),
+    moveToPane("workspace:move-tab-down", "Move current tab to the tab group below", "bottom"),
     {
       id: "app:go-back",
       name: "Navigate back",
@@ -172,6 +329,7 @@ export function registerAppCommands(parts: AppParts) {
       hotkeys: mod("]", { alt: true }),
       run: () => parts.docks.toggle("right"),
     },
+    { id: "app:toggle-ribbon", name: "Toggle ribbon", run: () => parts.toggleRibbon() },
     {
       id: "markdown:toggle-preview",
       name: "Toggle reading view",
@@ -183,24 +341,36 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "editor:toggle-source",
       name: "Toggle Live Preview/Source mode",
-      icon: "code",
+      icon: "code-xml",
       when: () => hasNote() && ws.active.mode !== "reading",
       run: () => ws.setMode(ws.active.mode === "source" ? "live" : "source"),
     },
+    {
+      id: "editor:toggle-readable-line-length",
+      name: "Toggle readable line length",
+      icon: "ruler",
+      run: () => {
+        const off = document.body.classList.toggle("is-readable-line-length-off");
+        store(PREFS.readable, off ? "off" : "on");
+        for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+      },
+    },
+    { id: "app:increase-font-size", name: "Increase font size", icon: "a-large-small", run: () => setFontSize(1) },
+    { id: "app:decrease-font-size", name: "Decrease font size", icon: "a-large-small", run: () => setFontSize(-1) },
 
     // ----- the open file -----
     {
       id: "workspace:edit-file-title",
       name: "Rename file",
-      icon: "pencil",
+      icon: "pen-line",
       hotkeys: [{ key: "f2" }],
       when: hasNote,
-      run: () => parts.pane.focusTitle(true),
+      run: () => parts.panes.focusTitle(true),
     },
     {
       id: "app:delete-file",
       name: "Delete current file",
-      icon: "trash",
+      icon: "trash-2",
       when: hasNote,
       run: () => ws.remove(note()).catch((err) => console.warn("Could not delete", err)),
     },
@@ -214,14 +384,21 @@ export function registerAppCommands(parts: AppParts) {
     {
       id: "file-explorer:move-file",
       name: "Move current file to another folder",
-      icon: "folder-input",
+      icon: "folder-tree",
       when: hasNote,
       run: () => openMovePrompt(ws, note()),
     },
     {
+      id: "note-composer:merge-file",
+      name: "Note composer: Merge current file with another file...",
+      icon: "git-merge",
+      when: () => hasNote() && ws.notes.length > 1,
+      run: () => openMergePrompt(ws, note()),
+    },
+    {
       id: "file-explorer:reveal-active-file",
       name: "Files: Reveal current file in navigation",
-      icon: "folder-open",
+      icon: "navigation",
       when: hasNote,
       run: () => {
         showLeft("files");
@@ -230,11 +407,23 @@ export function registerAppCommands(parts: AppParts) {
     },
     {
       id: "workspace:copy-path",
-      name: "Copy file path",
+      name: "Copy current file path from vault folder",
       icon: "copy",
       when: hasNote,
       run: () => navigator.clipboard.writeText(note()).catch((err) => console.warn("Could not copy", err)),
     },
+    {
+      id: "workspace:copy-full-path",
+      name: "Copy current file path from system root",
+      icon: "hard-drive",
+      when: hasNote,
+      run: () => {
+        const sep = ws.vault.path.includes("\\") ? "\\" : "/";
+        const full = `${ws.vault.path}${sep}${note().split("/").join(sep)}`;
+        navigator.clipboard.writeText(full).catch((err) => console.warn("Could not copy", err));
+      },
+    },
+    { id: "editor:save-file", name: "Save current file", hotkeys: mod("s"), when: hasNote, run: () => ws.saveNow() },
     {
       id: "bookmarks:bookmark-current-file",
       name: "Bookmarks: Bookmark current file",
@@ -249,9 +438,19 @@ export function registerAppCommands(parts: AppParts) {
       when: () => bookmarks.has(ws.active.path),
       run: () => bookmarks.toggle(note()),
     },
+    {
+      id: "bookmarks:bookmark-all-tabs",
+      name: "Bookmarks: Bookmark all tabs",
+      icon: "bookmark-plus",
+      when: () => ws.groups().some((g) => g.tabs.some((t) => t.path && !bookmarks.has(t.path))),
+      run: () => {
+        const paths = new Set(ws.groups().flatMap((g) => g.tabs.flatMap((t) => (t.path ? [t.path] : []))));
+        for (const p of paths) if (!bookmarks.has(p)) bookmarks.toggle(p);
+      },
+    },
 
     // ----- views -----
-    { id: "file-explorer:open", name: "Files: Show file explorer", icon: "folder-closed", run: () => showLeft("files") },
+    { id: "file-explorer:open", name: "Files: Show file explorer", icon: "files", run: () => showLeft("files") },
     { id: "file-explorer:collapse-all", name: "Files: Collapse all", icon: "chevrons-down-up", run: () => parts.left.collapseAll() },
     {
       id: "global-search:open",
@@ -263,22 +462,22 @@ export function registerAppCommands(parts: AppParts) {
     { id: "bookmarks:open", name: "Bookmarks: Show bookmarks", icon: "bookmark", run: () => showLeft("bookmarks") },
     { id: "backlink:open", name: "Backlinks: Show backlinks", icon: "link", run: () => showRight("backlinks") },
     { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", icon: "link-2", run: () => showRight("outgoing") },
-    { id: "tag-pane:open", name: "Tags: Show tags", icon: "tags", run: () => showRight("tags") },
+    { id: "tag-pane:open", name: "Tags view: Show tags", icon: "tags", run: () => showRight("tags") },
     { id: "outline:open", name: "Outline: Show outline", icon: "list", run: () => showRight("outline") },
 
     // ----- editing -----
     editorCommand("editor:toggle-bold", "Toggle bold", "bold", toggleWrap("**"), mod("b")),
-    editorCommand("editor:toggle-italics", "Toggle italics", "italic", toggleWrap("*"), mod("i")),
+    editorCommand("editor:toggle-italics", "Toggle italic", "italic", toggleWrap("*"), mod("i")),
     editorCommand("editor:toggle-strikethrough", "Toggle strikethrough", "strikethrough", toggleWrap("~~")),
     editorCommand("editor:toggle-highlight", "Toggle highlight", "highlighter", toggleWrap("==")),
-    editorCommand("editor:toggle-code", "Toggle code", "code", toggleWrap("`")),
-    editorCommand("editor:toggle-inline-math", "Toggle math", "sigma", toggleWrap("$")),
+    editorCommand("editor:toggle-code", "Toggle code", "code-xml", toggleWrap("`")),
+    editorCommand("editor:toggle-inline-math", "Toggle inline math", "sigma", toggleWrap("$")),
     editorCommand("editor:toggle-comments", "Toggle comment", "percent", toggleWrap("%%"), mod("/")),
     {
       ...editorCommand("editor:clear-formatting", "Clear formatting", "eraser", clearFormatting),
       when: () => canEdit() && ws.view.state.selection.ranges.some((r) => !r.empty),
     },
-    editorCommand("editor:insert-link", "Insert Markdown link", "link-2", insertMarkdownLink, mod("k")),
+    editorCommand("editor:insert-link", "Insert Markdown link", "link", insertMarkdownLink, mod("k")),
     {
       ...editorCommand("editor:insert-wikilink", "Add internal link", "link", insertWikilink),
       run: () => {
@@ -294,14 +493,40 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:toggle-checklist-status", "Toggle checkbox status", "square-check-big", toggleCheckbox, mod("l")),
     lineKind("editor:toggle-blockquote", "Toggle blockquote", "quote", "quote"),
     ...([1, 2, 3, 4, 5, 6] as const).map((n) =>
-      lineKind(`editor:set-heading-${n}`, `Set heading ${n}`, `heading-${n}`, `h${n}`),
+      lineKind(`editor:set-heading-${n}`, `Set as heading ${n}`, `heading-${n}`, `h${n}`),
     ),
-    lineKind("editor:set-body", "Set as body text", "pilcrow", "body"),
+    lineKind("editor:set-heading-0", "Remove heading", "pilcrow", "body"),
+    editorCommand("editor:insert-footnote", "Insert footnote", "file-signature", insertFootnote),
     editorCommand("editor:insert-table", "Insert table", "table", insertBlock(BLOCKS.table.text, BLOCKS.table.caret)),
     editorCommand("editor:insert-callout", "Insert callout", "message-square-quote", insertBlock(BLOCKS.callout.text, BLOCKS.callout.caret)),
     editorCommand("editor:insert-codeblock", "Insert code block", "square-code", insertBlock(BLOCKS.codeBlock.text, BLOCKS.codeBlock.caret)),
     editorCommand("editor:insert-mathblock", "Insert math block", "square-sigma", insertBlock(BLOCKS.mathBlock.text, BLOCKS.mathBlock.caret)),
     editorCommand("editor:insert-horizontal-rule", "Insert horizontal rule", "separator-horizontal", insertBlock(BLOCKS.rule.text, BLOCKS.rule.caret)),
+    editorCommand("insert-current-date", "Templates: Insert current date", "calendar-days", insertText(() => today())),
+    editorCommand("insert-current-time", "Templates: Insert current time", "clock", insertText(() => nowTime())),
+    editorCommand("editor:swap-line-up", "Move line up", "corner-right-up", stateCommand(moveLineUp)),
+    editorCommand("editor:swap-line-down", "Move line down", "corner-right-down", stateCommand(moveLineDown)),
+    editorCommand("editor:add-cursor-above", "Add cursor above", "mouse-pointer-click", addCursorAbove),
+    editorCommand("editor:add-cursor-below", "Add cursor below", "mouse-pointer-click", addCursorBelow),
+    editorCommand("editor:delete-paragraph", "Delete paragraph", "scissors", deleteLine, mod("d")),
+    editorCommand("editor:indent-list", "Indent list item", "indent-increase", stateCommand(indentMore)),
+    editorCommand("editor:unindent-list", "Unindent list item", "indent-decrease", stateCommand(indentLess)),
+    followLink("editor:follow-link", "Follow link under cursor", false, [{ alt: true, key: "enter" }]),
+    followLink("editor:open-link-in-new-leaf", "Open link under cursor in new tab", "tab", mod("enter")),
+    followLink("editor:open-link-in-new-split", "Open link under cursor to the right", "right", mod("enter", { alt: true })),
+    {
+      id: "editor:context-menu",
+      name: "Show context menu under cursor",
+      icon: "menu",
+      when: () => hasNote() && !typingElsewhere(),
+      run: () => parts.editorMenuAtCaret(),
+    },
+    {
+      id: "editor:focus",
+      name: "Focus on last note",
+      when: hasNote,
+      run: () => ws.view.focus(),
+    },
     editorCommand("editor:open-search", "Search current file", "search", openSearchPanel, mod("f")),
     {
       ...editorCommand("editor:open-search-replace", "Search & replace in current file", "replace", openSearchPanel, mod("h")),

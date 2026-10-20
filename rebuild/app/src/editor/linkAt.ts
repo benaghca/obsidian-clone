@@ -1,10 +1,11 @@
 // What link, if any, is at a document position: for the editor's context
-// menu ("Open link", "Open in new tab", "Copy URL").
+// menu ("Open in new tab", "Edit link", "Copy URL") and the link commands.
 
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 
-export type LinkAt = { kind: "internal"; target: string } | { kind: "external"; url: string };
+/** An internal link's target, with where that target text sits (for "Edit link"). */
+export type LinkAt = { kind: "internal"; target: string; from: number; to: number } | { kind: "external"; url: string };
 
 export function linkAt(state: EditorState, pos: number): LinkAt | null {
   const tree = syntaxTree(state);
@@ -12,7 +13,7 @@ export function linkAt(state: EditorState, pos: number): LinkAt | null {
     for (let node: ReturnType<typeof tree.resolveInner> | null = tree.resolveInner(pos, side); node; node = node.parent) {
       if (node.name === "WikiLink") {
         const target = node.getChild("WikiLinkTarget");
-        if (target) return { kind: "internal", target: state.sliceDoc(target.from, target.to).trim() };
+        if (target) return { kind: "internal", target: state.sliceDoc(target.from, target.to).trim(), from: target.from, to: target.to };
       }
       if (node.name === "Link" || node.name === "Image") {
         const url = node.getChild("URL");

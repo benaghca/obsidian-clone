@@ -3,7 +3,7 @@
 // Obsidian's. Read from the note's text after a switch has painted and after
 // the link index refreshes (a second after a save), never on a keystroke.
 
-import { noteName, type Workspace } from "../workspace";
+import { noteName, whereFromEvent, type Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { wikilinkTargets } from "./linksTags";
@@ -61,9 +61,9 @@ export function createOutgoingView(ws: Workspace): SideView {
             class: `tree-item-self outgoing-link-item${c.path ? "" : " is-unresolved"}`,
             title: c.path ?? `${c.name} (not created yet)`,
             onclick: (e: MouseEvent) => {
-              const newTab = e.ctrlKey || e.metaKey;
-              if (c.path) void ws.open(c.path, { newTab });
-              else void ws.openLink(c.name, newTab);
+              const where = whereFromEvent(e);
+              if (c.path) void ws.open(c.path, { where });
+              else void ws.openLink(c.name, where);
             },
           },
           h("div", { class: "tree-item-icon" }, icon(c.path ? "file-text" : "file", 16)),

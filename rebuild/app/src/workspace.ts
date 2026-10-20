@@ -1,14 +1,26 @@
-// App state: the vault's files, the open tabs with their back/forward
-// history, and one EditorState per open note. A single EditorView shows the
-// active tab; switching swaps states, so it costs no re-parse or re-render of
-// unchanged notes.
+// App state: the vault's files, the layout of tab groups (splits, see
+// layout.ts) with each tab's back/forward history, and one EditorState per
+// open note. Each tab group has its own EditorView showing its active tab;
+// switching swaps states, so it costs no re-parse or re-render of unchanged
+// notes.
+//
+// The same note in two panes: the note's main state (with its undo history)
+// is shown by exactly one of them. Every other pane showing that note gets a
+// light mirror state of the same document without a history of its own.
+// Whatever pane a change is typed in, it is applied there and then forwarded
+// to the other panes as a transaction annotated as a copy, so all of them
+// stay in step, each with its own selection and scroll position. Undo in a
+// mirror runs on the main state. Saving and the "doc" event follow the
+// original change only, so a note is still saved once.
 
-import type { EditorState } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { redo, undo } from "@codemirror/commands";
+import { Annotation, EditorSelection, type EditorState, Prec, Transaction, type TransactionSpec } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
 import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef } from "./editor/host";
+import { type Edge, Layout, type LayoutJSON, type TabGroup } from "./layout";
 import { duration, nextFrame, smoothScrollTo } from "./motion";
 
 export interface Tab {
@@ -20,68 +32,233 @@ export interface Tab {
   mode: ViewMode;
   /** A pinned tab keeps its note: links followed from it open in a new tab. */
   pinned: boolean;
+  /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
+  memory: TabMemory | null;
+}
+
+export interface TabMemory {
+  path: string;
+  scrollTop: number;
+  selection: EditorSelection | null;
+}
+
+export type Group = TabGroup<Tab>;
+
+/**
+ * Where to open a note, like Obsidian's: in the tab (false), a new tab, or a
+ * new tab group to the right of (or below) the pane.
+ */
+export type OpenWhere = false | "tab" | "right" | "down";
+
+/** Ctrl/Cmd+Alt+click opens to the right, Ctrl/Cmd+click in a new tab, as in Obsidian. */
+export function whereFromEvent(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): OpenWhere {
+  const mod = e.ctrlKey || e.metaKey;
+  return mod && e.altKey ? "right" : mod ? "tab" : false;
 }
 
 /**
- * "show" fires when the view swaps to a different note (or tab), before
- * "tabs". "mode" fires when a tab switches between editing and reading.
+ * - "files": the vault's file list changed.
+ * - "tabs": a tab bar or view header needs redrawing (tabs, titles, pins, history, active pane).
+ * - "layout": tab groups were added, removed or moved (the split tree changed).
+ * - "pane": a pane swapped to a different note or tab (listeners get the group).
+ * - "show": the active pane now shows a different note, or another pane became active.
+ * - "doc": a note's text changed. "links": the link index refreshed.
+ * - "mode": a tab switched between editing and reading.
  */
-export type Change = "files" | "tabs" | "doc" | "links" | "show" | "mode";
+export type Change = "files" | "tabs" | "layout" | "pane" | "show" | "doc" | "links" | "mode";
+
+/** A tab group's editor and what it shows. */
+interface Pane {
+  group: Group;
+  view: EditorView;
+  scroller: HTMLElement | null;
+  /** The tab and note on screen (null: the empty "New tab" state). */
+  tab: Tab | null;
+  path: string | null;
+}
+
+interface SavedTab {
+  path: string | null;
+  mode: ViewMode;
+  pinned: boolean;
+  back: string[];
+  forward: string[];
+  scroll?: number;
+  sel?: [number, number];
+}
+
+export interface SavedWorkspace {
+  v: 1;
+  root: LayoutJSON<SavedTab>;
+  active: number;
+}
+
+interface ClosedTab {
+  saved: SavedTab;
+  group: Group;
+  index: number;
+}
 
 const SAVE_DELAY = 300;
 const LINK_INDEX_DELAY = 1000;
+const CLOSED_MAX = 20;
+
+/** Marks a change copied from the pane it was typed in to another pane showing the same note. */
+const copied = Annotation.define<boolean>();
 
 export const noteName = (path: string) => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
 export const parentDir = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
+
+/** A saved selection, kept inside a (possibly shorter) document. */
+function clampSelection(sel: EditorSelection, length: number): EditorSelection {
+  return EditorSelection.create(
+    sel.ranges.map((r) => EditorSelection.range(Math.min(r.anchor, length), Math.min(r.head, length))),
+    sel.mainIndex,
+  );
+}
 
 export class Workspace {
   vault: VaultInfo = { path: "", name: "" };
   files: FileEntry[] = [];
   notes: NoteRef[] = [];
   links: LinkIndex = { outgoing: {}, backlinks: {} };
-  tabs: Tab[] = [];
-  active: Tab;
+  layout: Layout<Tab>;
   /** Recently shown notes, most recent first. */
   recent: string[] = [];
-  readonly view: EditorView;
-  /** The element that scrolls the active note (set by the pane). */
-  scroller: HTMLElement | null = null;
   /** Shows the editor's right-click menu (set by the app). */
   editorMenu: EditorHost["contextMenu"];
 
   private nextTabId = 1;
+  private panes = new Map<Group, Pane>();
+  private paneOfView = new Map<EditorView, Pane>();
+  /** Each loaded note's main state: the source of truth, holding its undo history. */
   private states = new Map<string, EditorState>();
+  /** The view showing a note's main state, while any pane shows the note. */
+  private owners = new Map<string, EditorView>();
+  /** Last scroll position per note, for a tab arriving at it through history. */
   private scrollTops = new Map<string, number>();
   private saveTimers = new Map<string, number>();
   private linkTimer = 0;
-  private listeners = new Set<(change: Change) => void>();
+  private listeners = new Set<(change: Change, group?: Group) => void>();
+  private shownKey = "";
+  private closed: ClosedTab[] = [];
   private readonly host: EditorHost;
-  private readonly updates = EditorView.updateListener.of((u) => {
-    const path = this.active.path;
-    if (!path || !u.docChanged) return;
-    this.states.set(path, u.state);
-    if (!u.transactions.some((tr) => tr.isUserEvent("external"))) this.scheduleSave(path);
-    this.emit("doc");
-  });
+  /** Mirrors have no history: undo and redo there act on the note's main state. */
+  private readonly mirrorKeys = Prec.high(
+    keymap.of([
+      { key: "Mod-z", run: (v) => this.historyCommand(v, false), preventDefault: true },
+      { key: "Mod-y", mac: "Mod-Shift-z", run: (v) => this.historyCommand(v, true), preventDefault: true },
+      { linux: "Mod-Shift-z", win: "Mod-Shift-z", run: (v) => this.historyCommand(v, true), preventDefault: true },
+    ]),
+  );
 
   constructor() {
     this.host = {
-      openLink: (target, newTab) => void this.openLink(target, newTab),
+      openLink: (target, where, view) => void this.openLink(target, where, view ? this.paneOfView.get(view)?.group : undefined),
       openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
       notes: () => this.notes,
-      contextMenu: (view, at, pos, keyboard) => this.editorMenu?.(view, at, pos, keyboard),
+      contextMenu: (view, at, pos, keyboard) => {
+        const pane = this.paneOfView.get(view);
+        if (pane) this.focusGroup(pane.group);
+        this.editorMenu?.(view, at, pos, keyboard);
+      },
     };
-    this.view = new EditorView();
-    this.active = this.addTab();
+    this.layout = new Layout(this.blankTab());
+    this.pane(this.layout.activeGroup);
   }
 
-  on(fn: (change: Change) => void) {
+  on(fn: (change: Change, group?: Group) => void) {
     this.listeners.add(fn);
   }
 
-  private emit(change: Change) {
-    for (const fn of this.listeners) fn(change);
+  private emit(change: Change, group?: Group) {
+    for (const fn of this.listeners) fn(change, group);
   }
+
+  // ----- the active pane -----
+
+  get activeGroup(): Group {
+    return this.layout.activeGroup;
+  }
+
+  /** The active pane's tab. */
+  get active(): Tab {
+    return this.layout.activeGroup.active;
+  }
+
+  /** The active pane's tabs. */
+  get tabs(): Tab[] {
+    return this.layout.activeGroup.tabs;
+  }
+
+  /** The active pane's editor. */
+  get view(): EditorView {
+    return this.pane(this.layout.activeGroup).view;
+  }
+
+  /** The element that scrolls the active pane's note. */
+  get scroller(): HTMLElement | null {
+    return this.pane(this.layout.activeGroup).scroller;
+  }
+
+  groups(): Group[] {
+    return this.layout.groups();
+  }
+
+  groupOf(tab: Tab): Group | undefined {
+    return this.layout.groupOf(tab);
+  }
+
+  viewOf(group: Group): EditorView {
+    return this.pane(group).view;
+  }
+
+  groupOfView(view: EditorView): Group | undefined {
+    return this.paneOfView.get(view)?.group;
+  }
+
+  /** The pane (UI) hands over the element that scrolls a group's note; its scroll is restored. */
+  setScroller(group: Group, el: HTMLElement) {
+    const pane = this.pane(group);
+    pane.scroller = el;
+    const memory = pane.tab?.memory;
+    if (memory && memory.path === pane.path) el.scrollTop = memory.scrollTop;
+  }
+
+  /** The tab group's editor, created with the group. */
+  private pane(group: Group): Pane {
+    let pane = this.panes.get(group);
+    if (pane) return pane;
+    const view = new EditorView({ dispatchTransactions: (trs, v) => this.dispatch(trs, v) });
+    pane = { group, view, scroller: null, tab: null, path: null };
+    this.panes.set(group, pane);
+    this.paneOfView.set(view, pane);
+    return pane;
+  }
+
+  /** Make a pane the active one (a click or focus inside it). */
+  focusGroup(group: Group) {
+    if (group === this.layout.activeGroup || !this.panes.has(group)) return;
+    this.layout.activeGroup = group;
+    this.settle();
+  }
+
+  /**
+   * After any change to tabs or panes: redraw the tab bars, and tell the
+   * views following the active pane if it now shows something else.
+   */
+  private settle(layoutChanged = false) {
+    if (layoutChanged) this.emit("layout");
+    this.emit("tabs");
+    const group = this.layout.activeGroup;
+    const key = `${group.id}:${group.active.id}:${group.active.path}`;
+    if (key !== this.shownKey) {
+      this.shownKey = key;
+      this.emit("show");
+    }
+  }
+
+  // ----- vault -----
 
   async init() {
     const last = await api.lastVault();
@@ -119,55 +296,267 @@ export class Workspace {
     return (byPath ?? this.notes.find((n) => n.name.toLowerCase() === name))?.path ?? null;
   }
 
+  // ----- showing notes in panes -----
+
+  /**
+   * Make a group's editor show its active tab. A note already on screen in
+   * another pane gets a mirror state here; otherwise this pane takes the
+   * note's main state. Returns false when it already showed that tab.
+   */
+  private present(group: Group): boolean {
+    const pane = this.pane(group);
+    const tab = group.active;
+    const path = tab.path;
+    if (pane.tab === tab && pane.path === path) {
+      if (path) this.applyMode(pane.view, tab.mode);
+      return false;
+    }
+    if (path && !this.states.has(path)) {
+      // A restored tab whose note isn't loaded yet: show it once it is.
+      void this.load(path).then((state) => {
+        if (state && group.active === tab && this.panes.get(group) === pane && this.present(group)) this.settle();
+      });
+      return false;
+    }
+    this.stash(pane);
+    pane.tab = tab;
+    pane.path = path;
+    if (path) {
+      const memory = tab.memory?.path === path ? tab.memory : null;
+      const owner = this.owners.get(path);
+      if (!owner) {
+        let state = this.states.get(path)!;
+        if (memory?.selection && !memory.selection.eq(state.selection)) {
+          state = state.update({ selection: clampSelection(memory.selection, state.doc.length) }).state;
+        }
+        this.states.set(path, state);
+        if (pane.view.state !== state) pane.view.setState(state);
+        this.owners.set(path, pane.view);
+      } else {
+        const doc = owner.state.doc;
+        pane.view.setState(
+          createNoteState({
+            doc,
+            host: this.host,
+            history: false,
+            extensions: this.mirrorKeys,
+            selection: clampSelection(memory?.selection ?? owner.state.selection, doc.length),
+          }),
+        );
+      }
+      this.applyMode(pane.view, tab.mode);
+      this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
+    }
+    this.emit("pane", group);
+    if (path && pane.scroller) {
+      pane.scroller.scrollTop = memoryOf(tab, path)?.scrollTop ?? this.scrollTops.get(path) ?? 0;
+    }
+    return true;
+  }
+
+  /** Remember where a pane's tab is in its note, and let go of the note. */
+  private stash(pane: Pane) {
+    this.remember(pane);
+    this.release(pane);
+  }
+
+  private remember(pane: Pane) {
+    if (!pane.tab || !pane.path) return;
+    const scrollTop = pane.scroller?.scrollTop ?? 0;
+    pane.tab.memory = { path: pane.path, scrollTop, selection: pane.view.state.selection };
+    this.scrollTops.set(pane.path, scrollTop);
+  }
+
+  /**
+   * The pane stops showing its note. If it held the main state and another
+   * pane still shows the note, that pane takes the main state over (keeping
+   * its own selection and scroll), so a note on screen always has its main
+   * state on screen and edits never have to update a hidden copy.
+   */
+  private release(pane: Pane) {
+    const path = pane.path;
+    pane.tab = null;
+    pane.path = null;
+    if (!path || this.owners.get(path) !== pane.view) return;
+    this.owners.delete(path);
+    this.states.set(path, pane.view.state);
+    const heir = [...this.panes.values()].find((p) => p !== pane && p.path === path);
+    if (!heir) return;
+    const scrollTop = heir.scroller?.scrollTop;
+    const main = this.states.get(path)!;
+    const state = main.update({ selection: clampSelection(heir.view.state.selection, main.doc.length) }).state;
+    this.states.set(path, state);
+    heir.view.setState(state);
+    this.owners.set(path, heir.view);
+    if (heir.tab) this.applyMode(heir.view, heir.tab.mode);
+    if (heir.scroller && scrollTop !== undefined) heir.scroller.scrollTop = scrollTop;
+  }
+
+  /** Configure a view's state for its tab's mode (a no-op when it already is). */
+  private applyMode(view: EditorView, mode: ViewMode) {
+    if (viewModeOf(view.state) !== mode) view.dispatch({ effects: viewModeCompartment.reconfigure(VIEW_MODES[mode]) });
+  }
+
+  /** Every transaction of every pane's editor comes through here. */
+  private dispatch(trs: readonly Transaction[], view: EditorView) {
+    view.update(trs);
+    if (!trs.some((tr) => tr.docChanged)) return;
+    const pane = this.paneOfView.get(view);
+    const path = pane?.path;
+    if (!path) return;
+    if (this.owners.get(path) === view) this.states.set(path, view.state);
+    for (const tr of trs) {
+      if (!tr.docChanged || tr.annotation(copied)) continue;
+      this.forward(path, tr, view);
+      if (!tr.isUserEvent("external")) this.scheduleSave(path);
+    }
+    this.emit("doc");
+  }
+
+  /** Copy a change to every other pane showing the note. */
+  private forward(path: string, tr: Transaction, from: EditorView) {
+    let spec: TransactionSpec | null = null;
+    for (const pane of this.panes.values()) {
+      if (pane.path !== path || pane.view === from) continue;
+      if (!spec) {
+        const userEvent = tr.annotation(Transaction.userEvent);
+        spec = {
+          changes: tr.changes,
+          annotations: userEvent ? [copied.of(true), Transaction.userEvent.of(userEvent)] : [copied.of(true)],
+        };
+      }
+      pane.view.dispatch(spec);
+    }
+  }
+
+  /** Undo or redo from a mirror: run it on the note's main state, which forwards the result. */
+  private historyCommand(view: EditorView, isRedo: boolean): boolean {
+    const path = this.paneOfView.get(view)?.path;
+    const owner = path ? this.owners.get(path) : undefined;
+    if (!owner || owner === view) return false;
+    return (isRedo ? redo : undo)(owner);
+  }
+
   // ----- tabs -----
 
   private blankTab(): Tab {
-    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: "live", pinned: false };
+    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: "live", pinned: false, memory: null };
   }
 
-  addTab(): Tab {
+  newTab(group: Group = this.activeGroup) {
     const tab = this.blankTab();
-    const at = this.active ? this.tabs.indexOf(this.active) + 1 : this.tabs.length;
-    this.tabs.splice(at, 0, tab);
-    return tab;
+    this.layout.addTab(group, tab);
+    this.select(group, tab);
   }
 
-  newTab() {
-    this.activate(this.addTab());
+  /** Show a tab: the active tab of its group, in the active pane. */
+  activate(tab: Tab) {
+    const group = this.layout.groupOf(tab);
+    if (group) this.select(group, tab);
+  }
+
+  private select(group: Group, tab: Tab, focus = true) {
+    if (group.active === tab && this.layout.activeGroup === group && this.panes.get(group)?.tab === tab) return;
+    group.active = tab;
+    this.layout.activeGroup = group;
+    this.present(group);
+    this.settle();
+    if (focus && tab.path) this.pane(group).view.focus();
   }
 
   closeTab(tab: Tab) {
     this.closeTabs([tab]);
   }
 
-  /** Close several tabs at once; the active one passes to its nearest open neighbour. */
+  /**
+   * Close tabs, in any groups. In each group the active tab passes to its
+   * nearest open neighbour; a group left without tabs collapses and gives
+   * its space to its sibling, except the last one, which shows a new empty
+   * tab (Obsidian's "New tab").
+   */
   closeTabs(close: Tab[]) {
-    const gone = new Set(close.filter((t) => this.tabs.includes(t)));
-    if (!gone.size) return;
-    const at = this.tabs.indexOf(this.active);
-    const keep = this.tabs.filter((t) => !gone.has(t));
-    if (!gone.has(this.active)) {
-      this.tabs = keep;
-      return this.emit("tabs");
+    const gone = new Set(close);
+    let layoutChanged = false;
+    const wasActive = this.active;
+    for (const group of this.layout.groups()) {
+      const doomed = group.tabs.filter((t) => gone.has(t));
+      if (!doomed.length) continue;
+      for (const tab of doomed) {
+        this.rememberClosed(tab, group);
+        this.layout.removeTab(tab);
+      }
+      if (group.tabs.length) continue;
+      if (this.layout.groups().length > 1) {
+        this.dropGroup(group);
+        layoutChanged = true;
+      } else {
+        const blank = this.blankTab();
+        group.tabs.push(blank);
+        group.active = blank;
+      }
     }
-    // The nearest survivor to the right of the active tab, else to its left.
-    const next = this.tabs.slice(at + 1).find((t) => !gone.has(t)) ?? [...this.tabs.slice(0, at)].reverse().find((t) => !gone.has(t));
-    this.tabs = keep;
-    if (!next) this.tabs.push(this.blankTab());
-    this.activate(next ?? this.tabs[0], true);
+    for (const group of this.layout.groups()) this.present(group);
+    this.settle(layoutChanged);
+    if (this.active !== wasActive && this.active.path) this.view.focus();
   }
 
-  /** Obsidian's "Close others", "Close tabs to the right" and "Close all" leave pinned tabs open. */
+  /** Close a whole tab group (its tabs can be brought back with Undo close tab). */
+  closeGroup(group: Group = this.activeGroup) {
+    this.closeTabs([...group.tabs]);
+  }
+
+  /** Remove a group's pane and take the group out of the layout. */
+  private dropGroup(group: Group) {
+    const pane = this.panes.get(group);
+    if (pane) {
+      this.stash(pane);
+      this.panes.delete(group);
+      this.paneOfView.delete(pane.view);
+      pane.view.destroy();
+    }
+    this.layout.removeGroup(group);
+  }
+
+  /** Obsidian's "Close others", "Close tabs after" and "Close all" act within the tab's group and leave pinned tabs open. */
   closeOthers(tab: Tab) {
-    this.closeTabs(this.tabs.filter((t) => t !== tab && !t.pinned));
+    this.closeTabs((this.layout.groupOf(tab)?.tabs ?? []).filter((t) => t !== tab && !t.pinned));
+  }
+
+  /** "Close all other tabs": every other unpinned tab, in every group. */
+  closeAllOthers(tab: Tab = this.active) {
+    this.closeTabs(this.layout.tabs().filter((t) => t !== tab && !t.pinned));
   }
 
   closeToRight(tab: Tab) {
-    this.closeTabs(this.tabs.slice(this.tabs.indexOf(tab) + 1).filter((t) => !t.pinned));
+    const tabs = this.layout.groupOf(tab)?.tabs ?? [];
+    this.closeTabs(tabs.slice(tabs.indexOf(tab) + 1).filter((t) => !t.pinned));
   }
 
-  closeAll() {
-    this.closeTabs(this.tabs.filter((t) => !t.pinned));
+  closeAll(group: Group = this.activeGroup) {
+    this.closeTabs(group.tabs.filter((t) => !t.pinned));
+  }
+
+  private rememberClosed(tab: Tab, group: Group) {
+    if (!tab.path) return;
+    this.closed.push({ saved: this.saveTab(tab), group, index: group.tabs.indexOf(tab) });
+    if (this.closed.length > CLOSED_MAX) this.closed.shift();
+  }
+
+  canUndoClose() {
+    return this.closed.some((c) => c.saved.path && this.notes.some((n) => n.path === c.saved.path));
+  }
+
+  /** Obsidian's "Undo close tab": reopen the last closed tab where it was (or in the active pane). */
+  async undoCloseTab() {
+    while (this.closed.length) {
+      const { saved, group: was, index } = this.closed.pop()!;
+      const tab = this.loadTab(saved);
+      if (!tab?.path || !(await this.load(tab.path))) continue;
+      const group = this.layout.groups().includes(was) ? was : this.activeGroup;
+      this.layout.addTab(group, tab, index);
+      this.select(group, tab);
+      return;
+    }
   }
 
   togglePin(tab: Tab = this.active) {
@@ -179,70 +568,172 @@ export class Workspace {
   setMode(mode: ViewMode, tab: Tab = this.active) {
     if (tab.mode === mode) return;
     tab.mode = mode;
-    if (tab === this.active) this.applyMode();
+    for (const pane of this.panes.values()) if (pane.tab === tab && tab.path) this.applyMode(pane.view, mode);
     this.emit("mode");
   }
 
-  /** Configure the shown note's state for the active tab's mode (a no-op when it already is). */
-  private applyMode() {
-    const mode = this.active.path ? this.active.mode : "live";
-    if (viewModeOf(this.view.state) !== mode) {
-      this.view.dispatch({ effects: viewModeCompartment.reconfigure(VIEW_MODES[mode]) });
-    }
-  }
-
-  activate(tab: Tab, force = false) {
-    if (tab === this.active && !force) return;
-    this.rememberScroll();
-    this.active = tab;
-    this.show();
-  }
-
   cycleTab(dir: 1 | -1) {
-    const i = this.tabs.indexOf(this.active);
-    this.activate(this.tabs[(i + dir + this.tabs.length) % this.tabs.length]);
+    const tabs = this.tabs;
+    const i = tabs.indexOf(this.active);
+    this.activate(tabs[(i + dir + tabs.length) % tabs.length]);
+  }
+
+  /** Obsidian's "Go to tab #n" (1-based; 0 means the last tab), in the active pane. */
+  gotoTab(n: number) {
+    const tabs = this.tabs;
+    const tab = n === 0 ? tabs[tabs.length - 1] : tabs[n - 1];
+    if (tab) this.activate(tab);
+  }
+
+  // ----- splits -----
+
+  /**
+   * Split right / Split down: a new tab group beside or below the tab's
+   * group, showing the same note in the same mode and place, made active.
+   */
+  split(tab: Tab = this.active, edge: Edge = "right") {
+    const group = this.layout.groupOf(tab);
+    if (!group) return;
+    const pane = this.panes.get(group);
+    if (pane?.tab === tab) this.remember(pane);
+    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, memory: tab.memory ? { ...tab.memory } : null };
+    const added = this.layout.split(group, edge, [copy]);
+    this.layout.activeGroup = added;
+    this.present(added);
+    this.settle(true);
+    if (copy.path) this.pane(added).view.focus();
+  }
+
+  /** Move a tab to another group (or elsewhere in its own) at a tab-bar position. */
+  moveTab(tab: Tab, to: Group, index: number) {
+    const from = this.layout.groupOf(tab);
+    if (!from) return;
+    const fromPane = this.panes.get(from);
+    if (fromPane?.tab === tab) this.remember(fromPane);
+    if (!this.layout.moveTab(tab, to, index)) return;
+    const collapsed = !this.layout.groups().includes(from);
+    if (collapsed) this.dropPane(from);
+    else this.present(from);
+    this.present(to);
+    this.settle(collapsed);
+    if (tab.path) this.pane(to).view.focus();
+  }
+
+  /**
+   * Move a tab into a new group on an edge of `target`. When the tab was
+   * the only one in its group, that group's editor moves with it, so nothing
+   * is rebuilt or re-rendered.
+   */
+  moveTabToEdge(tab: Tab, target: Group, edge: Edge) {
+    const from = this.layout.groupOf(tab);
+    if (!from) return;
+    const fromPane = this.panes.get(from);
+    if (fromPane?.tab === tab) this.remember(fromPane);
+    const added = this.layout.moveTabToEdge(tab, target, edge);
+    if (!added) return;
+    if (!this.layout.groups().includes(from) && fromPane) {
+      // Hand the editor (already showing this tab) to the new group.
+      this.panes.delete(from);
+      fromPane.group = added;
+      this.panes.set(added, fromPane);
+    } else this.present(from);
+    this.present(added);
+    this.settle(true);
+    if (tab.path) this.pane(added).view.focus();
+  }
+
+  private dropPane(group: Group) {
+    const pane = this.panes.get(group);
+    if (!pane) return;
+    this.stash(pane);
+    this.panes.delete(group);
+    this.paneOfView.delete(pane.view);
+    pane.view.destroy();
+  }
+
+  /** The group beside the active one, if any. */
+  neighbour(edge: Edge, group: Group = this.activeGroup): Group | null {
+    return this.layout.neighbour(group, edge);
+  }
+
+  /** Obsidian's "Focus on tab group to the left" and friends. */
+  focusNeighbour(edge: Edge) {
+    const next = this.neighbour(edge);
+    if (!next) return;
+    this.focusGroup(next);
+    if (next.active.path) this.pane(next).view.focus();
+  }
+
+  /** Move the active tab into the group beside its own, at the end of its tabs. */
+  moveToNeighbour(edge: Edge) {
+    const next = this.neighbour(edge);
+    if (next) this.moveTab(this.active, next, next.tabs.length);
+  }
+
+  /** The layout changed size (a divider was dragged): settle and save. */
+  resized() {
+    this.emit("layout");
   }
 
   // ----- navigation -----
 
   /**
-   * Open a note in the active tab (or a new one), optionally at a 1-based
-   * line (selecting columns `ch` of it) or at a heading.
+   * Open a note in the active pane's tab (or a new tab, or a new pane to the
+   * right or below), optionally at a 1-based line (selecting columns `ch` of
+   * it) or at a heading. `group` opens relative to another pane.
    */
-  async open(path: string, opts: { newTab?: boolean; line?: number; ch?: [number, number]; heading?: string } = {}) {
+  async open(
+    path: string,
+    opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
+  ) {
     const state = await this.load(path);
     if (!state) return;
+    let group = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
+    let where = opts.where ?? false;
+    const current = group.active;
     // A pinned tab keeps its note; anything else opened from it gets a new tab.
-    if (this.active.pinned && this.active.path && this.active.path !== path) opts = { ...opts, newTab: true };
-    const alreadyShown = !opts.newTab && this.active.path === path;
-    this.rememberScroll();
-    let tab = this.active;
-    if (opts.newTab) tab = this.addTab();
-    else if (tab.path !== path && tab.path) {
+    if (!where && current.pinned && current.path && current.path !== path) where = "tab";
+    const alreadyShown = !where && current.path === path && group === this.activeGroup;
+    let tab = current;
+    let layoutChanged = false;
+    if (where === "right" || where === "down") {
+      const pane = this.panes.get(group);
+      if (pane) this.remember(pane);
+      tab = this.blankTab();
+      group = this.layout.split(group, where === "right" ? "right" : "bottom", [tab]);
+      layoutChanged = true;
+    } else if (where === "tab") {
+      tab = this.blankTab();
+      this.layout.addTab(group, tab);
+    } else if (tab.path !== path && tab.path) {
       tab.back.push(tab.path);
       tab.forward = [];
     }
-    if (tab.path !== path || tab !== this.active) {
-      tab.path = path;
-      this.active = tab;
-      this.show();
-    }
-    const doc = this.view.state.doc;
+    tab.path = path;
+    group.active = tab;
+    this.layout.activeGroup = group;
+    this.present(group);
+    this.settle(layoutChanged);
+    const view = this.pane(group).view;
+    const doc = view.state.doc;
     const line = opts.line ? doc.line(Math.min(opts.line, doc.lines)) : null;
     const pos = line ? line.from : opts.heading ? headingPos(doc, opts.heading) : null;
-    if (pos === null) return;
+    if (pos === null) {
+      view.focus();
+      return;
+    }
     const clamp = (ch: number) => Math.min(line!.to, line!.from + ch);
     const selection = line && opts.ch ? { anchor: clamp(opts.ch[0]), head: clamp(opts.ch[1]) } : { anchor: pos };
     // Within the note on screen the jump glides; into a just-switched note
     // it lands at once, so the first frame already shows the target.
     if (alreadyShown) this.jumpTo(selection);
     else {
-      this.view.dispatch({ selection, effects: EditorView.scrollIntoView(selection.anchor, { y: "center" }) });
-      this.view.focus();
+      view.dispatch({ selection, effects: EditorView.scrollIntoView(selection.anchor, { y: "center" }) });
+      view.focus();
     }
   }
 
-  /** Put the caret (or a selection) in the open note and glide it into view. */
+  /** Put the caret (or a selection) in the active pane's note and glide it into view. */
   jumpTo(selection: { anchor: number; head?: number }) {
     this.view.dispatch({ selection });
     void this.glideTo(selection.anchor);
@@ -250,32 +741,33 @@ export class Workspace {
   }
 
   /** Follow a link target: "Note", "Note#Heading", or "#Heading" in the open note. */
-  async openLink(target: string, newTab = false) {
+  async openLink(target: string, where: OpenWhere = false, group: Group = this.activeGroup) {
     const hash = target.indexOf("#");
     const name = (hash < 0 ? target : target.slice(0, hash)).trim();
     const heading = hash < 0 ? undefined : target.slice(hash + 1);
-    let path = name ? this.resolve(name) : this.active.path;
+    let path = name ? this.resolve(name) : group.active.path;
     if (!path) {
       if (!name) return;
       path = (await this.createNote(`${name}.md`)).path;
     }
-    await this.open(path, { newTab, heading });
+    await this.open(path, { where, heading, group });
   }
 
   /**
-   * Smoothly scroll a document position to the middle of the view. A long jump
-   * cuts to one screen short of the target first, so the editor never has to
-   * render every line in between.
+   * Smoothly scroll a document position to the middle of the active pane. A
+   * long jump cuts to one screen short of the target first, so the editor
+   * never has to render every line in between.
    */
   private async glideTo(pos: number) {
     const scroller = this.scroller;
+    const view = this.view;
     if (!scroller || duration("slow") <= 0) {
-      this.view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
       return;
     }
     const targetTop = () => {
-      const block = this.view.lineBlockAt(pos);
-      const docTop = this.view.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const block = view.lineBlockAt(pos);
+      const docTop = view.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
       const top = docTop + block.top - (scroller.clientHeight - block.height) / 2;
       return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, top));
     };
@@ -291,23 +783,28 @@ export class Workspace {
     await smoothScrollTo(scroller, targetTop);
   }
 
+  /** Back and forward walk the active pane's own history. */
   async goBack() {
-    await this.travel(this.active.back, this.active.forward);
+    await this.travel(-1);
   }
 
   async goForward() {
-    await this.travel(this.active.forward, this.active.back);
+    await this.travel(1);
   }
 
-  private async travel(from: string[], to: string[]) {
-    const tab = this.active;
-    const path = from.pop();
-    if (!path) return;
-    if (!(await this.load(path))) return;
-    this.rememberScroll();
+  private async travel(dir: 1 | -1) {
+    const group = this.activeGroup;
+    const tab = group.active;
+    const from = dir < 0 ? tab.back : tab.forward;
+    const to = dir < 0 ? tab.forward : tab.back;
+    const path = from[from.length - 1];
+    if (!path || !(await this.load(path))) return;
+    from.pop();
     if (tab.path) to.push(tab.path);
     tab.path = path;
-    this.show();
+    if (group.active === tab) this.present(group);
+    this.settle();
+    if (group === this.activeGroup) this.pane(group).view.focus();
   }
 
   private async load(path: string): Promise<EditorState | null> {
@@ -315,7 +812,9 @@ export class Workspace {
     if (state) return state;
     try {
       const doc = await api.readNote(path);
-      state = createNoteState({ doc, host: this.host, extensions: this.updates });
+      state = this.states.get(path); // loaded meanwhile
+      if (state) return state;
+      state = createNoteState({ doc, host: this.host });
       this.states.set(path, state);
       return state;
     } catch (err) {
@@ -324,22 +823,60 @@ export class Workspace {
     }
   }
 
-  private rememberScroll() {
-    if (this.active?.path && this.scroller) this.scrollTops.set(this.active.path, this.scroller.scrollTop);
+  // ----- saving and restoring the layout -----
+
+  private saveTab(tab: Tab): SavedTab {
+    const saved: SavedTab = { path: tab.path, mode: tab.mode, pinned: tab.pinned, back: tab.back.slice(-20), forward: tab.forward.slice(-20) };
+    const pane = [...this.panes.values()].find((p) => p.tab === tab);
+    if (pane) this.remember(pane);
+    const memory = tab.memory?.path === tab.path ? tab.memory : null;
+    if (memory) {
+      saved.scroll = Math.round(memory.scrollTop);
+      if (memory.selection) saved.sel = [memory.selection.main.anchor, memory.selection.main.head];
+    }
+    return saved;
   }
 
-  private show() {
-    const path = this.active.path;
-    if (path) {
-      this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
-      const state = this.states.get(path)!;
-      if (this.view.state !== state) this.view.setState(state);
-      this.applyMode();
+  private loadTab(saved: SavedTab): Tab | null {
+    if (!saved || typeof saved !== "object") return null;
+    const exists = (p: unknown): p is string => typeof p === "string" && this.notes.some((n) => n.path === p);
+    const path = saved.path === null ? null : exists(saved.path) ? saved.path : undefined;
+    if (path === undefined) return null; // its note is gone
+    const tab = this.blankTab();
+    tab.path = path;
+    tab.mode = saved.mode === "source" || saved.mode === "reading" ? saved.mode : "live";
+    tab.pinned = saved.pinned === true;
+    tab.back = Array.isArray(saved.back) ? saved.back.filter(exists) : [];
+    tab.forward = Array.isArray(saved.forward) ? saved.forward.filter(exists) : [];
+    if (path && typeof saved.scroll === "number") {
+      const sel = Array.isArray(saved.sel) ? EditorSelection.single(Number(saved.sel[0]) || 0, Number(saved.sel[1]) || 0) : null;
+      tab.memory = { path, scrollTop: saved.scroll, selection: sel };
     }
-    this.emit("show");
-    this.emit("tabs");
-    if (path && this.scroller) this.scroller.scrollTop = this.scrollTops.get(path) ?? 0;
-    if (path) this.view.focus();
+    return tab;
+  }
+
+  /** The split tree, sizes, each group's tabs and active tab, and the active pane. */
+  saveLayout(): SavedWorkspace {
+    return { v: 1, root: this.layout.toJSON((t) => this.saveTab(t)), active: this.layout.groups().indexOf(this.activeGroup) };
+  }
+
+  /**
+   * Put back a saved layout (notes that no longer exist are dropped
+   * quietly). Returns false if nothing could be restored.
+   */
+  async restoreLayout(saved: unknown): Promise<boolean> {
+    if (!saved || typeof saved !== "object" || (saved as SavedWorkspace).v !== 1) return false;
+    const { root, active } = saved as SavedWorkspace;
+    const layout = Layout.fromJSON<Tab, SavedTab>(root, (s) => this.loadTab(s), active);
+    if (!layout || !layout.tabs().some((t) => t.path)) return false;
+    await Promise.all(layout.groups().map((g) => (g.active.path ? this.load(g.active.path) : null)));
+    for (const pane of [...this.panes.values()]) this.dropPane(pane.group);
+    this.layout = layout;
+    for (const group of layout.groups()) this.present(group);
+    this.shownKey = "";
+    this.settle(true);
+    if (this.active.path) this.view.focus();
+    return true;
   }
 
   // ----- files -----
@@ -351,9 +888,9 @@ export class Workspace {
   }
 
   /** Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (the vault root by default) and open it. */
-  async newNote(folder = ""): Promise<string> {
+  async newNote(folder = "", where?: OpenWhere): Promise<string> {
     const entry = await this.createNote(this.freeName(folder, ".md"));
-    await this.open(entry.path, { newTab: this.active.path !== null });
+    await this.open(entry.path, { where: where ?? (this.active.path !== null ? "tab" : false) });
     return entry.path;
   }
 
@@ -388,22 +925,29 @@ export class Workspace {
     await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
     await api.renamePath(from, to);
     const swap = (p: string) => (under(p) ? to + p.slice(from.length) : p);
-    for (const map of [this.states, this.scrollTops] as Map<string, unknown>[]) {
+    for (const map of [this.states, this.scrollTops, this.owners] as Map<string, unknown>[]) {
       for (const [key, value] of [...map]) {
         if (!under(key)) continue;
         map.delete(key);
         map.set(swap(key), value);
       }
     }
-    for (const tab of this.tabs) {
+    for (const tab of this.layout.tabs()) {
       if (tab.path) tab.path = swap(tab.path);
       tab.back = tab.back.map(swap);
       tab.forward = tab.forward.map(swap);
+      if (tab.memory) tab.memory.path = swap(tab.memory.path);
+    }
+    for (const pane of this.panes.values()) if (pane.path) pane.path = swap(pane.path);
+    for (const c of this.closed) {
+      if (c.saved.path) c.saved.path = swap(c.saved.path);
     }
     this.recent = this.recent.map(swap);
     for (const fn of this.moveListeners) fn(swap);
     await this.refreshFiles();
     this.emit("tabs");
+    this.shownKey = "";
+    this.settle();
     void this.refreshLinks();
   }
 
@@ -430,10 +974,15 @@ export class Workspace {
     return entry.path;
   }
 
+  /** The text of a note: from the editor if it is loaded (unsaved edits included), else from disk. */
+  async text(path: string): Promise<string> {
+    return this.states.get(path)?.doc.toString() ?? (await api.readNote(path));
+  }
+
   /** Obsidian's "Make a copy": "Name 1.md" beside the note, opened in the active tab. */
   async makeCopy(path: string): Promise<string> {
     await this.flush(path);
-    const content = this.states.get(path)?.doc.toString() ?? (await api.readNote(path));
+    const content = await this.text(path);
     const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
     const base = path.replace(/\.md$/, "");
     let n = 1;
@@ -443,25 +992,65 @@ export class Workspace {
     return entry.path;
   }
 
+  /**
+   * Obsidian's "Merge entire file with...": append this note's text to
+   * another note (after a blank line), then delete this one. The other note
+   * opens where this one was.
+   */
+  async mergeInto(path: string, into: string) {
+    if (path === into) return;
+    const [text, target] = await Promise.all([this.text(path), this.load(into)]);
+    if (!target) return;
+    const doc = this.owners.get(into)?.state.doc ?? this.states.get(into)?.doc ?? target.doc;
+    const sep = !doc.length ? "" : doc.sliceString(doc.length - 1) === "\n" ? "\n" : "\n\n";
+    this.change(into, { changes: { from: doc.length, insert: sep + text } });
+    await this.flush(into);
+    const showing = this.layout.tabs().filter((t) => t.path === path);
+    await this.remove(path);
+    for (const tab of showing) {
+      tab.path = into;
+      tab.memory = null;
+    }
+    for (const group of this.layout.groups()) this.present(group);
+    this.settle();
+  }
+
+  /** Apply a change to a note from outside its editors (wherever it is shown, or just its state). */
+  private change(path: string, spec: TransactionSpec) {
+    const owner = this.owners.get(path);
+    if (owner) {
+      owner.dispatch(spec);
+      return;
+    }
+    const state = this.states.get(path);
+    if (!state) return;
+    const tr = state.update(spec);
+    this.states.set(path, tr.state);
+    if (tr.docChanged && !tr.isUserEvent("external")) this.scheduleSave(path);
+  }
+
   /** Delete a note or folder (the backend moves it to the vault's .trash). */
   async remove(path: string) {
     const under = (p: string) => p === path || p.startsWith(path + "/");
     await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
     await api.deletePath(path);
+    for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.release(pane);
     for (const p of [...this.states.keys()].filter(under)) this.states.delete(p);
     for (const p of [...this.scrollTops.keys()].filter(under)) this.scrollTops.delete(p);
     this.recent = this.recent.filter((p) => !under(p));
-    for (const tab of this.tabs) {
+    this.closed = this.closed.filter((c) => !c.saved.path || !under(c.saved.path));
+    for (const tab of this.layout.tabs()) {
       tab.back = tab.back.filter((p) => !under(p));
       tab.forward = tab.forward.filter((p) => !under(p));
       if (tab.path && under(tab.path)) tab.path = null;
     }
     await this.refreshFiles();
-    this.show();
+    for (const group of this.layout.groups()) this.present(group);
+    this.settle();
     void this.refreshLinks();
   }
 
-  // ----- saving -----
+  // ----- saving notes -----
 
   private scheduleSave(path: string) {
     clearTimeout(this.saveTimers.get(path));
@@ -489,6 +1078,11 @@ export class Workspace {
     }
   }
 
+  /** Save the active note now (Obsidian's "Save current file"). */
+  async saveNow(path = this.active.path) {
+    if (path) await this.flush(path);
+  }
+
   async flushAll() {
     await Promise.all([...this.saveTimers.keys()].map((p) => this.flush(p)));
   }
@@ -502,11 +1096,12 @@ export class Workspace {
       if (!state || this.saveTimers.has(path)) continue;
       if (kind === "remove") continue;
       const doc = await api.readNote(path).catch(() => null);
-      if (doc === null || doc === state.doc.toString()) continue;
-      const tr = state.update({ changes: { from: 0, to: state.doc.length, insert: doc }, userEvent: "external" });
-      if (this.active.path === path) this.view.dispatch(tr);
-      else this.states.set(path, tr.state);
+      const current = this.owners.get(path)?.state.doc ?? this.states.get(path)?.doc;
+      if (doc === null || !current || doc === current.toString()) continue;
+      this.change(path, { changes: { from: 0, to: current.length, insert: doc }, userEvent: "external" });
     }
     void this.refreshLinks();
   }
 }
+
+const memoryOf = (tab: Tab, path: string) => (tab.memory?.path === path ? tab.memory : null);

@@ -1,15 +1,16 @@
 // Ctrl+O quick switcher: the shared prompt with notes as items (fuzzy
 // matches with bolded letters, recent notes first for an empty query).
 
-import { parentDir, type Workspace } from "../workspace";
+import { parentDir, whereFromEvent, type Workspace } from "../workspace";
 import { h } from "./dom";
 import { highlight } from "./fuzzy";
-import { modKey } from "./keys";
+import { altKey, modKey } from "./keys";
 import { openPrompt } from "./prompt";
 import { type SwitcherItem, switcherItems } from "./switcherItems";
 
+// Enter opens in the tab, Ctrl/Cmd+Enter in a new tab, Ctrl/Cmd+Alt+Enter
+// to the right, as in Obsidian (a click works the same with the modifiers).
 export function openQuickSwitcher(ws: Workspace) {
-  const newTab = (e: KeyboardEvent | MouseEvent) => e.ctrlKey || e.metaKey;
   openPrompt<SwitcherItem>({
     placeholder: "Find or create a note...",
     emptyText: "No notes found.",
@@ -17,6 +18,7 @@ export function openQuickSwitcher(ws: Workspace) {
       ["↑↓", "to navigate"],
       ["↵", "to open"],
       [`${modKey} ↵`, "to open in new tab"],
+      [`${modKey} ${altKey} ↵`, "to open to the right"],
       ["shift ↵", "to create"],
       ["esc", "to dismiss"],
     ],
@@ -28,13 +30,13 @@ export function openQuickSwitcher(ws: Workspace) {
       else if (parentDir(item.path)) content.append(h("div", { class: "suggestion-note" }, parentDir(item.path)));
     },
     choose(item, e) {
-      if (item.path) void ws.open(item.path, { newTab: newTab(e) });
-      else void ws.openLink(item.name, newTab(e));
+      if (item.path) void ws.open(item.path, { where: whereFromEvent(e) });
+      else void ws.openLink(item.name, whereFromEvent(e));
     },
     onKey(e, _selected, query, close) {
       if (e.key !== "Enter" || !e.shiftKey || !query.trim()) return false;
       close(false);
-      void ws.openLink(query.trim(), newTab(e));
+      void ws.openLink(query.trim(), whereFromEvent(e));
       return true;
     },
   });

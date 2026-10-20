@@ -485,22 +485,191 @@ body {
   font-size: var(--font-ui-smaller);
 }
 
-/* ----- main pane ----- */
+/* ----- main workspace: tab groups in splits (shell/pane.ts) ----- */
 
+/* Splits lay their children out by flex-grow (each child's fraction), so a
+   window resize scales every pane; a divider drag writes two flex-grows. */
 .mod-root {
   flex: 1;
   min-width: 0;
   display: flex;
+  position: relative;
+}
+.mod-root .workspace-split {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.mod-root .workspace-split.mod-vertical {
+  flex-direction: row;
+}
+.mod-root .workspace-split.mod-horizontal {
+  flex-direction: column;
+}
+.workspace-tabs {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--background-primary);
 }
 .workspace-leaf {
   flex: 1;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   background: var(--background-primary);
 }
 
-/* tab strip: doubles as the title bar */
+/* Dividers between panes: a 1px line on the boundary with a wider grab
+   area, like Obsidian's. Hovering a moment or dragging lights it in the
+   accent (an opacity fade on a second bar, nothing else moves). */
+.mod-root .workspace-leaf-resize-handle {
+  position: absolute;
+  z-index: 6;
+}
+.mod-root .workspace-split.mod-vertical > .workspace-leaf-resize-handle {
+  top: 0;
+  bottom: 0;
+  left: var(--at);
+  width: 7px;
+  margin-left: -3px;
+  cursor: col-resize;
+}
+.mod-root .workspace-split.mod-horizontal > .workspace-leaf-resize-handle {
+  left: 0;
+  right: 0;
+  top: var(--at);
+  height: 7px;
+  margin-top: -3px;
+  cursor: row-resize;
+}
+.mod-root .workspace-leaf-resize-handle::before,
+.mod-root .workspace-leaf-resize-handle::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.mod-root .mod-vertical > .workspace-leaf-resize-handle::before {
+  left: 3px;
+  width: 1px;
+  background: var(--background-modifier-border);
+}
+.mod-root .mod-horizontal > .workspace-leaf-resize-handle::before {
+  top: 3px;
+  height: 1px;
+  background: var(--background-modifier-border);
+}
+.mod-root .mod-vertical > .workspace-leaf-resize-handle::after {
+  left: 2px;
+  width: 3px;
+}
+.mod-root .mod-horizontal > .workspace-leaf-resize-handle::after {
+  top: 2px;
+  height: 3px;
+}
+.mod-root .workspace-leaf-resize-handle::after {
+  background: var(--interactive-accent);
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-out);
+}
+.mod-root .workspace-leaf-resize-handle:hover::after {
+  opacity: 1;
+  transition-delay: 0.3s;
+}
+.mod-root .workspace-leaf-resize-handle.is-dragging::after {
+  opacity: 1;
+  transition-delay: 0s;
+}
+body.is-resizing-x,
+body.is-resizing-x * {
+  cursor: col-resize !important;
+}
+body.is-resizing-y,
+body.is-resizing-y * {
+  cursor: row-resize !important;
+}
+body.is-grabbing,
+body.is-grabbing * {
+  cursor: grabbing !important;
+}
+
+/* The active pane: with more than one, the others' active tab and title
+   read slightly muted, as in Obsidian. Nothing else marks it. */
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .workspace-tab-header.is-active .workspace-tab-header-inner,
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header-title {
+  color: var(--text-muted);
+}
+
+/* Dragging a tab: where it will land, and the tab under the pointer. The
+   overlay is sized to the whole workspace and placed by a transform, so it
+   glides between places without layout. */
+.workspace-drop-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  pointer-events: none;
+  transform-origin: 0 0;
+  border-radius: var(--radius-m);
+  background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.22);
+  opacity: 0;
+  transition:
+    transform var(--anim-duration-fast) var(--anim-ease-in-out),
+    opacity var(--anim-duration-fast) var(--anim-ease-out);
+}
+.workspace-drop-overlay.is-visible {
+  opacity: 1;
+}
+.workspace-drop-overlay.is-placing {
+  transition: none;
+}
+.workspace-drop-overlay.is-closing {
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-in);
+}
+.drag-ghost {
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+  animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+.drag-ghost .svg-icon {
+  color: var(--icon-color);
+}
+.drag-ghost-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drag-ghost.is-closing {
+  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
+}
+.workspace-tab-header.is-being-dragged {
+  opacity: 0.5;
+}
+
+/* tab strip: the top ones double as the title bar */
 .mod-root .workspace-tab-header-container {
   height: var(--header-height);
   flex: none;
@@ -509,6 +678,8 @@ body {
   background: var(--background-secondary);
   border-bottom: 1px solid var(--background-modifier-border);
   padding: 0 4px 0 8px;
+}
+.mod-root .workspace-tabs.mod-top > .workspace-tab-header-container {
   -webkit-app-region: drag;
 }
 /* Tabs share the strip like Obsidian's: each is a full tab width while
@@ -621,6 +792,13 @@ body {
   margin: 0 0 2px 2px;
   -webkit-app-region: no-drag;
 }
+/* Only the pane in the top-right corner has the right sidebar's button. */
+.workspace-tabs:not(.mod-top-right-space) .sidebar-toggle-button.mod-right {
+  display: none;
+}
+.is-ribbon-hidden .workspace-ribbon {
+  display: none;
+}
 
 /* Frameless window (Tauri): the window buttons float in the top-right
    corner, and the rightmost header leaves room for them. */
@@ -639,10 +817,10 @@ body {
   padding: 0 6px;
   -webkit-app-region: no-drag;
 }
-.is-frameless .mod-root .workspace-tab-header-container {
+.is-frameless .mod-root .mod-top-right-space > .workspace-tab-header-container {
   transition: padding-right var(--anim-duration-sidebar) var(--anim-ease-out);
 }
-.is-frameless.is-right-sidebar-collapsed .mod-root .workspace-tab-header-container {
+.is-frameless.is-right-sidebar-collapsed .mod-root .mod-top-right-space > .workspace-tab-header-container {
   padding-right: calc(4px + var(--titlebar-buttons-width));
 }
 .is-frameless .mod-right-split > .workspace-tab-header-container {
@@ -711,6 +889,9 @@ body {
   max-width: var(--file-line-width);
   margin: 0 auto;
   padding-top: 24px;
+}
+.is-readable-line-length-off .markdown-sizer {
+  max-width: none;
 }
 /* note switch: shown on the first frame at reduced opacity, eased to full */
 .markdown-sizer.mod-note-in-a {

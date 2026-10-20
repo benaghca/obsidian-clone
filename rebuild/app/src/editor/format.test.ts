@@ -1,7 +1,7 @@
 import { insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
-import { expect, test } from "vitest";
-import { insertBlock, insertMarkdownLink, insertWikilink, setLineKind, stripFormatting, toggleCheckbox, toggleWrap } from "./format";
+import { describe, expect, it, test } from "vitest";
+import { insertBlock, insertFootnote, insertMarkdownLink, insertWikilink, setLineKind, stripFormatting, toggleCheckbox, toggleWrap } from "./format";
 import { linkAt } from "./linkAt";
 import { Tag, WikiLink } from "./syntax";
 
@@ -82,8 +82,25 @@ test("linkAt finds wikilinks, markdown links and bare URLs at a position", () =>
     extensions: markdown({ base: markdownLanguage, extensions: [WikiLink, Tag] }),
   });
   const at = (s: string) => linkAt(state, state.doc.toString().indexOf(s) + 1);
-  expect(at("Note")).toEqual({ kind: "internal", target: "Note#Head" }); // openLink follows the heading
+  expect(at("Note")).toMatchObject({ kind: "internal", target: "Note#Head" }); // openLink follows the heading
   expect(at("site")).toEqual({ kind: "external", url: "https://x.org" });
   expect(at("y.org")).toEqual({ kind: "external", url: "https://y.org" });
   expect(at("end")).toBeNull();
+});
+
+describe("insertFootnote", () => {
+  it("numbers after the highest footnote and adds its definition at the end", () => {
+    const state = EditorState.create({ doc: "One[^1] two\n\n[^1]: first", selection: { anchor: 11 } });
+    let next = state;
+    insertFootnote({ state, dispatch: (tr) => (next = tr.state) });
+    expect(next.doc.toString()).toBe("One[^1] two[^2]\n\n[^1]: first\n\n[^2]: ");
+    expect(next.selection.main.head).toBe(next.doc.length);
+  });
+
+  it("works in an empty note", () => {
+    const state = EditorState.create({ doc: "" });
+    let next = state;
+    insertFootnote({ state, dispatch: (tr) => (next = tr.state) });
+    expect(next.doc.toString()).toBe("[^1]\n\n[^1]: ");
+  });
 });

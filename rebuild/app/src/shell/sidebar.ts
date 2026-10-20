@@ -6,10 +6,11 @@ import { api, type FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
-import { noteName, type Workspace } from "../workspace";
+import { noteName, whereFromEvent, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { type MenuItems, showMenu } from "./menu";
+import { matchesPath, parseSearchQuery } from "./searchQuery";
 import type { Menus } from "./menus";
 
 export type LeftView = "files" | "search" | "bookmarks";
@@ -240,10 +241,10 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
           onclick: (e: MouseEvent) => {
             if ((e.target as HTMLElement).isContentEditable) return;
             if (entry.is_dir) toggleFolder(node, depth, folder!, chevron!);
-            else void ws.open(entry.path, { newTab: e.ctrlKey || e.metaKey });
+            else void ws.open(entry.path, { where: whereFromEvent(e) });
           },
           onauxclick: (e: MouseEvent) => {
-            if (e.button === 1 && !entry.is_dir) void ws.open(entry.path, { newTab: true });
+            if (e.button === 1 && !entry.is_dir) void ws.open(entry.path, { where: "tab" });
           },
           oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry)),
         },
@@ -380,7 +381,7 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
             "data-path": path,
             onclick: (e: MouseEvent) => {
               if (entry.is_dir) revealFolder(path);
-              else void ws.open(path, { newTab: e.ctrlKey || e.metaKey });
+              else void ws.open(path, { where: whereFromEvent(e) });
             },
             oncontextmenu: (e: MouseEvent) => {
               e.preventDefault();
@@ -411,10 +412,17 @@ function createSearchView(ws: Workspace): { el: HTMLElement; search(query: strin
   let seq = 0;
 
   input.addEventListener("input", async () => {
-    const query = input.value.trim();
+    // `path:` (from "Search in folder") narrows the hits to a folder; on its
+    // own it lists the folder's notes.
+    const { text: query, path: folder } = parseSearchQuery(input.value);
     const mine = ++seq;
-    const hits = query ? await api.search(query, 100) : [];
+    let hits = query ? await api.search(query, folder ? 1000 : 100) : [];
     if (mine !== seq) return;
+    if (folder) {
+      hits = query
+        ? hits.filter((hit) => matchesPath(hit.path, folder)).slice(0, 100)
+        : ws.notes.filter((n) => matchesPath(n.path, folder)).map((n) => ({ path: n.path, line: 0, text: "" }));
+    }
     const byFile = new Map<string, typeof hits>();
     for (const hit of hits) byFile.set(hit.path, [...(byFile.get(hit.path) ?? []), hit]);
     results.replaceChildren(
@@ -424,11 +432,11 @@ function createSearchView(ws: Workspace): { el: HTMLElement; search(query: strin
           { class: "search-result" },
           h(
             "div",
-            { class: "search-result-file-title", onclick: () => void ws.open(path) },
+            { class: "search-result-file-title", onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
             noteName(path),
-            h("span", { class: "search-result-count" }, String(fileHits.length)),
+            query ? h("span", { class: "search-result-count" }, String(fileHits.length)) : null,
           ),
-          ...fileHits.slice(0, 5).map((hit) =>
+          ...fileHits.filter((hit) => hit.line > 0).slice(0, 5).map((hit) =>
             h(
               "div",
               { class: "search-result-file-match", onclick: () => void ws.open(path, { line: hit.line }) },
@@ -438,7 +446,7 @@ function createSearchView(ws: Workspace): { el: HTMLElement; search(query: strin
         ),
       ),
     );
-    if (query && !hits.length) results.append(h("div", { class: "pane-empty" }, "No matches found."));
+    if ((query || folder) && !hits.length) results.append(h("div", { class: "pane-empty" }, "No matches found."));
   });
 
   return {

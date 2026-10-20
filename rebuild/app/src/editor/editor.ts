@@ -6,7 +6,7 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { deleteMarkupBackward, insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { indentUnit } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, type Extension, Prec } from "@codemirror/state";
+import { Compartment, type EditorSelection, EditorState, type Extension, Prec, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { countsField } from "./counts";
 import { type EditorHost, editorHost } from "./host";
@@ -89,18 +89,25 @@ const contextMenu = EditorView.domEventHandlers({
 });
 
 export interface NoteStateOptions {
-  doc: string;
+  doc: string | Text;
   host: EditorHost;
-  /** Extra extensions from the pane, e.g. an update listener. */
+  /** Extra extensions from the workspace, e.g. a mirror's undo keys. */
   extensions?: Extension;
+  /**
+   * A note's main state keeps its undo history. A mirror (the same note in
+   * a second pane) has none: its undo acts on the main state.
+   */
+  history?: boolean;
+  selection?: EditorSelection;
 }
 
-export function createNoteState({ doc, host, extensions = [] }: NoteStateOptions): EditorState {
+export function createNoteState({ doc, host, extensions = [], history: withHistory = true, selection }: NoteStateOptions): EditorState {
   return EditorState.create({
     doc,
+    selection,
     extensions: [
       editorHost.of(host),
-      history(),
+      withHistory ? history() : [],
       drawSelection(),
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),

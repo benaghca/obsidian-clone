@@ -9,9 +9,12 @@ export interface NoteRef {
   path: string;
 }
 
+/** Where a followed link opens: the same tab, a new tab, or a new pane to the right. */
+export type LinkTarget = false | "tab" | "right";
+
 export interface EditorHost {
-  /** Follow a [[wikilink]] target (note name, optionally with #heading). */
-  openLink(target: string, newTab: boolean): void;
+  /** Follow a [[wikilink]] target (note name, optionally with #heading), from the pane of `view`. */
+  openLink(target: string, where: LinkTarget, view?: EditorView): void;
   openUrl(url: string): void;
   notes(): NoteRef[];
   /** Show the editor menu at `at` for document position `pos` (the caret is already there). */
