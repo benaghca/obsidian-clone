@@ -8,7 +8,11 @@ use std::time::SystemTime;
 /// Marker on temp files created by [`atomic_write`]. The watcher ignores these.
 pub const TEMP_MARK: &str = ".grove-tmp";
 
-const SKIP_DIRS: &[&str] = &[".obsidian", ".git", ".trash"];
+/// The vault's own settings folder (Grove's `.obsidian/`). Hidden like the others: never
+/// listed, searched, indexed or reported by the watcher; only the config commands touch it.
+pub const CONFIG_DIR: &str = ".grove";
+
+const SKIP_DIRS: &[&str] = &[".obsidian", ".git", ".trash", CONFIG_DIR];
 
 pub fn mtime_ms(md: &fs::Metadata) -> u64 {
     md.modified()
@@ -89,6 +93,30 @@ fn ensure_inside(root: &Path, full: &Path) -> Result<(), String> {
             return Err(format!("invalid path: {}", full.display()));
         }
     }
+}
+
+/// Largest settings file the config commands read or write.
+pub const CONFIG_MAX_BYTES: usize = 1 << 20;
+
+/// Absolute path of a settings file in the vault's config folder. `name` must be a plain
+/// lower-case file name ending in `.json` (`app.json`, `core-plugins.json`): no folders, no
+/// dots before the extension, so nothing outside `.grove/` can be named. The folder itself
+/// must not lead outside the vault (a symlinked `.grove` is refused).
+pub fn config_file(root: &Path, name: &str) -> Result<PathBuf, String> {
+    let stem = name
+        .strip_suffix(".json")
+        .ok_or_else(|| format!("invalid config name: {name}"))?;
+    let valid = !stem.is_empty()
+        && stem.len() <= 64
+        && stem
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-');
+    if !valid {
+        return Err(format!("invalid config name: {name}"));
+    }
+    let full = root.join(CONFIG_DIR).join(name);
+    ensure_inside(root, &full)?;
+    Ok(full)
 }
 
 /// Write `bytes` via a temp file in the same directory, then rename over `path`.
@@ -193,6 +221,7 @@ mod tests {
             ".trash/x.md",
             "a/.git/config",
             ".obsidian/app.json",
+            ".grove/app.json",
             r"a\b",
             "C:/x",
             "a//b",
@@ -200,6 +229,43 @@ mod tests {
         ] {
             assert!(normalize_rel(bad).is_err(), "{bad} should be rejected");
         }
+    }
+
+    #[test]
+    fn config_file_names_stay_in_the_config_folder() {
+        let dir = tmp_dir("config-name");
+        let root = dir.path.canonicalize().unwrap();
+        assert_eq!(
+            config_file(&root, "app.json").unwrap(),
+            root.join(".grove").join("app.json")
+        );
+        assert!(config_file(&root, "core-plugins.json").is_ok());
+        for bad in [
+            "",
+            ".json",
+            "app",
+            "app.txt",
+            "App.json",
+            "a.b.json",
+            "../app.json",
+            "x/app.json",
+            "/etc/passwd.json",
+            "app.json/",
+            r"a\b.json",
+            "app .json",
+        ] {
+            assert!(config_file(&root, bad).is_err(), "{bad} should be rejected");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn config_folder_symlinked_outside_is_refused() {
+        let dir = tmp_dir("config-link");
+        let outside = tmp_dir("config-outside");
+        let root = dir.path.canonicalize().unwrap();
+        std::os::unix::fs::symlink(&outside.path, root.join(CONFIG_DIR)).unwrap();
+        assert!(config_file(&root, "app.json").is_err());
     }
 
     fn walk_names(root: &Path) -> Vec<String> {

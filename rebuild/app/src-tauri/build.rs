@@ -15,6 +15,8 @@ fn main() {
             "delete_path",
             "search",
             "link_index",
+            "read_config",
+            "write_config",
         ]),
     ))
     .expect("failed to run tauri-build");

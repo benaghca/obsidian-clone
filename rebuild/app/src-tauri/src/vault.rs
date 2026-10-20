@@ -115,11 +115,23 @@ impl Vault {
         Ok(())
     }
 
-    /// Move a file or folder into `.trash/` inside the vault. Never deletes bytes.
-    pub fn delete_path(&mut self, path: &str) -> Result<(), String> {
+    /// Move a file or folder into `.trash/` inside the vault, or, when `permanent` is set (the
+    /// "Deleted files: Permanently delete" setting), remove it for good.
+    pub fn delete_path(&mut self, path: &str, permanent: bool) -> Result<(), String> {
         let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
         if !full.exists() {
             return Err(format!("no such file: {path}"));
+        }
+        if permanent {
+            // symlink_metadata: a symlink is removed itself, never followed.
+            let md = fs::symlink_metadata(&full).map_err(|e| e.to_string())?;
+            if md.is_dir() {
+                fs::remove_dir_all(&full).map_err(|e| e.to_string())?;
+            } else {
+                fs::remove_file(&full).map_err(|e| e.to_string())?;
+            }
+            self.index.remove_tree(&rel);
+            return Ok(());
         }
         let dest = trash_dest(&self.root, &rel);
         if let Some(parent) = dest.parent() {
@@ -128,6 +140,33 @@ impl Vault {
         fs::rename(&full, &dest).map_err(|e| e.to_string())?;
         self.index.remove_tree(&rel);
         Ok(())
+    }
+
+    /// A settings file from the vault's `.grove/` folder; `None` if there is none yet.
+    pub fn read_config(&self, name: &str) -> Result<Option<String>, String> {
+        let full = fsutil::config_file(&self.root, name)?;
+        let md = match fs::metadata(&full) {
+            Ok(md) => md,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e.to_string()),
+        };
+        if !md.is_file() || md.len() > fsutil::CONFIG_MAX_BYTES as u64 {
+            return Err(format!("not a settings file: {name}"));
+        }
+        let text = fs::read_to_string(&full).map_err(|e| e.to_string())?;
+        Ok(Some(text))
+    }
+
+    /// Write a settings file into `.grove/` (created if missing), atomically. The content must
+    /// be JSON, so the folder only ever holds readable settings.
+    pub fn write_config(&self, name: &str, content: &str) -> Result<(), String> {
+        let full = fsutil::config_file(&self.root, name)?;
+        if content.len() > fsutil::CONFIG_MAX_BYTES {
+            return Err(format!("settings file too large: {name}"));
+        }
+        serde_json::from_str::<serde_json::Value>(content)
+            .map_err(|e| format!("not JSON: {e}"))?;
+        atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())
     }
 
     pub fn search(&self, query: &str, limit: u32) -> Vec<SearchHit> {
@@ -376,7 +415,7 @@ mod tests {
         assert!(vault.list_files().iter().any(|e| e.path == "carton/a.md"));
         assert!(vault.rename_path("carton", "carton/inner").is_err());
 
-        vault.delete_path("fresh/Moved.md").unwrap();
+        vault.delete_path("fresh/Moved.md", false).unwrap();
         assert!(!dir.path.join("fresh").join("Moved.md").exists());
         assert!(dir
             .path
@@ -390,6 +429,63 @@ mod tests {
             .any(|e| e.path == "fresh/Moved.md"));
         assert!(vault.index.resolve("Old.md", "Renamed").is_none());
         assert!(vault.index.resolve("Old.md", "Moved").is_none());
+    }
+
+    #[test]
+    fn permanent_delete_removes_files_and_folders_without_trash() {
+        let dir = tmp_dir("delete-permanent");
+        fs::write(dir.path.join("Gone.md"), "bye\n").unwrap();
+        fs::create_dir(dir.path.join("box")).unwrap();
+        fs::write(dir.path.join("box").join("a.md"), "in\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.delete_path("Gone.md", true).unwrap();
+        vault.delete_path("box", true).unwrap();
+        assert!(!dir.path.join("Gone.md").exists());
+        assert!(!dir.path.join("box").exists());
+        assert!(!dir.path.join(".trash").exists());
+        assert!(vault.list_files().is_empty());
+        assert!(vault.delete_path("Gone.md", true).is_err());
+        assert!(vault.delete_path("../outside", true).is_err());
+    }
+
+    #[test]
+    fn config_files_round_trip_and_stay_hidden() {
+        let dir = tmp_dir("config");
+        fs::write(dir.path.join("Note.md"), "app.json mention\n").unwrap();
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        assert_eq!(vault.read_config("app.json").unwrap(), None);
+        vault
+            .write_config("app.json", "{\n  \"useWikilinks\": false\n}")
+            .unwrap();
+        let back = vault.read_config("app.json").unwrap().unwrap();
+        assert!(back.contains("useWikilinks"));
+        assert!(dir.path.join(".grove").join("app.json").is_file());
+        // Not JSON, or a name outside the folder: refused, nothing written.
+        assert!(vault.write_config("app.json", "{oops").is_err());
+        assert!(vault.write_config("../x.json", "{}").is_err());
+        assert!(vault.read_config("../Note.md").is_err());
+        assert_eq!(
+            vault.read_config("app.json").unwrap().unwrap(),
+            back,
+            "a refused write leaves the file as it was"
+        );
+        // The folder is never listed, indexed or searched.
+        let reopened = Vault::open(dir.path.clone()).unwrap();
+        assert!(reopened
+            .list_files()
+            .iter()
+            .all(|e| !e.path.starts_with(".grove")));
+        assert!(reopened
+            .search("useWikilinks", 10)
+            .iter()
+            .all(|h| !h.path.starts_with(".grove")));
+        // No temp files left behind.
+        let names: Vec<_> = fs::read_dir(dir.path.join(".grove"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(names, vec!["app.json".to_string()]);
     }
 
     #[test]

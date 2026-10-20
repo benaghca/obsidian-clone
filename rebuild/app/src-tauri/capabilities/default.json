@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window, on the app's own origin only, can call the vault commands, listen for vault-changed, drive its own frameless window, and hand http, https and mailto links to the system opener.",
+  "description": "The main window, on the app's own origin only, can call the vault commands (and read and write its own settings in the vault's .grove folder), listen for vault-changed, drive its own frameless window, and hand http, https and mailto links to the system opener.",
   "windows": [
     "main"
   ],
@@ -19,6 +19,8 @@
     "allow-delete-path",
     "allow-search",
     "allow-link-index",
+    "allow-read-config",
+    "allow-write-config",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",

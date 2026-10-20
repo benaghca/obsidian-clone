@@ -91,6 +91,8 @@ pub fn run() {
             delete_path,
             search,
             link_index,
+            read_config,
+            write_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grove");
@@ -180,10 +182,33 @@ fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Result<(
     inner.vault.as_mut().unwrap().rename_path(&from, &to)
 }
 
+/// `permanent` (optional, default false) removes the file instead of moving it to `.trash/`.
 #[tauri::command]
-fn delete_path(state: State<'_, AppState>, path: String) -> Result<(), String> {
+fn delete_path(
+    state: State<'_, AppState>,
+    path: String,
+    permanent: Option<bool>,
+) -> Result<(), String> {
     let mut inner = vault_mut(&state)?;
-    inner.vault.as_mut().unwrap().delete_path(&path)
+    inner
+        .vault
+        .as_mut()
+        .unwrap()
+        .delete_path(&path, permanent.unwrap_or(false))
+}
+
+/// A settings file from the vault's `.grove/` folder (`None` if missing).
+#[tauri::command]
+fn read_config(state: State<'_, AppState>, name: String) -> Result<Option<String>, String> {
+    let inner = vault_mut(&state)?;
+    inner.vault.as_ref().unwrap().read_config(&name)
+}
+
+/// Write a settings file (JSON) into the vault's `.grove/` folder, atomically.
+#[tauri::command]
+fn write_config(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
+    let inner = vault_mut(&state)?;
+    inner.vault.as_ref().unwrap().write_config(&name, &content)
 }
 
 #[tauri::command]

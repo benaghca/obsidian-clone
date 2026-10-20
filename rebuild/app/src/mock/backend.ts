@@ -14,6 +14,15 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   // Folders made with create_folder that hold no files yet.
   const emptyDirs = new Set<string>();
   const vault: VaultInfo = { path: "/mock/Sample Vault", name: "Sample Vault" };
+  // The vault's .grove settings files. Kept in the browser's localStorage so
+  // settings survive a reload of the dev page, as they survive a restart in
+  // Tauri (where they are files in the vault).
+  const CONFIG_KEY = "grove.mock.config:";
+  const CONFIG_NAME = /^[a-z0-9-]{1,64}\.json$/;
+  const configName = (name: string) => {
+    if (!CONFIG_NAME.test(name)) throw new Error(`invalid config name: ${name}`);
+    return CONFIG_KEY + name;
+  };
 
   const nameOf = (path: string) => path.split("/").pop()!.replace(/\.md$/, "");
 
@@ -130,6 +139,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
         }
       }
     },
+    // `permanent` makes no difference here: the mock has no .trash.
     delete_path: ({ path }) => {
       const under = (p: string) => p === path || p.startsWith(path + "/");
       for (const p of [...files.keys()]) if (under(p)) files.delete(p);
@@ -137,6 +147,23 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     },
     search: ({ query, limit }) => search(query, limit),
     link_index: () => linkIndex(),
+    read_config: ({ name }) => {
+      const key = configName(name);
+      try {
+        return localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    write_config: ({ name, content }) => {
+      const key = configName(name);
+      JSON.parse(content); // must be JSON, as in the backend
+      try {
+        localStorage.setItem(key, content);
+      } catch {
+        // storage full or disabled: not remembered
+      }
+    },
   };
 
   return {
