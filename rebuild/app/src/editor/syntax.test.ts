@@ -1,8 +1,9 @@
 import { markdownLanguage } from "@codemirror/lang-markdown";
+import type { MarkdownParser } from "@lezer/markdown";
 import { expect, test } from "vitest";
 import { Tag, WikiLink } from "./syntax";
 
-const parser = markdownLanguage.parser.configure([WikiLink, Tag]);
+const parser = (markdownLanguage.parser as MarkdownParser).configure([WikiLink, Tag]);
 
 function nodes(doc: string): string[] {
   const out: string[] = [];
