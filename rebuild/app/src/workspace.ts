@@ -3,11 +3,12 @@
 // active tab; switching swaps states, so it costs no re-parse or re-render of
 // unchanged notes.
 
-import type { EditorState } from "@codemirror/state";
+import type { EditorState, Text } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
 import { createNoteState } from "./editor/editor";
 import type { EditorHost, NoteRef } from "./editor/host";
+import { duration, nextFrame, smoothScrollTo } from "./motion";
 
 export interface Tab {
   id: number;
@@ -143,10 +144,11 @@ export class Workspace {
 
   // ----- navigation -----
 
-  /** Open a note in the active tab (or a new one), optionally at a 1-based line. */
-  async open(path: string, opts: { newTab?: boolean; line?: number } = {}) {
+  /** Open a note in the active tab (or a new one), optionally at a 1-based line or a heading. */
+  async open(path: string, opts: { newTab?: boolean; line?: number; heading?: string } = {}) {
     const state = await this.load(path);
     if (!state) return;
+    const alreadyShown = !opts.newTab && this.active.path === path;
     this.rememberScroll();
     let tab = this.active;
     if (opts.newTab) tab = this.addTab();
@@ -159,21 +161,65 @@ export class Workspace {
       this.active = tab;
       this.show();
     }
-    if (opts.line) {
-      const line = this.view.state.doc.line(Math.min(opts.line, this.view.state.doc.lines));
-      this.view.dispatch({ selection: { anchor: line.from }, effects: EditorView.scrollIntoView(line.from, { y: "center" }) });
+    const doc = this.view.state.doc;
+    const pos = opts.line
+      ? doc.line(Math.min(opts.line, doc.lines)).from
+      : opts.heading
+        ? headingPos(doc, opts.heading)
+        : null;
+    if (pos !== null) {
+      // Within the note on screen the jump glides; into a just-switched note
+      // it lands at once, so the first frame already shows the target.
+      if (alreadyShown) {
+        this.view.dispatch({ selection: { anchor: pos } });
+        void this.glideTo(pos);
+      } else {
+        this.view.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      }
       this.view.focus();
     }
   }
 
+  /** Follow a link target: "Note", "Note#Heading", or "#Heading" in the open note. */
   async openLink(target: string, newTab = false) {
-    let path = this.resolve(target);
+    const hash = target.indexOf("#");
+    const name = (hash < 0 ? target : target.slice(0, hash)).trim();
+    const heading = hash < 0 ? undefined : target.slice(hash + 1);
+    let path = name ? this.resolve(name) : this.active.path;
     if (!path) {
-      const name = target.split("#")[0].trim();
       if (!name) return;
       path = (await this.createNote(`${name}.md`)).path;
     }
-    await this.open(path, { newTab });
+    await this.open(path, { newTab, heading });
+  }
+
+  /**
+   * Smoothly scroll a document position to the middle of the view. A long jump
+   * cuts to one screen short of the target first, so the editor never has to
+   * render every line in between.
+   */
+  private async glideTo(pos: number) {
+    const scroller = this.scroller;
+    if (!scroller || duration("slow") <= 0) {
+      this.view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      return;
+    }
+    const targetTop = () => {
+      const block = this.view.lineBlockAt(pos);
+      const docTop = this.view.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const top = docTop + block.top - (scroller.clientHeight - block.height) / 2;
+      return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, top));
+    };
+    const distance = targetTop() - scroller.scrollTop;
+    if (Math.abs(distance) > 2 * scroller.clientHeight) {
+      scroller.scrollTop = targetTop() - Math.sign(distance) * scroller.clientHeight;
+      // Two frames: CodeMirror reads the new viewport, then measures its lines.
+      await nextFrame();
+      await nextFrame();
+    }
+    // Re-aimed every frame: line heights estimated before CodeMirror measured
+    // them can move the target a little while the scroll is under way.
+    await smoothScrollTo(scroller, targetTop);
   }
 
   async goBack() {
@@ -334,4 +380,19 @@ export class Workspace {
     }
     void this.refreshLinks();
   }
+}
+
+/** Start of the first heading line whose text matches (case-insensitively); "A#B" means B. */
+function headingPos(doc: Text, heading: string): number | null {
+  const want = heading.split("#").pop()!.trim().toLowerCase();
+  if (!want || want.startsWith("^")) return null;
+  let pos = 0;
+  for (const text of doc.iterLines()) {
+    if (text.startsWith("#")) {
+      const m = /^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/.exec(text);
+      if (m && m[1].toLowerCase() === want) return pos;
+    }
+    pos += text.length + 1;
+  }
+  return null;
 }
