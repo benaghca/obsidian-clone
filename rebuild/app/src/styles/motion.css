@@ -1,0 +1,67 @@
+/* Shared keyframes for the motion tokens in theme.css. Entrances animate
+   opacity and transform only, so they stay on the compositor. */
+
+@keyframes grove-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes grove-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+/* modal panels: settle from slightly smaller and higher */
+@keyframes grove-pop-in {
+  from {
+    transform: translateY(calc(-1 * var(--anim-offset))) scale(var(--anim-scale-from));
+  }
+}
+@keyframes grove-pop-out {
+  to {
+    transform: scale(var(--anim-scale-from));
+  }
+}
+
+/* menus and suggesters: fade in while dropping a few pixels into place */
+@keyframes grove-popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(calc(-1 * var(--anim-offset)));
+  }
+}
+
+/* note switching: the text is there on the first frame, just not fully opaque.
+   Two identical rules so the pane can restart it by swapping names, with no
+   forced style flush. */
+@keyframes grove-note-in-a {
+  from {
+    opacity: var(--anim-note-opacity-from);
+  }
+}
+@keyframes grove-note-in-b {
+  from {
+    opacity: var(--anim-note-opacity-from);
+  }
+}
+
+/* tabs: grow from nothing, shrink away on close */
+@keyframes grove-tab-in {
+  from {
+    min-width: 0;
+    max-width: 0;
+    opacity: 0;
+  }
+  to {
+    min-width: 0;
+    max-width: var(--tab-width);
+  }
+}
+@keyframes grove-tab-out {
+  to {
+    min-width: 0;
+    max-width: 0;
+    opacity: 0;
+  }
+}

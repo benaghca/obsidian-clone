@@ -65,4 +65,25 @@
   --radius-m: 8px;
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.03), 0 3px 8px rgba(0, 0, 0, 0.07);
   --shadow-l: 0 2px 8px rgba(0, 0, 0, 0.05), 0 12px 40px rgba(0, 0, 0, 0.16);
+
+  /* Motion: every transition and animation in the app uses these. Hover and
+     state swaps are fast, popovers and folders moderate, the sidebar slow.
+     Exits use the ease-in curve and are a step faster than entrances. */
+  --anim-duration-fast: 100ms;
+  --anim-duration-moderate: 150ms;
+  --anim-duration-slow: 250ms;
+  --anim-ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --anim-ease-in: cubic-bezier(0.3, 0, 1, 1);
+  --anim-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --anim-offset: 4px;
+  --anim-scale-from: 0.98;
+  --anim-note-opacity-from: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --anim-duration-fast: 0ms;
+    --anim-duration-moderate: 0ms;
+    --anim-duration-slow: 0ms;
+  }
 }

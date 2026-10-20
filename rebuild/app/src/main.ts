@@ -1,6 +1,7 @@
 import "./styles/theme.css";
 import "./styles/app.css";
 import "./styles/editor.css";
+import "./styles/motion.css";
 import { countsField } from "./editor/counts";
 import { h, iconButton } from "./shell/dom";
 import { icon } from "./shell/icons";
