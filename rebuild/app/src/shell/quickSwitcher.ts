@@ -1,6 +1,7 @@
 // Ctrl+O quick switcher: the shared Obsidian prompt pattern (centered modal,
 // dim overlay, fuzzy results with bolded matches, footer key hints).
 
+import { animateOut } from "../motion";
 import { noteName, parentDir, type Workspace } from "../workspace";
 import { h } from "./dom";
 import { fuzzyMatch, highlight } from "./fuzzy";
@@ -8,7 +9,7 @@ import { fuzzyMatch, highlight } from "./fuzzy";
 const MAX_RESULTS = 50;
 
 export function openQuickSwitcher(ws: Workspace) {
-  if (document.querySelector(".prompt")) return;
+  if (document.querySelector(".modal-container:not(.is-closing)")) return;
   const restoreFocus = document.activeElement as HTMLElement | null;
 
   const input = h("input", { class: "prompt-input", "aria-label": "Find or create a note" });
@@ -107,8 +108,10 @@ export function openQuickSwitcher(ws: Workspace) {
     else await ws.openLink(item.name, newTab);
   }
 
+  // The overlay plays its exit and removes itself; the note being opened
+  // never waits on it.
   function close(restore = true) {
-    overlay.remove();
+    void animateOut(overlay);
     if (restore) restoreFocus?.focus();
   }
 

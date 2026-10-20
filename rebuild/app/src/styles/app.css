@@ -41,6 +41,10 @@ body {
   opacity: var(--icon-opacity);
   cursor: var(--cursor, default);
   flex: none;
+  transition:
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out),
+    opacity var(--anim-duration-fast) var(--anim-ease-out);
 }
 .clickable-icon:hover {
   background: var(--background-modifier-hover);
@@ -96,9 +100,29 @@ body {
   background: var(--background-secondary);
   border-right: 1px solid var(--background-modifier-border);
   min-width: 0;
+  overflow: hidden;
+  transition:
+    width var(--anim-duration-slow) var(--anim-ease-in-out),
+    border-right-width var(--anim-duration-slow) var(--anim-ease-in-out);
+}
+/* The width is the only layout property animated anywhere; the children keep
+   their full width (clipped) so nothing inside re-wraps while it moves. */
+.mod-left-split > * {
+  min-width: calc(var(--sidebar-width) - 1px);
+  transition: opacity var(--anim-duration-moderate) var(--anim-ease-out) var(--anim-duration-fast);
 }
 .is-left-sidebar-collapsed .mod-left-split {
-  display: none;
+  width: 0;
+  border-right-width: 0;
+  visibility: hidden;
+  transition:
+    width var(--anim-duration-slow) var(--anim-ease-in-out),
+    border-right-width var(--anim-duration-slow) var(--anim-ease-in-out),
+    visibility 0s linear var(--anim-duration-slow);
+}
+.is-left-sidebar-collapsed .mod-left-split > * {
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-in);
 }
 .mod-left-split > .workspace-tab-header-container {
   height: var(--header-height);
@@ -118,6 +142,9 @@ body {
   min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.workspace-leaf-content > * {
+  animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
 }
 .nav-files {
   display: flex;
@@ -149,6 +176,9 @@ body {
   line-height: 18px;
   position: relative;
   white-space: nowrap;
+  transition:
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
 }
 .tree-item-self.nav-folder-title {
   padding-left: calc(8px + var(--depth, 0) * 17px + 14px);
@@ -178,6 +208,9 @@ body {
   left: calc(4px + var(--depth, 0) * 17px);
   color: var(--text-faint);
   display: flex;
+}
+.collapse-icon .svg-icon {
+  transition: transform var(--anim-duration-moderate) var(--anim-ease-out);
 }
 .collapse-icon.is-collapsed .svg-icon {
   transform: rotate(-90deg);
@@ -238,6 +271,11 @@ body {
   background: var(--background-primary);
   outline: none;
 }
+.search-input {
+  transition:
+    border-color var(--anim-duration-fast) var(--anim-ease-out),
+    box-shadow var(--anim-duration-fast) var(--anim-ease-out);
+}
 .search-input:focus {
   border-color: var(--background-modifier-border-hover);
   box-shadow: 0 0 0 2px var(--background-modifier-active-hover);
@@ -253,6 +291,7 @@ body {
   border-radius: var(--radius-s);
   color: var(--text-normal);
   font-weight: 500;
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
 }
 .search-result-file-title:hover,
 .search-result-file-match:hover {
@@ -273,6 +312,7 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
 }
 .search-result-file-matched-text {
   background: var(--text-highlight-bg);
@@ -323,14 +363,31 @@ body {
   margin-bottom: -1px;
   -webkit-app-region: no-drag;
 }
+/* opening and closing tabs grow and shrink; the strip is a small fixed-height
+   box, so this layout work stays inside it */
+.mod-root .workspace-tab-header.mod-entering {
+  overflow: hidden;
+  animation: grove-tab-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.mod-root .workspace-tab-header.is-closing {
+  overflow: hidden;
+  pointer-events: none;
+  animation: grove-tab-out var(--anim-duration-moderate) var(--anim-ease-in) forwards;
+}
 .workspace-tab-header-inner {
   display: flex;
   align-items: center;
   height: 100%;
   padding: 0 4px 0 10px;
   gap: 4px;
+  border: 1px solid transparent;
   border-radius: 6px 6px 0 0;
   color: var(--text-muted);
+  /* the active tab's lighter "indicator" fades in rather than snapping */
+  transition:
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    border-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
 }
 .mod-root .workspace-tab-header:not(.is-active):hover .workspace-tab-header-inner {
   background: var(--background-modifier-hover);
@@ -366,6 +423,10 @@ body {
   border-radius: var(--radius-s);
   color: var(--icon-color);
   opacity: 0;
+  transition:
+    opacity var(--anim-duration-fast) var(--anim-ease-out),
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
 }
 .workspace-tab-header:hover .workspace-tab-header-inner-close-button,
 .workspace-tab-header.is-active .workspace-tab-header-inner-close-button {
@@ -451,6 +512,13 @@ body {
   margin: 0 auto;
   padding-top: 24px;
 }
+/* note switch: shown on the first frame at reduced opacity, eased to full */
+.markdown-sizer.mod-note-in-a {
+  animation: grove-note-in-a var(--anim-duration-fast) var(--anim-ease-out);
+}
+.markdown-sizer.mod-note-in-b {
+  animation: grove-note-in-b var(--anim-duration-fast) var(--anim-ease-out);
+}
 .inline-title {
   font-size: var(--h1-size);
   font-weight: 700;
@@ -514,11 +582,17 @@ body {
   border-radius: var(--radius-m);
   box-shadow: var(--shadow-s);
   font-size: var(--font-ui-small);
+  animation: grove-popover-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+.menu.is-closing {
+  pointer-events: none;
+  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .menu-item {
   padding: 4px 10px;
   border-radius: var(--radius-s);
   white-space: nowrap;
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
 }
 .menu-item:hover {
   background: var(--background-modifier-hover);
@@ -539,6 +613,11 @@ body {
   display: flex;
   justify-content: center;
   align-items: flex-start;
+  animation: grove-fade-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.modal-container.is-closing {
+  pointer-events: none;
+  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .modal-bg {
   position: absolute;
@@ -558,6 +637,10 @@ body {
   border-radius: 12px;
   box-shadow: var(--shadow-l);
   overflow: hidden;
+  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.is-closing .prompt {
+  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .prompt-input-container {
   position: relative;

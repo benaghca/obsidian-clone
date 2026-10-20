@@ -2,6 +2,7 @@
 // and the vault name footer.
 
 import { api, type FileEntry } from "../api";
+import { slideHeight } from "../motion";
 import { noteName, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
@@ -101,10 +102,7 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
       "div",
       { class: "nav-buttons-container" },
       iconButton(icon("square-pen", 16), "New note", newNote),
-      iconButton(icon("chevrons-down-up", 16), "Collapse all", () => {
-        expanded.clear();
-        render();
-      }),
+      iconButton(icon("chevrons-down-up", 16), "Collapse all", collapseAll),
     ),
   );
 
@@ -143,21 +141,27 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
     };
   }
 
+  // Folders are a title row plus, while open, a children box holding their
+  // rows. Toggling slides that one box; the rest of the tree is untouched.
   function renderNodes(nodes: TreeNode[], depth: number, into: HTMLElement) {
-    for (const { entry, children } of nodes) {
-      const isOpen = expanded.has(entry.path);
+    for (const node of nodes) {
+      const { entry } = node;
       const label = entry.is_dir ? entry.name : noteName(entry.path);
+      const chevron = entry.is_dir
+        ? h(
+            "div",
+            { class: `tree-item-icon collapse-icon${expanded.has(entry.path) ? "" : " is-collapsed"}` },
+            icon("chevron-down", 14),
+          )
+        : null;
       const self = h(
         "div",
         {
           class: `tree-item-self${entry.is_dir ? " nav-folder-title mod-collapsible" : " nav-file-title"}`,
           "data-path": entry.path,
           onclick: (e: MouseEvent) => {
-            if (entry.is_dir) {
-              if (isOpen) expanded.delete(entry.path);
-              else expanded.add(entry.path);
-              render();
-            } else if (!(e.target as HTMLElement).isContentEditable) {
+            if (entry.is_dir) toggleFolder(node, depth, folder!, chevron!);
+            else if (!(e.target as HTMLElement).isContentEditable) {
               void ws.open(entry.path, { newTab: e.ctrlKey || e.metaKey });
             }
           },
@@ -166,9 +170,7 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
           },
           oncontextmenu: (e: MouseEvent) => fileMenu(e, entry),
         },
-        entry.is_dir
-          ? h("div", { class: `tree-item-icon collapse-icon${isOpen ? "" : " is-collapsed"}` }, icon("chevron-down", 14))
-          : null,
+        chevron,
         h("div", { class: "tree-item-inner" }, label),
         !entry.is_dir && !entry.path.endsWith(".md")
           ? h("div", { class: "nav-file-tag" }, entry.path.split(".").pop()!)
@@ -176,8 +178,51 @@ function createFileExplorer(ws: Workspace, newNote: () => void): HTMLElement {
       );
       self.style.setProperty("--depth", String(depth));
       rows.set(entry.path, self);
-      into.append(self);
-      if (entry.is_dir && isOpen) renderNodes(children, depth + 1, into);
+      const folder = entry.is_dir ? h("div", { class: "tree-item nav-folder" }, self) : null;
+      if (folder && expanded.has(entry.path)) folder.append(renderChildren(node, depth));
+      into.append(folder ?? self);
+    }
+  }
+
+  function renderChildren(node: TreeNode, depth: number) {
+    const box = h("div", { class: "tree-item-children" });
+    renderNodes(node.children, depth + 1, box);
+    return box;
+  }
+
+  const childrenOf = (folder: HTMLElement) => folder.querySelector<HTMLElement>(":scope > .tree-item-children");
+
+  function toggleFolder(node: TreeNode, depth: number, folder: HTMLElement, chevron: HTMLElement) {
+    const path = node.entry.path;
+    const open = !expanded.has(path);
+    if (open) expanded.add(path);
+    else expanded.delete(path);
+    chevron.classList.toggle("is-collapsed", !open);
+    let box = childrenOf(folder);
+    if (open && !box) {
+      folder.append((box = renderChildren(node, depth)));
+      markActive();
+      void slideHeight(box, true, true);
+    } else if (box) slideAndDrop(box, open);
+  }
+
+  /** Slide a children box open or closed; once fully closed, drop its rows. */
+  function slideAndDrop(box: HTMLElement, open: boolean) {
+    void slideHeight(box, open).then((finished) => {
+      if (!finished || open) return;
+      for (const row of box.querySelectorAll<HTMLElement>("[data-path]")) {
+        if (rows.get(row.dataset.path!) === row) rows.delete(row.dataset.path!);
+      }
+      box.remove();
+    });
+  }
+
+  function collapseAll() {
+    expanded.clear();
+    for (const chevron of list.querySelectorAll(".collapse-icon")) chevron.classList.add("is-collapsed");
+    for (const folder of list.querySelectorAll<HTMLElement>(":scope > .nav-folder")) {
+      const box = childrenOf(folder);
+      if (box) slideAndDrop(box, false);
     }
   }
 

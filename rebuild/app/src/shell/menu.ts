@@ -1,5 +1,6 @@
 // Small context/dropdown menu, closed by Escape or any click outside.
 
+import { animateOut } from "../motion";
 import { h } from "./dom";
 
 export interface MenuItem {
@@ -11,8 +12,9 @@ export interface MenuItem {
 
 let open: HTMLElement | null = null;
 
+/** Close the open menu; it fades out on its own while the action runs. */
 export function closeMenu() {
-  open?.remove();
+  if (open) void animateOut(open);
   open = null;
 }
 

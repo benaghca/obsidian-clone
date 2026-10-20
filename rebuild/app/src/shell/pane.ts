@@ -3,7 +3,8 @@
 // title above the editor in a centered readable column.
 
 import { isTauri } from "../api";
-import { noteName, parentDir, type Workspace } from "../workspace";
+import { animateOut } from "../motion";
+import { noteName, parentDir, type Tab, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
@@ -44,39 +45,85 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
   );
   if (isTauri) void addWindowControls(strip);
 
-  function renderTabs() {
-    tabList.replaceChildren(
-      ...ws.tabs.map((tab) =>
+  // Tab headers are kept per tab id and updated in place, so a switch only
+  // flips classes, and opening/closing a tab can animate its own header.
+  const tabHeaders = new Map<number, { el: HTMLElement; title: HTMLElement }>();
+  let tabsRendered = false;
+
+  function tabHeader(tab: Tab) {
+    const title = h("div", { class: "workspace-tab-header-inner-title" });
+    const el = h(
+      "div",
+      {
+        class: "workspace-tab-header",
+        onmousedown: (e: MouseEvent) => {
+          if (e.button === 1) {
+            e.preventDefault();
+            ws.closeTab(tab);
+          } else if (e.button === 0) ws.activate(tab);
+        },
+      },
+      h(
+        "div",
+        { class: "workspace-tab-header-inner" },
+        title,
         h(
           "div",
           {
-            class: `workspace-tab-header${tab === ws.active ? " is-active" : ""}`,
-            "aria-label": tab.path ?? "New tab",
-            onmousedown: (e: MouseEvent) => {
-              if (e.button === 1) {
-                e.preventDefault();
-                ws.closeTab(tab);
-              } else if (e.button === 0) ws.activate(tab);
-            },
+            class: "workspace-tab-header-inner-close-button",
+            "aria-label": "Close",
+            onmousedown: (e: MouseEvent) => e.stopPropagation(),
+            onclick: () => ws.closeTab(tab),
           },
-          h(
-            "div",
-            { class: "workspace-tab-header-inner" },
-            h("div", { class: "workspace-tab-header-inner-title" }, tab.path ? noteName(tab.path) : "New tab"),
-            h(
-              "div",
-              {
-                class: "workspace-tab-header-inner-close-button",
-                "aria-label": "Close",
-                onmousedown: (e: MouseEvent) => e.stopPropagation(),
-                onclick: () => ws.closeTab(tab),
-              },
-              icon("x", 14),
-            ),
-          ),
+          icon("x", 14),
         ),
       ),
     );
+    return { el, title };
+  }
+
+  function renderTabs() {
+    const open = new Set(ws.tabs.map((tab) => tab.id));
+    for (const [id, { el }] of tabHeaders) {
+      if (open.has(id)) continue;
+      tabHeaders.delete(id);
+      // Pin the current width so the shrink starts from what is on screen.
+      el.style.maxWidth = `${el.getBoundingClientRect().width}px`;
+      void animateOut(el);
+    }
+    let prev: Element | null = null;
+    const added: HTMLElement[] = [];
+    for (const tab of ws.tabs) {
+      let header = tabHeaders.get(tab.id);
+      if (!header) {
+        tabHeaders.set(tab.id, (header = tabHeader(tab)));
+        if (tabsRendered) added.push(header.el);
+      }
+      const { el, title } = header;
+      const name = tab.path ? noteName(tab.path) : "New tab";
+      if (title.textContent !== name) title.textContent = name;
+      el.setAttribute("aria-label", tab.path ?? "New tab");
+      el.classList.toggle("is-active", tab === ws.active);
+      // Headers still shrinking away keep their place; order around them.
+      let at: Element | null = prev ? prev.nextElementSibling : tabList.firstElementChild;
+      while (at && at !== el && at.classList.contains("is-closing")) at = at.nextElementSibling;
+      if (at !== el) tabList.insertBefore(el, at);
+      prev = el;
+    }
+    // New tabs grow from nothing to their content width: the strip shares its
+    // width out by content, so that is what lands the last frame exactly on
+    // the settled layout.
+    for (const el of added) el.style.flex = "none";
+    const widths = added.map((el) => el.getBoundingClientRect().width);
+    added.forEach((el, i) => {
+      el.style.flex = "";
+      el.style.setProperty("--tab-width", `${widths[i]}px`);
+    });
+    for (const el of added) {
+      el.classList.add("mod-entering");
+      el.addEventListener("animationend", () => el.classList.remove("mod-entering"), { once: true });
+    }
+    tabsRendered = true;
   }
 
   // ----- sub-header -----
@@ -151,6 +198,19 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
     if (path && document.activeElement !== title) title.textContent = noteName(path);
   }
 
+  // A note switch eases the new text in from slightly transparent. The text
+  // is painted on the first frame either way; swapping between two identical
+  // animations restarts it without forcing a style flush.
+  let fadeFlip: boolean | null = null;
+  function fadeInNote() {
+    if (!ws.active.path) return;
+    if (fadeFlip !== null) {
+      sizer.classList.toggle("mod-note-in-a", fadeFlip);
+      sizer.classList.toggle("mod-note-in-b", !fadeFlip);
+    }
+    fadeFlip = !fadeFlip;
+  }
+
   function focusTitle(selectAll: boolean) {
     title.focus();
     const range = document.createRange();
@@ -193,6 +253,7 @@ export function createPane(ws: Workspace, commands: PaneCommands): Pane {
   });
 
   ws.on((change) => {
+    if (change === "show") fadeInNote();
     if (change === "tabs" || change === "files") {
       renderTabs();
       renderHeader();
