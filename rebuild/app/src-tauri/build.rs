@@ -1,7 +1,7 @@
 fn main() {
-    // Register each command so the capability can allow it. The dev server is a
-    // remote origin (http://localhost:1420), and Tauri blocks those commands
-    // unless the app manifest lists them.
+    // Register each command in the app manifest, so each one needs an explicit
+    // `allow-<command>` permission in a capability instead of being open to
+    // every window by default.
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(
         tauri_build::AppManifest::new().commands(&[
             "open_vault",

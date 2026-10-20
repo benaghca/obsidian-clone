@@ -2,6 +2,8 @@
 // commands from rebuild/CONTRACT.md; in a plain browser (npm run dev) it loads
 // an in-memory mock vault instead, so the front end runs on its own.
 
+import { isExternalUrl } from "./links";
+
 export interface VaultInfo {
   path: string;
   name: string;
@@ -61,6 +63,25 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   return (await load()).invoke<T>(cmd, args);
 }
 
+/**
+ * Hand an http(s) or mailto link to the system's default handler. Only ever
+ * called from an explicit click: nothing in the app fetches, previews or
+ * loads these URLs itself. In the browser mock it is only logged.
+ */
+async function openExternal(url: string): Promise<void> {
+  url = url.trim();
+  if (!isExternalUrl(url)) {
+    console.warn(`Not opening ${url}: only http, https and mailto links open externally`);
+    return;
+  }
+  if (!isTauri) {
+    console.info(`[mock] would open externally: ${url}`);
+    return;
+  }
+  const { openUrl } = await import("@tauri-apps/plugin-opener");
+  await openUrl(url);
+}
+
 export const api = {
   openVault: (path: string) => call<VaultInfo>("open_vault", { path }),
   lastVault: () => call<VaultInfo | null>("last_vault"),
@@ -72,6 +93,7 @@ export const api = {
   deletePath: (path: string) => call<void>("delete_path", { path }),
   search: (query: string, limit: number) => call<SearchHit[]>("search", { query, limit }),
   linkIndex: () => call<LinkIndex>("link_index"),
+  openExternal,
   onVaultChanged: async (handler: (change: VaultChange) => void) =>
     (await load()).listen("vault-changed", (p) => handler(p as VaultChange)),
 };

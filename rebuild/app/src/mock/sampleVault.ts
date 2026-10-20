@@ -9,6 +9,8 @@ Markdown syntax hides until your cursor touches it. Try moving through **bold te
 
 Links work the same way: [[Project roadmap]] is a wikilink, [[Reading list|this one]] has display text, and [Obsidian](https://obsidian.md) is a markdown link. Click a link to follow it, then use the back arrow above.
 
+Remote images are never fetched. This one shows as a link you can click to open it in your browser: ![A remote picture](https://example.com/picture.png)
+
 Type [[ to link another note. Tags like #getting-started and #ideas/later stay rendered.
 
 ### Lists and tasks

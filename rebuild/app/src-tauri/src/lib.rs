@@ -17,6 +17,7 @@
 mod config;
 mod fsutil;
 mod index;
+mod lockdown;
 mod model;
 mod vault;
 mod watch;
@@ -47,7 +48,9 @@ pub fn run() {
         std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .setup(|app| {
+            lockdown::create_main_window(app)?;
             let (tx, rx) = mpsc::channel();
             let config_dir = app
                 .path()

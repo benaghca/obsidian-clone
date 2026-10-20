@@ -6,7 +6,8 @@ Vite + TypeScript + CodeMirror 6, no UI framework. See `../CONTRACT.md` and `../
 npm install
 npm run dev     # http://localhost:1420, runs against the in-memory mock vault
 npm test        # unit tests (parser, counts, fuzzy matching)
-npm run build   # type-check + production bundle in dist/
+npm run build   # type-check + production bundle in dist/ (no source maps)
+npm run audit:offline  # build, then fail on any network API, remote URL or networking dependency
 ```
 
 Outside Tauri, `src/api.ts` loads `src/mock/backend.ts` instead of calling `invoke`. The mock vault resets on reload and includes a generated 5,000-line note ("Big note"). In dev builds the workspace is exposed as `window.ws` for poking at from devtools.
@@ -23,4 +24,4 @@ Outside Tauri, `src/api.ts` loads `src/mock/backend.ts` instead of calling `invo
 
 - Dev server: `devUrl` `http://localhost:1420`, `beforeDevCommand` `npm run dev`, `frontendDist` `../dist`, `beforeBuildCommand` `npm run build`.
 - The window is meant to be frameless (`decorations: false`). The tab strip carries `data-tauri-drag-region`, and inside Tauri the front end draws minimize/maximize/close buttons. That needs the `core:window:allow-start-dragging`, `allow-minimize`, `allow-toggle-maximize` and `allow-close` permissions.
-- External links open with `window.open`; Tauri may need the opener plugin for that.
+- Offline lockdown (see `../LOCKDOWN_SIDEBAR_NOTES.md`): a strict CSP in `tauri.conf.json` (also sent by the Vite dev and preview servers), IPC for the app's own origin only, a navigation guard and a deny-all new-window handler on the main window (`src-tauri/src/lockdown.rs`), and external links handed to the system browser through `tauri-plugin-opener`, scoped to http, https and mailto.

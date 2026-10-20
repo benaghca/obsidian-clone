@@ -15,6 +15,7 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
+import { isRemoteUrl } from "../links";
 import { editorHost } from "./host";
 
 class BulletWidget extends WidgetType {
@@ -66,6 +67,40 @@ class ExternalLinkWidget extends WidgetType {
     return span;
   }
 }
+
+// A markdown image pointing at another machine. Grove never fetches it: the
+// image shows as a small link chip that opens the URL in the system browser
+// on click, like any other external link.
+class RemoteImageWidget extends WidgetType {
+  constructor(
+    readonly alt: string,
+    readonly url: string,
+  ) {
+    super();
+  }
+  eq(other: RemoteImageWidget) {
+    return other.alt === this.alt && other.url === this.url;
+  }
+  toDOM() {
+    const span = document.createElement("span");
+    span.className = "cm-link cm-rendered-link cm-remote-embed";
+    span.dataset.href = this.url;
+    span.title = `Remote image, not loaded: ${this.url}`;
+    span.textContent = this.alt || hostOf(this.url);
+    return span;
+  }
+  ignoreEvent() {
+    return false;
+  }
+}
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
+};
 
 class RuleWidget extends WidgetType {
   eq() {
@@ -200,6 +235,7 @@ function build(view: EditorView): DecorationSet {
             decorateLink(node);
             return false;
           case "Image":
+            decorateImage(node);
             return false;
           case "URL":
             mark("cm-link cm-url", node.from, node.to, doc.sliceString(node.from, node.to));
@@ -251,6 +287,18 @@ function build(view: EditorView): DecorationSet {
     mark("cm-link cm-rendered-link", textFrom, textTo, href);
     hide(textTo, node.to);
     decos.push(externalIcon.range(node.to));
+  }
+
+  // Only remote images are rendered (as a link chip, never fetched); local
+  // images stay as text until Grove can show vault files.
+  function decorateImage(node: SyntaxNode) {
+    const url = node.getChild("URL");
+    const marks = node.getChildren("LinkMark");
+    if (!url || marks.length < 2 || touches(node.from, node.to)) return;
+    const href = doc.sliceString(url.from, url.to);
+    if (!isRemoteUrl(href)) return;
+    const alt = doc.sliceString(marks[0].to, marks[1].from);
+    decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
   }
 
   function decorateWikiLink(node: SyntaxNode) {
@@ -316,16 +364,35 @@ const livePreviewPlugin = ViewPlugin.fromClass(
 
 // A plain click on a rendered link follows it; Ctrl/Cmd-click always does,
 // in a new tab for wikilinks. Clicking revealed (raw) link text just edits.
+// The press only claims the link (so the caret stays put); the link is
+// followed on the click that completes it, and only for a real user click,
+// so a drag that starts on a link, or a scripted click, opens nothing.
+let pressed: HTMLElement | null = null;
+
+const followable = (event: MouseEvent) => {
+  if (event.button !== 0) return null;
+  const el = (event.target as HTMLElement).closest<HTMLElement>("[data-href]");
+  if (!el) return null;
+  const modifier = event.ctrlKey || event.metaKey;
+  return modifier || el.classList.contains("cm-rendered-link") ? el : null;
+};
+
 const linkClicks = EditorView.domEventHandlers({
   mousedown(event, view) {
-    if (event.button !== 0) return false;
-    const el = (event.target as HTMLElement).closest<HTMLElement>("[data-href]");
-    if (!el) return false;
-    const modifier = event.ctrlKey || event.metaKey;
-    if (!modifier && !el.classList.contains("cm-rendered-link")) return false;
+    pressed = followable(event);
+    if (!pressed || !view.state.facet(editorHost)) return false;
+    event.preventDefault();
+    return true;
+  },
+  click(event, view) {
+    const el = followable(event);
+    const wasPressed = pressed;
+    pressed = null;
+    if (!el || el !== wasPressed || !event.isTrusted) return false;
     const host = view.state.facet(editorHost);
     if (!host) return false;
     event.preventDefault();
+    const modifier = event.ctrlKey || event.metaKey;
     const href = el.dataset.href!;
     if (el.classList.contains("cm-wikilink")) host.openLink(href, modifier);
     else host.openUrl(href);

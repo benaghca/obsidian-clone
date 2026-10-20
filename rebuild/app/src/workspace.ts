@@ -58,7 +58,7 @@ export class Workspace {
   constructor() {
     this.host = {
       openLink: (target, newTab) => void this.openLink(target, newTab),
-      openUrl: (url) => window.open(url, "_blank", "noopener"),
+      openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
       notes: () => this.notes,
     };
     this.view = new EditorView();
