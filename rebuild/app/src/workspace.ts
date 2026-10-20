@@ -3,10 +3,11 @@
 // active tab; switching swaps states, so it costs no re-parse or re-render of
 // unchanged notes.
 
-import type { EditorState, Text } from "@codemirror/state";
+import type { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
 import { createNoteState } from "./editor/editor";
+import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef } from "./editor/host";
 import { duration, nextFrame, smoothScrollTo } from "./motion";
 
@@ -380,19 +381,4 @@ export class Workspace {
     }
     void this.refreshLinks();
   }
-}
-
-/** Start of the first heading line whose text matches (case-insensitively); "A#B" means B. */
-function headingPos(doc: Text, heading: string): number | null {
-  const want = heading.split("#").pop()!.trim().toLowerCase();
-  if (!want || want.startsWith("^")) return null;
-  let pos = 0;
-  for (const text of doc.iterLines()) {
-    if (text.startsWith("#")) {
-      const m = /^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/.exec(text);
-      if (m && m[1].toLowerCase() === want) return pos;
-    }
-    pos += text.length + 1;
-  }
-  return null;
 }

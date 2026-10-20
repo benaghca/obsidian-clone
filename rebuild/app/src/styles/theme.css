@@ -85,5 +85,6 @@
     --anim-duration-fast: 0ms;
     --anim-duration-moderate: 0ms;
     --anim-duration-slow: 0ms;
+    --anim-note-opacity-from: 1;
   }
 }
