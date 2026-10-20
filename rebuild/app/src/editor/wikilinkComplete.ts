@@ -37,6 +37,7 @@ function wikilinkSource(ctx: CompletionContext): CompletionResult | null {
 export const wikilinkCompletion = autocompletion({
   override: [wikilinkSource],
   icons: false,
+  activateOnTypingDelay: 0,
   maxRenderedOptions: 50,
   tooltipClass: () => "cm-link-suggest",
 });
