@@ -18,7 +18,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - `create_note(path: String, content: String) -> FileEntry`
 - `rename_path(from: String, to: String) -> ()` — and returns nothing; front end updates links itself later.
 - `delete_path(path: String) -> ()` — move to `.trash/` in the vault.
-- `search(query: String, limit: u32) -> Vec<SearchHit { path, line, text }>`
+- `search(query: String, limit: u32) -> Vec<SearchHit { path, line, text }>` — case-insensitive; every word must be on the same line. File-name matches use `line: 0` and come first. Other hits are round-robin across files so one note cannot fill `limit`.
 - `link_index() -> LinkIndex { outgoing: { [path]: string[] }, backlinks: { [path]: { from, line, text }[] } }` — `[[wikilinks]]` resolved by note name, case-insensitive.
 
 ## Events (backend emits)

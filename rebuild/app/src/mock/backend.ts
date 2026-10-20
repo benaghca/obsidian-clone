@@ -43,16 +43,31 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     return out;
   }
 
+  // Line hits are taken round-robin across files so one long note cannot fill `limit`
+  // and hide matches in the rest of the vault (unlinked mentions depend on this).
   function search(query: string, limit: number): SearchHit[] {
     const q = query.toLowerCase();
-    const hits: SearchHit[] = [];
-    if (!q) return hits;
+    if (!q || limit <= 0) return [];
+    const buckets: SearchHit[][] = [];
     for (const [path, f] of files) {
+      const bucket: SearchHit[] = [];
       const lines = f.content.split("\n");
-      for (let i = 0; i < lines.length && hits.length < limit; i++) {
-        if (lines[i].toLowerCase().includes(q)) hits.push({ path, line: i + 1, text: lines[i] });
+      for (let i = 0; i < lines.length; i++) {
+        if (lines[i].toLowerCase().includes(q)) bucket.push({ path, line: i + 1, text: lines[i] });
       }
-      if (hits.length >= limit) break;
+      if (bucket.length) buckets.push(bucket);
+    }
+    const hits: SearchHit[] = [];
+    for (let round = 0; hits.length < limit; round++) {
+      let added = false;
+      for (const bucket of buckets) {
+        if (round < bucket.length) {
+          hits.push(bucket[round]);
+          added = true;
+          if (hits.length >= limit) break;
+        }
+      }
+      if (!added) break;
     }
     return hits;
   }

@@ -133,7 +133,8 @@ impl Index {
     }
 
     /// Case-insensitive substring search. Whitespace-separated terms must all occur on the same
-    /// line. File-name matches (`line == 0`) come first.
+    /// line. File-name matches (`line == 0`) come first. Line hits are then taken round-robin
+    /// across files, so one note cannot use up `limit` and hide the rest of the vault.
     pub fn search(&self, query: &str, limit: u32) -> Vec<SearchHit> {
         let terms: Vec<String> = query
             .split_whitespace()
@@ -158,20 +159,39 @@ impl Index {
             if node.is_dir || !is_note_path(path) {
                 continue;
             }
+            let mut bucket = Vec::new();
             for (i, line) in node.lines.iter().enumerate() {
                 if terms.iter().all(|t| line.lower.contains(t)) {
-                    line_hits.push(SearchHit {
+                    bucket.push(SearchHit {
                         path: path.clone(),
                         line: (i as u32) + 1,
                         text: line.text.clone(),
                     });
                 }
             }
+            if !bucket.is_empty() {
+                line_hits.push(bucket);
+            }
         }
         name_hits.truncate(limit);
-        let room = limit.saturating_sub(name_hits.len());
-        line_hits.truncate(room);
-        name_hits.extend(line_hits);
+        // Round-robin so one note cannot fill `limit` and hide every other file.
+        let mut round = 0;
+        while name_hits.len() < limit {
+            let mut added = false;
+            for bucket in &line_hits {
+                if let Some(hit) = bucket.get(round) {
+                    name_hits.push(hit.clone());
+                    added = true;
+                    if name_hits.len() == limit {
+                        break;
+                    }
+                }
+            }
+            if !added {
+                break;
+            }
+            round += 1;
+        }
         name_hits
     }
 
