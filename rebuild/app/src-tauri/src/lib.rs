@@ -3,6 +3,8 @@
 #[allow(dead_code)]
 mod fsutil;
 #[allow(dead_code)]
+mod index;
+#[allow(dead_code)]
 mod model;
 
 pub fn run() {
