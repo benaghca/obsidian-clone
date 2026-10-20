@@ -433,6 +433,8 @@ function createSearchView(ws: Workspace): { el: HTMLElement; search(query: strin
         ? hits.filter((hit) => matchesPath(hit.path, folder)).slice(0, 100)
         : ws.notes.filter((n) => matchesPath(n.path, folder)).map((n) => ({ path: n.path, line: 0, text: "" }));
     }
+    // Excluded files (Settings → Files and links) are hidden from search.
+    hits = hits.filter((hit) => !ws.isExcluded(hit.path));
     const byFile = new Map<string, typeof hits>();
     for (const hit of hits) byFile.set(hit.path, [...(byFile.get(hit.path) ?? []), hit]);
     results.replaceChildren(

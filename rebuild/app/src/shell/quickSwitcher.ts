@@ -22,7 +22,7 @@ export function openQuickSwitcher(ws: Workspace) {
       ["shift ↵", "to create"],
       ["esc", "to dismiss"],
     ],
-    items: (query) => switcherItems(query, ws.notes, ws.recent, ws.active.path),
+    items: (query) => switcherItems(query, ws.includedNotes(), ws.recent, ws.active.path),
     render(item, row) {
       const content = h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(item.name, item.indices)));
       row.append(content);
