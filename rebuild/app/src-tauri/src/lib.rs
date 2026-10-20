@@ -79,6 +79,7 @@ pub fn run() {
             read_note,
             write_note,
             create_note,
+            create_folder,
             rename_path,
             delete_path,
             search,
@@ -158,6 +159,12 @@ fn create_note(
 ) -> Result<FileEntry, String> {
     let mut inner = vault_mut(&state)?;
     inner.vault.as_mut().unwrap().create_note(&path, &content)
+}
+
+#[tauri::command]
+fn create_folder(state: State<'_, AppState>, path: String) -> Result<FileEntry, String> {
+    let mut inner = vault_mut(&state)?;
+    inner.vault.as_mut().unwrap().create_folder(&path)
 }
 
 #[tauri::command]

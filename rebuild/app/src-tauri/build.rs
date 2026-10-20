@@ -10,6 +10,7 @@ fn main() {
             "read_note",
             "write_note",
             "create_note",
+            "create_folder",
             "rename_path",
             "delete_path",
             "search",

@@ -11,6 +11,8 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   for (const [path, content] of Object.entries(sampleVault())) {
     files.set(path, { content, mtime: Date.now() });
   }
+  // Folders made with create_folder that hold no files yet.
+  const emptyDirs = new Set<string>();
   const vault: VaultInfo = { path: "/mock/Sample Vault", name: "Sample Vault" };
 
   const nameOf = (path: string) => path.split("/").pop()!.replace(/\.md$/, "");
@@ -27,8 +29,8 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   }
 
   function listFiles(): FileEntry[] {
-    const dirs = new Set<string>();
-    for (const path of files.keys()) {
+    const dirs = new Set<string>(emptyDirs);
+    for (const path of [...files.keys(), ...emptyDirs]) {
       const parts = path.split("/");
       for (let i = 1; i < parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
     }
@@ -104,18 +106,34 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     create_note: ({ path, content }) => {
       if (files.has(path)) throw new Error(`Already exists: ${path}`);
       files.set(path, { content, mtime: Date.now() });
+      for (const dir of [...emptyDirs]) if (path.startsWith(dir + "/")) emptyDirs.delete(dir);
       return entry(path);
     },
+    create_folder: ({ path }) => {
+      if (files.has(path) || listFiles().some((e) => e.path === path)) throw new Error(`Already exists: ${path}`);
+      emptyDirs.add(path);
+      return { path, name: nameOf(path), is_dir: true, mtime_ms: Date.now(), size: 0 };
+    },
     rename_path: ({ from, to }) => {
+      if (listFiles().some((e) => e.path === to)) throw new Error(`Already exists: ${to}`);
+      const under = (p: string) => p === from || p.startsWith(from + "/");
       for (const [path, f] of [...files]) {
-        if (path === from || path.startsWith(from + "/")) {
+        if (under(path)) {
           files.delete(path);
           files.set(to + path.slice(from.length), f);
         }
       }
+      for (const dir of [...emptyDirs]) {
+        if (under(dir)) {
+          emptyDirs.delete(dir);
+          emptyDirs.add(to + dir.slice(from.length));
+        }
+      }
     },
     delete_path: ({ path }) => {
-      for (const p of [...files.keys()]) if (p === path || p.startsWith(path + "/")) files.delete(p);
+      const under = (p: string) => p === path || p.startsWith(path + "/");
+      for (const p of [...files.keys()]) if (under(p)) files.delete(p);
+      for (const d of [...emptyDirs]) if (under(d)) emptyDirs.delete(d);
     },
     search: ({ query, limit }) => search(query, limit),
     link_index: () => linkIndex(),
