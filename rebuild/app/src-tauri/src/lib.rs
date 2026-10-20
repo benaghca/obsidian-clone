@@ -41,6 +41,11 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn run() {
+    // WebKitGTK's DMA-BUF renderer crashes on some Wayland compositors (Hyprland: "Error 71 (Protocol error)").
+    #[cfg(target_os = "linux")]
+    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
     tauri::Builder::default()
         .setup(|app| {
             let (tx, rx) = mpsc::channel();
@@ -76,19 +81,19 @@ pub fn run() {
             link_index,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running cinder");
+        .expect("error while running grove");
 }
 
 fn fallback_config_dir() -> std::path::PathBuf {
     if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
-        return std::path::PathBuf::from(config).join("com.cinder.app");
+        return std::path::PathBuf::from(config).join("com.benaghca.grove");
     }
     if let Some(home) = std::env::var_os("HOME") {
         return std::path::PathBuf::from(home)
             .join(".config")
-            .join("com.cinder.app");
+            .join("com.benaghca.grove");
     }
-    std::env::temp_dir().join("cinder")
+    std::env::temp_dir().join("grove")
 }
 
 fn vault_mut(state: &AppState) -> Result<std::sync::MutexGuard<'_, Inner>, String> {

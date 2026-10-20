@@ -5,7 +5,7 @@
 
 import type { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
-import { api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
+import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
 import { createNoteState } from "./editor/editor";
 import type { EditorHost, NoteRef } from "./editor/host";
 
@@ -71,7 +71,15 @@ export class Workspace {
   }
 
   async init() {
-    this.vault = (await api.lastVault()) ?? this.vault;
+    const last = await api.lastVault();
+    if (isTauri) {
+      const path =
+        last?.path ??
+        window.prompt("Vault folder to open", "/home/chris/workspaces/remote/grove-test-vault");
+      if (path) this.vault = await api.openVault(path);
+    } else {
+      this.vault = last ?? this.vault;
+    }
     await this.refreshFiles();
     void this.refreshLinks();
     api.onVaultChanged((change) => void this.onVaultChanged(change.kind, change.paths));

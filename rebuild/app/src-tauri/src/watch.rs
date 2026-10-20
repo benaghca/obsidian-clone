@@ -64,7 +64,7 @@ pub fn run(
                     Ok(next) => watcher = Some(next),
                     Err(err) => {
                         watcher = None;
-                        eprintln!("cinder: file watch failed: {err}");
+                        eprintln!("grove: file watch failed: {err}");
                     }
                 }
             }

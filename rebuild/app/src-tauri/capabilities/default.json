@@ -1,9 +1,14 @@
 {
   "identifier": "default",
   "description": "The main window can call vault commands and listen for vault-changed.",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "remote": {
-    "urls": ["http://localhost:1420/*", "http://127.0.0.1:1420/*"]
+    "urls": [
+      "http://localhost:1420/*",
+      "http://127.0.0.1:1420/*"
+    ]
   },
   "permissions": [
     "core:default",
@@ -17,6 +22,10 @@
     "allow-rename-path",
     "allow-delete-path",
     "allow-search",
-    "allow-link-index"
+    "allow-link-index",
+    "core:window:allow-start-dragging",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close"
   ]
 }

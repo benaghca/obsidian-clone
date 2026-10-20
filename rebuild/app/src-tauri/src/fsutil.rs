@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 /// Marker on temp files created by [`atomic_write`]. The watcher ignores these.
-pub const TEMP_MARK: &str = ".cinder-tmp";
+pub const TEMP_MARK: &str = ".grove-tmp";
 
 const SKIP_DIRS: &[&str] = &[".obsidian", ".git", ".trash"];
 
@@ -153,7 +153,7 @@ pub fn tmp_dir(label: &str) -> Tmp {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     let n = N.fetch_add(1, Ordering::Relaxed);
-    let path = std::env::temp_dir().join(format!("cinder-{label}-{}-{n}", std::process::id()));
+    let path = std::env::temp_dir().join(format!("grove-{label}-{}-{n}", std::process::id()));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).unwrap();
     Tmp { path }
@@ -196,7 +196,7 @@ mod tests {
             r"a\b",
             "C:/x",
             "a//b",
-            "foo/.cinder-tmp",
+            "foo/.grove-tmp",
         ] {
             assert!(normalize_rel(bad).is_err(), "{bad} should be rejected");
         }

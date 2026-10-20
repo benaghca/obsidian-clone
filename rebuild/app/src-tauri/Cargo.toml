@@ -1,5 +1,5 @@
 [package]
-name = "cinder"
+name = "grove"
 version = "0.1.0"
 description = "Local Markdown notes in the Obsidian vault format"
 edition = "2021"
@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 publish = false
 
 [lib]
-name = "cinder_lib"
+name = "grove_lib"
 crate-type = ["rlib"]
 
 [build-dependencies]
