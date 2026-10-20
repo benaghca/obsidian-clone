@@ -139,7 +139,11 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     if (down.button !== 0 || !split) return;
     down.preventDefault();
     const handle = down.currentTarget as HTMLElement;
-    handle.setPointerCapture(down.pointerId);
+    try {
+      handle.setPointerCapture(down.pointerId);
+    } catch {
+      // not a live pointer (a synthetic event): the moves still reach the handle while over it
+    }
     const vertical = split.direction === "vertical";
     const rect = container.getBoundingClientRect();
     const total = vertical ? rect.width : rect.height;
