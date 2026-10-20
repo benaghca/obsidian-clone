@@ -5,7 +5,7 @@
 // with document length.
 
 import { syntaxTree } from "@codemirror/language";
-import type { Range } from "@codemirror/state";
+import type { Range, Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -131,6 +131,16 @@ const cachedLine = (cls: string) => {
   if (!d) lineCache.set(cls, (d = Decoration.line({ class: cls })));
   return d;
 };
+
+/**
+ * The text a checked task strikes through: from after "[x] " to the end of
+ * the task's own line. A line typed right below a task belongs to the same
+ * Task node (markdown's lazy continuation), but Obsidian renders it as plain
+ * text, so it must not inherit the strikethrough.
+ */
+export function checkedTaskText(doc: Text, task: { to: number }, marker: { to: number }) {
+  return { from: marker.to + 1, to: Math.min(task.to, doc.lineAt(marker.to).to) };
+}
 
 const INLINE_FORMATS: Record<string, string> = {
   Emphasis: "cm-em",
@@ -332,7 +342,10 @@ function build(view: EditorView): DecorationSet {
         mark("cm-list-number", node.from, node.to);
         decos.push(checkbox[+checked].range(taskMarker.from, taskMarker.to));
       }
-      if (checked) mark("cm-task-done", taskMarker.to + 1, task.to);
+      if (checked) {
+        const done = checkedTaskText(doc, task, taskMarker);
+        mark("cm-task-done", done.from, done.to);
+      }
       return;
     }
     if (bulleted) decos.push(bullet.range(node.from, node.to));
