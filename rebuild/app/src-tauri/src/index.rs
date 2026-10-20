@@ -243,6 +243,7 @@ impl Index {
         match fs::symlink_metadata(&full) {
             Ok(md) if md.file_type().is_symlink() => self.remove_tree(rel),
             Ok(md) if md.is_dir() => {
+                self.ensure_dirs(root, rel);
                 self.insert_dir(rel, fsutil::mtime_ms(&md));
                 self.adopt_children(root, rel);
                 self.rebuild_maps();

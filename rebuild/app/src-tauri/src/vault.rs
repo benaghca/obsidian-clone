@@ -79,7 +79,8 @@ impl Vault {
         Ok(self.entry_for(&rel))
     }
 
-    /// Create an empty folder (the file explorer's "New folder"). Fails if anything is already there.
+    /// Create an empty folder (the file explorer's "New folder"). Missing parents are created and
+    /// indexed too. Fails if anything is already there.
     pub fn create_folder(&mut self, path: &str) -> Result<FileEntry, String> {
         let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
         if full.exists() {
@@ -407,6 +408,21 @@ mod tests {
         assert!(vault.create_folder("sub/Untitled").is_err());
         assert!(vault.create_folder("../outside").is_err());
         assert!(vault.create_folder(".obsidian/x").is_err());
+    }
+
+    #[test]
+    fn create_folder_indexes_missing_parents() {
+        let dir = tmp_dir("folder-parents");
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let made = vault.create_folder("new/deeper/leaf").unwrap();
+        assert_eq!(made.path, "new/deeper/leaf");
+        let files = vault.list_files();
+        for path in ["new", "new/deeper", "new/deeper/leaf"] {
+            assert!(
+                files.iter().any(|e| e.path == path && e.is_dir),
+                "{path} should be listed as a folder"
+            );
+        }
     }
 
     #[test]
