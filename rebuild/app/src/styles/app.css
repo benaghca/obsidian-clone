@@ -282,6 +282,11 @@ body {
   opacity: 0;
   animation: grove-reveal 1s var(--anim-ease-in);
 }
+@media (prefers-reduced-motion: reduce) {
+  .tree-item-self.is-revealed::after {
+    animation: none;
+  }
+}
 .collapse-icon.is-collapsed .svg-icon {
   transform: rotate(-90deg);
 }
