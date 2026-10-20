@@ -303,3 +303,58 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+
+/* Source mode (src/editor/sourceMode.ts): Obsidian's raw markdown view. The
+   syntax stays highlighted in the normal text font; headings are bold at
+   the body size. */
+.is-source-mode .cm-s-heading {
+  font-weight: 700;
+}
+.is-source-mode .cm-s-em {
+  font-style: italic;
+}
+.is-source-mode .cm-s-strong {
+  font-weight: 700;
+}
+.is-source-mode .cm-s-strike {
+  text-decoration: line-through;
+}
+.is-source-mode .cm-s-code {
+  font-family: var(--font-monospace);
+  font-size: 0.875em;
+}
+.is-source-mode .cm-line:not(.cm-codeblock) .cm-s-code {
+  background: var(--code-background);
+  padding: 0.1em 0;
+}
+.is-source-mode .cm-s-link {
+  color: var(--text-accent);
+}
+.is-source-mode .cm-s-url {
+  color: var(--text-accent);
+  text-decoration: underline;
+  text-decoration-color: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
+  text-underline-offset: 2px;
+}
+/* Marks are faint (heading #, list markers, quote >, link brackets), but
+   emphasis and code markers take their text's look, as in Obsidian. */
+.is-source-mode .cm-s-mark {
+  color: var(--text-faint);
+}
+.is-source-mode .cm-s-em.cm-s-mark,
+.is-source-mode .cm-s-strong.cm-s-mark,
+.is-source-mode .cm-s-strike.cm-s-mark,
+.is-source-mode .cm-s-code.cm-s-mark {
+  color: inherit;
+}
+.is-source-mode .cm-s-task {
+  font-family: var(--font-monospace);
+  color: var(--text-muted);
+}
+.is-source-mode .cm-s-tag {
+  color: var(--tag-color);
+  background: var(--tag-background);
+  border-radius: 2em;
+  padding: 0.1em 0.5em;
+  font-size: 0.875em;
+}

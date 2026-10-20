@@ -224,3 +224,33 @@ export const BLOCKS = {
   codeBlock: { text: "```\n\n```", caret: 4 },
   mathBlock: { text: "$$\n\n$$", caret: 3 },
 };
+
+/**
+ * Obsidian's "Insert footnote": "[^n]" at the caret, with n one more than
+ * the highest footnote in the note, and its "[^n]: " definition on a new
+ * line at the end of the note, where the caret goes to write it.
+ */
+export const insertFootnote: StateCommand = ({ state, dispatch }) => {
+  let n = 0;
+  for (const m of state.doc.toString().matchAll(/\[\^(\d+)\]/g)) n = Math.max(n, Number(m[1]));
+  const label = `[^${n + 1}]`;
+  const at = state.selection.main.head;
+  const end = state.doc.length;
+  const lastLine = state.doc.line(state.doc.lines);
+  // The last line as it will be, with the reference in it if the caret is there.
+  const last = at >= lastLine.from ? lastLine.text + label : lastLine.text;
+  const def = `${last.trim() ? state.lineBreak + state.lineBreak : end ? state.lineBreak : ""}${label}: `;
+  update(
+    { state, dispatch },
+    { changes: [{ from: at, insert: label }, { from: end, insert: def }], selection: { anchor: end + label.length + def.length } },
+  );
+  return true;
+};
+
+/** Replace the selection with text, caret after it (Templates' "Insert current date/time"). */
+export const insertText =
+  (text: () => string): StateCommand =>
+  ({ state, dispatch }) => {
+    update({ state, dispatch }, state.replaceSelection(text()));
+    return true;
+  };

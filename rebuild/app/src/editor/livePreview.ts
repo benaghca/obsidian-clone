@@ -380,7 +380,8 @@ const livePreviewPlugin = ViewPlugin.fromClass(
 );
 
 // A plain click on a rendered link follows it; Ctrl/Cmd-click always does,
-// in a new tab for wikilinks. Clicking revealed (raw) link text just edits.
+// in a new tab for wikilinks (Ctrl/Cmd+Alt-click: in a new pane to the
+// right, as in Obsidian). Clicking revealed (raw) link text just edits.
 // The press only claims the link (so the caret stays put); the link is
 // followed on the click that completes it, and only for a real user click,
 // so a drag that starts on a link, or a scripted click, opens nothing.
@@ -411,7 +412,7 @@ const linkClicks = EditorView.domEventHandlers({
     event.preventDefault();
     const modifier = event.ctrlKey || event.metaKey;
     const href = el.dataset.href!;
-    if (el.classList.contains("cm-wikilink")) host.openLink(href, modifier);
+    if (el.classList.contains("cm-wikilink")) host.openLink(href, modifier ? (event.altKey ? "right" : "tab") : false, view);
     else host.openUrl(href);
     return true;
   },

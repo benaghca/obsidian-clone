@@ -2,15 +2,17 @@
 // it is used, nested tags ("#project/grove") as a tree, like Obsidian's tag
 // pane. The backend has no tag index, so this asks its search for lines
 // containing "#" (and for fence lines, to skip tags in code blocks) and reads
-// the tags from those lines. The open note is read from the editor instead,
-// so unsaved text counts. It runs only while the view is shown: the search
+// the tags from those lines. Frontmatter `tags:` are found by searching for
+// the key; only the notes that have it are read, and each is read again
+// only when it changes. The open note is read from the editor instead, so
+// unsaved text counts. It runs only while the view is shown: the search
 // after a vault change settles, the open note on a debounce after typing.
 
 import { api } from "../api";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
-import { type TagNode, tagsByNote, tagsInText, tagTree } from "./linksTags";
+import { type Frontmatter, frontmatterTags, type TagNode, tagsByNote, tagsInText, tagTree } from "./linksTags";
 import type { SideView } from "./outlineView";
 
 const LIMIT = 100_000;
@@ -30,17 +32,44 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
   let shown = "";
   /** Saved tags per note from the last search. */
   let saved = new Map<string, string[]>();
+  /** Frontmatter read from notes, by path, kept while the note's modified time stays the same. */
+  const frontmatter = new Map<string, { mtime: number; fm: Frontmatter }>();
+
+  /** The frontmatter of the notes with a `tags:` (or `tag:`) key on one of their first lines. */
+  async function readFrontmatter(keyLines: { path: string; line: number; text: string }[]) {
+    const paths = new Set(keyLines.filter((h) => h.line > 1 && h.path.endsWith(".md") && /^tags?\s*:/i.test(h.text)).map((h) => h.path));
+    const out = new Map<string, Frontmatter>();
+    await Promise.all(
+      [...paths].map(async (path) => {
+        const mtime = ws.files.find((f) => f.path === path)?.mtime_ms ?? 0;
+        const cached = frontmatter.get(path);
+        if (cached && cached.mtime === mtime && !ws.isLoaded(path)) return void out.set(path, cached.fm);
+        try {
+          const fm = frontmatterTags(await ws.text(path));
+          frontmatter.set(path, { mtime, fm });
+          out.set(path, fm);
+        } catch {
+          // gone meanwhile
+        }
+      }),
+    );
+    return out;
+  }
 
   async function refresh() {
     const mine = ++seq;
     try {
-      const [tagLines, ticks, tildes] = await Promise.all([
+      const [tagLines, ticks, tildes, keys, oldKeys] = await Promise.all([
         api.search("#", LIMIT),
         api.search("```", LIMIT),
         api.search("~~~", LIMIT),
+        api.search("tags:", LIMIT),
+        api.search("tag:", LIMIT),
       ]);
       if (mine !== seq) return;
-      saved = tagsByNote(tagLines, [...ticks, ...tildes]);
+      const fm = await readFrontmatter([...keys, ...oldKeys]);
+      if (mine !== seq) return;
+      saved = tagsByNote(tagLines, [...ticks, ...tildes], fm);
     } catch (err) {
       console.error("Could not read tags", err);
     }

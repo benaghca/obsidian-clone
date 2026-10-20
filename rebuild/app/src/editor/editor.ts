@@ -6,12 +6,13 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { deleteMarkupBackward, insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { indentUnit } from "@codemirror/language";
 import { searchKeymap } from "@codemirror/search";
-import { Compartment, EditorState, type Extension, Prec } from "@codemirror/state";
+import { Compartment, type EditorSelection, EditorState, type Extension, Prec, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
-import { countsField } from "./counts";
+import { type Counts, countsField } from "./counts";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
-import { Tag, WikiLink } from "./syntax";
+import { sourceMode } from "./sourceMode";
+import { MarkerStyles, Tag, WikiLink } from "./syntax";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
 const baseTheme = EditorView.theme({
@@ -36,7 +37,7 @@ export const viewModeCompartment = new Compartment();
 
 export const VIEW_MODES: Record<ViewMode, Extension> = {
   live: livePreview,
-  source: EditorView.editorAttributes.of({ class: "is-source-mode" }),
+  source: [EditorView.editorAttributes.of({ class: "is-source-mode" }), sourceMode],
   reading: [
     livePreview,
     readingMode.of(true),
@@ -88,30 +89,39 @@ const contextMenu = EditorView.domEventHandlers({
 });
 
 export interface NoteStateOptions {
-  doc: string;
+  doc: string | Text;
   host: EditorHost;
-  /** Extra extensions from the pane, e.g. an update listener. */
+  /** Extra extensions from the workspace, e.g. a mirror's undo keys. */
   extensions?: Extension;
+  /**
+   * A note's main state keeps its undo history. A mirror (the same note in
+   * a second pane) has none: its undo acts on the main state.
+   */
+  history?: boolean;
+  selection?: EditorSelection;
+  /** The word and character counts, when already known (a mirror copies its main state's). */
+  counts?: Counts;
 }
 
-export function createNoteState({ doc, host, extensions = [] }: NoteStateOptions): EditorState {
+export function createNoteState({ doc, host, extensions = [], history: withHistory = true, selection, counts }: NoteStateOptions): EditorState {
   return EditorState.create({
     doc,
+    selection,
     extensions: [
       editorHost.of(host),
-      history(),
+      withHistory ? history() : [],
       drawSelection(),
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       indentUnit.of("    "),
       EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{"] } }]),
       closeBrackets(),
-      markdown({ base: markdownLanguage, extensions: [WikiLink, Tag], addKeymap: false }),
+      markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, MarkerStyles], addKeymap: false }),
       listKeymap,
       viewModeCompartment.of(VIEW_MODES.live),
       contextMenu,
       wikilinkCompletion,
-      countsField,
+      counts ? countsField.init(() => counts) : countsField,
       keymap.of([
         ...closeBracketsKeymap,
         ...completionKeymap,

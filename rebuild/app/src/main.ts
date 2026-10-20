@@ -3,7 +3,7 @@ import "./styles/app.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
 import { isTauri } from "./api";
-import { type AppParts, registerAppCommands } from "./appCommands";
+import { type AppParts, applyViewPrefs, registerAppCommands } from "./appCommands";
 import { Bookmarks } from "./bookmarks";
 import { commands } from "./commands";
 import { countsField } from "./editor/counts";
@@ -11,10 +11,12 @@ import { h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
 import { type MenuItems, showMenu } from "./shell/menu";
 import { createMenus } from "./shell/menus";
+import { openMergePrompt } from "./shell/mergePrompt";
 import { openMovePrompt } from "./shell/movePrompt";
-import { createPane } from "./shell/pane";
+import { createPanes } from "./shell/pane";
 import { warmUpPromptGlyphs } from "./shell/prompt";
-import { loadLayout, saveLayout } from "./shell/prefs";
+import { loadLayout, loadWorkspace, saveLayout, saveWorkspace } from "./shell/prefs";
+import { pathQuery } from "./shell/searchQuery";
 import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
@@ -25,7 +27,17 @@ const bookmarks = new Bookmarks(ws);
 
 // Commands first: the views show their hotkeys. The views are filled into
 // `parts` below; commands only read them when they run.
-const parts = { ws, bookmarks } as AppParts;
+const parts = {
+  ws,
+  bookmarks,
+  toggleRibbon: () => setRibbonShown(app.classList.contains("is-ribbon-hidden")),
+  editorMenuAtCaret: () => {
+    const view = ws.view;
+    const head = view.state.selection.main.head;
+    const at = view.coordsAtPos(head);
+    if (at) showMenu(menus.editor(view, head), { x: at.left, y: at.bottom }, { keyboard: true });
+  },
+} as AppParts;
 registerAppCommands(parts);
 if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands }); // for poking at from devtools
 
@@ -36,17 +48,22 @@ const menus = createMenus({
     docks.setCollapsed("left", false);
     sidebar.renameInTree(path);
   },
-  renameActive: () => pane.focusTitle(true),
+  renameActive: () => panes.focusTitle(true),
   newNoteIn: (folder) =>
     void ws
       .newNote(folder)
-      .then(() => pane.focusTitle(true))
+      .then(() => panes.focusTitle(true))
       .catch((err) => console.warn("Could not create a note", err)),
   newFolderIn: (folder) => {
     docks.setCollapsed("left", false);
     sidebar.newFolderIn(folder);
   },
   moveFile: (path) => openMovePrompt(ws, path),
+  mergeFile: (path) => openMergePrompt(ws, path),
+  searchInFolder: (folder) => {
+    sidebar.searchFor(pathQuery(folder));
+    docks.setCollapsed("left", false);
+  },
   revealInTree: (path) => {
     sidebar.select("files");
     docks.setCollapsed("left", false);
@@ -55,7 +72,7 @@ const menus = createMenus({
 });
 ws.editorMenu = (view, at, pos, keyboard) => showMenu(menus.editor(view, pos), at, { keyboard });
 
-const pane = createPane(ws, () => menus);
+const panes = createPanes(ws, () => menus);
 const sidebar = createSidebar(ws, bookmarks, () => menus);
 const rightSidebar = createRightSidebar(
   ws,
@@ -69,12 +86,15 @@ const rightSidebar = createRightSidebar(
 // ----- ribbon -----
 
 // Obsidian's ribbon: its actions are commands, and right-clicking it lists
-// them with a check to show or hide each one.
+// them with a check to show or hide each one. These are Obsidian's, in its
+// order and with its glyphs, where Grove has the feature (graph, canvas,
+// templates and bases it doesn't), then "Create new note", which is Grove's.
 const RIBBON: { id: string; label: string; icon: IconName }[] = [
-  { id: "switcher:open", label: "Open quick switcher", icon: "arrow-left-right" },
-  { id: "daily-notes", label: "Open today's daily note", icon: "calendar-days" },
+  { id: "switcher:open", label: "Open quick switcher", icon: "file-search" },
+  { id: "daily-notes", label: "Open today's daily note", icon: "calendar" },
+  { id: "command-palette:open", label: "Open command palette", icon: "terminal" },
+  { id: "random-note", label: "Open random note", icon: "dices" },
   { id: "file-explorer:new-file", label: "Create new note", icon: "square-pen" },
-  { id: "command-palette:open", label: "Open command palette", icon: "square-terminal" },
 ];
 const RIBBON_HIDDEN = "grove.ribbon.hidden";
 const ribbonHidden = new Set<string>();
@@ -144,8 +164,8 @@ function renderBacklinks() {
   backlinkCount.textContent = plural(from.size, "backlink");
 }
 ws.on((change) => {
-  if (change === "doc" || change === "tabs") renderCounts();
-  if (change === "links" || change === "tabs") renderBacklinks();
+  if (change === "doc" || change === "tabs" || change === "show") renderCounts();
+  if (change === "links" || change === "tabs" || change === "show") renderBacklinks();
 });
 
 // ----- layout -----
@@ -156,15 +176,32 @@ const app = h(
   { class: "app-container is-right-sidebar-collapsed" },
   ribbon,
   sidebar.el,
-  h("div", { class: "workspace-split mod-root" }, pane.el),
+  panes.el,
   rightSidebar.el,
   statusBar,
 );
 document.getElementById("app")!.replaceWith(app);
 
-const docks = createSidedocks(app, pane);
+const docks = createSidedocks(app, panes);
 rightSidebar.el.append(docks.resizeHandle("right"));
-Object.assign(parts, { pane, docks, left: sidebar, right: rightSidebar });
+Object.assign(parts, { panes, docks, left: sidebar, right: rightSidebar });
+
+// The ribbon can be hidden (Obsidian's "Toggle ribbon"), remembered per machine.
+const RIBBON_SHOWN = "grove.ribbon.shown";
+function setRibbonShown(shown: boolean) {
+  app.classList.toggle("is-ribbon-hidden", !shown);
+  try {
+    localStorage.setItem(RIBBON_SHOWN, shown ? "1" : "0");
+  } catch {
+    // not remembered
+  }
+}
+try {
+  if (localStorage.getItem(RIBBON_SHOWN) === "0") app.classList.add("is-ribbon-hidden");
+} catch {
+  // shown
+}
+applyViewPrefs();
 
 function rememberLayout() {
   if (!ws.vault.path) return;
@@ -211,7 +248,23 @@ document.addEventListener("contextmenu", (e) => {
   const target = e.target as HTMLElement;
   if (!e.defaultPrevented && !target.closest("input, textarea")) e.preventDefault();
 });
-window.addEventListener("beforeunload", () => void ws.flushAll());
+// The panes (split tree, sizes, tabs, active pane) are saved per vault a
+// moment after they change, and when the window closes.
+let workspaceTimer = 0;
+let restored = false;
+const rememberWorkspace = () => {
+  clearTimeout(workspaceTimer);
+  if (restored && ws.vault.path) saveWorkspace(ws.vault.path, ws.saveLayout());
+};
+ws.on((change) => {
+  if (!restored || (change !== "tabs" && change !== "layout" && change !== "mode")) return;
+  clearTimeout(workspaceTimer);
+  workspaceTimer = window.setTimeout(rememberWorkspace, 500);
+});
+window.addEventListener("beforeunload", () => {
+  rememberWorkspace();
+  void ws.flushAll();
+});
 
 await ws.init();
 bookmarks.load();
@@ -220,5 +273,8 @@ docks.setWidth("right", layout.rightWidth);
 rightSidebar.select(layout.rightView);
 docks.setCollapsed("right", !layout.rightOpen, false);
 sidebar.setSortOrder(layout.fileSort);
-await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");
+if (!(await ws.restoreLayout(loadWorkspace(ws.vault.path)))) {
+  await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");
+}
+restored = true;
 warmUpPromptGlyphs();

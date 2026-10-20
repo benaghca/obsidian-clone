@@ -36,3 +36,26 @@ export function saveLayout(vaultPath: string, layout: VaultLayout) {
     // storage full or disabled: the layout just won't be remembered
   }
 }
+
+/**
+ * The workspace's panes (layout tree, sizes, tabs, active pane), saved per
+ * vault in its own key. Whatever is stored is handed back as is; the
+ * workspace checks it and drops anything that no longer exists.
+ */
+const workspaceKey = (vaultPath: string) => `grove.workspace:${vaultPath}`;
+
+export function loadWorkspace(vaultPath: string): unknown {
+  try {
+    return JSON.parse(localStorage.getItem(workspaceKey(vaultPath)) ?? "null");
+  } catch {
+    return null;
+  }
+}
+
+export function saveWorkspace(vaultPath: string, saved: unknown) {
+  try {
+    localStorage.setItem(workspaceKey(vaultPath), JSON.stringify(saved));
+  } catch {
+    // storage full or disabled: the panes just won't be remembered
+  }
+}

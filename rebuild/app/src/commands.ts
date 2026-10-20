@@ -62,6 +62,8 @@ const KEY_LABELS: Record<string, string> = {
   arrowdown: "↓",
   enter: "↵",
   tab: "Tab",
+  pageup: "Page Up",
+  pagedown: "Page Down",
   delete: "Delete",
   backspace: "Backspace",
   " ": "Space",

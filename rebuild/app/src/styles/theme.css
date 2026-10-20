@@ -88,14 +88,20 @@
   /* Menus */
   --menu-padding: 6px;
   --menu-item-radius: 6px;
-  --menu-shadow: 0 2px 6px rgba(0, 0, 0, 0.06), 0 6px 18px rgba(0, 0, 0, 0.1);
+  /* Measured on Obsidian 1.14.4's menus: a light three-step shadow, a
+     #dadada edge, and the secondary background. */
+  --menu-background: var(--background-secondary);
+  --menu-border-color: #dadada;
+  --menu-shadow: 0 1px 2px rgba(0, 0, 0, 0.027), 0 3.4px 6.7px rgba(0, 0, 0, 0.043), 0 15px 30px rgba(0, 0, 0, 0.07);
 
-  /* The quick switcher and the command palette */
+  /* The quick switcher and the command palette: 700px, capped at 80vw, as
+     measured side by side in Obsidian 1.14.4 (its footer of six hints fits
+     on one line at that width). */
   --prompt-width: 700px;
   --prompt-max-width: 80vw;
   --prompt-max-height: 70vh;
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.03), 0 3px 8px rgba(0, 0, 0, 0.07);
-  --shadow-l: 0 2px 8px rgba(0, 0, 0, 0.05), 0 12px 40px rgba(0, 0, 0, 0.16);
+  --shadow-l: 0 1.8px 7.3px rgba(0, 0, 0, 0.07), 0 6.3px 24.7px rgba(0, 0, 0, 0.114), 0 15px 30px rgba(0, 0, 0, 0.1);
 
   /* Motion: every transition and animation in the app uses these. Hover and
      state swaps are fast, popovers and folders moderate, smooth scrolling
