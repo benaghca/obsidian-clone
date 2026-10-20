@@ -767,7 +767,23 @@ body {
   z-index: 10;
 }
 .status-bar-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 0 4px;
+  border-radius: var(--radius-s);
+}
+.status-bar-item.mod-clickable {
+  pointer-events: auto;
+  cursor: var(--cursor, default);
+}
+.status-bar-item.mod-clickable:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+.status-bar-item .svg-icon {
+  width: 14px;
+  height: 14px;
 }
 
 /* ----- menu (context menus and dropdowns, shell/menu.ts) ----- */

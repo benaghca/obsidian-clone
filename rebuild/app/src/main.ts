@@ -116,7 +116,14 @@ const ribbon = h(
 
 // ----- status bar: backlinks, word and character counts for the open note -----
 
-const backlinks = h("div", { class: "status-bar-item" });
+// Clicking the backlink count opens the Backlinks view, like Obsidian.
+const backlinkCount = h("span");
+const backlinks = h(
+  "div",
+  { class: "status-bar-item mod-clickable", title: "Show backlinks", onclick: () => commands.run("backlink:open") },
+  icon("link", 14),
+  backlinkCount,
+);
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
 const statusBar = h("div", { class: "status-bar" }, backlinks, words, chars);
@@ -134,7 +141,7 @@ function renderBacklinks() {
   const path = ws.active.path;
   if (!path) return;
   const from = new Set((ws.links.backlinks[path] ?? []).map((b) => b.from));
-  backlinks.textContent = plural(from.size, "backlink");
+  backlinkCount.textContent = plural(from.size, "backlink");
 }
 ws.on((change) => {
   if (change === "doc" || change === "tabs") renderCounts();
