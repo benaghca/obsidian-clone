@@ -221,6 +221,14 @@ for (const path of walk(join(root, "src-tauri/capabilities"))) {
   }
 }
 
+// The opener plugin's default build injects a page script that sends any
+// <a target=_blank> click, even a scripted one, to the system browser. Only
+// the front end's trusted-click handler may open links, so it must be off.
+const libRs = readFileSync(join(root, "src-tauri/src/lib.rs"), "utf8");
+if (/tauri_plugin_opener::init\s*\(/.test(libRs) || !/\.open_js_links_on_click\(\s*false\s*\)/.test(libRs)) {
+  fail("src-tauri/src/lib.rs", "tauri-plugin-opener must be built with .open_js_links_on_click(false)");
+}
+
 // ----- 5. dependencies -----
 
 // Direct dependencies, each listed on purpose. Adding one means adding it here.
