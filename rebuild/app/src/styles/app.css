@@ -705,6 +705,9 @@ body.is-grabbing * {
 .workspace-tab-header.is-being-dragged {
   opacity: 0.5;
 }
+body.is-grabbing .workspace-tab-header:not(.is-active):hover .workspace-tab-header-inner {
+  background: transparent;
+}
 
 /* tab strip: the top ones double as the title bar */
 .mod-root .workspace-tab-header-container {

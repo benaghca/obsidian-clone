@@ -12,7 +12,7 @@ import { type Counts, countsField } from "./counts";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
 import { sourceMode } from "./sourceMode";
-import { Tag, WikiLink } from "./syntax";
+import { MarkerStyles, Tag, WikiLink } from "./syntax";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
 const baseTheme = EditorView.theme({
@@ -116,7 +116,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       indentUnit.of("    "),
       EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{"] } }]),
       closeBrackets(),
-      markdown({ base: markdownLanguage, extensions: [WikiLink, Tag], addKeymap: false }),
+      markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, MarkerStyles], addKeymap: false }),
       listKeymap,
       viewModeCompartment.of(VIEW_MODES.live),
       contextMenu,

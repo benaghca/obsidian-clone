@@ -340,7 +340,6 @@
    emphasis and code markers take their text's look, as in Obsidian. */
 .is-source-mode .cm-s-mark {
   color: var(--text-faint);
-  text-decoration: none;
 }
 .is-source-mode .cm-s-em.cm-s-mark,
 .is-source-mode .cm-s-strong.cm-s-mark,

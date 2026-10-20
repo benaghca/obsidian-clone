@@ -1,7 +1,7 @@
 // Lezer markdown extensions for the two Obsidian-only inline elements:
 // [[wikilinks]] (with optional #heading and |display text) and #tags.
 
-import { Tag as HighlightTag, tags as t } from "@lezer/highlight";
+import { Tag as HighlightTag, styleTags, tags as t } from "@lezer/highlight";
 import type { InlineContext, MarkdownConfig } from "@lezer/markdown";
 
 /** Highlight tags for Source mode (Live Preview styles these nodes itself). */
@@ -56,7 +56,7 @@ const isTagChar = (ch: number) =>
 const isSpace = (ch: number) => ch === 32 || ch === 9 || ch === NEWLINE;
 
 export const Tag: MarkdownConfig = {
-  defineNodes: [{ name: "Tag", style: hashtag }, "TagMark"],
+  defineNodes: [{ name: "Tag", style: { "Tag/...": hashtag } }, "TagMark"],
   parseInline: [
     {
       name: "Tag",
@@ -74,4 +74,12 @@ export const Tag: MarkdownConfig = {
       },
     },
   ],
+};
+
+/**
+ * Source mode draws markers in their text's style, as Obsidian does: the
+ * ~~ of struck text is struck, the backticks of inline code are code.
+ */
+export const MarkerStyles: MarkdownConfig = {
+  props: [styleTags({ "Strikethrough/...": t.strikethrough, "InlineCode/...": t.monospace })],
 };
