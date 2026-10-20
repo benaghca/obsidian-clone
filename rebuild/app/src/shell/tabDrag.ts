@@ -10,7 +10,7 @@
 import type { Edge } from "../layout";
 import { animateOut } from "../motion";
 import type { Group, Tab, Workspace } from "../workspace";
-import { noteName } from "../workspace";
+import { tabTitle } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import type { GroupView } from "./pane";
@@ -126,7 +126,7 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
       "div",
       { class: "drag-ghost" },
       icon(tab.path ? "file-text" : "file", 16),
-      h("span", { class: "drag-ghost-title" }, tab.path ? noteName(tab.path) : "New tab"),
+      h("span", { class: "drag-ghost-title" }, tabTitle(tab)),
     );
     document.body.append(overlay, ghost);
     header.classList.add("is-being-dragged");

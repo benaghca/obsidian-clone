@@ -73,6 +73,19 @@
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
   --drop-overlay: hsla(var(--accent-h), var(--accent-s), 62%, 0.4);
 
+  /* graph view (Obsidian's node, line and text colours, with Grove's teal for
+     the hovered and the current note) */
+  --graph-node: var(--text-muted);
+  --graph-node-unresolved: var(--text-faint);
+  --graph-node-tag: #08b94e;
+  --graph-node-attachment: #e0ac00;
+  --graph-node-focused: var(--text-accent);
+  --graph-node-highlight: var(--interactive-accent);
+  --graph-line: #dadada;
+  --graph-line-highlight: var(--interactive-accent);
+  --graph-text: var(--text-normal);
+  --graph-arrow: var(--text-normal);
+
   /* Noto Sans leads: on Linux, -apple-system/BlinkMacSystemFont resolve to the
      fontconfig default (often Liberation Sans), while the spec observed Noto
      Sans there. macOS and Windows rarely have it and fall through. */
@@ -206,6 +219,10 @@
   --scrollbar-thumb: rgba(255, 255, 255, 0.1);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
   --drop-overlay: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.35);
+
+  --graph-node-tag: #44cf6e;
+  --graph-node-attachment: #e0de71;
+  --graph-line: #3f3f3f;
 
   --menu-background: var(--background-secondary);
   --menu-border-color: #3f3f3f;

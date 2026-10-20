@@ -3,6 +3,7 @@ import "./styles/app.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
 import "./styles/settings.css";
+import "./styles/graph.css";
 import { isTauri } from "./api";
 import { type AppParts, registerAppCommands } from "./appCommands";
 import { Bookmarks } from "./bookmarks";
@@ -87,26 +88,29 @@ const menus = createMenus({
 });
 ws.editorMenu = (view, at, pos, keyboard) => showMenu(menus.editor(view, pos), at, { keyboard });
 
-const panes = createPanes(ws, () => menus);
+const searchVault = (query: string) => {
+  sidebar.searchFor(query);
+  docks.setCollapsed("left", false);
+};
+const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(tag) });
 const sidebar = createSidebar(ws, bookmarks, () => menus);
 const rightSidebar = createRightSidebar(
   ws,
   () => !docks.isCollapsed("right"),
-  (query) => {
-    sidebar.searchFor(query);
-    docks.setCollapsed("left", false);
-  },
+  searchVault,
+  (path, at) => showMenu(menus.graphNode(path), at),
 );
 
 // ----- ribbon -----
 
 // Obsidian's ribbon: its actions are commands, and right-clicking it lists
 // them with a check to show or hide each one. These are Obsidian's, in its
-// order and with its glyphs, where Grove has the feature (graph, canvas,
-// templates and bases it doesn't), then "Create new note", which is Grove's.
+// order and with its glyphs, where Grove has the feature (canvas and bases
+// it doesn't), then "Create new note", which is Grove's.
 // A core plugin that is off takes its button away too.
 const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[] = [
   { id: "switcher:open", label: "Open quick switcher", icon: "file-search", plugin: "switcher" },
+  { id: "graph:open", label: "Open graph view", icon: "git-fork", plugin: "graph" },
   { id: "daily-notes", label: "Open today's daily note", icon: "calendar", plugin: "daily-notes" },
   { id: "templates:insert-template", label: "Insert template", icon: "files", plugin: "templates" },
   { id: "command-palette:open", label: "Open command palette", icon: "terminal", plugin: "command-palette" },
@@ -278,8 +282,13 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["outline", "outline"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["outline", "outline"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
+  }
+  // Graph view off: its tabs close, as Obsidian closes the plugin's views.
+  if (!on("graph")) {
+    const graphTabs = ws.layout.tabs().filter((t) => t.type);
+    if (graphTabs.length) ws.closeTabs(graphTabs);
   }
   if (!anyRight) docks.setCollapsed("right", true);
   app.classList.toggle("is-right-sidebar-empty", !anyRight);

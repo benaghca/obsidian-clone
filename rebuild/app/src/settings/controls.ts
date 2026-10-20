@@ -84,7 +84,8 @@ export function dropdown<T extends string>(options: readonly (readonly [T, strin
 export interface SliderOptions {
   min: number;
   max: number;
-  step: number;
+  /** "any" for a continuous slider. */
+  step: number | "any";
   value: number;
   label: string;
   /** The value as shown beside the slider. */

@@ -539,6 +539,18 @@ export function registerAppCommands(parts: AppParts) {
     { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", plugin: "outgoing-link", icon: "link-2", run: () => showRight("outgoing") },
     { id: "tag-pane:open", name: "Tags view: Show tags", plugin: "tag-pane", icon: "tags", run: () => showRight("tags") },
     { id: "outline:open", name: "Outline: Show outline", plugin: "outline", icon: "list", run: () => showRight("outline") },
+    // Graph view: the global graph in a tab (Obsidian's Ctrl/Cmd+G), and the
+    // open note's local graph to the right (as Obsidian opens it).
+    { id: "graph:open", name: "Graph view: Open graph view", plugin: "graph", icon: "git-fork", hotkeys: mod("g"), run: () => ws.openView("graph") },
+    {
+      id: "graph:open-local",
+      name: "Graph view: Open local graph",
+      plugin: "graph",
+      icon: "git-fork",
+      when: hasNote,
+      run: () => ws.openView("localgraph", "right", note()),
+    },
+    { id: "graph:show-local", name: "Graph view: Show local graph in sidebar", plugin: "graph", icon: "git-fork", run: () => showRight("localgraph") },
 
     // ----- editing -----
     editorCommand("editor:toggle-bold", "Toggle bold", "bold", toggleWrap("**"), mod("b")),

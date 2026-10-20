@@ -1131,6 +1131,10 @@ body.is-grabbing .workspace-tab-header:not(.is-active):hover .workspace-tab-head
   margin-left: 8px;
   color: var(--text-muted);
 }
+.menu-item.is-label {
+  color: var(--text-muted);
+  cursor: default;
+}
 .menu-item.is-disabled {
   color: var(--text-faint);
 }

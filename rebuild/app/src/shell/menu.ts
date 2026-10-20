@@ -19,6 +19,8 @@ export interface MenuEntry {
   checked?: boolean;
   /** Destructive (Delete): red, like Obsidian's. */
   danger?: boolean;
+  /** A muted title row that can't be chosen (the graph's node menu names its note). */
+  label?: boolean;
   /** Shortcut hint shown on the right, e.g. "Ctrl + B". */
   hotkey?: string;
   submenu?: MenuItems | (() => MenuItems);
@@ -57,7 +59,7 @@ export function tidy(items: MenuItems): (MenuEntry | typeof SEPARATOR)[] {
 }
 
 const selectable = (item: MenuEntry | typeof SEPARATOR | undefined): item is MenuEntry =>
-  !!item && item !== SEPARATOR && !item.disabled;
+  !!item && item !== SEPARATOR && !item.disabled && !item.label;
 
 class Menu {
   readonly el: HTMLElement;
@@ -96,6 +98,7 @@ class Menu {
     const cls = ["menu-item"];
     if (item.disabled) cls.push("is-disabled");
     if (item.danger) cls.push("is-warning");
+    if (item.label) cls.push("is-label");
     if (item.checked) cls.push("is-checked");
     if (item.submenu) cls.push("has-submenu");
     const row = h(

@@ -59,6 +59,7 @@ import {
   FolderOpen,
   FolderPlus,
   FolderSearch,
+  GitFork,
   FolderTree,
   GitMerge,
   HardDrive,
@@ -136,6 +137,7 @@ import {
   X,
   ZoomIn,
   ZoomOut,
+  WandSparkles,
 } from "lucide";
 
 type IconNode = [tag: string, attrs: Record<string, string | number | undefined>][];
@@ -194,6 +196,7 @@ const ICONS = {
   "folder-open": FolderOpen,
   "folder-plus": FolderPlus,
   "folder-search": FolderSearch,
+  "git-fork": GitFork,
   "folder-tree": FolderTree,
   "git-merge": GitMerge,
   "hard-drive": HardDrive,
@@ -268,6 +271,7 @@ const ICONS = {
   type: Type,
   "undo-2": Undo2,
   "whole-word": WholeWord,
+  "wand-sparkles": WandSparkles,
   x: X,
   "zoom-in": ZoomIn,
   "zoom-out": ZoomOut,

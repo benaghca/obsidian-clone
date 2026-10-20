@@ -1,7 +1,8 @@
-// Right sidebar: Backlinks, Outgoing links, Tags and Outline, switched with
-// icon tabs at the top like Obsidian's. Only the selected view, and only
-// while the sidebar is open, does any work.
+// Right sidebar: Backlinks, Outgoing links, Tags, Outline and Local graph,
+// switched with icon tabs at the top like Obsidian's. Only the selected view,
+// and only while the sidebar is open, does any work.
 
+import { createGraphView } from "../graph/view";
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
 import { h, iconButton } from "./dom";
@@ -10,7 +11,7 @@ import { createOutgoingView } from "./outgoingView";
 import { createOutlineView, type SideView } from "./outlineView";
 import { createTagsView } from "./tagsView";
 
-export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "outline"] as const;
+export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "outline", "localgraph"] as const;
 export type RightView = (typeof RIGHT_VIEWS)[number];
 
 export interface RightSidebar {
@@ -24,13 +25,22 @@ export interface RightSidebar {
   setEnabled(view: RightView, enabled: boolean): boolean;
 }
 
-/** `searchFor` runs a vault search in the left sidebar (a click on a tag). */
-export function createRightSidebar(ws: Workspace, isOpen: () => boolean, searchFor: (query: string) => void): RightSidebar {
+/**
+ * `searchFor` runs a vault search in the left sidebar (a click on a tag);
+ * `graphMenu` shows the menu for a note in the local graph.
+ */
+export function createRightSidebar(
+  ws: Workspace,
+  isOpen: () => boolean,
+  searchFor: (query: string) => void,
+  graphMenu: (path: string, at: { x: number; y: number }) => void,
+): RightSidebar {
   const views: Record<RightView, SideView> = {
     backlinks: createBacklinksView(ws),
     outgoing: createOutgoingView(ws),
     tags: createTagsView(ws, searchFor),
     outline: createOutlineView(ws),
+    localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
   const buttons = new Map<RightView, HTMLElement>();
   const listeners = new Set<(view: RightView) => void>();
@@ -71,6 +81,7 @@ export function createRightSidebar(ws: Workspace, isOpen: () => boolean, searchF
       tab("outgoing", "link-2", "Outgoing links"),
       tab("tags", "tags", "Tags"),
       tab("outline", "list", "Outline"),
+      tab("localgraph", "git-fork", "Local graph"),
     ),
     content,
   );
@@ -92,4 +103,35 @@ export function createRightSidebar(ws: Workspace, isOpen: () => boolean, searchF
       return available.length > 0;
     },
   };
+}
+
+/**
+ * The local graph in the sidebar: the neighbourhood of the note open in the
+ * active pane (it keeps the last note while a graph or an empty tab is
+ * active). Its settings panel starts closed, the sidebar being narrow.
+ */
+function createLocalGraphView(ws: Workspace, searchFor: (query: string) => void, menu: (path: string, at: { x: number; y: number }) => void): SideView {
+  let file: string | null = ws.active.path;
+  const view = createGraphView({
+    ws,
+    local: true,
+    file: () => file,
+    open: (path, where) => void ws.open(path, { where }),
+    openMissing: (name, where) => void ws.openLink(name, where),
+    searchTag: (tag) => searchFor(tag),
+    menu,
+    panelClosed: true,
+  });
+  ws.on((change) => {
+    if (change !== "show" && change !== "files") return;
+    const next = ws.active.path ?? (file && ws.notes.some((n) => n.path === file) ? file : null);
+    if (next === file) return;
+    file = next;
+    view.refresh();
+  });
+  // A rename moves the note it shows.
+  ws.onMove((swap) => {
+    if (file) file = swap(file);
+  });
+  return { el: view.el, setActive: (active) => view.setActive(active) };
 }
