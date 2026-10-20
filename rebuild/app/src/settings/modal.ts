@@ -22,6 +22,10 @@ export interface SettingsSection {
 }
 
 let lastSection = "general";
+let session = 0;
+
+/** Counts openings, so a page built in an earlier opening can tell it is stale. */
+export const settingsSession = () => session;
 let current: { close(): void; show(id: string): void; refreshNav(): void } | null = null;
 
 /** Whether the settings modal is open (the app's hotkeys stand aside meanwhile). */
@@ -42,6 +46,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
     if (id) current.show(id);
     return;
   }
+  session++;
   const restoreFocus = document.activeElement as HTMLElement | null;
   let listed = sections.filter((s) => s.shown?.() ?? true);
   const built = new Map<string, HTMLElement>();
@@ -145,7 +150,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
   const navGroups = h("div", { class: "vertical-tab-header-group-container" });
   function renderNav() {
     navItems.clear();
-    navGroups.replaceChildren(...[navGroup("Options", "options"), navGroup("Core plugins", "plugins")].filter((g): g is HTMLElement => !!g));
+    navGroups.replaceChildren(...([navGroup("Options", "options"), navGroup("Core plugins", "plugins")].filter(Boolean) as HTMLElement[]));
     for (const [sid, item] of navItems) {
       item.classList.toggle("is-active", sid === selected && !search.value);
       item.setAttribute("aria-selected", String(sid === selected));

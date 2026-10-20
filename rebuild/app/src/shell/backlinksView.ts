@@ -30,7 +30,12 @@ const SEARCH_LIMIT = 500;
 /** Matches shown per note before a "show more" row; keeps the DOM small for heavily linked notes. */
 const PAGE = 25;
 
-export function createBacklinksView(ws: Workspace): SideView {
+/**
+ * The Backlinks view. `pathOf` is the note it is for: the active pane's in
+ * the right sidebar; a pane's own note when shown under it ("Backlinks in
+ * document").
+ */
+export function createBacklinksView(ws: Workspace, pathOf: () => string | null = () => ws.active.path): SideView {
   const collapsedFiles = new Set<string>();
   let unlinkedOpen = false;
 
@@ -145,16 +150,18 @@ export function createBacklinksView(ws: Workspace): SideView {
   }
 
   function renderLinked() {
-    const path = ws.active.path;
+    const path = pathOf();
     const entries = path ? (ws.links.backlinks[path] ?? []) : [];
     // Skip the DOM work (and keep scroll and collapsed groups) when nothing changed.
     const key = `${path}\n${entries.map((b) => `${b.from}:${b.line}:${b.text}`).join("\n")}`;
     if (key === shownLinked) return;
     shownLinked = key;
     const resolved = new Map<string, boolean>();
-    const isHere = (target: string) => {
-      let here = resolved.get(target);
-      if (here === undefined) resolved.set(target, (here = ws.resolve(target) === path));
+    // Link targets resolve from the note they are in.
+    const isHere = (target: string, from: string) => {
+      const key = `${from}\n${target}`;
+      let here = resolved.get(key);
+      if (here === undefined) resolved.set(key, (here = ws.resolve(target, from) === path));
       return here;
     };
     // One row per line, however many links it has; the count is every link.
@@ -162,7 +169,7 @@ export function createBacklinksView(ws: Workspace): SideView {
     for (const b of entries) {
       const row = byLine.get(`${b.from}:${b.line}`);
       if (row) row.count++;
-      else byLine.set(`${b.from}:${b.line}`, { ...b, count: 1, spans: () => linkSpans(b.text, isHere) });
+      else byLine.set(`${b.from}:${b.line}`, { ...b, count: 1, spans: () => linkSpans(b.text, (t) => isHere(t, b.from)) });
     }
     const n = renderGroups(linked.body, [...byLine.values()], path ? "No backlinks found." : "No file is open.");
     linked.count.textContent = n ? n.toLocaleString() : "";
@@ -174,7 +181,7 @@ export function createBacklinksView(ws: Workspace): SideView {
   }
 
   async function renderUnlinked() {
-    const path = ws.active.path;
+    const path = pathOf();
     const seq = ++unlinkedSeq;
     if (!path) {
       renderGroups(unlinked.body, [], "No file is open.");
@@ -188,10 +195,10 @@ export function createBacklinksView(ws: Workspace): SideView {
     } catch (err) {
       console.error("Could not search for unlinked mentions", err);
     }
-    if (seq !== unlinkedSeq || ws.active.path !== path) return; // superseded
+    if (seq !== unlinkedSeq || pathOf() !== path) return; // superseded
     const mentions: Mention[] = [];
     for (const hit of hits) {
-      if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md")) continue;
+      if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md") || ws.isExcluded(hit.path)) continue;
       const spans = mentionSpans(hit.text, title);
       if (spans.length) mentions.push({ from: hit.path, line: hit.line, text: hit.text, count: spans.length, spans: () => spans });
     }
@@ -206,7 +213,7 @@ export function createBacklinksView(ws: Workspace): SideView {
 
   ws.on((change) => {
     if (!active) return;
-    if (change === "show") afterPaint(refresh);
+    if (change === "show" || change === "pane") afterPaint(refresh);
     else if (change === "links" || change === "files") refresh();
   });
 

@@ -95,6 +95,15 @@ body {
 .side-dock-ribbon-action {
   padding: 4px;
 }
+/* The settings gear: at the foot of the ribbon only while the left sidebar
+   is closed (otherwise it is in the sidebar's vault footer, as in Obsidian). */
+.side-dock-settings {
+  margin-top: auto;
+  padding: 6px 0 8px;
+}
+.app-container:not(.is-left-sidebar-collapsed) .side-dock-settings {
+  display: none;
+}
 
 /* ----- side docks (left: files; right: backlinks, outline) ----- */
 
@@ -529,10 +538,12 @@ body {
   min-width: 0;
   display: flex;
   position: relative;
+  overflow: hidden;
 }
 .mod-root .workspace-split {
   flex: 1 1 0;
-  min-width: 0;
+  /* auto: a nested split needs room for its panes' floors */
+  min-width: auto;
   min-height: 0;
   display: flex;
   position: relative;
@@ -547,7 +558,9 @@ body {
 }
 .workspace-tabs {
   flex: 1 1 0;
-  min-width: 0;
+  /* A floor for when the window, a sidebar or a split squeezes a pane
+     (dragging stops earlier, at 200px): narrower, words break mid-word. */
+  min-width: var(--pane-min-width, 130px);
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -636,12 +649,13 @@ body.is-grabbing * {
   cursor: grabbing !important;
 }
 
-/* The active pane: with more than one, the others' active tab and view
-   header chrome read faint (round 5 took this from Grok's pass: a clearer
-   cue than muted text). The note text itself never dims. */
+/* The active pane: with more than one, the others' active tab title and
+   view-header title read faint. Obsidian 1.14.4 (measured) dims just those
+   two, to its muted colour, and leaves the header icons alone; Grove dims
+   them one step further (faint), since muted proved hard to see side by
+   side, and now leaves the icons alone too. The note text never dims. */
 .mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .workspace-tab-header.is-active .workspace-tab-header-inner,
-.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header-title,
-.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header .clickable-icon:not(:hover) {
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header-title {
   color: var(--text-faint);
 }
 
@@ -656,7 +670,9 @@ body.is-grabbing * {
   pointer-events: none;
   transform-origin: 0 0;
   border-radius: var(--radius-m);
-  background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.22);
+  /* Obsidian's is a light accent at half strength: lighter and more
+     see-through than a dark accent tint. */
+  background: var(--drop-overlay);
   opacity: 0;
   transition:
     transform var(--anim-duration-fast) var(--anim-ease-in-out),
@@ -840,6 +856,30 @@ body.is-grabbing .workspace-tab-header:not(.is-active):hover .workspace-tab-head
 }
 .is-ribbon-hidden .workspace-ribbon {
   display: none;
+}
+/* Settings → Interface → Show tab title bar; Editor → Inline title. */
+.is-view-header-hidden .view-header {
+  display: none;
+}
+.is-inline-title-hidden .inline-title:not(.is-renaming) {
+  display: none;
+}
+.is-right-sidebar-empty .sidebar-toggle-button.mod-right {
+  display: none;
+}
+
+/* Backlinks in document: under the note, past a thin rule. */
+.embedded-backlinks {
+  margin: 0 0 32vh;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+  user-select: none;
+  cursor: default;
+}
+.embedded-backlinks .backlink-pane {
+  overflow: visible;
+  padding: 0;
 }
 
 /* Frameless window (Tauri): the window buttons float in the top-right

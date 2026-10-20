@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window, on the app's own origin only, can call the vault commands (and read and write its own settings in the vault's .grove folder), listen for vault-changed, drive its own frameless window, and hand http, https and mailto links to the system opener.",
+  "description": "The main window, on the app's own origin only, can call the vault commands (and read and write its own settings in the vault's .grove folder), listen for vault-changed, drive its own frameless window, set its own zoom level (Settings → Interface → Zoom level), and hand http, https and mailto links to the system opener.",
   "windows": [
     "main"
   ],
@@ -25,6 +25,7 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:webview:allow-set-webview-zoom",
     {
       "identifier": "opener:allow-open-url",
       "allow": [

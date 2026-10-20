@@ -18,15 +18,23 @@ import { showMenu } from "./menu";
 import type { Menus } from "./menus";
 import type { ColumnHolder } from "./sidedock";
 import { startTabDrag } from "./tabDrag";
+import { createBacklinksView } from "./backlinksView";
+import type { SideView } from "./outlineView";
 
 export interface Panes extends ColumnHolder {
   el: HTMLElement;
+  /** Whether backlinks may show under notes (the Backlinks core plugin is on). */
+  setBacklinksAllowed(allowed: boolean): void;
   /** Focus the active pane's inline title, selecting it for a rename. */
   focusTitle(selectAll: boolean): void;
 }
 
-/** No pane can be dragged smaller than this (px), across or down. */
-export const MIN_PANE_WIDTH = 160;
+/**
+ * No pane can be dragged smaller than this (px), across or down. 200px
+ * across is Obsidian 1.14.4's (measured by dragging a divider as far as it
+ * goes); below about that, words start breaking in the text column.
+ */
+export const MIN_PANE_WIDTH = 200;
 export const MIN_PANE_HEIGHT = 120;
 const minFor = (direction: Direction) => (direction === "vertical" ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT);
 
@@ -40,6 +48,7 @@ interface GroupView {
   headers: Map<number, HTMLElement>;
   render(): void;
   renderMode(): void;
+  renderBacklinks(): void;
   fade(): void;
   holdColumn(delta: number, dock?: Animation): void;
   focusTitle(selectAll: boolean): void;
@@ -50,6 +59,7 @@ interface GroupView {
 export function createPanes(ws: Workspace, menus: () => Menus): Panes {
   const root = h("div", { class: "workspace-split mod-vertical mod-root" });
   const views = new Map<Group, GroupView>();
+  let backlinksAllowed = true;
   const splitEls = new Map<number, HTMLElement>();
 
   /** Group views made since the last layout pass; they get their scroll position once attached. */
@@ -242,6 +252,7 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     if (change === "layout") renderLayout();
     if (change === "pane" && group) views.get(group)?.fade();
     if (change === "mode") for (const v of views.values()) v.renderMode();
+    if (change === "tabs" || change === "pane") for (const v of views.values()) v.renderBacklinks();
     if (change === "tabs" || change === "files" || change === "layout") {
       for (const v of views.values()) v.render();
       renderActive();
@@ -251,8 +262,17 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
   for (const v of views.values()) v.render();
   renderActive();
 
+  // The empty state's hotkey hints follow Settings → Hotkeys.
+  commands.onChange(() => {
+    for (const v of views.values()) v.render();
+  });
+
   return {
     el: root,
+    setBacklinksAllowed(allowed) {
+      backlinksAllowed = allowed;
+      for (const v of views.values()) v.renderBacklinks();
+    },
     focusTitle: (selectAll) => viewFor(ws.activeGroup).focusTitle(selectAll),
     // Every pane's width scales with the workspace's (sizes are fractions),
     // so each holds its own column for its share of the change.
@@ -470,10 +490,21 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     const sizer = h("div", { class: "markdown-sizer" }, title, ws.viewOf(group).dom);
     const scroller = h("div", { class: "view-content" }, sizer);
 
+    const emptyActions: [HTMLElement, string, string][] = [];
     const emptyAction = (label: string, id: string) => {
-      const hotkey = commands.hotkey(id);
-      return h("div", { class: "empty-state-action", onclick: () => commands.run(id) }, `${label}${hotkey ? ` (${hotkey})` : ""}`);
+      const el = h("div", { class: "empty-state-action", onclick: () => commands.run(id) });
+      emptyActions.push([el, label, id]);
+      return el;
     };
+    // Labels carry the current hotkey; a command whose core plugin is off is left out.
+    function renderEmpty() {
+      for (const [el, label, id] of emptyActions) {
+        const hotkey = commands.hotkey(id);
+        const text = `${label}${hotkey ? ` (${hotkey})` : ""}`;
+        if (el.textContent !== text) el.textContent = text;
+        el.hidden = !commands.isEnabled(id);
+      }
+    }
     const empty = h(
       "div",
       { class: "empty-state" },
@@ -490,13 +521,31 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
       if (path && document.activeElement !== title) title.textContent = noteName(path);
       // The editor may have moved here from another group (a tab dragged out).
       const dom = ws.viewOf(group).dom;
-      if (dom.parentElement !== sizer) sizer.append(dom);
+      if (dom.parentElement !== sizer) sizer.insertBefore(dom, backlinksBox);
     }
 
     function render() {
       renderTabs();
       renderHeader();
       renderView();
+      if (empty.hidden === false) renderEmpty();
+    }
+
+    // Backlinks under the note (Obsidian's "Backlinks in document"): built
+    // the first time a tab here asks for them; only works while shown.
+    let backlinks: SideView | null = null;
+    let backlinksBox: HTMLElement | null = null;
+    function renderBacklinks() {
+      const tab = group.active;
+      const want = backlinksAllowed && !!tab.path && tab.backlinks;
+      if (want && !backlinks) {
+        backlinks = createBacklinksView(ws, () => group.active.path);
+        backlinksBox = h("div", { class: "embedded-backlinks" }, backlinks.el);
+        sizer.append(backlinksBox);
+      }
+      if (!backlinks || !backlinksBox) return;
+      backlinksBox.hidden = !want;
+      backlinks.setActive(want);
     }
 
     // A note switch eases the new text in from slightly transparent. The text
@@ -555,6 +604,8 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     }
 
     function focusTitle(selectAll: boolean) {
+      // With the inline title turned off, it shows just for the rename.
+      title.classList.add("is-renaming");
       title.focus();
       const range = document.createRange();
       range.selectNodeContents(title);
@@ -586,7 +637,10 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
         view.focus();
       }
     });
-    title.addEventListener("blur", () => void commitTitle());
+    title.addEventListener("blur", () => {
+      title.classList.remove("is-renaming");
+      void commitTitle();
+    });
     // Clicking the empty space below the text puts the caret at the end, like Obsidian.
     scroller.addEventListener("mousedown", (e) => {
       if (e.target === scroller || e.target === sizer) {
@@ -613,11 +667,13 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
       headers,
       render,
       renderMode,
+      renderBacklinks,
       fade,
       holdColumn,
       focusTitle,
       dispose() {
         hold?.cancel();
+        backlinks?.setActive(false);
         el.remove();
       },
     };

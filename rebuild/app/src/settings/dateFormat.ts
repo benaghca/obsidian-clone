@@ -103,3 +103,16 @@ export function dateNamePattern(format: string): { regex: RegExp; parse(name: st
     },
   };
 }
+
+/**
+ * A template's text with Obsidian's variables filled in: {{title}},
+ * {{date}} and {{time}} (in the Templates settings' formats), and
+ * {{date:FORMAT}} / {{time:FORMAT}} for a one-off format.
+ */
+export function fillTemplate(text: string, title: string, now: Date, dateFormat: string, timeFormat: string): string {
+  return text.replace(/\{\{\s*(title|date|time)\s*(?::([^}]*))?\}\}/gi, (_m, name: string, format: string | undefined) => {
+    const key = name.toLowerCase();
+    if (key === "title") return title;
+    return formatDate(now, format?.trim() || (key === "date" ? dateFormat : timeFormat));
+  });
+}

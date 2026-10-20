@@ -123,11 +123,12 @@ export function rewriteLinks(
   before: NoteLike[],
   after: NoteLike[],
   style: LinkStyle,
+  /** Where the linking note is after the move (it may have moved with a folder). */
+  fromAfter: string = from === oldPath ? newPath : from,
 ): { text: string; count: number } {
   let count = 0;
   const lines = text.split("\n");
   let fence: string | null = null;
-  const fromAfter = from === oldPath ? newPath : from;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const f = /^\s*(`{3,}|~{3,})/.exec(line);

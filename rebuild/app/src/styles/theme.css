@@ -71,6 +71,7 @@
   --slider-track: #dadada;
   --scrollbar-thumb: rgba(0, 0, 0, 0.1);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
+  --drop-overlay: hsla(var(--accent-h), var(--accent-s), 62%, 0.4);
 
   /* Noto Sans leads: on Linux, -apple-system/BlinkMacSystemFont resolve to the
      fontconfig default (often Liberation Sans), while the spec observed Noto
@@ -204,6 +205,7 @@
   --slider-track: #3f3f3f;
   --scrollbar-thumb: rgba(255, 255, 255, 0.1);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
+  --drop-overlay: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.35);
 
   --menu-background: var(--background-secondary);
   --menu-border-color: #3f3f3f;

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { dateNamePattern, formatDate } from "./dateFormat";
+import { dateNamePattern, fillTemplate, formatDate } from "./dateFormat";
 
 const d = new Date(2026, 9, 3, 14, 5, 9); // Saturday 3 October 2026, 14:05:09
 
@@ -22,4 +22,9 @@ test("daily note names are recognised and ordered by their format", () => {
   expect(long.parse("Saturday, October 3rd")).toBeNull();
   const nested = dateNamePattern("YYYY/MM/YYYY-MM-DD");
   expect(nested.parse("2026/10/2026-10-03")).toBe(new Date(2026, 9, 3).getTime());
+});
+
+test("templates fill in title, date and time, with one-off formats", () => {
+  const out = fillTemplate("# {{title}}\n{{date}} {{time}} {{date:dddd}} {{ time:HH }} {{other}}", "Plan", d, "YYYY-MM-DD", "HH:mm");
+  expect(out).toBe("# Plan\n2026-10-03 14:05 Saturday 14 {{other}}");
 });

@@ -39,6 +39,10 @@ export interface LeftSidebar {
   readonly sortOrder: SortOrder;
   setSortOrder(order: SortOrder): void;
   onSortChange(fn: () => void): void;
+  /** Show or remove the Bookmarks view (its core plugin turned on or off). */
+  setBookmarksEnabled(enabled: boolean): void;
+  /** The footer under the views (vault name; the settings button goes here). */
+  footer: HTMLElement;
 }
 
 /** `menus` is read when a menu opens (it is built after the sidebar). */
@@ -69,6 +73,7 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
   }
 
   const vaultName = h("div", { class: "workspace-drawer-vault-name" });
+  const footer = h("div", { class: "workspace-sidedock-vault-profile" }, vaultName);
   ws.on((change) => {
     if (change === "files") vaultName.textContent = ws.vault.name;
   });
@@ -84,9 +89,9 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
       tab("bookmarks", "bookmark", "Bookmarks"),
     ),
     content,
-    // Obsidian's help and settings buttons live here too; Grove has neither
-    // (help would mean the network), so the footer is just the vault name.
-    h("div", { class: "workspace-sidedock-vault-profile" }, vaultName),
+    // The vault name, and Obsidian's settings button at the right. (Obsidian
+    // also has help here; help would mean the network, so Grove has none.)
+    footer,
   );
   select("files");
   return {
@@ -109,6 +114,11 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     },
     setSortOrder: (order) => explorer.setSortOrder(order),
     onSortChange: (fn) => explorer.onSortChange(fn),
+    setBookmarksEnabled(enabled) {
+      tabButtons.get("bookmarks")!.hidden = !enabled;
+      if (!enabled && content.firstElementChild === views.bookmarks) select("files");
+    },
+    footer,
   };
 }
 

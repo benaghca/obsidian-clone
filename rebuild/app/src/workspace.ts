@@ -35,6 +35,8 @@ export interface Tab {
   mode: ViewMode;
   /** A pinned tab keeps its note: links followed from it open in a new tab. */
   pinned: boolean;
+  /** Backlinks shown under the note (Obsidian's "Backlinks in document"). */
+  backlinks: boolean;
   /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
   memory: TabMemory | null;
 }
@@ -85,6 +87,7 @@ interface SavedTab {
   path: string | null;
   mode: ViewMode;
   pinned: boolean;
+  backlinks?: boolean;
   back: string[];
   forward: string[];
   scroll?: number;
@@ -133,6 +136,8 @@ export class Workspace {
   editorMenu: EditorHost["contextMenu"];
   /** The mode a new tab starts in (Settings → Editor: default view and editing mode). */
   newTabMode: () => ViewMode = () => "live";
+  /** Whether a new tab shows backlinks under its note (Settings → Backlinks). */
+  newTabBacklinks: () => boolean = () => false;
   /** The editing mode new notes open in (Live Preview or Source mode). */
   editingMode: () => ViewMode = () => "live";
   /** Where "Create new note" puts a note when no folder is given (Settings → Files and links). */
@@ -143,6 +148,10 @@ export class Workspace {
   confirmDelete: ((path: string) => Promise<boolean>) | null = null;
   /** How new links are written (Settings → Files and links). */
   linkStyle: () => LinkStyle = () => ({ format: "shortest", wikilinks: true });
+  /** Asked before merging one note into another; false cancels. */
+  confirmMerge: ((from: string, into: string) => Promise<boolean>) | null = null;
+  /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
+  isExcluded: (path: string) => boolean = () => false;
   /** Told after a note or folder moved, with the notes as they were before (to update links). */
   onRenamed: ((from: string, to: string, before: NoteRef[]) => void) | null = null;
 
@@ -174,7 +183,7 @@ export class Workspace {
     this.host = {
       openLink: (target, where, view) => void this.openLink(target, where, view ? this.paneOfView.get(view)?.group : undefined),
       openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
-      notes: () => this.notes,
+      notes: () => this.includedNotes(),
       formatLink: (target, view, display) => this.linkTo(target, this.paneOfView.get(view)?.path ?? null, display),
       contextMenu: (view, at, pos, keyboard) => {
         const pane = this.paneOfView.get(view);
@@ -478,7 +487,7 @@ export class Workspace {
   // ----- tabs -----
 
   private blankTab(): Tab {
-    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: this.newTabMode(), pinned: false, memory: null };
+    return { id: this.nextTabId++, path: null, back: [], forward: [], mode: this.newTabMode(), pinned: false, backlinks: this.newTabBacklinks(), memory: null };
   }
 
   newTab(group: Group = this.activeGroup) {
@@ -597,6 +606,12 @@ export class Workspace {
     }
   }
 
+  /** Obsidian's "Toggle backlinks in document", per tab. */
+  toggleBacklinks(tab: Tab = this.active) {
+    tab.backlinks = !tab.backlinks;
+    this.emit("tabs");
+  }
+
   togglePin(tab: Tab = this.active) {
     tab.pinned = !tab.pinned;
     this.emit("tabs");
@@ -638,7 +653,7 @@ export class Workspace {
     // show other text: it starts at the line at the top of the old one.
     const topLine = pane?.tab === tab ? this.topLine(pane) : null;
     const memory = tab.memory ? { ...tab.memory, scrollTop: topLine === null ? tab.memory.scrollTop : null } : null;
-    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, memory };
+    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory };
     const added = this.layout.split(group, edge, [copy]);
     this.layout.activeGroup = added;
     this.present(added);
@@ -894,6 +909,7 @@ export class Workspace {
 
   private saveTab(tab: Tab): SavedTab {
     const saved: SavedTab = { path: tab.path, mode: tab.mode, pinned: tab.pinned, back: tab.back.slice(-20), forward: tab.forward.slice(-20) };
+    if (tab.backlinks) saved.backlinks = true;
     const pane = [...this.panes.values()].find((p) => p.tab === tab);
     if (pane) this.remember(pane);
     const memory = tab.memory?.path === tab.path ? tab.memory : null;
@@ -913,6 +929,7 @@ export class Workspace {
     tab.path = path;
     tab.mode = saved.mode === "source" || saved.mode === "reading" ? saved.mode : "live";
     tab.pinned = saved.pinned === true;
+    tab.backlinks = saved.backlinks === true;
     tab.back = Array.isArray(saved.back) ? saved.back.filter(exists) : [];
     tab.forward = Array.isArray(saved.forward) ? saved.forward.filter(exists) : [];
     if (path && typeof saved.scroll === "number") {
@@ -1049,6 +1066,17 @@ export class Workspace {
     return entry.path;
   }
 
+  private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
+
+  /** The notes that aren't excluded (Settings → Files and links → Excluded files). */
+  includedNotes(): NoteRef[] {
+    const c = this.included;
+    if (c && c.notes === this.notes && c.test === this.isExcluded) return c.out;
+    const out = this.notes.filter((n) => !this.isExcluded(n.path));
+    this.included = { notes: this.notes, test: this.isExcluded, out };
+    return out;
+  }
+
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
   linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
     return formatLink(target, from, this.notes, this.linkStyle(), display, subpath);
@@ -1115,6 +1143,7 @@ export class Workspace {
    */
   async mergeInto(path: string, into: string) {
     if (path === into) return;
+    if (this.confirmMerge && !(await this.confirmMerge(path, into))) return;
     const [text, target] = await Promise.all([this.text(path), this.load(into)]);
     if (!target) return;
     const doc = this.owners.get(into)?.state.doc ?? this.states.get(into)?.doc ?? target.doc;

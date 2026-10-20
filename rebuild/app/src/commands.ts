@@ -180,8 +180,9 @@ export class CommandRegistry {
   }
 
   /** Called when hotkeys or plugins change, so hints can be redrawn. */
-  onChange(fn: () => void) {
+  onChange(fn: () => void): () => void {
     this.listeners.add(fn);
+    return () => this.listeners.delete(fn);
   }
 
   /** Tell listeners that what commands show (hotkeys, availability through plugins) changed. */

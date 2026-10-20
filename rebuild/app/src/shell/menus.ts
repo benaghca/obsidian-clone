@@ -53,8 +53,12 @@ export function createMenus(host: MenuHost) {
     };
   }
 
+  // A core plugin that is off takes its menu items with it.
+  const on = (plugin: string) => commands.pluginEnabled(plugin);
+
   // Obsidian's "Bookmark..." opens a dialog; Grove bookmarks at once, so no ellipsis.
-  function bookmarkItem(path: string): MenuEntry {
+  function bookmarkItem(path: string): MenuEntry | false {
+    if (!on("bookmarks")) return false;
     return bookmarks.has(path)
       ? { title: "Remove bookmark", icon: "bookmark-minus", action: () => bookmarks.toggle(path) }
       : { title: "Bookmark", icon: "bookmark", action: () => bookmarks.toggle(path) };
@@ -73,7 +77,8 @@ export function createMenus(host: MenuHost) {
     icon: "folder-tree",
     action: () => host.moveFile(path),
   });
-  const mergeItem = (path: string): MenuEntry => ({ title: "Merge entire file with...", icon: "git-merge", action: () => host.mergeFile(path) });
+  const mergeItem = (path: string): MenuEntry | false =>
+    on("note-composer") && { title: "Merge entire file with...", icon: "git-merge", action: () => host.mergeFile(path) };
   const revealItem = (path: string): MenuEntry => ({ title: "Reveal file in navigation", icon: "folder-open", action: () => host.revealInTree(path) });
   const openInNewTab = (open: () => void): MenuEntry => ({ title: "Open in new tab", icon: "file-plus", action: open });
   const openToRight = (open: () => void): MenuEntry => ({ title: "Open to the right", icon: "separator-vertical", action: open });
@@ -246,7 +251,19 @@ export function createMenus(host: MenuHost) {
       ws.activate(tab);
       fn();
     };
+    const linkedViews = [
+      on("backlink") && commands.menuItem("backlink:open", { title: "Open backlinks" }),
+      on("outgoing-link") && commands.menuItem("outgoing-links:open", { title: "Open outgoing links" }),
+      on("tag-pane") && commands.menuItem("tag-pane:open", { title: "Open tags" }),
+      on("outline") && commands.menuItem("outline:open", { title: "Open outline" }),
+    ].filter((x): x is MenuEntry => !!x);
     return [
+      on("backlink") && {
+        title: "Backlinks in document",
+        icon: "link",
+        checked: tab.backlinks,
+        action: () => ws.toggleBacklinks(tab),
+      },
       commands.menuItem("markdown:toggle-preview", {
         title: reading ? "Editing view" : "Reading view",
         icon: reading ? "pen-line" : "book-open",
@@ -267,22 +284,14 @@ export function createMenus(host: MenuHost) {
       moveItem(path),
       bookmarkItem(path),
       mergeItem(path),
+      !reading && commands.menuItem("markdown:add-metadata-property", { action: onTab(() => commands.run("markdown:add-metadata-property")) }),
       SEPARATOR,
       !reading && { title: "Find...", icon: "file-search", hotkey: commands.hotkey("editor:open-search"), action: onTab(() => openSearchPanel(ws.view)) },
       !reading && commands.menuItem("editor:open-search-replace", { title: "Replace...", icon: "file-search", action: onTab(() => commands.run("editor:open-search-replace")) }),
       SEPARATOR,
       copyPath(path),
       SEPARATOR,
-      {
-        title: "Open linked view",
-        icon: "link",
-        submenu: () => [
-          commands.menuItem("backlink:open", { title: "Open backlinks" }),
-          commands.menuItem("outgoing-links:open", { title: "Open outgoing links" }),
-          commands.menuItem("tag-pane:open", { title: "Open tags" }),
-          commands.menuItem("outline:open", { title: "Open outline" }),
-        ],
-      },
+      linkedViews.length > 0 && { title: "Open linked view", icon: "link", submenu: () => linkedViews },
       SEPARATOR,
       revealItem(path),
       SEPARATOR,
@@ -325,7 +334,8 @@ export function createMenus(host: MenuHost) {
     const notes = [...new Set(group.tabs.flatMap((t) => (t.path ? [t.path] : [])))];
     const unmarked = notes.filter((p) => !bookmarks.has(p));
     return [
-      unmarked.length > 0 && {
+      on("bookmarks") &&
+        unmarked.length > 0 && {
         title: `Bookmark ${unmarked.length} ${unmarked.length === 1 ? "tab" : "tabs"}`,
         icon: "bookmark",
         action: () => unmarked.forEach((p) => bookmarks.toggle(p)),
