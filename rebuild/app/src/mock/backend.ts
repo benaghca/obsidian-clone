@@ -2,13 +2,18 @@
 // Implements the commands in rebuild/CONTRACT.md against sampleVault().
 
 import type { Backlink, FileEntry, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
-import { sampleVault } from "./sampleVault";
+import { sampleVault, syntheticVault } from "./sampleVault";
 
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
+/** [text](target) and ![alt](target); the target as written (without a title). */
+const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|([^)\s]*))[^)\n]*\)/g;
 
 export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   const files = new Map<string, { content: string; mtime: number }>();
-  for (const [path, content] of Object.entries(sampleVault())) {
+  // `?synthetic=1000` on the dev page adds a generated 1,000-note vault (for measuring the graph).
+  const synthetic = Number(new URLSearchParams(location.search).get("synthetic")) || 0;
+  const vaultFiles = { ...sampleVault(), ...(synthetic > 0 ? syntheticVault(Math.min(synthetic, 20000)) : {}) };
+  for (const [path, content] of Object.entries(vaultFiles)) {
     files.set(path, { content, mtime: Date.now() });
   }
   // Folders made with create_folder that hold no files yet.
@@ -86,22 +91,64 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   function linkIndex(): LinkIndex {
     const byName = new Map<string, string>();
     for (const path of files.keys()) byName.set(nameOf(path).toLowerCase(), path);
+    const byPath = new Map<string, string>();
+    for (const path of files.keys()) byPath.set(path.toLowerCase(), path);
+    /** A markdown link's target: a path from the note's folder or the vault, or a note name. */
+    const resolveMd = (from: string, target: string) => {
+      const dir = from.includes("/") ? from.slice(0, from.lastIndexOf("/") + 1) : "";
+      for (const p of [dir + target, target, `${dir}${target}.md`, `${target}.md`]) {
+        const parts: string[] = [];
+        for (const part of p.split("/")) {
+          if (part === "..") parts.pop();
+          else if (part && part !== ".") parts.push(part);
+        }
+        const hit = byPath.get(parts.join("/").toLowerCase());
+        if (hit) return hit;
+      }
+      return target.includes("/") ? undefined : byName.get(target.replace(/\.md$/i, "").toLowerCase());
+    };
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
+    const markdown: Record<string, string[]> = {};
+    const unresolved: Record<string, string[]> = {};
     for (const [path, f] of files) {
       const out = new Set<string>();
+      const md = new Set<string>();
+      const missing = new Map<string, string>();
       const lines = f.content.split("\n");
       lines.forEach((text, i) => {
         for (const m of text.matchAll(WIKILINK)) {
-          const target = byName.get(m[1].trim().toLowerCase());
-          if (!target) continue;
+          const name = m[1].trim();
+          const target = byName.get(name.toLowerCase());
+          if (!target) {
+            if (!missing.has(name.toLowerCase())) missing.set(name.toLowerCase(), name);
+            continue;
+          }
           out.add(target);
           (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
         }
+        for (const m of text.matchAll(MDLINK)) {
+          const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
+          if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
+          let target = raw.replace(/^\.\//, "");
+          try {
+            target = decodeURIComponent(target);
+          } catch {
+            // not percent-encoded
+          }
+          const hit = resolveMd(path, target);
+          if (hit) md.add(hit);
+          else {
+            const name = target.replace(/\.md$/i, "");
+            if (!missing.has(name.toLowerCase())) missing.set(name.toLowerCase(), name);
+          }
+        }
       });
-      outgoing[path] = [...out];
+      if (out.size) outgoing[path] = [...out];
+      if (md.size) markdown[path] = [...md];
+      if (missing.size) unresolved[path] = [...missing.values()];
     }
-    return { outgoing, backlinks };
+    return { outgoing, backlinks, markdown, unresolved };
   }
 
   const commands: Record<string, (a: any) => unknown> = {
