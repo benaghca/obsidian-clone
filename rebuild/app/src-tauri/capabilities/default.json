@@ -2,5 +2,21 @@
   "identifier": "default",
   "description": "The main window can call vault commands and listen for vault-changed.",
   "windows": ["main"],
-  "permissions": ["core:default", "core:event:default"]
+  "remote": {
+    "urls": ["http://localhost:1420/*", "http://127.0.0.1:1420/*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "allow-open-vault",
+    "allow-last-vault",
+    "allow-list-files",
+    "allow-read-note",
+    "allow-write-note",
+    "allow-create-note",
+    "allow-rename-path",
+    "allow-delete-path",
+    "allow-search",
+    "allow-link-index"
+  ]
 }

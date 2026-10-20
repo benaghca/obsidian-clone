@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-link-index"
+description = "Enables the link_index command without any pre-configured scope."
+commands.allow = ["link_index"]
+
+[[permission]]
+identifier = "deny-link-index"
+description = "Denies the link_index command without any pre-configured scope."
+commands.deny = ["link_index"]
