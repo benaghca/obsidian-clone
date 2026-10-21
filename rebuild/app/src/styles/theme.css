@@ -152,13 +152,12 @@
   --shadow-l: 0 1.8px 7.3px rgba(0, 0, 0, 0.07), 0 6.3px 24.7px rgba(0, 0, 0, 0.114), 0 15px 30px rgba(0, 0, 0, 0.1);
 
   /* Motion: every transition and animation in the app uses these. Hover and
-     state swaps are fast, popovers and folders moderate, smooth scrolling
-     slow. Exits use the ease-in curve and are a step faster than entrances.
-     The side docks have their own token: Obsidian's measure about 130ms, and
-     they ease out both ways, so they move off at once and settle softly. */
+     state swaps are fast; popovers and folders are moderate. Exits use the
+     ease-in curve and are a step faster than entrances. The side docks have
+     their own token: Obsidian's measure about 130ms, and they ease out both
+     ways, so they move off at once and settle softly. */
   --anim-duration-fast: 100ms;
   --anim-duration-moderate: 150ms;
-  --anim-duration-slow: 250ms;
   --anim-duration-sidebar: 130ms;
   --anim-ease-out: cubic-bezier(0.2, 0, 0, 1);
   --anim-ease-in: cubic-bezier(0.3, 0, 1, 1);
@@ -238,7 +237,6 @@
   :root {
     --anim-duration-fast: 0ms;
     --anim-duration-moderate: 0ms;
-    --anim-duration-slow: 0ms;
     --anim-duration-sidebar: 0ms;
     --anim-note-opacity-from: 1;
   }
