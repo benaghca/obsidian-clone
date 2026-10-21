@@ -10,8 +10,11 @@ test("heading lookup is case-insensitive and skips the marker", () => {
   expect(headingPos(doc, "  ")).toBeNull();
 });
 
-test("nested heading paths use the last segment; block refs are not headings", () => {
-  const doc = EditorState.create({ doc: "# Top\ntext ^abc\n### Deep one\n" }).doc;
+test("nested heading paths use the last segment; #^id finds the block's line", () => {
+  const doc = EditorState.create({ doc: "# Top\ntext ^abc\n### Deep one\n- item ^Item-2 \n" }).doc;
   expect(headingPos(doc, "Top#Deep one")).toBe(doc.line(3).from);
-  expect(headingPos(doc, "^abc")).toBeNull();
+  expect(headingPos(doc, "^abc")).toBe(doc.line(2).from);
+  expect(headingPos(doc, "Top#^item-2")).toBe(doc.line(4).from);
+  expect(headingPos(doc, "^nope")).toBeNull();
+  expect(headingPos(doc, "^")).toBeNull();
 });
