@@ -427,7 +427,9 @@ export function createGraphView(host: GraphHost): GraphView {
     const touched = !!drag?.moved || !!pan || zoomAt !== null || hoverFade !== want;
     if (!more || touched || lastCost < SLOW_FRAME || ++frameCount % 2 === 0) {
       const moving = more || touched;
-      setRatio(moving && fullCost > SLOW_FRAME ? Math.min(dpr, lowRatio) : dpr);
+      // WebKitGTK may not show a frame drawn right after the canvas was
+      // resized until something else repaints: draw the next one too.
+      if (setRatio(moving && fullCost > SLOW_FRAME ? Math.min(dpr, lowRatio) : dpr)) more = true;
       const t = performance.now();
       draw();
       lastCost = performance.now() - t;
@@ -848,8 +850,10 @@ export function createGraphView(host: GraphHost): GraphView {
     height = hgt;
     dpr = device;
     setRatio(dpr, true);
-    // Resizing clears the canvas: draw now, before the frame is painted.
+    // Resizing clears the canvas: draw now, before the frame is painted, and
+    // once more next frame (see step).
     draw();
+    invalidate();
   }
 
   /**
@@ -861,13 +865,14 @@ export function createGraphView(host: GraphHost): GraphView {
    * 47ms instead of 19ms, and 85ms with a wider pane). The background shows
    * in the sub-pixel strip left over.
    */
-  function setRatio(r: number, force = false) {
-    if (r === ratio && !force) return;
+  function setRatio(r: number, force = false): boolean {
+    if (r === ratio && !force) return false;
     ratio = r;
     canvas.width = Math.max(1, Math.round(width * r));
     canvas.height = Math.max(1, Math.round(height * r));
     canvas.style.width = `${canvas.width / r}px`;
     canvas.style.height = `${canvas.height / r}px`;
+    return true;
   }
 
   // The scheme or accent changed (classes and variables on <html>): read the colours again.
