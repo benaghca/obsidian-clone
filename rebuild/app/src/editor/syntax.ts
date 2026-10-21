@@ -6,7 +6,6 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Tag as HighlightTag, styleTags, tags as t } from "@lezer/highlight";
 import type { BlockContext, InlineContext, Line, MarkdownConfig } from "@lezer/markdown";
-import { codeLanguage } from "./codeHighlight";
 
 /** Highlight tags for Source mode (Live Preview styles these nodes itself). */
 export const wikiTarget = HighlightTag.define(t.link);
@@ -157,9 +156,4 @@ export const Comment: MarkdownConfig = {
 };
 
 /** Markdown with every extension above: the notes' language, in the editor and in rendered embeds. */
-export const markdownSyntax = markdown({
-  base: markdownLanguage,
-  extensions: [WikiLink, Tag, Highlight, Comment, MarkerStyles],
-  codeLanguages: codeLanguage,
-  addKeymap: false,
-});
+export const markdownSyntax = markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, Highlight, Comment, MarkerStyles], addKeymap: false });

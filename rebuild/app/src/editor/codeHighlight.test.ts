@@ -34,19 +34,12 @@ describe("code highlighting", () => {
       "obj=property",
       ".=plain",
       "f=function",
-      "(=plain",
       "42=value",
-      ",=plain",
       '"s"=string',
-      ")=plain",
-      ";=plain",
       "if=keyword",
-      "(=plain",
       "x=property",
-      ")=plain",
       "return=keyword",
       "null=plain",
-      ";=plain",
     ]);
     expect(marked("```bash\necho $HOME # c\n```")).toEqual(["echo=function", "$HOME=plain", "# c=comment"]);
     expect(marked("```md\n**b**\n```")).toEqual(["**=strong punctuation", "b=strong", "**=strong punctuation"]);

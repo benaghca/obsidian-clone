@@ -34,8 +34,7 @@ const smartLists = Prec.high(
 );
 
 const brackets = [
-  // Ahead of a code block's own language data, which would pair quotes too.
-  Prec.high(EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{"] } }])),
+  EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{"] } }]),
   closeBrackets(),
   keymap.of(closeBracketsKeymap),
 ];
