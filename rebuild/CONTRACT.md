@@ -14,6 +14,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - `last_vault() -> Option<VaultInfo>`
 - `list_files() -> Vec<FileEntry { path (vault-relative, forward slashes), name (no .md), is_dir, mtime_ms, size }>` — recursive, skips `.obsidian`, `.git`, `.trash`, `.grove`.
 - `read_note(path: String) -> String`
+- `read_file_bytes(path: String) -> bytes` — an image file's raw bytes (a `tauri::ipc::Response`, so the page gets an `ArrayBuffer`), for `![[embeds]]`. The same path checks as `read_note` (vault-relative, no `..`, no symlink out of the vault, nothing in `.grove/`, `.obsidian/` or the other hidden folders), only `png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `bmp`, `avif` (any case), at most 20 MB. Permission `allow-read-file-bytes` in the default capability. The front end shows the bytes through a `blob:` URL it revokes when no embed shows it (the CSP already allows `img-src blob:`); Tauri's asset protocol stays off. Added in round 12.
 - `write_note(path: String, content: String) -> ()` — atomic write (temp file + rename). Front end debounces saves ~300ms. Other windows (a note's own window) get a `vault-changed` `modify` for it; the window that saved does not. Changed in round 9.
 - `create_note(path: String, content: String) -> FileEntry`
 - `create_folder(path: String) -> FileEntry` — creates an empty folder (the file explorer's "New folder"); errors if anything already exists at `path`. Added in round 4.

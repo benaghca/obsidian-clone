@@ -13,6 +13,7 @@
     "allow-last-vault",
     "allow-list-files",
     "allow-read-note",
+    "allow-read-file-bytes",
     "allow-write-note",
     "allow-create-note",
     "allow-create-folder",

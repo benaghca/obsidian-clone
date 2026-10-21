@@ -9,11 +9,17 @@ use crate::index::Index;
 use crate::model::{push_change, ChangeKind, FileEntry, VaultChanged};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How long a `write_note` suppresses watcher events for that path.
 pub const OWN_WRITE: Duration = Duration::from_millis(500);
+
+/// Largest image `read_file_bytes` hands to an embed.
+pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
+/// The files `read_file_bytes` reads: images an embed can show.
+const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
 
 pub struct Vault {
     pub root: PathBuf,
@@ -47,6 +53,34 @@ impl Vault {
         let bytes = fs::read(&full).map_err(|e| e.to_string())?;
         let text = String::from_utf8_lossy(&bytes);
         Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
+    }
+
+    /// An image's bytes, for an `![[embed]]`: the same path checks as `read_note` (inside the
+    /// vault, no `..`, no symlink out, nothing in hidden folders), image extensions only, and at
+    /// most [`IMAGE_MAX_BYTES`].
+    pub fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
+        if !ext.is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str())) {
+            return Err(format!("not an image: {path}"));
+        }
+        let (_rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
+        let file = fs::File::open(&full).map_err(|_| format!("no such file: {path}"))?;
+        let md = file.metadata().map_err(|e| e.to_string())?;
+        if !md.is_file() {
+            return Err(format!("no such file: {path}"));
+        }
+        if md.len() > IMAGE_MAX_BYTES {
+            return Err(format!("too large to show: {path}"));
+        }
+        let mut bytes = Vec::with_capacity(md.len() as usize);
+        // A file that grew since: still no more than the cap.
+        file.take(IMAGE_MAX_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > IMAGE_MAX_BYTES {
+            return Err(format!("too large to show: {path}"));
+        }
+        Ok(bytes)
     }
 
     pub fn write_note(&mut self, path: &str, content: &str) -> Result<(), String> {
@@ -439,6 +473,43 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec!["app.json".to_string()]);
+    }
+
+    #[test]
+    fn read_file_bytes_reads_vault_images_only() {
+        let dir = tmp_dir("bytes");
+        fs::create_dir(dir.path.join("pics")).unwrap();
+        fs::write(dir.path.join("pics").join("a.PNG"), [137, 80, 78, 71]).unwrap();
+        fs::write(dir.path.join("Note.md"), "text").unwrap();
+        fs::create_dir(dir.path.join(".grove")).unwrap();
+        fs::write(dir.path.join(".grove").join("x.png"), [1]).unwrap();
+        let outside = tmp_dir("bytes-outside");
+        fs::write(outside.path.join("secret.png"), [2]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path.join("secret.png"), dir.path.join("link.png"))
+            .unwrap();
+        // Bigger than the cap, without writing 20 MB.
+        fs::File::create(dir.path.join("huge.png"))
+            .unwrap()
+            .set_len(IMAGE_MAX_BYTES + 1)
+            .unwrap();
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        assert_eq!(
+            vault.read_file_bytes("pics/a.PNG").unwrap(),
+            vec![137, 80, 78, 71]
+        );
+        assert!(vault.read_file_bytes("Note.md").is_err(), "not an image");
+        assert!(vault.read_file_bytes("pics/../../x.png").is_err());
+        assert!(vault.read_file_bytes("/etc/x.png").is_err());
+        assert!(vault.read_file_bytes(".grove/x.png").is_err());
+        assert!(vault.read_file_bytes("missing.png").is_err());
+        assert!(vault.read_file_bytes("pics").is_err());
+        assert!(vault.read_file_bytes("huge.png").is_err());
+        #[cfg(unix)]
+        assert!(
+            vault.read_file_bytes("link.png").is_err(),
+            "a symlink out of the vault"
+        );
     }
 
     #[test]
