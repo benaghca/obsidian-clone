@@ -6,6 +6,7 @@
 // embed shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
+import { toggledTask } from "./editor/embeds";
 import type { EmbedHost } from "./editor/host";
 import { type NoteLike, resolveLink } from "./links/internal";
 import type { Workspace } from "./workspace";
@@ -23,11 +24,12 @@ export function createEmbedHost(ws: Workspace): EmbedHost {
   const watchers = new Map<string, Set<() => void>>();
   let files: { list: FileEntry[]; out: NoteLike[] } | null = null;
 
-  ws.vault.onModified((path) => {
+  const modified = (path: string) => {
     notes.delete(path);
     images.delete(path); // its holders load it again, and let go of the old URL
     for (const fn of [...(watchers.get(path) ?? [])]) fn();
-  });
+  };
+  ws.vault.onModified(modified);
 
   return {
     resolve(target, view) {
@@ -64,6 +66,15 @@ export function createEmbedHost(ws: Workspace): EmbedHost {
           held.url.then(URL.revokeObjectURL, () => {});
         },
       };
+    },
+    async toggleTask(path, line) {
+      // Through the note's editor state (loaded from disk if it isn't open), so it is saved like any edit.
+      if (!(await ws.editors.load(path))) return;
+      const doc = ws.editors.doc(path)!;
+      const tick = toggledTask(doc.toString(), line);
+      if (!tick) return;
+      ws.editors.change(path, { changes: { from: tick.at, to: tick.at + 1, insert: tick.insert }, userEvent: "input.toggle" });
+      modified(path); // its embeds show it now, not when it is saved
     },
     watch(path, fn) {
       let set = watchers.get(path);

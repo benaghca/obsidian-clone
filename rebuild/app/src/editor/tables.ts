@@ -54,6 +54,8 @@ export class TableWidget extends DrawnWidget {
   constructor(
     readonly text: string,
     readonly chain: readonly string[],
+    /** Bumped to draw it again when files its embeds point at may have changed (blocks.ts). */
+    readonly files = 0,
   ) {
     super();
   }

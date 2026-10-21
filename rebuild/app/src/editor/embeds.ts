@@ -42,12 +42,18 @@ export function splitSubpath(target: string): [string, string] {
   return hash < 0 ? [target.trim(), ""] : [target.slice(0, hash).trim(), target.slice(hash + 1).trim()];
 }
 
+/** Some lines of a note, and the line (from 0) they start at. */
+export interface NotePart {
+  text: string;
+  line: number;
+}
+
 /**
  * The part of a note an embed's #subpath shows: a heading's section (to the
  * next heading of its level or above), or for "^id" the paragraph ending in
  * " ^id" (without it). Null if there is no such heading or block.
  */
-export function embedSection(text: string, sub: string): string | null {
+export function embedSection(text: string, sub: string): NotePart | null {
   const lines = text.split("\n");
   if (sub.startsWith("^")) {
     const mark = ` ^${sub.slice(1)}`;
@@ -59,7 +65,7 @@ export function embedSection(text: string, sub: string): string | null {
     while (a > 0 && inPara(lines[a - 1])) a--;
     while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
     lines[at] = lines[at].trimEnd().slice(0, -mark.length);
-    return lines.slice(a, b + 1).join("\n");
+    return { text: lines.slice(a, b + 1).join("\n"), line: a };
   }
   const want = sub.split("#").pop()!.trim().toLowerCase();
   let start = -1;
@@ -72,20 +78,33 @@ export function embedSection(text: string, sub: string): string | null {
     if (start < 0 && m[2].toLowerCase() === want) {
       start = i;
       level = m[1].length;
-    } else if (start >= 0 && m[1].length <= level) return lines.slice(start, i).join("\n").trimEnd();
+    } else if (start >= 0 && m[1].length <= level) return { text: lines.slice(start, i).join("\n").trimEnd(), line: start };
   }
-  return start < 0 ? null : lines.slice(start).join("\n").trimEnd();
+  return start < 0 ? null : { text: lines.slice(start).join("\n").trimEnd(), line: start };
+}
+
+/** What an embed of a note shows (#subpath: its section), without the frontmatter. */
+export function embedPart(text: string, sub: string): NotePart | null {
+  const fm = splitFrontmatter(text);
+  const skip = fm ? fm.close + 1 : 0;
+  const body = { text: fm ? text.split("\n").slice(skip).join("\n") : text, line: 0 };
+  const part = sub ? embedSection(body.text, sub) : body;
+  return part && { text: part.text, line: part.line + skip };
+}
+
+/** Ticking line `line` of a note's text: where its task's box is and what it becomes (null: not a task). */
+export function toggledTask(text: string, line: number): { at: number; insert: string } | null {
+  const lines = text.split("\n");
+  const m = /^([ \t>]*(?:[-*+]|\d+[.)])[ \t]+\[)([^\]\n])\]/.exec(lines[line] ?? "");
+  if (!m) return null;
+  const at = lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0) + m[1].length;
+  return { at, insert: m[2] === " " ? "x" : " " };
 }
 
 /** Whether an embed of `path` shows only a chip: it is the note on screen (`top`) or one it is drawn inside of, or it is too deep. */
 export const embedStopped = (path: string, top: string | null, chain: readonly string[]) =>
   chain.length >= MAX_DEPTH || path === top || chain.includes(path);
 
-/** A note's text without its frontmatter (an embed doesn't show it). */
-const body = (text: string) => {
-  const fm = splitFrontmatter(text);
-  return fm ? text.split("\n").slice(fm.close + 1).join("\n") : text;
-};
 
 /** "Edit this block" on an image: its source shows, path selected, until the selection moves. */
 const editEmbed = StateEffect.define<number>();
@@ -234,9 +253,10 @@ export class NoteEmbedWidget extends DrawnWidget {
         if (gone) return;
         if (painted) release(painted);
         content.replaceChildren();
-        const shown = sub ? embedSection(body(text), sub) : body(text);
+        const shown = embedPart(text, sub);
         if (shown === null) content.append(missingBox(`Unable to find “${sub}” in “${noteName(path)}”.`));
-        else painted = render(content, shown, view, [...chain, path]);
+        // Its tasks can be ticked: that writes the line in the embedded note.
+        else painted = render(content, shown.text, view, [...chain, path], (line) => embeds.toggleTask(path, shown.line + line));
       });
     fill();
     const unwatch = embeds.watch(path, fill);
