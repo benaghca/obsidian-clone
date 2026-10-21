@@ -12,6 +12,60 @@ export interface SideView {
   setActive(active: boolean): void;
 }
 
+/**
+ * Vault-wide data a view shows (all tags, all property names), read only
+ * while the view is shown: `delay` ms after it goes stale (`changed()`), or
+ * when it is shown again after going stale while hidden. A read a newer one
+ * overtook is dropped; a failed one keeps the last data. Each read that
+ * lands is drawn with `render`.
+ */
+export function liveData<T>(initial: T, read: () => Promise<T>, render: () => void, what: string) {
+  let data = initial;
+  let active = false;
+  let stale = true;
+  let timer = 0;
+  let seq = 0;
+  async function refresh() {
+    const mine = ++seq;
+    try {
+      const next = await read();
+      if (mine === seq) data = next;
+    } catch (err) {
+      console.error(`Could not read ${what}`, err);
+    }
+    if (mine !== seq || !active) return;
+    stale = false;
+    render();
+  }
+  const schedule = (delay: number) => {
+    clearTimeout(timer);
+    if (active) timer = window.setTimeout(() => void refresh(), delay);
+  };
+  return {
+    get data() {
+      return data;
+    },
+    get active() {
+      return active;
+    },
+    get stale() {
+      return stale;
+    },
+    changed(delay: number) {
+      stale = true;
+      schedule(delay);
+    },
+    /** Returns whether `next` is a change; a view shown while stale reads again after `delay`. */
+    setActive(next: boolean, delay: number): boolean {
+      if (next === active) return false;
+      active = next;
+      if (active && stale) schedule(delay);
+      else if (!active) clearTimeout(timer);
+      return true;
+    },
+  };
+}
+
 /** Run after the current frame is painted, so a note switch shows first. */
 export const afterPaint = (fn: () => void) => requestAnimationFrame(() => setTimeout(fn, 0));
 

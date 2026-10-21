@@ -8,7 +8,7 @@
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { type TagNode, tagsInText, tagTree } from "./linksTags";
-import { foldToggle, type SideView } from "./sideView";
+import { foldToggle, liveData, type SideView } from "./sideView";
 import { vaultTags } from "./vaultTags";
 
 const DELAY = 300;
@@ -19,34 +19,16 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
   const el = h("div", { class: "backlink-pane tag-pane" }, list, empty);
   const collapsed = new Set<string>();
 
-  let active = false;
-  let stale = true;
-  let timer = 0;
-  let seq = 0;
   let docTimer = 0;
   let shown = "";
-  /** Saved tags per note from the last search. */
-  let saved = new Map<string, string[]>();
-
-  async function refresh() {
-    const mine = ++seq;
-    try {
-      const tags = await vaultTags(ws).read();
-      if (mine !== seq) return;
-      saved = tags;
-    } catch (err) {
-      console.error("Could not read tags", err);
-    }
-    if (mine !== seq || !active) return;
-    stale = false;
-    render();
-  }
+  /** Saved tags per note. */
+  const saved = liveData(new Map<string, string[]>(), () => vaultTags(ws).read(), render, "tags");
 
   function render() {
     const open = ws.active.path;
     const tags: string[] = [];
     // Excluded files (Settings → Files and links) don't count.
-    for (const [path, list] of saved) if (path !== open && !ws.vault.isExcluded(path)) tags.push(...list);
+    for (const [path, list] of saved.data) if (path !== open && !ws.vault.isExcluded(path)) tags.push(...list);
     if (open?.endsWith(".md") && !ws.vault.isExcluded(open)) tags.push(...tagsInText(ws.view.state.doc.toString()));
     const tree = tagTree(tags);
     const key = JSON.stringify(tree);
@@ -78,34 +60,20 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
     });
   }
 
-  function schedule() {
-    clearTimeout(timer);
-    if (active) timer = window.setTimeout(() => void refresh(), DELAY);
-  }
-
   ws.on((change) => {
     if (change === "doc" || change === "show") {
       // The open note's own tags: no backend call, and nothing on the keystroke itself.
       clearTimeout(docTimer);
-      if (active && !stale) docTimer = window.setTimeout(render, change === "doc" ? DELAY : 0);
-      return;
-    }
-    if (change !== "links" && change !== "files") return;
-    stale = true;
-    schedule();
+      if (saved.active && !saved.stale) docTimer = window.setTimeout(render, change === "doc" ? DELAY : 0);
+    } else if (change === "links" || change === "files") saved.changed(DELAY);
   });
 
   return {
     el,
     setActive(next) {
-      if (next === active) return;
-      active = next;
-      if (active && stale) schedule();
-      else if (active) render();
-      else {
-        clearTimeout(timer);
-        clearTimeout(docTimer);
-      }
+      if (!saved.setActive(next, DELAY)) return;
+      if (!next) clearTimeout(docTimer);
+      else if (!saved.stale) render();
     },
   };
 }

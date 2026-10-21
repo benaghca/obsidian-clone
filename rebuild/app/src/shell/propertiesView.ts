@@ -16,7 +16,7 @@ import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { SEPARATOR, showMenu } from "./menu";
 import { type PropertyName, propertyIndex } from "./propertyIndex";
-import type { SideView } from "./sideView";
+import { liveData, type SideView } from "./sideView";
 
 const DELAY = 300;
 const SORT_KEY = "grove.properties.sort";
@@ -66,11 +66,7 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
     empty,
   );
 
-  let active = false;
-  let stale = true;
-  let timer = 0;
-  let seq = 0;
-  let names: PropertyName[] = [];
+  const names = liveData<PropertyName[]>([], () => propertyIndex(ws).names(), render, "properties");
   let shown = "";
   let lastFm: unknown = null;
 
@@ -80,23 +76,9 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
     render();
   }
 
-  async function refresh() {
-    const mine = ++seq;
-    try {
-      const found = await propertyIndex(ws).names();
-      if (mine !== seq) return;
-      names = found;
-    } catch (err) {
-      console.error("Could not read properties", err);
-    }
-    if (mine !== seq || !active) return;
-    stale = false;
-    render();
-  }
-
   function render() {
     const words = filter.value.trim().toLowerCase();
-    const rows = names.filter((n) => !words || n.key.toLowerCase().includes(words)).sort(compare[sort]);
+    const rows = names.data.filter((n) => !words || n.key.toLowerCase().includes(words)).sort(compare[sort]);
     const key = JSON.stringify(rows.map((n) => [n.key, n.type, n.count]));
     if (key === shown) return;
     shown = key;
@@ -125,11 +107,6 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
     empty.hidden = rows.length > 0;
   }
 
-  function schedule(delay = DELAY) {
-    clearTimeout(timer);
-    if (active) timer = window.setTimeout(() => void refresh(), delay);
-  }
-
   filter.addEventListener("input", render);
   ws.on((change) => {
     if (change === "doc" || change === "show") {
@@ -138,22 +115,11 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
       if (fm === lastFm) return;
       lastFm = fm;
     } else if (change !== "links" && change !== "files") return;
-    stale = true;
-    schedule();
+    names.changed(DELAY);
   });
   settings.on((file) => {
-    if (file !== "types.json" && file !== null) return;
-    stale = true; // so a hidden view reads them when it is shown again
-    schedule(0);
+    if (file === "types.json" || file === null) names.changed(0);
   });
 
-  return {
-    el,
-    setActive(next) {
-      if (next === active) return;
-      active = next;
-      if (active && stale) schedule(0);
-      else if (!active) clearTimeout(timer);
-    },
-  };
+  return { el, setActive: (next) => void names.setActive(next, 0) };
 }
