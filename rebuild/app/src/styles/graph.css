@@ -161,30 +161,6 @@
 .graph-controls .setting-item.mod-cta .setting-item-control {
   flex: 1;
 }
-.graph-controls button {
-  height: 30px;
-  padding: 4px 12px;
-  font: inherit;
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  background: var(--interactive-normal);
-  border: 0;
-  border-radius: 5px;
-  box-shadow: var(--input-shadow);
-  white-space: nowrap;
-  cursor: var(--cursor, default);
-  outline: none;
-  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
-}
-.graph-controls button:hover {
-  background: var(--interactive-hover);
-  box-shadow: var(--input-shadow-hover);
-}
-.graph-controls button:focus-visible {
-  box-shadow:
-    var(--input-shadow),
-    0 0 0 2px var(--background-modifier-border-focus);
-}
 .graph-controls .search-input-container {
   padding: 4px 0 6px;
 }
@@ -203,20 +179,7 @@
 .graph-color-group-query {
   flex: 1;
   min-width: 0;
-  height: 30px;
   padding: 4px 8px;
-  font: inherit;
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  background: var(--background-modifier-form-field);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 5px;
-  outline: none;
-  user-select: text;
-}
-.graph-color-group-query:focus {
-  border-color: var(--background-modifier-border-focus);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
 .graph-color-group-color {
   flex: none;

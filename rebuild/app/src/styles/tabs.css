@@ -125,21 +125,14 @@
   margin: 0 0 2px 2px;
   -webkit-app-region: no-drag;
 }
-/* Only the pane in the top-right corner has the right sidebar's button. */
-.workspace-tabs:not(.mod-top-right-space) .sidebar-toggle-button.mod-right {
-  display: none;
-}
-.is-ribbon-hidden .workspace-ribbon {
-  display: none;
-}
-/* Settings → Interface → Show tab title bar; Editor → Inline title. */
-.is-view-header-hidden .view-header {
-  display: none;
-}
+/* Only the pane in the top-right corner has the right sidebar's button (and
+   only while the sidebar has a view). Settings → Interface → Show ribbon and
+   Show tab title bar; Editor → Inline title. */
+.workspace-tabs:not(.mod-top-right-space) .sidebar-toggle-button.mod-right,
+.is-right-sidebar-empty .sidebar-toggle-button.mod-right,
+.is-ribbon-hidden .workspace-ribbon,
+.is-view-header-hidden .view-header,
 .is-inline-title-hidden .inline-title:not(.is-renaming) {
-  display: none;
-}
-.is-right-sidebar-empty .sidebar-toggle-button.mod-right {
   display: none;
 }
 

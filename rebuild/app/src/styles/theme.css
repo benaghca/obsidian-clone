@@ -29,7 +29,6 @@
 
   color-scheme: light;
   --background-primary: #ffffff;
-  --background-primary-alt: #fafafa;
   --background-secondary: #f6f6f6;
   --background-secondary-alt: #ebebeb;
   --background-modifier-hover: rgba(0, 0, 0, 0.067);
@@ -108,7 +107,6 @@
   --h3-size: 1.25em;
   --h4-size: 1.125em;
   --h5-size: 1em;
-  --h6-size: 1em;
 
   --file-line-width: 700px;
   --ribbon-width: 29px;
@@ -127,11 +125,9 @@
   --icon-xs: 14px;
   --icon-s: 16px;
   --icon-m: 18px;
-  --icon-l: 18px;
   --icon-xs-stroke-width: 2px;
   --icon-s-stroke-width: 2px;
   --icon-m-stroke-width: 1.75px;
-  --icon-l-stroke-width: 1.75px;
   --icon-size: var(--icon-m);
   --icon-stroke: var(--icon-m-stroke-width);
 
@@ -179,7 +175,6 @@
   --text-accent-hover: hsl(var(--accent-h), var(--accent-s), var(--accent-l-dark-hover));
 
   --background-primary: #1c1c1c;
-  --background-primary-alt: #232323;
   --background-secondary: #282828;
   --background-secondary-alt: #333333;
   --background-modifier-hover: rgba(255, 255, 255, 0.067);

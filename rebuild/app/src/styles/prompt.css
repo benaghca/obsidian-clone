@@ -85,7 +85,8 @@
   flex: 1;
   min-width: 0;
 }
-.suggestion-title {
+.suggestion-title,
+.suggestion-note {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -112,11 +113,6 @@
 .suggestion-action {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
-}
-.suggestion-note {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .suggestion-highlight {
   font-weight: 700;

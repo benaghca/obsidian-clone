@@ -1,8 +1,6 @@
 /* Live Preview styling for the classes added in src/editor/livePreview.ts. */
 
-.cm-editor {
-  font-family: var(--font-text);
-}
+.cm-editor,
 .cm-content {
   font-family: var(--font-text);
 }
@@ -307,14 +305,12 @@
 /* Source mode (src/editor/sourceMode.ts): Obsidian's raw markdown view. The
    syntax stays highlighted in the normal text font; headings are bold at
    the body size. */
-.is-source-mode .cm-s-heading {
+.is-source-mode .cm-s-heading,
+.is-source-mode .cm-s-strong {
   font-weight: 700;
 }
 .is-source-mode .cm-s-em {
   font-style: italic;
-}
-.is-source-mode .cm-s-strong {
-  font-weight: 700;
 }
 .is-source-mode .cm-s-strike {
   text-decoration: line-through;

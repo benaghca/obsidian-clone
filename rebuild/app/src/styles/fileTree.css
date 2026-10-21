@@ -36,13 +36,7 @@
     background-color var(--anim-duration-fast) var(--anim-ease-out),
     color var(--anim-duration-fast) var(--anim-ease-out);
 }
-.tree-item-self.nav-folder-title {
-  padding-left: calc(8px + var(--depth, 0) * 17px + 14px);
-}
-.tree-item-self:hover {
-  background: var(--background-modifier-hover);
-  color: var(--text-normal);
-}
+.tree-item-self:hover,
 .tree-item-self.is-active {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
@@ -64,8 +58,6 @@
   left: calc(4px + var(--depth, 0) * 17px);
   color: var(--text-faint);
   display: flex;
-}
-.collapse-icon {
   --icon-size: var(--icon-xs);
   --icon-stroke: var(--icon-xs-stroke-width);
 }
@@ -158,8 +150,6 @@
   border-radius: var(--radius-s);
   background: var(--background-primary);
   outline: none;
-}
-.search-input {
   transition:
     border-color var(--anim-duration-fast) var(--anim-ease-out),
     box-shadow var(--anim-duration-fast) var(--anim-ease-out);

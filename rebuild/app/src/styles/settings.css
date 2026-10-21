@@ -5,21 +5,25 @@
    30px dropdowns, inputs and buttons. Colours are the theme's tokens, so the
    dark theme just works. */
 
-.modal.mod-settings {
+.modal.mod-settings,
+.modal.mod-confirm {
   position: relative;
   align-self: center;
-  width: min(1100px, 90vw);
-  height: min(85vh, 1000px);
-  display: flex;
-  overflow: hidden;
   background: var(--background-primary);
   border: 1px solid var(--modal-border-color);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-l);
-  font-size: var(--font-ui-medium);
   animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
 }
-.is-closing .modal.mod-settings {
+.modal.mod-settings {
+  width: min(1100px, 90vw);
+  height: min(85vh, 1000px);
+  display: flex;
+  overflow: hidden;
+  font-size: var(--font-ui-medium);
+}
+.is-closing .modal.mod-settings,
+.is-closing .modal.mod-confirm {
   animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .mod-settings-container {
@@ -88,10 +92,11 @@
   color: var(--text-faint);
   pointer-events: none;
 }
-.search-input-container input {
-  width: 100%;
+/* text fields: the search boxes, settings' inputs, the graph's group queries */
+.search-input-container input,
+.setting-input,
+.graph-color-group-query {
   height: 30px;
-  padding: 4px 8px 4px 30px;
   font: inherit;
   font-size: var(--font-ui-small);
   color: var(--text-normal);
@@ -100,16 +105,25 @@
   border-radius: 5px;
   outline: none;
   user-select: text;
+}
+.search-input-container input,
+.setting-input {
   transition:
     border-color var(--anim-duration-fast) var(--anim-ease-out),
     box-shadow var(--anim-duration-fast) var(--anim-ease-out);
 }
-.search-input-container input::-webkit-search-cancel-button {
-  display: none;
-}
-.search-input-container input:focus {
+.search-input-container input:focus,
+.setting-input:focus,
+.graph-color-group-query:focus {
   border-color: var(--background-modifier-border-focus);
   box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+.search-input-container input {
+  width: 100%;
+  padding: 4px 8px 4px 30px;
+}
+.search-input-container input::-webkit-search-cancel-button {
+  display: none;
 }
 .search-input-container .input-right-decorator {
   position: absolute;
@@ -163,7 +177,9 @@
 .vertical-tab-nav-item.is-active {
   background: var(--background-modifier-hover);
 }
-.vertical-tab-nav-item:focus-visible {
+.vertical-tab-nav-item:focus-visible,
+.extra-setting-button:focus-visible,
+.setting-group-filter:focus-visible {
   box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
 
@@ -334,11 +350,15 @@
   cursor: var(--cursor, default);
   transition: box-shadow var(--anim-duration-fast) var(--anim-ease-out);
 }
-.dropdown:hover {
+.dropdown:hover,
+.modal.mod-settings button:hover,
+.graph-controls button:hover {
   background: var(--interactive-hover);
   box-shadow: var(--input-shadow-hover);
 }
-.dropdown:focus-visible {
+.dropdown:focus-visible,
+.modal.mod-settings button:focus-visible,
+.graph-controls button:focus-visible {
   box-shadow:
     var(--input-shadow),
     0 0 0 2px var(--background-modifier-border-focus);
@@ -353,8 +373,9 @@
   pointer-events: none;
 }
 
-/* buttons */
-.modal.mod-settings button {
+/* buttons (the graph panel's too) */
+.modal.mod-settings button,
+.graph-controls button {
   height: 30px;
   padding: 4px 12px;
   font: inherit;
@@ -369,23 +390,16 @@
   outline: none;
   transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
 }
-.modal.mod-settings button:hover {
-  background: var(--interactive-hover);
-  box-shadow: var(--input-shadow-hover);
-}
-.modal.mod-settings button:focus-visible {
-  box-shadow:
-    var(--input-shadow),
-    0 0 0 2px var(--background-modifier-border-focus);
-}
-.modal.mod-settings button.mod-cta {
+.modal.mod-settings button.mod-cta,
+.modal.mod-confirm button.mod-cta {
   color: var(--text-on-accent);
   background: var(--interactive-accent);
 }
 .modal.mod-settings button.mod-cta:hover {
   background: var(--interactive-accent-hover);
 }
-.modal.mod-settings button.mod-warning {
+.modal.mod-settings button.mod-warning,
+.modal.mod-confirm button.mod-warning {
   color: var(--text-on-accent);
   background: var(--background-modifier-error);
 }
@@ -393,23 +407,7 @@
 /* text and number fields */
 .setting-input {
   width: 200px;
-  height: 30px;
   padding: 4px 8px;
-  font: inherit;
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  background: var(--background-modifier-form-field);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: 5px;
-  outline: none;
-  user-select: text;
-  transition:
-    border-color var(--anim-duration-fast) var(--anim-ease-out),
-    box-shadow var(--anim-duration-fast) var(--anim-ease-out);
-}
-.setting-input:focus {
-  border-color: var(--background-modifier-border-focus);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
 .setting-input.is-invalid {
   border-color: var(--text-error);
@@ -485,9 +483,6 @@
 .extra-setting-button.is-disabled {
   opacity: 0.4;
 }
-.extra-setting-button:focus-visible {
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
-}
 .extra-setting-button.mod-active {
   color: var(--interactive-accent);
   opacity: 1;
@@ -559,9 +554,6 @@
 .setting-group-filter:hover {
   background: var(--background-modifier-hover);
 }
-.setting-group-filter:focus-visible {
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
-}
 .setting-group-filter.is-active {
   color: var(--text-on-accent);
   background: var(--interactive-accent);
@@ -629,18 +621,8 @@
 
 /* ----- confirm dialog (delete, update links, merge) ----- */
 .modal.mod-confirm {
-  position: relative;
-  align-self: center;
   width: min(450px, calc(100vw - 48px));
   padding: 24px;
-  background: var(--background-primary);
-  border: 1px solid var(--modal-border-color);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-l);
-  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
-}
-.is-closing .modal.mod-confirm {
-  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .modal.mod-confirm .modal-title {
   margin-bottom: 12px;
@@ -681,14 +663,6 @@
 }
 .modal.mod-confirm button:focus-visible {
   outline: 2px solid var(--background-modifier-border-focus);
-}
-.modal.mod-confirm button.mod-cta {
-  color: var(--text-on-accent);
-  background: var(--interactive-accent);
-}
-.modal.mod-confirm button.mod-warning {
-  color: var(--text-on-accent);
-  background: var(--background-modifier-error);
 }
 
 /* Core plugins: "Search plugins..." above the list */
