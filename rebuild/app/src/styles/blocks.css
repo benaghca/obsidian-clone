@@ -10,17 +10,24 @@
   color: var(--text-faint);
 }
 
-/* "Edit this block": top right of a callout, table or image, on hover */
+/* "Edit this block" (and an embed's "Open link"), top right, the first on hover */
 .cm-callout,
 .cm-table-widget,
-.image-embed {
+.image-embed,
+.markdown-embed {
   position: relative;
 }
-.embed-actions {
+.embed-actions,
+.markdown-embed-link {
   position: absolute;
   top: 4px;
   right: 4px;
-  display: flex;
+  --icon-size: var(--icon-s);
+  --cursor: pointer;
+}
+.embed-actions {
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
   opacity: 0;
   transition: opacity var(--anim-duration-fast) var(--anim-ease-out);
 }
@@ -31,19 +38,6 @@
 .markdown-embed .embed-actions {
   display: none;
 }
-.embed-action {
-  display: flex;
-  padding: 4px;
-  border-radius: var(--radius-s);
-  color: var(--icon-color);
-  background: var(--background-primary);
-  cursor: pointer;
-  --icon-size: var(--icon-s);
-}
-.embed-action:hover {
-  color: var(--icon-color-hover);
-  background: var(--background-modifier-hover);
-}
 
 /* callouts */
 .callout {
@@ -51,53 +45,45 @@
   background: color-mix(in srgb, var(--callout-color) 10%, transparent);
   border-radius: var(--radius-s);
   padding: 12px 12px 12px 24px;
-  overflow: hidden;
 }
-.callout-title {
+.callout-title,
+.callout-icon,
+.callout-fold {
   display: flex;
-  align-items: flex-start;
   gap: 4px;
   color: var(--callout-color);
   line-height: 1.3;
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+}
+.callout-icon,
+.callout-fold {
+  align-items: center;
+  height: 1.3em;
+  transition: transform var(--anim-duration-moderate) var(--anim-ease-out);
 }
 .callout-title-inner {
   font-weight: 600;
 }
-.callout-icon {
-  display: flex;
-  align-items: center;
-  height: 1.3em;
-  --icon-size: var(--icon-s);
-  --icon-stroke: var(--icon-s-stroke-width);
-}
 .callout.is-collapsible .callout-title {
   cursor: pointer;
-}
-.callout-fold {
-  display: flex;
-  align-items: center;
-  height: 1.3em;
-  --icon-size: var(--icon-s);
-  transition: transform var(--anim-duration-moderate) var(--anim-ease-out);
 }
 .callout.is-collapsed .callout-fold {
   transform: rotate(-90deg);
 }
 .callout-content {
-  padding-top: 16px;
-  padding-bottom: 4px;
-  color: var(--text-normal);
+  padding: 16px 0 4px;
 }
 .callout.is-collapsed .callout-content {
   display: none;
 }
 
-/* tables: a padded strip that scrolls sideways when the table is wider than the column */
+/* tables: a padded strip as wide as the column (whatever the table's width),
+   scrolling sideways; words in cells stay whole */
 .cm-table-widget {
   margin: 0 -16px;
   padding: 16px;
   overflow-x: auto;
-  /* its width is the column's, whatever the table's */
   contain: inline-size;
 }
 .cm-table-widget table {
@@ -108,28 +94,33 @@
   padding: 4px 8px;
   line-height: 1.3;
   min-width: 3em;
-  /* words stay whole: a wide table scrolls instead */
   overflow-wrap: normal;
   word-break: normal;
+  text-align: left;
 }
 .cm-table-widget th {
   font-weight: 600;
-  text-align: left;
 }
 
-/* images in the vault */
+/* images in the vault, in a note and opened from the file list */
 .image-embed {
   display: inline-flex;
   max-width: 100%;
   vertical-align: bottom;
 }
-.image-embed img {
+.image-embed img,
+.image-container img {
   display: block;
   max-width: 100%;
   border-radius: var(--radius-s);
 }
 .image-embed img:not([height]) {
   height: auto;
+}
+.image-container {
+  display: flex;
+  justify-content: center;
+  padding: 16px;
 }
 
 /* note embeds, and the box for a missing file: blocks inside their line,
@@ -140,13 +131,11 @@
 }
 .markdown-embed {
   display: block;
-  position: relative;
   border-left: 2px solid var(--interactive-accent);
 }
 .markdown-embed-title {
   font-weight: 600;
   height: 24px;
-  padding-left: 24px;
 }
 .markdown-embed-title:empty {
   display: none;
@@ -154,24 +143,9 @@
 .markdown-embed-content {
   max-height: 4000px;
   overflow-y: auto;
+}
+.markdown-embed > :not(.markdown-embed-link) {
   padding-left: 24px;
-}
-.markdown-embed-link {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  display: flex;
-  padding: 4px;
-  border-radius: var(--radius-s);
-  color: var(--icon-color);
-  opacity: var(--icon-opacity);
-  cursor: pointer;
-  --icon-size: var(--icon-s);
-}
-.markdown-embed-link:hover {
-  opacity: 1;
-  color: var(--icon-color-hover);
-  background: var(--background-modifier-hover);
 }
 .file-embed {
   display: block;
@@ -202,31 +176,22 @@
   top: 6px;
   right: 6px;
   padding: 4px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
   font-family: var(--font-interface);
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
   cursor: pointer;
+  --icon-size: var(--icon-xs);
 }
 .copy-code-button {
   display: flex;
-  border: 0;
-  border-radius: 5px;
-  background: transparent;
   opacity: 0;
-  --icon-size: var(--icon-xs);
 }
 .cm-codeblock-begin:hover .copy-code-button {
   opacity: 1;
 }
 .copy-code-button:hover {
   background: var(--background-modifier-hover);
-}
-
-/* an image opened from the file list */
-.image-container {
-  padding: 16px;
-  text-align: center;
-}
-.image-container img {
-  max-width: 100%;
 }

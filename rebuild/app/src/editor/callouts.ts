@@ -7,12 +7,12 @@
 // or its "Edit this block" button, puts the caret in it, which shows the
 // source (blocks.ts).
 
-import { type EditorView, WidgetType } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
-import { isLinkEvent } from "./embeds";
+import { DrawnWidget, editButton, isLinkEvent } from "./embeds";
 import { readingMode } from "./livePreview";
-import { destroyed, onDestroy, type Painted, paintLines, paintRange, release, decorate } from "./render";
+import { decorate, onDestroy, type Painted, paintLines, paintRange, release } from "./render";
 
 export interface CalloutHeader {
   /** As written, lower-cased ("tldr"). */
@@ -58,15 +58,12 @@ export const calloutBody = (text: string) =>
     .map((l) => l.replace(/^\s*> ?/, ""))
     .join("\n");
 
-export class CalloutWidget extends WidgetType {
+export class CalloutWidget extends DrawnWidget {
   constructor(
     readonly text: string,
     readonly chain: readonly string[],
   ) {
     super();
-  }
-  eq(o: CalloutWidget) {
-    return o.text === this.text && o.chain.join("\0") === this.chain.join("\0");
   }
   toDOM(view: EditorView) {
     const header = calloutHeader(this.text.split("\n", 1)[0])!;
@@ -92,8 +89,7 @@ export class CalloutWidget extends WidgetType {
       box.classList.add("is-collapsible");
       box.classList.toggle("is-collapsed", header.fold === "-");
     }
-    const edit = h("div", { class: "embed-action edit-block-button", "aria-label": "Edit this block", title: "Edit this block" }, icon("code-xml"));
-    const dom = h("div", { class: "cm-callout" }, box, h("div", { class: "embed-actions" }, edit));
+    const dom = h("div", { class: "cm-callout" }, box, editButton());
     dom.addEventListener("mousedown", (e) => {
       if (e.button !== 0 || isLinkEvent(e)) return;
       if (fold && title.contains(e.target as Node)) box.classList.toggle("is-collapsed");
@@ -106,12 +102,6 @@ export class CalloutWidget extends WidgetType {
       if (painted) release(painted);
     });
     return dom;
-  }
-  destroy(dom: HTMLElement) {
-    destroyed(dom);
-  }
-  ignoreEvent(e: Event) {
-    return !isLinkEvent(e);
   }
 }
 

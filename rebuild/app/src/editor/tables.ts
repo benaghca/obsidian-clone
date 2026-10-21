@@ -5,13 +5,12 @@
 // here a click on a cell puts the caret in that cell's source instead,
 // which shows the table as markdown while the caret is in it (blocks.ts).
 
-import { type EditorView, WidgetType } from "@codemirror/view";
+import type { EditorView } from "@codemirror/view";
 import { h } from "../shell/dom";
-import { icon } from "../shell/icons";
 import { editAt } from "./callouts";
-import { isLinkEvent } from "./embeds";
+import { DrawnWidget, editButton, isLinkEvent } from "./embeds";
 import { readingMode } from "./livePreview";
-import { decorate, destroyed, onDestroy, type Painted, paintRange, release } from "./render";
+import { decorate, onDestroy, type Painted, paintRange, release } from "./render";
 
 export type Align = "left" | "center" | "right" | "";
 
@@ -49,15 +48,12 @@ export function alignments(row: string): Align[] {
   });
 }
 
-export class TableWidget extends WidgetType {
+export class TableWidget extends DrawnWidget {
   constructor(
     readonly text: string,
     readonly chain: readonly string[],
   ) {
     super();
-  }
-  eq(o: TableWidget) {
-    return o.text === this.text && o.chain.join("\0") === this.chain.join("\0");
   }
   toDOM(view: EditorView) {
     const lines = this.text.split("\n");
@@ -82,8 +78,7 @@ export class TableWidget extends WidgetType {
       if (n === 0) table.append(h("thead", null, tr));
       else (table.tBodies[0] ?? table.appendChild(h("tbody"))).append(tr);
     });
-    const edit = h("div", { class: "embed-action edit-block-button", "aria-label": "Edit this block", title: "Edit this block" }, icon("code-xml"));
-    const dom = h("div", { class: "cm-table-widget" }, h("div", { class: "table-wrapper" }, table), h("div", { class: "embed-actions" }, edit));
+    const dom = h("div", { class: "cm-table-widget" }, table, editButton());
     dom.addEventListener("mousedown", (e) => {
       if (e.button !== 0 || isLinkEvent(e) || view.state.facet(readingMode)) return;
       const cell = (e.target as Element).closest<HTMLElement>("[data-offset]");
@@ -92,11 +87,5 @@ export class TableWidget extends WidgetType {
     });
     onDestroy(dom, () => release(painted));
     return dom;
-  }
-  destroy(dom: HTMLElement) {
-    destroyed(dom);
-  }
-  ignoreEvent(e: Event) {
-    return !isLinkEvent(e);
   }
 }

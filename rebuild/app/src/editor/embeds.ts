@@ -99,10 +99,26 @@ export const editingEmbed = StateField.define<number | null>({
 /** Clicks on links inside a widget go to Live Preview's link handling; anything else is the widget's. */
 export const isLinkEvent = (e: Event) => !!(e.target as Element).closest?.("[data-href]");
 
+/** A widget drawn from plain fields (equal when they are), that lets go of what it drew (render.ts onDestroy). */
+export abstract class DrawnWidget extends WidgetType {
+  eq(other: WidgetType) {
+    return other.constructor === this.constructor && JSON.stringify(other) === JSON.stringify(this);
+  }
+  destroy(dom: HTMLElement) {
+    destroyed(dom);
+  }
+  ignoreEvent(e: Event) {
+    return !isLinkEvent(e);
+  }
+}
+
+/** "Edit this block", top right of an image, callout or table on hover. */
+export const editButton = () => h("div", { class: "embed-actions clickable-icon", "aria-label": "Edit this block", title: "Edit this block" }, icon("code-xml"));
+
 const missingBox = (text: string, onclick?: () => void) =>
   h("span", { class: `internal-embed file-embed mod-empty${onclick ? " is-clickable" : ""}`, onclick }, text);
 
-export class ImageWidget extends WidgetType {
+export class ImageWidget extends DrawnWidget {
   constructor(
     readonly path: string | null,
     /** The link as written, and where its path is from the embed's start (for "Edit this block"). */
@@ -112,9 +128,6 @@ export class ImageWidget extends WidgetType {
   ) {
     super();
   }
-  eq(o: ImageWidget) {
-    return o.path === this.path && o.src === this.src && o.srcAt === this.srcAt && o.size.alt === this.size.alt && o.size.width === this.size.width && o.size.height === this.size.height;
-  }
   toDOM(view: EditorView) {
     const host = view.state.facet(editorHost)?.embeds;
     const { path, size } = this;
@@ -123,8 +136,8 @@ export class ImageWidget extends WidgetType {
     img.decoding = "async";
     if (size.width) img.width = size.width;
     if (size.height) img.height = size.height;
-    const edit = h("div", { class: "embed-action edit-block-button", "aria-label": "Edit this block", title: "Edit this block" }, icon("code-xml"));
-    const dom = h("span", { class: "internal-embed media-embed image-embed" }, img, h("span", { class: "embed-actions" }, edit));
+    const edit = editButton();
+    const dom = h("span", { class: "internal-embed media-embed image-embed" }, img, edit);
     edit.addEventListener("mousedown", (e) => {
       e.preventDefault();
       const at = view.posAtDOM(dom);
@@ -150,25 +163,18 @@ export class ImageWidget extends WidgetType {
     onDestroy(dom, () => {
       unwatch();
       held?.release();
-      held = null;
     });
     return dom;
   }
-  destroy(dom: HTMLElement) {
-    destroyed(dom);
-  }
 }
 
-export class NoteEmbedWidget extends WidgetType {
+export class NoteEmbedWidget extends DrawnWidget {
   constructor(
     readonly target: string,
     readonly path: string | null,
     readonly chain: readonly string[],
   ) {
     super();
-  }
-  eq(o: NoteEmbedWidget) {
-    return o.target === this.target && o.path === this.path && o.chain.join("\0") === this.chain.join("\0");
   }
   toDOM(view: EditorView) {
     const host = view.state.facet(editorHost);
@@ -181,7 +187,7 @@ export class NoteEmbedWidget extends WidgetType {
       return h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path));
     }
     const content = h("div", { class: "markdown-embed-content" });
-    const link = h("div", { class: "markdown-embed-link", "aria-label": "Open link", title: "Open link", onclick: open }, icon("maximize-2"));
+    const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", title: "Open link", onclick: open }, icon("maximize-2"));
     const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub ? "" : noteName(path)), content, link);
     let painted: ReturnType<typeof render> | null = null;
     let gone = false;
@@ -202,11 +208,5 @@ export class NoteEmbedWidget extends WidgetType {
       if (painted) release(painted);
     });
     return dom;
-  }
-  destroy(dom: HTMLElement) {
-    destroyed(dom);
-  }
-  ignoreEvent(e: Event) {
-    return !isLinkEvent(e);
   }
 }
