@@ -25,6 +25,8 @@ describe("unlinkedMentions", () => {
   it("skips the note itself, links, tags, code, URLs and frontmatter", () => {
     expect(found("Welcome to [[Ideas]] and [Ideas](Ideas.md), #Ideas `Ideas` https://x.org/Ideas")).toEqual([]);
     expect(found("---\ntags: [Ideas]\n---\nIdeas")).toEqual(["4:Ideas>Ideas"]);
+    // A YAML "..." line closes no frontmatter (as in Obsidian), so those lines are text.
+    expect(found("---\nIdeas\n...\nIdeas")).toEqual(["2:Ideas>Ideas", "4:Ideas>Ideas"]);
     expect(found("```\nIdeas\n```\n~~~~\nIdeas\n~~~~\nIdeas")).toEqual(["7:Ideas>Ideas"]);
   });
 

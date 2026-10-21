@@ -8,6 +8,7 @@
 // and URLs are skipped. It can pause every few hundred lines (a generator),
 // so the view spreads a long note over short tasks.
 
+import { splitFrontmatter } from "../editor/frontmatter";
 import type { NoteRef } from "../editor/host";
 
 export interface UnlinkedMention {
@@ -87,13 +88,9 @@ export function* scanUnlinked(text: string, notes: NoteRef[], selfPath: string |
   if (!names.size) return;
   const lines = text.split("\n");
   let fence: string | null = null;
-  let start = 0;
-  // Frontmatter: a first line of "---" up to the next "---".
-  if (lines[0]?.trim() === "---") {
-    const end = lines.findIndex((l, i) => i > 0 && (l.trim() === "---" || l.trim() === "..."));
-    if (end > 0) start = end + 1;
-  }
-  for (let n = start; n < lines.length; n++) {
+  // Frontmatter, read as the Properties block reads it (a "..." line closes none).
+  const fm = splitFrontmatter(lines);
+  for (let n = fm ? fm.close + 1 : 0; n < lines.length; n++) {
     if (n % slice === slice - 1) yield;
     const line = lines[n];
     const f = FENCE.exec(line);
