@@ -89,7 +89,9 @@ export const frontmatterField = StateField.define<Frontmatter | null>({
     // None yet: one can only start in the first lines.
     const doc = tr.startState.doc;
     if (!fm && !tr.changes.touchesRange(0, doc.line(Math.min(doc.lines, MAX_LINES + 1)).to)) return fm;
-    return readFrontmatter(tr.state.doc);
+    // Typing at the start of the body touches it too: keep it if it is the same.
+    const next = readFrontmatter(tr.state.doc);
+    return fm && next && next.end === fm.end && next.lines.join("\n") === fm.lines.join("\n") ? fm : next;
   },
 });
 
@@ -372,6 +374,13 @@ export function removeProperty(fm: Frontmatter, p: Property): Change {
 
 /** Add a property at the end of the frontmatter (a new frontmatter if the note has none). */
 export function addProperty(fm: Frontmatter | null, key: string, type: PropertyType = "text", value: Property["value"] = ""): Change {
-  const line = formatProperty(key, type, value);
-  return fm ? { from: fm.closeFrom, to: fm.closeFrom, insert: `${line}\n` } : { from: 0, to: 0, insert: `---\n${line}\n---\n` };
+  return addLines(fm, formatProperty(key, type, value));
 }
+
+/** Add lines of YAML (pasted properties) at the end of the frontmatter, or as a new one. */
+export function addLines(fm: Frontmatter | null, lines: string): Change {
+  return fm ? { from: fm.closeFrom, to: fm.closeFrom, insert: `${lines}\n` } : { from: 0, to: 0, insert: `---\n${lines}\n---\n` };
+}
+
+/** Replace a property's lines with lines of YAML (a pasted property of the same name). */
+export const replaceLines = (fm: Frontmatter, p: Property, lines: string): Change => ({ from: fm.starts[p.line], to: lastLineEnd(fm, p), insert: lines });

@@ -9,7 +9,7 @@ import { EditorView } from "@codemirror/view";
 import { api, type FileEntry, isTauri, type LinkIndex, type VaultInfo } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
-import type { EditorHost, NoteRef } from "./editor/host";
+import type { EditorHost, NoteRef, PropertyHost } from "./editor/host";
 import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
@@ -69,6 +69,8 @@ export class Workspace {
   isExcluded: (path: string) => boolean = () => false;
   /** Told after a note or folder moved, with the notes as they were before (to update links). */
   onRenamed: ((from: string, to: string, before: NoteRef[]) => void) | null = null;
+  /** The vault's properties, for the Properties block (set by the app). */
+  propertyHost: PropertyHost | null = null;
   /** Each tab group's editor, and the notes they show. */
   readonly editors: NoteEditors;
 
@@ -91,6 +93,7 @@ export class Workspace {
         if (group) this.focusGroup(group);
         this.editorMenu?.(view, at, pos, keyboard);
       },
+      properties: () => this.propertyHost,
     };
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {

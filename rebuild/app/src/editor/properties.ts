@@ -13,14 +13,40 @@
 // note, rewriting only that property's lines. A frontmatter Grove can't read
 // line by line is shown as source instead, and a value it can't edit (a
 // nested map, multi-line text) is shown as written, read-only.
+//
+// A row's icon opens Obsidian's menu: Property type (chosen per name for
+// the whole vault; nothing is rewritten, a value that doesn't fit is shown
+// as it is with a warning, which offers to show it in the chosen type),
+// Cut, Copy, Paste and Remove. Name and value fields suggest what the vault
+// already uses (names with their type, a name's values, the vault's tags).
 
 import { Facet, Prec, StateEffect, StateField, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, WidgetType } from "@codemirror/view";
+import { confirmDialog } from "../shell/confirm";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
-import { showMenu } from "../shell/menu";
-import { addProperty, type Change, type Frontmatter, frontmatterField, type Property, type PropertyType, removeProperty, renameKey, setValue } from "./frontmatter";
-import { editorHost } from "./host";
+import { type MenuItems, SEPARATOR, showMenu } from "../shell/menu";
+import { suggest, type SuggestItem } from "../shell/suggest";
+import {
+  addLines,
+  addProperty,
+  asType,
+  type Change,
+  CHOOSABLE_TYPES,
+  fits,
+  fixedType,
+  type Frontmatter,
+  frontmatterField,
+  type Property,
+  type PropertyType,
+  readProperties,
+  removeProperty,
+  renameKey,
+  replaceLines,
+  setValue,
+  STORED_TYPES,
+} from "./frontmatter";
+import { editorHost, type PropertyHost } from "./host";
 import { readingMode } from "./livePreview";
 
 export type PropertiesDisplay = "visible" | "hidden" | "source";
@@ -40,6 +66,27 @@ const TYPE_ICONS: Record<PropertyType, IconName> = {
   unknown: "file-question-mark",
 };
 
+const TYPE_NAMES: Record<PropertyType, string> = {
+  text: "Text",
+  list: "List",
+  number: "Number",
+  checkbox: "Checkbox",
+  date: "Date",
+  datetime: "Date & time",
+  tags: "Tags",
+  aliases: "Aliases",
+  unknown: "Unknown",
+};
+
+/** The vault's chosen property types changed (refreshPropertyTypes): blocks draw their rows again. */
+const typesChanged = StateEffect.define<null>();
+let typesVersion = 0;
+
+export function refreshPropertyTypes(views: EditorView[]) {
+  typesVersion++;
+  for (const view of views) view.dispatch({ effects: typesChanged.of(null) });
+}
+
 /** Show the (empty) block on a note without frontmatter, for "Add file property". */
 const showEmpty = StateEffect.define<boolean>();
 
@@ -48,9 +95,9 @@ function build(state: EditorState, empty: boolean): DecorationSet {
   const fm = state.field(frontmatterField);
   const display = state.facet(propertiesDisplay);
   if (display === "hidden") return fm ? Decoration.set(Decoration.replace({ block: true }).range(0, fm.end)) : Decoration.none;
-  if (!fm) return empty ? Decoration.set(Decoration.widget({ widget: new PropertiesWidget(""), block: true, side: -1 }).range(0)) : Decoration.none;
+  if (!fm) return empty ? Decoration.set(Decoration.widget({ widget: new PropertiesWidget("", typesVersion), block: true, side: -1 }).range(0)) : Decoration.none;
   if (fm.props && (display === "visible" || state.facet(readingMode))) {
-    return Decoration.set(Decoration.replace({ widget: new PropertiesWidget(state.doc.sliceString(0, fm.end)), block: true }).range(0, fm.end));
+    return Decoration.set(Decoration.replace({ widget: new PropertiesWidget(state.doc.sliceString(0, fm.end), typesVersion), block: true }).range(0, fm.end));
   }
   const lines: Range<Decoration>[] = [];
   for (let n = 1; n <= fm.lines.length + 2; n++) lines.push(sourceLine.range(state.doc.line(n).from));
@@ -75,7 +122,8 @@ const blockField = StateField.define<{ deco: DecorationSet; empty: boolean }>({
       empty === value.empty &&
       tr.state.field(frontmatterField) === tr.startState.field(frontmatterField) &&
       tr.state.facet(propertiesDisplay) === tr.startState.facet(propertiesDisplay) &&
-      tr.state.facet(readingMode) === tr.startState.facet(readingMode);
+      tr.state.facet(readingMode) === tr.startState.facet(readingMode) &&
+      !tr.effects.some((e) => e.is(typesChanged));
     return same ? { deco: value.deco.map(tr.changes), empty } : { deco: build(tr.state, empty), empty };
   },
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
@@ -126,12 +174,15 @@ export function openNewProperty(view: EditorView): boolean {
 }
 
 class PropertiesWidget extends WidgetType {
-  /** `source`: the frontmatter as written (what makes two widgets the same). */
-  constructor(readonly source: string) {
+  /** `source`: the frontmatter as written; with the types' version, what makes two widgets the same. */
+  constructor(
+    readonly source: string,
+    readonly version: number,
+  ) {
     super();
   }
   eq(other: PropertiesWidget) {
-    return other.source === this.source;
+    return other.source === this.source && other.version === this.version;
   }
   toDOM(view: EditorView) {
     const block = new Block(view);
@@ -161,6 +212,8 @@ class Block {
   /** A row added with "Add property" whose key isn't written yet. */
   private pending: HTMLElement | null = null;
   private focusNext: FocusAt | null = null;
+  /** Values shown in their chosen type after "Display as ...?" (that type, by name). */
+  private readonly updated = new Map<string, PropertyType>();
 
   constructor(private readonly view: EditorView) {
     this.rows = h("div", { class: "properties-rows" });
@@ -198,6 +251,30 @@ class Block {
     return this.view.state.field(frontmatterField);
   }
 
+  private get vault(): PropertyHost | null {
+    return this.view.state.facet(editorHost)?.properties?.() ?? null;
+  }
+
+  /** How a property is shown: in its chosen type when its value fits (or after "Update"), else as it is, flagged. */
+  private shownAs(p: Property): { type: PropertyType; value: Property["value"]; want: PropertyType | null; mismatch: boolean } {
+    const want = p.type === "unknown" ? null : (this.vault?.typeOf(p.key) ?? null);
+    if (!want || want === p.type) return { type: p.type, value: p.value, want, mismatch: false };
+    if (fits(p, want) || this.updated.get(p.key) === want) return { type: want, value: asType(p, want), want, mismatch: false };
+    return { type: p.type, value: p.value, want, mismatch: true };
+  }
+
+  /** Suggestions for a name field: the vault's names the note doesn't have yet, with their types' icons. */
+  private names = async (): Promise<SuggestItem[]> => {
+    const own = new Set(this.fm?.props?.map((p) => p.key));
+    return ((await this.vault?.names()) ?? []).filter((n) => !own.has(n.key)).map((n) => ({ text: n.key, icon: TYPE_ICONS[n.type] }));
+  };
+
+  /** Suggestions for a value: what the name has elsewhere in the vault (less what is there already). */
+  private values = async (key: string, except: string[] = []): Promise<SuggestItem[]> => {
+    const skip = new Set(except.map((v) => v.toLowerCase()));
+    return ((await this.vault?.values(key)) ?? []).filter((v) => !skip.has(v.toLowerCase())).map((text) => ({ text }));
+  };
+
   private dispatch(change: Change, focus: FocusAt | null) {
     this.focusNext = focus;
     this.view.dispatch({ changes: change, userEvent: "input.property" });
@@ -214,7 +291,8 @@ class Block {
     const old = new Map<string, HTMLElement>();
     for (const row of this.rows.querySelectorAll<HTMLElement>(":scope > .property:not(.is-new)")) old.set(row.dataset.sig!, row);
     const next = props.map((p) => {
-      const sig = `${p.key}\u0000${p.type}\u0000${JSON.stringify(p.value)}`;
+      const shown = this.shownAs(p);
+      const sig = [p.key, p.type, JSON.stringify(p.value), shown.type, shown.want, shown.mismatch].join("\u0000");
       const row = old.get(sig) ?? this.row(p);
       old.delete(sig);
       row.dataset.sig = sig;
@@ -241,7 +319,7 @@ class Block {
     this.el.classList.remove("is-collapsed");
     folded.delete(this.view);
     if (!this.pending) {
-      const input = keyInput("", (key) => {
+      const input = keyInput("", this.names, (key) => {
         const row = this.pending;
         this.pending = null;
         row?.remove();
@@ -267,23 +345,42 @@ class Block {
     return fm && p ? { fm, p } : null;
   }
 
-  private set(key: string, value: Property["value"], part: string) {
+  /** Write a value, in the type it is shown as. */
+  private set(key: string, value: Property["value"], part: string, type: PropertyType) {
     const at = this.current(key);
-    if (at && JSON.stringify(at.p.value) !== JSON.stringify(value)) this.dispatch(setValue(at.fm, at.p, value), { key, part });
+    if (at && (JSON.stringify(at.p.value) !== JSON.stringify(value) || at.p.type !== type)) this.dispatch(setValue(at.fm, at.p, value, type), { key, part });
   }
 
   private row(p: Property): HTMLElement {
     const key = p.key;
-    const iconEl = h("span", { class: "property-icon", title: p.type === "unknown" ? "Grove can't edit this value here" : undefined }, icon(TYPE_ICONS[p.type]));
-    iconEl.addEventListener("click", () =>
-      showMenu([{ title: "Remove property", icon: "trash-2", action: () => this.remove(key) }], iconEl),
+    const shown = this.shownAs(p);
+    const iconEl = h(
+      "span",
+      { class: "property-icon", title: p.type === "unknown" ? "Grove can't edit this value here" : undefined },
+      icon(TYPE_ICONS[shown.want ?? p.type]),
     );
-    const input = keyInput(key, (next) => {
+    iconEl.addEventListener("click", () => showMenu(this.menu(p), iconEl));
+    const input = keyInput(key, this.names, (next) => {
       const at = this.current(key);
       if (!at || !next || next === key || this.fm?.props?.some((q) => q.key === next)) input.value = key;
       else this.dispatch(renameKey(at.fm, at.p, next), { key: next, part: "value" });
     });
-    const row = h("div", { class: "property", tabindex: "0", "data-key": key, "data-part": "row" }, h("div", { class: "property-key" }, iconEl, input), this.value(p));
+    // A value that doesn't fit the type chosen for its name: Obsidian's warning, which offers to show it in that type.
+    const want = shown.want!;
+    const warning =
+      shown.mismatch &&
+      h(
+        "span",
+        { class: "property-warning", title: `Type mismatch, expected ${TYPE_NAMES[want]}`, onclick: () => void this.adapt(key, p.type, want) },
+        icon("triangle-alert"),
+      );
+    const row = h(
+      "div",
+      { class: "property", tabindex: "0", "data-key": key, "data-part": "row" },
+      h("div", { class: "property-key" }, iconEl, input),
+      this.value(key, shown.type, shown.value),
+      warning || null,
+    );
     row.addEventListener("keydown", (e) => {
       if (e.target !== row) return;
       if (e.key === "Delete" || e.key === "Backspace") this.remove(key);
@@ -300,17 +397,92 @@ class Block {
     this.view.focus();
   }
 
-  /** The value's editor for its type. */
-  private value(p: Property): HTMLElement {
+  /** The row icon's menu, as Obsidian's. */
+  private menu(p: Property): MenuItems {
     const key = p.key;
-    const box = h("div", { class: "property-value", "data-type": p.type });
+    const vault = this.vault;
+    const fixed = fixedType(key);
+    const chosen = vault?.typeOf(key) ?? null;
+    // Tags, aliases and cssclasses have their own type: the menu shows it, every item disabled.
+    const types = fixed ? [...new Set([...CHOOSABLE_TYPES, fixed])].sort((a, b) => TYPE_NAMES[a].localeCompare(TYPE_NAMES[b])) : CHOOSABLE_TYPES;
+    return [
+      {
+        title: "Property type",
+        icon: "info",
+        submenu: [
+          !fixed && { title: `Automatic (${TYPE_NAMES[p.type]})`, icon: "loader", checked: !chosen, disabled: !vault, action: () => vault?.setType(key, null) },
+          ...types.map((t) => ({ title: TYPE_NAMES[t], icon: TYPE_ICONS[t], checked: chosen === t, disabled: !!fixed || !vault, action: () => vault?.setType(key, t) })),
+        ],
+      },
+      { title: "Cut", icon: "scissors", action: () => void this.copy(key, true) },
+      { title: "Copy", icon: "copy", action: () => void this.copy(key, false) },
+      { title: "Paste", icon: "clipboard-check", action: () => void this.paste() },
+      SEPARATOR,
+      { title: "Remove", icon: "trash-2", danger: true, action: () => this.remove(key) },
+    ];
+  }
+
+  /** Copy a property's lines as written (Cut also removes it). */
+  private async copy(key: string, cut: boolean) {
+    const at = this.current(key);
+    if (!at) return;
+    try {
+      await navigator.clipboard.writeText(`${at.fm.lines.slice(at.p.line, at.p.line + at.p.count).join("\n")}\n`);
+    } catch (err) {
+      console.warn("Could not copy", err);
+      return;
+    }
+    if (cut) this.remove(key);
+  }
+
+  /** Paste copied properties (YAML): a name the note has takes the pasted value, a new one is added at the end. */
+  private async paste() {
+    let text: string;
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      console.warn("Grove could not read the clipboard", err);
+      return;
+    }
+    const lines = text.replace(/\r/g, "").replace(/\n+$/, "").split("\n");
+    const pasted = readProperties(lines);
+    const fm = this.fm;
+    if (!pasted?.length || (fm && !fm.props)) return;
+    const changes: Change[] = [];
+    const added: string[] = [];
+    for (const p of pasted) {
+      const own = lines.slice(p.line, p.line + p.count).join("\n");
+      const old = fm?.props?.find((q) => q.key === p.key);
+      if (old) changes.push(replaceLines(fm!, old, own));
+      else added.push(own);
+    }
+    if (added.length) changes.push(addLines(fm, added.join("\n")));
+    this.view.dispatch({ changes: changes.sort((a, b) => a.from - b.from), userEvent: "input.paste" });
+  }
+
+  /** "Display as ...?": show a value that doesn't fit its chosen type in that type (written once it is edited). */
+  private async adapt(key: string, from: PropertyType, to: PropertyType) {
+    const { ok } = await confirmDialog({
+      title: `Display as ${STORED_TYPES[to]}?`,
+      message: `Your ${STORED_TYPES[from]} data is not compatible. It will be adapted to fit the new format.`,
+      confirm: "Update",
+    });
+    if (!ok) return;
+    this.updated.set(key, to);
+    this.render();
+  }
+
+  /** The value's editor for its type. */
+  private value(key: string, type: PropertyType, value: Property["value"]): HTMLElement {
+    const box = h("div", { class: "property-value", "data-type": type });
     const leave = (el: HTMLElement) => el.closest<HTMLElement>(".property")?.focus();
-    switch (p.type) {
+    const set = (v: Property["value"], part: string) => this.set(key, v, part, type);
+    switch (type) {
       case "checkbox": {
         const check = h("input", { class: "cm-task-checkbox", "data-part": "value" });
         check.type = "checkbox";
-        check.checked = p.value === true;
-        check.addEventListener("change", () => this.set(key, check.checked, "value"));
+        check.checked = value === true;
+        check.addEventListener("change", () => set(check.checked, "value"));
         box.append(check);
         break;
       }
@@ -318,11 +490,11 @@ class Block {
       case "date":
       case "datetime": {
         const input = h("input", { class: "property-input", "data-part": "value" });
-        input.type = p.type === "datetime" ? "datetime-local" : p.type;
-        if (p.type === "number") input.step = "any";
-        input.value = p.value as string;
+        input.type = type === "datetime" ? "datetime-local" : type;
+        if (type === "number") input.step = "any";
+        input.value = value as string;
         input.placeholder = "Empty";
-        input.addEventListener("change", () => input.validity.valid && this.set(key, input.value, "value"));
+        input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
         box.append(input);
         break;
@@ -330,13 +502,13 @@ class Block {
       case "list":
       case "tags":
       case "aliases":
-        this.list(box, key, p.type, p.value as string[]);
+        this.list(box, key, type, value as string[]);
         break;
       case "unknown":
-        box.append(h("span", { class: "property-unknown", "data-part": "value", tabindex: "0" }, p.value as string));
+        box.append(h("span", { class: "property-unknown", "data-part": "value", tabindex: "0" }, value as string));
         break;
       default: {
-        const text = editable(p.value as string, (next) => this.set(key, next, "row"), leave);
+        const text = editable(value as string, (next) => set(next, "row"), leave, () => this.values(key));
         box.append(text);
       }
     }
@@ -351,32 +523,43 @@ class Block {
       const label = h("span", { class: link ? "property-link" : undefined }, link ? (link[2] ?? link[1]) : item);
       if (link) label.addEventListener("click", (e) => host?.openLink(link[1].trim(), e.ctrlKey || e.metaKey ? "tab" : false, this.view));
       const remove = h("span", { class: "property-pill-remove", "aria-label": "Remove" }, icon("x"));
-      remove.addEventListener("click", () => this.set(key, items.filter((_, k) => k !== i), "add"));
+      remove.addEventListener("click", () => this.set(key, items.filter((_, k) => k !== i), "add", type));
       box.append(h("span", { class: `property-pill${type === "tags" ? " is-tag" : ""}` }, label, remove));
     });
-    const add = editable("", () => {}, () => {});
-    add.dataset.part = "add";
     const commit = () => {
       let item = add.textContent!.trim();
       if (type === "tags") item = item.replace(/^#/, "");
       add.textContent = "";
-      if (item) this.set(key, [...items, item], "add");
+      if (item) this.set(key, [...items, item], "add", type);
     };
+    const add = editable("", () => {}, () => {}, () => this.values(key, items), (item) => {
+      add.textContent = item.text;
+      commit();
+    });
+    add.dataset.part = "add";
     add.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === ",") {
         e.preventDefault();
         commit();
-      } else if (e.key === "Backspace" && !add.textContent && items.length) this.set(key, items.slice(0, -1), "add");
+      } else if (e.key === "Backspace" && !add.textContent && items.length) this.set(key, items.slice(0, -1), "add", type);
     });
     add.addEventListener("blur", commit);
     box.append(add);
   }
 }
 
-/** A key field: written on Enter or when left; Escape gives the old key back. */
-function keyInput(key: string, commit: (key: string) => void) {
+/** A key field, suggesting the vault's names: written on Enter or when left; Escape gives the old key back. */
+function keyInput(key: string, names: () => Promise<SuggestItem[]>, commit: (key: string) => void) {
   const input = h("input", { class: "property-key-input", "data-part": "key", "aria-label": key || "New property" });
   input.value = key;
+  suggest(input, {
+    className: "mod-property-key",
+    items: names,
+    choose: (item) => {
+      input.value = item.text;
+      finish();
+    },
+  });
   let done = false;
   const finish = () => {
     if (done) return;
@@ -398,11 +581,32 @@ function keyInput(key: string, commit: (key: string) => void) {
   return input;
 }
 
-/** A one-line text field (a plain-text editable span): `commit` on Enter or when left, Escape undoes. */
-function editable(text: string, commit: (text: string) => void, leave: (el: HTMLElement) => void) {
+/**
+ * A one-line text field (a plain-text editable span): `commit` on Enter or
+ * when left, Escape undoes. It suggests `values` (a pick commits it, or goes
+ * to `choose`).
+ */
+function editable(
+  text: string,
+  commit: (text: string) => void,
+  leave: (el: HTMLElement) => void,
+  values: () => Promise<SuggestItem[]>,
+  choose?: (item: SuggestItem) => void,
+) {
   const el = h("div", { class: "property-text", "data-part": "value" });
   el.contentEditable = "plaintext-only";
   el.textContent = text;
+  suggest(el, {
+    className: "mod-property-value",
+    items: values,
+    selectEmpty: !choose,
+    choose:
+      choose ??
+      ((item) => {
+        el.textContent = item.text;
+        leave(el);
+      }),
+  });
   el.addEventListener("keydown", (e) => {
     if (e.key === "Enter" || e.key === "Escape") {
       e.preventDefault();

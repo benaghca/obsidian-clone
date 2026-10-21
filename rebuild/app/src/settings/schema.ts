@@ -83,6 +83,7 @@ export const CORE_PLUGINS = {
   "note-composer": field(true, bool),
   "outgoing-link": field(true, bool),
   outline: field(true, bool),
+  properties: field(true, bool),
   "random-note": field(true, bool),
   switcher: field(true, bool),
   "tag-pane": field(true, bool),
@@ -271,7 +272,25 @@ export function sanitizeHotkeys(raw: unknown): Record<string, StoredHotkey[]> {
   return out;
 }
 
+const sortedKeys = <T>(map: Record<string, T>) => Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
+
 export function serializeHotkeys(map: Record<string, StoredHotkey[]>): string {
-  const sorted = Object.fromEntries(Object.entries(map).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
-  return JSON.stringify(sorted, null, 2) + "\n";
+  return JSON.stringify(sortedKeys(map), null, 2) + "\n";
 }
+
+// ----- types.json -----
+
+const STORED_TYPES = ["text", "multitext", "number", "checkbox", "date", "datetime", "tags", "aliases"];
+
+/**
+ * The type chosen for each property name ("Property type"), as Obsidian
+ * keeps it in types.json: { "types": { "status": "multitext" } }. Unknown
+ * types are dropped quietly.
+ */
+export function sanitizeTypes(raw: unknown): Record<string, string> {
+  const types = raw && typeof raw === "object" ? (raw as { types?: unknown }).types : null;
+  if (!types || typeof types !== "object" || Array.isArray(types)) return {};
+  return Object.fromEntries(Object.entries(types).filter(([k, v]) => k.length <= 500 && STORED_TYPES.includes(v as string)));
+}
+
+export const serializeTypes = (types: Record<string, string>) => JSON.stringify({ types: sortedKeys(types) }, null, 2) + "\n";
