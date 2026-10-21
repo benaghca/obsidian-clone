@@ -30,8 +30,13 @@ export interface Backlink {
 }
 
 export interface LinkIndex {
+  /** Resolved [[wikilink]] targets per note. */
   outgoing: Record<string, string[]>;
   backlinks: Record<string, Backlink[]>;
+  /** Resolved [text](path) link targets per note (not in outgoing or backlinks). */
+  markdown?: Record<string, string[]>;
+  /** Link targets that match no file, per note, as written. */
+  unresolved?: Record<string, string[]>;
 }
 
 export interface VaultChange {

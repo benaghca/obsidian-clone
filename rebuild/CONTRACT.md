@@ -24,7 +24,11 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
   - For both: `name` must be a plain lower-case file name ending in `.json` (`[a-z0-9-]+\.json`, at most 64 characters before the extension), so nothing outside `.grove/` can be named; a `.grove` that leads outside the vault (a symlink) is refused; files over 1 MB are refused.
   - `.grove/` is hidden like `.obsidian/`: never listed, searched, indexed or reported by the watcher, and the note commands refuse paths inside it.
 - `search(query: String, limit: u32) -> Vec<SearchHit { path, line, text }>` — case-insensitive; every word must be on the same line. File-name matches use `line: 0` and come first. Other hits are round-robin across files so one note cannot fill `limit`.
-- `link_index() -> LinkIndex { outgoing: { [path]: string[] }, backlinks: { [path]: { from, line, text }[] } }` — `[[wikilinks]]` resolved by note name, case-insensitive.
+- `link_index() -> LinkIndex { outgoing: { [path]: string[] }, backlinks: { [path]: { from, line, text }[] }, markdown: { [path]: string[] }, unresolved: { [path]: string[] } }` — `[[wikilinks]]` resolved by note name, case-insensitive.
+  - `outgoing` and `backlinks` hold wikilinks (and `![[embeds]]`) only, as before.
+  - `markdown` (added in round 7, for the graph view): per note, the resolved targets of its `[text](path)` and `![alt](path)` links to files in the vault. URLs (anything with a scheme) and `#heading` anchors are not links here; the path is percent-decoded and resolved like a wikilink path (from the note's folder, then the vault). Notes with none are omitted.
+  - `unresolved` (added in round 7): per note, the link targets (wikilinks and markdown links) that match no file, as written without heading, alias or a markdown link's `.md`, deduplicated case-insensitively. Notes with none are omitted.
+  - Links in fenced or inline code are skipped in all four.
 
 ## Events (backend emits)
 - `vault-changed` payload `{ kind: "create"|"modify"|"remove"|"rename", paths: string[] }` from a debounced (~100ms) file watcher. Ignore changes caused by our own `write_note` within 500ms.

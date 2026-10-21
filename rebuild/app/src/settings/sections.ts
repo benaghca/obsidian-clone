@@ -8,7 +8,7 @@
 import { version } from "../../package.json";
 import { commands } from "../commands";
 import { h } from "../shell/dom";
-import type { IconName } from "../shell/icons";
+import { icon, type IconName } from "../shell/icons";
 import type { Workspace } from "../workspace";
 import { formatDate } from "./dateFormat";
 import { button, dropdown, extraButton, group, row, slider, textInput, toggle } from "./controls";
@@ -116,12 +116,38 @@ function appearance(): HTMLElement {
   const resetAccent = extraButton("rotate-ccw", "Restore default", () => {
     settings.set("appearance.json", "accentColor", "");
     color.value = DEFAULT_ACCENT;
+    hex.value = DEFAULT_ACCENT;
+    hex.classList.remove("is-invalid");
     resetAccent.classList.add("is-disabled");
   });
   resetAccent.classList.toggle("is-disabled", !get("appearance.json", "accentColor"));
-  color.addEventListener("input", () => {
-    settings.set("appearance.json", "accentColor", color.value.toLowerCase() === DEFAULT_ACCENT ? "" : color.value.toLowerCase());
+  // The colour as hex beside the picker: type or paste one (#rrggbb, the # optional).
+  const hex = textInput({
+    value: color.value,
+    placeholder: DEFAULT_ACCENT,
+    label: "Accent color (hex)",
+    cls: "setting-hex-input",
+    onInput: (v) => {
+      const m = /^#?([0-9a-f]{6})$/i.exec(v.trim());
+      hex.classList.toggle("is-invalid", !m && v.trim() !== "");
+      if (!m) return;
+      const value = `#${m[1].toLowerCase()}`;
+      color.value = value;
+      setAccent(value);
+    },
+    onCommit: () => {
+      hex.value = color.value;
+      hex.classList.remove("is-invalid");
+    },
+  });
+  const setAccent = (value: string) => {
+    settings.set("appearance.json", "accentColor", value === DEFAULT_ACCENT ? "" : value);
     resetAccent.classList.toggle("is-disabled", !get("appearance.json", "accentColor"));
+  };
+  color.addEventListener("input", () => {
+    setAccent(color.value.toLowerCase());
+    hex.value = color.value.toLowerCase();
+    hex.classList.remove("is-invalid");
   });
 
   return h(
@@ -135,7 +161,7 @@ function appearance(): HTMLElement {
         ["light", "Light"],
         ["system", "Adapt to system"],
       ]),
-      row({ name: "Accent color", desc: "Choose the accent color used throughout the app. The default is Grove's forest teal.", cls: "mod-color" }, resetAccent, color),
+      row({ name: "Accent color", desc: "Choose the accent color used throughout the app. The default is Grove's forest teal.", cls: "mod-color" }, resetAccent, hex, color),
     ),
     group(
       "Font",
@@ -214,6 +240,10 @@ function editor(): HTMLElement {
           (v) => settings.set("app.json", "livePreview", v === "live"),
           "Default editing mode",
         ),
+      ),
+      row(
+        { name: "Show editing mode in status bar", desc: "Show the editing mode toggle in the status bar.", cls: "mod-toggle" },
+        toggle(get("core-plugins.json", "editor-status"), (on) => settings.set("core-plugins.json", "editor-status", on), "Show editing mode in status bar"),
       ),
     ),
     group(
@@ -333,38 +363,60 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement {
 }
 
 function corePlugins(): HTMLElement {
-  return h(
-    "div",
+  // "Search plugins..." filters the list by name and description, as in Obsidian.
+  const search = h("input", { "aria-label": "Search plugins" });
+  search.type = "search";
+  search.placeholder = "Search plugins...";
+  search.spellcheck = false;
+  const none = h("div", { class: "setting-search-empty" }, "No plugins match.");
+  none.hidden = true;
+  search.addEventListener("input", () => {
+    const q = search.value.trim().toLowerCase();
+    let shown = 0;
+    for (const r of list.querySelectorAll<HTMLElement>(".setting-items > .setting-item")) {
+      const match = !q || (r.querySelector(".setting-item-info")?.textContent ?? "").toLowerCase().includes(q);
+      r.classList.toggle("is-filtered-out", !match);
+      if (match) shown++;
+    }
+    list.hidden = shown === 0;
+    none.hidden = shown > 0;
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && search.value) {
+      e.preventDefault();
+      search.value = "";
+      search.dispatchEvent(new Event("input"));
+    }
+  });
+  const list = group(
     null,
-    group(
-      null,
-      ...PLUGINS.map((p) => {
-        const page = PLUGIN_PAGES.find((s) => s.id === p.id);
-        const options = page
-          ? extraButton("settings", "Options", () => openSettings([], p.id))
-          : null;
-        const hotkeys = extraButton("circle-plus", "Hotkeys", () => {
-          showHotkeysFor(p.name);
-          openSettings([], "hotkeys");
-        });
-        const sync = (on: boolean) => {
-          if (options) options.hidden = !on;
-          hotkeys.hidden = !on;
-        };
-        sync(get("core-plugins.json", p.id));
-        return row(
-          { name: p.name, desc: p.desc, cls: "mod-toggle" },
-          options,
-          hotkeys,
-          toggle(get("core-plugins.json", p.id), (on) => {
-            settings.set("core-plugins.json", p.id, on);
-            sync(on);
-            refreshSettingsNav();
-          }, p.name),
-        );
-      }),
-    ),
+    ...PLUGINS.map((p) => {
+      const page = PLUGIN_PAGES.find((s) => s.id === p.id);
+      const options = page
+        ? extraButton("settings", "Options", () => openSettings([], p.id))
+        : null;
+      const hotkeys = extraButton("circle-plus", "Hotkeys", () => {
+        showHotkeysFor(p.name);
+        openSettings([], "hotkeys");
+      });
+      const sync = (on: boolean) => {
+        if (options) options.hidden = !on;
+        hotkeys.hidden = !on;
+      };
+      sync(get("core-plugins.json", p.id));
+      return row(
+        { name: p.name, desc: p.desc, cls: "mod-toggle" },
+        options,
+        hotkeys,
+        toggle(get("core-plugins.json", p.id), (on) => {
+          settings.set("core-plugins.json", p.id, on);
+          sync(on);
+          refreshSettingsNav();
+        }, p.name),
+      );
+    }),
   );
+  return h("div", null, h("div", { class: "search-input-container setting-plugin-search" }, icon("search", 16), search), list, none);
 }
 
 const DATE_PRESETS = ["YYYY-MM-DD", "YYYY.MM.DD", "YYYY/MM/DD", "YYYY/MM/YYYY-MM-DD"];
@@ -466,6 +518,8 @@ export function settingsSections(ctx: SettingsContext): SettingsSection[] {
       name: "Hotkeys",
       icon: "command",
       group: "options",
+      // It has its own filter; its command rows are not settings to search.
+      unsearchable: true,
       build: () => createHotkeysPage(commands),
     },
     { id: "core-plugins", name: "Core plugins", icon: "toy-brick", group: "options", build: corePlugins },

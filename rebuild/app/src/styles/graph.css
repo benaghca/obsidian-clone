@@ -1,0 +1,247 @@
+/* The graph view: one canvas filling the tab, and Obsidian's floating
+   settings panel in its top-right corner (observed in Obsidian 1.14.4: 240px
+   wide, 12px from the edges, 8px radius, the menu's background, edge and
+   shadow; section headers 40px apart; 13px labels). */
+
+.graph-view {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--background-primary);
+  font-family: var(--font-interface);
+  user-select: none;
+  touch-action: none;
+}
+.graph-canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  outline: none;
+}
+.graph-view.is-panning {
+  cursor: grabbing;
+}
+
+.graph-controls {
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1;
+  width: 240px;
+  max-height: calc(100% - 16px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--background-secondary);
+  border: 1px solid var(--menu-border-color);
+  border-radius: var(--radius-m);
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+}
+/* Its shadow: an image (see panel.ts), the same three layers as the menus'. */
+.graph-controls-shadow {
+  position: absolute;
+  top: calc(12px - 64px);
+  right: calc(12px - 64px);
+  border: 64px solid transparent;
+  pointer-events: none;
+}
+.graph-controls.is-close {
+  width: auto;
+  min-width: 36px;
+  min-height: 72px;
+  overflow: visible;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.graph-controls.is-close > .graph-control-section,
+.graph-controls.is-close > .mod-close,
+.graph-controls.is-close > .mod-reset,
+.graph-controls:not(.is-close) > .mod-open,
+.graph-controls:not(.is-close) > .mod-animate {
+  display: none;
+}
+.graph-controls-button {
+  position: absolute;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 24px;
+  border-radius: var(--radius-s);
+  color: var(--icon-color);
+  opacity: var(--icon-opacity);
+}
+.graph-controls-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--icon-color-hover);
+  opacity: 1;
+}
+.graph-controls-button:focus-visible {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  outline: none;
+}
+/* Open: Restore default settings and Close sit in the first header row. */
+.graph-controls > .mod-close {
+  top: 6px;
+  right: 6px;
+}
+.graph-controls > .mod-reset {
+  top: 6px;
+  right: 34px;
+}
+/* Closed: a gear, and below it the wand. */
+.graph-controls > .mod-open {
+  top: 6px;
+  right: 6px;
+}
+.graph-controls > .mod-animate {
+  top: 38px;
+  right: 6px;
+}
+
+.graph-control-section + .graph-control-section {
+  border-top: 1px solid var(--menu-border-color);
+}
+.graph-control-section > .tree-item-self {
+  padding: 8px 12px 8px 28px;
+  border-radius: 0;
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  line-height: 24px;
+}
+.graph-control-section > .tree-item-self:hover {
+  background: none;
+}
+.graph-control-section > .tree-item-self:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
+}
+.graph-control-section > .tree-item-self .collapse-icon {
+  left: 10px;
+  color: var(--icon-color);
+}
+.graph-control-section > .tree-item-children {
+  padding: 2px 12px 12px;
+}
+.graph-controls .setting-item {
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 6px 0;
+}
+.graph-controls .setting-item::before {
+  display: none;
+}
+.graph-controls .setting-item-info {
+  margin-right: 0;
+}
+/* Sliders: the name on its line, then the value and the slider under it. */
+.graph-controls .setting-item.mod-slider .setting-item-info {
+  flex-basis: 100%;
+}
+.graph-controls .setting-item.mod-slider .setting-item-control {
+  flex: 1;
+  justify-content: flex-start;
+  padding-top: 6px;
+}
+.graph-controls .slider {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+.graph-controls .slider-value {
+  min-width: 0;
+  text-align: left;
+}
+.graph-controls .setting-item.mod-cta .setting-item-control {
+  flex: 1;
+}
+.graph-controls button {
+  height: 30px;
+  padding: 4px 12px;
+  font: inherit;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  background: var(--interactive-normal);
+  border: 0;
+  border-radius: 5px;
+  box-shadow: var(--input-shadow);
+  white-space: nowrap;
+  cursor: var(--cursor, default);
+  outline: none;
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.graph-controls button:hover {
+  background: var(--interactive-hover);
+  box-shadow: var(--input-shadow-hover);
+}
+.graph-controls button:focus-visible {
+  box-shadow:
+    var(--input-shadow),
+    0 0 0 2px var(--background-modifier-border-focus);
+}
+.graph-controls .search-input-container {
+  padding: 4px 0 6px;
+}
+.graph-controls .graph-color-button-container {
+  width: 100%;
+  margin-top: 6px;
+}
+
+/* A colour group: query, colour swatch, delete. */
+.graph-color-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.graph-color-group-query {
+  flex: 1;
+  min-width: 0;
+  height: 30px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  background: var(--background-modifier-form-field);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 5px;
+  outline: none;
+  user-select: text;
+}
+.graph-color-group-query:focus {
+  border-color: var(--background-modifier-border-focus);
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+.graph-color-group-color {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: none;
+  overflow: hidden;
+  cursor: var(--cursor, default);
+}
+.graph-color-group-color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.graph-color-group-color::-webkit-color-swatch {
+  border: 0;
+  border-radius: 50%;
+}
+.graph-color-group > .graph-controls-button {
+  position: static;
+  flex: none;
+}
+
+/* The local graph in the narrow right sidebar. */
+.workspace-leaf-content > .graph-view {
+  height: 100%;
+}

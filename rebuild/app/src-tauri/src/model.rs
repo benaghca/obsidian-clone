@@ -58,6 +58,13 @@ pub struct LinkIndex {
     pub outgoing: BTreeMap<String, Vec<String>>,
     /// Notes nothing links to are omitted.
     pub backlinks: BTreeMap<String, Vec<Backlink>>,
+    /// Resolved targets of `[text](path)` links (not counted in `outgoing` or `backlinks`),
+    /// first-seen order, duplicates removed. Notes with none are omitted.
+    pub markdown: BTreeMap<String, Vec<String>>,
+    /// Link targets (wikilinks and markdown links) that match no file, as written without
+    /// heading, alias or a markdown link's `.md`; deduplicated case-insensitively. Notes with
+    /// none are omitted.
+    pub unresolved: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

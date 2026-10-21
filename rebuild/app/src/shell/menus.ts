@@ -11,7 +11,7 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
-import { type Group, noteName, type Tab, type Workspace } from "../workspace";
+import { type Group, noteName, type Tab, tabTitle, type Workspace } from "../workspace";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 
 export interface MenuHost {
@@ -255,6 +255,7 @@ export function createMenus(host: MenuHost) {
       on("backlink") && commands.menuItem("backlink:open", { title: "Open backlinks" }),
       on("outgoing-link") && commands.menuItem("outgoing-links:open", { title: "Open outgoing links" }),
       on("tag-pane") && commands.menuItem("tag-pane:open", { title: "Open tags" }),
+      on("graph") && commands.menuItem("graph:open-local", { title: "Open local graph", action: onTab(() => commands.run("graph:open-local")) }),
       on("outline") && commands.menuItem("outline:open", { title: "Open outline" }),
     ].filter((x): x is MenuEntry => !!x);
     return [
@@ -319,7 +320,10 @@ export function createMenus(host: MenuHost) {
       SEPARATOR,
       t.pinned ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) } : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
       ...(isActive && t.path ? viewItems(t, t.path) : []),
-      ...(isActive && !t.path
+      ...(isActive && !t.path && t.type
+        ? [SEPARATOR, ...graphViewItems(t)]
+        : []),
+      ...(isActive && !t.path && !t.type
         ? [
             SEPARATOR,
             commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
@@ -345,8 +349,8 @@ export function createMenus(host: MenuHost) {
       SEPARATOR,
       ...group.tabs.map(
         (t): MenuEntry => ({
-          title: t.path ? noteName(t.path) : "New tab",
-          icon: t.path ? "file-text" : "file",
+          title: tabTitle(t),
+          icon: t.type ? "git-fork" : t.path ? "file-text" : "file",
           checked: t === group.active,
           action: () => ws.activate(t),
         }),
@@ -354,13 +358,50 @@ export function createMenus(host: MenuHost) {
     ];
   }
 
+  /** A graph tab's view items: splits, and the local graph's note. */
+  function graphViewItems(t: Tab): MenuItems {
+    const file = t.type === "localgraph" ? t.graphFile : null;
+    return [
+      commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
+      commands.menuItem("workspace:split-horizontal", { action: () => ws.split(t, "bottom") }),
+      SEPARATOR,
+      !!file && { title: `Open ${noteName(file)}`, icon: "file-text", action: () => void ws.open(file, { where: "tab" }) },
+      !!file && revealItem(file),
+    ];
+  }
+
   /** The view header's "More options" (three dots), for the active pane. */
   function moreOptions(): MenuItems {
     const t = ws.active;
+    if (t.type) return graphViewItems(t);
     return t.path ? viewItems(t, t.path) : [];
   }
 
-  return { file, vault, editor, tab, tabList, moreOptions };
+  /**
+   * Right-click on a node in the graph (observed in Obsidian 1.14.4: the
+   * note's name, then where to open it and the file items).
+   */
+  function graphNode(path: string): MenuItems {
+    return [
+      { title: noteName(path), label: true },
+      SEPARATOR,
+      openInNewTab(() => void ws.open(path, { where: "tab" })),
+      openToRight(() => void ws.open(path, { where: "right" })),
+      SEPARATOR,
+      moveItem(path),
+      bookmarkItem(path),
+      mergeItem(path),
+      SEPARATOR,
+      copyPath(path),
+      SEPARATOR,
+      on("graph") && { title: "Open local graph", icon: "git-fork", action: () => ws.openView("localgraph", "right", path) },
+      revealItem(path),
+      SEPARATOR,
+      deleteItem(path, "Delete file"),
+    ];
+  }
+
+  return { file, vault, editor, tab, tabList, moreOptions, graphNode };
 }
 
 export type Menus = ReturnType<typeof createMenus>;

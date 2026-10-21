@@ -3,6 +3,7 @@ import "./styles/app.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
 import "./styles/settings.css";
+import "./styles/graph.css";
 import { isTauri } from "./api";
 import { type AppParts, registerAppCommands } from "./appCommands";
 import { Bookmarks } from "./bookmarks";
@@ -87,26 +88,29 @@ const menus = createMenus({
 });
 ws.editorMenu = (view, at, pos, keyboard) => showMenu(menus.editor(view, pos), at, { keyboard });
 
-const panes = createPanes(ws, () => menus);
+const searchVault = (query: string) => {
+  sidebar.searchFor(query);
+  docks.setCollapsed("left", false);
+};
+const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(tag) });
 const sidebar = createSidebar(ws, bookmarks, () => menus);
 const rightSidebar = createRightSidebar(
   ws,
   () => !docks.isCollapsed("right"),
-  (query) => {
-    sidebar.searchFor(query);
-    docks.setCollapsed("left", false);
-  },
+  searchVault,
+  (path, at) => showMenu(menus.graphNode(path), at),
 );
 
 // ----- ribbon -----
 
 // Obsidian's ribbon: its actions are commands, and right-clicking it lists
 // them with a check to show or hide each one. These are Obsidian's, in its
-// order and with its glyphs, where Grove has the feature (graph, canvas,
-// templates and bases it doesn't), then "Create new note", which is Grove's.
+// order and with its glyphs, where Grove has the feature (canvas and bases
+// it doesn't), then "Create new note", which is Grove's.
 // A core plugin that is off takes its button away too.
 const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[] = [
   { id: "switcher:open", label: "Open quick switcher", icon: "file-search", plugin: "switcher" },
+  { id: "graph:open", label: "Open graph view", icon: "git-fork", plugin: "graph" },
   { id: "daily-notes", label: "Open today's daily note", icon: "calendar", plugin: "daily-notes" },
   { id: "templates:insert-template", label: "Insert template", icon: "files", plugin: "templates" },
   { id: "command-palette:open", label: "Open command palette", icon: "terminal", plugin: "command-palette" },
@@ -169,14 +173,42 @@ const backlinks = h(
 );
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
-const statusBar = h("div", { class: "status-bar" }, backlinks, words, chars);
+// The editing mode (Settings → Editor → Show editing mode in status bar), as
+// in Obsidian: its icon, and a click offers the three modes.
+const MODES: { mode: "reading" | "source" | "live"; title: string; icon: IconName }[] = [
+  { mode: "reading", title: "Reading", icon: "book-open" },
+  { mode: "source", title: "Source mode", icon: "code-xml" },
+  { mode: "live", title: "Live Preview", icon: "pen-line" },
+];
+const editorStatus = h("div", { class: "status-bar-item mod-clickable plugin-editor-status" });
+editorStatus.addEventListener("click", () => {
+  const tab = ws.active;
+  showMenu(
+    MODES.map((m) => ({ title: m.title, icon: m.icon, checked: tab.mode === m.mode, action: () => ws.setMode(m.mode, tab) })),
+    editorStatus,
+  );
+});
+let shownMode = "";
+function renderEditorStatus() {
+  const mode = ws.active.path ? ws.active.mode : "";
+  editorStatus.hidden = !mode || !commands.pluginEnabled("editor-status");
+  if (mode === shownMode || !mode) return;
+  shownMode = mode;
+  const m = MODES.find((x) => x.mode === mode)!;
+  editorStatus.replaceChildren(icon(m.icon, 14));
+  editorStatus.setAttribute("aria-label", m.title);
+  editorStatus.title = m.title;
+}
+const statusBar = h("div", { class: "status-bar" }, backlinks, editorStatus, words, chars);
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 function renderCounts() {
   const path = ws.active.path;
-  statusBar.hidden = !path || (backlinks.hidden && words.hidden);
-  if (!path) return;
-  const { words: w, chars: c } = ws.view.state.field(countsField);
+  statusBar.hidden = !path || (backlinks.hidden && words.hidden && editorStatus.hidden);
+  // A tab whose note is still loading shows no counts until it is on screen.
+  const counts = path ? ws.view.state.field(countsField, false) : undefined;
+  if (!counts) return;
+  const { words: w, chars: c } = counts;
   words.textContent = plural(w, "word");
   chars.textContent = plural(c, "character");
 }
@@ -189,6 +221,7 @@ function renderBacklinks() {
 ws.on((change) => {
   if (change === "doc" || change === "tabs" || change === "show") renderCounts();
   if (change === "links" || change === "tabs" || change === "show") renderBacklinks();
+  if (change === "tabs" || change === "show" || change === "mode") renderEditorStatus();
 });
 
 // ----- layout -----
@@ -278,14 +311,20 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["outline", "outline"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["outline", "outline"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
+  }
+  // Graph view off: its tabs close, as Obsidian closes the plugin's views.
+  if (!on("graph")) {
+    const graphTabs = ws.layout.tabs().filter((t) => t.type);
+    if (graphTabs.length) ws.closeTabs(graphTabs);
   }
   if (!anyRight) docks.setCollapsed("right", true);
   app.classList.toggle("is-right-sidebar-empty", !anyRight);
   sidebar.setBookmarksEnabled(on("bookmarks"));
   backlinks.hidden = !on("backlink");
   words.hidden = chars.hidden = !on("word-count");
+  renderEditorStatus();
   panes.setBacklinksAllowed(on("backlink"));
   renderCounts();
   commands.changed();

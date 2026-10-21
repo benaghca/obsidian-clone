@@ -11,7 +11,8 @@
 import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
-import { type Group, noteName, parentDir, type Tab, type Workspace } from "../workspace";
+import { createGraphView, type GraphView } from "../graph/view";
+import { type Group, noteName, parentDir, type Tab, tabTitle, type ViewType, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
@@ -55,10 +56,71 @@ interface GroupView {
   dispose(): void;
 }
 
+/** What graph tabs need from the rest of the app. */
+export interface PaneExtras {
+  /** Search the vault for a tag (a tag node was clicked). */
+  searchTag(tag: string): void;
+}
+
 /** `menus` is read when a menu opens (it is built after the panes). */
-export function createPanes(ws: Workspace, menus: () => Menus): Panes {
+export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtras): Panes {
   const root = h("div", { class: "workspace-split mod-vertical mod-root" });
   const views = new Map<Group, GroupView>();
+
+  // ----- graph tabs -----
+
+  // One graph view per graph tab, kept while the tab shows it (so switching
+  // back to it is instant, zoom and layout as they were), and working only
+  // while it is the active tab of its pane.
+  const graphs = new Map<Tab, { view: GraphView; type: ViewType; file: string | null }>();
+  /** The pane that last showed a note while active: a local graph tab opens notes there. */
+  let notePane: Group | null = null;
+
+  function graphFor(tab: Tab): GraphView {
+    let g = graphs.get(tab);
+    if (g && g.type !== tab.type) {
+      g.view.dispose();
+      graphs.delete(tab);
+      g = undefined;
+    }
+    if (!g) {
+      const local = tab.type === "localgraph";
+      const view = createGraphView({
+        ws,
+        local,
+        file: () => tab.graphFile ?? null,
+        open: (path, where) => {
+          const own = ws.groupOf(tab);
+          const target = local && notePane && notePane !== own && ws.groups().includes(notePane) ? notePane : own;
+          void ws.open(path, { where: local && target === own && !where ? "tab" : where, group: target });
+        },
+        openMissing: (name, where) => void ws.openLink(name, where || (local ? "tab" : false), ws.groupOf(tab)),
+        searchTag: (tag) => extras.searchTag(tag),
+        menu: (path, at) => showMenu(menus().graphNode(path), at),
+      });
+      g = { view, type: tab.type!, file: tab.graphFile ?? null };
+      graphs.set(tab, g);
+    }
+    return g.view;
+  }
+
+  /** Drop the views of closed graph tabs, and wake only the ones on screen. */
+  function syncGraphs() {
+    const live = new Set(ws.layout.tabs());
+    for (const [tab, g] of graphs) {
+      if (live.has(tab) && tab.type === g.type) continue;
+      g.view.dispose();
+      graphs.delete(tab);
+    }
+    const shown = new Set(ws.groups().map((g) => g.active));
+    for (const [tab, g] of graphs) {
+      if (g.file !== (tab.graphFile ?? null)) {
+        g.file = tab.graphFile ?? null;
+        g.view.refresh();
+      }
+      g.view.setActive(shown.has(tab) && g.view.el.isConnected);
+    }
+  }
   let backlinksAllowed = true;
   const splitEls = new Map<number, HTMLElement>();
 
@@ -260,6 +322,12 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
       for (const v of views.values()) v.render();
       renderActive();
     }
+    if (change === "tabs" || change === "layout" || change === "pane") syncGraphs();
+    // Local graph tabs follow the note open in the active pane.
+    if (change === "show" && ws.active.path) {
+      notePane = ws.activeGroup;
+      for (const tab of graphs.keys()) if (tab.type === "localgraph") ws.setGraphFile(tab, ws.active.path);
+    }
   });
   renderLayout();
   for (const v of views.values()) v.render();
@@ -362,9 +430,16 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
           if (tabsRendered) added.push(header.el);
         }
         const { el, title, close } = header;
-        const name = tab.path ? noteName(tab.path) : "New tab";
+        const name = tabTitle(tab);
         if (title.textContent !== name) title.textContent = name;
-        el.setAttribute("aria-label", tab.path ?? "New tab");
+        el.setAttribute("aria-label", tab.path ?? name);
+        const viewIcon = tab.type ? "git-fork" : null;
+        if ((el.dataset.icon ?? null) !== viewIcon) {
+          el.querySelector(".workspace-tab-header-inner-icon")?.remove();
+          if (viewIcon) el.firstElementChild!.prepend(h("div", { class: "workspace-tab-header-inner-icon" }, icon(viewIcon, 16)));
+          if (viewIcon) el.dataset.icon = viewIcon;
+          else delete el.dataset.icon;
+        }
         el.classList.toggle("is-active", tab === group.active);
         if (el.classList.contains("is-pinned") !== tab.pinned || !close.firstChild) {
           el.classList.toggle("is-pinned", tab.pinned);
@@ -470,11 +545,17 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
       const path = tab.path;
       back.classList.toggle("is-disabled", tab.back.length === 0);
       forward.classList.toggle("is-disabled", tab.forward.length === 0);
-      actions.hidden = !path;
+      actions.hidden = !path && !tab.type;
+      modeButton.hidden = !!tab.type;
       renderMode();
-      if ((path ?? "") === shownCrumb) return;
-      shownCrumb = path ?? "";
+      const crumb = tab.type ? `\0${tab.type}` : (path ?? "");
+      if (crumb === shownCrumb) return;
+      shownCrumb = crumb;
       breadcrumb.replaceChildren();
+      if (tab.type) {
+        breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "graph" ? "Graph view" : "Local graph"));
+        return;
+      }
       if (!path) return;
       const dir = parentDir(path);
       for (const part of dir ? dir.split("/") : []) {
@@ -518,9 +599,13 @@ export function createPanes(ws: Workspace, menus: () => Menus): Panes {
     );
 
     function renderView() {
-      const path = group.active.path;
-      scroller.hidden = !path;
-      empty.hidden = !!path;
+      const tab = group.active;
+      const path = tab.path;
+      const graph = tab.type ? graphFor(tab) : null;
+      scroller.hidden = !path || !!graph;
+      empty.hidden = !!path || !!graph;
+      for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
+      if (graph && graph.el.parentElement !== leaf) leaf.append(graph.el);
       if (path && document.activeElement !== title) title.textContent = noteName(path);
       // The editor may have moved here from another group (a tab dragged out).
       const dom = ws.viewOf(group).dom;

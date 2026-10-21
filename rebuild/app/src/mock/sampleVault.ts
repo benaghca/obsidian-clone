@@ -141,3 +141,52 @@ export function sampleVault(): Record<string, string> {
     "Daily/2026-10-19.md": daily,
   };
 }
+
+/**
+ * A synthetic vault for measuring the graph view (dev only, `?synthetic=1000`
+ * on the dev page): `n` notes in a few folders with about `links` links
+ * between them, chosen with preferential attachment so a few notes are hubs,
+ * as in a real vault. Every fifth link is a markdown link, every tenth note
+ * links to a note that doesn't exist, and every 97th note is an orphan. The
+ * same arguments always give the same vault.
+ */
+export function syntheticVault(n: number, links = n * 3): Record<string, string> {
+  let seed = 42;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const words = "alpha beta gamma delta river stone garden forest cloud signal lantern harbor meadow copper ember willow cedar maple orbit prism quartz echo".split(" ");
+  const folders = ["", "Projects", "Areas", "Resources", "Journal", "Archive/Old"];
+  const notes = Array.from({ length: n }, (_, i) => {
+    const name = `${words[i % words.length]} ${words[(i * 7 + 3) % words.length]} ${i}`;
+    return { path: `${folders[i % folders.length] ? folders[i % folders.length] + "/" : ""}${name}.md`, name, links: new Set<number>() };
+  });
+  const degree = new Array(n).fill(1);
+  let total = n;
+  const pick = () => {
+    let r = rnd() * total;
+    for (let i = 0; i < n; i++) if ((r -= degree[i]) <= 0) return i;
+    return n - 1;
+  };
+  for (let made = 0, tries = 0; made < links && tries < links * 20; tries++) {
+    const a = Math.floor(rnd() * n);
+    const b = pick();
+    if (a % 97 === 5 || b % 97 === 5 || b === a || notes[a].links.has(b)) continue;
+    notes[a].links.add(b);
+    degree[a]++;
+    degree[b]++;
+    total += 2;
+    made++;
+  }
+  const out: Record<string, string> = {};
+  notes.forEach((note, i) => {
+    const lines = [`# ${note.name}`, "", `Some text about ${note.name}.`, ""];
+    let k = 0;
+    for (const b of note.links) {
+      const to = notes[b];
+      lines.push(k++ % 5 === 4 ? `See [${to.name}](${to.path.replace(/ /g, "%20")}).` : `Related: [[${to.name}]]`);
+    }
+    if (i % 10 === 0) lines.push(`Missing: [[Unwritten ${i % 50}]]`);
+    lines.push("", `#topic/${words[i % 5]} #${words[(i * 3) % 8]}`);
+    out[note.path] = lines.join("\n") + "\n";
+  });
+  return out;
+}

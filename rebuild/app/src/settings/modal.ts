@@ -18,6 +18,8 @@ export interface SettingsSection {
   group: "options" | "plugins";
   /** Whether the section is listed now (a core plugin's page only while it is on). */
   shown?(): boolean;
+  /** Left out of the settings search (Hotkeys, which has its own filter). */
+  unsearchable?: boolean;
   build(): HTMLElement;
 }
 
@@ -88,13 +90,16 @@ export function openSettings(sections: SettingsSection[], id?: string) {
     content.replaceChildren();
     let any = false;
     for (const s of listed) {
+      if (s.unsearchable) continue;
       const el = sectionEl(s);
       let hits = 0;
       for (const group of el.querySelectorAll<HTMLElement>(".setting-group")) {
         let groupHits = 0;
         for (const r of group.querySelectorAll<HTMLElement>(".setting-items > .setting-item")) {
+          // A row that only shows in some states (a custom format, a folder
+          // field) isn't a match while it is hidden.
           const text = (r.querySelector(".setting-item-info")?.textContent ?? "").toLowerCase();
-          const match = text.includes(q) || s.name.toLowerCase().includes(q);
+          const match = !r.hidden && (text.includes(q) || s.name.toLowerCase().includes(q));
           r.classList.toggle("is-search-hidden", !match);
           if (match) groupHits++;
         }

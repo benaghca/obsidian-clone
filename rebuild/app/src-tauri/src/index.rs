@@ -22,6 +22,8 @@ struct RawLink {
     line: u32,
     text: String,
     target: String,
+    /// A `[text](path)` link rather than a `[[wikilink]]`.
+    markdown: bool,
 }
 
 struct Node {
@@ -104,15 +106,33 @@ impl Index {
     pub fn link_index(&self) -> LinkIndex {
         let mut outgoing = BTreeMap::new();
         let mut backlinks: BTreeMap<String, Vec<Backlink>> = BTreeMap::new();
+        let mut markdown = BTreeMap::new();
+        let mut unresolved = BTreeMap::new();
         for (path, node) in &self.files {
             if node.is_dir || !is_note_path(path) {
                 continue;
             }
             let mut outs = Vec::new();
+            let mut md_outs = Vec::new();
+            let mut missing: Vec<String> = Vec::new();
             for link in &node.links {
                 let Some(dest) = self.resolve(path, &link.target) else {
+                    let name = if link.markdown {
+                        strip_md(&link.target)
+                    } else {
+                        link.target.as_str()
+                    };
+                    if !missing.iter().any(|m| m.eq_ignore_ascii_case(name)) {
+                        missing.push(name.to_string());
+                    }
                     continue;
                 };
+                if link.markdown {
+                    if !md_outs.contains(&dest) {
+                        md_outs.push(dest);
+                    }
+                    continue;
+                }
                 if !outs.contains(&dest) {
                     outs.push(dest.clone());
                 }
@@ -125,10 +145,18 @@ impl Index {
             if !outs.is_empty() {
                 outgoing.insert(path.clone(), outs);
             }
+            if !md_outs.is_empty() {
+                markdown.insert(path.clone(), md_outs);
+            }
+            if !missing.is_empty() {
+                unresolved.insert(path.clone(), missing);
+            }
         }
         LinkIndex {
             outgoing,
             backlinks,
+            markdown,
+            unresolved,
         }
     }
 
@@ -632,6 +660,15 @@ fn parse_note(content: &str) -> (Vec<RawLink>, Vec<String>, Vec<Line>) {
                 line: line_no,
                 text: line.to_string(),
                 target,
+                markdown: false,
+            });
+        }
+        for target in markdown_targets(&blanked) {
+            links.push(RawLink {
+                line: line_no,
+                text: line.to_string(),
+                target,
+                markdown: true,
             });
         }
         lines.push(Line {
@@ -734,6 +771,120 @@ fn wiki_targets(line: &str) -> Vec<String> {
         i += 1;
     }
     out
+}
+
+/// The targets of `[text](path)` and `![alt](path)` links on a line: files in the vault, so
+/// not URLs (anything with a scheme, like `https:` or `mailto:`) and not `#heading` anchors in
+/// the same note. A target is percent-decoded (`My%20Note.md`), without its `#fragment` or
+/// title, and may be written in `<angle brackets>`.
+fn markdown_targets(line: &str) -> Vec<String> {
+    let bytes = line.as_bytes();
+    let mut out = Vec::new();
+    let mut from = 0;
+    while let Some(off) = line[from..].find("](") {
+        let close = from + off;
+        from = close + 2;
+        // The `[` that opens this link text (brackets inside it must balance); `[[...]]` is a wikilink.
+        let mut depth = 0i32;
+        let mut open = None;
+        for j in (0..close).rev() {
+            match bytes[j] {
+                b']' => depth += 1,
+                b'[' if depth == 0 => {
+                    open = Some(j);
+                    break;
+                }
+                b'[' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(open) = open else { continue };
+        if (open > 0 && bytes[open - 1] == b'[') || bytes.get(open + 1) == Some(&b'[') {
+            continue;
+        }
+        let rest = &line[from..];
+        let raw = if let Some(inner) = rest.strip_prefix('<') {
+            match inner.find('>') {
+                Some(end) => &inner[..end],
+                None => continue,
+            }
+        } else {
+            // Up to the `)` that closes the link (parentheses inside may nest), then the
+            // destination ends at the first space (a title may follow).
+            let mut depth = 0i32;
+            let mut end = None;
+            for (k, c) in rest.char_indices() {
+                match c {
+                    '(' => depth += 1,
+                    ')' if depth == 0 => {
+                        end = Some(k);
+                        break;
+                    }
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+            }
+            let Some(end) = end else { continue };
+            rest[..end].trim().split_whitespace().next().unwrap_or("")
+        };
+        let raw = raw.split('#').next().unwrap_or("").trim();
+        if raw.is_empty() || has_scheme(raw) {
+            continue;
+        }
+        let target = percent_decode(raw.strip_prefix("./").unwrap_or(raw));
+        if !target.trim().is_empty() {
+            out.push(target);
+        }
+    }
+    out
+}
+
+/// Whether a link destination starts with a URL scheme (`https:`, `mailto:`, `file:`).
+fn has_scheme(s: &str) -> bool {
+    match s.find(':') {
+        Some(i) if i > 0 => {
+            let scheme = &s[..i];
+            scheme
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_alphabetic())
+                && scheme
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+        }
+        _ => false,
+    }
+}
+
+/// `%XX` escapes decoded as UTF-8 (invalid sequences are replaced, a stray `%` is kept).
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            let hex = std::str::from_utf8(&bytes[i + 1..i + 3])
+                .ok()
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
+            if let Some(b) = hex {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// A markdown link's target without its `.md`, as the graph names a note that doesn't exist.
+fn strip_md(target: &str) -> &str {
+    if is_note_path(target) {
+        &target[..target.len() - 3]
+    } else {
+        target
+    }
 }
 
 fn find_bytes(bytes: &[u8], from: usize, a: u8, b: u8) -> Option<usize> {
@@ -984,6 +1135,71 @@ mod tests {
         // Two mentions in Code.md, both to world, one line each that survived the fence.
         let from_code: Vec<_> = backs.iter().filter(|b| b["from"] == "Code.md").collect();
         assert_eq!(from_code.len(), 2);
+    }
+
+    #[test]
+    fn markdown_links_and_unresolved_targets_for_the_graph() {
+        let idx = Index::from_notes(&[
+            (
+                "a.md",
+                "[Design](Design.md) and [again](<design.md>) [web](https://example.com/x.md) [mail](mailto:x@y.z)\n",
+            ),
+            ("b/c.md", "[up](../a.md#Top \"title\") [x](My%20Note.md) [pic](img.png) ![alt](img.png)\n"),
+            ("Design.md", "[[Nowhere]] [[nowhere#h|alias]] [gone](Gone.md) [[a]] `[code](a.md)` [[x]](a.md)\n"),
+            ("My Note.md", "[[[weird]]] [self](#heading) [](a.md)\n"),
+            ("img.png", ""),
+        ]);
+        let links = idx.link_index();
+        assert_eq!(
+            links.markdown.get("a.md").unwrap(),
+            &vec!["Design.md".to_string()]
+        );
+        assert_eq!(
+            links.markdown.get("b/c.md").unwrap(),
+            &vec![
+                "a.md".to_string(),
+                "My Note.md".to_string(),
+                "img.png".to_string()
+            ]
+        );
+        assert_eq!(
+            links.markdown.get("My Note.md").unwrap(),
+            &vec!["a.md".to_string()]
+        );
+        // Markdown links stay out of the wikilink maps the Backlinks and Outgoing views use.
+        assert!(links.outgoing.get("a.md").is_none());
+        assert!(links.backlinks.get("Design.md").is_none());
+        assert_eq!(
+            links.outgoing.get("Design.md").unwrap(),
+            &vec!["a.md".to_string()]
+        );
+        // Inline code and `[[x]](a.md)` are not markdown links.
+        assert!(links.markdown.get("Design.md").is_none());
+        assert_eq!(
+            links.unresolved.get("Design.md").unwrap(),
+            // Per line: wikilinks first, then markdown links.
+            &vec!["Nowhere".to_string(), "x".to_string(), "Gone".to_string()]
+        );
+        assert!(links.unresolved.get("a.md").is_none());
+    }
+
+    #[test]
+    fn markdown_target_parsing() {
+        assert_eq!(
+            markdown_targets("[a](b.md) [c](<d e.md>) [f](g%C3%A9.md#x)"),
+            vec!["b.md", "d e.md", "gé.md"]
+        );
+        assert_eq!(markdown_targets("[a](./b/c.md 'title')"), vec!["b/c.md"]);
+        assert_eq!(
+            markdown_targets("[a [nested]](n.md) [p](x_(1).md)"),
+            vec!["n.md", "x_(1).md"]
+        );
+        assert!(markdown_targets(
+            "[a](http://x) [b](obsidian://open) [c](#h) [d]( ) ](x) [e](unclosed"
+        )
+        .is_empty());
+        assert_eq!(percent_decode("a%2"), "a%2");
+        assert_eq!(percent_decode("100%"), "100%");
     }
 
     #[test]

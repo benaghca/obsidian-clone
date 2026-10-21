@@ -85,8 +85,11 @@ export const CORE_PLUGINS = {
   "random-note": field(true, bool),
   switcher: field(true, bool),
   "tag-pane": field(true, bool),
+  graph: field(true, bool),
   templates: field(true, bool),
   "word-count": field(true, bool),
+  /** Obsidian keeps "Show editing mode in status bar" (Settings → Editor) as this hidden core plugin. */
+  "editor-status": field(true, bool),
 };
 
 export const DAILY_NOTES = {
@@ -105,6 +108,74 @@ export const BACKLINK = {
   backlinkInDocument: field(false, bool),
 };
 
+/** A graph colour group, as Obsidian's graph.json writes it: a query and an RGB colour. */
+export interface ColorGroup {
+  query: string;
+  color: { a: number; rgb: number };
+}
+
+const isColorGroup = (v: unknown): v is ColorGroup =>
+  !!v &&
+  typeof v === "object" &&
+  typeof (v as ColorGroup).query === "string" &&
+  (v as ColorGroup).query.length <= 500 &&
+  !!(v as ColorGroup).color &&
+  typeof (v as ColorGroup).color.rgb === "number" &&
+  Number.isInteger((v as ColorGroup).color.rgb) &&
+  (v as ColorGroup).color.rgb >= 0 &&
+  (v as ColorGroup).color.rgb <= 0xffffff &&
+  typeof (v as ColorGroup).color.a === "number";
+const colorGroups: Check = (v) => Array.isArray(v) && v.length <= 50 && v.every(isColorGroup);
+
+/**
+ * The graph settings panel (Filters, Groups, Display, Forces), with
+ * Obsidian's graph.json keys and defaults, the panel's open sections and the
+ * zoom. The global graph uses these; the local graph has its own copy under
+ * "local" (Obsidian keeps those per view).
+ */
+const GRAPH_PANEL = {
+  "collapse-filter": field(true, bool),
+  search: field("", text()),
+  showTags: field(false, bool),
+  showAttachments: field(false, bool),
+  hideUnresolved: field(false, bool),
+  showOrphans: field(true, bool),
+  "collapse-color-groups": field(true, bool),
+  colorGroups: field<ColorGroup[]>([], colorGroups),
+  "collapse-display": field(true, bool),
+  showArrow: field(false, bool),
+  textFadeMultiplier: field(0, num(-3, 3, 0.1)),
+  nodeSizeMultiplier: field(1, num(0.1, 5)),
+  lineSizeMultiplier: field(1, num(0.1, 5)),
+  "collapse-forces": field(true, bool),
+  centerStrength: field(0.518713248970312, num(0, 1)),
+  repelStrength: field(10, num(0, 20)),
+  linkStrength: field(1, num(0, 1)),
+  linkDistance: field(250, num(30, 500, 1)),
+  scale: field(1, num(1 / 128, 8)),
+  close: field(false, bool),
+};
+
+/** The local graph's settings: the same panel plus depth and which links to follow. */
+export const LOCAL_GRAPH = {
+  ...GRAPH_PANEL,
+  "collapse-filter": field(false, bool),
+  close: field(true, bool),
+  localJumps: field(1, num(1, 5, 1)),
+  localBacklinks: field(true, bool),
+  localForelinks: field(true, bool),
+  localInterlinks: field(false, bool),
+};
+
+export const GRAPH = {
+  ...GRAPH_PANEL,
+  /** The local graph's own settings (checked key by key when read). */
+  local: field<Record<string, unknown>>({}, (v) => !!v && typeof v === "object" && !Array.isArray(v)),
+};
+
+/** One graph's settings (the global graph's leave the local-only keys at their defaults). */
+export type GraphSettings = Values<typeof LOCAL_GRAPH>;
+
 export const NOTE_COMPOSER = {
   askBeforeMerging: field(true, bool),
 };
@@ -121,6 +192,7 @@ export const FILES = {
   "templates.json": TEMPLATES,
   "backlink.json": BACKLINK,
   "note-composer.json": NOTE_COMPOSER,
+  "graph.json": GRAPH,
 } satisfies Record<string, Spec>;
 
 export type FileName = keyof typeof FILES;

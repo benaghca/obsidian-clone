@@ -39,6 +39,34 @@ export interface Tab {
   backlinks: boolean;
   /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
   memory: TabMemory | null;
+  /** A view instead of a note: the graph, or the local graph of `graphFile` (path is null then). */
+  type?: ViewType;
+  /** The note a local graph shows (it follows the note open in the active pane). */
+  graphFile?: string | null;
+}
+
+/** The views a tab can show instead of a note. */
+export type ViewType = "graph" | "localgraph";
+
+/**
+ * Back/forward history entries are note paths, or one of these for a view
+ * ("\0graph", "\0localgraph\0Note.md"); no path starts with a NUL.
+ */
+export function viewEntry(tab: { type?: ViewType; graphFile?: string | null }): string {
+  return tab.type === "localgraph" ? `\0localgraph\0${tab.graphFile ?? ""}` : "\0graph";
+}
+
+export function parseViewEntry(entry: string): { type: ViewType; file: string | null } | null {
+  if (!entry.startsWith("\0")) return null;
+  if (entry.startsWith("\0localgraph\0")) return { type: "localgraph", file: entry.slice(12) || null };
+  return { type: "graph", file: null };
+}
+
+/** A tab's title: its note's name, the view's name, or "New tab". */
+export function tabTitle(tab: Tab): string {
+  if (tab.type === "graph") return "Graph view";
+  if (tab.type === "localgraph") return tab.graphFile ? `Graph of ${noteName(tab.graphFile)}` : "Local graph";
+  return tab.path ? noteName(tab.path) : "New tab";
 }
 
 export interface TabMemory {
@@ -85,6 +113,8 @@ interface Pane {
 
 interface SavedTab {
   path: string | null;
+  type?: ViewType;
+  file?: string | null;
   mode: ViewMode;
   pinned: boolean;
   backlinks?: boolean;
@@ -199,6 +229,10 @@ export class Workspace {
     this.listeners.add(fn);
   }
 
+  off(fn: (change: Change, group?: Group) => void) {
+    this.listeners.delete(fn);
+  }
+
   private emit(change: Change, group?: Group) {
     for (const fn of this.listeners) fn(change, group);
   }
@@ -279,7 +313,7 @@ export class Workspace {
     if (layoutChanged) this.emit("layout");
     this.emit("tabs");
     const group = this.layout.activeGroup;
-    const key = `${group.id}:${group.active.id}:${group.active.path}`;
+    const key = `${group.id}:${group.active.id}:${group.active.path}:${group.active.type ?? ""}`;
     if (key !== this.shownKey) {
       this.shownKey = key;
       this.emit("show");
@@ -584,13 +618,13 @@ export class Workspace {
   }
 
   private rememberClosed(tab: Tab, group: Group) {
-    if (!tab.path) return;
+    if (!tab.path && !tab.type) return;
     this.closed.push({ saved: this.saveTab(tab), group, index: group.tabs.indexOf(tab) });
     if (this.closed.length > CLOSED_MAX) this.closed.shift();
   }
 
   canUndoClose() {
-    return this.closed.some((c) => c.saved.path && this.notes.some((n) => n.path === c.saved.path));
+    return this.closed.some((c) => c.saved.type || (c.saved.path && this.notes.some((n) => n.path === c.saved.path)));
   }
 
   /** Obsidian's "Undo close tab": reopen the last closed tab where it was (or in the active pane). */
@@ -598,7 +632,7 @@ export class Workspace {
     while (this.closed.length) {
       const { saved, group: was, index } = this.closed.pop()!;
       const tab = this.loadTab(saved);
-      if (!tab?.path || !(await this.load(tab.path))) continue;
+      if (!tab || (!tab.type && (!tab.path || !(await this.load(tab.path))))) continue;
       const group = this.layout.groups().includes(was) ? was : this.activeGroup;
       this.layout.addTab(group, tab, index);
       this.select(group, tab);
@@ -653,7 +687,7 @@ export class Workspace {
     // show other text: it starts at the line at the top of the old one.
     const topLine = pane?.tab === tab ? this.topLine(pane) : null;
     const memory = tab.memory ? { ...tab.memory, scrollTop: topLine === null ? tab.memory.scrollTop : null } : null;
-    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory };
+    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory, type: tab.type, graphFile: tab.graphFile };
     const added = this.layout.split(group, edge, [copy]);
     this.layout.activeGroup = added;
     this.present(added);
@@ -768,7 +802,7 @@ export class Workspace {
     let where = opts.where ?? false;
     const current = group.active;
     // A pinned tab keeps its note; anything else opened from it gets a new tab.
-    if (!where && current.pinned && current.path && current.path !== path) where = "tab";
+    if (!where && current.pinned && (current.type || (current.path && current.path !== path))) where = "tab";
     const alreadyShown = !where && current.path === path && group === this.activeGroup;
     let tab = current;
     let layoutChanged = false;
@@ -781,6 +815,12 @@ export class Workspace {
     } else if (where === "tab") {
       tab = this.blankTab();
       this.layout.addTab(group, tab);
+    } else if (tab.type) {
+      // A graph tab becomes the note (Obsidian's click on a node); Back returns to the graph.
+      tab.back.push(viewEntry(tab));
+      tab.forward = [];
+      tab.type = undefined;
+      tab.graphFile = undefined;
     } else if (tab.path !== path && tab.path) {
       tab.back.push(tab.path);
       tab.forward = [];
@@ -879,14 +919,52 @@ export class Workspace {
     const tab = group.active;
     const from = dir < 0 ? tab.back : tab.forward;
     const to = dir < 0 ? tab.forward : tab.back;
-    const path = from[from.length - 1];
-    if (!path || !(await this.load(path))) return;
+    const entry = from[from.length - 1];
+    if (!entry) return;
+    const view = parseViewEntry(entry);
+    if (!view && !(await this.load(entry))) return;
     from.pop();
-    if (tab.path) to.push(tab.path);
-    tab.path = path;
+    if (tab.type) to.push(viewEntry(tab));
+    else if (tab.path) to.push(tab.path);
+    tab.type = view?.type;
+    tab.graphFile = view ? view.file : undefined;
+    tab.path = view ? null : entry;
     if (group.active === tab) this.present(group);
     this.settle();
-    if (group === this.activeGroup) this.pane(group).view.focus();
+    if (group === this.activeGroup && tab.path) this.pane(group).view.focus();
+  }
+
+  /**
+   * Open the graph (or the local graph of a note) in a tab: the active tab
+   * if it is empty, else a new tab, or a new pane to the right or below.
+   */
+  openView(type: ViewType, where: OpenWhere = false, file: string | null = null) {
+    let group = this.activeGroup;
+    let tab = group.active;
+    let layoutChanged = false;
+    if (where === "right" || where === "down") {
+      const pane = this.panes.get(group);
+      if (pane) this.remember(pane);
+      tab = this.blankTab();
+      group = this.layout.split(group, where === "right" ? "right" : "bottom", [tab]);
+      layoutChanged = true;
+    } else if (where === "tab" || tab.path || tab.type) {
+      tab = this.blankTab();
+      this.layout.addTab(group, tab);
+    }
+    tab.type = type;
+    tab.graphFile = type === "localgraph" ? file : undefined;
+    group.active = tab;
+    this.layout.activeGroup = group;
+    this.present(group);
+    this.settle(layoutChanged);
+  }
+
+  /** A local graph tab now follows another note. */
+  setGraphFile(tab: Tab, file: string | null) {
+    if (tab.type !== "localgraph" || tab.graphFile === file) return;
+    tab.graphFile = file;
+    this.emit("tabs");
   }
 
   private async load(path: string): Promise<EditorState | null> {
@@ -910,6 +988,10 @@ export class Workspace {
   private saveTab(tab: Tab): SavedTab {
     const saved: SavedTab = { path: tab.path, mode: tab.mode, pinned: tab.pinned, back: tab.back.slice(-20), forward: tab.forward.slice(-20) };
     if (tab.backlinks) saved.backlinks = true;
+    if (tab.type) {
+      saved.type = tab.type;
+      if (tab.type === "localgraph") saved.file = tab.graphFile ?? null;
+    }
     const pane = [...this.panes.values()].find((p) => p.tab === tab);
     if (pane) this.remember(pane);
     const memory = tab.memory?.path === tab.path ? tab.memory : null;
@@ -922,11 +1004,17 @@ export class Workspace {
 
   private loadTab(saved: SavedTab): Tab | null {
     if (!saved || typeof saved !== "object") return null;
-    const exists = (p: unknown): p is string => typeof p === "string" && this.notes.some((n) => n.path === p);
-    const path = saved.path === null ? null : exists(saved.path) ? saved.path : undefined;
+    const isNote = (p: unknown): p is string => typeof p === "string" && this.notes.some((n) => n.path === p);
+    const exists = (p: unknown): p is string => isNote(p) || (typeof p === "string" && parseViewEntry(p) !== null);
+    const type = saved.type === "graph" || saved.type === "localgraph" ? saved.type : undefined;
+    const path = type || saved.path === null ? null : isNote(saved.path) ? saved.path : undefined;
     if (path === undefined) return null; // its note is gone
     const tab = this.blankTab();
     tab.path = path;
+    if (type) {
+      tab.type = type;
+      if (type === "localgraph") tab.graphFile = isNote(saved.file) ? saved.file : null;
+    }
     tab.mode = saved.mode === "source" || saved.mode === "reading" ? saved.mode : "live";
     tab.pinned = saved.pinned === true;
     tab.backlinks = saved.backlinks === true;
@@ -952,7 +1040,7 @@ export class Workspace {
     if (!saved || typeof saved !== "object" || (saved as SavedWorkspace).v !== 1) return false;
     const { root, active } = saved as SavedWorkspace;
     const layout = Layout.fromJSON<Tab, SavedTab>(root, (s) => this.loadTab(s), active);
-    if (!layout || !layout.tabs().some((t) => t.path)) return false;
+    if (!layout || !layout.tabs().some((t) => t.path || t.type)) return false;
     await Promise.all(layout.groups().map((g) => (g.active.path ? this.load(g.active.path) : null)));
     for (const pane of [...this.panes.values()]) this.dropPane(pane.group);
     this.layout = layout;
@@ -978,7 +1066,7 @@ export class Workspace {
   async newNote(folder: string = this.newNoteFolder(), where?: OpenWhere): Promise<string> {
     if (folder && !this.isFolder(folder)) await api.createFolder(folder).catch(() => {});
     const entry = await this.createNote(this.freeName(folder, ".md"));
-    await this.open(entry.path, { where: where ?? (this.active.path !== null ? "tab" : false) });
+    await this.open(entry.path, { where: where ?? (this.active.path !== null || this.active.type ? "tab" : false) });
     // A new note is for writing in, even when new tabs open in Reading view.
     if (this.active.path === entry.path && this.active.mode === "reading") this.setMode(this.editingMode());
     return entry.path;
@@ -1023,10 +1111,15 @@ export class Workspace {
         map.set(swap(key), value);
       }
     }
+    const swapEntry = (e: string) => {
+      const view = parseViewEntry(e);
+      return !view ? swap(e) : view.file ? viewEntry({ type: view.type, graphFile: swap(view.file) }) : e;
+    };
     for (const tab of this.layout.tabs()) {
       if (tab.path) tab.path = swap(tab.path);
-      tab.back = tab.back.map(swap);
-      tab.forward = tab.forward.map(swap);
+      if (tab.graphFile) tab.graphFile = swap(tab.graphFile);
+      tab.back = tab.back.map(swapEntry);
+      tab.forward = tab.forward.map(swapEntry);
       if (tab.memory) tab.memory.path = swap(tab.memory.path);
     }
     for (const pane of this.panes.values()) if (pane.path) pane.path = swap(pane.path);
@@ -1193,6 +1286,7 @@ export class Workspace {
       tab.back = tab.back.filter((p) => !under(p));
       tab.forward = tab.forward.filter((p) => !under(p));
       if (tab.path && under(tab.path)) tab.path = null;
+      if (tab.graphFile && under(tab.graphFile)) tab.graphFile = null;
     }
     await this.refreshFiles();
     for (const group of this.layout.groups()) this.present(group);
