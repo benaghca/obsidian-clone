@@ -31,16 +31,19 @@ import { DrawnWidget, embedChain, paintWith, readingMode } from "./render";
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
 export const filesChanged = StateEffect.define<null>();
 
-/** An empty span drawn by CSS: a list bullet, a horizontal rule, the external link icon. */
+/** An empty span drawn by CSS: a list bullet, a horizontal rule, the external link icon, a highlight's swatch. */
 class SpanWidget extends WidgetType {
-  constructor(readonly cls: string) {
+  constructor(
+    readonly cls: string,
+    readonly style?: string,
+  ) {
     super();
   }
   eq(other: SpanWidget) {
-    return other.cls === this.cls;
+    return other.cls === this.cls && other.style === this.style;
   }
   toDOM() {
-    return h("span", { class: this.cls });
+    return h("span", { class: this.cls, style: this.style });
   }
 }
 
@@ -122,7 +125,11 @@ const once = (key: string, make: () => Decoration) => {
   return d;
 };
 const cached = (kind: "mark" | "line", cls: string) => once(`${kind} ${cls}`, () => (kind === "mark" ? Decoration.mark({ class: cls }) : Decoration.line({ class: cls })));
-const swatch = (color: HighlightColor) => once(`swatch ${color}`, () => Decoration.replace({ widget: new SpanWidget(`cm-highlight-swatch cm-highlight-${color}`) }));
+// A coloured highlight's colour reaches CSS as --highlight-color, as a callout's does.
+const tint = (color: HighlightColor) => `--highlight-color: var(--color-${color})`;
+const swatch = (color: HighlightColor) => once(`swatch ${color}`, () => Decoration.replace({ widget: new SpanWidget("cm-highlight-swatch", tint(color)) }));
+const highlight = (color: HighlightColor | null) =>
+  color ? once(`highlight ${color}`, () => Decoration.mark({ class: "cm-highlight mod-color", attributes: { style: tint(color) } })) : cached("mark", "cm-highlight");
 
 /**
  * The text a checked task strikes through: from after "[x] " to the end of
@@ -235,13 +242,12 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             // While the markup shows, it is highlighted too.
             const color = highlightColor(doc.sliceString(node.from + 2, node.from + 4));
             const text = color ? node.from + 4 : node.from + 2;
-            const cls = color ? `cm-highlight cm-highlight-${color}` : "cm-highlight";
             if (!touches(node.from, node.to)) {
               hide(node.from + 2, text);
-              mark(cls, text, node.to - 2);
+              if (node.to - 2 > text) decos.push(highlight(color).range(text, node.to - 2));
             } else {
               if (color) decos.push(swatch(color).range(node.from + 2, text));
-              mark(cls, node.from, node.to);
+              decos.push(highlight(color).range(node.from, node.to));
             }
             return;
           }

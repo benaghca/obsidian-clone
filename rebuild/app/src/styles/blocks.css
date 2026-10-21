@@ -6,26 +6,9 @@
 .cm-highlight {
   background: var(--mark-background);
 }
-/* ==🔴coloured highlights==: the colour at 30%, as Obsidian's (yellow is the plain one) */
-.cm-highlight-red {
-  --highlight-color: var(--color-red);
-}
-.cm-highlight-orange {
-  --highlight-color: var(--color-orange);
-}
-.cm-highlight-yellow {
-  --highlight-color: var(--color-yellow);
-}
-.cm-highlight-green {
-  --highlight-color: var(--color-green);
-}
-.cm-highlight-blue {
-  --highlight-color: var(--color-blue);
-}
-.cm-highlight-purple {
-  --highlight-color: var(--color-purple);
-}
-.cm-highlight[class*="cm-highlight-"] {
+/* ==🔴coloured highlights==: the colour (--highlight-color, set on the mark) at 30%, as
+   Obsidian's (yellow is the plain one) */
+.cm-highlight.mod-color {
   background: color-mix(in srgb, var(--highlight-color) 30%, transparent);
 }
 .cm-highlight-swatch {
