@@ -128,7 +128,7 @@ export async function updateNoteText(ws: Workspace, path: string, next: string) 
   const doc = ws.editors.doc(path);
   if (!doc) {
     await api.writeNote(path, next);
-    ws.touch(path);
+    ws.written(path);
     return;
   }
   const lines = next.split("\n");

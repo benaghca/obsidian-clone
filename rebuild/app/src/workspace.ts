@@ -99,11 +99,7 @@ export class Workspace {
       },
       loaded: () => this.settle(),
       changed: () => this.emit("doc"),
-      saved: (path) => {
-        this.touch(path);
-        clearTimeout(this.linkTimer);
-        this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
-      },
+      saved: (path) => this.written(path),
     });
     this.layout = new Layout(this.blankTab());
     this.editors.viewOf(this.layout.activeGroup);
@@ -231,9 +227,16 @@ export class Workspace {
   }
 
   /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
-  touch(path: string) {
+  private touch(path: string) {
     const entry = this.files.find((f) => f.path === path);
     if (entry) entry.mtime_ms = Date.now();
+  }
+
+  /** We wrote a note to disk: it is modified now, and the link index is read again a moment later. */
+  written(path: string) {
+    this.touch(path);
+    clearTimeout(this.linkTimer);
+    this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
   }
 
   // ----- tabs -----
