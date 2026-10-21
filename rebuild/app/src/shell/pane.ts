@@ -1,9 +1,9 @@
 // The main workspace: the split tree of tab groups (layout.ts), drawn like
-// Obsidian's. Each group has its own tab strip (the top ones double as the
-// title bar), a sub-header with back/forward and breadcrumb, and the
-// scrolling note view with its inline title above the editor in a centred
-// readable column. Splits get thin draggable dividers; tabs can be dragged
-// between groups or onto a pane's edge (tabDrag.ts).
+// Obsidian's. Each group has its own tab strip (tabStrip.ts; the top ones
+// double as the title bar), a sub-header with back/forward and breadcrumb,
+// and the scrolling note view with its inline title above the editor in a
+// centred readable column, or a graph. Splits get thin draggable dividers;
+// tabs can be dragged between groups or onto a pane's edge (tabDrag.ts).
 //
 // DOM is kept per group and per split and only moved when the tree changes,
 // so a split, a close or a tab move never rebuilds an editor.
@@ -14,16 +14,16 @@ import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
 import { renameFile } from "../fileOps";
 import { noteName, parentDir } from "../paths";
-import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
+import { type Group, type Tab, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
 import { dragPointer, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
 import type { Menus } from "./menus";
 import type { ColumnHolder } from "./sidedock";
-import { startTabDrag } from "./tabDrag";
 import { createBacklinksView } from "./backlinksView";
 import type { SideView } from "./sideView";
+import { createTabStrip, type TabStrip } from "./tabStrip";
 
 export interface Panes extends ColumnHolder {
   el: HTMLElement;
@@ -45,11 +45,8 @@ const minFor = (direction: Direction) => (direction === "vertical" ? MIN_PANE_WI
 interface GroupView {
   group: Group;
   el: HTMLElement;
-  strip: HTMLElement;
+  strip: TabStrip;
   scroller: HTMLElement;
-  tabList: HTMLElement;
-  /** Tab header elements by tab id, for the drag code to measure. */
-  headers: Map<number, HTMLElement>;
   render(): void;
   renderMode(): void;
   renderBacklinks(): void;
@@ -286,7 +283,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       // press on an element that carries the attribute itself (not on its
       // children), so it goes on each empty part: the strip, the band above
       // and between the tabs (the tab row's own box), and the spacer.
-      for (const el of [v.strip, v.tabList, v.strip.querySelector(".workspace-tab-header-spacer")!]) el.toggleAttribute("data-tauri-drag-region", top);
+      for (const el of [v.strip.el, v.strip.tabList, v.strip.el.querySelector(".workspace-tab-header-spacer")!]) el.toggleAttribute("data-tauri-drag-region", top);
     }
     for (const [group, v] of views) v.el.classList.toggle("mod-top-right-space", group === corner);
   }
@@ -339,137 +336,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
   // ----- one tab group -----
 
   function createGroupView(ws: Workspace, group: Group, menus: () => Menus): GroupView {
-    const tabList = h("div", { class: "workspace-tab-header-container-inner" });
-    const tabListButton = iconButton(icon("chevron-down"), "Show tab list", () =>
-      showMenu(menus().tabList(group), tabListButton, { align: "right" }),
-    );
-    const strip = h(
-      "div",
-      { class: "workspace-tab-header-container" },
-      tabList,
-      iconButton(icon("plus"), "New tab", () => ws.newTab(group), "workspace-tab-header-new-tab"),
-      h("div", { class: "workspace-tab-header-spacer" }),
-      h("div", { class: "workspace-tab-header-tab-list" }, tabListButton),
-      iconButton(icon("panel-right"), "Toggle right sidebar", () => commands.run("app:toggle-right-sidebar"), "sidebar-toggle-button mod-right"),
-    );
-
-    // Tab headers are kept per tab id and updated in place, so a switch only
-    // flips classes, and opening/closing a tab can animate its own header.
-    const tabHeaders = new Map<number, { el: HTMLElement; title: HTMLElement; close: HTMLElement; tab: Tab }>();
-    const headers = new Map<number, HTMLElement>();
-    let tabsRendered = false;
-
-    function tabHeader(tab: Tab) {
-      const title = h("div", { class: "workspace-tab-header-inner-title" });
-      // Close button; on a pinned tab, a pin that unpins it (as in Obsidian).
-      const close = h("div", {
-        class: "workspace-tab-header-inner-close-button",
-        onpointerdown: (e: PointerEvent) => e.stopPropagation(),
-        onmousedown: (e: MouseEvent) => e.stopPropagation(),
-        onclick: () => (tab.pinned ? ws.togglePin(tab) : ws.closeTab(tab)),
-      });
-      const el = h(
-        "div",
-        {
-          class: "workspace-tab-header",
-          onpointerdown: (e: PointerEvent) => {
-            if (e.button === 1) {
-              e.preventDefault();
-              ws.closeTab(tab);
-            } else if (e.button === 0) {
-              ws.activate(tab);
-              startTabDrag(e, tab, ws, () => [...views.values()]);
-            }
-          },
-          // Middle-click must not paste or autoscroll.
-          onmousedown: (e: MouseEvent) => {
-            if (e.button === 1) e.preventDefault();
-          },
-          oncontextmenu: (e: MouseEvent) => {
-            e.preventDefault();
-            showMenu(menus().tab(tab), { x: e.clientX, y: e.clientY });
-          },
-        },
-        h("div", { class: "workspace-tab-header-inner" }, title, close),
-      );
-      return { el, title, close, tab };
-    }
-
-    function renderTabs() {
-      const open = new Set(group.tabs.map((tab) => tab.id));
-      for (const [id, { el }] of tabHeaders) {
-        if (open.has(id)) continue;
-        tabHeaders.delete(id);
-        headers.delete(id);
-        closeTabHeader(el);
-      }
-      let prev: Element | null = null;
-      const added: HTMLElement[] = [];
-      for (const tab of group.tabs) {
-        let header = tabHeaders.get(tab.id);
-        if (!header) {
-          tabHeaders.set(tab.id, (header = tabHeader(tab)));
-          headers.set(tab.id, header.el);
-          if (tabsRendered) added.push(header.el);
-        }
-        const { el, title, close } = header;
-        const name = tabTitle(tab);
-        if (title.textContent !== name) title.textContent = name;
-        el.setAttribute("aria-label", tab.path ?? name);
-        const viewIcon = tab.type ? "git-fork" : null;
-        if ((el.dataset.icon ?? null) !== viewIcon) {
-          el.querySelector(".workspace-tab-header-inner-icon")?.remove();
-          if (viewIcon) el.firstElementChild!.prepend(h("div", { class: "workspace-tab-header-inner-icon" }, icon(viewIcon, 16)));
-          if (viewIcon) el.dataset.icon = viewIcon;
-          else delete el.dataset.icon;
-        }
-        el.classList.toggle("is-active", tab === group.active);
-        if (el.classList.contains("is-pinned") !== tab.pinned || !close.firstChild) {
-          el.classList.toggle("is-pinned", tab.pinned);
-          close.replaceChildren(icon(tab.pinned ? "pin" : "x", 14));
-          close.setAttribute("aria-label", tab.pinned ? "Unpin" : "Close");
-        }
-        // Headers still shrinking away keep their place; order around them.
-        let at: Element | null = prev ? prev.nextElementSibling : tabList.firstElementChild;
-        while (at && at !== el && at.classList.contains("is-closing")) at = at.nextElementSibling;
-        if (at !== el) tabList.insertBefore(el, at);
-        prev = el;
-      }
-      for (const el of added) openTabHeader(el);
-      tabsRendered = true;
-    }
-
-    // A new tab grows from nothing to the width it has in the settled strip,
-    // which is measured first, so the last frame lands exactly on the layout
-    // and the neighbours give up their room smoothly as it grows. Only this
-    // tab's max-width animates; the strip is a small fixed-height box. A
-    // closed tab shrinks from its width to nothing, then goes; like a closing
-    // folder it eases in and out (a plain ease-in would leave the last third
-    // of the width to vanish in a single frame).
-    function slideTabHeader(el: HTMLElement, open: boolean, ms: number) {
-      const width = el.getBoundingClientRect().width;
-      const frames = [
-        { maxWidth: "0px", minWidth: "0px", opacity: 0 },
-        { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
-      ];
-      el.style.overflow = "hidden";
-      return el.animate(open ? frames : frames.reverse(), { duration: ms, easing: easing(open ? "out" : "in-out"), fill: open ? "auto" : "forwards" })
-        .finished;
-    }
-
-    function openTabHeader(el: HTMLElement) {
-      const ms = duration("moderate");
-      if (ms > 0) slideTabHeader(el, true, ms).then(() => (el.style.overflow = ""), () => {});
-    }
-
-    // A tab that moved to another group just goes.
-    function closeTabHeader(el: HTMLElement) {
-      el.classList.add("is-closing");
-      const ms = duration("moderate");
-      if (ms <= 0 || !el.isConnected || el.classList.contains("is-moving")) return el.remove();
-      const remove = () => el.remove();
-      slideTabHeader(el, false, ms).then(remove, remove);
-    }
+    const strip = createTabStrip(ws, group, menus, () => [...views.values()]);
 
     // ----- sub-header -----
     const back = iconButton(icon("arrow-left"), "Navigate back", () => commands.run("app:go-back"));
@@ -585,7 +452,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     }
 
     function render() {
-      renderTabs();
+      strip.render();
       renderHeader();
       renderView();
       if (empty.hidden === false) renderEmpty();
@@ -712,7 +579,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     });
 
     const leaf = h("div", { class: "workspace-leaf" }, header, scroller, empty);
-    const el = h("div", { class: "workspace-tabs" }, strip, leaf);
+    const el = h("div", { class: "workspace-tabs" }, strip.el, leaf);
     // A press or focus anywhere in a pane makes it the active one.
     const activate = () => ws.focusGroup(group);
     el.addEventListener("pointerdown", activate, true);
@@ -723,8 +590,6 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       el,
       strip,
       scroller,
-      tabList,
-      headers,
       render,
       renderMode,
       renderBacklinks,
