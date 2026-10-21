@@ -470,11 +470,7 @@ pub fn is_note_path(path: &str) -> bool {
 
 fn display_name(path: &str, is_dir: bool) -> String {
     let base = basename(path);
-    if !is_dir && is_note_path(base) {
-        base[..base.len() - 3].to_string()
-    } else {
-        base.to_string()
-    }
+    if is_dir { base } else { strip_md(base) }.to_string()
 }
 
 fn basename(path: &str) -> &str {
