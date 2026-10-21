@@ -111,6 +111,17 @@ function selectedLines(state: EditorState) {
   return lines.sort((a, b) => a.from - b.from);
 }
 
+/** Keep every selection endpoint attached to its text as line prefixes change. */
+function updateLines(target: Target, specs: Parameters<EditorState["changes"]>[0]) {
+  const { state } = target;
+  const changes = state.changes(specs);
+  const selection = EditorSelection.create(
+    state.selection.ranges.map((r) => EditorSelection.range(changes.mapPos(r.anchor, 1), changes.mapPos(r.head, 1))),
+    state.selection.mainIndex,
+  );
+  update(target, { changes, selection });
+}
+
 /**
  * Make the selected lines headings, list items, tasks or quotes (or plain
  * body text). If every line already is that kind, it is toggled off.
@@ -137,12 +148,7 @@ export const setLineKind =
       const from = target.startsWith("h") ? line.from : line.from + indent.length;
       return { from, to: line.from + indent.length + prefix.length, insert };
     });
-    const changes = state.changes(specs);
-    const selection = EditorSelection.create(
-      state.selection.ranges.map((r) => EditorSelection.range(changes.mapPos(r.anchor, 1), changes.mapPos(r.head, 1))),
-      state.selection.mainIndex,
-    );
-    update({ state, dispatch }, { changes, selection });
+    updateLines({ state, dispatch }, specs);
     return true;
   };
 
@@ -160,12 +166,7 @@ export const toggleCheckbox: StateCommand = ({ state, dispatch }) => {
     if (kind === "bullet") return { from: at + prefix.length, insert: "[ ] " };
     return { from: at, to: at + prefix.length, insert: "- [ ] " };
   });
-  const changes = state.changes(specs);
-  const selection = EditorSelection.create(
-    state.selection.ranges.map((r) => EditorSelection.range(changes.mapPos(r.anchor, 1), changes.mapPos(r.head, 1))),
-    state.selection.mainIndex,
-  );
-  update({ state, dispatch }, { changes, selection });
+  updateLines({ state, dispatch }, specs);
   return true;
 };
 
