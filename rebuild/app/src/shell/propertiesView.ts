@@ -41,9 +41,7 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
   let sort: Sort = SORTS.some(([s]) => s === saved) ? (saved as Sort) : "frequency";
   const list = h("div", { class: "tag-container" });
   const empty = h("div", { class: "pane-empty" }, "No properties found.");
-  const filter = h("input", { class: "search-input", "aria-label": "Search properties" });
-  filter.type = "search";
-  filter.placeholder = "Search...";
+  const filter = h("input", { class: "search-input", type: "search", placeholder: "Search...", "aria-label": "Search properties" });
   const filterBox = h("div", { class: "search-input-container" }, filter);
   filterBox.hidden = true;
   const sortButton = iconButton(icon("arrow-up-narrow-wide"), "Change sort order", () =>

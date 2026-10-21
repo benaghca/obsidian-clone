@@ -19,9 +19,7 @@ const LINES = 5;
 const PAGE = 50;
 
 export function createSearchView(ws: Workspace): { el: HTMLElement; search(query: string): void } {
-  const input = h("input", { class: "search-input", "aria-label": "Search" });
-  input.placeholder = "Search...";
-  input.type = "search";
+  const input = h("input", { class: "search-input", type: "search", placeholder: "Search...", "aria-label": "Search" });
   const info = h("div", { class: "search-results-info" });
   const results = h("div", { class: "search-results" });
   let seq = 0;

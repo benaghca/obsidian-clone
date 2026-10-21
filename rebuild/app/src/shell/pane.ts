@@ -407,9 +407,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     }
 
     // ----- note view -----
-    const title = h("div", { class: "inline-title", "aria-label": "Note title" });
-    title.spellcheck = false;
-    title.contentEditable = "plaintext-only";
+    const title = h("div", { class: "inline-title", contenteditable: "plaintext-only", spellcheck: "false", "aria-label": "Note title" });
     const sizer = h("div", { class: "markdown-sizer" }, title, ws.editors.viewOf(group).dom);
     const scroller = h("div", { class: "view-content" }, sizer);
 

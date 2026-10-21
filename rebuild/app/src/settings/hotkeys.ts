@@ -32,11 +32,7 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
   let capturing: string | null = null;
   let listeningForQuery = false;
 
-  const query = h("input", { class: "setting-hotkey-search", "aria-label": "Filter commands" });
-  query.type = "search";
-  query.placeholder = "Filter...";
-  query.spellcheck = false;
-  query.value = pendingQuery;
+  const query = h("input", { class: "setting-hotkey-search", type: "search", value: pendingQuery, placeholder: "Filter...", spellcheck: "false", "aria-label": "Filter commands" });
   pendingQuery = "";
   const byKey = keyButton(icon("keyboard", 16), "Search by hotkey", () => toggleListening(), "input-right-decorator");
 

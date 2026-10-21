@@ -49,22 +49,14 @@ function dropdownRow<F extends FileName, K extends Key<F>>(file: F, key: K, name
 }
 
 function textRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: string, desc: string, placeholder: string, list?: string) {
-  const input = textInput({ value: get(file, key) as string, placeholder, label: name, onInput: (v) => void settings.set(file, key, v.trim() as SettingsOf<F>[K]) });
-  if (list) input.setAttribute("list", list);
+  const input = textInput({ value: get(file, key) as string, placeholder, label: name, list, onInput: (v) => void settings.set(file, key, v.trim() as SettingsOf<F>[K]) });
   return row({ name, desc, cls: "mod-text" }, input);
 }
 
 /** A <datalist> of the vault's folders or notes, for path fields. */
 function pathList(ws: Workspace, id: string, kind: "folder" | "note"): HTMLElement {
-  const list = h("datalist");
-  list.id = id;
   const paths = kind === "folder" ? ws.vault.files.filter((f) => f.is_dir).map((f) => f.path) : ws.vault.notes.map((n) => n.path.replace(/\.md$/, ""));
-  for (const p of paths.sort()) {
-    const option = h("option");
-    option.value = p;
-    list.append(option);
-  }
-  return list;
+  return h("datalist", { id }, ...paths.sort().map((p) => h("option", { value: p })));
 }
 
 function general(ctx: SettingsContext): HTMLElement {
@@ -87,33 +79,24 @@ function general(ctx: SettingsContext): HTMLElement {
 }
 
 function appearance(): HTMLElement {
-  const fonts = h("datalist");
-  fonts.id = "grove-font-list";
-  installedFonts((names) => {
-    for (const name of names) {
-      const option = h("option");
-      option.value = name;
-      fonts.append(option);
-    }
-  });
+  const fonts = h("datalist", { id: "grove-font-list" });
+  installedFonts((names) => fonts.append(...names.map((name) => h("option", { value: name }))));
   const fontRow = (key: "interfaceFontFamily" | "textFontFamily" | "monospaceFontFamily", name: string, desc: string) => {
     const input = textInput({
       value: get("appearance.json", key),
       placeholder: "Default",
       label: name,
+      list: fonts.id,
       onInput: (v) => {
         const ok = isFontName(v.trim());
         input.classList.toggle("is-invalid", !ok);
         if (ok) settings.set("appearance.json", key, v.trim());
       },
     });
-    input.setAttribute("list", fonts.id);
     return row({ name, desc, cls: "mod-text" }, input);
   };
 
-  const color = h("input", { class: "setting-color", "aria-label": "Accent color" });
-  color.type = "color";
-  color.value = get("appearance.json", "accentColor") || DEFAULT_ACCENT;
+  const color = h("input", { class: "setting-color", type: "color", value: get("appearance.json", "accentColor") || DEFAULT_ACCENT, "aria-label": "Accent color" });
   const resetAccent = extraButton("rotate-ccw", "Restore default", () => {
     settings.set("appearance.json", "accentColor", "");
     color.value = DEFAULT_ACCENT;
@@ -305,8 +288,7 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement {
     filterInput.value = "";
     renderFilters();
   };
-  const filterInput = textInput({ value: "", placeholder: "Folder, file or /regex/", label: "Add an excluded file filter", onInput: () => {} });
-  filterInput.setAttribute("list", "grove-folder-list");
+  const filterInput = textInput({ value: "", placeholder: "Folder, file or /regex/", label: "Add an excluded file filter", list: "grove-folder-list", onInput: () => {} });
   filterInput.addEventListener("keydown", (e) => {
     if (e.key === "Enter") addFilter();
   });
@@ -370,10 +352,7 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement {
 
 function corePlugins(): HTMLElement {
   // "Search plugins..." filters the list by name and description, as in Obsidian.
-  const search = h("input", { "aria-label": "Search plugins" });
-  search.type = "search";
-  search.placeholder = "Search plugins...";
-  search.spellcheck = false;
+  const search = h("input", { type: "search", placeholder: "Search plugins...", spellcheck: "false", "aria-label": "Search plugins" });
   const none = h("div", { class: "setting-search-empty" }, "No plugins match.");
   none.hidden = true;
   search.addEventListener("input", () => {

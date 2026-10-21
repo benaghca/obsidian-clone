@@ -130,11 +130,7 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
   const syncers: (() => void)[] = [];
 
   // Filters: a search field (Grove's search syntax), then what to show.
-  const search = h("input", { class: "graph-search-input", "aria-label": "Search files" });
-  search.spellcheck = false;
-  search.type = "search";
-  search.placeholder = "Search files...";
-  search.value = cfg().search;
+  const search = h("input", { class: "graph-search-input", type: "search", value: cfg().search, placeholder: "Search files...", spellcheck: "false", "aria-label": "Search files" });
   let searchTimer = 0;
   search.addEventListener("input", () => {
     clearTimeout(searchTimer);
@@ -168,20 +164,14 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
     const groups = cfg().colorGroups;
     groupList.replaceChildren(
       ...groups.map((g, i) => {
-        const query = h("input", { class: "graph-color-group-query", "aria-label": "Group query" });
-        query.spellcheck = false;
-        query.type = "text";
-        query.placeholder = "Enter query...";
-        query.value = g.query;
+        const query = h("input", { class: "graph-color-group-query", type: "text", value: g.query, placeholder: "Enter query...", spellcheck: "false", "aria-label": "Group query" });
         let timer = 0;
         query.addEventListener("input", () => {
           clearTimeout(timer);
           timer = window.setTimeout(() => setGroups(cfg().colorGroups.map((x, j) => (j === i ? { ...x, query: query.value } : x))), 250);
         });
         query.addEventListener("keydown", (e) => e.stopPropagation());
-        const color = h("input", { class: "graph-color-group-color", "aria-label": "Click to change color" });
-        color.type = "color";
-        color.value = hex(g.color.rgb);
+        const color = h("input", { class: "graph-color-group-color", type: "color", value: hex(g.color.rgb), "aria-label": "Click to change color" });
         color.addEventListener("input", () =>
           setGroups(cfg().colorGroups.map((x, j) => (j === i ? { ...x, color: { a: 1, rgb: parseInt(color.value.slice(1), 16) } } : x))),
         );

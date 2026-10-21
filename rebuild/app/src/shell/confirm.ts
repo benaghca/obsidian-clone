@@ -25,8 +25,7 @@ export const isConfirmOpen = () => openCount > 0;
 export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAskAgain: boolean }> {
   return new Promise((resolve) => {
     const restoreFocus = document.activeElement as HTMLElement | null;
-    const box = h("input");
-    box.type = "checkbox";
+    const box = h("input", { type: "checkbox" });
     const yes = h("button", { class: o.warning ? "mod-warning" : "mod-cta" }, o.confirm);
     const no = h("button", null, o.cancel ?? "Cancel");
     const modal = h(

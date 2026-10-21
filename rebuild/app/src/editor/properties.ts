@@ -443,8 +443,7 @@ class Block {
     const set = (v: Property["value"], part: string) => this.set(key, v, part, type);
     switch (type) {
       case "checkbox": {
-        const check = h("input", { class: "cm-task-checkbox", "data-part": "value" });
-        check.type = "checkbox";
+        const check = h("input", { class: "cm-task-checkbox", type: "checkbox", "data-part": "value" });
         check.checked = value === true;
         check.addEventListener("change", () => set(check.checked, "value"));
         box.append(check);
@@ -453,11 +452,8 @@ class Block {
       case "number":
       case "date":
       case "datetime": {
-        const input = h("input", { class: "property-input", "data-part": "value" });
-        input.type = type === "datetime" ? "datetime-local" : type;
+        const input = h("input", { class: "property-input", type: type === "datetime" ? "datetime-local" : type, value: value as string, placeholder: "Empty", "data-part": "value" });
         if (type === "number") input.step = "any";
-        input.value = value as string;
-        input.placeholder = "Empty";
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
         box.append(input);

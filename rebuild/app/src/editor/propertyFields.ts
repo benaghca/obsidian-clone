@@ -49,8 +49,7 @@ export function typeItems(key: string, inferred: PropertyType, vault: PropertyHo
 
 /** A key field, suggesting the vault's names: written on Enter or when left; Escape gives the old key back. */
 export function keyInput(key: string, names: () => Promise<SuggestItem[]>, commit: (key: string) => void) {
-  const input = h("input", { class: "property-key-input", "data-part": "key", "aria-label": key || "New property" });
-  input.value = key;
+  const input = h("input", { class: "property-key-input", value: key, "data-part": "key", "aria-label": key || "New property" });
   suggest(input, {
     className: "mod-property-key",
     items: names,
@@ -92,9 +91,7 @@ export function editable(
   values: () => Promise<SuggestItem[]>,
   choose?: (item: SuggestItem) => void,
 ) {
-  const el = h("div", { class: "property-text", "data-part": "value" });
-  el.contentEditable = "plaintext-only";
-  el.textContent = text;
+  const el = h("div", { class: "property-text", contenteditable: "plaintext-only", "data-part": "value" }, text);
   suggest(el, {
     className: "mod-property-value",
     items: values,

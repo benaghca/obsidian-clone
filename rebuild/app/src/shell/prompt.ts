@@ -53,9 +53,7 @@ export function openPrompt<T>(opts: PromptOptions<T>): Prompt | null {
   if (document.querySelector(".modal-container:not(.is-closing)")) return null;
   const restoreFocus = document.activeElement as HTMLElement | null;
 
-  const input = h("input", { class: "prompt-input", "aria-label": opts.placeholder });
-  input.placeholder = opts.placeholder;
-  input.spellcheck = false;
+  const input = h("input", { class: "prompt-input", placeholder: opts.placeholder, spellcheck: "false", "aria-label": opts.placeholder });
   const clear = h(
     "div",
     { class: "search-input-clear-button", "aria-label": "Clear search", onclick: () => setQuery("") },

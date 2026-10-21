@@ -74,10 +74,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
   }
 
   // ----- search: every section's rows, filtered by name and description -----
-  const search = h("input", { class: "setting-search-input", "aria-label": "Search settings" });
-  search.type = "search";
-  search.placeholder = "Search settings...";
-  search.spellcheck = false;
+  const search = h("input", { class: "setting-search-input", type: "search", placeholder: "Search settings...", spellcheck: "false", "aria-label": "Search settings" });
   const emptyResult = h("div", { class: "setting-search-empty" }, "No settings match.");
 
   function runSearch() {
