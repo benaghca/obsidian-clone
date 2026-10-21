@@ -7,6 +7,7 @@
 
 import { listeners } from "../listeners";
 import { duration } from "../motion";
+import { dragPointer } from "./dom";
 
 export type Side = "left" | "right";
 
@@ -80,32 +81,13 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
     handle.addEventListener("pointerdown", (down) => {
       if (down.button !== 0) return;
       down.preventDefault();
-      handle.setPointerCapture(down.pointerId);
-      const startX = down.clientX;
       const startWidth = width(side);
       const sign = side === "left" ? 1 : -1;
-      let frame = 0;
-      let x = startX;
       app.classList.add("is-sidedock-resizing");
-      const move = (e: PointerEvent) => {
-        x = e.clientX;
-        frame ||= requestAnimationFrame(() => {
-          frame = 0;
-          setWidth(side, startWidth + sign * (x - startX));
-        });
-      };
-      const up = () => {
-        cancelAnimationFrame(frame);
-        setWidth(side, startWidth + sign * (x - startX));
+      dragPointer(down, handle, (e) => setWidth(side, startWidth + sign * (e.clientX - down.clientX)), () => {
         app.classList.remove("is-sidedock-resizing");
-        handle.removeEventListener("pointermove", move);
-        handle.removeEventListener("pointerup", up);
-        handle.removeEventListener("pointercancel", up);
         changes.emit(side);
-      };
-      handle.addEventListener("pointermove", move);
-      handle.addEventListener("pointerup", up);
-      handle.addEventListener("pointercancel", up);
+      });
     });
     return handle;
   }

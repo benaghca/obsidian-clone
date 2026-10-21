@@ -16,7 +16,7 @@ import { renameFile } from "../fileOps";
 import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
-import { h, iconButton } from "./dom";
+import { dragPointer, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
 import type { Menus } from "./menus";
@@ -214,11 +214,6 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     if (down.button !== 0 || !split) return;
     down.preventDefault();
     const handle = down.currentTarget as HTMLElement;
-    try {
-      handle.setPointerCapture(down.pointerId);
-    } catch {
-      // not a live pointer (a synthetic event): the moves still reach the handle while over it
-    }
     const vertical = split.direction === "vertical";
     const rect = container.getBoundingClientRect();
     const total = vertical ? rect.width : rect.height;
@@ -226,35 +221,20 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     const from = vertical ? down.clientX : down.clientY;
     const kids = split.children.map((c) => (c.kind === "group" ? viewFor(c).el : (splitEls.get(c.id) ?? container)));
     const handles = handleEls.get(container) ?? [];
-    let pos = from;
-    let frame = 0;
     document.body.classList.add(vertical ? "is-resizing-x" : "is-resizing-y");
     handle.classList.add("is-dragging");
-    const apply = () => {
-      frame = 0;
+    const apply = (e: PointerEvent) => {
       split.sizes = [...start];
-      const sizes = ws.layout.resize(split, index, pos - from, total, minFor(split.direction));
+      const sizes = ws.layout.resize(split, index, (vertical ? e.clientX : e.clientY) - from, total, minFor(split.direction));
       kids[index].style.flexGrow = String(sizes[index]);
       kids[index + 1].style.flexGrow = String(sizes[index + 1]);
       placeHandles(split, handles.slice(0, split.children.length - 1));
     };
-    const move = (e: PointerEvent) => {
-      pos = vertical ? e.clientX : e.clientY;
-      frame ||= requestAnimationFrame(apply);
-    };
-    const up = () => {
-      cancelAnimationFrame(frame);
-      apply();
+    dragPointer(down, handle, apply, () => {
       handle.classList.remove("is-dragging");
       document.body.classList.remove("is-resizing-x", "is-resizing-y");
-      handle.removeEventListener("pointermove", move);
-      handle.removeEventListener("pointerup", up);
-      handle.removeEventListener("pointercancel", up);
       ws.resized();
-    };
-    handle.addEventListener("pointermove", move);
-    handle.addEventListener("pointerup", up);
-    handle.addEventListener("pointercancel", up);
+    });
   }
 
   function renderLayout() {
@@ -462,44 +442,33 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     // A new tab grows from nothing to the width it has in the settled strip,
     // which is measured first, so the last frame lands exactly on the layout
     // and the neighbours give up their room smoothly as it grows. Only this
-    // tab's max-width animates; the strip is a small fixed-height box.
-    function openTabHeader(el: HTMLElement) {
-      const ms = duration("moderate");
-      if (ms <= 0) return;
+    // tab's max-width animates; the strip is a small fixed-height box. A
+    // closed tab shrinks from its width to nothing, then goes; like a closing
+    // folder it eases in and out (a plain ease-in would leave the last third
+    // of the width to vanish in a single frame).
+    function slideTabHeader(el: HTMLElement, open: boolean, ms: number) {
       const width = el.getBoundingClientRect().width;
+      const frames = [
+        { maxWidth: "0px", minWidth: "0px", opacity: 0 },
+        { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
+      ];
       el.style.overflow = "hidden";
-      el.animate(
-        [
-          { maxWidth: "0px", minWidth: "0px", opacity: 0 },
-          { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
-        ],
-        { duration: ms, easing: easing("out") },
-      ).finished.then(
-        () => (el.style.overflow = ""),
-        () => {},
-      );
+      return el.animate(open ? frames : frames.reverse(), { duration: ms, easing: easing(open ? "out" : "in-out"), fill: open ? "auto" : "forwards" })
+        .finished;
     }
 
-    // A closed tab shrinks from its current width to nothing, then goes. Like
-    // a closing folder it eases in and out: a plain ease-in would leave the
-    // last third of the width to vanish in a single frame. A tab that moved
-    // to another group just goes.
+    function openTabHeader(el: HTMLElement) {
+      const ms = duration("moderate");
+      if (ms > 0) slideTabHeader(el, true, ms).then(() => (el.style.overflow = ""), () => {});
+    }
+
+    // A tab that moved to another group just goes.
     function closeTabHeader(el: HTMLElement) {
       el.classList.add("is-closing");
       const ms = duration("moderate");
       if (ms <= 0 || !el.isConnected || el.classList.contains("is-moving")) return el.remove();
-      const width = el.getBoundingClientRect().width;
-      el.style.overflow = "hidden";
-      el.animate(
-        [
-          { maxWidth: `${width}px`, minWidth: "0px", opacity: 1 },
-          { maxWidth: "0px", minWidth: "0px", opacity: 0 },
-        ],
-        { duration: ms, easing: easing("in-out"), fill: "forwards" },
-      ).finished.then(
-        () => el.remove(),
-        () => el.remove(),
-      );
+      const remove = () => el.remove();
+      slideTabHeader(el, false, ms).then(remove, remove);
     }
 
     // ----- sub-header -----
