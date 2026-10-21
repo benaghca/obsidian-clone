@@ -21,5 +21,5 @@ export function systemPath(vault: string, path: string): string {
   return `${vault}${sep}${path.split("/").join(sep)}`;
 }
 
-/** Names in Obsidian's order: case ignored, numbers by value ("Note 2" before "Note 10"). */
-export const compareNames = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+/** Names in Obsidian's order: case ignored, numbers by value ("Note 2" before "Note 10"). One collator, made once (fast for sorting a vault). */
+export const compareNames = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }).compare;

@@ -37,7 +37,7 @@ import { createMenus } from "./shell/menus";
 import { openMergePrompt } from "./shell/mergePrompt";
 import { openMovePrompt } from "./shell/movePrompt";
 import { createPanes } from "./shell/pane";
-import { createPropertyIndex } from "./shell/propertyIndex";
+import { propertyIndex } from "./shell/propertyIndex";
 import { warmUpPromptGlyphs } from "./shell/prompt";
 import { loadLayout, loadWorkspace, saveLayout, saveWorkspace } from "./shell/prefs";
 import { pathQuery } from "./shell/searchQuery";
@@ -50,8 +50,7 @@ import { Workspace } from "./workspace";
 
 const ws = new Workspace();
 const bookmarks = new Bookmarks(ws);
-const propertyIndex = createPropertyIndex(ws);
-ws.propertyHost = propertyIndex.host;
+ws.propertyHost = propertyIndex(ws).host;
 
 // Commands first: the views show their hotkeys. The views are filled into
 // `parts` below; commands only read them when they run.
@@ -108,7 +107,7 @@ const searchVault = (query: string) => {
   sidebar.searchFor(query);
   docks.setCollapsed("left", false);
 };
-const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(tag) });
+const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(`tag:${tag}`) });
 const sidebar = createSidebar(ws, bookmarks, () => menus);
 const rightSidebar = createRightSidebar(
   ws,

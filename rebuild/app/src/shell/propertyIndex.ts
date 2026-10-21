@@ -38,7 +38,16 @@ const parse = (lines: string[]): NoteProperties | null => {
   return props ? { props, lines } : null;
 };
 
-export function createPropertyIndex(ws: Workspace) {
+const shared = new WeakMap<Workspace, ReturnType<typeof create>>();
+
+/** The workspace's properties index (one for every view that needs it). */
+export function propertyIndex(ws: Workspace) {
+  let index = shared.get(ws);
+  if (!index) shared.set(ws, (index = create(ws)));
+  return index;
+}
+
+function create(ws: Workspace) {
   const cache = new Map<string, { mtime: number; entry: NoteProperties | null }>();
   let reading: Promise<Map<string, NoteProperties>> | null = null;
   const readTags = createTagReader(ws);
@@ -122,7 +131,6 @@ export function createPropertyIndex(ws: Workspace) {
   return { notes, names, values, host };
 }
 
-export type PropertyIndex = ReturnType<typeof createPropertyIndex>;
 
 /** Case-insensitively unique (the first spelling kept), sorted by name. */
 function dedupe(list: string[]): string[] {

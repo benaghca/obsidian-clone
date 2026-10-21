@@ -120,7 +120,7 @@ function createLocalGraphView(ws: Workspace, searchFor: (query: string) => void,
     file: () => file,
     open: (path, where) => void ws.open(path, { where }),
     openMissing: (name, where) => void ws.openLink(name, where),
-    searchTag: (tag) => searchFor(tag),
+    searchTag: (tag) => searchFor(`tag:${tag}`),
     menu,
     panelClosed: true,
   });

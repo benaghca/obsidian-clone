@@ -636,7 +636,7 @@ export function createGraphView(host: GraphHost): GraphView {
     }
     const dataKeys: (keyof GraphSettings)[] = ["search", "showTags", "showAttachments", "hideUnresolved", "showOrphans", "colorGroups", "localJumps", "localBacklinks", "localForelinks", "localInterlinks"];
     if (dataKeys.some((k) => JSON.stringify(before[k]) !== JSON.stringify(cfg[k]))) {
-      if (before.showTags !== cfg.showTags) source.forget(true);
+      if (before.showTags !== cfg.showTags) source.forget();
       void rebuild();
     }
     invalidate();

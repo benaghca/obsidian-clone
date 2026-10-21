@@ -197,3 +197,8 @@
   color: var(--text-normal);
   border-radius: 2px;
 }
+.search-results-info {
+  padding: 0 14px 6px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
