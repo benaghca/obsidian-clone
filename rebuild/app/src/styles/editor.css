@@ -253,18 +253,21 @@
   color: var(--text-faint);
 }
 
-/* [[ link suggester */
-.cm-editor .cm-tooltip.cm-link-suggest {
-  width: 300px;
+/* [[ link suggester, and the Properties block's suggestions (shell/suggest.ts) */
+.cm-editor .cm-tooltip.cm-link-suggest,
+.suggestion-container {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   box-shadow: var(--shadow-s);
   font-family: var(--font-interface);
-  overflow: hidden;
-  /* CodeMirror keeps this element while the query is refined, so the
+  /* CodeMirror keeps the link suggester while the query is refined, so the
      entrance plays once per opening, not per keystroke */
   animation: grove-popover-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+.cm-editor .cm-tooltip.cm-link-suggest {
+  width: 300px;
+  overflow: hidden;
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul {
   max-height: 300px;
