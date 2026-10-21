@@ -46,7 +46,7 @@ import {
   STORED_TYPES,
 } from "./frontmatter";
 import { editorHost, type PropertyHost } from "./host";
-import { readingMode } from "./livePreview";
+import { readingMode } from "./render";
 import { editable, keyInput, TYPE_ICONS, TYPE_NAMES, typeItems } from "./propertyFields";
 
 export type PropertiesDisplay = "visible" | "hidden" | "source";

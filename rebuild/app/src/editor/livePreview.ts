@@ -7,7 +7,7 @@
 // rendered callouts, tables and embeds show (render.ts).
 
 import { syntaxTree } from "@codemirror/language";
-import { type EditorState, Facet, type Range, StateEffect, type Text } from "@codemirror/state";
+import { type EditorState, type Range, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -26,10 +26,7 @@ import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
-import { embedChain, paintWith } from "./render";
-
-/** Reading view: render everything, as if the selection touched nothing. */
-export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
+import { embedChain, paintWith, readingMode } from "./render";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
 export const filesChanged = StateEffect.define<null>();

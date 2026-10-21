@@ -12,9 +12,7 @@ import { syntaxTree } from "@codemirror/language";
 import { Decoration, type EditorView } from "@codemirror/view";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
-import { DrawnWidget, editButton, isLinkEvent } from "./embeds";
-import { readingMode } from "./livePreview";
-import { decorate, onDestroy, type Painted, paintLines, paintRange, paintWith, release } from "./render";
+import { BlockWidget, decorate, onDestroy, type Painted, paintLines, paintRange, paintWith, release } from "./render";
 
 export interface CalloutHeader {
   /** As written, lower-cased ("tldr"). */
@@ -63,15 +61,7 @@ export const calloutBody = (text: string) =>
 /** The callouts folded or unfolded by a click, by their text: drawn again (scrolled away and back), they stay so. */
 const toggled = new WeakMap<EditorView, Set<string>>();
 
-export class CalloutWidget extends DrawnWidget {
-  constructor(
-    readonly text: string,
-    readonly chain: readonly string[],
-    /** Bumped to draw it again when files its embeds point at may have changed (blocks.ts). */
-    readonly files = 0,
-  ) {
-    super();
-  }
+export class CalloutWidget extends BlockWidget {
   toDOM(view: EditorView) {
     const header = calloutHeader(this.text.split("\n", 1)[0])!;
     const kind = calloutKind(header.type);
@@ -96,17 +86,13 @@ export class CalloutWidget extends DrawnWidget {
       box.classList.add("is-collapsible");
       box.classList.toggle("is-collapsed", (header.fold === "-") !== !!toggled.get(view)?.has(this.text));
     }
-    const dom = h("div", { class: "cm-callout" }, box, editButton());
-    dom.addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || isLinkEvent(e)) return;
-      if (fold && title.contains(e.target as Node)) {
-        box.classList.toggle("is-collapsed");
-        const set = toggled.get(view) ?? toggled.set(view, new Set()).get(view)!;
-        if (!set.delete(this.text)) set.add(this.text);
-      }
-      else if (!view.state.facet(readingMode)) editAt(view, view.posAtDOM(dom));
-      else return;
-      e.preventDefault();
+    // The title folds and unfolds it (in Reading view too).
+    const dom = this.box(view, "cm-callout", box, (_, dom) => view.posAtDOM(dom), (e) => {
+      if (!fold || !title.contains(e.target as Node)) return false;
+      box.classList.toggle("is-collapsed");
+      const set = toggled.get(view) ?? toggled.set(view, new Set()).get(view)!;
+      if (!set.delete(this.text)) set.add(this.text);
+      return true;
     });
     onDestroy(dom, () => {
       release(titled);
@@ -135,9 +121,3 @@ paintWith((state) => {
   for (; next <= doc.lines; next++) out.push(blank.range(doc.line(next).from));
   return out;
 });
-
-/** Put the caret at `pos` in the editor (inside a block widget's source, which then shows). */
-export function editAt(view: EditorView, pos: number) {
-  view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
-  view.focus();
-}

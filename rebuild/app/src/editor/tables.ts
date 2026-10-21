@@ -19,11 +19,8 @@ import { EditorSelection, type EditorState, Prec } from "@codemirror/state";
 import { type EditorView, keymap } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { h } from "../shell/dom";
-import { editAt } from "./callouts";
-import { DrawnWidget, editButton, isLinkEvent } from "./embeds";
 import { editorHost } from "./host";
-import { readingMode } from "./livePreview";
-import { decorate, onDestroy, type Painted, paintRange, release } from "./render";
+import { BlockWidget, decorate, editAt, onDestroy, type Painted, paintRange, readingMode, release } from "./render";
 
 export type Align = "left" | "center" | "right" | "";
 
@@ -67,15 +64,7 @@ export function alignments(row: string): Align[] {
   });
 }
 
-export class TableWidget extends DrawnWidget {
-  constructor(
-    readonly text: string,
-    readonly chain: readonly string[],
-    /** Bumped to draw it again when files its embeds point at may have changed (blocks.ts). */
-    readonly files = 0,
-  ) {
-    super();
-  }
+export class TableWidget extends BlockWidget {
   toDOM(view: EditorView) {
     const lines = this.text.split("\n");
     const align = alignments(lines[1] ?? "");
@@ -99,16 +88,11 @@ export class TableWidget extends DrawnWidget {
       if (n === 0) table.append(h("thead", null, tr));
       else (table.tBodies[0] ?? table.appendChild(h("tbody"))).append(tr);
     });
-    const dom = h("div", { class: "cm-table-widget" }, table, editButton());
-    const cellPos = (e: Event) => view.posAtDOM(dom) + Number((e.target as Element).closest<HTMLElement>("[data-offset]")?.dataset.offset ?? 0);
-    dom.addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || isLinkEvent(e) || view.state.facet(readingMode)) return;
-      e.preventDefault();
-      editAt(view, cellPos(e));
-    });
+    const cellPos = (e: Event, dom: HTMLElement) => view.posAtDOM(dom) + Number((e.target as Element).closest<HTMLElement>("[data-offset]")?.dataset.offset ?? 0);
+    const dom = this.box(view, "cm-table-widget", table, cellPos);
     // Right-click: the editor's menu, with the table's items for that cell.
     dom.addEventListener("contextmenu", (e) => {
-      const pos = cellPos(e);
+      const pos = cellPos(e, dom);
       e.preventDefault();
       if (!view.state.facet(readingMode)) editAt(view, pos);
       view.state.facet(editorHost)?.contextMenu?.(view, { x: e.clientX, y: e.clientY }, pos, false);
