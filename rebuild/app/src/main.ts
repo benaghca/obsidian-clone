@@ -229,6 +229,10 @@ ws.on((change) => {
 
 // ----- layout -----
 
+// A note's own window (Open in new window): just its tabs, and nothing it
+// does is saved over the main window's layout.
+const popoutNote = new URLSearchParams(location.search).get("note");
+
 // The right sidebar starts closed; the vault's saved layout is applied once it is open.
 const app = h(
   "div",
@@ -240,6 +244,7 @@ const app = h(
   statusBar,
 );
 document.getElementById("app")!.replaceWith(app);
+if (popoutNote) app.classList.add("is-popout");
 
 const docks = createSidedocks(app, panes);
 rightSidebar.el.append(docks.resizeHandle("right"));
@@ -377,7 +382,7 @@ settings.on((file) => applySettings(file));
 applySettings(null);
 
 function rememberLayout() {
-  if (!ws.vault.path) return;
+  if (!ws.vault.path || popoutNote) return;
   saveLayout(ws.vault.path, {
     rightOpen: !docks.isCollapsed("right"),
     rightWidth: docks.width("right"),
@@ -406,7 +411,8 @@ async function addWindowControls() {
       { class: "titlebar-buttons" },
       iconButton(icon("minus"), "Minimize", () => void win.minimize(), "titlebar-button"),
       iconButton(icon("square"), "Maximize", () => void win.toggleMaximize(), "titlebar-button mod-maximize"),
-      iconButton(icon("x"), "Close", () => void win.close(), "titlebar-button mod-close"),
+      // Unsaved edits are written first, so closing a window loses nothing.
+      iconButton(icon("x"), "Close", () => void ws.editors.flush().finally(() => win.close()), "titlebar-button mod-close"),
     ),
   );
   // The headers under the buttons leave exactly their width free (it varies
@@ -444,17 +450,22 @@ window.addEventListener("beforeunload", () => {
   void ws.editors.flush();
 });
 
-await ws.init();
+await ws.init(!!popoutNote);
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
 bookmarks.load();
-const layout = loadLayout(ws.vault.path);
-docks.setWidth("right", layout.rightWidth);
-rightSidebar.select(layout.rightView);
-docks.setCollapsed("right", !layout.rightOpen, false);
-sidebar.setSortOrder(layout.fileSort);
-if (!(await ws.restoreLayout(loadWorkspace(ws.vault.path)))) {
-  await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");
-}
-restored = true;
+if (popoutNote) await ws.open(popoutNote);
+else await restoreLayout();
 warmUpPromptGlyphs();
+
+async function restoreLayout() {
+  const layout = loadLayout(ws.vault.path);
+  docks.setWidth("right", layout.rightWidth);
+  rightSidebar.select(layout.rightView);
+  docks.setCollapsed("right", !layout.rightOpen, false);
+  sidebar.setSortOrder(layout.fileSort);
+  if (!(await ws.restoreLayout(loadWorkspace(ws.vault.path)))) {
+    await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");
+  }
+  restored = true;
+}

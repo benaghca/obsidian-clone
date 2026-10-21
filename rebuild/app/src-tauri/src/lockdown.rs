@@ -1,7 +1,7 @@
 //! Keeps the webview on Grove's own pages.
 //!
-//! The main window is built here rather than from `tauri.conf.json` so it can carry two guards
-//! the config cannot express:
+//! Windows are built here rather than from `tauri.conf.json` so they can carry two guards the
+//! config cannot express:
 //!
 //! - every navigation (a link, a dropped URL, script setting `location`) is checked, and only the
 //!   app's own origin is allowed: `tauri://localhost` (or `http(s)://tauri.localhost` on Windows)
@@ -11,14 +11,42 @@
 //! External links never load inside the app: the front end hands them to the system opener
 //! (`tauri-plugin-opener`, scoped to http, https and mailto in `capabilities/default.json`).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tauri::webview::NewWindowResponse;
-use tauri::{App, Url, WebviewWindowBuilder};
+use tauri::{AppHandle, Url, WebviewUrl, WebviewWindowBuilder};
 
 pub const MAIN_WINDOW: &str = "main";
+/// A note's own window ("Open in new window") is `note-<n>`; the capability names them by it.
+const NOTE_WINDOW: &str = "note-";
 
 /// Build the main window from its config entry (marked `"create": false`) with the guards.
-pub fn create_main_window(app: &App) -> Result<(), Box<dyn std::error::Error>> {
-    let config = app
+pub fn create_main_window(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    build_window(app, MAIN_WINDOW, None)
+}
+
+/// A note's own window: the main window's settings and guards, on the app's own page with the
+/// note in its query. `note` must already be percent-encoded, so it can't add to the URL.
+pub fn create_note_window(app: &AppHandle, note: &str) -> Result<(), String> {
+    if !is_encoded(note) {
+        return Err("expected a percent-encoded note path".into());
+    }
+    static NEXT: AtomicUsize = AtomicUsize::new(1);
+    let label = format!("{NOTE_WINDOW}{}", NEXT.fetch_add(1, Ordering::Relaxed));
+    let url = WebviewUrl::App(format!("index.html?note={note}").into());
+    build_window(app, &label, Some(url)).map_err(|e| e.to_string())
+}
+
+/// Only what a fully percent-encoded string can hold: nothing that could add to a URL.
+fn is_encoded(note: &str) -> bool {
+    !note.is_empty() && note.bytes().all(|b| b.is_ascii_alphanumeric() || b"%-._~".contains(&b))
+}
+
+fn build_window(
+    app: &AppHandle,
+    label: &str,
+    url: Option<WebviewUrl>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut config = app
         .config()
         .app
         .windows
@@ -26,12 +54,16 @@ pub fn create_main_window(app: &App) -> Result<(), Box<dyn std::error::Error>> {
         .find(|w| w.label == MAIN_WINDOW)
         .ok_or("tauri.conf.json has no main window")?
         .clone();
+    config.label = label.into();
+    if let Some(url) = url {
+        config.url = url;
+    }
     let dev_url = if tauri::is_dev() {
         app.config().build.dev_url.clone()
     } else {
         None
     };
-    let window = WebviewWindowBuilder::from_config(app.handle(), &config)?
+    let window = WebviewWindowBuilder::from_config(app, &config)?
         .on_navigation(move |url| {
             let allowed = is_app_url(url, dev_url.as_ref());
             if !allowed {
@@ -109,6 +141,16 @@ mod tests {
         assert!(!is_app_url(&url("file:///etc/passwd"), None));
         assert!(!is_app_url(&url("mailto:a@b.c"), None));
         assert!(!is_app_url(&url("about:srcdoc"), None));
+    }
+
+    #[test]
+    fn note_windows_take_only_percent_encoded_paths() {
+        assert!(is_encoded("Projects%2FProject%20roadmap.md"));
+        assert!(!is_encoded(""));
+        assert!(!is_encoded("a.md?x=1"));
+        assert!(!is_encoded("a.md#top"));
+        assert!(!is_encoded("../a.md/"));
+        assert!(!is_encoded("https://example.com"));
     }
 
     #[test]

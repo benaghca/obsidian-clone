@@ -172,9 +172,10 @@ export class Workspace {
 
   // ----- vault -----
 
-  async init() {
+  /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
+  async init(reuse = false) {
     const last = await api.lastVault();
-    if (isTauri) {
+    if (isTauri && !(reuse && last)) {
       const path =
         last?.path ??
         window.prompt("Vault folder to open", "/home/chris/workspaces/remote/grove-test-vault");

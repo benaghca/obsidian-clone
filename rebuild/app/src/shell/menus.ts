@@ -84,6 +84,11 @@ export function createMenus(host: MenuHost) {
   const revealItem = (path: string): MenuEntry => ({ title: "Reveal file in navigation", icon: "folder-open", action: () => host.revealInTree(path) });
   const openInNewTab = (open: () => void): MenuEntry => ({ title: "Open in new tab", icon: "file-plus", action: open });
   const openToRight = (open: () => void): MenuEntry => ({ title: "Open to the right", icon: "separator-vertical", action: open });
+  const openInNewWindow = (path: string): MenuEntry => ({
+    title: "Open in new window",
+    icon: "picture-in-picture-2",
+    action: () => void api.openNoteWindow(path).catch(warn(`open ${path} in a new window`)),
+  });
 
   /** File explorer (and bookmarks): right-click on a note, a folder, or the empty space. */
   function file(entry: FileEntry): MenuItems {
@@ -107,6 +112,7 @@ export function createMenus(host: MenuHost) {
     return [
       isNote && openInNewTab(() => void ws.open(path, { where: "tab" })),
       isNote && openToRight(() => void ws.open(path, { where: "right" })),
+      isNote && openInNewWindow(path),
       SEPARATOR,
       isNote && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
       moveItem(path),
@@ -145,6 +151,7 @@ export function createMenus(host: MenuHost) {
         ? [
             openInNewTab(() => void ws.openLink(link.target, "tab", group)),
             openToRight(() => void ws.openLink(link.target, "right", group)),
+            !!linked && openInNewWindow(linked),
           ]
         : [
             { title: "Open link", icon: "external-link", action: () => api.openExternal(link.url).catch(warn(`open ${link.url}`)) },
@@ -282,12 +289,14 @@ export function createMenus(host: MenuHost) {
       SEPARATOR,
       commands.menuItem("workspace:split-vertical", { action: () => ws.split(tab, "right") }),
       commands.menuItem("workspace:split-horizontal", { action: () => ws.split(tab, "bottom") }),
+      openInNewWindow(path),
       SEPARATOR,
       renameItem(onTab(() => host.renameActive())),
       moveItem(path),
       bookmarkItem(path),
       mergeItem(path),
-      !reading && commands.menuItem("markdown:add-metadata-property", { action: onTab(() => commands.run("markdown:add-metadata-property")) }),
+      commands.menuItem("markdown:add-metadata-property", { action: onTab(() => commands.run("markdown:add-metadata-property")) }),
+      commands.menuItem("workspace:export-pdf", { action: onTab(() => commands.run("workspace:export-pdf")) }),
       SEPARATOR,
       !reading && { title: "Find...", icon: "file-search", hotkey: commands.hotkey("editor:open-search"), action: onTab(() => openSearchPanel(ws.view)) },
       !reading && commands.menuItem("editor:open-search-replace", { title: "Replace...", icon: "file-search", action: onTab(() => commands.run("editor:open-search-replace")) }),

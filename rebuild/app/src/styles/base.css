@@ -67,3 +67,29 @@ body {
   opacity: 0.35;
   pointer-events: none;
 }
+
+/* A note's own window (Open in new window): just its tabs. */
+.is-popout > .workspace-ribbon,
+.is-popout > .mod-left-split,
+.is-popout > .mod-right-split,
+.is-popout > .status-bar,
+.is-popout .sidebar-toggle-button {
+  display: none;
+}
+
+/* Export to PDF: only the exported pane's note, its whole length. */
+@media print {
+  body.is-printing,
+  .is-printing .print-path,
+  .is-printing .print-target {
+    display: block !important;
+    position: static !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  .is-printing .print-path > :not(.print-path, .print-target),
+  .is-printing .print-target .properties {
+    display: none !important;
+  }
+}

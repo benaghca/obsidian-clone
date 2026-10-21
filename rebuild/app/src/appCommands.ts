@@ -8,6 +8,7 @@ import { startCompletion } from "@codemirror/autocomplete";
 import { addCursorAbove, addCursorBelow, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
+import { api } from "./api";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
@@ -181,6 +182,36 @@ export function registerAppCommands(parts: AppParts) {
     return true;
   };
 
+  // Export to PDF: the note as Reading view shows it (in the light scheme),
+  // printed through the webview, whose print dialog writes the PDF ("Print to
+  // File"). Only that pane is printed, all of it (base.css, @media print).
+  const exportPdf = () => {
+    const tab = ws.active;
+    const { mode } = tab;
+    const root = document.documentElement;
+    const dark = root.classList.contains("theme-dark");
+    const target = ws.view.dom.closest<HTMLElement>(".view-content");
+    const path: HTMLElement[] = [];
+    for (let el = target?.parentElement; el && el !== document.body; el = el.parentElement) path.push(el);
+    if (mode !== "reading") ws.setMode("reading", tab);
+    if (dark) root.classList.replace("theme-dark", "theme-light");
+    document.body.classList.add("is-printing");
+    target?.classList.add("print-target");
+    for (const el of path) el.classList.add("print-path");
+    let printing = true;
+    const done = () => {
+      if (!printing) return;
+      printing = false;
+      document.body.classList.remove("is-printing");
+      target?.classList.remove("print-target");
+      for (const el of path) el.classList.remove("print-path");
+      if (dark) root.classList.replace("theme-light", "theme-dark");
+      if (mode !== "reading") ws.setMode(mode, tab);
+    };
+    window.addEventListener("afterprint", done, { once: true });
+    window.print();
+  };
+
   const editorCommand = (id: string, name: string, icon: IconName | undefined, run: (view: EditorView) => boolean, hotkeys?: Command["hotkeys"]): Command => ({
     id,
     name,
@@ -287,6 +318,8 @@ export function registerAppCommands(parts: AppParts) {
     { id: "workspace:toggle-pin", name: "Toggle pin", icon: "pin", run: () => ws.togglePin() },
     // Splits. Obsidian has no default hotkeys for these.
     { id: "workspace:split-vertical", name: "Split right", icon: "separator-vertical", run: () => ws.split(ws.active, "right") },
+    { id: "workspace:open-in-new-window", name: "Open current tab in new window", icon: "picture-in-picture-2", when: hasNote, run: () => api.openNoteWindow(ws.active.path!) },
+    { id: "workspace:export-pdf", name: "Export to PDF...", icon: "file-down", when: hasNote, run: exportPdf },
     { id: "workspace:split-horizontal", name: "Split down", icon: "separator-horizontal", run: () => ws.split(ws.active, "bottom") },
     paneCommand("editor:focus-left", "Focus on tab group to the left", "left"),
     paneCommand("editor:focus-right", "Focus on tab group to the right", "right"),
