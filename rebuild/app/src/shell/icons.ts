@@ -81,6 +81,7 @@ const ICONS = {
   highlighter: lucide.Highlighter,
   "indent-decrease": lucide.IndentDecrease,
   "indent-increase": lucide.IndentIncrease,
+  image: lucide.Image,
   info: lucide.Info,
   italic: lucide.Italic,
   keyboard: lucide.Keyboard,

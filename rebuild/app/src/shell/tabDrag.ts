@@ -11,7 +11,7 @@
 
 import type { Edge } from "../layout";
 import { animateOut } from "../motion";
-import { type Group, type Tab, tabTitle } from "../tabs";
+import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
@@ -115,7 +115,7 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
     ghost = h(
       "div",
       { class: "drag-ghost" },
-      icon(tab.type ? "git-fork" : "file", 16),
+      icon(viewIcon(tab) ?? "file", 16),
       h("span", { class: "drag-ghost-title" }, tabTitle(tab)),
     );
     document.body.append(overlay, ghost);

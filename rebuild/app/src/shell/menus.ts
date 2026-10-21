@@ -13,7 +13,7 @@ import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
 import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
-import { type Group, type Tab, tabTitle } from "../tabs";
+import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 
@@ -363,7 +363,7 @@ export function createMenus(host: MenuHost) {
       ...group.tabs.map(
         (t): MenuEntry => ({
           title: tabTitle(t),
-          icon: t.type ? "git-fork" : t.path ? "file-text" : "file",
+          icon: viewIcon(t) ?? (t.path ? "file-text" : "file"),
           checked: t === group.active,
           action: () => ws.activate(t),
         }),
@@ -373,7 +373,7 @@ export function createMenus(host: MenuHost) {
 
   /** A graph tab's view items: splits, and the local graph's note. */
   function graphViewItems(t: Tab): MenuItems {
-    const file = t.type === "localgraph" ? t.graphFile : null;
+    const file = t.type === "localgraph" ? t.viewFile : null;
     return [
       commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
       commands.menuItem("workspace:split-horizontal", { action: () => ws.split(t, "bottom") }),

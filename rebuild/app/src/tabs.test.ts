@@ -10,11 +10,13 @@ const isNote = (p: unknown): p is string => typeof p === "string" && notes.has(p
 describe("tabs", () => {
   it("history entries for views round-trip, and titles name what a tab shows", () => {
     expect(parseViewEntry(viewEntry({ type: "graph" }))).toEqual({ type: "graph", file: null });
-    expect(parseViewEntry(viewEntry({ type: "localgraph", graphFile: "Folder/B.md" }))).toEqual({ type: "localgraph", file: "Folder/B.md" });
+    expect(parseViewEntry(viewEntry({ type: "localgraph", viewFile: "Folder/B.md" }))).toEqual({ type: "localgraph", file: "Folder/B.md" });
     expect(parseViewEntry("Folder/B.md")).toBeNull();
     expect(tabTitle({ ...blank(), path: "Folder/B.md" })).toBe("B");
-    expect(tabTitle({ ...blank(), type: "localgraph", graphFile: "A.md" })).toBe("Graph of A");
+    expect(tabTitle({ ...blank(), type: "localgraph", viewFile: "A.md" })).toBe("Graph of A");
     expect(tabTitle(blank())).toBe("New tab");
+    expect(parseViewEntry(viewEntry({ type: "image", viewFile: "pics/a.png" }))).toEqual({ type: "image", file: "pics/a.png" });
+    expect(tabTitle({ ...blank(), type: "image", viewFile: "pics/a.png" })).toBe("a");
   });
 
   it("modifier clicks open in a new tab or to the right", () => {
@@ -39,6 +41,6 @@ describe("tabs", () => {
     expect(back.memory?.scrollTop).toBe(120);
     expect(back.memory?.selection?.main.head).toBe(5);
     expect(loadTab({ ...saved, path: "Gone.md" }, blank, isNote)).toBeNull();
-    expect(loadTab(saveTab({ ...blank(), type: "localgraph", graphFile: "Gone.md" }), blank, isNote)).toMatchObject({ type: "localgraph", graphFile: null });
+    expect(loadTab(saveTab({ ...blank(), type: "localgraph", viewFile: "Gone.md" }), blank, isNote)).toMatchObject({ type: "localgraph", viewFile: null });
   });
 });

@@ -211,3 +211,12 @@
 .copy-code-button:hover {
   background: var(--background-modifier-hover);
 }
+
+/* an image opened from the file list */
+.image-container {
+  padding: 16px;
+  text-align: center;
+}
+.image-container img {
+  max-width: 100%;
+}

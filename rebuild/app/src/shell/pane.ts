@@ -14,7 +14,7 @@ import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
 import { renameFile } from "../fileOps";
 import { noteName, parentDir } from "../paths";
-import { type Group, type Tab, type ViewType } from "../tabs";
+import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
 import { dragPointer, h, iconButton } from "./dom";
 import { icon } from "./icons";
@@ -88,7 +88,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       const view = createGraphView({
         ws,
         local,
-        file: () => tab.graphFile ?? null,
+        file: () => tab.viewFile ?? null,
         open: (path, where) => {
           const own = ws.groupOf(tab);
           const target = local && notePane && notePane !== own && ws.groups().includes(notePane) ? notePane : own;
@@ -98,7 +98,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         searchTag: (tag) => extras.searchTag(tag),
         menu: (path, at) => showMenu(menus().graphNode(path), at),
       });
-      g = { view, type: tab.type!, file: tab.graphFile ?? null };
+      g = { view, type: tab.type!, file: tab.viewFile ?? null };
       graphs.set(tab, g);
     }
     return g.view;
@@ -114,8 +114,8 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     }
     const shown = new Set(ws.groups().map((g) => g.active));
     for (const [tab, g] of graphs) {
-      if (g.file !== (tab.graphFile ?? null)) {
-        g.file = tab.graphFile ?? null;
+      if (g.file !== (tab.viewFile ?? null)) {
+        g.file = tab.viewFile ?? null;
         g.view.refresh();
       }
       g.view.setActive(shown.has(tab) && g.view.el.isConnected);
@@ -392,7 +392,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       shownCrumb = crumb;
       breadcrumb.replaceChildren();
       if (tab.type) {
-        breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "graph" ? "Graph view" : "Local graph"));
+        breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "image" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph"));
         return;
       }
       if (!path) return;
@@ -435,12 +435,30 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       h("div", { class: "empty-state-action", onclick: () => ws.closeTab(group.active) }, "Close"),
     );
 
+    // An image tab: the picture at its own size, centred, through the same blob: URLs as embeds.
+    const picture = h("img", { alt: "" });
+    const imageView = h("div", { class: "view-content image-container" }, picture);
+    let shownImage: { path: string; held: ReturnType<typeof ws.embeds.image> } | null = null;
+    function renderImage(path: string | null) {
+      if (shownImage?.path === path) return;
+      shownImage?.held.release();
+      shownImage = null;
+      picture.removeAttribute("src");
+      if (!path) return;
+      const held = ws.embeds.image(path);
+      shownImage = { path, held };
+      void held.url.then((url) => shownImage?.held === held && (picture.src = url), () => {});
+    }
+
     function renderView() {
       const tab = group.active;
       const path = tab.path;
-      const graph = tab.type ? graphFor(tab) : null;
+      const image = tab.type === "image" ? (tab.viewFile ?? null) : null;
+      const graph = tab.type && !image ? graphFor(tab) : null;
       scroller.hidden = !path || !!graph;
-      empty.hidden = !!path || !!graph;
+      empty.hidden = !!path || !!graph || !!image;
+      imageView.hidden = !image;
+      renderImage(image);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
       if (graph && graph.el.parentElement !== leaf) leaf.append(graph.el);
       if (path && document.activeElement !== title) title.textContent = noteName(path);
@@ -576,7 +594,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       }
     });
 
-    const leaf = h("div", { class: "workspace-leaf" }, header, scroller, empty);
+    const leaf = h("div", { class: "workspace-leaf" }, header, scroller, empty, imageView);
     const el = h("div", { class: "workspace-tabs" }, strip.el, leaf);
     // A press or focus anywhere in a pane makes it the active one.
     const activate = () => ws.focusGroup(group);
@@ -597,6 +615,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       dispose() {
         hold?.cancel();
         backlinks?.setActive(false);
+        renderImage(null);
         el.remove();
       },
     };

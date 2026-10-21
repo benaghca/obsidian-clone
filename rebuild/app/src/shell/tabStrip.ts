@@ -8,7 +8,7 @@
 
 import { commands } from "../commands";
 import { duration, easing } from "../motion";
-import { type Group, type Tab, tabTitle } from "../tabs";
+import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
@@ -98,11 +98,11 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
       const name = tabTitle(tab);
       if (title.textContent !== name) title.textContent = name;
       el.setAttribute("aria-label", tab.path ?? name);
-      const viewIcon = tab.type ? "git-fork" : null;
-      if ((el.dataset.icon ?? null) !== viewIcon) {
+      const shownIcon = viewIcon(tab);
+      if ((el.dataset.icon ?? null) !== shownIcon) {
         el.querySelector(".workspace-tab-header-inner-icon")?.remove();
-        if (viewIcon) el.firstElementChild!.prepend(h("div", { class: "workspace-tab-header-inner-icon" }, icon(viewIcon, 16)));
-        if (viewIcon) el.dataset.icon = viewIcon;
+        if (shownIcon) el.firstElementChild!.prepend(h("div", { class: "workspace-tab-header-inner-icon" }, icon(shownIcon, 16)));
+        if (shownIcon) el.dataset.icon = shownIcon;
         else delete el.dataset.icon;
       }
       el.classList.toggle("is-active", tab === group.active);
