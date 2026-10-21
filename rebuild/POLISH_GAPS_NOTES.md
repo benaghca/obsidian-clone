@@ -1,4 +1,53 @@
-# Round 9: polish and the biggest remaining Obsidian gaps (Claude)
+# Round 9: polish and the biggest remaining Obsidian gaps (as merged)
+
+**Merged:** Claude's version (`rebuild/r9-claude`, `fd35a74`) as merge `3faeb4b`, plus one fix found while comparing (`3bfef58`). Three agents did the same brief; the comparison was headless (Vite preview + headless Chromium with the mock vault, and Obsidian 1.14.4 on a private Xvfb display in its own network namespace with a scratch profile and vault).
+
+## How the three compared
+
+| Item | Claude (merged) | Grok | Codex |
+|---|---|---|---|
+| 1. Graph speed (WebKitGTK) | Found the round-7 low-resolution-while-moving path was itself the slow part (a resampled canvas); now only when full resolution can't keep up. Measured on Xvfb: pan p95 40–50 → 17–18 ms, wheel p95 49–50 → 21–22 ms. | Steps to 1× / ½× while moving, `contain: paint` on panes, label bitmaps cached while panning. Pan p95 18 ms on its Xvfb run. | Three CSS lines (`contain`, `translateZ`); WebKitGTK not measured (no Xvfb found). |
+| 2. Groups on tag / missing nodes | Groups colour **notes only**. Observed again during the comparison in Obsidian 1.14.4 (`tag:#x` and `Missing` groups): the `#x` tag node and the `Missing note` node keep their default colours, so this matches Obsidian and the brief's premise was wrong. | Colours tag and missing-note nodes (not what Obsidian does). | Same as Grok. |
+| 3. Properties in document | Closest to Obsidian: typed rows with Obsidian's icons, tag/alias pills, date picker, Add property, Ctrl+; focuses a new key row, setting Visible/Hidden/Source; unknown YAML shown read-only. | **Broken:** opening any note with frontmatter in Live Preview throws `RangeError: Block decorations may not be specified via plugins`, so the note never opens. | Works and is the most careful about YAML (edits replace only the value's range; comments, CRLF, ambiguous numbers fall back to source; type menu), but looks less like Obsidian (lists as text areas, no pills). |
+| 4. New window / Export to PDF | Both, inside the lockdown: note windows reuse the main window's builder and guards; `windows: ["main", "note-*"]` and one new permission (`allow-open-note-window`); saves notify the other window. PDF through the webview's print dialog. | Both, but the window builder is duplicated (hard-coded size, synchronous command), two new permissions, and neither the second window nor the print dialog was opened to check. | Skipped both, with reasons. No config change. |
+| 5. Tab drop overlay | Edge zone a third, the whole third of the group lit, 10px between-tab marker, dark ghost, as observed in Obsidian. | Half-pane fill, strong (text under it hidden), dark ghost. | Radius and inset fixes only. |
+| Net lines | +1,273 | +1,406 | +529 |
+
+**Lockdown:** all three pass `npm run audit:offline`; none adds a dependency, changes the CSP or `tauri.conf.json`, or grants window-creation or webview permissions. Grok's notes say it read the overlay CSS and script inside `obsidian.asar` (read only); the rule is observation only, so that should not be repeated.
+
+## Ideas from the other two (for later rounds)
+
+- **Grok:** print the note's properties as rows in Export to PDF (Claude's PDF leaves the block out); `contain: paint` on panes and cached label bitmaps while panning are worth measuring again on the owner's GPU path.
+- **Codex:** the conservative YAML handling (value-range edits that keep comments, fallback to source for ambiguous numbers such as `012`, `...` closers and comments after values) and its property type menu.
+
+No code was ported from either: Grok's pieces sit on top of its broken Properties widget, and Codex's YAML layer has a different API from the merged one, so its ideas go into the round 10 brief instead.
+
+## Fix added at merge (`3bfef58`)
+
+Ctrl/Cmd+A inside a property field ran the browser's select-all on the editor's contenteditable (the block sits inside it), so focus fell back to the note and the next keys were typed at the end of its body. It now selects that field only.
+
+## Merged line counts (from `rebuild/app`)
+
+| | Round 8 | Round 9 merged | Change |
+|---|---:|---:|---:|
+| TypeScript (incl. tests) | 15,700 (1,287 tests) | 16,685 (1,445 tests) | +985 |
+| CSS | 2,909 | 3,144 | +235 |
+| Rust | 3,064 | 3,129 | +65 |
+| **Total** | **21,673** | **22,958** | **+1,285** |
+
+Largest files: `shell/pane.ts` 743, `workspace.ts` 735, `graph/view.ts` 733, `styles/settings.css` 681, `appCommands.ts` 538. New files: `editor/frontmatter.ts` (305), `editor/properties.ts` (418), `styles/properties.css` (207), plus tests.
+
+## Known gaps left after the merge
+
+- Properties: no type menu, no key/value suggestions, no "N properties" in the status bar, word count still counts frontmatter, the block is left out of Export to PDF; `012` reads as a number and a `...` closing line is accepted.
+- Links to missing notes look like ordinary links in the editor (Obsidian fades them).
+- Wheel zoom p95 is 21–22 ms on Xvfb; the 14.5 ms typing gap next to the graph is not confirmed fixed on the owner's GPU path.
+- Obsidian's tab menu also has "Move to new window" and "Link with tab...".
+
+---
+
+# Claude's round notes (as written on `rebuild/r9-claude`)
+
 
 All five items are done. Item 2 turned out different from the brief once Obsidian was observed: there, colour groups colour notes only, so Grove now does the same. Item 3 cost more than the ~400 lines one item should, for the reasons given under it. The round's total is +1,273 lines, under the +1,500 cap.
 
