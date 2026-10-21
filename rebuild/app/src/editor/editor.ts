@@ -3,10 +3,10 @@
 
 import { completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { searchKeymap } from "@codemirror/search";
 import { Compartment, type EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
+import { blocks } from "./blocks";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
 import { frontmatterField } from "./frontmatter";
@@ -14,7 +14,7 @@ import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
 import { propertiesBlock } from "./properties";
 import { sourceMode } from "./sourceMode";
-import { MarkerStyles, Tag, WikiLink } from "./syntax";
+import { markdownSyntax } from "./syntax";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
 const baseTheme = EditorView.theme({
@@ -38,10 +38,11 @@ export type ViewMode = "live" | "source" | "reading";
 export const viewModeCompartment = new Compartment();
 
 export const VIEW_MODES: Record<ViewMode, Extension> = {
-  live: [livePreview, propertiesBlock],
+  live: [livePreview, blocks, propertiesBlock],
   source: [EditorView.editorAttributes.of({ class: "is-source-mode" }), sourceMode],
   reading: [
     livePreview,
+    blocks,
     propertiesBlock,
     readingMode.of(true),
     EditorView.editable.of(false),
@@ -106,7 +107,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       drawSelection(),
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
-      markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, MarkerStyles], addKeymap: false }),
+      markdownSyntax,
       frontmatterField,
       // Settings → Editor: line numbers, folding, spellcheck, pairing, lists, indentation.
       configExtensions(),

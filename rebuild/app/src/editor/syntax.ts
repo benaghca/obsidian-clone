@@ -1,8 +1,11 @@
-// Lezer markdown extensions for the two Obsidian-only inline elements:
-// [[wikilinks]] (with optional #heading and |display text) and #tags.
+// Lezer markdown extensions for Obsidian's own syntax: [[wikilinks]] (with
+// optional #heading and |display text), #tags, ==highlights== and
+// %%comments%% (inline, or a block from a line that opens with %% to the
+// next line holding %%).
 
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { Tag as HighlightTag, styleTags, tags as t } from "@lezer/highlight";
-import type { InlineContext, MarkdownConfig } from "@lezer/markdown";
+import type { BlockContext, InlineContext, Line, MarkdownConfig } from "@lezer/markdown";
 
 /** Highlight tags for Source mode (Live Preview styles these nodes itself). */
 export const wikiTarget = HighlightTag.define(t.link);
@@ -12,7 +15,10 @@ const BRACKET_OPEN = 91; // [
 const BRACKET_CLOSE = 93; // ]
 const PIPE = 124; // |
 const HASH = 35; // #
+const BANG = 33; // !
 const NEWLINE = 10;
+const EQUALS = 61; // =
+const PERCENT = 37; // %
 
 export const WikiLink: MarkdownConfig = {
   defineNodes: [
@@ -25,8 +31,10 @@ export const WikiLink: MarkdownConfig = {
     {
       name: "WikiLink",
       before: "Link",
-      parse(cx: InlineContext, next: number, pos: number) {
-        if (next !== BRACKET_OPEN || cx.char(pos + 1) !== BRACKET_OPEN) return -1;
+      // ![[embed]]: the "!" stays text before the WikiLink (Image would take "![" otherwise).
+      parse(cx: InlineContext, next: number, start: number) {
+        const pos = next === BANG ? start + 1 : start;
+        if (cx.char(pos) !== BRACKET_OPEN || cx.char(pos + 1) !== BRACKET_OPEN) return -1;
         let pipe = -1;
         for (let i = pos + 2; i < cx.end; i++) {
           const ch = cx.char(i);
@@ -83,3 +91,69 @@ export const Tag: MarkdownConfig = {
 export const MarkerStyles: MarkdownConfig = {
   props: [styleTags({ "Strikethrough/...": t.strikethrough, "InlineCode/...": t.monospace })],
 };
+
+const HighlightDelim = { resolve: "Highlight", mark: "HighlightMark" };
+
+/** ==highlight==, delimited like GFM's ~~strikethrough~~. */
+export const Highlight: MarkdownConfig = {
+  defineNodes: [{ name: "Highlight", style: { "Highlight/...": t.special(t.content) } }, { name: "HighlightMark", style: t.processingInstruction }],
+  parseInline: [
+    {
+      name: "Highlight",
+      parse(cx: InlineContext, next: number, pos: number) {
+        if (next !== EQUALS || cx.char(pos + 1) !== EQUALS || cx.char(pos + 2) === EQUALS) return -1;
+        const before = cx.slice(pos - 1, pos);
+        const after = cx.slice(pos + 2, pos + 3);
+        return cx.addDelimiter(HighlightDelim, pos, pos + 2, !/\s|^$/.test(after), !/\s|^$/.test(before));
+      },
+      after: "Emphasis",
+    },
+  ],
+};
+
+/** %%comment%%: nothing inside is markdown. A line opening one that doesn't close it starts a CommentBlock. */
+export const Comment: MarkdownConfig = {
+  defineNodes: [
+    { name: "Comment", style: t.comment },
+    { name: "CommentMark", style: t.comment },
+    { name: "CommentBlock", block: true, style: t.comment },
+  ],
+  parseInline: [
+    {
+      name: "Comment",
+      before: "Emphasis",
+      parse(cx: InlineContext, next: number, pos: number) {
+        if (next !== PERCENT || cx.char(pos + 1) !== PERCENT) return -1;
+        for (let i = pos + 2; i < cx.end - 1; i++) {
+          if (cx.char(i) === PERCENT && cx.char(i + 1) === PERCENT) {
+            return cx.addElement(cx.elt("Comment", pos, i + 2, [cx.elt("CommentMark", pos, pos + 2), cx.elt("CommentMark", i, i + 2)]));
+          }
+        }
+        return -1;
+      },
+    },
+  ],
+  parseBlock: [
+    {
+      name: "CommentBlock",
+      before: "FencedCode",
+      parse(cx: BlockContext, line: Line) {
+        if (!line.text.startsWith("%%", line.pos) || line.text.includes("%%", line.pos + 2)) return false;
+        const from = cx.lineStart + line.pos;
+        let to = cx.lineStart + line.text.length;
+        while (cx.nextLine()) {
+          to = cx.lineStart + line.text.length;
+          if (line.text.includes("%%")) {
+            cx.nextLine();
+            break;
+          }
+        }
+        cx.addElement(cx.elt("CommentBlock", from, to));
+        return true;
+      },
+    },
+  ],
+};
+
+/** Markdown with every extension above: the notes' language, in the editor and in rendered embeds. */
+export const markdownSyntax = markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, Highlight, Comment, MarkerStyles], addKeymap: false });
