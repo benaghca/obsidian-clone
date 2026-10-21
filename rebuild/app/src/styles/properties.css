@@ -72,7 +72,7 @@
 }
 .property:focus,
 .property:focus-within {
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  box-shadow: var(--focus-ring);
 }
 .property-key {
   display: flex;

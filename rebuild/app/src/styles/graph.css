@@ -73,7 +73,7 @@
   height: 24px;
 }
 .graph-controls-button:focus-visible {
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  box-shadow: var(--focus-ring);
   outline: none;
 }
 /* Open: Restore default settings and Close sit in the first header row. */
