@@ -11,7 +11,8 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
-import { type Group, noteName, type Tab, tabTitle, type Workspace } from "../workspace";
+import { noteName, systemPath } from "../paths";
+import { type Group, type Tab, tabTitle, type Workspace } from "../workspace";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 
 export interface MenuHost {
@@ -42,13 +43,12 @@ export function createMenus(host: MenuHost) {
 
   /** "Copy path" with Obsidian's two choices. */
   function copyPath(path: string): MenuEntry {
-    const sep = ws.vault.path.includes("\\") ? "\\" : "/";
     return {
       title: "Copy path",
       icon: "clipboard",
       submenu: [
         { title: "From vault folder", action: () => copyText(path) },
-        { title: "From system root", action: () => copyText(`${ws.vault.path}${sep}${path.split("/").join(sep)}`) },
+        { title: "From system root", action: () => copyText(systemPath(ws.vault.path, path)) },
       ],
     };
   }

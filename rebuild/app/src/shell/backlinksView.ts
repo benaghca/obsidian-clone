@@ -9,7 +9,8 @@
 // index, which the workspace refreshes a second after a save.
 
 import { api, type SearchHit } from "../api";
-import { noteName, type Workspace } from "../workspace";
+import { compareNames, noteName } from "../paths";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { linkSpans, mentionSpans, snippetParts, type Span } from "./mentions";
@@ -78,9 +79,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string) {
     const byFile = new Map<string, Mention[]>();
     for (const m of mentions) byFile.set(m.from, [...(byFile.get(m.from) ?? []), m]);
-    const files = [...byFile.keys()].sort((a, b) =>
-      noteName(a).localeCompare(noteName(b), undefined, { numeric: true, sensitivity: "base" }),
-    );
+    const files = [...byFile.keys()].sort((a, b) => compareNames(noteName(a), noteName(b)));
     into.replaceChildren(
       ...files.map((path) => {
         const all = byFile.get(path)!;

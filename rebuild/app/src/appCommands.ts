@@ -42,7 +42,8 @@ import { openTemplatePrompt } from "./shell/templatePrompt";
 import type { RightSidebar, RightView } from "./shell/rightSidebar";
 import type { LeftSidebar, LeftView } from "./shell/sidebar";
 import type { Sidedocks } from "./shell/sidedock";
-import { noteName, type OpenWhere, type Workspace } from "./workspace";
+import { noteName, systemPath, trimSlashes } from "./paths";
+import type { OpenWhere, Workspace } from "./workspace";
 
 export interface AppParts {
   ws: Workspace;
@@ -64,10 +65,7 @@ const mod = (key: string, more: { shift?: boolean; alt?: boolean } = {}) => [{ m
 const templates = () => settings.get("templates.json");
 const today = () => formatDate(new Date(), templates().dateFormat || "YYYY-MM-DD");
 const nowTime = () => formatDate(new Date(), templates().timeFormat || "HH:mm");
-const folderPrefix = (folder: string) => {
-  const f = folder.trim().replace(/^\/+|\/+$/g, "");
-  return f ? `${f}/` : "";
-};
+const folderPrefix = (folder: string) => (trimSlashes(folder) ? `${trimSlashes(folder)}/` : "");
 
 /**
  * Register everything. Only `ws` and `bookmarks` must exist yet: the views
@@ -146,7 +144,7 @@ export function registerAppCommands(parts: AppParts) {
   }
 
   // ----- templates -----
-  const templateFolder = () => templates().folder.trim().replace(/^\/+|\/+$/g, "");
+  const templateFolder = () => trimSlashes(templates().folder);
   const templateNotes = () => (templateFolder() ? ws.notes.filter((n) => n.path.startsWith(`${templateFolder()}/`)) : []);
   async function insertTemplate(path: string) {
     const view = ws.view;
@@ -480,11 +478,7 @@ export function registerAppCommands(parts: AppParts) {
       name: "Copy current file path from system root",
       icon: "hard-drive",
       when: hasNote,
-      run: () => {
-        const sep = ws.vault.path.includes("\\") ? "\\" : "/";
-        const full = `${ws.vault.path}${sep}${note().split("/").join(sep)}`;
-        navigator.clipboard.writeText(full).catch((err) => console.warn("Could not copy", err));
-      },
+      run: () => navigator.clipboard.writeText(systemPath(ws.vault.path, note())).catch((err) => console.warn("Could not copy", err)),
     },
     { id: "editor:save-file", name: "Save current file", hotkeys: mod("s"), when: hasNote, run: () => ws.saveNow() },
     {

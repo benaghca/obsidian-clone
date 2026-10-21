@@ -7,6 +7,8 @@
 // Several terms must all match. Pure; the word search itself is done by the
 // caller (it needs the backend) and handed in as the set of matching paths.
 
+import { isUnder, noteName } from "../paths";
+
 export interface GraphQuery {
   /** What to search the notes' text for ("" for none). */
   text: string;
@@ -44,11 +46,10 @@ export interface QueryFacts {
 export function matchesQuery(path: string, q: GraphQuery, facts: QueryFacts): boolean {
   const lower = path.toLowerCase();
   if (q.paths.some((p) => !lower.includes(p))) return false;
-  const name = lower.slice(lower.lastIndexOf("/") + 1).replace(/\.md$/, "");
-  if (q.files.some((f) => !name.includes(f))) return false;
+  if (q.files.some((f) => !noteName(lower).includes(f))) return false;
   if (q.tags.length) {
     const tags = (facts.tags?.get(path) ?? []).map((t) => t.toLowerCase());
-    if (q.tags.some((want) => !tags.some((t) => t === want || t.startsWith(`${want}/`)))) return false;
+    if (q.tags.some((want) => !tags.some((t) => isUnder(t, want)))) return false;
   }
   return !q.text || !!facts.textHits?.has(path);
 }

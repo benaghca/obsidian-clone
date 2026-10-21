@@ -1,6 +1,7 @@
 // "Move file to...": the shared prompt listing the vault's folders.
 
-import { parentDir, type Workspace } from "../workspace";
+import { parentDir } from "../paths";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { fuzzyMatch, highlight } from "./fuzzy";
 import { openPrompt } from "./prompt";

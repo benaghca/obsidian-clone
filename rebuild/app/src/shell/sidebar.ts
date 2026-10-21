@@ -6,7 +6,8 @@ import { api, type FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
-import { noteName, whereFromEvent, type Workspace } from "../workspace";
+import { compareNames, noteName } from "../paths";
+import { whereFromEvent, type Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { type MenuItems, showMenu } from "./menu";
@@ -138,8 +139,7 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
     (parent ? parent.children : root).push(node);
     if (entry.is_dir) dirs.set(entry.path, node);
   }
-  const byName = (a: TreeNode, b: TreeNode) =>
-    a.entry.name.localeCompare(b.entry.name, undefined, { numeric: true, sensitivity: "base" });
+  const byName = (a: TreeNode, b: TreeNode) => compareNames(a.entry.name, b.entry.name);
   // Folders first, by name (reversed for Z to A); files in the chosen order.
   const compare = (a: TreeNode, b: TreeNode) => {
     if (a.entry.is_dir !== b.entry.is_dir) return Number(b.entry.is_dir) - Number(a.entry.is_dir);

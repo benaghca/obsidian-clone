@@ -4,6 +4,7 @@
 
 import { api } from "../api";
 import type { NoteRef } from "../editor/host";
+import { isUnder, movedPath } from "../paths";
 import type { Workspace } from "../workspace";
 import { type LinkStyle, rewriteLinks } from "./internal";
 
@@ -22,9 +23,8 @@ export async function updateLinks(
   style: LinkStyle,
   ask: ((links: number, notes: number) => Promise<boolean>) | null,
 ): Promise<number> {
-  const moved = (p: string) => p === from || p.startsWith(`${from}/`);
-  const swap = (p: string) => (moved(p) ? to + p.slice(from.length) : p);
-  const pairs = before.filter((n) => moved(n.path)).map((n) => ({ old: n.path, now: swap(n.path), name: n.name }));
+  const swap = (p: string) => movedPath(p, from, to);
+  const pairs = before.filter((n) => isUnder(n.path, from)).map((n) => ({ old: n.path, now: swap(n.path), name: n.name }));
   if (!pairs.length) return 0;
 
   // Which notes may link there: the link index's backlinks (wikilinks; read
@@ -35,7 +35,7 @@ export async function updateLinks(
     for (const q of new Set([p.name, p.name.replace(/ /g, "%20")])) {
       const hits = await api.search(q, SEARCH_LIMIT).catch(() => []);
       // Search already sees the new paths: map them back to where they were.
-      for (const h of hits) if (h.line > 0) sources.add(h.path === to || h.path.startsWith(`${to}/`) ? from + h.path.slice(to.length) : h.path);
+      for (const h of hits) if (h.line > 0) sources.add(movedPath(h.path, to, from));
     }
   }
 

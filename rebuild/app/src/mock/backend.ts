@@ -2,6 +2,7 @@
 // Implements the commands in rebuild/CONTRACT.md against sampleVault().
 
 import type { Backlink, FileEntry, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
+import { fileName, noteName } from "../paths";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
@@ -29,11 +30,10 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     return CONFIG_KEY + name;
   };
 
-  const nameOf = (path: string) => path.split("/").pop()!.replace(/\.md$/, "");
 
   function entry(path: string): FileEntry {
     const f = files.get(path)!;
-    return { path, name: nameOf(path), is_dir: false, mtime_ms: f.mtime, size: f.content.length };
+    return { path, name: noteName(path), is_dir: false, mtime_ms: f.mtime, size: f.content.length };
   }
 
   function need(path: string) {
@@ -50,7 +50,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     }
     const out: FileEntry[] = [...dirs].map((path) => ({
       path,
-      name: path.split("/").pop()!,
+      name: fileName(path),
       is_dir: true,
       mtime_ms: 0,
       size: 0,
@@ -90,7 +90,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
 
   function linkIndex(): LinkIndex {
     const byName = new Map<string, string>();
-    for (const path of files.keys()) byName.set(nameOf(path).toLowerCase(), path);
+    for (const path of files.keys()) byName.set(noteName(path).toLowerCase(), path);
     const byPath = new Map<string, string>();
     for (const path of files.keys()) byPath.set(path.toLowerCase(), path);
     /** A markdown link's target: a path from the note's folder or the vault, or a note name. */
@@ -168,7 +168,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     create_folder: ({ path }) => {
       if (files.has(path) || listFiles().some((e) => e.path === path)) throw new Error(`Already exists: ${path}`);
       emptyDirs.add(path);
-      return { path, name: nameOf(path), is_dir: true, mtime_ms: Date.now(), size: 0 };
+      return { path, name: noteName(path), is_dir: true, mtime_ms: Date.now(), size: 0 };
     },
     rename_path: ({ from, to }) => {
       if (listFiles().some((e) => e.path === to)) throw new Error(`Already exists: ${to}`);

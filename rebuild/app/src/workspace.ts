@@ -25,6 +25,7 @@ import type { EditorHost, NoteRef } from "./editor/host";
 import { type Edge, Layout, type LayoutJSON, type TabGroup } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { duration, nextFrame, smoothScrollTo } from "./motion";
+import { fileName, isUnder, movedPath, noteName, parentDir } from "./paths";
 
 export interface Tab {
   id: number;
@@ -142,9 +143,6 @@ const CLOSED_MAX = 20;
 
 /** Marks a change copied from the pane it was typed in to another pane showing the same note. */
 const copied = Annotation.define<boolean>();
-
-export const noteName = (path: string) => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
-export const parentDir = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 
 /** A saved selection, kept inside a (possibly shorter) document. */
 function clampSelection(sel: EditorSelection, length: number): EditorSelection {
@@ -1076,15 +1074,14 @@ export class Workspace {
   async rename(path: string, newName: string) {
     newName = newName.trim().replace(/[\\/:]/g, "");
     const isDir = this.isFolder(path);
-    if (!newName || newName === (isDir ? path.slice(path.lastIndexOf("/") + 1) : noteName(path))) return;
+    if (!newName || newName === (isDir ? fileName(path) : noteName(path))) return;
     const dir = parentDir(path);
     await this.relocate(path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
   }
 
   /** Move a note or folder into another folder ("" for the vault root). */
   async moveTo(path: string, folder: string) {
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    const to = folder ? `${folder}/${name}` : name;
+    const to = folder ? `${folder}/${fileName(path)}` : fileName(path);
     if (to !== path) await this.relocate(path, to);
   }
 
@@ -1099,11 +1096,11 @@ export class Workspace {
   private async relocate(from: string, to: string) {
     const clash = this.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
     if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
-    const under = (p: string) => p === from || p.startsWith(from + "/");
+    const under = (p: string) => isUnder(p, from);
     await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
     const before = this.notes;
     await api.renamePath(from, to);
-    const swap = (p: string) => (under(p) ? to + p.slice(from.length) : p);
+    const swap = (p: string) => movedPath(p, from, to);
     for (const map of [this.states, this.scrollTops, this.owners] as Map<string, unknown>[]) {
       for (const [key, value] of [...map]) {
         if (!under(key)) continue;
@@ -1274,7 +1271,7 @@ export class Workspace {
    */
   async remove(path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
     if (!opts.confirmed && this.confirmDelete && !(await this.confirmDelete(path))) return false;
-    const under = (p: string) => p === path || p.startsWith(path + "/");
+    const under = (p: string) => isUnder(p, path);
     await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
     await api.deletePath(path, this.permanentDelete());
     for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.release(pane);

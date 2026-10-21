@@ -7,6 +7,7 @@
 
 import { version } from "../../package.json";
 import { commands } from "../commands";
+import { systemPath } from "../paths";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import type { Workspace } from "../workspace";
@@ -67,7 +68,7 @@ function pathList(ws: Workspace, id: string, kind: "folder" | "note"): HTMLEleme
 }
 
 function general(ctx: SettingsContext): HTMLElement {
-  const config = `${ctx.ws.vault.path}${ctx.ws.vault.path.includes("\\") ? "\\" : "/"}.grove`;
+  const config = systemPath(ctx.ws.vault.path, ".grove");
   return h(
     "div",
     null,

@@ -31,7 +31,8 @@ import { pathQuery } from "./shell/searchQuery";
 import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
-import { noteName, parentDir, Workspace } from "./workspace";
+import { fileName, noteName, parentDir, trimSlashes } from "./paths";
+import { Workspace } from "./workspace";
 
 const ws = new Workspace();
 const bookmarks = new Bookmarks(ws);
@@ -258,7 +259,7 @@ ws.newTabBacklinks = () => commands.pluginEnabled("backlink") && settings.get("b
 ws.newNoteFolder = () => {
   const a = appSettings();
   if (a.newFileLocation === "current") return ws.active.path ? parentDir(ws.active.path) : "";
-  if (a.newFileLocation === "folder") return a.newFileFolderPath.trim().replace(/^\/+|\/+$/g, "");
+  if (a.newFileLocation === "folder") return trimSlashes(a.newFileFolderPath);
   return "";
 };
 ws.permanentDelete = () => appSettings().trashOption === "none";
@@ -266,7 +267,7 @@ ws.linkStyle = () => ({ format: appSettings().newLinkFormat, wikilinks: !appSett
 ws.confirmDelete = async (path) => {
   if (!appSettings().promptDelete) return true;
   const folder = ws.isFolder(path);
-  const name = folder ? path.slice(path.lastIndexOf("/") + 1) : noteName(path);
+  const name = folder ? fileName(path) : noteName(path);
   const where = ws.permanentDelete() ? "It will be permanently deleted." : "It will be moved to the vault's .trash folder.";
   const r = await confirmDialog({
     title: folder ? "Delete folder" : "Delete file",

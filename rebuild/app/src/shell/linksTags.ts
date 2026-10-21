@@ -1,5 +1,7 @@
 // Pure helpers for the Outgoing links and Tags views (tested without the DOM).
 
+import { compareNames } from "../paths";
+
 const WIKILINK = /!?\[\[([^\]|#^\n]*)(?:[#^][^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 const FENCE = /^[ \t]*(```|~~~)/;
 /** Obsidian tags: # then letters, digits, _ - /, not only digits, after a space or line start. */
@@ -225,7 +227,7 @@ export function tagTree(tags: string[]): TagNode[] {
     for (let i = 1; i <= parts.length; i++) node(parts.slice(0, i).join("/")).count++;
   }
   const sort = (list: TagNode[]) => {
-    list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+    list.sort((a, b) => compareNames(a.name, b.name));
     for (const n of list) sort(n.children);
   };
   sort(roots);

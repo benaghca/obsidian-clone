@@ -7,7 +7,8 @@
 // are only worked out while open: after a switch has painted, and 300ms
 // after typing stops. Nothing here runs on a keystroke.
 
-import { noteName, whereFromEvent, type Workspace } from "../workspace";
+import { compareNames, fileName, noteName } from "../paths";
+import { whereFromEvent, type Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { wikilinkTargets } from "./linksTags";
@@ -64,7 +65,7 @@ export function createOutgoingView(ws: Workspace): SideView {
     const resolved = new Map<string, string | null>();
     const counts = new Map<string, { path: string | null; name: string; n: number }>();
     for (const target of targets) {
-      const name = target.split("/").pop()!;
+      const name = fileName(target);
       let dest = resolved.get(target.toLowerCase());
       if (dest === undefined) resolved.set(target.toLowerCase(), (dest = ws.resolve(target)));
       const key = dest ?? `?${name.toLowerCase()}`;
@@ -72,7 +73,7 @@ export function createOutgoingView(ws: Workspace): SideView {
       entry.n++;
       counts.set(key, entry);
     }
-    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    const byName = (a: { name: string }, b: { name: string }) => compareNames(a.name, b.name);
     const found = [...counts.values()].filter((c) => c.path).sort(byName);
     const unresolved = [...counts.values()].filter((c) => !c.path).sort(byName);
     // Same list as last time: leave the DOM (and its scroll) alone.

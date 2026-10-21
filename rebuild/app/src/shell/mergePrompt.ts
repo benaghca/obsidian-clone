@@ -2,7 +2,8 @@
 // The chosen note gets this note's text appended, and this note is deleted
 // (to the vault's .trash), like Obsidian's Note composer.
 
-import { noteName, parentDir, type Workspace } from "../workspace";
+import { noteName, parentDir } from "../paths";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { fuzzyMatch, highlight } from "./fuzzy";
 import { openPrompt } from "./prompt";

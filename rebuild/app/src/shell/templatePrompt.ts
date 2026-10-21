@@ -1,7 +1,7 @@
 // Templates: Insert template: the shared prompt listing the notes in the
 // template folder (Settings → Templates), fuzzy-filtered.
 
-import { noteName } from "../workspace";
+import { noteName } from "../paths";
 import type { NoteRef } from "../editor/host";
 import { h } from "./dom";
 import { fuzzyMatch, highlight } from "./fuzzy";
