@@ -6,6 +6,36 @@
 .cm-highlight {
   background: var(--mark-background);
 }
+/* ==🔴coloured highlights==: the colour at 30%, as Obsidian's (yellow is the plain one) */
+.cm-highlight-red {
+  --highlight-color: var(--color-red);
+}
+.cm-highlight-orange {
+  --highlight-color: var(--color-orange);
+}
+.cm-highlight-yellow {
+  --highlight-color: var(--color-yellow);
+}
+.cm-highlight-green {
+  --highlight-color: var(--color-green);
+}
+.cm-highlight-blue {
+  --highlight-color: var(--color-blue);
+}
+.cm-highlight-purple {
+  --highlight-color: var(--color-purple);
+}
+.cm-highlight[class*="cm-highlight-"] {
+  background: color-mix(in srgb, var(--highlight-color) 30%, transparent);
+}
+.cm-highlight-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  background: var(--highlight-color);
+}
 .cm-comment {
   color: var(--text-faint);
 }
@@ -26,6 +56,7 @@
   --cursor: pointer;
 }
 .embed-actions {
+  display: flex;
   border-radius: var(--radius-s);
   background: var(--background-primary);
   opacity: 0;
@@ -41,7 +72,7 @@
 
 /* callouts */
 .callout {
-  --callout-color: var(--callout-blue);
+  --callout-color: var(--color-blue);
   background: color-mix(in srgb, var(--callout-color) 10%, transparent);
   border-radius: var(--radius-s);
   padding: 12px 12px 12px 24px;
@@ -77,9 +108,19 @@
 .callout.is-collapsed .callout-content {
   display: none;
 }
+.callout-content > .cm-blank {
+  display: none;
+}
+.callout-content > .cm-block-start,
+.callout-content > .cm-blank + :is(.cm-callout, .cm-table-widget) {
+  margin-top: 16px;
+}
+.callout-content > .cm-block-start.cm-h {
+  margin-top: 40px;
+}
 
 /* tables: a padded strip as wide as the column (whatever the table's width),
-   scrolling sideways; words in cells stay whole */
+   scrolling sideways; words in cells stay whole; an empty row a line high */
 .cm-table-widget {
   margin: 0 -16px;
   padding: 16px;
@@ -101,6 +142,9 @@
 .cm-table-widget th {
   font-weight: 600;
 }
+.cm-table-widget :is(th, td):empty::after {
+  content: "\200b";
+}
 
 /* images in the vault, in a note and opened from the file list */
 .image-embed {
@@ -116,6 +160,65 @@
 }
 .image-embed img:not([height]) {
   height: auto;
+}
+.image-resize-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 30px;
+  height: 30px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.is-reading-mode .image-resize-corner {
+  display: none;
+}
+
+/* an image's "Zoom in" (editor/imageZoom.ts) */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  animation: grove-fade-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.lightbox.is-closing {
+  pointer-events: none;
+  animation: grove-fade-out var(--anim-duration-moderate) var(--anim-ease-in) forwards;
+}
+.lightbox-bg {
+  position: absolute;
+  inset: 0;
+  background: #000;
+  opacity: 0.9;
+}
+.lightbox-content {
+  position: relative;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 30px 8px;
+}
+.lightbox-content img {
+  max-width: 100%;
+  max-height: 100%;
+}
+.lightbox-titlebar {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 30px;
+  line-height: 30px;
+  text-align: center;
+  font-size: var(--font-ui-small);
+  color: #fff;
+}
+.lightbox .modal-close-button {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  color: #fff;
 }
 .image-container {
   display: flex;
@@ -194,4 +297,43 @@
 }
 .copy-code-button:hover {
   background: var(--background-modifier-hover);
+}
+
+/* code tokens, by kind (editor/codeHighlight.ts) */
+.cm-code-keyword {
+  color: var(--code-keyword);
+}
+.cm-code-string {
+  color: var(--code-string);
+}
+.cm-code-value {
+  color: var(--code-value);
+}
+.cm-code-comment {
+  color: var(--code-comment);
+}
+.cm-code-operator {
+  color: var(--code-operator);
+}
+.cm-code-punctuation {
+  color: var(--code-punctuation);
+}
+.cm-code-tag {
+  color: var(--code-tag);
+}
+.cm-code-important {
+  color: var(--code-important);
+}
+.cm-code-function {
+  color: var(--code-function);
+}
+.cm-code-property {
+  color: var(--code-property);
+}
+.cm-code-strong,
+.cm-code-important {
+  font-weight: 700;
+}
+.cm-code-em {
+  font-style: italic;
 }

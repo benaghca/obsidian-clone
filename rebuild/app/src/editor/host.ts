@@ -40,6 +40,8 @@ export interface EmbedHost {
   read(path: string): Promise<string>;
   /** An image file as a blob: URL, held until `release` (revoked once nothing holds it). */
   image(path: string): { url: Promise<string>; release(): void };
+  /** Tick or untick the task on line `line` (from 0) of a note, through its editor (so it is saved as usual). */
+  toggleTask(path: string, line: number): void;
   /** Call `fn` when the file changes (on disk, or saved from an editor); returns a function that stops. */
   watch(path: string, fn: () => void): () => void;
 }

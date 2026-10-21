@@ -63,6 +63,55 @@ export const toggleWrap =
     return true;
   };
 
+/** Obsidian's coloured highlights (1.14.4): an emoji just inside the opening ==, ==🔴like this==. */
+export const HIGHLIGHT_COLORS = { red: "🔴", orange: "🟠", yellow: "🟡", green: "🟢", blue: "🔵", purple: "🟣" };
+export type HighlightColor = keyof typeof HIGHLIGHT_COLORS;
+
+/** The colour a highlight's text starts with (its emoji), or null. */
+export const highlightColor = (text: string) =>
+  (Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).find((c) => text.startsWith(HIGHLIGHT_COLORS[c])) ?? null;
+
+/**
+ * "Toggle highlight" (`color` null) and "Toggle red highlight" and the
+ * rest, as Obsidian writes them (observed): the selection, or the word at
+ * the caret, wrapped in ==, with the colour's emoji first. Inside a
+ * highlight, the same command (or plain "Toggle highlight") removes it and
+ * another colour recolours it.
+ */
+export const toggleHighlight =
+  (color: HighlightColor | null): StateCommand =>
+  ({ state, dispatch }) => {
+    const emoji = color ? HIGHLIGHT_COLORS[color] : "";
+    const changes = state.changeByRange((range) => {
+      const line = state.doc.lineAt(range.from);
+      // The line's ==highlights==, opening and closing marks paired in order.
+      const marks = [...line.text.matchAll(/==/g)].map((m) => line.from + m.index);
+      let around: [number, number] | null = null;
+      for (let i = 0; i + 1 < marks.length; i += 2) if (marks[i] <= range.from && range.to <= marks[i + 1] + 2) around = [marks[i], marks[i + 1]];
+      let specs: { from: number; to?: number; insert?: string }[];
+      if (around) {
+        const [open, close] = around;
+        const current = highlightColor(state.sliceDoc(open + 2, open + 4));
+        const had = current ? 2 : 0;
+        specs =
+          !color || current === color
+            ? [{ from: open, to: open + 2 + had }, { from: close, to: close + 2 }]
+            : [{ from: open + 2, to: open + 2 + had, insert: emoji }];
+      } else {
+        const word = range.empty ? state.wordAt(range.head) : null;
+        if (range.empty && !word) return { changes: { from: range.from, insert: `==${emoji}==` }, range: EditorSelection.cursor(range.from + 2 + emoji.length) };
+        const { from, to } = word ?? range;
+        specs = [{ from, insert: "==" + emoji }, { from: to, insert: "==" }];
+      }
+      const set = state.changes(specs);
+      // The selection keeps its text; a caret stays inside what it was in.
+      const map = (pos: number, end: boolean) => set.mapPos(pos, end && pos !== range.from ? -1 : 1);
+      return { changes: set, range: EditorSelection.range(map(range.anchor, range.anchor === range.to), map(range.head, range.head === range.to)) };
+    });
+    update({ state, dispatch }, changes);
+    return true;
+  };
+
 /** Markdown inline formatting stripped from the selected text. */
 export function stripFormatting(text: string): string {
   return text

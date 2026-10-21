@@ -1,7 +1,17 @@
 import { insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
 import { describe, expect, it, test } from "vitest";
-import { insertBlock, insertFootnote, insertMarkdownLink, insertWikilink, setLineKind, stripFormatting, toggleCheckbox, toggleWrap } from "./format";
+import {
+  insertBlock,
+  insertFootnote,
+  insertMarkdownLink,
+  insertWikilink,
+  setLineKind,
+  stripFormatting,
+  toggleCheckbox,
+  toggleHighlight,
+  toggleWrap,
+} from "./format";
 import { linkAt } from "./linkAt";
 import { Tag, WikiLink } from "./syntax";
 
@@ -103,4 +113,19 @@ describe("insertFootnote", () => {
     insertFootnote({ state, dispatch: (tr) => (next = tr.state) });
     expect(next.doc.toString()).toBe("[^1]\n\n[^1]: ");
   });
+});
+
+test("coloured highlights, written as Obsidian writes them", () => {
+  // What Obsidian 1.14.4 wrote for each command (observed).
+  expect(run(toggleHighlight("red"), "plain «word» one")).toBe("plain ==🔴«word»== one");
+  expect(run(toggleHighlight(null), "plain wo|rd two")).toBe("plain ==wo|rd== two");
+  expect(run(toggleHighlight("purple"), "plain wo|rd two")).toBe("plain ==🟣wo|rd== two");
+  // The same colour again removes it; another recolours it; plain highlight takes a colour.
+  expect(run(toggleHighlight("red"), "plain ==🔴«word»== one")).toBe("plain «word» one");
+  expect(run(toggleHighlight("orange"), "plain ==🔴wo|rd== one")).toBe("plain ==🟠wo|rd== one");
+  expect(run(toggleHighlight("green"), "plain ==wo|rd== one")).toBe("plain ==🟢wo|rd== one");
+  expect(run(toggleHighlight(null), "a ==🔵bl|ue== b")).toBe("a bl|ue b");
+  // Only the highlight around the caret is touched.
+  expect(run(toggleHighlight("blue"), "==x== and w|ord ==y==")).toBe("==x== and ==🔵w|ord== ==y==");
+  expect(run(toggleHighlight("yellow"), "a | b")).toBe("a ==🟡|== b");
 });

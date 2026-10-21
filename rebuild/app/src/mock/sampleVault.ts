@@ -104,7 +104,7 @@ const blocks = `Obsidian's block syntax, drawn as Obsidian draws it.
 | Tables | Live Preview | ==done== |
 | Images | \`![[...]]\` | 2 |
 
-Text with ==highlighted words== and a %%hidden comment%%.
+Text with ==highlighted words==, ==🟢green ones== and a %%hidden comment%%.
 
 ![[diagram.svg|240]] ![a photo](Attachments/photo.png)
 
@@ -113,7 +113,7 @@ Text with ==highlighted words== and a %%hidden comment%%.
 ![[Missing note]]
 
 \`\`\`js
-const answer = 42;
+const answer = 42; // coloured as Obsidian colours code
 \`\`\`
 `;
 

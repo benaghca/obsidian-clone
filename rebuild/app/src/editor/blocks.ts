@@ -16,7 +16,7 @@ import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, type Wi
 import type { Tree } from "@lezer/common";
 import { CalloutWidget, calloutHeader } from "./callouts";
 import { frontmatterField } from "./frontmatter";
-import { readingMode } from "./livePreview";
+import { filesChanged, readingMode } from "./livePreview";
 import { embedChain, paintWith } from "./render";
 import { TableWidget } from "./tables";
 
@@ -29,6 +29,8 @@ interface Block {
 }
 
 const hiddenBlock = Decoration.replace({ block: true });
+/** Counts the vault's file changes: a block drawn with embeds in it is drawn again after one (its targets may have come or gone). */
+let files = 0;
 
 /** The blocks among the top-level nodes overlapping `from`–`to`. */
 function scan(state: EditorState, from: number, to: number): Block[] {
@@ -45,8 +47,9 @@ function scan(state: EditorState, from: number, to: number): Block[] {
       const end = doc.lineAt(n.to).to;
       const text = doc.sliceString(start, end);
       let widget: WidgetType | null = null;
-      if (n.name === "Table") widget = new TableWidget(text, chain);
-      else if (n.name === "Blockquote" && calloutHeader(doc.lineAt(n.from).text)) widget = new CalloutWidget(text, chain);
+      const version = text.includes("![") ? files : 0;
+      if (n.name === "Table") widget = new TableWidget(text, chain, version);
+      else if (n.name === "Blockquote" && calloutHeader(doc.lineAt(n.from).text)) widget = new CalloutWidget(text, chain, version);
       else if (n.name !== "CommentBlock") return false;
       out.push({ from: start, to: end, widget, deco: widget ? Decoration.replace({ widget, block: true }) : hiddenBlock });
       return false;
@@ -114,6 +117,10 @@ const blocksField = StateField.define<Blocks>({
     if (tr.docChanged) {
       list = remap(list, tr);
       scanned = Math.min(tr.changes.mapPos(scanned), length);
+    }
+    if (tr.effects.some((e) => e.is(filesChanged))) {
+      files++;
+      list = list.flatMap((b) => (b.widget && tr.state.sliceDoc(b.from, b.to).includes("![") ? scan(tr.state, b.from, b.to) : [b]));
     }
     if (length > scanned) {
       list = [...list.filter((b) => b.to < scanned), ...scan(tr.state, scanned, length)].sort((a, b) => a.from - b.from);

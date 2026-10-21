@@ -18,10 +18,12 @@ import {
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { writeClipboard } from "./clipboard";
+import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
+import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
 import { embedChain, paintWith } from "./render";
@@ -95,10 +97,6 @@ class RemoteImageWidget extends WidgetType {
 
 // A code block's language, top right (Live Preview), or its copy button,
 // shown on hover (Reading view), as in Obsidian.
-const LANGUAGES: Record<string, string> = {
-  js: "JavaScript", javascript: "JavaScript", ts: "TypeScript", typescript: "TypeScript", python: "Python",
-  rust: "Rust", bash: "Shell", sh: "Shell", json: "JSON", css: "CSS", html: "HTML",
-};
 
 class CodeFlairWidget extends WidgetType {
   constructor(
@@ -117,7 +115,7 @@ class CodeFlairWidget extends WidgetType {
       void writeClipboard(this.code);
     };
     if (this.reading) return h("button", { class: "copy-code-button", "aria-label": "Copy", title: "Copy", onmousedown: copy }, icon("copy"));
-    return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, LANGUAGES[this.lang.toLowerCase()] ?? this.lang);
+    return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, codeLabel(this.lang));
   }
 }
 
@@ -135,6 +133,12 @@ const checkbox = [false, true].map((c) => Decoration.replace({ widget: new Check
 const externalIcon = Decoration.widget({ widget: new SpanWidget("cm-external-link"), side: 1 });
 const rule = Decoration.replace({ widget: new SpanWidget("cm-hr") });
 const decoCache = new Map<string, Decoration>();
+const swatches = new Map<HighlightColor, Decoration>();
+const swatch = (color: HighlightColor) => {
+  let d = swatches.get(color);
+  if (!d) swatches.set(color, (d = Decoration.replace({ widget: new SpanWidget(`cm-highlight-swatch cm-highlight-${color}`) })));
+  return d;
+};
 
 /** A mark or line decoration with a class, made once. */
 const cached = (kind: "mark" | "line", cls: string) => {
@@ -246,10 +250,24 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             mark(INLINE_FORMATS[name], node.from, node.to);
             return;
           case "Strikethrough":
-          case "Highlight":
             // Inner text only: a child can't cancel its parent's line-through.
             mark(INLINE_FORMATS[name], node.from + 2, node.to - 2);
             return;
+          case "Highlight": {
+            // ==🔴coloured==: the emoji is hidden, a swatch of its colour while the markup shows.
+            // While the markup shows, it is highlighted too.
+            const color = highlightColor(doc.sliceString(node.from + 2, node.from + 4));
+            const text = color ? node.from + 4 : node.from + 2;
+            const cls = color ? `cm-highlight cm-highlight-${color}` : "cm-highlight";
+            if (!touches(node.from, node.to)) {
+              hide(node.from + 2, text);
+              mark(cls, text, node.to - 2);
+            } else {
+              if (color) decos.push(swatch(color).range(node.from + 2, text));
+              mark(cls, node.from, node.to);
+            }
+            return;
+          }
 
           case "Comment":
             if (reading) hide(node.from, node.to);
@@ -359,7 +377,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     if (isRemoteUrl(href)) {
       if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
-      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt));
+      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
     }
   }
@@ -371,8 +389,12 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     const src = doc.sliceString(target.from, target.to).trim();
     if (IMAGE_EXT.test(src)) {
       if (editing === from) return false;
-      const size = embedSize(alias ? doc.sliceString(alias.from, alias.to) : "");
-      decos.push(Decoration.replace({ widget: new ImageWidget(resolve(src), src, target.from - from, size) }).range(from, node.to));
+      const aliasText = alias ? doc.sliceString(alias.from, alias.to) : null;
+      // No alias: a resize writes "|width" after the target (an empty "|" alias counts as one).
+      const sizeAt = (alias?.from ?? (doc.sliceString(target.to, target.to + 1) === "|" ? target.to + 1 : target.to)) - from;
+      const sizeText = aliasText ?? (doc.sliceString(target.to, target.to + 1) === "|" ? "" : null);
+      const widget = new ImageWidget(resolve(src), src, target.from - from, embedSize(aliasText ?? ""), sizeAt, sizeText);
+      decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }
     if (/\.[a-z0-9]+$/i.test(src.split("#")[0]) && !/\.md$/i.test(src.split("#")[0])) return false; // other files stay links
@@ -456,6 +478,7 @@ function build(view: EditorView): DecorationSet {
 
 // Rendered text (callout bodies, table cells, embedded notes) looks like Reading view.
 paintWith((state, view) => decorate(state, [{ from: 0, to: state.doc.length }], { sel: [], reading: true, view }), readingMode.of(true));
+paintWith((state) => codeMarks(state, [{ from: 0, to: state.doc.length }]));
 
 const livePreviewPlugin = ViewPlugin.fromClass(
   class {

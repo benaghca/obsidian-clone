@@ -3,12 +3,14 @@
 // rendered as Reading view renders inline markdown, a wide table scrolling
 // sideways inside the readable column. Obsidian edits the cells in place;
 // here a click on a cell puts the caret in that cell's source instead,
-// which shows the table as markdown while the caret is in it (blocks.ts).
+// which shows the table as markdown while the caret is in it (blocks.ts),
+// where Tab, Enter and the table menu edit it (tableEdit.ts).
 
 import type { EditorView } from "@codemirror/view";
 import { h } from "../shell/dom";
 import { editAt } from "./callouts";
 import { DrawnWidget, editButton, isLinkEvent } from "./embeds";
+import { editorHost } from "./host";
 import { readingMode } from "./livePreview";
 import { decorate, onDestroy, type Painted, paintRange, release } from "./render";
 
@@ -52,6 +54,8 @@ export class TableWidget extends DrawnWidget {
   constructor(
     readonly text: string,
     readonly chain: readonly string[],
+    /** Bumped to draw it again when files its embeds point at may have changed (blocks.ts). */
+    readonly files = 0,
   ) {
     super();
   }
@@ -79,11 +83,18 @@ export class TableWidget extends DrawnWidget {
       else (table.tBodies[0] ?? table.appendChild(h("tbody"))).append(tr);
     });
     const dom = h("div", { class: "cm-table-widget" }, table, editButton());
+    const cellPos = (e: Event) => view.posAtDOM(dom) + Number((e.target as Element).closest<HTMLElement>("[data-offset]")?.dataset.offset ?? 0);
     dom.addEventListener("mousedown", (e) => {
       if (e.button !== 0 || isLinkEvent(e) || view.state.facet(readingMode)) return;
-      const cell = (e.target as Element).closest<HTMLElement>("[data-offset]");
       e.preventDefault();
-      editAt(view, view.posAtDOM(dom) + Number(cell?.dataset.offset ?? 0));
+      editAt(view, cellPos(e));
+    });
+    // Right-click: the editor's menu, with the table's items for that cell.
+    dom.addEventListener("contextmenu", (e) => {
+      const pos = cellPos(e);
+      e.preventDefault();
+      if (!view.state.facet(readingMode)) editAt(view, pos);
+      view.state.facet(editorHost)?.contextMenu?.(view, { x: e.clientX, y: e.clientY }, pos, false);
     });
     onDestroy(dom, () => release(painted));
     return dom;

@@ -11,6 +11,7 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
+import { editTable, type TableOp, tableModel, tableOps } from "../editor/tableEdit";
 import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
@@ -143,6 +144,7 @@ export function createMenus(host: MenuHost) {
     const reading = group.active.mode === "reading";
     const hasSelection = view.state.selection.ranges.some((r) => !r.empty);
     const link = linkAt(view.state, pos);
+    const table = !reading && tableModel(view.state, pos);
     const cmd = (id: string, overrides?: Partial<MenuEntry>) => commands.menuItem(id, overrides);
     const linked = link?.kind === "internal" ? ws.resolve(link.target) : null;
     const linkItems: MenuItems = !link
@@ -198,6 +200,7 @@ export function createMenus(host: MenuHost) {
       !reading && {
         title: "Paragraph",
         icon: "pilcrow",
+        disabled: !!table,
         submenu: () => [
           cmd("editor:toggle-bullet-list", { title: "Bullet list" }),
           cmd("editor:toggle-numbered-list", { title: "Numbered list" }),
@@ -212,6 +215,7 @@ export function createMenus(host: MenuHost) {
       !reading && {
         title: "Insert",
         icon: "list-plus",
+        disabled: !!table,
         submenu: () => [
           cmd("editor:insert-footnote", { title: "Footnote" }),
           cmd("editor:insert-table", { title: "Table" }),
@@ -235,6 +239,7 @@ export function createMenus(host: MenuHost) {
           view.dispatch({ selection: { anchor: 0, head: view.state.doc.length } });
         },
       },
+      ...(table ? tableItems(view, pos, table) : []),
       ...(linked
         ? [
             SEPARATOR,
@@ -247,6 +252,52 @@ export function createMenus(host: MenuHost) {
             revealItem(linked),
           ]
         : []),
+    ];
+  }
+
+  /** A table's rows and columns (Obsidian's table menu, at the end of the editor's). */
+  function tableItems(view: EditorView, pos: number, { table: model, cell }: NonNullable<ReturnType<typeof tableModel>>): MenuItems {
+    // An item that can't apply here (Move row up on the header) isn't shown, as in Obsidian.
+    const item = (title: string, icon: MenuEntry["icon"], op: TableOp): MenuEntry | false =>
+      !!op(model, cell) && { title, icon, action: () => void editTable(view, op, false, pos) };
+    const ops = tableOps;
+    return [
+      SEPARATOR,
+      {
+        title: "Row",
+        icon: "table",
+        submenu: () => [
+          item("Add row above", "panel-top-close", ops.rowAbove),
+          item("Add row below", "panel-bottom-close", ops.rowBelow),
+          SEPARATOR,
+          item("Move row up", "arrow-up", ops.moveRowUp),
+          item("Move row down", "arrow-down", ops.moveRowDown),
+          SEPARATOR,
+          item("Duplicate row", "copy", ops.duplicateRow),
+          item("Delete row", "trash-2", ops.deleteRow),
+        ],
+      },
+      {
+        title: "Column",
+        icon: "table",
+        submenu: () => [
+          item("Add column to the left", "panel-left-close", ops.colLeft),
+          item("Add column to the right", "panel-right-close", ops.colRight),
+          SEPARATOR,
+          item("Move column left", "arrow-left", ops.moveColLeft),
+          item("Move column right", "arrow-right", ops.moveColRight),
+          SEPARATOR,
+          item("Align left", "text-align-start", ops.alignLeft),
+          item("Align center", "text-align-center", ops.alignCenter),
+          item("Align right", "text-align-end", ops.alignRight),
+          SEPARATOR,
+          item("Duplicate column", "copy", ops.duplicateCol),
+          item("Delete column", "trash-2", ops.deleteCol),
+        ],
+      },
+      SEPARATOR,
+      item("Sort by column (A to Z)", "arrow-down-a-z", ops.sortAsc),
+      item("Sort by column (Z to A)", "arrow-up-z-a", ops.sortDesc),
     ];
   }
 
