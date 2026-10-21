@@ -120,7 +120,7 @@
 }
 
 /* tables: a padded strip as wide as the column (whatever the table's width),
-   scrolling sideways; words in cells stay whole */
+   scrolling sideways; words in cells stay whole; an empty row a line high */
 .cm-table-widget {
   margin: 0 -16px;
   padding: 16px;
@@ -141,6 +141,9 @@
 }
 .cm-table-widget th {
   font-weight: 600;
+}
+.cm-table-widget :is(th, td):empty::after {
+  content: "\200b";
 }
 
 /* images in the vault, in a note and opened from the file list */
