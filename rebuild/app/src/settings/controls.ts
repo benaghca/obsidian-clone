@@ -138,8 +138,8 @@ export function textInput(o: TextOptions): HTMLInputElement {
   return input;
 }
 
-export function button(text: string, onClick: (e: MouseEvent) => void, mod?: "cta" | "warning"): HTMLButtonElement {
-  const el = h("button", { class: mod ? `mod-${mod}` : undefined, type: "button" }, text);
+export function button(text: string, onClick: (e: MouseEvent) => void): HTMLButtonElement {
+  const el = h("button", { type: "button" }, text);
   el.addEventListener("click", onClick);
   return el;
 }

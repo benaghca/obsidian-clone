@@ -363,10 +363,6 @@
   padding: 0 8px 0 0;
   font-variant-numeric: tabular-nums;
 }
-.cm-editor .cm-gutter-lint,
-.cm-editor .cm-activeLineGutter {
-  background: transparent;
-}
 
 /* The fold chevron: in the margin, on hover; kept on folded lines. */
 .cm-fold-indicator {
