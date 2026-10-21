@@ -21,13 +21,17 @@ import { editorHost } from "./host";
 /** Reading view: render everything, as if the selection touched nothing. */
 export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
 
-class BulletWidget extends WidgetType {
-  eq() {
-    return true;
+/** An empty span drawn by CSS: a list bullet, a horizontal rule, the external link icon. */
+class SpanWidget extends WidgetType {
+  constructor(readonly cls: string) {
+    super();
+  }
+  eq(other: SpanWidget) {
+    return other.cls === this.cls;
   }
   toDOM() {
     const span = document.createElement("span");
-    span.className = "cm-list-bullet";
+    span.className = this.cls;
     return span;
   }
 }
@@ -58,17 +62,6 @@ function toggleTask(view: EditorView, pos: number) {
   if (!m) return;
   const at = pos + m.index + 1;
   view.dispatch({ changes: { from: at, to: at + 1, insert: m[1] === " " ? "x" : " " }, userEvent: "input.toggle" });
-}
-
-class ExternalLinkWidget extends WidgetType {
-  eq() {
-    return true;
-  }
-  toDOM() {
-    const span = document.createElement("span");
-    span.className = "cm-external-link";
-    return span;
-  }
 }
 
 // A markdown image pointing at another machine. Grove never fetches it: the
@@ -105,33 +98,17 @@ const hostOf = (url: string) => {
   }
 };
 
-class RuleWidget extends WidgetType {
-  eq() {
-    return true;
-  }
-  toDOM() {
-    const hr = document.createElement("span");
-    hr.className = "cm-hr";
-    return hr;
-  }
-}
-
 const hidden = Decoration.replace({});
-const bullet = Decoration.replace({ widget: new BulletWidget() });
+const bullet = Decoration.replace({ widget: new SpanWidget("cm-list-bullet") });
 const checkbox = [false, true].map((c) => Decoration.replace({ widget: new CheckboxWidget(c) }));
-const externalIcon = Decoration.widget({ widget: new ExternalLinkWidget(), side: 1 });
-const rule = Decoration.replace({ widget: new RuleWidget() });
-const markCache = new Map<string, Decoration>();
-const lineCache = new Map<string, Decoration>();
+const externalIcon = Decoration.widget({ widget: new SpanWidget("cm-external-link"), side: 1 });
+const rule = Decoration.replace({ widget: new SpanWidget("cm-hr") });
+const decoCache = new Map<string, Decoration>();
 
-const cachedMark = (cls: string) => {
-  let d = markCache.get(cls);
-  if (!d) markCache.set(cls, (d = Decoration.mark({ class: cls })));
-  return d;
-};
-const cachedLine = (cls: string) => {
-  let d = lineCache.get(cls);
-  if (!d) lineCache.set(cls, (d = Decoration.line({ class: cls })));
+/** A mark or line decoration with a class, made once. */
+const cached = (kind: "mark" | "line", cls: string) => {
+  let d = decoCache.get(`${kind} ${cls}`);
+  if (!d) decoCache.set(`${kind} ${cls}`, (d = kind === "mark" ? Decoration.mark({ class: cls }) : Decoration.line({ class: cls })));
   return d;
 };
 
@@ -170,7 +147,7 @@ function build(view: EditorView): DecorationSet {
     if (to <= from) return;
     const deco = href
       ? Decoration.mark({ class: cls, attributes: { "data-href": href } })
-      : cachedMark(cls);
+      : cached("mark", cls);
     decos.push(deco.range(from, to));
   };
   // Hide a leading marker plus the single space after it ("# ", "> ").
@@ -183,7 +160,7 @@ function build(view: EditorView): DecorationSet {
       const end = Math.min(to, visible.to);
       for (let pos = start; pos <= end; ) {
         const line = doc.lineAt(pos);
-        decos.push(cachedLine(cls).range(line.from));
+        decos.push(cached("line", cls).range(line.from));
         pos = line.to + 1;
       }
     };
@@ -195,11 +172,7 @@ function build(view: EditorView): DecorationSet {
         const name = ref.name;
         const node = ref.node;
 
-        if (name.startsWith("ATXHeading")) {
-          lineClass(`cm-h cm-h${name.slice(-1)}`, node.from, node.from);
-          return;
-        }
-        if (name.startsWith("SetextHeading")) {
+        if (name.startsWith("ATXHeading") || name.startsWith("SetextHeading")) {
           lineClass(`cm-h cm-h${name.slice(-1)}`, node.from, node.from);
           return;
         }
