@@ -142,7 +142,9 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
     schedule();
   });
   settings.on((file) => {
-    if (file === "types.json" || file === null) schedule(0);
+    if (file !== "types.json" && file !== null) return;
+    stale = true; // so a hidden view reads them when it is shown again
+    schedule(0);
   });
 
   return {
