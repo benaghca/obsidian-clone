@@ -7,7 +7,7 @@
 // settles, and a moment after the open note's frontmatter changes.
 
 import { frontmatterField } from "../editor/frontmatter";
-import { TYPE_ICONS, typeItems } from "../editor/properties";
+import { TYPE_ICONS, typeItems } from "../editor/propertyFields";
 import { compareNames } from "../paths";
 import { settings } from "../settings/store";
 import { readStored, store } from "../storage";
