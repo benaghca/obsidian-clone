@@ -3,9 +3,8 @@
 import { moveFile } from "../fileOps";
 import { parentDir } from "../paths";
 import type { Workspace } from "../workspace";
-import { h } from "./dom";
-import { fuzzyMatch, highlight } from "./fuzzy";
-import { openPrompt } from "./prompt";
+import { fuzzyRank } from "./fuzzy";
+import { hints, openPrompt, suggestionText } from "./prompt";
 
 interface FolderItem {
   path: string;
@@ -22,23 +21,12 @@ export function openMovePrompt(ws: Workspace, path: string) {
   openPrompt<FolderItem>({
     placeholder: "Type a folder",
     emptyText: "No folders found.",
-    instructions: [
-      ["↑↓", "to navigate"],
-      ["↵", "to move"],
-      ["esc", "to dismiss"],
-    ],
+    instructions: hints("to move"),
     items(query) {
       if (!query.trim()) return folders.map((f) => ({ path: f, indices: [] }));
-      const scored = [];
-      for (const f of folders) {
-        const m = fuzzyMatch(query, label(f));
-        if (m) scored.push({ path: f, indices: m.indices, score: m.score });
-      }
-      return scored.sort((a, b) => b.score - a.score);
+      return fuzzyRank(query, folders, label).map(({ item, indices }) => ({ path: item, indices }));
     },
-    render(item, row) {
-      row.append(h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(label(item.path), item.indices))));
-    },
+    render: (item, row) => suggestionText(row, label(item.path), item.indices),
     choose(item) {
       moveFile(ws, path, item.path).catch((err) => console.warn(`Could not move ${path}`, err));
     },

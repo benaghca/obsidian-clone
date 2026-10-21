@@ -3,9 +3,8 @@
 
 import { type Command, type CommandRegistry, hotkeyLabel } from "../commands";
 import { h } from "./dom";
-import { highlight } from "./fuzzy";
 import { paletteItems } from "./paletteItems";
-import { openPrompt } from "./prompt";
+import { hints, openPrompt, suggestionText } from "./prompt";
 
 export function openCommandPalette(registry: CommandRegistry) {
   // Availability is read before the prompt takes focus: editor commands
@@ -17,15 +16,11 @@ export function openCommandPalette(registry: CommandRegistry) {
     emptyText: "No commands found.",
     className: "mod-command-palette",
     restoreFocusOnChoose: true,
-    instructions: [
-      ["↑↓", "to navigate"],
-      ["↵", "to use"],
-      ["esc", "to dismiss"],
-    ],
+    instructions: hints("to use"),
     items: (query) => paletteItems<Command>(query, available, recent),
     render({ cmd, indices }, row) {
       row.classList.add("mod-complex");
-      row.append(h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(cmd.name, indices))));
+      suggestionText(row, cmd.name, indices);
       const hotkeys = registry.hotkeysOf(cmd.id);
       if (hotkeys.length) {
         row.append(h("div", { class: "suggestion-aux" }, ...hotkeys.map((hk) => h("kbd", { class: "suggestion-hotkey" }, hotkeyLabel(hk)))));

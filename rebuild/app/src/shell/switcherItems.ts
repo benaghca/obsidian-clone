@@ -2,7 +2,7 @@
 // be tested on its own.
 
 import type { NoteRef } from "../editor/host";
-import { fuzzyMatch, isStrongMatch } from "./fuzzy";
+import { fuzzyRank, isStrongMatch } from "./fuzzy";
 
 export interface SwitcherItem {
   /** null for the "create a note with this name" row. */
@@ -33,12 +33,7 @@ export function switcherItems(query: string, notes: NoteRef[], recent: string[],
     }
     return out;
   }
-  const scored: (SwitcherItem & { score: number })[] = [];
-  for (const note of notes) {
-    const m = fuzzyMatch(q, note.name);
-    if (m) scored.push({ path: note.path, name: note.name, indices: m.indices, score: m.score });
-  }
-  scored.sort((a, b) => b.score - a.score);
+  const scored = fuzzyRank(q, notes, (n) => n.name).map(({ item, indices }) => ({ path: item.path, name: item.name, indices }));
   const out: SwitcherItem[] = scored.slice(0, MAX_RESULTS);
   const good = scored.some((r) => isStrongMatch(r.name, r.indices));
   const exact = scored.some((r) => r.name.toLowerCase() === q.toLowerCase());

@@ -37,6 +37,16 @@ export function fuzzyMatch(query: string, text: string): FuzzyMatch | null {
   return { score: score - indices[0] - t.length * 0.1, indices };
 }
 
+/** The items whose text matches the query, best match first, with the matched letters. */
+export function fuzzyRank<T>(query: string, items: readonly T[], text: (item: T) => string): { item: T; indices: number[]; score: number }[] {
+  const out: { item: T; indices: number[]; score: number }[] = [];
+  for (const item of items) {
+    const m = fuzzyMatch(query, text(item));
+    if (m) out.push({ item, indices: m.indices, score: m.score });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+
 /**
  * A match someone plausibly meant: one contiguous run of letters, or runs
  * that each start a word ("proj road", "rl" for "Reading list"). Letters
