@@ -3,6 +3,7 @@
 // and only while the sidebar is open, does any work.
 
 import { createGraphView } from "../graph/view";
+import { listeners } from "../listeners";
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
 import { h, iconButton } from "./dom";
@@ -43,7 +44,7 @@ export function createRightSidebar(
     localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
   const buttons = new Map<RightView, HTMLElement>();
-  const listeners = new Set<(view: RightView) => void>();
+  const selected = listeners<[RightView]>();
   const content = h("div", { class: "workspace-leaf-content" });
   let current: RightView = "backlinks";
 
@@ -63,7 +64,7 @@ export function createRightSidebar(
     const changed = name !== current;
     show(name);
     sync();
-    if (changed) for (const fn of listeners) fn(name);
+    if (changed) selected.emit(name);
   }
 
   function sync() {
@@ -94,7 +95,7 @@ export function createRightSidebar(
     },
     select,
     sync,
-    onSelect: (fn) => void listeners.add(fn),
+    onSelect: selected.on,
     setEnabled(view, enabled) {
       buttons.get(view)!.hidden = !enabled;
       const available = RIGHT_VIEWS.filter((v) => !buttons.get(v)!.hidden);

@@ -7,6 +7,7 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
 import { newFolder, renameFile } from "../fileOps";
+import { listeners } from "../listeners";
 import { compareNames, noteName } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -161,7 +162,7 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
-  const sortListeners = new Set<() => void>();
+  const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
   const list = h("div", { class: "nav-files-container" });
 
@@ -188,7 +189,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (order === sortOrder) return;
     sortOrder = order;
     render();
-    for (const fn of sortListeners) fn();
+    sorted.emit();
   }
 
   function contextMenu(e: MouseEvent, items: MenuItems) {
@@ -374,7 +375,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       return sortOrder;
     },
     setSortOrder,
-    onSortChange: (fn: () => void) => void sortListeners.add(fn),
+    onSortChange: sorted.on,
   };
 }
 

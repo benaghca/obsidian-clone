@@ -5,6 +5,7 @@
 // note column's wrap width for the length of the move, so the text slides
 // over as one block instead of re-flowing every frame.
 
+import { listeners } from "../listeners";
 import { duration } from "../motion";
 
 export type Side = "left" | "right";
@@ -37,10 +38,7 @@ const clampWidth = (px: number) => Math.round(Math.min(MAX_DOCK_WIDTH, Math.max(
 export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks {
   const collapsedClass = (side: Side) => `is-${side}-sidebar-collapsed`;
   const dock = (side: Side) => app.querySelector<HTMLElement>(`.mod-${side}-split`)!;
-  const listeners = new Set<(side: Side) => void>();
-  const changed = (side: Side) => {
-    for (const fn of listeners) fn(side);
-  };
+  const changes = listeners<[Side]>();
 
   const isCollapsed = (side: Side) => app.classList.contains(collapsedClass(side));
 
@@ -69,7 +67,7 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
         .find((a): a is CSSTransition => a instanceof CSSTransition && a.transitionProperty === "width");
       pane.holdColumn(now - (collapsed ? 0 : width(side)), transition);
     }
-    changed(side);
+    changes.emit(side);
   }
 
   function setWidth(side: Side, px: number) {
@@ -103,7 +101,7 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
         handle.removeEventListener("pointermove", move);
         handle.removeEventListener("pointerup", up);
         handle.removeEventListener("pointercancel", up);
-        changed(side);
+        changes.emit(side);
       };
       handle.addEventListener("pointermove", move);
       handle.addEventListener("pointerup", up);
@@ -119,6 +117,6 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
     width,
     setWidth,
     resizeHandle,
-    onChange: (fn) => void listeners.add(fn),
+    onChange: changes.on,
   };
 }
