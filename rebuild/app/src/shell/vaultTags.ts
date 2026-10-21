@@ -1,17 +1,20 @@
-// Tags per note across the vault, for the Tags view and the graph. The
-// backend has no tag index, so this asks its search for lines containing "#"
-// (and for fence lines, to skip tags in code blocks) and reads the tags from
-// those lines. Frontmatter `tags:` are found by searching for the key; only
-// the notes that have it are read, and each is read again only when it
-// changes. Saved text only: callers add the open note's unsaved tags.
+// Tags per note across the vault, for the Tags view, search's tag: terms,
+// the graph and the tag suggestions: one reader per workspace, whose result
+// is kept until the vault changes (a moment after a save, or a change on
+// disk). The backend has no tag index, so this asks its search for lines
+// containing "#" (and for fence lines, to skip tags in code blocks) and
+// reads the tags from those lines. Frontmatter `tags:` are found by
+// searching for the key; only the notes that have it are read, and each is
+// read again only when it changes. Saved text only: the Tags view adds the
+// open note's unsaved tags.
 
 import { api } from "../api";
-import type { Workspace } from "../workspace";
+import { perWorkspace, type Workspace } from "../workspace";
 import { type Frontmatter, frontmatterTags, tagsByNote } from "./linksTags";
 
 const LIMIT = 100_000;
 
-export function createTagReader(ws: Workspace) {
+export const vaultTags = perWorkspace((ws: Workspace) => {
   /** Frontmatter read from notes, by path, kept while the note's modified time stays the same. */
   const frontmatter = new Map<string, { mtime: number; fm: Frontmatter }>();
 
@@ -36,8 +39,7 @@ export function createTagReader(ws: Workspace) {
     return out;
   }
 
-  /** Every note's saved tags (notes without tags are left out). */
-  return async function readTags(): Promise<Map<string, string[]>> {
+  async function readTags(): Promise<Map<string, string[]>> {
     const [tagLines, ticks, tildes, keys, oldKeys] = await Promise.all([
       api.search("#", LIMIT),
       api.search("```", LIMIT),
@@ -47,5 +49,20 @@ export function createTagReader(ws: Workspace) {
     ]);
     const fm = await readFrontmatter([...keys, ...oldKeys]);
     return tagsByNote(tagLines, [...ticks, ...tildes], fm);
+  }
+
+  let tags: Promise<Map<string, string[]>> | null = null;
+  const forget = () => (tags = null);
+  ws.on((change) => {
+    if (change === "files" || change === "links") forget();
+  });
+  return {
+    /** Every note's saved tags (notes without tags are left out), read again only after a change. */
+    read: () =>
+      (tags ??= readTags().catch((err) => {
+        forget();
+        throw err;
+      })),
+    forget,
   };
-}
+});

@@ -9,7 +9,7 @@ import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { type TagNode, tagsInText, tagTree } from "./linksTags";
 import { foldToggle, type SideView } from "./sideView";
-import { createTagReader } from "./vaultTags";
+import { vaultTags } from "./vaultTags";
 
 const DELAY = 300;
 
@@ -27,12 +27,11 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
   let shown = "";
   /** Saved tags per note from the last search. */
   let saved = new Map<string, string[]>();
-  const readTags = createTagReader(ws);
 
   async function refresh() {
     const mine = ++seq;
     try {
-      const tags = await readTags();
+      const tags = await vaultTags(ws).read();
       if (mine !== seq) return;
       saved = tags;
     } catch (err) {

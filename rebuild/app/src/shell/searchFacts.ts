@@ -6,10 +6,10 @@
 // the backend only about the term being typed.
 
 import { api } from "../api";
-import type { Workspace } from "../workspace";
+import { perWorkspace, type Workspace } from "../workspace";
 import { propertyIndex } from "./propertyIndex";
 import { type Facts, type Line, needs, type Query, termsOf } from "./searchQuery";
-import { createTagReader } from "./vaultTags";
+import { vaultTags } from "./vaultTags";
 
 export interface VaultFacts extends Facts {
   tags?: Map<string, string[]>;
@@ -18,26 +18,11 @@ export interface VaultFacts extends Facts {
 /** Terms remembered at most (the prefixes of what was typed, mostly). */
 const KEEP = 200;
 
-const shared = new WeakMap<Workspace, ReturnType<typeof create>>();
-
 /** The workspace's facts (one cache for every search and graph). */
-export function searchFacts(ws: Workspace) {
-  let f = shared.get(ws);
-  if (!f) shared.set(ws, (f = create(ws)));
-  return f;
-}
-
-function create(ws: Workspace) {
+export const searchFacts = perWorkspace((ws: Workspace) => {
   const lines = new Map<string, Promise<Map<string, Line[]>>>();
-  const readTags = createTagReader(ws);
-  let tags: Promise<Map<string, string[]>> | null = null;
-
-  const forget = () => {
-    lines.clear();
-    tags = null;
-  };
   ws.on((change) => {
-    if (change === "files" || change === "links") forget();
+    if (change === "files" || change === "links") lines.clear();
   });
 
   /** The lines with a term, per note. The backend finds lines with all its words; a phrase is then looked for whole. */
@@ -76,7 +61,10 @@ function create(ws: Workspace) {
   }
 
   return {
-    forget,
+    forget() {
+      lines.clear();
+      vaultTags(ws).forget();
+    },
     /** What `queries` need (and the tags, if `withTags`), or null when they need nothing from the backend. */
     facts(queries: (Query | null)[], withTags = false): Promise<VaultFacts> | null {
       const terms = new Set<string>();
@@ -85,12 +73,12 @@ function create(ws: Workspace) {
       const wantTags = withTags || need.some((n) => n.tags);
       const wantProps = need.some((n) => n.props);
       if (!terms.size && !wantTags && !wantProps) return null;
-      if (wantTags) tags ??= readTags().catch(() => new Map());
+      const tags = wantTags ? vaultTags(ws).read().catch(() => new Map<string, string[]>()) : undefined;
       const list = [...terms];
-      return Promise.all([Promise.all(list.map(linesOf)), wantTags ? tags : undefined, wantProps ? properties() : undefined]).then(([found, t, props]) => {
+      return Promise.all([Promise.all(list.map(linesOf)), tags, wantProps ? properties() : undefined]).then(([found, t, props]) => {
         const byTerm = new Map(list.map((term, i) => [term, found[i]]));
         return { lines: (term) => byTerm.get(term), tags: t ?? undefined, props };
       });
     },
   };
-}
+});
