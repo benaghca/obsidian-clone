@@ -1,4 +1,57 @@
-# Round 12: callouts, tables, embeds and images (Claude's version)
+# Round 12: callouts, tables, embeds and images (as merged)
+
+**Merged:** Claude's version (`rebuild/r12-claude`, `4288bf8`) as merge `af52122`, plus one small port: Grok's block-link find (`5d347aa`: Grok noticed that opening `[[Note#^id]]` landed at the top of the note because `headingPos` skipped `^` targets; it now lands on the line that ends in ` ^id`, with tests). Three agents did the same brief from `981ef82`; the comparison was headless (Vite preview of each branch and of the round-start base, with the mock vault plus one shared `Blocks12` note holding a note callout, a folded `[!tip]-`, an open `[!warning]+` with a list, an aligned table with bold and a link, a local image at `|200`, a `![[Ideas]]` embed, `==highlight==`, `%%comment%%` and a `js` code block, in headless Chromium at 1280×1150; Obsidian 1.14.4 on a private Xvfb display in its own network namespace, scratch profile, the same note in a copy of the test vault). Live Preview, unfolding the tip, and Reading view were shot for all four.
+
+## How the three compared
+
+Line counts from `rebuild/app` with the brief's commands (before = `981ef82`: TS app 16,294, tests 1,716, CSS 3,106, Rust 3,137, total 24,253):
+
+| | Claude (merged) | Codex | Grok |
+|---|---:|---:|---:|
+| TypeScript, app | +1,123 | +678 | +1,669 |
+| TypeScript, tests | +85 | +134 | +180 |
+| CSS | +217 | +57 | +229 |
+| Rust | +82 | +84 | +71 |
+| **Total** | **+1,507** | **+953** | **+2,149** (over the ~1,500 budget) |
+| Largest file after | 676 (`workspace.ts`) | 661 (`workspace.ts`) | 712 (`workspace.ts`) |
+| New dependency / CSP / scope change | none | none | none |
+| `#^block` embeds | done | skipped | done |
+| Commits | 9 + notes | 16 + notes | 4 + notes |
+
+- **Closest to Obsidian:** Claude. Side by side with Obsidian its callouts (no border, 12/24 px padding, chevron after the title), table, image, note embed (accent bar, bold note name, `maximize-2` open button), `%%` markers left visible in Live Preview, the "JavaScript" label on the code block and no label in Reading view all match what Obsidian draws. It also opens images from the file list in an image tab and checked `read_file_bytes` end to end in a Tauri window on a private display.
+- **Codex:** the smallest and most careful about resource lifetimes (DOM-owned widget cleanup, per-path leases, path-targeted change events, a committed 106-line headless check script). Visible differences from Obsidian: the `%%` markers hide in Live Preview (Obsidian shows them), the embed has no note-name header, the code block label reads `js` and also shows in Reading view, and the inline `%%comment%%` was still visible in Reading view in this run. `#^block` embeds skipped.
+- **Grok:** every item built, but a note embed shows the embedded note's raw frontmatter (`--- status: draft …`), callouts carry a left border and put the chevron before the icon (Obsidian has no border and the chevron after the title), and it went 43% over the line budget.
+- **Checks:** all three build, pass their tests and the offline audit. On the merged tree on Cloud: `npm run build`, `npm test` (142 tests in 29 files), `npm run audit:offline`, `cargo build` and `cargo test` (31) pass.
+
+## Ideas from the other two
+
+- **Grok (ported in `5d347aa`):** the `#^block` link landing bug above. Also worth knowing: its small in-code PNG encoder for the mock (`mock/png.ts`), not ported because Claude's mock already paints a PNG on an `OffscreenCanvas`.
+- **Codex (not ported):** remote `![[https://…]]` wiki embeds as offline link chips (Claude shows a "could not be found" box; both are offline-safe); embeds that follow the open editor's unsaved text on every change rather than on save (Claude's update 300 ms after typing pauses, which is enough); its `scripts/check-embeds.mjs` headless check (candidate for a shared harness; it is tied to Codex's DOM). None was small and clean to lift onto Claude's structure.
+
+## Merged line counts (from `rebuild/app`)
+
+| | Round 11 merged (`4e57533`) | Round 12 merged (`5d347aa`) | Change |
+|---|---:|---:|---:|
+| TypeScript, app | 16,294 | 17,424 | +1,130 |
+| TypeScript, tests | 1,716 | 1,804 | +88 |
+| CSS | 3,106 | 3,323 | +217 |
+| Rust | 3,137 | 3,219 | +82 |
+| **Total** | **24,253** | **25,770** | **+1,517** |
+
+Largest files: `workspace.ts` 676, `graph/view.ts` 649, `styles/settings.css` 647, `shell/pane.ts` 625, `src-tauri/src/vault.rs` 561. None over 680. New files: `editor/blocks.ts`, `editor/callouts.ts`, `editor/tables.ts`, `editor/embeds.ts`, `editor/render.ts`, `embedHost.ts`, `styles/blocks.css`, `editor/blocks.test.ts`. One new command and permission: `read_file_bytes` / `allow-read-file-bytes`. No dependency, scope, CSP or `tauri.conf.json` change.
+
+## Known gaps left after the merge
+
+- Tables are source-on-touch, not Obsidian's in-place cell editor; no table context menu.
+- No syntax highlighting in code blocks (Obsidian colours them in every mode).
+- Images: no "Zoom in" and no drag-to-resize corner.
+- Tasks inside a note embed can't be ticked; embeds inside a callout or table don't follow a target being created or removed until redrawn.
+- No coloured highlight commands (Obsidian 1.14.4 has red, orange, yellow, green, blue, purple).
+- Round 13 takes these. Search pane and properties leftovers from round 10 (match-case toggle, sort menu, match counts; File properties view; Rename/Delete property) wait for round 15.
+
+---
+
+# Round 12: callouts, tables, embeds and images (Claude's notes)
 
 Branch `rebuild/r12-claude`, from `981ef82`. Every item of the brief is done, item 6 (code blocks) included; nothing was skipped except the few details listed under each item, with reasons.
 
