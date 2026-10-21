@@ -122,11 +122,6 @@ export class Workspace {
     return this.editors.viewOf(this.layout.activeGroup);
   }
 
-  /** The element that scrolls the active pane's note. */
-  get scroller(): HTMLElement | null {
-    return this.editors.scrollerOf(this.layout.activeGroup);
-  }
-
   groups(): Group[] {
     return this.layout.groups();
   }
