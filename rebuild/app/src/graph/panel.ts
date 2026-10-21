@@ -6,9 +6,9 @@
 // moves; the values are saved in .grove/graph.json through the settings
 // store. The open sections and whether the panel is open are saved too.
 
-import { button, slider, toggle } from "../settings/controls";
+import { button, setToggle, slider, toggle } from "../settings/controls";
 import type { ColorGroup, GraphSettings } from "../settings/schema";
-import { h } from "../shell/dom";
+import { h, keyButton, pressable } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 
 export interface PanelHost {
@@ -70,18 +70,8 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
   const el = h("div", { class: "graph-controls" });
   const cfg = () => host.get();
 
-  const controlButton = (cls: string, name: IconName, label: string, onClick: () => void) => {
-    const b = h("div", { class: `clickable-icon graph-controls-button ${cls}`, "aria-label": label, title: label, role: "button" }, icon(name, 16));
-    b.tabIndex = 0;
-    b.addEventListener("click", onClick);
-    b.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onClick();
-      }
-    });
-    return b;
-  };
+  const controlButton = (cls: string, name: IconName, label: string, onClick: () => void) =>
+    keyButton(icon(name, 16), label, onClick, `graph-controls-button ${cls}`);
 
   const shadow = h("div", { class: "graph-controls-shadow" });
   const restyle = () => {
@@ -106,11 +96,7 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
   type ToggleKey = "showTags" | "showAttachments" | "hideUnresolved" | "showOrphans" | "showArrow" | "localBacklinks" | "localForelinks" | "localInterlinks";
   const toggleRow = (key: ToggleKey, name: string, invert = false) => {
     const t = toggle(invert ? !cfg()[key] : cfg()[key], (on) => host.set(key, invert ? !on : on), name);
-    syncers.push(() => {
-      const on = invert ? !cfg()[key] : cfg()[key];
-      t.classList.toggle("is-enabled", on);
-      t.setAttribute("aria-checked", String(on));
-    });
+    syncers.push(() => setToggle(t, invert ? !cfg()[key] : cfg()[key]));
     return h("div", { class: "setting-item mod-toggle" }, h("div", { class: "setting-item-info" }, h("div", { class: "setting-item-name" }, name)), h("div", { class: "setting-item-control" }, t));
   };
 
@@ -251,7 +237,6 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
     const chevron = h("div", { class: "tree-item-icon collapse-icon" }, icon("chevron-down", 16));
     const children = h("div", { class: "tree-item-children" }, ...rows);
     const self = h("div", { class: "tree-item-self mod-collapsible", role: "button", "aria-label": title }, chevron, h("div", { class: "tree-item-inner" }, title));
-    self.tabIndex = 0;
     const section = h("div", { class: `tree-item graph-control-section ${cls}` }, self, children);
     const show = (collapsed: boolean) => {
       section.classList.toggle("is-collapsed", collapsed);
@@ -260,17 +245,10 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
       self.setAttribute("aria-expanded", String(!collapsed));
     };
     show(cfg()[key]);
-    const flip = () => {
+    pressable(self, () => {
       const collapsed = !section.classList.contains("is-collapsed");
       show(collapsed);
       host.set(key, collapsed);
-    };
-    self.addEventListener("click", flip);
-    self.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        flip();
-      }
     });
     return section;
   });

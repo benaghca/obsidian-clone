@@ -30,3 +30,20 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 export function iconButton(icon: SVGElement, label: string, onClick?: (e: MouseEvent) => void, cls = "") {
   return h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, title: label, onclick: onClick }, icon);
 }
+
+/** Make an element a keyboard button: in the Tab order, and Enter or Space presses it like a click. */
+export function pressable<E extends HTMLElement>(el: E, onPress: (e: MouseEvent | KeyboardEvent) => void): E {
+  el.tabIndex = 0;
+  el.addEventListener("click", onPress);
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onPress(e);
+    }
+  });
+  return el;
+}
+
+/** An icon button the keyboard can press too (the settings' and the graph panel's small buttons). */
+export const keyButton = (icon: SVGElement, label: string, onPress: (e: MouseEvent | KeyboardEvent) => void, cls = "") =>
+  pressable(h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, title: label, role: "button" }, icon), onPress);

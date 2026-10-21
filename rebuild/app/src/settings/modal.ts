@@ -7,7 +7,7 @@
 // section shown is remembered while the app runs.
 
 import { animateOut } from "../motion";
-import { h } from "../shell/dom";
+import { h, keyButton } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 
 export interface SettingsSection {
@@ -185,15 +185,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
     }
   });
 
-  const closeButton = h("div", { class: "modal-close-button clickable-icon", "aria-label": "Close", title: "Close", role: "button" }, icon("x", 16));
-  closeButton.tabIndex = 0;
-  closeButton.addEventListener("click", () => close());
-  closeButton.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      close();
-    }
-  });
+  const closeButton = keyButton(icon("x", 16), "Close", () => close(), "modal-close-button");
   const modal = h(
     "div",
     { class: "modal mod-settings", role: "dialog", "aria-modal": "true", "aria-label": "Settings" },

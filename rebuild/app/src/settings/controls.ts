@@ -6,7 +6,7 @@
 // is in the Tab order; Space or Enter flips a toggle, arrow keys move a
 // slider (natively), dropdowns are native selects.
 
-import { h } from "../shell/dom";
+import { h, keyButton, pressable } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 
 type Child = Node | string | null | undefined | false;
@@ -44,27 +44,20 @@ export function group(heading: string | null, ...rows: Child[]): HTMLElement {
   );
 }
 
+/** Show a toggle on or off (without telling its listener). */
+export function setToggle(el: HTMLElement, on: boolean) {
+  el.classList.toggle("is-enabled", on);
+  el.setAttribute("aria-checked", String(on));
+}
+
 /** Obsidian's pill switch. Space or Enter flips it. */
 export function toggle(value: boolean, onChange: (on: boolean) => void, label: string): HTMLElement {
-  const el = h("div", { class: "checkbox-container", role: "switch", "aria-label": label });
-  el.tabIndex = 0;
-  const set = (on: boolean) => {
-    el.classList.toggle("is-enabled", on);
-    el.setAttribute("aria-checked", String(on));
-  };
-  set(value);
-  const flip = () => {
+  const el = pressable(h("div", { class: "checkbox-container", role: "switch", "aria-label": label }), () => {
     const on = !el.classList.contains("is-enabled");
-    set(on);
+    setToggle(el, on);
     onChange(on);
-  };
-  el.addEventListener("click", flip);
-  el.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      flip();
-    }
   });
+  setToggle(el, value);
   return el;
 }
 
@@ -164,16 +157,7 @@ export function button(text: string, onClick: (e: MouseEvent) => void, mod?: "ct
 
 /** The small icon buttons beside controls (Restore default, Options, Customize). */
 export function extraButton(name: IconName, label: string, onClick: (e: MouseEvent | KeyboardEvent) => void, cls = ""): HTMLElement {
-  const el = h("div", { class: `clickable-icon extra-setting-button${cls ? ` ${cls}` : ""}`, "aria-label": label, title: label, role: "button" }, icon(name, 16));
-  el.tabIndex = 0;
-  el.addEventListener("click", onClick);
-  el.addEventListener("keydown", (e) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      onClick(e);
-    }
-  });
-  return el;
+  return keyButton(icon(name, 16), label, onClick, `extra-setting-button ${cls}`);
 }
 
 /** A section's heading-less description paragraph (General's statements). */

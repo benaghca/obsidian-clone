@@ -8,7 +8,7 @@
 // settings store to the command registry, so they apply everywhere at once.
 
 import { type Command, type CommandRegistry, type Hotkey, hotkeyFromEvent, hotkeyLabel, toStored } from "../commands";
-import { h } from "../shell/dom";
+import { h, keyButton, pressable } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { extraButton } from "./controls";
 import { settingsSession } from "./modal";
@@ -38,28 +38,14 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
   query.spellcheck = false;
   query.value = pendingQuery;
   pendingQuery = "";
-  const byKey = h(
-    "div",
-    { class: "clickable-icon input-right-decorator", "aria-label": "Search by hotkey", title: "Search by hotkey", role: "button" },
-    icon("keyboard", 16),
-  );
-  byKey.tabIndex = 0;
+  const byKey = keyButton(icon("keyboard", 16), "Search by hotkey", () => toggleListening(), "input-right-decorator");
 
   const pills = new Map<Filter, HTMLElement>();
   const conflictBadge = h("span", { class: "setting-group-filter-badge" });
   const pill = (f: Filter, ...label: (Node | string)[]) => {
-    const el = h("div", { class: `setting-group-filter${f === "conflicts" ? " mod-error" : ""}`, role: "button" }, ...label);
-    el.tabIndex = 0;
-    const pick = () => {
+    const el = pressable(h("div", { class: `setting-group-filter${f === "conflicts" ? " mod-error" : ""}`, role: "button" }, ...label), () => {
       filter = filter === f && f === "conflicts" ? "all" : f;
       apply();
-    };
-    el.addEventListener("click", pick);
-    el.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        pick();
-      }
     });
     pills.set(f, el);
     return el;
@@ -209,13 +195,6 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
     query.placeholder = "Press a hotkey...";
     window.addEventListener("keydown", onQueryKey, true);
   };
-  byKey.addEventListener("click", toggleListening);
-  byKey.addEventListener("keydown", (e) => {
-    if (!listeningForQuery && (e.key === "Enter" || e.key === " ")) {
-      e.preventDefault();
-      toggleListening();
-    }
-  });
   query.addEventListener("input", apply);
 
   const empty = h("div", { class: "setting-search-empty" }, "No commands match.");
