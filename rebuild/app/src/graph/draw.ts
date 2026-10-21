@@ -205,8 +205,12 @@ export function drawGraph(ctx: CanvasRenderingContext2D, f: GraphFrame) {
   // Labels fade in with the zoom: none below 50%, all from 100% (the
   // text fade threshold shifts that), and the hovered node's always. A
   // local graph zoomed out only to fit its neighbourhood keeps them.
+  // The label size is rounded to whole device pixels: while zooming it
+  // changes every frame, and text at a size not drawn before is rasterised
+  // afresh (in WebKitGTK that was half of a wheel-zoom frame, ~6 ms for
+  // 1,000 labels; at a handful of sizes the glyphs are reused).
   const textAlpha = f.follow ? 1 : Math.max(0, Math.min(1, Math.log2(s) + 1 - cfg.textFadeMultiplier));
-  const fontSize = LABEL_SIZE * (f.follow ? Math.max(ns, 0.75) : ns);
+  const fontSize = Math.round(LABEL_SIZE * (f.follow ? Math.max(ns, 0.75) : ns) * ratio) / ratio;
   ctx.font = `${fontSize}px ${c.font}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "top";
