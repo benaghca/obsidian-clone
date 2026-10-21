@@ -518,11 +518,7 @@ fn norm_logical(path: &str) -> Option<String> {
             out.push(part);
         }
     }
-    if out.is_empty() {
-        None
-    } else {
-        Some(out.join("/"))
-    }
+    (!out.is_empty()).then(|| out.join("/"))
 }
 
 /// A markdown link's target without its `.md`, as the graph names a note that doesn't exist.

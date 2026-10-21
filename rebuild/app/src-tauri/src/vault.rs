@@ -290,12 +290,10 @@ impl Vault {
             .list()
             .into_iter()
             .find(|e| e.path == rel)
-            .unwrap_or(FileEntry {
+            .unwrap_or_else(|| FileEntry {
                 path: rel.to_string(),
                 name: rel.to_string(),
-                is_dir: false,
-                mtime_ms: 0,
-                size: 0,
+                ..FileEntry::default()
             })
     }
 }

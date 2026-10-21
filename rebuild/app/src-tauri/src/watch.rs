@@ -151,21 +151,11 @@ pub fn coalesce(
     for event in events {
         match event.kind {
             EventKind::Access(AccessKind::Close(AccessMode::Write)) => {
-                for path in visible_files(root, event) {
-                    modifies.insert(path);
-                }
+                modifies.extend(visible(root, event, true));
             }
             EventKind::Access(_) | EventKind::Any | EventKind::Other => {}
-            EventKind::Create(_) => {
-                for path in visible(root, event) {
-                    creates.insert(path);
-                }
-            }
-            EventKind::Remove(_) => {
-                for path in visible(root, event) {
-                    removes.insert(path);
-                }
-            }
+            EventKind::Create(_) => creates.extend(visible(root, event, false)),
+            EventKind::Remove(_) => removes.extend(visible(root, event, false)),
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
                     let ends = rename_ends(root, event);
@@ -175,7 +165,7 @@ pub fn coalesce(
                     }
                 }
                 RenameMode::From | RenameMode::To => {
-                    let path = visible(root, event).into_iter().next();
+                    let path = visible(root, event, false).into_iter().next();
                     let is_from = mode == RenameMode::From;
                     if let Some(tracker) = event.attrs.tracker() {
                         let part = part_of(&mut order, &mut parts, tracker);
@@ -189,22 +179,16 @@ pub fn coalesce(
                     }
                 }
                 RenameMode::Any | RenameMode::Other => {
-                    let paths = visible(root, event);
+                    let paths = visible(root, event, false);
                     if paths.len() >= 2 {
                         bare.push((Some(paths[0].clone()), Some(paths[1].clone())));
                     } else {
-                        for path in paths {
-                            modifies.insert(path);
-                        }
+                        modifies.extend(paths);
                     }
                 }
             },
             EventKind::Modify(ModifyKind::Metadata(_)) => {}
-            EventKind::Modify(_) => {
-                for path in visible_files(root, event) {
-                    modifies.insert(path);
-                }
-            }
+            EventKind::Modify(_) => modifies.extend(visible(root, event, true)),
         }
     }
 
@@ -279,20 +263,13 @@ fn push_rename(
     }
 }
 
-fn visible(root: &Path, event: &Event) -> Vec<String> {
+/// The event's paths in the vault, hidden ones left out. Content changes on a directory are the
+/// parent folder's mtime moving (the child event is enough), so `files` leaves directories out.
+fn visible(root: &Path, event: &Event, files: bool) -> Vec<String> {
     event
         .paths
         .iter()
-        .filter_map(|path| crate::fsutil::rel_of(root, path))
-        .collect()
-}
-
-/// Content changes on a directory are the parent folder's mtime moving. The child event is enough.
-fn visible_files(root: &Path, event: &Event) -> Vec<String> {
-    event
-        .paths
-        .iter()
-        .filter(|path| !path.is_dir())
+        .filter(|path| !files || !path.is_dir())
         .filter_map(|path| crate::fsutil::rel_of(root, path))
         .collect()
 }
