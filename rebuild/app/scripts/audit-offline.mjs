@@ -235,6 +235,16 @@ if (/tauri_plugin_opener::init\s*\(/.test(libRs) || !/\.open_js_links_on_click\(
 const NPM_DEPS = new Set([
   "@codemirror/autocomplete",
   "@codemirror/commands",
+  // Code block highlighting (src/editor/codeHighlight.ts), grammars bundled,
+  // nothing loaded at runtime. JavaScript/TypeScript, CSS and HTML were
+  // already bundled through lang-markdown; JSON and SQL are small Lezer
+  // grammars; Python, Rust, Shell, YAML and XML are legacy stream modes.
+  "@codemirror/lang-css",
+  "@codemirror/lang-html",
+  "@codemirror/lang-javascript",
+  "@codemirror/lang-json",
+  "@codemirror/lang-sql",
+  "@codemirror/legacy-modes",
   "@codemirror/lang-markdown",
   "@codemirror/language",
   "@codemirror/search",

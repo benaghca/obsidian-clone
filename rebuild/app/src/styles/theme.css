@@ -53,14 +53,29 @@
   --mark-background: rgba(224, 172, 0, 0.3);
   --background-primary-alt: #fafafa;
 
-  /* Callouts: each type's colour (Obsidian's, measured); the box is it at 10%. */
-  --callout-blue: #086ddd;
-  --callout-cyan: #00bfbc;
-  --callout-green: #08b94e;
-  --callout-orange: #ec7500;
-  --callout-red: #e93147;
-  --callout-purple: #7852ee;
-  --callout-gray: #9e9e9e;
+  /* Obsidian's colours (measured): callouts (the box is the colour at 10%),
+     code tokens and the coloured highlights take theirs from these. */
+  --color-red: #e93147;
+  --color-orange: #ec7500;
+  --color-yellow: #e0ac00;
+  --color-green: #08b94e;
+  --color-cyan: #00bfbc;
+  --color-blue: #086ddd;
+  --color-purple: #7852ee;
+  --color-pink: #d53984;
+  --color-gray: #9e9e9e;
+
+  /* Code blocks, by token kind (editor/codeHighlight.ts), as Obsidian colours them. */
+  --code-comment: var(--text-faint);
+  --code-function: var(--color-yellow);
+  --code-important: var(--color-orange);
+  --code-keyword: var(--color-pink);
+  --code-operator: var(--color-red);
+  --code-property: var(--color-cyan);
+  --code-punctuation: var(--text-muted);
+  --code-string: var(--color-green);
+  --code-tag: var(--color-red);
+  --code-value: var(--color-purple);
 
   --icon-color: #6e6e6e;
   --icon-color-hover: #222222;
@@ -214,12 +229,14 @@
   --code-background: #232323;
   --mark-background: rgba(224, 222, 113, 0.3);
   --background-primary-alt: #232323;
-  --callout-blue: #027aff;
-  --callout-cyan: #53dfdd;
-  --callout-green: #44cf6e;
-  --callout-orange: #e9973f;
-  --callout-red: #fb464c;
-  --callout-purple: #a882ff;
+  --color-red: #fb464c;
+  --color-orange: #e9973f;
+  --color-yellow: #e0de71;
+  --color-green: #44cf6e;
+  --color-cyan: #53dfdd;
+  --color-blue: #027aff;
+  --color-purple: #a882ff;
+  --color-pink: #fa99cd;
 
   --setting-items-background: #232323;
   --modal-border-color: #3f3f3f;

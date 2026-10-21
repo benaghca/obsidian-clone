@@ -41,7 +41,7 @@
 
 /* callouts */
 .callout {
-  --callout-color: var(--callout-blue);
+  --callout-color: var(--color-blue);
   background: color-mix(in srgb, var(--callout-color) 10%, transparent);
   border-radius: var(--radius-s);
   padding: 12px 12px 12px 24px;
@@ -194,4 +194,43 @@
 }
 .copy-code-button:hover {
   background: var(--background-modifier-hover);
+}
+
+/* code tokens, by kind (editor/codeHighlight.ts) */
+.cm-code-keyword {
+  color: var(--code-keyword);
+}
+.cm-code-string {
+  color: var(--code-string);
+}
+.cm-code-value {
+  color: var(--code-value);
+}
+.cm-code-comment {
+  color: var(--code-comment);
+}
+.cm-code-operator {
+  color: var(--code-operator);
+}
+.cm-code-punctuation {
+  color: var(--code-punctuation);
+}
+.cm-code-tag {
+  color: var(--code-tag);
+}
+.cm-code-important {
+  color: var(--code-important);
+}
+.cm-code-function {
+  color: var(--code-function);
+}
+.cm-code-property {
+  color: var(--code-property);
+}
+.cm-code-strong,
+.cm-code-important {
+  font-weight: 700;
+}
+.cm-code-em {
+  font-style: italic;
 }

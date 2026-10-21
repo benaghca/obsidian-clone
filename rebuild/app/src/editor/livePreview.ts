@@ -18,6 +18,7 @@ import {
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { writeClipboard } from "./clipboard";
+import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
@@ -95,10 +96,6 @@ class RemoteImageWidget extends WidgetType {
 
 // A code block's language, top right (Live Preview), or its copy button,
 // shown on hover (Reading view), as in Obsidian.
-const LANGUAGES: Record<string, string> = {
-  js: "JavaScript", javascript: "JavaScript", ts: "TypeScript", typescript: "TypeScript", python: "Python",
-  rust: "Rust", bash: "Shell", sh: "Shell", json: "JSON", css: "CSS", html: "HTML",
-};
 
 class CodeFlairWidget extends WidgetType {
   constructor(
@@ -117,7 +114,7 @@ class CodeFlairWidget extends WidgetType {
       void writeClipboard(this.code);
     };
     if (this.reading) return h("button", { class: "copy-code-button", "aria-label": "Copy", title: "Copy", onmousedown: copy }, icon("copy"));
-    return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, LANGUAGES[this.lang.toLowerCase()] ?? this.lang);
+    return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, codeLabel(this.lang));
   }
 }
 
@@ -456,6 +453,7 @@ function build(view: EditorView): DecorationSet {
 
 // Rendered text (callout bodies, table cells, embedded notes) looks like Reading view.
 paintWith((state, view) => decorate(state, [{ from: 0, to: state.doc.length }], { sel: [], reading: true, view }), readingMode.of(true));
+paintWith((state) => codeMarks(state, [{ from: 0, to: state.doc.length }]));
 
 const livePreviewPlugin = ViewPlugin.fromClass(
   class {

@@ -7,6 +7,7 @@ import { searchKeymap } from "@codemirror/search";
 import { Compartment, type EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { blocks } from "./blocks";
+import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
 import { frontmatterField } from "./frontmatter";
@@ -108,6 +109,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       markdownSyntax,
+      codeHighlight,
       frontmatterField,
       // Settings → Editor: line numbers, folding, spellcheck, pairing, lists, indentation.
       configExtensions(),

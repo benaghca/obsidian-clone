@@ -76,7 +76,7 @@ export class CalloutWidget extends DrawnWidget {
     const title = h("div", { class: "callout-title" }, h("div", { class: "callout-icon" }, icon(kind.icon)), inner);
     const content = h("div", { class: "callout-content" });
     const box = h("div", { class: "callout", "data-callout": header.type, "data-callout-fold": header.fold }, title, content);
-    box.style.setProperty("--callout-color", `var(--callout-${kind.color})`);
+    box.style.setProperty("--callout-color", `var(--color-${kind.color})`);
     const body = calloutBody(this.text);
     let painted: Painted | null = null;
     if (body.trim()) {
