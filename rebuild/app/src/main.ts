@@ -1,5 +1,13 @@
 import "./styles/theme.css";
-import "./styles/app.css";
+import "./styles/base.css";
+import "./styles/sidedock.css";
+import "./styles/fileTree.css";
+import "./styles/sideViews.css";
+import "./styles/panes.css";
+import "./styles/tabs.css";
+import "./styles/noteView.css";
+import "./styles/menu.css";
+import "./styles/prompt.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
 import "./styles/settings.css";
@@ -10,6 +18,7 @@ import { Bookmarks } from "./bookmarks";
 import { commands, fromStored } from "./commands";
 import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
+import { newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
 import { excluder } from "./settings/exclude";
@@ -31,7 +40,9 @@ import { pathQuery } from "./shell/searchQuery";
 import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
-import { noteName, parentDir, Workspace } from "./workspace";
+import { fileName, noteName, parentDir, trimSlashes } from "./paths";
+import { readStored, store } from "./storage";
+import { Workspace } from "./workspace";
 
 const ws = new Workspace();
 const bookmarks = new Bookmarks(ws);
@@ -66,8 +77,7 @@ const menus = createMenus({
   },
   renameActive: () => panes.focusTitle(true),
   newNoteIn: (folder) =>
-    void ws
-      .newNote(folder)
+    void newNote(ws, folder)
       .then(() => panes.focusTitle(true))
       .catch((err) => console.warn("Could not create a note", err)),
   newFolderIn: (folder) => {
@@ -118,12 +128,8 @@ const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[]
   { id: "file-explorer:new-file", label: "Create new note", icon: "square-pen" },
 ];
 const RIBBON_HIDDEN = "grove.ribbon.hidden";
-const ribbonHidden = new Set<string>();
-try {
-  for (const id of JSON.parse(localStorage.getItem(RIBBON_HIDDEN) ?? "[]")) ribbonHidden.add(String(id));
-} catch {
-  // no storage: every action shows
-}
+const savedHidden = readStored(RIBBON_HIDDEN, []);
+const ribbonHidden = new Set<string>(Array.isArray(savedHidden) ? savedHidden.map(String) : []);
 const ribbonActions = RIBBON.map((a) => iconButton(icon(a.icon), a.label, () => commands.run(a.id), "side-dock-ribbon-action"));
 const ribbonPluginOn = (a: (typeof RIBBON)[number]) => !a.plugin || commands.pluginEnabled(a.plugin);
 function renderRibbon() {
@@ -133,11 +139,7 @@ function setRibbonShown(id: string, shown: boolean) {
   if (shown) ribbonHidden.delete(id);
   else ribbonHidden.add(id);
   renderRibbon();
-  try {
-    localStorage.setItem(RIBBON_HIDDEN, JSON.stringify([...ribbonHidden]));
-  } catch {
-    // not remembered
-  }
+  store(RIBBON_HIDDEN, [...ribbonHidden]);
 }
 function ribbonMenu(e: MouseEvent) {
   e.preventDefault();
@@ -258,7 +260,7 @@ ws.newTabBacklinks = () => commands.pluginEnabled("backlink") && settings.get("b
 ws.newNoteFolder = () => {
   const a = appSettings();
   if (a.newFileLocation === "current") return ws.active.path ? parentDir(ws.active.path) : "";
-  if (a.newFileLocation === "folder") return a.newFileFolderPath.trim().replace(/^\/+|\/+$/g, "");
+  if (a.newFileLocation === "folder") return trimSlashes(a.newFileFolderPath);
   return "";
 };
 ws.permanentDelete = () => appSettings().trashOption === "none";
@@ -266,7 +268,7 @@ ws.linkStyle = () => ({ format: appSettings().newLinkFormat, wikilinks: !appSett
 ws.confirmDelete = async (path) => {
   if (!appSettings().promptDelete) return true;
   const folder = ws.isFolder(path);
-  const name = folder ? path.slice(path.lastIndexOf("/") + 1) : noteName(path);
+  const name = folder ? fileName(path) : noteName(path);
   const where = ws.permanentDelete() ? "It will be permanently deleted." : "It will be moved to the vault's .trash folder.";
   const r = await confirmDialog({
     title: folder ? "Delete folder" : "Delete file",
@@ -343,7 +345,7 @@ function applySettings(file: SettingsFile | null) {
     const metrics = [a.baseFontSize, a.textFontFamily, a.interfaceFontFamily, a.monospaceFontFamily].join("|");
     if (metrics !== shownMetrics) {
       shownMetrics = metrics;
-      for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+      for (const g of ws.groups()) ws.editors.viewOf(g).requestMeasure();
     }
   }
   if (all || file === "app.json") {
@@ -360,7 +362,7 @@ function applySettings(file: SettingsFile | null) {
       useTab: a.useTab,
       tabSize: a.tabSize,
     });
-    if (changed) ws.reconfigureEditors();
+    if (changed) ws.editors.reconfigure();
     const test = excluder(a.userIgnoreFilters);
     if (ws.isExcluded !== test) ws.isExcluded = test;
   }
@@ -437,7 +439,7 @@ ws.on((change) => {
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();
   settings.flush();
-  void ws.flushAll();
+  void ws.editors.flush();
 });
 
 await ws.init();

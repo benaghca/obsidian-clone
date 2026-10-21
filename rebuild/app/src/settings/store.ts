@@ -6,6 +6,7 @@
 // commands change settings.
 
 import { api } from "../api";
+import { listeners } from "../listeners";
 import {
   defaults,
   FILES,
@@ -19,7 +20,6 @@ import {
 } from "./schema";
 
 export type SettingsFile = FileName | "hotkeys.json";
-type Listener = (file: SettingsFile | null, key: string | null) => void;
 
 const WRITE_DELAY = 500;
 
@@ -28,7 +28,9 @@ class SettingsStore {
   private extras = new Map<FileName, Record<string, unknown>>();
   private hotkeyMap: Record<string, StoredHotkey[]> = {};
   private timers = new Map<SettingsFile, number>();
-  private listeners = new Set<Listener>();
+  private changes = listeners<[file: SettingsFile | null, key: string | null]>();
+  /** Called with the file and key that changed (both null after a load). */
+  readonly on = this.changes.on;
 
   constructor() {
     for (const [file, spec] of Object.entries(FILES) as [FileName, (typeof FILES)[FileName]][]) {
@@ -69,7 +71,7 @@ class SettingsStore {
       this.extras.set(file, extra);
     });
     this.hotkeyMap = sanitizeHotkeys(hotkeys);
-    this.emit(null, null);
+    this.changes.emit(null, null);
   }
 
   /** Change one setting. Invalid values are refused (returns false). */
@@ -79,7 +81,7 @@ class SettingsStore {
     const values = this.values.get(file)!;
     if (JSON.stringify(values[key]) === JSON.stringify(value)) return true;
     values[key] = value;
-    this.emit(file, key);
+    this.changes.emit(file, key);
     this.schedule(file);
     return true;
   }
@@ -90,14 +92,8 @@ class SettingsStore {
     if (hotkeys) next[id] = hotkeys;
     else delete next[id];
     this.hotkeyMap = next;
-    this.emit("hotkeys.json", id);
+    this.changes.emit("hotkeys.json", id);
     this.schedule("hotkeys.json");
-  }
-
-  /** Called with the file and key that changed (both null after a load). */
-  on(fn: Listener): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
   }
 
   /** Write everything still waiting (the window is closing). */
@@ -106,10 +102,6 @@ class SettingsStore {
       clearTimeout(timer);
       this.write(file);
     }
-  }
-
-  private emit(file: SettingsFile | null, key: string | null) {
-    for (const fn of this.listeners) fn(file, key);
   }
 
   private schedule(file: SettingsFile) {

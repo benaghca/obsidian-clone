@@ -9,11 +9,11 @@
 // index, which the workspace refreshes a second after a save.
 
 import { api, type SearchHit } from "../api";
-import { noteName, type Workspace } from "../workspace";
+import { compareNames, noteName } from "../paths";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
-import { icon } from "./icons";
-import { linkSpans, mentionSpans, snippetParts, type Span } from "./mentions";
-import { afterPaint, type SideView } from "./outlineView";
+import { linkSpans, mentionSpans, type Span } from "./mentions";
+import { afterPaint, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -51,67 +51,20 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   let unlinkedTimer = 0;
   let unlinkedSeq = 0;
 
-  /** A collapsible "Linked mentions"-style section with a count. */
-  function section(title: string, open: boolean, onToggle: (open: boolean) => void) {
-    const count = h("div", { class: "tree-item-flair" });
-    const chevron = h("div", { class: `tree-item-icon collapse-icon${open ? "" : " is-collapsed"}` }, icon("chevron-down", 14));
-    const body = h("div", { class: "search-result-container" });
-    body.hidden = !open;
-    const header = h(
-      "div",
-      {
-        class: "tree-item-self backlink-header",
-        onclick: () => {
-          body.hidden = !body.hidden;
-          chevron.classList.toggle("is-collapsed", body.hidden);
-          onToggle(!body.hidden);
-        },
-      },
-      chevron,
-      h("div", { class: "tree-item-inner" }, title),
-      count,
-    );
-    return { el: h("div", { class: "backlink-section" }, header, body), body, count };
-  }
-
   /** Rows grouped per note; returns the number of mentions shown (Obsidian's count). */
   function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string) {
     const byFile = new Map<string, Mention[]>();
     for (const m of mentions) byFile.set(m.from, [...(byFile.get(m.from) ?? []), m]);
-    const files = [...byFile.keys()].sort((a, b) =>
-      noteName(a).localeCompare(noteName(b), undefined, { numeric: true, sensitivity: "base" }),
-    );
+    const files = [...byFile.keys()].sort((a, b) => compareNames(noteName(a), noteName(b)));
     into.replaceChildren(
       ...files.map((path) => {
         const all = byFile.get(path)!;
         const matches = h("div", { class: "search-result-file-matches" });
-        const more = h("div", { class: "search-result-more" });
-        let shown = 0;
-        const showMore = (n: number) => {
-          more.before(...all.slice(shown, shown + n).map(matchRow));
-          shown = Math.min(all.length, shown + n);
-          more.textContent = `Show ${(all.length - shown).toLocaleString()} more`;
-          more.hidden = shown >= all.length;
-        };
-        more.addEventListener("click", () => showMore(PAGE * 4));
-        matches.append(more);
-        showMore(PAGE);
-        const collapsed = collapsedFiles.has(path);
-        matches.hidden = collapsed;
-        const chevron = h(
-          "div",
-          {
-            class: `tree-item-icon collapse-icon${collapsed ? " is-collapsed" : ""}`,
-            onclick: (e: MouseEvent) => {
-              e.stopPropagation();
-              matches.hidden = !matches.hidden;
-              chevron.classList.toggle("is-collapsed", matches.hidden);
-              if (matches.hidden) collapsedFiles.add(path);
-              else collapsedFiles.delete(path);
-            },
-          },
-          icon("chevron-down", 14),
-        );
+        pagedRows(matches, all, matchRow, PAGE);
+        const chevron = foldToggle(matches, collapsedFiles.has(path), (collapsed) => {
+          if (collapsed) collapsedFiles.add(path);
+          else collapsedFiles.delete(path);
+        });
         return h(
           "div",
           { class: "search-result" },
@@ -143,9 +96,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
           void ws.open(m.from, { line: m.line, ch: first ? [first.from, first.to] : undefined });
         },
       },
-      ...snippetParts(m.text, spans).map((part) =>
-        part.hit ? h("span", { class: "search-result-file-matched-text" }, part.text) : part.text,
-      ),
+      ...highlighted(m.text, spans),
     );
   }
 

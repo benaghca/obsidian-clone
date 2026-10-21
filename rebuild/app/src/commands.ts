@@ -10,10 +10,12 @@
 // A command can belong to a core plugin; while that plugin is off the command
 // is gone: not listed, not run, its hotkeys free.
 
+import { listeners } from "./listeners";
 import type { IconName } from "./shell/icons";
 import { isMac } from "./shell/keys";
 import type { MenuEntry } from "./shell/menu";
 import type { StoredHotkey } from "./settings/schema";
+import { readStored, store } from "./storage";
 
 export interface Hotkey {
   /** Ctrl on Linux and Windows, Cmd on macOS. */
@@ -140,19 +142,15 @@ export class CommandRegistry {
   private recentIds: string[] = [];
   /** Custom hotkeys by command id (Settings → Hotkeys); they replace the defaults. */
   private custom = new Map<string, Hotkey[]>();
-  private listeners = new Set<() => void>();
+  private changes = listeners();
   /** While true (a modal is open), hotkeys are left alone. */
   suspended = () => false;
   /** Whether a core plugin is on (set by the app from Settings → Core plugins). */
   pluginEnabled: (plugin: string) => boolean = () => true;
 
   constructor() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-      if (Array.isArray(saved)) this.recentIds = saved.filter((id) => typeof id === "string");
-    } catch {
-      // no storage: no recent commands
-    }
+    const saved = readStored(RECENT_KEY, []);
+    if (Array.isArray(saved)) this.recentIds = saved.filter((id) => typeof id === "string");
   }
 
   register(...cmds: Command[]) {
@@ -180,14 +178,11 @@ export class CommandRegistry {
   }
 
   /** Called when hotkeys or plugins change, so hints can be redrawn. */
-  onChange(fn: () => void): () => void {
-    this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
-  }
+  readonly onChange = this.changes.on;
 
   /** Tell listeners that what commands show (hotkeys, availability through plugins) changed. */
   changed() {
-    for (const fn of this.listeners) fn();
+    this.changes.emit();
   }
 
   /** A command's hotkeys now: its custom ones if set, else its defaults. */
@@ -259,11 +254,7 @@ export class CommandRegistry {
 
   noteUsed(id: string) {
     this.recentIds = [id, ...this.recentIds.filter((x) => x !== id)].slice(0, RECENT_MAX);
-    try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(this.recentIds));
-    } catch {
-      // storage full or disabled: recents just aren't remembered
-    }
+    store(RECENT_KEY, this.recentIds);
   }
 
   /**

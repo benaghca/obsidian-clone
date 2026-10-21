@@ -1,12 +1,7 @@
 import { expect, test } from "vitest";
-import { fuzzyMatch } from "./fuzzy";
+import { fuzzyMatch, fuzzyRank } from "./fuzzy";
 
-const rank = (query: string, names: string[]) =>
-  names
-    .map((name) => ({ name, m: fuzzyMatch(query, name) }))
-    .filter((x) => x.m)
-    .sort((a, b) => b.m!.score - a.m!.score)
-    .map((x) => x.name);
+const rank = (query: string, names: string[]) => fuzzyRank(query, names, (n) => n).map((x) => x.item);
 
 test("subsequence matching with indices", () => {
   expect(fuzzyMatch("prd", "Project roadmap")?.indices).toEqual([0, 1, 11]);

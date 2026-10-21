@@ -7,12 +7,13 @@
 // are only worked out while open: after a switch has painted, and 300ms
 // after typing stops. Nothing here runs on a keystroke.
 
-import { noteName, whereFromEvent, type Workspace } from "../workspace";
+import { compareNames, fileName, noteName } from "../paths";
+import { whereFromEvent } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { wikilinkTargets } from "./linksTags";
-import { snippetParts } from "./mentions";
-import { afterPaint, type SideView } from "./outlineView";
+import { afterPaint, highlighted, pagedRows, section, type SideView } from "./sideView";
 import { scanUnlinked, type UnlinkedMention } from "./unlinked";
 
 const DELAY = 300;
@@ -21,29 +22,6 @@ const SLICE_MS = 6;
 const PAGE = 50;
 
 export function createOutgoingView(ws: Workspace): SideView {
-  /** A collapsible section with a count, like the backlinks view's. */
-  function section(title: string, open: boolean, onToggle: (open: boolean) => void) {
-    const count = h("div", { class: "tree-item-flair" });
-    const chevron = h("div", { class: `tree-item-icon collapse-icon${open ? "" : " is-collapsed"}` }, icon("chevron-down", 14));
-    const body = h("div", { class: "search-result-container" });
-    body.hidden = !open;
-    const header = h(
-      "div",
-      {
-        class: "tree-item-self backlink-header",
-        onclick: () => {
-          body.hidden = !body.hidden;
-          chevron.classList.toggle("is-collapsed", body.hidden);
-          onToggle(!body.hidden);
-        },
-      },
-      chevron,
-      h("div", { class: "tree-item-inner" }, title),
-      count,
-    );
-    return { el: h("div", { class: "backlink-section" }, header, body), body, count };
-  }
-
   let unlinkedOpen = false;
   const links = section("Links", true, () => {});
   const unlinked = section("Unlinked mentions", false, (open) => {
@@ -64,7 +42,7 @@ export function createOutgoingView(ws: Workspace): SideView {
     const resolved = new Map<string, string | null>();
     const counts = new Map<string, { path: string | null; name: string; n: number }>();
     for (const target of targets) {
-      const name = target.split("/").pop()!;
+      const name = fileName(target);
       let dest = resolved.get(target.toLowerCase());
       if (dest === undefined) resolved.set(target.toLowerCase(), (dest = ws.resolve(target)));
       const key = dest ?? `?${name.toLowerCase()}`;
@@ -72,7 +50,7 @@ export function createOutgoingView(ws: Workspace): SideView {
       entry.n++;
       counts.set(key, entry);
     }
-    const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    const byName = (a: { name: string }, b: { name: string }) => compareNames(a.name, b.name);
     const found = [...counts.values()].filter((c) => c.path).sort(byName);
     const unresolved = [...counts.values()].filter((c) => !c.path).sort(byName);
     // Same list as last time: leave the DOM (and its scroll) alone.
@@ -133,17 +111,7 @@ export function createOutgoingView(ws: Workspace): SideView {
     if (key === shownUnlinked) return;
     shownUnlinked = key;
     unlinked.body.replaceChildren();
-    let shown = 0;
-    const more = h("div", { class: "search-result-more" });
-    const showMore = (n: number) => {
-      more.before(...mentions.slice(shown, shown + n).map(card));
-      shown = Math.min(mentions.length, shown + n);
-      more.textContent = `Show ${(mentions.length - shown).toLocaleString()} more`;
-      more.hidden = shown >= mentions.length;
-    };
-    more.addEventListener("click", () => showMore(PAGE * 4));
-    unlinked.body.append(more);
-    showMore(PAGE);
+    pagedRows(unlinked.body, mentions, card, PAGE);
     if (!mentions.length) unlinked.body.append(h("div", { class: "search-empty-state" }, path ? "No unlinked mentions found." : "No file is open."));
     unlinked.count.textContent = mentions.length ? mentions.length.toLocaleString() : "";
   }
@@ -175,9 +143,7 @@ export function createOutgoingView(ws: Workspace): SideView {
       h(
         "div",
         { class: "unlinked-mention-text" },
-        ...snippetParts(m.text, [{ from: m.from, to: m.to }]).map((part) =>
-          part.hit ? h("span", { class: "search-result-file-matched-text" }, part.text) : part.text,
-        ),
+        ...highlighted(m.text, [{ from: m.from, to: m.to }]),
       ),
       button,
     );

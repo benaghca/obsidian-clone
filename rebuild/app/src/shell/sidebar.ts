@@ -6,7 +6,11 @@ import { api, type FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
-import { noteName, whereFromEvent, type Workspace } from "../workspace";
+import { newFolder, renameFile } from "../fileOps";
+import { listeners } from "../listeners";
+import { compareNames, noteName } from "../paths";
+import { whereFromEvent } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { type MenuItems, showMenu } from "./menu";
@@ -138,8 +142,7 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
     (parent ? parent.children : root).push(node);
     if (entry.is_dir) dirs.set(entry.path, node);
   }
-  const byName = (a: TreeNode, b: TreeNode) =>
-    a.entry.name.localeCompare(b.entry.name, undefined, { numeric: true, sensitivity: "base" });
+  const byName = (a: TreeNode, b: TreeNode) => compareNames(a.entry.name, b.entry.name);
   // Folders first, by name (reversed for Z to A); files in the chosen order.
   const compare = (a: TreeNode, b: TreeNode) => {
     if (a.entry.is_dir !== b.entry.is_dir) return Number(b.entry.is_dir) - Number(a.entry.is_dir);
@@ -159,7 +162,7 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
-  const sortListeners = new Set<() => void>();
+  const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
   const list = h("div", { class: "nav-files-container" });
 
@@ -186,7 +189,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (order === sortOrder) return;
     sortOrder = order;
     render();
-    for (const fn of sortListeners) fn();
+    sorted.emit();
   }
 
   function contextMenu(e: MouseEvent, items: MenuItems) {
@@ -207,7 +210,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       label.contentEditable = "false";
       const name = label.textContent ?? "";
       label.textContent = shown;
-      if (commit) ws.rename(path, name).catch((err) => console.warn(err));
+      if (commit) renameFile(ws, path, name).catch((err) => console.warn(err));
     };
     label.addEventListener("blur", () => finish(true), { once: true });
     label.onkeydown = (ev) => {
@@ -222,7 +225,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   async function newFolderIn(parent: string) {
     try {
-      const path = await ws.newFolder(parent);
+      const path = await newFolder(ws, parent);
       if (parent) expandTo(path);
       startRename(path);
     } catch (err) {
@@ -372,7 +375,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       return sortOrder;
     },
     setSortOrder,
-    onSortChange: (fn: () => void) => void sortListeners.add(fn),
+    onSortChange: sorted.on,
   };
 }
 

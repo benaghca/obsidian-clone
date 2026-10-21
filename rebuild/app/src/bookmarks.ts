@@ -2,13 +2,17 @@
 // localStorage next to the layout prefs (nothing leaves the machine); a
 // rename or move carries its bookmark along.
 
+import { listeners } from "./listeners";
+import { readStored, store } from "./storage";
 import type { Workspace } from "./workspace";
 
 const key = (vaultPath: string) => `grove.bookmarks:${vaultPath}`;
 
 export class Bookmarks {
   private paths: string[] = [];
-  private listeners = new Set<() => void>();
+  private changes = listeners();
+  /** Called after bookmarks are added, removed, moved or loaded. */
+  readonly onChange = this.changes.on;
 
   constructor(private ws: Workspace) {
     ws.onMove((swap) => {
@@ -19,13 +23,9 @@ export class Bookmarks {
 
   /** Read the open vault's bookmarks (after the vault is open). */
   load() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(key(this.ws.vault.path)) ?? "[]");
-      this.paths = Array.isArray(saved) ? saved.filter((p) => typeof p === "string") : [];
-    } catch {
-      this.paths = [];
-    }
-    this.changed();
+    const saved = readStored(key(this.ws.vault.path), []);
+    this.paths = Array.isArray(saved) ? saved.filter((p) => typeof p === "string") : [];
+    this.changes.emit();
   }
 
   /** Bookmarked paths that still exist, in the order they were added. */
@@ -42,21 +42,9 @@ export class Bookmarks {
     this.set(this.has(path) ? this.paths.filter((p) => p !== path) : [...this.paths, path]);
   }
 
-  onChange(fn: () => void) {
-    this.listeners.add(fn);
-  }
-
   private set(paths: string[]) {
     this.paths = paths;
-    try {
-      localStorage.setItem(key(this.ws.vault.path), JSON.stringify(paths));
-    } catch {
-      // storage full or disabled: bookmarks last for this session only
-    }
-    this.changed();
-  }
-
-  private changed() {
-    for (const fn of this.listeners) fn();
+    store(key(this.ws.vault.path), paths); // without storage, bookmarks last for this session only
+    this.changes.emit();
   }
 }

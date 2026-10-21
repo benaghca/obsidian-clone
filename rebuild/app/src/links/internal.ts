@@ -3,6 +3,8 @@
 // finds its note, and rewriting the links to a note when it is renamed
 // ("Automatically update internal links"). Free of the DOM.
 
+import { fileName, parentDir } from "../paths";
+
 export interface NoteLike {
   name: string;
   path: string;
@@ -16,9 +18,8 @@ export interface LinkStyle {
   wikilinks: boolean;
 }
 
-const dirOf = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 const stripMd = (path: string) => path.replace(/\.md$/i, "");
-const nameOf = (path: string) => stripMd(path.slice(path.lastIndexOf("/") + 1));
+const nameOf = (path: string) => stripMd(fileName(path));
 
 /** `to` relative to the folder `fromDir` ("../Other/Note.md"). */
 export function relativePath(fromDir: string, to: string): string {
@@ -32,10 +33,10 @@ export function relativePath(fromDir: string, to: string): string {
 /** The path part of a new link to `target` from the note at `from` (with .md; wikilinks drop it). */
 export function linkPath(target: string, from: string | null, notes: NoteLike[], format: LinkFormat): string {
   if (format === "absolute") return target;
-  if (format === "relative") return relativePath(dirOf(from ?? ""), target);
+  if (format === "relative") return relativePath(parentDir(from ?? ""), target);
   const name = nameOf(target).toLowerCase();
   const clash = notes.some((n) => n.path !== target && n.name.toLowerCase() === name);
-  return clash ? target : target.slice(target.lastIndexOf("/") + 1);
+  return clash ? target : fileName(target);
 }
 
 /** Markdown link destinations: spaces and brackets percent-encoded, as Obsidian writes them. */
@@ -84,7 +85,7 @@ export function resolveLink(target: string, from: string | null, notes: NoteLike
   }
   const withMd = /\.md$/i.test(t) ? t : `${t}.md`;
   const byPath = new Map(notes.map((n) => [n.path.toLowerCase(), n.path]));
-  const fromDir = dirOf(from ?? "");
+  const fromDir = parentDir(from ?? "");
   if (t.startsWith("./") || t.startsWith("../")) {
     const rel = normalise(`${fromDir}/${withMd}`);
     return rel === null ? null : (byPath.get(rel.toLowerCase()) ?? null);
@@ -103,7 +104,7 @@ export function resolveLink(target: string, from: string | null, notes: NoteLike
   const matches = notes.filter((n) => n.name.toLowerCase() === name);
   if (matches.length <= 1) return matches[0]?.path ?? null;
   // Several notes share the name: the one in the linking note's folder, else the shallowest.
-  return (matches.find((n) => dirOf(n.path) === fromDir) ?? [...matches].sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0]).path;
+  return (matches.find((n) => parentDir(n.path) === fromDir) ?? [...matches].sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0]).path;
 }
 
 const WIKILINK = /(!?)\[\[([^\]|#\n]*)(#[^\]|\n]*)?(\|[^\]\n]*)?\]\]/g;

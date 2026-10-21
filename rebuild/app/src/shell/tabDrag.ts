@@ -9,8 +9,8 @@
 
 import type { Edge } from "../layout";
 import { animateOut } from "../motion";
-import type { Group, Tab, Workspace } from "../workspace";
-import { tabTitle } from "../workspace";
+import { type Group, type Tab, tabTitle } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import type { GroupView } from "./pane";

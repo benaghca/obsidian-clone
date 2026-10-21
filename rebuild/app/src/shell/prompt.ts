@@ -5,6 +5,7 @@
 
 import { animateOut } from "../motion";
 import { h } from "./dom";
+import { highlight } from "./fuzzy";
 import { icon } from "./icons";
 
 export interface PromptOptions<T> {
@@ -27,6 +28,20 @@ export interface PromptOptions<T> {
 export interface Prompt {
   close(restoreFocus?: boolean): void;
   readonly query: string;
+}
+
+/** The usual footer: navigate, what Enter does, dismiss. */
+export const hints = (enter: string): [string, string][] => [
+  ["↑↓", "to navigate"],
+  ["↵", enter],
+  ["esc", "to dismiss"],
+];
+
+/** A suggestion's title, its matched letters bold, and a muted note under it (a folder) if given. */
+export function suggestionText(row: HTMLElement, title: string, indices: number[], note = "") {
+  const content = h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(title, indices)));
+  if (note) content.append(h("div", { class: "suggestion-note" }, note));
+  row.append(content);
 }
 
 let openCount = 0;

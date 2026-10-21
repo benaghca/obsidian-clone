@@ -1,11 +1,12 @@
 // Ctrl+O quick switcher: the shared prompt with notes as items (fuzzy
 // matches with bolded letters, recent notes first for an empty query).
 
-import { parentDir, whereFromEvent, type Workspace } from "../workspace";
+import { parentDir } from "../paths";
+import { whereFromEvent } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
-import { highlight } from "./fuzzy";
 import { altKey, modKey } from "./keys";
-import { openPrompt } from "./prompt";
+import { openPrompt, suggestionText } from "./prompt";
 import { type SwitcherItem, switcherItems } from "./switcherItems";
 
 // Enter opens in the tab, Ctrl/Cmd+Enter in a new tab, Ctrl/Cmd+Alt+Enter
@@ -24,10 +25,8 @@ export function openQuickSwitcher(ws: Workspace) {
     ],
     items: (query) => switcherItems(query, ws.includedNotes(), ws.recent, ws.active.path),
     render(item, row) {
-      const content = h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(item.name, item.indices)));
-      row.append(content);
+      suggestionText(row, item.name, item.indices, item.path ? parentDir(item.path) : "");
       if (item.path === null) row.append(h("div", { class: "suggestion-aux" }, h("span", { class: "suggestion-action" }, "Enter to create")));
-      else if (parentDir(item.path)) content.append(h("div", { class: "suggestion-note" }, parentDir(item.path)));
     },
     choose(item, e) {
       if (item.path) void ws.open(item.path, { where: whereFromEvent(e) });

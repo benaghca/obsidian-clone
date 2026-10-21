@@ -1,0 +1,93 @@
+/* Menus: context menus and dropdowns (shell/menu.ts). */
+
+.menu {
+  position: fixed;
+  z-index: 100;
+  min-width: 160px;
+  max-width: 360px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: var(--menu-padding);
+  background: var(--menu-background);
+  border: 1px solid var(--menu-border-color);
+  border-radius: var(--radius-m);
+  box-shadow: var(--menu-shadow);
+  font-size: var(--font-ui-small);
+  line-height: 1.4;
+  animation: grove-popover-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+/* a submenu appears beside its item: a fade, no drop */
+.menu.mod-submenu {
+  animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+.menu.is-closing {
+  pointer-events: none;
+  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: var(--menu-item-radius);
+  color: var(--text-normal);
+  white-space: nowrap;
+  cursor: var(--cursor, default);
+}
+/* one highlight, moved by the mouse and the arrow keys alike; instant, as
+   in Obsidian (it follows the arrow keys, and nothing animates on a key) */
+.menu-item.selected {
+  background: var(--background-modifier-hover);
+}
+.menu-item-icon {
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-s);
+  flex: none;
+  color: var(--icon-color);
+}
+.menu-item-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-item-hotkey {
+  margin-left: 16px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+}
+.menu-item-icon.mod-checked,
+.menu-item-icon.mod-submenu {
+  margin-left: 8px;
+  color: var(--text-muted);
+}
+.menu-item.is-label {
+  color: var(--text-muted);
+  cursor: default;
+}
+.menu-item.is-disabled {
+  color: var(--text-faint);
+}
+.menu-item.is-disabled .menu-item-icon {
+  opacity: 0.5;
+}
+.menu-item.is-warning,
+.menu-item.is-warning .menu-item-icon {
+  color: var(--text-error);
+}
+.menu-item.is-warning.selected {
+  background: var(--background-modifier-error);
+}
+.menu-item.is-warning.selected,
+.menu-item.is-warning.selected .menu-item-icon {
+  color: var(--text-on-accent);
+}
+.menu-separator {
+  height: 1px;
+  margin: 4px calc(-1 * var(--menu-padding));
+  background: var(--background-modifier-border);
+}

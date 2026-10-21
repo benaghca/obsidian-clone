@@ -7,7 +7,7 @@
 // section shown is remembered while the app runs.
 
 import { animateOut } from "../motion";
-import { h } from "../shell/dom";
+import { h, keyButton } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 
 export interface SettingsSection {
@@ -32,10 +32,6 @@ let current: { close(): void; show(id: string): void; refreshNav(): void } | nul
 
 /** Whether the settings modal is open (the app's hotkeys stand aside meanwhile). */
 export const isSettingsOpen = () => current !== null;
-
-export function closeSettings() {
-  current?.close();
-}
 
 /** Re-list the sections (a core plugin was turned on or off, so its page comes or goes). */
 export function refreshSettingsNav() {
@@ -185,15 +181,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
     }
   });
 
-  const closeButton = h("div", { class: "modal-close-button clickable-icon", "aria-label": "Close", title: "Close", role: "button" }, icon("x", 16));
-  closeButton.tabIndex = 0;
-  closeButton.addEventListener("click", () => close());
-  closeButton.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      close();
-    }
-  });
+  const closeButton = keyButton(icon("x", 16), "Close", () => close(), "modal-close-button");
   const modal = h(
     "div",
     { class: "modal mod-settings", role: "dialog", "aria-modal": "true", "aria-label": "Settings" },

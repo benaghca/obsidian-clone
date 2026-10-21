@@ -1,0 +1,189 @@
+/* Each pane's tab strip (the top ones double as the title bar), the empty
+   window corner for the frameless window's buttons, and backlinks under
+   the note. */
+
+/* tab strip: the top ones double as the title bar */
+.mod-root .workspace-tab-header-container {
+  height: var(--header-height);
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  background: var(--background-secondary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding: 0 4px 0 8px;
+}
+.mod-root .workspace-tabs.mod-top > .workspace-tab-header-container {
+  -webkit-app-region: drag;
+}
+/* Tabs share the strip like Obsidian's: each is a full tab width while
+   there is room, and they all shrink evenly when there is not, instead of
+   shrinking to fit their titles. The + button follows the last tab. */
+.workspace-tab-header-container-inner {
+  display: flex;
+  align-items: flex-end;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding-top: 7px;
+  overflow: hidden;
+}
+.mod-root .workspace-tab-header {
+  height: 28px;
+  width: var(--tab-width);
+  min-width: var(--tab-min-width);
+  flex: 0 1 auto;
+  position: relative;
+  padding: 0 1px;
+  margin-bottom: -1px;
+  -webkit-app-region: no-drag;
+}
+/* opening and closing tabs grow and shrink (Web Animations in pane.ts) */
+.mod-root .workspace-tab-header.is-closing {
+  pointer-events: none;
+}
+.workspace-tab-header-inner {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 4px 0 10px;
+  gap: 4px;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
+  color: var(--text-muted);
+  /* the active tab's lighter "indicator" fades in rather than snapping */
+  transition:
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    border-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.mod-root .workspace-tab-header:not(.is-active):hover .workspace-tab-header-inner {
+  background: var(--background-modifier-hover);
+  border-radius: 6px;
+  height: 24px;
+  margin-top: 1px;
+}
+/* thin separators between inactive tabs */
+.mod-root .workspace-tab-header:not(.is-active) + .workspace-tab-header:not(.is-active)::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 7px;
+  height: 14px;
+  width: 1px;
+  background: var(--background-modifier-border-hover);
+}
+.mod-root .workspace-tab-header.is-active .workspace-tab-header-inner {
+  background: var(--background-primary);
+  color: var(--text-normal);
+  border: 1px solid var(--background-modifier-border);
+  border-bottom-color: var(--background-primary);
+}
+.workspace-tab-header-inner-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.workspace-tab-header-inner-close-button {
+  --icon-size: var(--icon-xs);
+  --icon-stroke: var(--icon-xs-stroke-width);
+  display: flex;
+  padding: 2px;
+  border-radius: var(--radius-s);
+  color: var(--icon-color);
+  opacity: 0;
+  transition:
+    opacity var(--anim-duration-fast) var(--anim-ease-out),
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.workspace-tab-header:hover .workspace-tab-header-inner-close-button,
+.workspace-tab-header.is-active .workspace-tab-header-inner-close-button,
+.workspace-tab-header.is-pinned .workspace-tab-header-inner-close-button {
+  opacity: 1;
+}
+.workspace-tab-header-inner-close-button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--icon-color-hover);
+}
+/* centred on the tabs' 28px row, so they line up with the tab titles */
+.workspace-tab-header-new-tab,
+.workspace-tab-header-tab-list {
+  align-self: flex-end;
+  margin-bottom: 2px;
+  -webkit-app-region: no-drag;
+}
+.workspace-tab-header-new-tab {
+  margin-left: 4px;
+}
+.workspace-tab-header-spacer {
+  flex: 1;
+  height: 100%;
+}
+.mod-root .sidebar-toggle-button.mod-right {
+  align-self: flex-end;
+  margin: 0 0 2px 2px;
+  -webkit-app-region: no-drag;
+}
+/* Only the pane in the top-right corner has the right sidebar's button (and
+   only while the sidebar has a view). Settings → Interface → Show ribbon and
+   Show tab title bar; Editor → Inline title. */
+.workspace-tabs:not(.mod-top-right-space) .sidebar-toggle-button.mod-right,
+.is-right-sidebar-empty .sidebar-toggle-button.mod-right,
+.is-ribbon-hidden .workspace-ribbon,
+.is-view-header-hidden .view-header,
+.is-inline-title-hidden .inline-title:not(.is-renaming) {
+  display: none;
+}
+
+/* Backlinks in document: under the note, past a thin rule. */
+.embedded-backlinks {
+  margin: 0 0 32vh;
+  padding-top: 16px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-small);
+  user-select: none;
+  cursor: default;
+}
+.embedded-backlinks .backlink-pane {
+  overflow: visible;
+  padding: 0;
+}
+
+/* Frameless window (Tauri): the window buttons float in the top-right
+   corner, and the rightmost header leaves room for them. */
+.is-frameless {
+  --titlebar-buttons-width: 92px;
+}
+.titlebar-buttons {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 20;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px;
+  -webkit-app-region: no-drag;
+}
+.is-frameless .mod-root .mod-top-right-space > .workspace-tab-header-container {
+  transition: padding-right var(--anim-duration-sidebar) var(--anim-ease-out);
+}
+.is-frameless.is-right-sidebar-collapsed .mod-root .mod-top-right-space > .workspace-tab-header-container {
+  padding-right: calc(4px + var(--titlebar-buttons-width));
+}
+.is-frameless .mod-right-split > .workspace-tab-header-container {
+  padding-right: var(--titlebar-buttons-width);
+}
+.titlebar-button {
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+}
+.titlebar-button.mod-maximize {
+  --icon-size: var(--icon-xs);
+}
+.titlebar-button.mod-close:hover {
+  background: var(--text-error);
+  color: white;
+}

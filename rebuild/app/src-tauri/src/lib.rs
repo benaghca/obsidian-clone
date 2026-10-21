@@ -110,12 +110,13 @@ fn fallback_config_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("grove")
 }
 
-fn vault_mut(state: &AppState) -> Result<std::sync::MutexGuard<'_, Inner>, String> {
-    let guard = lock(&state.inner);
-    if guard.vault.is_none() {
-        return Err("no vault open".into());
-    }
-    Ok(guard)
+/// Run `f` on the open vault, or fail when none is open.
+fn with_vault<T>(
+    state: &AppState,
+    f: impl FnOnce(&mut vault::Vault) -> Result<T, String>,
+) -> Result<T, String> {
+    let mut inner = lock(&state.inner);
+    f(inner.vault.as_mut().ok_or("no vault open")?)
 }
 
 #[tauri::command]
@@ -144,20 +145,17 @@ fn last_vault(state: State<'_, AppState>) -> Result<Option<VaultInfo>, String> {
 
 #[tauri::command]
 fn list_files(state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
-    let inner = vault_mut(&state)?;
-    Ok(inner.vault.as_ref().unwrap().list_files())
+    with_vault(&state, |v| Ok(v.list_files()))
 }
 
 #[tauri::command]
 fn read_note(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    let inner = vault_mut(&state)?;
-    inner.vault.as_ref().unwrap().read_note(&path)
+    with_vault(&state, |v| v.read_note(&path))
 }
 
 #[tauri::command]
 fn write_note(state: State<'_, AppState>, path: String, content: String) -> Result<(), String> {
-    let mut inner = vault_mut(&state)?;
-    inner.vault.as_mut().unwrap().write_note(&path, &content)
+    with_vault(&state, |v| v.write_note(&path, &content))
 }
 
 #[tauri::command]
@@ -166,20 +164,17 @@ fn create_note(
     path: String,
     content: String,
 ) -> Result<FileEntry, String> {
-    let mut inner = vault_mut(&state)?;
-    inner.vault.as_mut().unwrap().create_note(&path, &content)
+    with_vault(&state, |v| v.create_note(&path, &content))
 }
 
 #[tauri::command]
 fn create_folder(state: State<'_, AppState>, path: String) -> Result<FileEntry, String> {
-    let mut inner = vault_mut(&state)?;
-    inner.vault.as_mut().unwrap().create_folder(&path)
+    with_vault(&state, |v| v.create_folder(&path))
 }
 
 #[tauri::command]
 fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Result<(), String> {
-    let mut inner = vault_mut(&state)?;
-    inner.vault.as_mut().unwrap().rename_path(&from, &to)
+    with_vault(&state, |v| v.rename_path(&from, &to))
 }
 
 /// `permanent` (optional, default false) removes the file instead of moving it to `.trash/`.
@@ -189,36 +184,27 @@ fn delete_path(
     path: String,
     permanent: Option<bool>,
 ) -> Result<(), String> {
-    let mut inner = vault_mut(&state)?;
-    inner
-        .vault
-        .as_mut()
-        .unwrap()
-        .delete_path(&path, permanent.unwrap_or(false))
+    with_vault(&state, |v| v.delete_path(&path, permanent.unwrap_or(false)))
 }
 
 /// A settings file from the vault's `.grove/` folder (`None` if missing).
 #[tauri::command]
 fn read_config(state: State<'_, AppState>, name: String) -> Result<Option<String>, String> {
-    let inner = vault_mut(&state)?;
-    inner.vault.as_ref().unwrap().read_config(&name)
+    with_vault(&state, |v| v.read_config(&name))
 }
 
 /// Write a settings file (JSON) into the vault's `.grove/` folder, atomically.
 #[tauri::command]
 fn write_config(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
-    let inner = vault_mut(&state)?;
-    inner.vault.as_ref().unwrap().write_config(&name, &content)
+    with_vault(&state, |v| v.write_config(&name, &content))
 }
 
 #[tauri::command]
 fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<SearchHit>, String> {
-    let inner = vault_mut(&state)?;
-    Ok(inner.vault.as_ref().unwrap().search(&query, limit))
+    with_vault(&state, |v| Ok(v.search(&query, limit)))
 }
 
 #[tauri::command]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
-    let inner = vault_mut(&state)?;
-    Ok(inner.vault.as_ref().unwrap().link_index())
+    with_vault(&state, |v| Ok(v.link_index()))
 }

@@ -7,9 +7,8 @@
 
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
-import { icon } from "./icons";
 import { type TagNode, tagsInText, tagTree } from "./linksTags";
-import type { SideView } from "./outlineView";
+import { foldToggle, type SideView } from "./sideView";
 import { createTagReader } from "./vaultTags";
 
 const DELAY = 300;
@@ -61,23 +60,12 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
   function rows(nodes: TagNode[], depth: number): HTMLElement[] {
     return nodes.map((n) => {
       const kids = h("div", { class: "tree-item-children" }, ...rows(n.children, depth + 1));
-      const isCollapsed = collapsed.has(n.tag.toLowerCase());
-      kids.hidden = isCollapsed;
+      const key = n.tag.toLowerCase();
       const chevron = n.children.length
-        ? h(
-            "div",
-            {
-              class: `tree-item-icon collapse-icon${isCollapsed ? " is-collapsed" : ""}`,
-              onclick: (e: MouseEvent) => {
-                e.stopPropagation();
-                kids.hidden = !kids.hidden;
-                chevron!.classList.toggle("is-collapsed", kids.hidden);
-                if (kids.hidden) collapsed.add(n.tag.toLowerCase());
-                else collapsed.delete(n.tag.toLowerCase());
-              },
-            },
-            icon("chevron-down", 14),
-          )
+        ? foldToggle(kids, collapsed.has(key), (folded) => {
+            if (folded) collapsed.add(key);
+            else collapsed.delete(key);
+          })
         : null;
       const self = h(
         "div",

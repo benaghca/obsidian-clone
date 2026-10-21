@@ -1,7 +1,7 @@
 // What the command palette lists for a query. Free of the DOM so it can be
 // tested and timed on its own.
 
-import { fuzzyMatch } from "./fuzzy";
+import { fuzzyRank } from "./fuzzy";
 
 export interface PaletteCommand {
   id: string;
@@ -36,11 +36,7 @@ export function paletteItems<C extends PaletteCommand>(query: string, cmds: C[],
     const rest = cmds.filter((c) => !rank.has(c.id)).sort(byName);
     return [...used, ...rest].map((cmd) => ({ cmd, indices: [] }));
   }
-  const scored: (PaletteItem<C> & { score: number })[] = [];
-  for (const cmd of cmds) {
-    const m = fuzzyMatch(query, cmd.name);
-    if (m) scored.push({ cmd, indices: m.indices, score: m.score });
-  }
-  scored.sort((a, b) => b.score - a.score || recency(a.cmd) - recency(b.cmd) || byName(a.cmd, b.cmd));
-  return scored;
+  return fuzzyRank(query, cmds, (c) => c.name)
+    .sort((a, b) => b.score - a.score || recency(a.item) - recency(b.item) || byName(a.item, b.item))
+    .map(({ item, indices }) => ({ cmd: item, indices }));
 }

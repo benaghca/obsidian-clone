@@ -6,7 +6,7 @@
 
 use crate::fsutil::{self, atomic_write};
 use crate::index::Index;
-use crate::model::{ChangeKind, FileEntry, LinkIndex, SearchHit, VaultChanged};
+use crate::model::{push_change, ChangeKind, FileEntry, LinkIndex, SearchHit, VaultChanged};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -72,10 +72,8 @@ impl Vault {
         }
         atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        let mtime_ms = fsutil::mtime_ms(&md);
-        let size = md.len();
         self.index
-            .upsert_note(&self.root, &rel, content, mtime_ms, size);
+            .upsert_note(&self.root, &rel, content, fsutil::mtime_ms(&md), md.len());
         Ok(self.entry_for(&rel))
     }
 
@@ -130,14 +128,13 @@ impl Vault {
             } else {
                 fs::remove_file(&full).map_err(|e| e.to_string())?;
             }
-            self.index.remove_tree(&rel);
-            return Ok(());
+        } else {
+            let dest = trash_dest(&self.root, &rel);
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            fs::rename(&full, &dest).map_err(|e| e.to_string())?;
         }
-        let dest = trash_dest(&self.root, &rel);
-        if let Some(parent) = dest.parent() {
-            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-        }
-        fs::rename(&full, &dest).map_err(|e| e.to_string())?;
         self.index.remove_tree(&rel);
         Ok(())
     }
@@ -193,27 +190,12 @@ impl Vault {
                 out.push(change);
                 continue;
             }
-            let mut created = Vec::new();
-            let mut modified = Vec::new();
-            for path in change.paths {
-                if self.index.contains(&path) {
-                    modified.push(path);
-                } else {
-                    created.push(path);
-                }
-            }
-            if !created.is_empty() {
-                out.push(VaultChanged {
-                    kind: ChangeKind::Create,
-                    paths: created,
-                });
-            }
-            if !modified.is_empty() {
-                out.push(VaultChanged {
-                    kind: ChangeKind::Modify,
-                    paths: modified,
-                });
-            }
+            let (modified, created) = change
+                .paths
+                .into_iter()
+                .partition(|path| self.index.contains(path));
+            push_change(&mut out, ChangeKind::Create, created);
+            push_change(&mut out, ChangeKind::Modify, modified);
         }
         out
     }
@@ -265,24 +247,9 @@ impl Vault {
         }
         self.index = fresh;
         let mut out = Vec::new();
-        if !removed.is_empty() {
-            out.push(VaultChanged {
-                kind: ChangeKind::Remove,
-                paths: removed,
-            });
-        }
-        if !created.is_empty() {
-            out.push(VaultChanged {
-                kind: ChangeKind::Create,
-                paths: created,
-            });
-        }
-        if !modified.is_empty() {
-            out.push(VaultChanged {
-                kind: ChangeKind::Modify,
-                paths: modified,
-            });
-        }
+        push_change(&mut out, ChangeKind::Remove, removed);
+        push_change(&mut out, ChangeKind::Create, created);
+        push_change(&mut out, ChangeKind::Modify, modified);
         out
     }
 

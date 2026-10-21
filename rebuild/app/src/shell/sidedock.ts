@@ -5,7 +5,9 @@
 // note column's wrap width for the length of the move, so the text slides
 // over as one block instead of re-flowing every frame.
 
+import { listeners } from "../listeners";
 import { duration } from "../motion";
+import { dragPointer } from "./dom";
 
 export type Side = "left" | "right";
 
@@ -37,10 +39,7 @@ const clampWidth = (px: number) => Math.round(Math.min(MAX_DOCK_WIDTH, Math.max(
 export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks {
   const collapsedClass = (side: Side) => `is-${side}-sidebar-collapsed`;
   const dock = (side: Side) => app.querySelector<HTMLElement>(`.mod-${side}-split`)!;
-  const listeners = new Set<(side: Side) => void>();
-  const changed = (side: Side) => {
-    for (const fn of listeners) fn(side);
-  };
+  const changes = listeners<[Side]>();
 
   const isCollapsed = (side: Side) => app.classList.contains(collapsedClass(side));
 
@@ -69,7 +68,7 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
         .find((a): a is CSSTransition => a instanceof CSSTransition && a.transitionProperty === "width");
       pane.holdColumn(now - (collapsed ? 0 : width(side)), transition);
     }
-    changed(side);
+    changes.emit(side);
   }
 
   function setWidth(side: Side, px: number) {
@@ -82,32 +81,13 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
     handle.addEventListener("pointerdown", (down) => {
       if (down.button !== 0) return;
       down.preventDefault();
-      handle.setPointerCapture(down.pointerId);
-      const startX = down.clientX;
       const startWidth = width(side);
       const sign = side === "left" ? 1 : -1;
-      let frame = 0;
-      let x = startX;
       app.classList.add("is-sidedock-resizing");
-      const move = (e: PointerEvent) => {
-        x = e.clientX;
-        frame ||= requestAnimationFrame(() => {
-          frame = 0;
-          setWidth(side, startWidth + sign * (x - startX));
-        });
-      };
-      const up = () => {
-        cancelAnimationFrame(frame);
-        setWidth(side, startWidth + sign * (x - startX));
+      dragPointer(down, handle, (e) => setWidth(side, startWidth + sign * (e.clientX - down.clientX)), () => {
         app.classList.remove("is-sidedock-resizing");
-        handle.removeEventListener("pointermove", move);
-        handle.removeEventListener("pointerup", up);
-        handle.removeEventListener("pointercancel", up);
-        changed(side);
-      };
-      handle.addEventListener("pointermove", move);
-      handle.addEventListener("pointerup", up);
-      handle.addEventListener("pointercancel", up);
+        changes.emit(side);
+      });
     });
     return handle;
   }
@@ -119,6 +99,6 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
     width,
     setWidth,
     resizeHandle,
-    onChange: (fn) => void listeners.add(fn),
+    onChange: changes.on,
   };
 }

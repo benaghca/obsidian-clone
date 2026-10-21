@@ -12,6 +12,7 @@ import type { EditorView } from "@codemirror/view";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
+import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import {
   BLOCKS,
@@ -42,7 +43,9 @@ import { openTemplatePrompt } from "./shell/templatePrompt";
 import type { RightSidebar, RightView } from "./shell/rightSidebar";
 import type { LeftSidebar, LeftView } from "./shell/sidebar";
 import type { Sidedocks } from "./shell/sidedock";
-import { noteName, type OpenWhere, type Workspace } from "./workspace";
+import { noteName, systemPath, trimSlashes } from "./paths";
+import type { OpenWhere } from "./tabs";
+import type { Workspace } from "./workspace";
 
 export interface AppParts {
   ws: Workspace;
@@ -64,10 +67,7 @@ const mod = (key: string, more: { shift?: boolean; alt?: boolean } = {}) => [{ m
 const templates = () => settings.get("templates.json");
 const today = () => formatDate(new Date(), templates().dateFormat || "YYYY-MM-DD");
 const nowTime = () => formatDate(new Date(), templates().timeFormat || "HH:mm");
-const folderPrefix = (folder: string) => {
-  const f = folder.trim().replace(/^\/+|\/+$/g, "");
-  return f ? `${f}/` : "";
-};
+const folderPrefix = (folder: string) => (trimSlashes(folder) ? `${trimSlashes(folder)}/` : "");
 
 /**
  * Register everything. Only `ws` and `bookmarks` must exist yet: the views
@@ -103,8 +103,8 @@ export function registerAppCommands(parts: AppParts) {
     parts.docks.setCollapsed("right", false);
   };
 
-  async function newNote(where?: OpenWhere) {
-    await ws.newNote("", where);
+  async function createNewNote(where?: OpenWhere) {
+    await newNote(ws, "", where);
     parts.panes.focusTitle(true);
   }
 
@@ -133,7 +133,7 @@ export function registerAppCommands(parts: AppParts) {
   /** A template note's text with its variables filled in for a note titled `title`. */
   const templateText = async (templatePath: string | null, title: string) => {
     if (!templatePath) return "";
-    const text = await ws.text(templatePath).catch(() => "");
+    const text = await ws.editors.text(templatePath).catch(() => "");
     return fillTemplate(text, title, new Date(), templates().dateFormat || "YYYY-MM-DD", templates().timeFormat || "HH:mm");
   };
   async function openDailyNote() {
@@ -141,12 +141,12 @@ export function registerAppCommands(parts: AppParts) {
     const existing = ws.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
     if (existing) return ws.open(existing.path);
     const template = daily().template.trim() ? ws.resolve(daily().template.trim(), null) : null;
-    const entry = await ws.createNote(path, await templateText(template, noteName(path)));
+    const entry = await createNote(ws, path, await templateText(template, noteName(path)));
     await ws.open(entry.path);
   }
 
   // ----- templates -----
-  const templateFolder = () => templates().folder.trim().replace(/^\/+|\/+$/g, "");
+  const templateFolder = () => trimSlashes(templates().folder);
   const templateNotes = () => (templateFolder() ? ws.notes.filter((n) => n.path.startsWith(`${templateFolder()}/`)) : []);
   async function insertTemplate(path: string) {
     const view = ws.view;
@@ -249,14 +249,14 @@ export function registerAppCommands(parts: AppParts) {
       hotkeys: mod("o"),
       run: () => openQuickSwitcher(ws),
     },
-    { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => newNote() },
-    { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => newNote(false) },
+    { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => createNewNote() },
+    { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => createNewNote(false) },
     {
       id: "file-explorer:new-file-in-new-pane",
       name: "Create note to the right",
       icon: "file-plus",
       hotkeys: mod("n", { shift: true }),
-      run: () => newNote("right"),
+      run: () => createNewNote("right"),
     },
     { id: "file-explorer:new-folder", name: "Files: Create new folder", icon: "folder-plus", run: () => parts.left.newFolderIn("") },
     { id: "daily-notes", name: "Daily notes: Open today's daily note", plugin: "daily-notes", icon: "calendar-days", run: () => openDailyNote() },
@@ -434,14 +434,14 @@ export function registerAppCommands(parts: AppParts) {
       name: "Delete current file",
       icon: "trash-2",
       when: hasNote,
-      run: () => ws.remove(note()).catch((err) => console.warn("Could not delete", err)),
+      run: () => deleteFile(ws, note()).catch((err) => console.warn("Could not delete", err)),
     },
     {
       id: "file-explorer:duplicate-file",
       name: "Make a copy of the current file",
       icon: "files",
       when: hasNote,
-      run: () => ws.makeCopy(note()).catch((err) => console.warn("Could not copy", err)),
+      run: () => copyNote(ws, note()).catch((err) => console.warn("Could not copy", err)),
     },
     {
       id: "file-explorer:move-file",
@@ -480,11 +480,7 @@ export function registerAppCommands(parts: AppParts) {
       name: "Copy current file path from system root",
       icon: "hard-drive",
       when: hasNote,
-      run: () => {
-        const sep = ws.vault.path.includes("\\") ? "\\" : "/";
-        const full = `${ws.vault.path}${sep}${note().split("/").join(sep)}`;
-        navigator.clipboard.writeText(full).catch((err) => console.warn("Could not copy", err));
-      },
+      run: () => navigator.clipboard.writeText(systemPath(ws.vault.path, note())).catch((err) => console.warn("Could not copy", err)),
     },
     { id: "editor:save-file", name: "Save current file", hotkeys: mod("s"), when: hasNote, run: () => ws.saveNow() },
     {

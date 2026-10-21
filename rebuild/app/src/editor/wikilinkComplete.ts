@@ -9,6 +9,7 @@ import {
   type CompletionResult,
 } from "@codemirror/autocomplete";
 import type { EditorView } from "@codemirror/view";
+import { parentDir } from "../paths";
 import { editorHost } from "./host";
 
 // The chosen note replaces the whole "[[...]]" with a link written the way
@@ -30,10 +31,13 @@ function wikilinkSource(ctx: CompletionContext): CompletionResult | null {
   if (!before) return null;
   const host = ctx.state.facet(editorHost);
   if (!host) return null;
-  const options: Completion[] = host.notes().map((note) => {
-    const folder = note.path.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : undefined;
-    return { label: note.name, detail: folder, apply: applyLink, type: "note", path: note.path };
-  });
+  const options: Completion[] = host.notes().map((note) => ({
+    label: note.name,
+    detail: parentDir(note.path) || undefined,
+    apply: applyLink,
+    type: "note",
+    path: note.path,
+  }));
   return { from: before.from + 2, options, validFor: /^[^[\]|#\n]*$/ };
 }
 

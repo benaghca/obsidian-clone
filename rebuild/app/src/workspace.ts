@@ -1,94 +1,23 @@
-// App state: the vault's files, the layout of tab groups (splits, see
-// layout.ts) with each tab's back/forward history, and one EditorState per
-// open note. Each tab group has its own EditorView showing its active tab;
-// switching swaps states, so it costs no re-parse or re-render of unchanged
-// notes.
-//
-// The same note in two panes: the note's main state (with its undo history)
-// is shown by exactly one of them. Every other pane showing that note gets a
-// light mirror state of the same document without a history of its own.
-// Whatever pane a change is typed in, it is applied there and then forwarded
-// to the other panes as a transaction annotated as a copy, so all of them
-// stay in step, each with its own selection and scroll position. Undo in a
-// mirror runs on the main state. Saving and the "doc" event follow the
-// original change only, so a note is still saved once.
+// App state: the vault's files and link index, and the layout of tab groups
+// (splits, see layout.ts) with their tabs (tabs.ts). This module changes
+// them (opening, closing, splitting, moving, navigating, renaming and
+// deleting) and tells the views through change events. The editors that
+// show the notes are noteEditors.ts; the saved form of the layout is
+// savedLayout.ts.
 
-import { redo, undo } from "@codemirror/commands";
-import { Annotation, EditorSelection, type EditorState, Prec, Transaction, type TransactionSpec } from "@codemirror/state";
-import { EditorView, keymap } from "@codemirror/view";
-import { isTauri, api, type FileEntry, type LinkIndex, type VaultInfo } from "./api";
-import { countsField } from "./editor/counts";
-import { configEffects } from "./editor/config";
-import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
+import { EditorView } from "@codemirror/view";
+import { api, type FileEntry, isTauri, type LinkIndex, type VaultInfo } from "./api";
+import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef } from "./editor/host";
-import { type Edge, Layout, type LayoutJSON, type TabGroup } from "./layout";
+import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
-import { duration, nextFrame, smoothScrollTo } from "./motion";
-
-export interface Tab {
-  id: number;
-  path: string | null;
-  back: string[];
-  forward: string[];
-  /** Live Preview, Source mode or Reading view, per tab like Obsidian's. */
-  mode: ViewMode;
-  /** A pinned tab keeps its note: links followed from it open in a new tab. */
-  pinned: boolean;
-  /** Backlinks shown under the note (Obsidian's "Backlinks in document"). */
-  backlinks: boolean;
-  /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
-  memory: TabMemory | null;
-  /** A view instead of a note: the graph, or the local graph of `graphFile` (path is null then). */
-  type?: ViewType;
-  /** The note a local graph shows (it follows the note open in the active pane). */
-  graphFile?: string | null;
-}
-
-/** The views a tab can show instead of a note. */
-export type ViewType = "graph" | "localgraph";
-
-/**
- * Back/forward history entries are note paths, or one of these for a view
- * ("\0graph", "\0localgraph\0Note.md"); no path starts with a NUL.
- */
-export function viewEntry(tab: { type?: ViewType; graphFile?: string | null }): string {
-  return tab.type === "localgraph" ? `\0localgraph\0${tab.graphFile ?? ""}` : "\0graph";
-}
-
-export function parseViewEntry(entry: string): { type: ViewType; file: string | null } | null {
-  if (!entry.startsWith("\0")) return null;
-  if (entry.startsWith("\0localgraph\0")) return { type: "localgraph", file: entry.slice(12) || null };
-  return { type: "graph", file: null };
-}
-
-/** A tab's title: its note's name, the view's name, or "New tab". */
-export function tabTitle(tab: Tab): string {
-  if (tab.type === "graph") return "Graph view";
-  if (tab.type === "localgraph") return tab.graphFile ? `Graph of ${noteName(tab.graphFile)}` : "Local graph";
-  return tab.path ? noteName(tab.path) : "New tab";
-}
-
-export interface TabMemory {
-  path: string;
-  /** null: no position to restore (a split places its pane by a line instead). */
-  scrollTop: number | null;
-  selection: EditorSelection | null;
-}
-
-export type Group = TabGroup<Tab>;
-
-/**
- * Where to open a note, like Obsidian's: in the tab (false), a new tab, or a
- * new tab group to the right of (or below) the pane.
- */
-export type OpenWhere = false | "tab" | "right" | "down";
-
-/** Ctrl/Cmd+Alt+click opens to the right, Ctrl/Cmd+click in a new tab, as in Obsidian. */
-export function whereFromEvent(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): OpenWhere {
-  const mod = e.ctrlKey || e.metaKey;
-  return mod && e.altKey ? "right" : mod ? "tab" : false;
-}
+import { listeners } from "./listeners";
+import { createNote } from "./fileOps";
+import { NoteEditors } from "./noteEditors";
+import { noteName } from "./paths";
+import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
+import { type Group, type OpenWhere, parseViewEntry, type Tab, type ViewType, viewEntry } from "./tabs";
 
 /**
  * - "files": the vault's file list changed.
@@ -101,58 +30,14 @@ export function whereFromEvent(e: { ctrlKey: boolean; metaKey: boolean; altKey: 
  */
 export type Change = "files" | "tabs" | "layout" | "pane" | "show" | "doc" | "links" | "mode";
 
-/** A tab group's editor and what it shows. */
-interface Pane {
-  group: Group;
-  view: EditorView;
-  scroller: HTMLElement | null;
-  /** The tab and note on screen (null: the empty "New tab" state). */
-  tab: Tab | null;
-  path: string | null;
-}
-
-interface SavedTab {
-  path: string | null;
-  type?: ViewType;
-  file?: string | null;
-  mode: ViewMode;
-  pinned: boolean;
-  backlinks?: boolean;
-  back: string[];
-  forward: string[];
-  scroll?: number;
-  sel?: [number, number];
-}
-
-export interface SavedWorkspace {
-  v: 1;
-  root: LayoutJSON<SavedTab>;
-  active: number;
-}
-
 interface ClosedTab {
   saved: SavedTab;
   group: Group;
   index: number;
 }
 
-const SAVE_DELAY = 300;
 const LINK_INDEX_DELAY = 1000;
 const CLOSED_MAX = 20;
-
-/** Marks a change copied from the pane it was typed in to another pane showing the same note. */
-const copied = Annotation.define<boolean>();
-
-export const noteName = (path: string) => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, "");
-export const parentDir = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
-
-/** A saved selection, kept inside a (possibly shorter) document. */
-function clampSelection(sel: EditorSelection, length: number): EditorSelection {
-  return EditorSelection.create(
-    sel.ranges.map((r) => EditorSelection.range(Math.min(r.anchor, length), Math.min(r.head, length))),
-    sel.mainIndex,
-  );
-}
 
 export class Workspace {
   vault: VaultInfo = { path: "", name: "" };
@@ -184,57 +69,49 @@ export class Workspace {
   isExcluded: (path: string) => boolean = () => false;
   /** Told after a note or folder moved, with the notes as they were before (to update links). */
   onRenamed: ((from: string, to: string, before: NoteRef[]) => void) | null = null;
+  /** Each tab group's editor, and the notes they show. */
+  readonly editors: NoteEditors;
 
   private nextTabId = 1;
-  private panes = new Map<Group, Pane>();
-  private paneOfView = new Map<EditorView, Pane>();
-  /** Each loaded note's main state: the source of truth, holding its undo history. */
-  private states = new Map<string, EditorState>();
-  /** The view showing a note's main state, while any pane shows the note. */
-  private owners = new Map<string, EditorView>();
-  /** Last scroll position per note, for a tab arriving at it through history. */
-  private scrollTops = new Map<string, number>();
-  private saveTimers = new Map<string, number>();
-  private linkTimer = 0;
-  private listeners = new Set<(change: Change, group?: Group) => void>();
+  private changes = listeners<[Change, Group?]>();
+  private moves = listeners<[(path: string) => string]>();
   private shownKey = "";
   private closed: ClosedTab[] = [];
-  private readonly host: EditorHost;
-  /** Mirrors have no history: undo and redo there act on the note's main state. */
-  private readonly mirrorKeys = Prec.high(
-    keymap.of([
-      { key: "Mod-z", run: (v) => this.historyCommand(v, false), preventDefault: true },
-      { key: "Mod-y", mac: "Mod-Shift-z", run: (v) => this.historyCommand(v, true), preventDefault: true },
-      { linux: "Mod-Shift-z", win: "Mod-Shift-z", run: (v) => this.historyCommand(v, true), preventDefault: true },
-    ]),
-  );
+  private linkTimer = 0;
+  private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
 
   constructor() {
-    this.host = {
-      openLink: (target, where, view) => void this.openLink(target, where, view ? this.paneOfView.get(view)?.group : undefined),
+    const host: EditorHost = {
+      openLink: (target, where, view) => void this.openLink(target, where, view ? this.editors.groupOfView(view) : undefined),
       openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
       notes: () => this.includedNotes(),
-      formatLink: (target, view, display) => this.linkTo(target, this.paneOfView.get(view)?.path ?? null, display),
+      formatLink: (target, view, display) => this.linkTo(target, this.editors.pathOf(view), display),
       contextMenu: (view, at, pos, keyboard) => {
-        const pane = this.paneOfView.get(view);
-        if (pane) this.focusGroup(pane.group);
+        const group = this.editors.groupOfView(view);
+        if (group) this.focusGroup(group);
         this.editorMenu?.(view, at, pos, keyboard);
       },
     };
+    this.editors = new NoteEditors(host, {
+      shown: (group, path) => {
+        if (path) this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
+        this.emit("pane", group);
+      },
+      loaded: () => this.settle(),
+      changed: () => this.emit("doc"),
+      saved: (path) => this.written(path),
+    });
     this.layout = new Layout(this.blankTab());
-    this.pane(this.layout.activeGroup);
+    this.editors.viewOf(this.layout.activeGroup);
   }
 
-  on(fn: (change: Change, group?: Group) => void) {
-    this.listeners.add(fn);
-  }
-
-  off(fn: (change: Change, group?: Group) => void) {
-    this.listeners.delete(fn);
+  /** Listen for changes; returns a function that stops listening. */
+  on(fn: (change: Change, group?: Group) => void): () => void {
+    return this.changes.on(fn);
   }
 
   private emit(change: Change, group?: Group) {
-    for (const fn of this.listeners) fn(change, group);
+    this.changes.emit(change, group);
   }
 
   // ----- the active pane -----
@@ -255,12 +132,12 @@ export class Workspace {
 
   /** The active pane's editor. */
   get view(): EditorView {
-    return this.pane(this.layout.activeGroup).view;
+    return this.editors.viewOf(this.layout.activeGroup);
   }
 
   /** The element that scrolls the active pane's note. */
   get scroller(): HTMLElement | null {
-    return this.pane(this.layout.activeGroup).scroller;
+    return this.editors.scrollerOf(this.layout.activeGroup);
   }
 
   groups(): Group[] {
@@ -271,36 +148,9 @@ export class Workspace {
     return this.layout.groupOf(tab);
   }
 
-  viewOf(group: Group): EditorView {
-    return this.pane(group).view;
-  }
-
-  groupOfView(view: EditorView): Group | undefined {
-    return this.paneOfView.get(view)?.group;
-  }
-
-  /** The pane (UI) hands over the element that scrolls a group's note; its scroll is restored. */
-  setScroller(group: Group, el: HTMLElement) {
-    const pane = this.pane(group);
-    pane.scroller = el;
-    const memory = pane.tab?.memory;
-    if (memory && memory.path === pane.path && memory.scrollTop !== null) el.scrollTop = memory.scrollTop;
-  }
-
-  /** The tab group's editor, created with the group. */
-  private pane(group: Group): Pane {
-    let pane = this.panes.get(group);
-    if (pane) return pane;
-    const view = new EditorView({ dispatchTransactions: (trs, v) => this.dispatch(trs, v) });
-    pane = { group, view, scroller: null, tab: null, path: null };
-    this.panes.set(group, pane);
-    this.paneOfView.set(view, pane);
-    return pane;
-  }
-
   /** Make a pane the active one (a click or focus inside it). */
   focusGroup(group: Group) {
-    if (group === this.layout.activeGroup || !this.panes.has(group)) return;
+    if (group === this.layout.activeGroup || !this.editors.has(group)) return;
     this.layout.activeGroup = group;
     this.settle();
   }
@@ -358,164 +208,35 @@ export class Workspace {
     return resolveLink(target, from, this.notes);
   }
 
-  // ----- showing notes in panes -----
-
-  /**
-   * Make a group's editor show its active tab. A note already on screen in
-   * another pane gets a mirror state here; otherwise this pane takes the
-   * note's main state. Returns false when it already showed that tab.
-   */
-  private present(group: Group): boolean {
-    const pane = this.pane(group);
-    const tab = group.active;
-    const path = tab.path;
-    if (pane.tab === tab && pane.path === path) {
-      if (path) this.applyMode(pane.view, tab.mode);
-      return false;
-    }
-    if (path && !this.states.has(path)) {
-      // A restored tab whose note isn't loaded yet: show it once it is.
-      void this.load(path).then((state) => {
-        if (state && group.active === tab && this.panes.get(group) === pane && this.present(group)) this.settle();
-      });
-      return false;
-    }
-    this.stash(pane);
-    pane.tab = tab;
-    pane.path = path;
-    if (path) {
-      const memory = tab.memory?.path === path ? tab.memory : null;
-      const owner = this.owners.get(path);
-      if (!owner) {
-        let state = this.states.get(path)!;
-        if (memory?.selection && !memory.selection.eq(state.selection)) {
-          state = state.update({ selection: clampSelection(memory.selection, state.doc.length) }).state;
-        }
-        this.states.set(path, state);
-        if (pane.view.state !== state) pane.view.setState(state);
-        this.owners.set(path, pane.view);
-      } else {
-        const doc = owner.state.doc;
-        pane.view.setState(
-          createNoteState({
-            doc,
-            host: this.host,
-            history: false,
-            extensions: this.mirrorKeys,
-            selection: clampSelection(memory?.selection ?? owner.state.selection, doc.length),
-            counts: owner.state.field(countsField, false),
-          }),
-        );
-      }
-      this.applyMode(pane.view, tab.mode);
-      this.applyConfig(pane.view);
-      this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
-    }
-    this.emit("pane", group);
-    if (path && pane.scroller) {
-      const top = memoryOf(tab, path)?.scrollTop;
-      if (top !== null) pane.scroller.scrollTop = top ?? this.scrollTops.get(path) ?? 0;
-    }
-    return true;
+  /** The notes that aren't excluded (Settings → Files and links → Excluded files). */
+  includedNotes(): NoteRef[] {
+    const c = this.included;
+    if (c && c.notes === this.notes && c.test === this.isExcluded) return c.out;
+    const out = this.notes.filter((n) => !this.isExcluded(n.path));
+    this.included = { notes: this.notes, test: this.isExcluded, out };
+    return out;
   }
 
-  /** Remember where a pane's tab is in its note, and let go of the note. */
-  private stash(pane: Pane) {
-    this.remember(pane);
-    this.release(pane);
+  /** A new link to `target` from the note at `from`, in the style the settings ask for. */
+  linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
+    return formatLink(target, from, this.notes, this.linkStyle(), display, subpath);
   }
 
-  private remember(pane: Pane) {
-    if (!pane.tab || !pane.path) return;
-    const scrollTop = pane.scroller?.scrollTop ?? 0;
-    pane.tab.memory = { path: pane.path, scrollTop, selection: pane.view.state.selection };
-    this.scrollTops.set(pane.path, scrollTop);
+  isFolder(path: string) {
+    return this.files.some((f) => f.path === path && f.is_dir);
   }
 
-  /**
-   * The pane stops showing its note. If it held the main state and another
-   * pane still shows the note, that pane takes the main state over (keeping
-   * its own selection and scroll), so a note on screen always has its main
-   * state on screen and edits never have to update a hidden copy.
-   */
-  private release(pane: Pane) {
-    const path = pane.path;
-    pane.tab = null;
-    pane.path = null;
-    if (!path || this.owners.get(path) !== pane.view) return;
-    this.owners.delete(path);
-    this.states.set(path, pane.view.state);
-    const heir = [...this.panes.values()].find((p) => p !== pane && p.path === path);
-    if (!heir) return;
-    const scrollTop = heir.scroller?.scrollTop;
-    const main = this.states.get(path)!;
-    const state = main.update({ selection: clampSelection(heir.view.state.selection, main.doc.length) }).state;
-    this.states.set(path, state);
-    heir.view.setState(state);
-    this.owners.set(path, heir.view);
-    if (heir.tab) this.applyMode(heir.view, heir.tab.mode);
-    this.applyConfig(heir.view);
-    if (heir.scroller && scrollTop !== undefined) heir.scroller.scrollTop = scrollTop;
+  /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
+  private touch(path: string) {
+    const entry = this.files.find((f) => f.path === path);
+    if (entry) entry.mtime_ms = Date.now();
   }
 
-  /** Configure a view's state for its tab's mode (a no-op when it already is). */
-  private applyMode(view: EditorView, mode: ViewMode) {
-    if (viewModeOf(view.state) !== mode) view.dispatch({ effects: viewModeCompartment.reconfigure(VIEW_MODES[mode]) });
-  }
-
-  /** Bring a view's state up to the current editor settings (a no-op when it already is). */
-  private applyConfig(view: EditorView) {
-    const effects = configEffects(view.state);
-    if (effects.length) view.dispatch({ effects });
-  }
-
-  /**
-   * The editor settings changed: reconfigure every editor on screen in place
-   * (one transaction each, nothing re-created). Notes off screen catch up
-   * when they are next shown.
-   */
-  reconfigureEditors() {
-    for (const pane of this.panes.values()) if (pane.path) this.applyConfig(pane.view);
-  }
-
-  /** Every transaction of every pane's editor comes through here. */
-  private dispatch(trs: readonly Transaction[], view: EditorView) {
-    view.update(trs);
-    if (!trs.some((tr) => tr.docChanged)) return;
-    const pane = this.paneOfView.get(view);
-    const path = pane?.path;
-    if (!path) return;
-    if (this.owners.get(path) === view) this.states.set(path, view.state);
-    for (const tr of trs) {
-      if (!tr.docChanged || tr.annotation(copied)) continue;
-      this.forward(path, tr, view);
-      if (!tr.isUserEvent("external")) this.scheduleSave(path);
-    }
-    this.emit("doc");
-  }
-
-  /** Copy a change to every other pane showing the note. */
-  private forward(path: string, tr: Transaction, from: EditorView) {
-    let spec: TransactionSpec | null = null;
-    for (const pane of this.panes.values()) {
-      if (pane.path !== path || pane.view === from) continue;
-      if (!spec) {
-        const userEvent = tr.annotation(Transaction.userEvent);
-        spec = {
-          changes: tr.changes,
-          annotations: userEvent ? [copied.of(true), Transaction.userEvent.of(userEvent)] : [copied.of(true)],
-        };
-      }
-      pane.view.dispatch(spec);
-    }
-  }
-
-  /** Undo or redo from a mirror: run it on the note's main state, which forwards the result. */
-  private historyCommand(view: EditorView, isRedo: boolean): boolean {
-    const path = this.paneOfView.get(view)?.path;
-    const owner = path ? this.owners.get(path) : undefined;
-    if (!owner || owner === view) return false;
-    return (isRedo ? redo : undo)(owner);
+  /** We wrote a note to disk: it is modified now, and the link index is read again a moment later. */
+  written(path: string) {
+    this.touch(path);
+    clearTimeout(this.linkTimer);
+    this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
   }
 
   // ----- tabs -----
@@ -537,12 +258,12 @@ export class Workspace {
   }
 
   private select(group: Group, tab: Tab, focus = true) {
-    if (group.active === tab && this.layout.activeGroup === group && this.panes.get(group)?.tab === tab) return;
+    if (group.active === tab && this.layout.activeGroup === group && this.editors.shows(group, tab)) return;
     group.active = tab;
     this.layout.activeGroup = group;
-    this.present(group);
+    this.editors.present(group);
     this.settle();
-    if (focus && tab.path) this.pane(group).view.focus();
+    if (focus && tab.path) this.editors.viewOf(group).focus();
   }
 
   closeTab(tab: Tab) {
@@ -568,7 +289,8 @@ export class Workspace {
       }
       if (group.tabs.length) continue;
       if (this.layout.groups().length > 1) {
-        this.dropGroup(group);
+        this.editors.drop(group);
+        this.layout.removeGroup(group);
         layoutChanged = true;
       } else {
         const blank = this.blankTab();
@@ -576,7 +298,7 @@ export class Workspace {
         group.active = blank;
       }
     }
-    for (const group of this.layout.groups()) this.present(group);
+    this.presentAll();
     this.settle(layoutChanged);
     if (this.active !== wasActive && this.active.path) this.view.focus();
   }
@@ -584,18 +306,6 @@ export class Workspace {
   /** Close a whole tab group (its tabs can be brought back with Undo close tab). */
   closeGroup(group: Group = this.activeGroup) {
     this.closeTabs([...group.tabs]);
-  }
-
-  /** Remove a group's pane and take the group out of the layout. */
-  private dropGroup(group: Group) {
-    const pane = this.panes.get(group);
-    if (pane) {
-      this.stash(pane);
-      this.panes.delete(group);
-      this.paneOfView.delete(pane.view);
-      pane.view.destroy();
-    }
-    this.layout.removeGroup(group);
   }
 
   /** Obsidian's "Close others", "Close tabs after" and "Close all" act within the tab's group and leave pinned tabs open. */
@@ -632,7 +342,7 @@ export class Workspace {
     while (this.closed.length) {
       const { saved, group: was, index } = this.closed.pop()!;
       const tab = this.loadTab(saved);
-      if (!tab || (!tab.type && (!tab.path || !(await this.load(tab.path))))) continue;
+      if (!tab || (!tab.type && (!tab.path || !(await this.editors.load(tab.path))))) continue;
       const group = this.layout.groups().includes(was) ? was : this.activeGroup;
       this.layout.addTab(group, tab, index);
       this.select(group, tab);
@@ -655,7 +365,7 @@ export class Workspace {
   setMode(mode: ViewMode, tab: Tab = this.active) {
     if (tab.mode === mode) return;
     tab.mode = mode;
-    for (const pane of this.panes.values()) if (pane.tab === tab && tab.path) this.applyMode(pane.view, mode);
+    this.editors.showMode(tab);
     this.emit("mode");
   }
 
@@ -672,6 +382,11 @@ export class Workspace {
     if (tab) this.activate(tab);
   }
 
+  /** Every group's editor shows its group's active tab. */
+  private presentAll() {
+    for (const group of this.layout.groups()) this.editors.present(group);
+  }
+
   // ----- splits -----
 
   /**
@@ -681,50 +396,39 @@ export class Workspace {
   split(tab: Tab = this.active, edge: Edge = "right") {
     const group = this.layout.groupOf(tab);
     if (!group) return;
-    const pane = this.panes.get(group);
-    if (pane?.tab === tab) this.remember(pane);
+    const showing = this.editors.shows(group, tab);
+    if (showing) this.editors.remember(group);
     // The new pane is narrower or shorter, so the same scroll offset would
     // show other text: it starts at the line at the top of the old one.
-    const topLine = pane?.tab === tab ? this.topLine(pane) : null;
+    const topLine = showing ? this.editors.topLine(group) : null;
     const memory = tab.memory ? { ...tab.memory, scrollTop: topLine === null ? tab.memory.scrollTop : null } : null;
     const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory, type: tab.type, graphFile: tab.graphFile };
     const added = this.layout.split(group, edge, [copy]);
     this.layout.activeGroup = added;
-    this.present(added);
-    const view = this.pane(added).view;
+    this.editors.present(added);
+    const view = this.editors.viewOf(added);
     if (topLine !== null) {
       // Both panes keep that line at the top, though both now wrap narrower.
       const keep = EditorView.scrollIntoView(topLine, { y: "start", yMargin: 0 });
       view.dispatch({ effects: keep });
-      pane!.view.dispatch({ effects: keep });
+      this.editors.viewOf(group).dispatch({ effects: keep });
     }
     this.settle(true);
     if (copy.path) requestAnimationFrame(() => view.focus());
-  }
-
-  /** The start of the first line in view in a pane, or null at the very top. */
-  private topLine(pane: Pane): number | null {
-    const scroller = pane.scroller;
-    if (!scroller || scroller.scrollTop <= 0) return null;
-    const view = pane.view;
-    const docTop = view.documentTop - scroller.getBoundingClientRect().top;
-    if (docTop >= 0) return null; // the title is still in view
-    return view.lineBlockAtHeight(-docTop).from;
   }
 
   /** Move a tab to another group (or elsewhere in its own) at a tab-bar position. */
   moveTab(tab: Tab, to: Group, index: number) {
     const from = this.layout.groupOf(tab);
     if (!from) return;
-    const fromPane = this.panes.get(from);
-    if (fromPane?.tab === tab) this.remember(fromPane);
+    if (this.editors.shows(from, tab)) this.editors.remember(from);
     if (!this.layout.moveTab(tab, to, index)) return;
     const collapsed = !this.layout.groups().includes(from);
-    if (collapsed) this.dropPane(from);
-    else this.present(from);
-    this.present(to);
+    if (collapsed) this.editors.drop(from);
+    else this.editors.present(from);
+    this.editors.present(to);
     this.settle(collapsed);
-    const view = this.pane(to).view;
+    const view = this.editors.viewOf(to);
     if (tab.path) requestAnimationFrame(() => view.focus());
   }
 
@@ -736,29 +440,15 @@ export class Workspace {
   moveTabToEdge(tab: Tab, target: Group, edge: Edge) {
     const from = this.layout.groupOf(tab);
     if (!from) return;
-    const fromPane = this.panes.get(from);
-    if (fromPane?.tab === tab) this.remember(fromPane);
+    if (this.editors.shows(from, tab)) this.editors.remember(from);
     const added = this.layout.moveTabToEdge(tab, target, edge);
     if (!added) return;
-    if (!this.layout.groups().includes(from) && fromPane) {
-      // Hand the editor (already showing this tab) to the new group.
-      this.panes.delete(from);
-      fromPane.group = added;
-      this.panes.set(added, fromPane);
-    } else this.present(from);
-    this.present(added);
+    // Hand the editor (already showing this tab) to the new group.
+    if (this.layout.groups().includes(from) || !this.editors.rehome(from, added)) this.editors.present(from);
+    this.editors.present(added);
     this.settle(true);
-    const view = this.pane(added).view;
+    const view = this.editors.viewOf(added);
     if (tab.path) requestAnimationFrame(() => view.focus());
-  }
-
-  private dropPane(group: Group) {
-    const pane = this.panes.get(group);
-    if (!pane) return;
-    this.stash(pane);
-    this.panes.delete(group);
-    this.paneOfView.delete(pane.view);
-    pane.view.destroy();
   }
 
   /** The group beside the active one, if any. */
@@ -771,7 +461,7 @@ export class Workspace {
     const next = this.neighbour(edge);
     if (!next) return;
     this.focusGroup(next);
-    if (next.active.path) this.pane(next).view.focus();
+    if (next.active.path) this.editors.viewOf(next).focus();
   }
 
   /** Move the active tab into the group beside its own, at the end of its tabs. */
@@ -785,6 +475,30 @@ export class Workspace {
     this.emit("layout");
   }
 
+  /**
+   * Where `open` and `openView` put what they open: the group's tab, a new
+   * tab (`tab` true), or a new group to the right or below.
+   */
+  private target(group: Group, where: OpenWhere, tab: boolean): { group: Group; tab: Tab; layoutChanged: boolean } {
+    if (where === "right" || where === "down") {
+      this.editors.remember(group);
+      const blank = this.blankTab();
+      return { group: this.layout.split(group, where === "right" ? "right" : "bottom", [blank]), tab: blank, layoutChanged: true };
+    }
+    if (!tab) return { group, tab: group.active, layoutChanged: false };
+    const blank = this.blankTab();
+    this.layout.addTab(group, blank);
+    return { group, tab: blank, layoutChanged: false };
+  }
+
+  /** Show `tab`, now the active tab of `group`, in the active pane. */
+  private show(group: Group, tab: Tab, layoutChanged: boolean) {
+    group.active = tab;
+    this.layout.activeGroup = group;
+    this.editors.present(group);
+    this.settle(layoutChanged);
+  }
+
   // ----- navigation -----
 
   /**
@@ -796,41 +510,28 @@ export class Workspace {
     path: string,
     opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
   ) {
-    const state = await this.load(path);
+    const state = await this.editors.load(path);
     if (!state) return;
-    let group = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
+    const from = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
     let where = opts.where ?? false;
-    const current = group.active;
+    const current = from.active;
     // A pinned tab keeps its note; anything else opened from it gets a new tab.
     if (!where && current.pinned && (current.type || (current.path && current.path !== path))) where = "tab";
-    const alreadyShown = !where && current.path === path && group === this.activeGroup;
-    let tab = current;
-    let layoutChanged = false;
-    if (where === "right" || where === "down") {
-      const pane = this.panes.get(group);
-      if (pane) this.remember(pane);
-      tab = this.blankTab();
-      group = this.layout.split(group, where === "right" ? "right" : "bottom", [tab]);
-      layoutChanged = true;
-    } else if (where === "tab") {
-      tab = this.blankTab();
-      this.layout.addTab(group, tab);
-    } else if (tab.type) {
+    const alreadyShown = !where && current.path === path && from === this.activeGroup;
+    const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
+    if (!where && tab.type) {
       // A graph tab becomes the note (Obsidian's click on a node); Back returns to the graph.
       tab.back.push(viewEntry(tab));
       tab.forward = [];
       tab.type = undefined;
       tab.graphFile = undefined;
-    } else if (tab.path !== path && tab.path) {
+    } else if (!where && tab.path !== path && tab.path) {
       tab.back.push(tab.path);
       tab.forward = [];
     }
     tab.path = path;
-    group.active = tab;
-    this.layout.activeGroup = group;
-    this.present(group);
-    this.settle(layoutChanged);
-    const view = this.pane(group).view;
+    this.show(group, tab, layoutChanged);
+    const view = this.editors.viewOf(group);
     const doc = view.state.doc;
     const line = opts.line ? doc.line(Math.min(opts.line, doc.lines)) : null;
     const pos = line ? line.from : opts.heading ? headingPos(doc, opts.heading) : null;
@@ -852,7 +553,7 @@ export class Workspace {
   /** Put the caret (or a selection) in the active pane's note and glide it into view. */
   jumpTo(selection: { anchor: number; head?: number }) {
     this.view.dispatch({ selection });
-    void this.glideTo(selection.anchor);
+    void this.editors.glide(this.activeGroup, selection.anchor);
     this.view.focus();
   }
 
@@ -870,39 +571,9 @@ export class Workspace {
         const folder = this.newNoteFolder();
         file = folder ? `${folder}/${file}` : file;
       }
-      path = (await this.createNote(`${file}.md`)).path;
+      path = (await createNote(this, `${file}.md`)).path;
     }
     await this.open(path, { where, heading, group });
-  }
-
-  /**
-   * Smoothly scroll a document position to the middle of the active pane. A
-   * long jump cuts to one screen short of the target first, so the editor
-   * never has to render every line in between.
-   */
-  private async glideTo(pos: number) {
-    const scroller = this.scroller;
-    const view = this.view;
-    if (!scroller || duration("slow") <= 0) {
-      view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
-      return;
-    }
-    const targetTop = () => {
-      const block = view.lineBlockAt(pos);
-      const docTop = view.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const top = docTop + block.top - (scroller.clientHeight - block.height) / 2;
-      return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, top));
-    };
-    const distance = targetTop() - scroller.scrollTop;
-    if (Math.abs(distance) > 2 * scroller.clientHeight) {
-      scroller.scrollTop = targetTop() - Math.sign(distance) * scroller.clientHeight;
-      // Two frames: CodeMirror reads the new viewport, then measures its lines.
-      await nextFrame();
-      await nextFrame();
-    }
-    // Re-aimed every frame: line heights estimated before CodeMirror measured
-    // them can move the target a little while the scroll is under way.
-    await smoothScrollTo(scroller, targetTop);
   }
 
   /** Back and forward walk the active pane's own history. */
@@ -922,16 +593,16 @@ export class Workspace {
     const entry = from[from.length - 1];
     if (!entry) return;
     const view = parseViewEntry(entry);
-    if (!view && !(await this.load(entry))) return;
+    if (!view && !(await this.editors.load(entry))) return;
     from.pop();
     if (tab.type) to.push(viewEntry(tab));
     else if (tab.path) to.push(tab.path);
     tab.type = view?.type;
     tab.graphFile = view ? view.file : undefined;
     tab.path = view ? null : entry;
-    if (group.active === tab) this.present(group);
+    if (group.active === tab) this.editors.present(group);
     this.settle();
-    if (group === this.activeGroup && tab.path) this.pane(group).view.focus();
+    if (group === this.activeGroup && tab.path) this.editors.viewOf(group).focus();
   }
 
   /**
@@ -939,25 +610,11 @@ export class Workspace {
    * if it is empty, else a new tab, or a new pane to the right or below.
    */
   openView(type: ViewType, where: OpenWhere = false, file: string | null = null) {
-    let group = this.activeGroup;
-    let tab = group.active;
-    let layoutChanged = false;
-    if (where === "right" || where === "down") {
-      const pane = this.panes.get(group);
-      if (pane) this.remember(pane);
-      tab = this.blankTab();
-      group = this.layout.split(group, where === "right" ? "right" : "bottom", [tab]);
-      layoutChanged = true;
-    } else if (where === "tab" || tab.path || tab.type) {
-      tab = this.blankTab();
-      this.layout.addTab(group, tab);
-    }
+    const active = this.activeGroup.active;
+    const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab" || !!active.path || !!active.type);
     tab.type = type;
     tab.graphFile = type === "localgraph" ? file : undefined;
-    group.active = tab;
-    this.layout.activeGroup = group;
-    this.present(group);
-    this.settle(layoutChanged);
+    this.show(group, tab, layoutChanged);
   }
 
   /** A local graph tab now follows another note. */
@@ -967,64 +624,16 @@ export class Workspace {
     this.emit("tabs");
   }
 
-  private async load(path: string): Promise<EditorState | null> {
-    let state = this.states.get(path);
-    if (state) return state;
-    try {
-      const doc = await api.readNote(path);
-      state = this.states.get(path); // loaded meanwhile
-      if (state) return state;
-      state = createNoteState({ doc, host: this.host });
-      this.states.set(path, state);
-      return state;
-    } catch (err) {
-      console.error(`Could not open ${path}`, err);
-      return null;
-    }
-  }
-
   // ----- saving and restoring the layout -----
 
   private saveTab(tab: Tab): SavedTab {
-    const saved: SavedTab = { path: tab.path, mode: tab.mode, pinned: tab.pinned, back: tab.back.slice(-20), forward: tab.forward.slice(-20) };
-    if (tab.backlinks) saved.backlinks = true;
-    if (tab.type) {
-      saved.type = tab.type;
-      if (tab.type === "localgraph") saved.file = tab.graphFile ?? null;
-    }
-    const pane = [...this.panes.values()].find((p) => p.tab === tab);
-    if (pane) this.remember(pane);
-    const memory = tab.memory?.path === tab.path ? tab.memory : null;
-    if (memory) {
-      if (memory.scrollTop !== null) saved.scroll = Math.round(memory.scrollTop);
-      if (memory.selection) saved.sel = [memory.selection.main.anchor, memory.selection.main.head];
-    }
-    return saved;
+    this.editors.rememberTab(tab);
+    return saveTab(tab);
   }
 
   private loadTab(saved: SavedTab): Tab | null {
-    if (!saved || typeof saved !== "object") return null;
     const isNote = (p: unknown): p is string => typeof p === "string" && this.notes.some((n) => n.path === p);
-    const exists = (p: unknown): p is string => isNote(p) || (typeof p === "string" && parseViewEntry(p) !== null);
-    const type = saved.type === "graph" || saved.type === "localgraph" ? saved.type : undefined;
-    const path = type || saved.path === null ? null : isNote(saved.path) ? saved.path : undefined;
-    if (path === undefined) return null; // its note is gone
-    const tab = this.blankTab();
-    tab.path = path;
-    if (type) {
-      tab.type = type;
-      if (type === "localgraph") tab.graphFile = isNote(saved.file) ? saved.file : null;
-    }
-    tab.mode = saved.mode === "source" || saved.mode === "reading" ? saved.mode : "live";
-    tab.pinned = saved.pinned === true;
-    tab.backlinks = saved.backlinks === true;
-    tab.back = Array.isArray(saved.back) ? saved.back.filter(exists) : [];
-    tab.forward = Array.isArray(saved.forward) ? saved.forward.filter(exists) : [];
-    if (path && typeof saved.scroll === "number") {
-      const sel = Array.isArray(saved.sel) ? EditorSelection.single(Number(saved.sel[0]) || 0, Number(saved.sel[1]) || 0) : null;
-      tab.memory = { path, scrollTop: saved.scroll, selection: sel };
-    }
-    return tab;
+    return loadTab(saved, () => this.blankTab(), isNote);
   }
 
   /** The split tree, sizes, each group's tabs and active tab, and the active pane. */
@@ -1041,76 +650,25 @@ export class Workspace {
     const { root, active } = saved as SavedWorkspace;
     const layout = Layout.fromJSON<Tab, SavedTab>(root, (s) => this.loadTab(s), active);
     if (!layout || !layout.tabs().some((t) => t.path || t.type)) return false;
-    await Promise.all(layout.groups().map((g) => (g.active.path ? this.load(g.active.path) : null)));
-    for (const pane of [...this.panes.values()]) this.dropPane(pane.group);
+    await Promise.all(layout.groups().map((g) => (g.active.path ? this.editors.load(g.active.path) : null)));
+    this.editors.dropAll();
     this.layout = layout;
-    for (const group of layout.groups()) this.present(group);
+    this.presentAll();
     this.shownKey = "";
     this.settle(true);
     if (this.active.path) this.view.focus();
     return true;
   }
 
-  // ----- files -----
+  // ----- what is open follows the files -----
 
-  async createNote(path: string, content = ""): Promise<FileEntry> {
-    const entry = await api.createNote(path, content);
-    await this.refreshFiles();
-    return entry;
+  /** Called with a path-mapping function after anything is renamed or moved. */
+  onMove(fn: (swap: (path: string) => string) => void) {
+    this.moves.on(fn);
   }
 
-  /**
-   * Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (by default
-   * where Settings → Files and links puts new notes) and open it for editing.
-   */
-  async newNote(folder: string = this.newNoteFolder(), where?: OpenWhere): Promise<string> {
-    if (folder && !this.isFolder(folder)) await api.createFolder(folder).catch(() => {});
-    const entry = await this.createNote(this.freeName(folder, ".md"));
-    await this.open(entry.path, { where: where ?? (this.active.path !== null || this.active.type ? "tab" : false) });
-    // A new note is for writing in, even when new tabs open in Reading view.
-    if (this.active.path === entry.path && this.active.mode === "reading") this.setMode(this.editingMode());
-    return entry.path;
-  }
-
-  /** Rename a note (keeping its folder and .md) or a folder. */
-  async rename(path: string, newName: string) {
-    newName = newName.trim().replace(/[\\/:]/g, "");
-    const isDir = this.isFolder(path);
-    if (!newName || newName === (isDir ? path.slice(path.lastIndexOf("/") + 1) : noteName(path))) return;
-    const dir = parentDir(path);
-    await this.relocate(path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
-  }
-
-  /** Move a note or folder into another folder ("" for the vault root). */
-  async moveTo(path: string, folder: string) {
-    const name = path.slice(path.lastIndexOf("/") + 1);
-    const to = folder ? `${folder}/${name}` : name;
-    if (to !== path) await this.relocate(path, to);
-  }
-
-  isFolder(path: string) {
-    return this.files.some((f) => f.path === path && f.is_dir);
-  }
-
-  /**
-   * Move a file or folder, and everything open that points into it: tabs,
-   * their history, loaded notes and recents follow.
-   */
-  private async relocate(from: string, to: string) {
-    const clash = this.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
-    if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
-    const under = (p: string) => p === from || p.startsWith(from + "/");
-    await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
-    const before = this.notes;
-    await api.renamePath(from, to);
-    const swap = (p: string) => (under(p) ? to + p.slice(from.length) : p);
-    for (const map of [this.states, this.scrollTops, this.owners] as Map<string, unknown>[]) {
-      for (const [key, value] of [...map]) {
-        if (!under(key)) continue;
-        map.delete(key);
-        map.set(swap(key), value);
-      }
-    }
+  /** A file or folder moved (see fileOps.ts): tabs, their history, closed tabs and recents follow. */
+  async followMove(swap: (path: string) => string) {
     const swapEntry = (e: string) => {
       const view = parseViewEntry(e);
       return !view ? swap(e) : view.file ? viewEntry({ type: view.type, graphFile: swap(view.file) }) : e;
@@ -1122,164 +680,20 @@ export class Workspace {
       tab.forward = tab.forward.map(swapEntry);
       if (tab.memory) tab.memory.path = swap(tab.memory.path);
     }
-    for (const pane of this.panes.values()) if (pane.path) pane.path = swap(pane.path);
     for (const c of this.closed) {
       if (c.saved.path) c.saved.path = swap(c.saved.path);
     }
     this.recent = this.recent.map(swap);
-    for (const fn of this.moveListeners) fn(swap);
+    this.moves.emit(swap);
     await this.refreshFiles();
     this.emit("tabs");
     this.shownKey = "";
     this.settle();
     void this.refreshLinks();
-    this.onRenamed?.(from, to, before);
   }
 
-  private moveListeners = new Set<(swap: (path: string) => string) => void>();
-
-  /** Called with a path-mapping function after anything is renamed or moved. */
-  onMove(fn: (swap: (path: string) => string) => void) {
-    this.moveListeners.add(fn);
-  }
-
-  /** A free "Untitled" name in a folder: "Untitled", "Untitled 1", ... */
-  private freeName(folder: string, ext: string) {
-    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
-    const at = (name: string) => `${folder ? folder + "/" : ""}${name}${ext}`;
-    let name = "Untitled";
-    for (let i = 1; taken.has(at(name).toLowerCase()); i++) name = `Untitled ${i}`;
-    return at(name);
-  }
-
-  /** Create an empty "Untitled" folder; returns its path. */
-  async newFolder(parent = ""): Promise<string> {
-    const entry = await api.createFolder(this.freeName(parent, ""));
-    await this.refreshFiles();
-    return entry.path;
-  }
-
-  private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
-
-  /** The notes that aren't excluded (Settings → Files and links → Excluded files). */
-  includedNotes(): NoteRef[] {
-    const c = this.included;
-    if (c && c.notes === this.notes && c.test === this.isExcluded) return c.out;
-    const out = this.notes.filter((n) => !this.isExcluded(n.path));
-    this.included = { notes: this.notes, test: this.isExcluded, out };
-    return out;
-  }
-
-  /** A new link to `target` from the note at `from`, in the style the settings ask for. */
-  linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
-    return formatLink(target, from, this.notes, this.linkStyle(), display, subpath);
-  }
-
-  /**
-   * Change a note's text from outside its editors (link updates after a
-   * rename): only the lines that differ are replaced, through the editor if
-   * the note is loaded (so it is undoable and saved as usual), else on disk.
-   */
-  async updateText(path: string, next: string) {
-    const doc = this.owners.get(path)?.state.doc ?? this.states.get(path)?.doc;
-    if (!doc) {
-      await api.writeNote(path, next);
-      this.touch(path);
-      return;
-    }
-    const lines = next.split("\n");
-    if (lines.length !== doc.lines) {
-      this.change(path, { changes: { from: 0, to: doc.length, insert: next } });
-      return;
-    }
-    const changes: { from: number; to: number; insert: string }[] = [];
-    lines.forEach((text, i) => {
-      const line = doc.line(i + 1);
-      if (line.text !== text) changes.push({ from: line.from, to: line.to, insert: text });
-    });
-    if (changes.length) this.change(path, { changes });
-  }
-
-  /** Whether a note is loaded in the editor (its text may hold unsaved edits). */
-  isLoaded(path: string) {
-    return this.states.has(path);
-  }
-
-  /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
-  private touch(path: string) {
-    const entry = this.files.find((f) => f.path === path);
-    if (entry) entry.mtime_ms = Date.now();
-  }
-
-  /** The text of a note: from the editor if it is loaded (unsaved edits included), else from disk. */
-  async text(path: string): Promise<string> {
-    return this.states.get(path)?.doc.toString() ?? (await api.readNote(path));
-  }
-
-  /** Obsidian's "Make a copy": "Name 1.md" beside the note, opened in the active tab. */
-  async makeCopy(path: string): Promise<string> {
-    await this.flush(path);
-    const content = await this.text(path);
-    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
-    const base = path.replace(/\.md$/, "");
-    let n = 1;
-    while (taken.has(`${base} ${n}.md`.toLowerCase())) n++;
-    const entry = await this.createNote(`${base} ${n}.md`, content);
-    await this.open(entry.path);
-    return entry.path;
-  }
-
-  /**
-   * Obsidian's "Merge entire file with...": append this note's text to
-   * another note (after a blank line), then delete this one. The other note
-   * opens where this one was.
-   */
-  async mergeInto(path: string, into: string) {
-    if (path === into) return;
-    if (this.confirmMerge && !(await this.confirmMerge(path, into))) return;
-    const [text, target] = await Promise.all([this.text(path), this.load(into)]);
-    if (!target) return;
-    const doc = this.owners.get(into)?.state.doc ?? this.states.get(into)?.doc ?? target.doc;
-    const sep = !doc.length ? "" : doc.sliceString(doc.length - 1) === "\n" ? "\n" : "\n\n";
-    this.change(into, { changes: { from: doc.length, insert: sep + text } });
-    await this.flush(into);
-    const showing = this.layout.tabs().filter((t) => t.path === path);
-    await this.remove(path, { confirmed: true });
-    for (const tab of showing) {
-      tab.path = into;
-      tab.memory = null;
-    }
-    for (const group of this.layout.groups()) this.present(group);
-    this.settle();
-  }
-
-  /** Apply a change to a note from outside its editors (wherever it is shown, or just its state). */
-  private change(path: string, spec: TransactionSpec) {
-    const owner = this.owners.get(path);
-    if (owner) {
-      owner.dispatch(spec);
-      return;
-    }
-    const state = this.states.get(path);
-    if (!state) return;
-    const tr = state.update(spec);
-    this.states.set(path, tr.state);
-    if (tr.docChanged && !tr.isUserEvent("external")) this.scheduleSave(path);
-  }
-
-  /**
-   * Delete a note or folder: to the vault's .trash, or for good, as Settings
-   * → Files and links says, after asking if it says to ask. Returns whether
-   * it was deleted.
-   */
-  async remove(path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
-    if (!opts.confirmed && this.confirmDelete && !(await this.confirmDelete(path))) return false;
-    const under = (p: string) => p === path || p.startsWith(path + "/");
-    await Promise.all([...this.saveTimers.keys()].filter(under).map((p) => this.flush(p)));
-    await api.deletePath(path, this.permanentDelete());
-    for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.release(pane);
-    for (const p of [...this.states.keys()].filter(under)) this.states.delete(p);
-    for (const p of [...this.scrollTops.keys()].filter(under)) this.scrollTops.delete(p);
+  /** Files were deleted: tabs showing them go empty, and they leave every history. */
+  async forget(under: (path: string) => boolean) {
     this.recent = this.recent.filter((p) => !under(p));
     this.closed = this.closed.filter((c) => !c.saved.path || !under(c.saved.path));
     for (const tab of this.layout.tabs()) {
@@ -1289,48 +703,24 @@ export class Workspace {
       if (tab.graphFile && under(tab.graphFile)) tab.graphFile = null;
     }
     await this.refreshFiles();
-    for (const group of this.layout.groups()) this.present(group);
+    this.presentAll();
     this.settle();
     void this.refreshLinks();
-    return true;
   }
 
-  // ----- saving notes -----
-
-  private scheduleSave(path: string) {
-    clearTimeout(this.saveTimers.get(path));
-    this.saveTimers.set(path, window.setTimeout(() => void this.save(path), SAVE_DELAY));
-  }
-
-  private async save(path: string) {
-    this.saveTimers.delete(path);
-    const state = this.states.get(path);
-    if (!state) return;
-    try {
-      await api.writeNote(path, state.doc.toString());
-    } catch (err) {
-      console.error(`Could not save ${path}`, err);
-      return;
+  /** These tabs now show another note, from its top. */
+  reopen(tabs: Tab[], path: string) {
+    for (const tab of tabs) {
+      tab.path = path;
+      tab.memory = null;
     }
-    this.touch(path);
-    clearTimeout(this.linkTimer);
-    this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
+    this.presentAll();
+    this.settle();
   }
 
-  private async flush(path: string) {
-    if (this.saveTimers.has(path)) {
-      clearTimeout(this.saveTimers.get(path));
-      await this.save(path);
-    }
-  }
-
-  /** Save the active note now (Obsidian's "Save current file"). */
+  /** Save a note now (Obsidian's "Save current file"), if it has changes waiting. */
   async saveNow(path = this.active.path) {
-    if (path) await this.flush(path);
-  }
-
-  async flushAll() {
-    await Promise.all([...this.saveTimers.keys()].map((p) => this.flush(p)));
+    if (path) await this.editors.flush((p) => p === path);
   }
 
   // ----- outside changes -----
@@ -1338,17 +728,7 @@ export class Workspace {
   private async onVaultChanged(kind: string, paths: string[]) {
     if (kind !== "modify") await this.refreshFiles();
     else for (const path of paths) this.touch(path);
-    for (const path of paths) {
-      const state = this.states.get(path);
-      if (!state || this.saveTimers.has(path)) continue;
-      if (kind === "remove") continue;
-      const doc = await api.readNote(path).catch(() => null);
-      const current = this.owners.get(path)?.state.doc ?? this.states.get(path)?.doc;
-      if (doc === null || !current || doc === current.toString()) continue;
-      this.change(path, { changes: { from: 0, to: current.length, insert: doc }, userEvent: "external" });
-    }
+    if (kind !== "remove") for (const path of paths) await this.editors.reload(path);
     void this.refreshLinks();
   }
 }
-
-const memoryOf = (tab: Tab, path: string) => (tab.memory?.path === path ? tab.memory : null);
