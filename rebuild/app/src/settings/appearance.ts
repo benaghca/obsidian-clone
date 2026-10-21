@@ -7,6 +7,7 @@
 // public/boot.js, which puts them back before the first paint.
 
 import { isTauri } from "../api";
+import { store } from "../storage";
 import { accentVars } from "./accent";
 import type { SettingsOf } from "./schema";
 
@@ -91,11 +92,8 @@ export function applyAppearance(a: Appearance) {
   document.body.classList.toggle("is-view-header-hidden", !a.showViewHeader);
   if (applied.zoomLevel !== a.zoomLevel) void setZoom(zoomFactor(a.zoomLevel)).catch((err) => console.warn("Could not zoom", err));
   applied = { ...a };
-  try {
-    localStorage.setItem(BOOT_KEY, JSON.stringify({ theme: a.theme, vars }));
-  } catch {
-    // not remembered for the next start: it starts with defaults, then applies the vault's
-  }
+  // Without storage the next start begins with defaults, then applies the vault's.
+  store(BOOT_KEY, { theme: a.theme, vars });
 }
 
 /** The app.json settings that are only page classes. */

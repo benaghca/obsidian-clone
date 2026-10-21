@@ -41,6 +41,7 @@ import { createRightSidebar } from "./shell/rightSidebar";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
 import { fileName, noteName, parentDir, trimSlashes } from "./paths";
+import { readStored, store } from "./storage";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
@@ -127,12 +128,8 @@ const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[]
   { id: "file-explorer:new-file", label: "Create new note", icon: "square-pen" },
 ];
 const RIBBON_HIDDEN = "grove.ribbon.hidden";
-const ribbonHidden = new Set<string>();
-try {
-  for (const id of JSON.parse(localStorage.getItem(RIBBON_HIDDEN) ?? "[]")) ribbonHidden.add(String(id));
-} catch {
-  // no storage: every action shows
-}
+const savedHidden = readStored(RIBBON_HIDDEN, []);
+const ribbonHidden = new Set<string>(Array.isArray(savedHidden) ? savedHidden.map(String) : []);
 const ribbonActions = RIBBON.map((a) => iconButton(icon(a.icon), a.label, () => commands.run(a.id), "side-dock-ribbon-action"));
 const ribbonPluginOn = (a: (typeof RIBBON)[number]) => !a.plugin || commands.pluginEnabled(a.plugin);
 function renderRibbon() {
@@ -142,11 +139,7 @@ function setRibbonShown(id: string, shown: boolean) {
   if (shown) ribbonHidden.delete(id);
   else ribbonHidden.add(id);
   renderRibbon();
-  try {
-    localStorage.setItem(RIBBON_HIDDEN, JSON.stringify([...ribbonHidden]));
-  } catch {
-    // not remembered
-  }
+  store(RIBBON_HIDDEN, [...ribbonHidden]);
 }
 function ribbonMenu(e: MouseEvent) {
   e.preventDefault();

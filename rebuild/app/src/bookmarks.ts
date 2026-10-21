@@ -3,6 +3,7 @@
 // rename or move carries its bookmark along.
 
 import { listeners } from "./listeners";
+import { readStored, store } from "./storage";
 import type { Workspace } from "./workspace";
 
 const key = (vaultPath: string) => `grove.bookmarks:${vaultPath}`;
@@ -22,12 +23,8 @@ export class Bookmarks {
 
   /** Read the open vault's bookmarks (after the vault is open). */
   load() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(key(this.ws.vault.path)) ?? "[]");
-      this.paths = Array.isArray(saved) ? saved.filter((p) => typeof p === "string") : [];
-    } catch {
-      this.paths = [];
-    }
+    const saved = readStored(key(this.ws.vault.path), []);
+    this.paths = Array.isArray(saved) ? saved.filter((p) => typeof p === "string") : [];
     this.changes.emit();
   }
 
@@ -47,11 +44,7 @@ export class Bookmarks {
 
   private set(paths: string[]) {
     this.paths = paths;
-    try {
-      localStorage.setItem(key(this.ws.vault.path), JSON.stringify(paths));
-    } catch {
-      // storage full or disabled: bookmarks last for this session only
-    }
+    store(key(this.ws.vault.path), paths); // without storage, bookmarks last for this session only
     this.changes.emit();
   }
 }

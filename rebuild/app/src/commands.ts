@@ -15,6 +15,7 @@ import type { IconName } from "./shell/icons";
 import { isMac } from "./shell/keys";
 import type { MenuEntry } from "./shell/menu";
 import type { StoredHotkey } from "./settings/schema";
+import { readStored, store } from "./storage";
 
 export interface Hotkey {
   /** Ctrl on Linux and Windows, Cmd on macOS. */
@@ -148,12 +149,8 @@ export class CommandRegistry {
   pluginEnabled: (plugin: string) => boolean = () => true;
 
   constructor() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]");
-      if (Array.isArray(saved)) this.recentIds = saved.filter((id) => typeof id === "string");
-    } catch {
-      // no storage: no recent commands
-    }
+    const saved = readStored(RECENT_KEY, []);
+    if (Array.isArray(saved)) this.recentIds = saved.filter((id) => typeof id === "string");
   }
 
   register(...cmds: Command[]) {
@@ -257,11 +254,7 @@ export class CommandRegistry {
 
   noteUsed(id: string) {
     this.recentIds = [id, ...this.recentIds.filter((x) => x !== id)].slice(0, RECENT_MAX);
-    try {
-      localStorage.setItem(RECENT_KEY, JSON.stringify(this.recentIds));
-    } catch {
-      // storage full or disabled: recents just aren't remembered
-    }
+    store(RECENT_KEY, this.recentIds);
   }
 
   /**
