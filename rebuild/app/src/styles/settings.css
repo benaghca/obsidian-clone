@@ -325,6 +325,22 @@
     0 0 0 2px var(--background-modifier-border-focus);
 }
 
+/* dropdowns and buttons (the graph panel's and the confirm dialog's too) */
+.dropdown,
+.modal.mod-settings button,
+.modal.mod-confirm button,
+.graph-controls button {
+  height: 30px;
+  font: inherit;
+  font-size: var(--font-ui-small);
+  color: var(--text-normal);
+  background: var(--interactive-normal);
+  border: 0;
+  border-radius: 5px;
+  box-shadow: var(--input-shadow);
+  cursor: var(--cursor, default);
+}
+
 /* dropdown: a native select with Lucide's chevrons-up-down on the right */
 .dropdown-container {
   position: relative;
@@ -334,20 +350,10 @@
 }
 .dropdown {
   appearance: none;
-  -webkit-appearance: none;
-  height: 30px;
   max-width: 400px;
   padding: 0 31px 0 10px;
-  font: inherit;
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  background: var(--interactive-normal);
-  border: 0;
-  border-radius: 5px;
-  box-shadow: var(--input-shadow);
   outline: none;
   text-overflow: ellipsis;
-  cursor: var(--cursor, default);
   transition: box-shadow var(--anim-duration-fast) var(--anim-ease-out);
 }
 .dropdown:hover,
@@ -376,17 +382,8 @@
 /* buttons (the graph panel's too) */
 .modal.mod-settings button,
 .graph-controls button {
-  height: 30px;
   padding: 4px 12px;
-  font: inherit;
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  background: var(--interactive-normal);
-  border: 0;
-  border-radius: 5px;
-  box-shadow: var(--input-shadow);
   white-space: nowrap;
-  cursor: var(--cursor, default);
   outline: none;
   transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
 }
@@ -425,7 +422,6 @@
 /* slider: a thin track filled with the accent up to the knob */
 .slider {
   --slider-fill: 0;
-  -webkit-appearance: none;
   appearance: none;
   width: 100px;
   height: 4px;
@@ -446,14 +442,6 @@
     0 1px 2px rgba(0, 0, 0, 0.2),
     0 0 0 1px rgba(0, 0, 0, 0.08);
   transition: transform var(--anim-duration-fast) var(--anim-ease-out);
-}
-.slider::-moz-range-thumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  background: var(--toggle-thumb);
-  border: 0;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
 }
 .slider:hover::-webkit-slider-thumb {
   transform: scale(1.1);
@@ -650,16 +638,7 @@
   margin-top: 20px;
 }
 .modal.mod-confirm button {
-  height: 30px;
   padding: 4px 14px;
-  font: inherit;
-  font-size: var(--font-ui-small);
-  color: var(--text-normal);
-  background: var(--interactive-normal);
-  border: 0;
-  border-radius: 5px;
-  box-shadow: var(--input-shadow);
-  cursor: var(--cursor, default);
 }
 .modal.mod-confirm button:focus-visible {
   outline: 2px solid var(--background-modifier-border-focus);

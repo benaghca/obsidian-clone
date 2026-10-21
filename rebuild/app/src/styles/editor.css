@@ -186,7 +186,6 @@
 }
 .cm-task-checkbox {
   appearance: none;
-  -webkit-appearance: none;
   width: 0.95em;
   height: 0.95em;
   margin: 0 0.2em 0 0.05em;
