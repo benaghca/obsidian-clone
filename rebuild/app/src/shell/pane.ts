@@ -23,7 +23,7 @@ import type { Menus } from "./menus";
 import type { ColumnHolder } from "./sidedock";
 import { startTabDrag } from "./tabDrag";
 import { createBacklinksView } from "./backlinksView";
-import type { SideView } from "./outlineView";
+import type { SideView } from "./sideView";
 
 export interface Panes extends ColumnHolder {
   el: HTMLElement;

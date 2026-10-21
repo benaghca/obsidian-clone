@@ -9,7 +9,8 @@ import { createBacklinksView } from "./backlinksView";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { createOutgoingView } from "./outgoingView";
-import { createOutlineView, type SideView } from "./outlineView";
+import { createOutlineView } from "./outlineView";
+import type { SideView } from "./sideView";
 import { createTagsView } from "./tagsView";
 
 export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "outline", "localgraph"] as const;

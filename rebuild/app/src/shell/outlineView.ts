@@ -13,18 +13,10 @@ import type { Text } from "@codemirror/state";
 import { type Heading, headingsFromTree, outlineDepths } from "../editor/outline";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
-
-export interface SideView {
-  el: HTMLElement;
-  /** Shown (sidebar open, this view selected) or not; hidden views do no work. */
-  setActive(active: boolean): void;
-}
+import { afterPaint, type SideView } from "./sideView";
 
 const IDLE_MS = 300;
 const SLICE_MS = 4;
-
-/** Run after the current frame is painted, so a note switch shows first. */
-export const afterPaint = (fn: () => void) => requestAnimationFrame(() => setTimeout(fn, 0));
 
 export function createOutlineView(ws: Workspace): SideView {
   const list = h("div", { class: "outline-list" });
