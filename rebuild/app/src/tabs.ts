@@ -5,7 +5,7 @@
 import type { EditorSelection } from "@codemirror/state";
 import type { ViewMode } from "./editor/editor";
 import type { TabGroup } from "./layout";
-import { noteName } from "./paths";
+import { fileName, noteName } from "./paths";
 
 export interface Tab {
   id: number;
@@ -20,14 +20,14 @@ export interface Tab {
   backlinks: boolean;
   /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
   memory: TabMemory | null;
-  /** A view instead of a note: the graph, or the local graph of `graphFile` (path is null then). */
+  /** A view instead of a note: the graph, the local graph of `viewFile`, or the image `viewFile` (path is null then). */
   type?: ViewType;
-  /** The note a local graph shows (it follows the note open in the active pane). */
-  graphFile?: string | null;
+  /** The note a local graph shows (it follows the note open in the active pane), or the image an image tab shows. */
+  viewFile?: string | null;
 }
 
 /** The views a tab can show instead of a note. */
-export type ViewType = "graph" | "localgraph";
+export type ViewType = "graph" | "localgraph" | "image";
 
 export interface TabMemory {
   path: string;
@@ -43,22 +43,26 @@ export const memoryOf = (tab: Tab, path: string | null) => (tab.memory?.path ===
 
 /**
  * Back/forward history entries are note paths, or one of these for a view
- * ("\0graph", "\0localgraph\0Note.md"); no path starts with a NUL.
+ * ("\0graph", "\0localgraph\0Note.md", "\0image\0pic.png"); no path starts with a NUL.
  */
-export function viewEntry(tab: { type?: ViewType; graphFile?: string | null }): string {
-  return tab.type === "localgraph" ? `\0localgraph\0${tab.graphFile ?? ""}` : "\0graph";
+export function viewEntry(tab: { type?: ViewType; viewFile?: string | null }): string {
+  return tab.type === "graph" ? "\0graph" : `\0${tab.type}\0${tab.viewFile ?? ""}`;
 }
 
 export function parseViewEntry(entry: string): { type: ViewType; file: string | null } | null {
   if (!entry.startsWith("\0")) return null;
-  if (entry.startsWith("\0localgraph\0")) return { type: "localgraph", file: entry.slice(12) || null };
-  return { type: "graph", file: null };
+  const [, type, file] = entry.split("\0");
+  return { type: type as ViewType, file: file || null };
 }
+
+/** The icon a view's tab shows (a note's tab has none). */
+export const viewIcon = (tab: Tab) => (tab.type === "image" ? "image" : tab.type ? "git-fork" : null);
 
 /** A tab's title: its note's name, the view's name, or "New tab". */
 export function tabTitle(tab: Tab): string {
   if (tab.type === "graph") return "Graph view";
-  if (tab.type === "localgraph") return tab.graphFile ? `Graph of ${noteName(tab.graphFile)}` : "Local graph";
+  if (tab.type === "localgraph") return tab.viewFile ? `Graph of ${noteName(tab.viewFile)}` : "Local graph";
+  if (tab.type === "image") return fileName(tab.viewFile ?? "").replace(/\.[^.]+$/, "");
   return tab.path ? noteName(tab.path) : "New tab";
 }
 

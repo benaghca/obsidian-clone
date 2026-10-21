@@ -90,20 +90,19 @@ export function resolveLink(target: string, from: string | null, notes: NoteLike
   if (!t) return null;
   const withMd = /\.md$/i.test(t) ? t : `${t}.md`;
   const byPath = new Map(notes.map((n) => [n.path.toLowerCase(), n.path]));
+  // A note's path with or without its ".md"; any other file (an image in an embed) by its full name.
+  const find = (path: string | null) => (path === null ? undefined : (byPath.get(`${path}.md`.toLowerCase()) ?? byPath.get(path.toLowerCase())));
+  const bare = withMd === t ? t.slice(0, -3) : t;
   const fromDir = parentDir(from ?? "");
-  if (t.startsWith("./") || t.startsWith("../")) {
-    const rel = normalise(`${fromDir}/${withMd}`);
-    return rel === null ? null : (byPath.get(rel.toLowerCase()) ?? null);
-  }
-  const exact = byPath.get(withMd.toLowerCase());
+  if (t.startsWith("./") || t.startsWith("../")) return find(normalise(`${fromDir}/${bare}`)) ?? null;
+  const exact = find(bare);
   if (exact) return exact;
   if (t.includes("/")) {
-    const rel = normalise(`${fromDir}/${withMd}`);
-    const hit = rel === null ? undefined : byPath.get(rel.toLowerCase());
+    const hit = find(normalise(`${fromDir}/${bare}`));
     if (hit) return hit;
-    // A partial path: any note whose path ends with it.
-    const tail = `/${withMd.toLowerCase()}`;
-    return notes.find((n) => `/${n.path.toLowerCase()}`.endsWith(tail))?.path ?? null;
+    // A partial path: any note (or file) whose path ends with it.
+    const tails = [`/${withMd.toLowerCase()}`, `/${t.toLowerCase()}`];
+    return notes.find((n) => tails.some((tail) => `/${n.path.toLowerCase()}`.endsWith(tail)))?.path ?? null;
   }
   const name = nameOf(withMd).toLowerCase();
   const matches = notes.filter((n) => n.name.toLowerCase() === name);

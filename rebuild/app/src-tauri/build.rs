@@ -8,6 +8,7 @@ fn main() {
             "last_vault",
             "list_files",
             "read_note",
+            "read_file_bytes",
             "write_note",
             "create_note",
             "create_folder",

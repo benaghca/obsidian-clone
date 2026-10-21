@@ -10,6 +10,8 @@ import { api } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, PropertyHost } from "./editor/host";
+import { IMAGE_EXT } from "./editor/embeds";
+import { createEmbedHost } from "./embedHost";
 import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
@@ -43,6 +45,8 @@ export class Workspace {
     (change) => this.emit(change),
     (path) => this.editors.reload(path),
   );
+  /** What embeds and image tabs read: notes' text and images' blob: URLs. */
+  readonly embeds = createEmbedHost(this);
   layout: Layout<Tab>;
   /** Recently shown notes, most recent first. */
   recent: string[] = [];
@@ -78,6 +82,7 @@ export class Workspace {
       },
       properties: () => this.propertyHost,
       linkExists: (target, view) => this.vault.linkExists(target, this.editors.pathOf(view)),
+      embeds: this.embeds,
     };
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {
@@ -342,7 +347,7 @@ export class Workspace {
     // show other text: it starts at the line at the top of the old one.
     const topLine = showing ? this.editors.topLine(group) : null;
     const memory = tab.memory ? { ...tab.memory, scrollTop: topLine === null ? tab.memory.scrollTop : null } : null;
-    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory, type: tab.type, graphFile: tab.graphFile };
+    const copy: Tab = { ...this.blankTab(), path: tab.path, mode: tab.mode, backlinks: tab.backlinks, memory, type: tab.type, viewFile: tab.viewFile };
     const added = this.layout.split(group, edge, [copy]);
     this.layout.activeGroup = added;
     this.editors.present(added);
@@ -450,6 +455,7 @@ export class Workspace {
     path: string,
     opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
   ) {
+    if (IMAGE_EXT.test(path)) return this.openImage(path, opts.where ?? false);
     const state = await this.editors.load(path);
     if (!state) return;
     const from = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
@@ -464,7 +470,7 @@ export class Workspace {
       tab.back.push(viewEntry(tab));
       tab.forward = [];
       tab.type = undefined;
-      tab.graphFile = undefined;
+      tab.viewFile = undefined;
     } else if (!where && tab.path !== path && tab.path) {
       tab.back.push(tab.path);
       tab.forward = [];
@@ -488,6 +494,19 @@ export class Workspace {
       view.dispatch({ selection, effects: EditorView.scrollIntoView(selection.anchor, { y: "center" }) });
       view.focus();
     }
+  }
+
+  /** An image from the file list: shown in the tab (or where `where` says), as Obsidian's image view. */
+  private openImage(path: string, where: OpenWhere) {
+    const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab");
+    if (tab.path || tab.type) {
+      tab.back.push(tab.type ? viewEntry(tab) : tab.path!);
+      tab.forward = [];
+    }
+    tab.path = null;
+    tab.type = "image";
+    tab.viewFile = path;
+    this.show(group, tab, layoutChanged);
   }
 
   /** Put the caret (or a selection) in the active pane's note and glide it into view. */
@@ -530,7 +549,7 @@ export class Workspace {
     if (tab.type) to.push(viewEntry(tab));
     else if (tab.path) to.push(tab.path);
     tab.type = view?.type;
-    tab.graphFile = view ? view.file : undefined;
+    tab.viewFile = view ? view.file : undefined;
     tab.path = view ? null : entry;
     if (group.active === tab) this.editors.present(group);
     this.settle();
@@ -545,14 +564,14 @@ export class Workspace {
     const active = this.activeGroup.active;
     const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab" || !!active.path || !!active.type);
     tab.type = type;
-    tab.graphFile = type === "localgraph" ? file : undefined;
+    tab.viewFile = type === "localgraph" ? file : undefined;
     this.show(group, tab, layoutChanged);
   }
 
   /** A local graph tab now follows another note. */
   setGraphFile(tab: Tab, file: string | null) {
-    if (tab.type !== "localgraph" || tab.graphFile === file) return;
-    tab.graphFile = file;
+    if (tab.type !== "localgraph" || tab.viewFile === file) return;
+    tab.viewFile = file;
     this.emit("tabs");
   }
 
@@ -603,11 +622,11 @@ export class Workspace {
   async followMove(swap: (path: string) => string) {
     const swapEntry = (e: string) => {
       const view = parseViewEntry(e);
-      return !view ? swap(e) : view.file ? viewEntry({ type: view.type, graphFile: swap(view.file) }) : e;
+      return !view ? swap(e) : view.file ? viewEntry({ type: view.type, viewFile: swap(view.file) }) : e;
     };
     for (const tab of this.layout.tabs()) {
       if (tab.path) tab.path = swap(tab.path);
-      if (tab.graphFile) tab.graphFile = swap(tab.graphFile);
+      if (tab.viewFile) tab.viewFile = swap(tab.viewFile);
       tab.back = tab.back.map(swapEntry);
       tab.forward = tab.forward.map(swapEntry);
       if (tab.memory) tab.memory.path = swap(tab.memory.path);
@@ -632,7 +651,7 @@ export class Workspace {
       tab.back = tab.back.filter((p) => !under(p));
       tab.forward = tab.forward.filter((p) => !under(p));
       if (tab.path && under(tab.path)) tab.path = null;
-      if (tab.graphFile && under(tab.graphFile)) tab.graphFile = null;
+      if (tab.viewFile && under(tab.viewFile)) tab.viewFile = null;
     }
     await this.vault.refreshFiles();
     this.presentAll();

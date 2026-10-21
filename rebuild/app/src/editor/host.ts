@@ -26,6 +26,22 @@ export interface EditorHost {
   linkExists?(target: string, view: EditorView): boolean;
   /** What the Properties block knows of the vault's properties (null until the app has the index). */
   properties?(): PropertyHost | null;
+  /** The files `![[embeds]]` show. */
+  embeds?: EmbedHost;
+}
+
+/** Embedded notes and images, read only when drawn and cached by the app. */
+export interface EmbedHost {
+  /** The vault file a link target points at from the note in `view` (images by their name with its extension), or null. */
+  resolve(target: string, view: EditorView): string | null;
+  /** The note on screen in `view`. */
+  pathOf(view: EditorView): string | null;
+  /** A note's text: from its editor when it is open, else from disk (cached by path and modified time). */
+  read(path: string): Promise<string>;
+  /** An image file as a blob: URL, held until `release` (revoked once nothing holds it). */
+  image(path: string): { url: Promise<string>; release(): void };
+  /** Call `fn` when the file changes (on disk, or saved from an editor); returns a function that stops. */
+  watch(path: string, fn: () => void): () => void;
 }
 
 /** The vault's properties, as the Properties block uses them. */

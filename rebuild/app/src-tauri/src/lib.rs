@@ -85,6 +85,7 @@ pub fn run() {
             last_vault,
             list_files,
             read_note,
+            read_file_bytes,
             write_note,
             create_note,
             create_folder,
@@ -154,6 +155,15 @@ fn list_files(state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
 #[tauri::command]
 fn read_note(state: State<'_, AppState>, path: String) -> Result<String, String> {
     with_vault(&state, |v| v.read_note(&path))
+}
+
+/// Sent as raw bytes (an ArrayBuffer in the page), not as a JSON array of numbers.
+#[tauri::command]
+fn read_file_bytes(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    with_vault(&state, |v| v.read_file_bytes(&path)).map(tauri::ipc::Response::new)
 }
 
 #[tauri::command]

@@ -89,6 +89,38 @@ const daily = `## Today
 Nothing else yet.
 `;
 
+const blocks = `Obsidian's block syntax, drawn as Obsidian draws it.
+
+> [!tip] Callouts
+> Their body is **markdown** too: [[Welcome]], #tags and lists.
+> - one
+> - two
+
+> [!warning]- A folded callout
+> Click the chevron to open it.
+
+| Feature | Where | Status |
+| :--- | :---: | ---: |
+| Tables | Live Preview | ==done== |
+| Images | \`![[...]]\` | 2 |
+
+Text with ==highlighted words== and a %%hidden comment%%.
+
+![[diagram.svg|240]] ![a photo](Attachments/photo.png)
+
+![[Project roadmap#Milestones]]
+
+![[Missing note]]
+
+\`\`\`js
+const answer = 42;
+\`\`\`
+`;
+
+/** A mock vault's image: an SVG drawn in code (the mock serves "png WxH #colour" files as PNGs it paints itself). */
+const diagram = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="160" viewBox="0 0 320 160"><rect width="320" height="160" rx="12" fill="#2a7f6f"/><circle cx="80" cy="80" r="44" fill="#e8f3f1"/><rect x="150" y="50" width="130" height="60" rx="8" fill="#e8f3f1"/></svg>
+`;
+
 function bigNote(): string {
   const words = (
     "the vault keeps every note as a plain markdown file so other tools can read it while " +
@@ -148,6 +180,9 @@ export function sampleVault(): Record<string, string> {
     "Reading list.md": reading,
     "Projects/Project roadmap.md": roadmap,
     "Daily/2026-10-19.md": daily,
+    "Callouts, tables and embeds.md": blocks,
+    "Attachments/diagram.svg": diagram,
+    "Attachments/photo.png": "png 160x100 #c8553d",
   };
 }
 

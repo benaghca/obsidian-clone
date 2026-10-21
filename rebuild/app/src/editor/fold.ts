@@ -6,7 +6,7 @@
 
 import { codeFolding, foldable, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import { type EditorState, Facet, type Line, type Range, StateEffect } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { BlockType, Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 
@@ -152,7 +152,8 @@ const hoverChevron = ViewPlugin.fromClass(
       const block = view.lineBlockAtHeight(this.y - view.documentTop);
       const line = view.state.doc.lineAt(block.from);
       const top = view.documentTop + block.top;
-      if (this.y < top || this.y > top + block.height || foldedOn(view.state, line) || !foldRangeAt(view.state, line)) return this.hide();
+      // A callout or table drawn in place of its lines has no chevron.
+      if (block.type !== BlockType.Text || this.y < top || this.y > top + block.height || foldedOn(view.state, line) || !foldRangeAt(view.state, line)) return this.hide();
       // Centred on the line's first row of text.
       const coords = view.coordsAtPos(line.from, 1);
       const rowMid = coords ? (coords.top + coords.bottom) / 2 : top + 12;

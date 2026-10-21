@@ -92,6 +92,8 @@ export const api = {
   lastVault: () => call<VaultInfo | null>("last_vault"),
   listFiles: () => call<FileEntry[]>("list_files"),
   readNote: (path: string) => call<string>("read_note", { path }),
+  /** An image file's bytes (vault images only, at most 20 MB), for an embed. */
+  readFileBytes: (path: string) => call<ArrayBuffer>("read_file_bytes", { path }),
   writeNote: (path: string, content: string) => call<void>("write_note", { path, content }),
   createNote: (path: string, content: string) => call<FileEntry>("create_note", { path, content }),
   createFolder: (path: string) => call<FileEntry>("create_folder", { path }),

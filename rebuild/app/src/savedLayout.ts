@@ -33,7 +33,7 @@ export function saveTab(tab: Tab): SavedTab {
   if (tab.backlinks) saved.backlinks = true;
   if (tab.type) {
     saved.type = tab.type;
-    if (tab.type === "localgraph") saved.file = tab.graphFile ?? null;
+    if (tab.type !== "graph") saved.file = tab.viewFile ?? null;
   }
   const memory = memoryOf(tab, tab.path);
   if (memory) {
@@ -47,14 +47,15 @@ export function saveTab(tab: Tab): SavedTab {
 export function loadTab(saved: SavedTab, blank: () => Tab, isNote: (path: unknown) => path is string): Tab | null {
   if (!saved || typeof saved !== "object") return null;
   const exists = (p: unknown): p is string => isNote(p) || (typeof p === "string" && parseViewEntry(p) !== null);
-  const type = saved.type === "graph" || saved.type === "localgraph" ? saved.type : undefined;
+  const type = saved.type === "graph" || saved.type === "localgraph" || saved.type === "image" ? saved.type : undefined;
   const path = type || saved.path === null ? null : isNote(saved.path) ? saved.path : undefined;
   if (path === undefined) return null; // its note is gone
   const tab = blank();
   tab.path = path;
   if (type) {
     tab.type = type;
-    if (type === "localgraph") tab.graphFile = isNote(saved.file) ? saved.file : null;
+    if (type === "localgraph") tab.viewFile = isNote(saved.file) ? saved.file : null;
+    if (type === "image") tab.viewFile = typeof saved.file === "string" ? saved.file : null;
   }
   tab.mode = saved.mode === "source" || saved.mode === "reading" ? saved.mode : "live";
   tab.pinned = saved.pinned === true;
