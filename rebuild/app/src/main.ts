@@ -369,19 +369,7 @@ function applySettings(file: SettingsFile | null) {
   if (all || file === "app.json") {
     const a = appSettings();
     applyPageSettings(a);
-    const changed = setEditorConfig({
-      lineNumbers: a.showLineNumber,
-      foldHeading: a.foldHeading,
-      foldIndent: a.foldIndent,
-      spellcheck: a.spellcheck,
-      autoPairBrackets: a.autoPairBrackets,
-      autoPairMarkdown: a.autoPairMarkdown,
-      smartLists: a.smartIndentList,
-      useTab: a.useTab,
-      tabSize: a.tabSize,
-      properties: a.propertiesInDocument,
-    });
-    if (changed) ws.editors.reconfigure();
+    if (setEditorConfig(a)) ws.editors.reconfigure();
     const test = excluder(a.userIgnoreFilters);
     if (ws.vault.isExcluded !== test) ws.vault.isExcluded = test;
   }

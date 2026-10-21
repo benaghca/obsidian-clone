@@ -10,34 +10,16 @@ import { indentUnit } from "@codemirror/language";
 import { deleteMarkupBackward, insertNewlineContinueMarkupCommand } from "@codemirror/lang-markdown";
 import { Compartment, EditorSelection, EditorState, type Extension, Prec, type StateEffect } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
+import { APP, defaults, type SettingsOf } from "../settings/schema";
 import { folding } from "./fold";
-import { type PropertiesDisplay, propertiesDisplay } from "./properties";
+import { propertiesDisplay } from "./properties";
 
-export interface EditorConfig {
-  lineNumbers: boolean;
-  foldHeading: boolean;
-  foldIndent: boolean;
-  spellcheck: boolean;
-  autoPairBrackets: boolean;
-  autoPairMarkdown: boolean;
-  smartLists: boolean;
-  useTab: boolean;
-  tabSize: number;
-  properties: PropertiesDisplay;
-}
-
-export const DEFAULT_EDITOR_CONFIG: EditorConfig = {
-  lineNumbers: false,
-  foldHeading: true,
-  foldIndent: true,
-  spellcheck: true,
-  autoPairBrackets: true,
-  autoPairMarkdown: true,
-  smartLists: true,
-  useTab: true,
-  tabSize: 4,
-  properties: "visible",
-};
+/** The settings that are the editor's, under their app.json names. */
+const KEYS = [
+  "showLineNumber", "foldHeading", "foldIndent", "spellcheck", "autoPairBrackets",
+  "autoPairMarkdown", "smartIndentList", "useTab", "tabSize", "propertiesInDocument",
+] as const;
+export type EditorConfig = Pick<SettingsOf<"app.json">, (typeof KEYS)[number]>;
 
 const NONE: Extension = [];
 
@@ -98,7 +80,7 @@ const cached = (key: string, make: () => Extension) => {
 };
 
 const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[] = [
-  { compartment: new Compartment(), ext: (c) => (c.lineNumbers ? cached("lines", () => lineNumbers()) : NONE) },
+  { compartment: new Compartment(), ext: (c) => (c.showLineNumber ? cached("lines", () => lineNumbers()) : NONE) },
   {
     compartment: new Compartment(),
     ext: (c) => (c.foldHeading || c.foldIndent ? cached(`fold:${c.foldHeading}:${c.foldIndent}`, () => folding(c.foldHeading, c.foldIndent)) : NONE),
@@ -106,7 +88,7 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
   { compartment: new Compartment(), ext: (c) => spellcheck[c.spellcheck ? 0 : 1] },
   { compartment: new Compartment(), ext: (c) => (c.autoPairBrackets ? brackets : NONE) },
   { compartment: new Compartment(), ext: (c) => (c.autoPairMarkdown ? markdownPairs : NONE) },
-  { compartment: new Compartment(), ext: (c) => (c.smartLists ? smartLists : NONE) },
+  { compartment: new Compartment(), ext: (c) => (c.smartIndentList ? smartLists : NONE) },
   {
     compartment: new Compartment(),
     ext: (c) =>
@@ -115,14 +97,14 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
         EditorState.tabSize.of(c.tabSize),
       ]),
   },
-  { compartment: new Compartment(), ext: (c) => cached(`properties:${c.properties}`, () => propertiesDisplay.of(c.properties)) },
+  { compartment: new Compartment(), ext: (c) => cached(`properties:${c.propertiesInDocument}`, () => propertiesDisplay.of(c.propertiesInDocument)) },
 ];
 
-let current: EditorConfig = { ...DEFAULT_EDITOR_CONFIG };
+let current: EditorConfig = defaults(APP);
 
-/** Set the editor settings. Returns whether anything changed. */
+/** Set the editor settings (the app.json settings; the others are left alone). Returns whether any changed. */
 export function setEditorConfig(next: EditorConfig): boolean {
-  const changed = (Object.keys(next) as (keyof EditorConfig)[]).some((k) => next[k] !== current[k]);
+  const changed = KEYS.some((k) => next[k] !== current[k]);
   current = { ...next };
   return changed;
 }
