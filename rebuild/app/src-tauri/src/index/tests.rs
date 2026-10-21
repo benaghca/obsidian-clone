@@ -1,4 +1,4 @@
-use super::parse::{markdown_targets, percent_decode};
+use super::parse::{markdown_targets, percent_decode, wiki_targets};
 use super::*;
 use crate::fsutil::tmp_dir;
 use serde_json::json;
@@ -172,6 +172,15 @@ fn markdown_target_parsing() {
     .is_empty());
     assert_eq!(percent_decode("a%2"), "a%2");
     assert_eq!(percent_decode("100%"), "100%");
+}
+
+#[test]
+fn wikilink_target_parsing() {
+    assert_eq!(
+        wiki_targets("[[a#h|x]] ![[b]] [[c\\|d]] [[ ]] [[e[f]] [[g]] [[h"),
+        vec!["a", "b", "c", "g"]
+    );
+    assert!(wiki_targets("[[a[[b]] [[|x]] [[#h]]").is_empty());
 }
 
 #[test]
