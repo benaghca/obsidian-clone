@@ -97,6 +97,8 @@
   margin: 0 -16px;
   padding: 16px;
   overflow-x: auto;
+  /* its width is the column's, whatever the table's */
+  contain: inline-size;
 }
 .cm-table-widget table {
   border-collapse: collapse;
@@ -106,7 +108,9 @@
   padding: 4px 8px;
   line-height: 1.3;
   min-width: 3em;
-  white-space: pre-wrap;
+  /* words stay whole: a wide table scrolls instead */
+  overflow-wrap: normal;
+  word-break: normal;
 }
 .cm-table-widget th {
   font-weight: 600;
@@ -128,7 +132,12 @@
   height: auto;
 }
 
-/* note embeds, and the box for a missing file */
+/* note embeds, and the box for a missing file: blocks inside their line,
+   without the empty line boxes CodeMirror's caret buffers would add around them */
+.cm-line > .cm-widgetBuffer:has(+ :is(.markdown-embed, .file-embed)),
+.cm-line > :is(.markdown-embed, .file-embed) + .cm-widgetBuffer {
+  display: none;
+}
 .markdown-embed {
   display: block;
   position: relative;
@@ -175,6 +184,7 @@
   --icon-size: var(--icon-s);
 }
 .file-embed .svg-icon {
+  display: inline-block;
   vertical-align: -3px;
   margin-right: 6px;
 }
