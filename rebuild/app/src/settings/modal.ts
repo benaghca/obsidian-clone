@@ -33,10 +33,6 @@ let current: { close(): void; show(id: string): void; refreshNav(): void } | nul
 /** Whether the settings modal is open (the app's hotkeys stand aside meanwhile). */
 export const isSettingsOpen = () => current !== null;
 
-export function closeSettings() {
-  current?.close();
-}
-
 /** Re-list the sections (a core plugin was turned on or off, so its page comes or goes). */
 export function refreshSettingsNav() {
   current?.refreshNav();

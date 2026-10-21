@@ -224,11 +224,6 @@ export function sanitize<S extends Spec>(spec: S, raw: unknown): { values: Value
   return { values: values as Values<S>, extra };
 }
 
-/** Whether a value is acceptable for a key (what the settings UI may write). */
-export function isValid<S extends Spec>(spec: S, key: keyof S, value: unknown): boolean {
-  return spec[key].valid(value);
-}
-
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 /** A file's JSON: the values that differ from the defaults, plus keys Grove doesn't know. Two-space indented. */

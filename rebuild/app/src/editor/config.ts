@@ -116,8 +116,6 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
 
 let current: EditorConfig = { ...DEFAULT_EDITOR_CONFIG };
 
-export const editorConfig = () => current;
-
 /** Set the editor settings. Returns whether anything changed. */
 export function setEditorConfig(next: EditorConfig): boolean {
   const changed = (Object.keys(next) as (keyof EditorConfig)[]).some((k) => next[k] !== current[k]);

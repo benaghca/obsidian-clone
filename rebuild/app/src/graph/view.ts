@@ -24,7 +24,7 @@ import { duration } from "../motion";
 import { h } from "../shell/dom";
 import { type OpenWhere, whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
-import { camera, easeZoom, fitAround, hitTest, panBy, toWorld, wheelZoom } from "./camera";
+import { camera, easeZoom, fitAround, hitTest, panBy, toScreen, toWorld, wheelZoom } from "./camera";
 import { type GraphModel, type GraphNode, nodeRadius } from "./data";
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { createGraphPanel } from "./panel";
@@ -656,11 +656,13 @@ export function createGraphView(host: GraphHost): GraphView {
     }
   };
   const offWorkspace = ws.on(onChange);
-  (window as any).__graphRatio = (r: number) => { setRatio(r); draw(); };
   // For the measuring harness (dev builds): a node's and an empty spot's client coordinates.
   const probe = () => {
     const rect = canvas.getBoundingClientRect();
-    const at = (i: number) => [rect.left + cam.width / 2 + cam.offX + sim.x[i] * cam.scale, rect.top + cam.height / 2 + cam.offY + sim.y[i] * cam.scale];
+    const at = (i: number) => {
+      const [x, y] = toScreen(cam, sim.x[i], sim.y[i]);
+      return [rect.left + x, rect.top + y];
+    };
     // The most linked node on screen (clear of the settings panel).
     let best = -1;
     for (let i = 0; i < model.nodes.length; i++) {
