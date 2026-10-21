@@ -31,8 +31,8 @@
 import { api } from "../api";
 import { duration } from "../motion";
 import { h } from "../shell/dom";
-import type { OpenWhere, Workspace } from "../workspace";
-import { whereFromEvent } from "../workspace";
+import { type OpenWhere, whereFromEvent } from "../tabs";
+import type { Workspace } from "../workspace";
 import { buildGraph, type GraphModel, type GraphNode, nodeRadius } from "./data";
 import { createGraphPanel } from "./panel";
 import { type GraphQuery, isEmptyQuery, matchesQuery, parseGraphQuery } from "./query";
@@ -939,7 +939,7 @@ export function createGraphView(host: GraphHost): GraphView {
       }
     }
   };
-  ws.on(onChange);
+  const offWorkspace = ws.on(onChange);
   (window as any).__graphRatio = (r: number) => { setRatio(r); draw(); };
   // For the measuring harness (dev builds): a node's and an empty spot's client coordinates.
   const probe = () => {
@@ -1002,7 +1002,7 @@ export function createGraphView(host: GraphHost): GraphView {
       resize.disconnect();
       themeWatch.disconnect();
       offSettings();
-      ws.off(onChange);
+      offWorkspace();
       el.remove();
     },
   };

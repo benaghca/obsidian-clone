@@ -2,7 +2,8 @@
 // matches with bolded letters, recent notes first for an empty query).
 
 import { parentDir } from "../paths";
-import { whereFromEvent, type Workspace } from "../workspace";
+import { whereFromEvent } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { highlight } from "./fuzzy";
 import { altKey, modKey } from "./keys";

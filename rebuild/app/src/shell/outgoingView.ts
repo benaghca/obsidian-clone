@@ -8,7 +8,8 @@
 // after typing stops. Nothing here runs on a keystroke.
 
 import { compareNames, fileName, noteName } from "../paths";
-import { whereFromEvent, type Workspace } from "../workspace";
+import { whereFromEvent } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
 import { wikilinkTargets } from "./linksTags";

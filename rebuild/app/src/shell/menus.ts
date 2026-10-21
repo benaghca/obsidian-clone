@@ -12,7 +12,8 @@ import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
 import { noteName, systemPath } from "../paths";
-import { type Group, type Tab, tabTitle, type Workspace } from "../workspace";
+import { type Group, type Tab, tabTitle } from "../tabs";
+import type { Workspace } from "../workspace";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 
 export interface MenuHost {
@@ -131,7 +132,7 @@ export function createMenus(host: MenuHost) {
    * link: open and copy the URL first.
    */
   function editor(view: EditorView, pos: number): MenuItems {
-    const group = ws.groupOfView(view) ?? ws.activeGroup;
+    const group = ws.editors.groupOfView(view) ?? ws.activeGroup;
     const reading = group.active.mode === "reading";
     const hasSelection = view.state.selection.ranges.some((r) => !r.empty);
     const link = linkAt(view.state, pos);

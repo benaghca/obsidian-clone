@@ -344,7 +344,7 @@ function applySettings(file: SettingsFile | null) {
     const metrics = [a.baseFontSize, a.textFontFamily, a.interfaceFontFamily, a.monospaceFontFamily].join("|");
     if (metrics !== shownMetrics) {
       shownMetrics = metrics;
-      for (const g of ws.groups()) ws.viewOf(g).requestMeasure();
+      for (const g of ws.groups()) ws.editors.viewOf(g).requestMeasure();
     }
   }
   if (all || file === "app.json") {
@@ -361,7 +361,7 @@ function applySettings(file: SettingsFile | null) {
       useTab: a.useTab,
       tabSize: a.tabSize,
     });
-    if (changed) ws.reconfigureEditors();
+    if (changed) ws.editors.reconfigure();
     const test = excluder(a.userIgnoreFilters);
     if (ws.isExcluded !== test) ws.isExcluded = test;
   }
@@ -438,7 +438,7 @@ ws.on((change) => {
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();
   settings.flush();
-  void ws.flushAll();
+  void ws.editors.flush();
 });
 
 await ws.init();

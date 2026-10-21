@@ -43,7 +43,8 @@ import type { RightSidebar, RightView } from "./shell/rightSidebar";
 import type { LeftSidebar, LeftView } from "./shell/sidebar";
 import type { Sidedocks } from "./shell/sidedock";
 import { noteName, systemPath, trimSlashes } from "./paths";
-import type { OpenWhere, Workspace } from "./workspace";
+import type { OpenWhere } from "./tabs";
+import type { Workspace } from "./workspace";
 
 export interface AppParts {
   ws: Workspace;
@@ -131,7 +132,7 @@ export function registerAppCommands(parts: AppParts) {
   /** A template note's text with its variables filled in for a note titled `title`. */
   const templateText = async (templatePath: string | null, title: string) => {
     if (!templatePath) return "";
-    const text = await ws.text(templatePath).catch(() => "");
+    const text = await ws.editors.text(templatePath).catch(() => "");
     return fillTemplate(text, title, new Date(), templates().dateFormat || "YYYY-MM-DD", templates().timeFormat || "HH:mm");
   };
   async function openDailyNote() {

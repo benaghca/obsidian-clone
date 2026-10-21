@@ -46,7 +46,7 @@ export async function updateLinks(
     const now = swap(src);
     let text: string;
     try {
-      text = await ws.text(now);
+      text = await ws.editors.text(now);
     } catch {
       continue;
     }

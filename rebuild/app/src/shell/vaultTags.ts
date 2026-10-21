@@ -23,9 +23,9 @@ export function createTagReader(ws: Workspace) {
       [...paths].map(async (path) => {
         const mtime = ws.files.find((f) => f.path === path)?.mtime_ms ?? 0;
         const cached = frontmatter.get(path);
-        if (cached && cached.mtime === mtime && !ws.isLoaded(path)) return void out.set(path, cached.fm);
+        if (cached && cached.mtime === mtime && !ws.editors.isLoaded(path)) return void out.set(path, cached.fm);
         try {
-          const fm = frontmatterTags(await ws.text(path));
+          const fm = frontmatterTags(await ws.editors.text(path));
           frontmatter.set(path, { mtime, fm });
           out.set(path, fm);
         } catch {

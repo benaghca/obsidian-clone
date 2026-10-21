@@ -13,7 +13,8 @@ import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
 import { noteName, parentDir } from "../paths";
-import { type Group, type Tab, tabTitle, type ViewType, type Workspace } from "../workspace";
+import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
+import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
@@ -282,7 +283,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       if (views.get(v.group) === v && moved.some((el) => el.contains(v.el))) v.scroller.scrollTop = top;
     }
     moved = [];
-    for (const v of fresh) if (views.get(v.group) === v) ws.setScroller(v.group, v.scroller);
+    for (const v of fresh) if (views.get(v.group) === v) ws.editors.setScroller(v.group, v.scroller);
     fresh.clear();
     renderPlaces();
   }
@@ -572,7 +573,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     const title = h("div", { class: "inline-title", "aria-label": "Note title" });
     title.spellcheck = false;
     title.contentEditable = "plaintext-only";
-    const sizer = h("div", { class: "markdown-sizer" }, title, ws.viewOf(group).dom);
+    const sizer = h("div", { class: "markdown-sizer" }, title, ws.editors.viewOf(group).dom);
     const scroller = h("div", { class: "view-content" }, sizer);
 
     const emptyActions: [HTMLElement, string, string][] = [];
@@ -609,7 +610,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       if (graph && graph.el.parentElement !== leaf) leaf.append(graph.el);
       if (path && document.activeElement !== title) title.textContent = noteName(path);
       // The editor may have moved here from another group (a tab dragged out).
-      const dom = ws.viewOf(group).dom;
+      const dom = ws.editors.viewOf(group).dom;
       if (dom.parentElement !== sizer) sizer.insertBefore(dom, backlinksBox);
     }
 
@@ -716,7 +717,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     }
 
     title.addEventListener("keydown", (e) => {
-      const view = ws.viewOf(group);
+      const view = ws.editors.viewOf(group);
       if (e.key === "Enter" || e.key === "ArrowDown") {
         e.preventDefault();
         view.focus();
@@ -734,7 +735,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     scroller.addEventListener("mousedown", (e) => {
       if (e.target === scroller || e.target === sizer) {
         e.preventDefault();
-        const view = ws.viewOf(group);
+        const view = ws.editors.viewOf(group);
         view.focus();
         view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
       }
