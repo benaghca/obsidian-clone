@@ -16,6 +16,14 @@
 // (while it is still cooling), eases the zoom and the hover fade, and draws.
 // When all of that has settled no frame is requested at all, and a hidden
 // graph (a background tab, a closed sidebar) does nothing until shown.
+//
+// The webview's canvas is drawn on the CPU (Cairo, in WebKitGTK), where a
+// line costs in proportion to its length times its width in device pixels.
+// So on a high-density screen lines are one device pixel wide, and while the
+// graph moves a canvas that turns out slow to draw is drawn at one pixel per
+// CSS pixel, then once more at full resolution when it comes to rest. While
+// it settles on its own (nobody touching it) a slow canvas is drawn every
+// other frame, leaving the rest of each frame to the editor.
 // The graph follows the vault through the workspace's "links" and "files"
 // changes (which come a moment after a save, never on a keystroke), and an
 // update keeps every node that is still there where it is.
@@ -70,6 +78,8 @@ const DIM = 0.2;
 const CLICK_SLOP = 4;
 const LABEL_SIZE = 16;
 const REFRESH_DELAY = 200;
+/** A frame that takes longer than this (ms) to draw at full resolution is drawn at 1× while moving. */
+const SLOW_FRAME = 10;
 
 interface Colors {
   node: string;
@@ -95,6 +105,17 @@ const devStats = import.meta.env.DEV
     }
   : null;
 
+/** When a key was last pressed outside a graph: graphs settling on their own wait for typing to pause. */
+let lastKey = -Infinity;
+const TYPING_PAUSE = 400;
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (!(e.target as Element | null)?.closest?.(".graph-view")) lastKey = performance.now();
+  },
+  true,
+);
+
 /** Where the global graph's nodes were, per vault, so reopening it starts from its settled layout. */
 const layouts = new Map<string, Map<string, [number, number]>>();
 
@@ -112,8 +133,11 @@ export function createGraphView(host: GraphHost): GraphView {
     reset: () => resetGraphSettings(local),
     animate: () => startTimelapse(),
   });
-  if (host.panelClosed) panel.el.classList.add("is-close");
-  const el = h("div", { class: `graph-view${local ? " mod-local" : ""}` }, canvas, panel.el);
+  if (host.panelClosed) {
+    panel.el.classList.add("is-close");
+    panel.shadow.hidden = true;
+  }
+  const el = h("div", { class: `graph-view${local ? " mod-local" : ""}` }, canvas, panel.shadow, panel.el);
 
   let active = false;
   let disposed = false;
@@ -134,7 +158,16 @@ export function createGraphView(host: GraphHost): GraphView {
   // View transform: screen = centre of the canvas + offset + world × scale.
   let width = 0;
   let height = 0;
+  /** The screen's device pixels per CSS pixel. */
   let dpr = 1;
+  /** The canvas's pixels per CSS pixel now: dpr, or 1 while moving if full resolution is slow. */
+  let ratio = 1;
+  /** How long the last full-resolution frame took to draw (ms). */
+  let fullCost = 0;
+  let lastCost = 0;
+  /** The resolution used while moving when full resolution is slow (1, or lower if 1 is slow too). */
+  let lowRatio = 1;
+  let frameCount = 0;
   let scale = cfg.scale;
   let targetScale = scale;
   let offX = 0;
@@ -344,9 +377,20 @@ export function createGraphView(host: GraphHost): GraphView {
     if (!frame && active && !disposed) frame = requestAnimationFrame(step);
   }
 
+  let typingWait = 0;
+  let drawnModel: GraphModel | null = null;
   function step(now: number) {
     const started = performance.now();
     frame = 0;
+    // Nobody is touching the graph and someone is typing: let the editor have
+    // the frames, and carry on settling once the typing pauses. (A graph
+    // whose nodes aren't on screen yet is drawn first.)
+    if (!drag && !pan && zoomAt === null && drawnModel === model && started - lastKey < TYPING_PAUSE) {
+      lastFrame = 0;
+      clearTimeout(typingWait);
+      typingWait = window.setTimeout(invalidate, TYPING_PAUSE - (started - lastKey) + 10);
+      return;
+    }
     const dt = lastFrame ? Math.min(64, now - lastFrame) : 16;
     lastFrame = now;
     let more = false;
@@ -379,7 +423,19 @@ export function createGraphView(host: GraphHost): GraphView {
     if (follow) followFocus();
     // Nodes may have moved under a still pointer.
     if (pointer && !drag && !pan && more) updateHover(pointer.x, pointer.y);
-    draw();
+    // Settling on its own with a slow canvas: draw every other frame.
+    const touched = !!drag?.moved || !!pan || zoomAt !== null || hoverFade !== want;
+    if (!more || touched || lastCost < SLOW_FRAME || ++frameCount % 2 === 0) {
+      const moving = more || touched;
+      setRatio(moving && fullCost > SLOW_FRAME ? Math.min(dpr, lowRatio) : dpr);
+      const t = performance.now();
+      draw();
+      lastCost = performance.now() - t;
+      if (ratio === dpr) fullCost = lastCost;
+      // Still slow at the lower resolution: go lower (to half), and back up when there is room.
+      else if (lastCost > SLOW_FRAME * 1.2) lowRatio = Math.max(0.5, lowRatio * 0.85);
+      else if (lastCost < SLOW_FRAME / 2) lowRatio = Math.min(1, lowRatio / 0.85);
+    }
     if (more) invalidate();
     else lastFrame = 0;
     devStats?.(performance.now() - started, model.nodes.length, more);
@@ -415,11 +471,12 @@ export function createGraphView(host: GraphHost): GraphView {
   function draw() {
     if (!width || !height) return;
     const c = colors ?? readColors();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.globalAlpha = 1;
     ctx.fillStyle = getBackground();
     ctx.fillRect(0, 0, width, height);
     const n = model.nodes.length;
+    drawnModel = model;
     if (!n) return;
     const s = scale;
     const ns = Math.sqrt(s); // nodes and labels grow with the square root of the zoom
@@ -437,8 +494,9 @@ export function createGraphView(host: GraphHost): GraphView {
     const sy = (i: number) => cy + y[i] * s;
 
     // Links: one stroke for all of them, or dimmed ones and highlighted ones.
+    // One device pixel on a dense screen at the default thickness (see the top).
     const lw = Math.max(0.3, cfg.lineSizeMultiplier * ns);
-    ctx.lineWidth = lw;
+    ctx.lineWidth = ratio > 1 && lw <= 1.05 ? 1 / ratio : lw;
     const links = model.links;
     const pathLinks = (want: (touches: boolean) => boolean) => {
       ctx.beginPath();
@@ -702,6 +760,7 @@ export function createGraphView(host: GraphHost): GraphView {
     if (pan && e.pointerId === pan.pointerId) {
       pan = null;
       el.classList.remove("is-panning");
+      invalidate(); // the last frame at full resolution
     }
   };
   canvas.addEventListener("pointerup", (e) => endPointer(e, false));
@@ -779,21 +838,41 @@ export function createGraphView(host: GraphHost): GraphView {
 
   const resize = new ResizeObserver(() => measure());
   function measure() {
-    const w = el.clientWidth;
-    const hgt = el.clientHeight;
-    const ratio = window.devicePixelRatio || 1;
-    if (w === width && hgt === height && ratio === dpr) return;
+    // Whole CSS pixels (a pane can be 377.5px wide): see setRatio.
+    const box = el.getBoundingClientRect();
+    const w = Math.floor(box.width);
+    const hgt = Math.floor(box.height);
+    const device = window.devicePixelRatio || 1;
+    if (w === width && hgt === height && device === dpr) return;
     width = w;
     height = hgt;
-    dpr = ratio;
-    canvas.width = Math.max(1, Math.round(w * ratio));
-    canvas.height = Math.max(1, Math.round(hgt * ratio));
+    dpr = device;
+    setRatio(dpr, true);
     // Resizing clears the canvas: draw now, before the frame is painted.
     draw();
   }
 
+  /**
+   * Size the canvas for `r` canvas pixels per CSS pixel. The element gets a
+   * whole number of CSS pixels and exactly the canvas's pixels' worth, not
+   * "100%": in a pane 377.5px wide, WebKitGTK composites a 755px canvas into
+   * a 378px (756 device pixel) layer, resampling it every time anything on
+   * the page is painted (measured: the editor's frames in the next pane took
+   * 47ms instead of 19ms, and 85ms with a wider pane). The background shows
+   * in the sub-pixel strip left over.
+   */
+  function setRatio(r: number, force = false) {
+    if (r === ratio && !force) return;
+    ratio = r;
+    canvas.width = Math.max(1, Math.round(width * r));
+    canvas.height = Math.max(1, Math.round(height * r));
+    canvas.style.width = `${canvas.width / r}px`;
+    canvas.style.height = `${canvas.height / r}px`;
+  }
+
   // The scheme or accent changed (classes and variables on <html>): read the colours again.
   const themeWatch = new MutationObserver(() => {
+    panel.restyle();
     colors = null;
     background = "";
     readColors();
@@ -856,6 +935,7 @@ export function createGraphView(host: GraphHost): GraphView {
     }
   };
   ws.on(onChange);
+  (window as any).__graphRatio = (r: number) => { setRatio(r); draw(); };
   // For the measuring harness (dev builds): a node's and an empty spot's client coordinates.
   const probe = () => {
     const rect = canvas.getBoundingClientRect();
@@ -913,6 +993,7 @@ export function createGraphView(host: GraphHost): GraphView {
       cancelAnimationFrame(frame);
       clearTimeout(refreshTimer);
       clearTimeout(scaleTimer);
+      clearTimeout(typingWait);
       resize.disconnect();
       themeWatch.disconnect();
       offSettings();

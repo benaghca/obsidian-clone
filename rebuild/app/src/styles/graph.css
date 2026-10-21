@@ -15,10 +15,9 @@
 }
 .graph-canvas {
   position: absolute;
-  inset: 0;
+  left: 0;
+  top: 0;
   display: block;
-  width: 100%;
-  height: 100%;
   outline: none;
 }
 .graph-view.is-panning {
@@ -39,9 +38,16 @@
   background: var(--background-secondary);
   border: 1px solid var(--menu-border-color);
   border-radius: var(--radius-m);
-  box-shadow: var(--menu-shadow);
   font-size: var(--font-ui-small);
   color: var(--text-normal);
+}
+/* Its shadow: an image (see panel.ts), the same three layers as the menus'. */
+.graph-controls-shadow {
+  position: absolute;
+  top: calc(12px - 64px);
+  right: calc(12px - 64px);
+  border: 64px solid transparent;
+  pointer-events: none;
 }
 .graph-controls.is-close {
   width: auto;

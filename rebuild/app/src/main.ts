@@ -205,8 +205,10 @@ const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n ==
 function renderCounts() {
   const path = ws.active.path;
   statusBar.hidden = !path || (backlinks.hidden && words.hidden && editorStatus.hidden);
-  if (!path) return;
-  const { words: w, chars: c } = ws.view.state.field(countsField);
+  // A tab whose note is still loading shows no counts until it is on screen.
+  const counts = path ? ws.view.state.field(countsField, false) : undefined;
+  if (!counts) return;
+  const { words: w, chars: c } = counts;
   words.textContent = plural(w, "word");
   chars.textContent = plural(c, "character");
 }

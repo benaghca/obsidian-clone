@@ -26,7 +26,47 @@ const GROUP_COLORS = [0xe05252, 0xe0ac00, 0x08b94e, 0x086ddd, 0x7852ee, 0xd53984
 
 const hex = (rgb: number) => `#${rgb.toString(16).padStart(6, "0")}`;
 
-export function createGraphPanel(host: PanelHost): { el: HTMLElement; sync(): void } {
+/** The panel's shadow is drawn this far around it (px). */
+const SHADOW = 64;
+const shadowImages = new Map<string, string>();
+
+/**
+ * Obsidian's three-layer panel shadow, drawn once into an image and shown
+ * as a nine-slice border image behind the panel. A CSS box-shadow with a
+ * 30px blur is painted again with every frame of anything else on the page
+ * in WebKitGTK (measured: 7ms of each editor frame in the next pane); an
+ * image costs about 1ms.
+ */
+function shadowImage(dark: boolean, dpr: number): string {
+  const key = `${dark}:${dpr}`;
+  let url = shadowImages.get(key);
+  if (url) return url;
+  const k = SHADOW;
+  const c = document.createElement("canvas");
+  c.width = c.height = 3 * k * dpr;
+  const g = c.getContext("2d")!;
+  g.scale(dpr, dpr);
+  const far = 3 * k * 4; // the box itself is drawn off the image; only its shadow lands on it
+  const layers: [number, number, number][] = dark
+    ? [[2, 1, 0.121], [6.7, 3.4, 0.179], [30, 15, 0.3]]
+    : [[2, 1, 0.027], [6.7, 3.4, 0.043], [30, 15, 0.07]];
+  for (const [blur, y, alpha] of layers) {
+    g.save();
+    g.shadowColor = `rgba(0, 0, 0, ${alpha})`;
+    g.shadowBlur = blur;
+    g.shadowOffsetX = far;
+    g.shadowOffsetY = y;
+    g.beginPath();
+    g.roundRect(k - far, k, k, k, 8);
+    g.fill();
+    g.restore();
+  }
+  url = c.toDataURL();
+  shadowImages.set(key, url);
+  return url;
+}
+
+export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HTMLElement; sync(): void; restyle(): void } {
   const el = h("div", { class: "graph-controls" });
   const cfg = () => host.get();
 
@@ -43,8 +83,21 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; sync(): vo
     return b;
   };
 
+  const shadow = h("div", { class: "graph-controls-shadow" });
+  const restyle = () => {
+    const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+    shadow.style.borderImage = `url(${shadowImage(document.documentElement.classList.contains("theme-dark"), dpr)}) ${SHADOW * dpr} / ${SHADOW}px`;
+  };
+  restyle();
+  new ResizeObserver(() => {
+    shadow.hidden = el.classList.contains("is-close");
+    shadow.style.width = `${el.offsetWidth}px`;
+    shadow.style.height = `${el.offsetHeight}px`;
+  }).observe(el);
+
   const setClosed = (closed: boolean) => {
     el.classList.toggle("is-close", closed);
+    shadow.hidden = closed;
     host.set("close", closed);
   };
 
@@ -230,11 +283,14 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; sync(): vo
     ...sectionEls,
   );
   el.classList.toggle("is-close", cfg().close);
+  shadow.hidden = cfg().close;
   // Presses in the panel are its own, not the graph's (no pan or hover behind it).
   for (const type of ["pointerdown", "wheel", "contextmenu"] as const) el.addEventListener(type, (e) => e.stopPropagation());
 
   return {
     el,
+    shadow,
+    restyle,
     sync() {
       for (const fn of syncers) fn();
     },
