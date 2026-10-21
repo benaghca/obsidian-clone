@@ -59,11 +59,9 @@ function pathList(ws: Workspace, id: string, kind: "folder" | "note"): HTMLEleme
   return h("datalist", { id }, ...paths.sort().map((p) => h("option", { value: p })));
 }
 
-function general(ctx: SettingsContext): HTMLElement {
+function general(ctx: SettingsContext): HTMLElement[] {
   const config = systemPath(ctx.ws.vault.path, ".grove");
-  return h(
-    "div",
-    null,
+  return [
     group(
       null,
       row({
@@ -75,10 +73,10 @@ function general(ctx: SettingsContext): HTMLElement {
         button("Copy path", () => ctx.copyText(config)),
       ),
     ),
-  );
+  ];
 }
 
-function appearance(): HTMLElement {
+function appearance(): HTMLElement[] {
   const fonts = h("datalist", { id: "grove-font-list" });
   installedFonts((names) => fonts.append(...names.map((name) => h("option", { value: name }))));
   const fontRow = (key: "interfaceFontFamily" | "textFontFamily" | "monospaceFontFamily", name: string, desc: string) => {
@@ -134,9 +132,7 @@ function appearance(): HTMLElement {
     hex.classList.remove("is-invalid");
   });
 
-  return h(
-    "div",
-    null,
+  return [
     fonts,
     group(
       null,
@@ -166,13 +162,11 @@ function appearance(): HTMLElement {
         }),
       ),
     ),
-  );
+  ];
 }
 
-function interfaceSection(ctx: SettingsContext): HTMLElement {
-  return h(
-    "div",
-    null,
+function interfaceSection(ctx: SettingsContext): HTMLElement[] {
+  return [
     group(
       null,
       toggleRow("appearance.json", "showViewHeader", "Show tab title bar", "Display the header at the top of every tab."),
@@ -200,13 +194,11 @@ function interfaceSection(ctx: SettingsContext): HTMLElement {
         }),
       ),
     ),
-  );
+  ];
 }
 
-function editor(): HTMLElement {
-  return h(
-    "div",
-    null,
+function editor(): HTMLElement[] {
+  return [
     group(
       null,
       dropdownRow("app.json", "defaultViewMode", "Default view for new tabs", "The default view that a new Markdown tab gets opened in.", [
@@ -255,10 +247,10 @@ function editor(): HTMLElement {
         ...slider({ min: 1, max: 8, step: 1, value: get("app.json", "tabSize"), defaultValue: 4, label: "Indent visual width", format: String, onInput: set("app.json", "tabSize") }),
       ),
     ),
-  );
+  ];
 }
 
-function filesAndLinks(ctx: SettingsContext): HTMLElement {
+function filesAndLinks(ctx: SettingsContext): HTMLElement[] {
   const folderRow = textRow("app.json", "newFileFolderPath", "Folder to create new notes in", "Newly created notes will appear in this folder.", "Example: folder 1/folder 2", "grove-folder-list");
   folderRow.hidden = get("app.json", "newFileLocation") !== "folder";
 
@@ -293,9 +285,7 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement {
     if (e.key === "Enter") addFilter();
   });
 
-  return h(
-    "div",
-    null,
+  return [
     pathList(ctx.ws, "grove-folder-list", "folder"),
     group(
       null,
@@ -347,10 +337,10 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement {
       ),
       filters,
     ),
-  );
+  ];
 }
 
-function corePlugins(): HTMLElement {
+function corePlugins(): HTMLElement[] {
   // "Search plugins..." filters the list by name and description, as in Obsidian.
   const search = h("input", { type: "search", placeholder: "Search plugins...", spellcheck: "false", "aria-label": "Search plugins" });
   const none = h("div", { class: "setting-search-empty" }, "No plugins match.");
@@ -401,12 +391,12 @@ function corePlugins(): HTMLElement {
       );
     }),
   );
-  return h("div", null, h("div", { class: "search-input-container setting-plugin-search" }, icon("search", 16), search), list, none);
+  return [h("div", { class: "search-input-container setting-plugin-search" }, icon("search", 16), search), list, none];
 }
 
 const DATE_PRESETS = ["YYYY-MM-DD", "YYYY.MM.DD", "YYYY/MM/DD", "YYYY/MM/YYYY-MM-DD"];
 
-function dailyNotes(ctx: SettingsContext): HTMLElement {
+function dailyNotes(ctx: SettingsContext): HTMLElement[] {
   const format = get("daily-notes.json", "format");
   const preview = h("div", { class: "setting-item-preview" });
   const showPreview = () => (preview.textContent = `Your current syntax looks like this: ${formatDate(new Date(), get("daily-notes.json", "format") || "YYYY-MM-DD")}`);
@@ -423,9 +413,7 @@ function dailyNotes(ctx: SettingsContext): HTMLElement {
   const customRow = row({ name: "Custom format", desc: ["For more syntax, use Moment.js tokens (YYYY, MM, DD, dddd, ...). ", preview], cls: "mod-text" }, custom);
   customRow.hidden = DATE_PRESETS.includes(format);
   const now = new Date();
-  return h(
-    "div",
-    null,
+  return [
     pathList(ctx.ws, "grove-note-list", "note"),
     pathList(ctx.ws, "grove-folder-list", "folder"),
     group(
@@ -448,13 +436,11 @@ function dailyNotes(ctx: SettingsContext): HTMLElement {
       textRow("daily-notes.json", "folder", "New file location", "New daily notes will be placed here.", "Example: folder 1/folder 2", "grove-folder-list"),
       textRow("daily-notes.json", "template", "Template file location", "Choose the file to use as a template.", "Example: folder/note", "grove-note-list"),
     ),
-  );
+  ];
 }
 
-function templates(ctx: SettingsContext): HTMLElement {
-  return h(
-    "div",
-    null,
+function templates(ctx: SettingsContext): HTMLElement[] {
+  return [
     pathList(ctx.ws, "grove-folder-list", "folder"),
     group(
       null,
@@ -462,7 +448,7 @@ function templates(ctx: SettingsContext): HTMLElement {
       textRow("templates.json", "dateFormat", "Date format", "{{date}} in the template file will be replaced with this value. You can also use {{date:YYYY-MM-DD}} to override the format once.", "YYYY-MM-DD"),
       textRow("templates.json", "timeFormat", "Time format", "{{time}} in the template file will be replaced with this value. You can also use {{time:HH:mm}} to override the format once.", "HH:mm"),
     ),
-  );
+  ];
 }
 
 const plugin = (id: PluginId) => () => settings.get("core-plugins.json")[id];

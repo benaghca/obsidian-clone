@@ -20,7 +20,7 @@ export interface SettingsSection {
   shown?(): boolean;
   /** Left out of the settings search (Hotkeys, which has its own filter). */
   unsearchable?: boolean;
-  build(): HTMLElement;
+  build(): HTMLElement | HTMLElement[];
 }
 
 let lastSection = "general";
@@ -55,7 +55,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
 
   const sectionEl = (s: SettingsSection) => {
     let el = built.get(s.id);
-    if (!el) built.set(s.id, (el = h("div", { class: "setting-section", "data-section": s.id }, s.build())));
+    if (!el) built.set(s.id, (el = h("div", { class: "setting-section", "data-section": s.id }, ...[s.build()].flat())));
     return el;
   };
 
