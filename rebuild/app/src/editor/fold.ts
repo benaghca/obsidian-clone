@@ -7,6 +7,8 @@
 import { codeFolding, foldable, foldEffect, foldedRanges, unfoldEffect } from "@codemirror/language";
 import { type EditorState, Facet, type Line, type Range, StateEffect } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from "@codemirror/view";
+import { h } from "../shell/dom";
+import { icon } from "../shell/icons";
 
 interface FoldKinds {
   heading: boolean;
@@ -69,20 +71,7 @@ export function unfoldEverything(view: EditorView): boolean {
   return effects.length > 0;
 }
 
-function chevron(): HTMLElement {
-  const el = document.createElement("div");
-  el.className = "cm-fold-indicator collapse-indicator";
-  el.setAttribute("aria-hidden", "true");
-  // Lucide's chevron-down, drawn here so the editor needs no shell modules.
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  for (const [k, v] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round", "stroke-linejoin": "round", class: "svg-icon" })) svg.setAttribute(k, v);
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", "m6 9 6 6 6-6");
-  svg.append(path);
-  el.append(svg);
-  return el;
-}
+const chevron = () => h("div", { class: "cm-fold-indicator collapse-indicator", "aria-hidden": "true" }, icon("chevron-down"));
 
 class FoldedMarker extends WidgetType {
   eq() {
@@ -188,14 +177,7 @@ const hoverChevron = ViewPlugin.fromClass(
   },
 );
 
-function placeholder(_view: EditorView, onclick: (e: Event) => void): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "cm-foldPlaceholder";
-  el.textContent = "…";
-  el.title = "Unfold";
-  el.addEventListener("click", onclick);
-  return el;
-}
+const placeholder = (_view: EditorView, onclick: (e: Event) => void) => h("span", { class: "cm-foldPlaceholder", title: "Unfold", onclick }, "…");
 
 /** Folding with the given kinds of fold turned on. */
 export function folding(heading: boolean, indent: boolean) {

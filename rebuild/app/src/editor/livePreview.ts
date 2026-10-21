@@ -16,6 +16,7 @@ import {
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { isNotePath, isRemoteUrl } from "../links/external";
+import { h } from "../shell/dom";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
 
@@ -34,9 +35,7 @@ class SpanWidget extends WidgetType {
     return other.cls === this.cls;
   }
   toDOM() {
-    const span = document.createElement("span");
-    span.className = this.cls;
-    return span;
+    return h("span", { class: this.cls });
   }
 }
 
@@ -48,9 +47,7 @@ class CheckboxWidget extends WidgetType {
     return other.checked === this.checked;
   }
   toDOM(view: EditorView) {
-    const box = document.createElement("input");
-    box.type = "checkbox";
-    box.className = "cm-task-checkbox";
+    const box = h("input", { class: "cm-task-checkbox", type: "checkbox" });
     box.checked = this.checked;
     box.addEventListener("mousedown", (e) => {
       e.preventDefault();
@@ -82,12 +79,8 @@ class RemoteImageWidget extends WidgetType {
     return other.alt === this.alt && other.url === this.url;
   }
   toDOM() {
-    const span = document.createElement("span");
-    span.className = "cm-link cm-rendered-link cm-remote-embed";
-    span.dataset.href = this.url;
-    span.title = `Remote image, not loaded: ${this.url}`;
-    span.textContent = this.alt || hostOf(this.url);
-    return span;
+    const text = this.alt || hostOf(this.url);
+    return h("span", { class: "cm-link cm-rendered-link cm-remote-embed", "data-href": this.url, title: `Remote image, not loaded: ${this.url}` }, text);
   }
   ignoreEvent() {
     return false;
