@@ -173,6 +173,18 @@ class Block {
     const add = h("div", { class: "properties-add", tabindex: "0", onclick: () => this.newRow(), onkeydown: (e: KeyboardEvent) => e.key === "Enter" && this.newRow() }, icon("plus"), "Add property");
     this.el = h("div", { class: "properties" }, heading, h("div", { class: "properties-content" }, this.rows, add));
     this.el.classList.toggle("is-collapsed", folded.has(view));
+    // Select all in a field selects that field only. The block sits inside the
+    // editor's contenteditable, so the browser's own select-all would take the
+    // whole note and the next keys would land in its body.
+    this.el.addEventListener("keydown", (e) => {
+      const t = e.target as HTMLElement;
+      if (e.key.toLowerCase() !== "a" || !(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey) return;
+      if (t instanceof HTMLInputElement) t.select();
+      else if (t.isContentEditable) getSelection()?.selectAllChildren(t);
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
     blocks.set(this.el, this);
   }
 
