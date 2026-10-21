@@ -1,11 +1,13 @@
 // Obsidian-style Live Preview. Markdown syntax is hidden per element and comes
 // back only while the selection touches that element (headings, quotes and
-// rules reveal per line). Bullets, checkboxes and tags are always rendered.
+// rules reveal per line, code blocks as a whole). Bullets, checkboxes, tags,
+// images and %%comments%% (dimmed, markers shown) always stay as they are.
 // Decorations are built for the visible ranges only, so cost does not grow
-// with document length.
+// with document length. The same decorations, over a whole text, are what
+// rendered callouts, tables and embeds show (render.ts).
 
 import { syntaxTree } from "@codemirror/language";
-import { Facet, type Range, StateEffect, type Text } from "@codemirror/state";
+import { type EditorState, Facet, type Range, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -15,10 +17,14 @@ import {
   WidgetType,
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
+import { writeClipboard } from "./clipboard";
 import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
+import { icon } from "../shell/icons";
+import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
+import { embedChain, paintWith } from "./render";
 
 /** Reading view: render everything, as if the selection touched nothing. */
 export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
@@ -87,6 +93,34 @@ class RemoteImageWidget extends WidgetType {
   }
 }
 
+// A code block's language, top right (Live Preview), or its copy button,
+// shown on hover (Reading view), as in Obsidian.
+const LANGUAGES: Record<string, string> = {
+  js: "JavaScript", javascript: "JavaScript", ts: "TypeScript", typescript: "TypeScript", py: "Python", python: "Python",
+  rs: "Rust", rust: "Rust", sh: "Shell", bash: "Bash", json: "JSON", css: "CSS", html: "HTML", md: "Markdown", sql: "SQL",
+};
+
+class CodeFlairWidget extends WidgetType {
+  constructor(
+    readonly lang: string,
+    readonly code: string,
+    readonly reading: boolean,
+  ) {
+    super();
+  }
+  eq(o: CodeFlairWidget) {
+    return o.lang === this.lang && o.code === this.code && o.reading === this.reading;
+  }
+  toDOM() {
+    const copy = (e: Event) => {
+      e.preventDefault();
+      void writeClipboard(this.code);
+    };
+    if (this.reading) return h("button", { class: "copy-code-button", "aria-label": "Copy", title: "Copy", onmousedown: copy }, icon("copy"));
+    return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, LANGUAGES[this.lang.toLowerCase()] ?? this.lang);
+  }
+}
+
 const hostOf = (url: string) => {
   try {
     return new URL(url).host || url;
@@ -123,24 +157,37 @@ const INLINE_FORMATS: Record<string, string> = {
   Emphasis: "cm-em",
   StrongEmphasis: "cm-strong",
   Strikethrough: "cm-strikethrough",
+  Highlight: "cm-highlight",
   InlineCode: "cm-inline-code",
 };
 
-function build(view: EditorView): DecorationSet {
-  const { state } = view;
+/** What a decoration pass needs from its editor. */
+interface Look {
+  /** The selection markup comes back around (none in Reading view or an unfocused pane). */
+  sel: readonly { from: number; to: number }[];
+  reading: boolean;
+  /** The editor whose links and files decide what a link or embed points at. */
+  view: EditorView;
+}
+
+/**
+ * The Live Preview decorations of `ranges` of `state`. Markup comes back
+ * around the selection only in the focused editor, as in Obsidian: a pane
+ * you're not typing in (or a note just opened elsewhere) keeps its headings'
+ * # hidden, even with its caret on that line.
+ */
+function decorate(state: EditorState, ranges: readonly { from: number; to: number }[], { sel, reading, view }: Look): Range<Decoration>[] {
   const doc = state.doc;
-  // Markup comes back around the selection only in the focused editor, as in
-  // Obsidian: a pane you're not typing in (or a note just opened elsewhere)
-  // keeps its headings' # hidden, even with its caret on that line.
-  const sel = state.facet(readingMode) || !view.hasFocus ? [] : state.selection.ranges;
   const touches = (from: number, to: number) => sel.some((r) => r.from <= to && r.to >= from);
   const touchesLines = (from: number, to: number) => touches(doc.lineAt(from).from, doc.lineAt(to).to);
   const decos: Range<Decoration>[] = [];
   // Links to missing notes are faded, as in Obsidian: wikilinks in both
   // views, markdown links to notes only in Reading view. One set lookup per
   // link drawn (links/internal.ts linkTargets).
-  const host = state.facet(editorHost);
+  const host = view.state.facet(editorHost);
   const missing = (href: string) => !!host?.linkExists && !host.linkExists(href, view);
+  const resolve = (target: string) => host?.embeds?.resolve(target, view) ?? null;
+  const editing = state.field(editingEmbed, false);
 
   const hide = (from: number, to: number) => {
     if (to > from) decos.push(hidden.range(from, to));
@@ -158,7 +205,7 @@ function build(view: EditorView): DecorationSet {
 
   // The frontmatter is the Properties block's (properties.ts), never markdown.
   const bodyFrom = (state.field(frontmatterField, false)?.end ?? -1) + 1;
-  for (const { from, to } of view.visibleRanges) {
+  for (const { from, to } of ranges) {
     if (to < bodyFrom) continue;
     const visible = { from: Math.max(from, bodyFrom), to };
     const lineClass = (cls: string, from: number, to: number) => {
@@ -199,12 +246,22 @@ function build(view: EditorView): DecorationSet {
             mark(INLINE_FORMATS[name], node.from, node.to);
             return;
           case "Strikethrough":
+          case "Highlight":
             // Inner text only: a child can't cancel its parent's line-through.
             mark(INLINE_FORMATS[name], node.from + 2, node.to - 2);
             return;
 
+          case "Comment":
+            if (reading) hide(node.from, node.to);
+            else mark("cm-comment", node.from, node.to);
+            return false;
+          case "CommentBlock":
+            mark("cm-comment", node.from, node.to);
+            return false;
+
           case "EmphasisMark":
           case "StrikethroughMark":
+          case "HighlightMark":
           case "CodeMark": {
             const parent = node.parent!;
             if (!(parent.name in INLINE_FORMATS)) {
@@ -216,12 +273,12 @@ function build(view: EditorView): DecorationSet {
             return;
           }
 
-          case "FencedCode": {
+          case "FencedCode":
             lineClass("cm-codeblock", node.from, node.to);
             lineClass("cm-codeblock-begin", node.from, node.from);
             lineClass("cm-codeblock-end", node.to, node.to);
+            decorateCodeBlock(node);
             return;
-          }
           case "CodeInfo":
             mark("cm-formatting cm-formatting-code-fence", node.from, node.to);
             return;
@@ -251,10 +308,14 @@ function build(view: EditorView): DecorationSet {
           case "Blockquote":
             lineClass("cm-blockquote", node.from, node.to);
             return;
-          case "QuoteMark":
-            if (touchesLines(node.from, node.from)) mark("cm-formatting cm-formatting-quote", node.from, node.to);
+          case "QuoteMark": {
+            // A callout being edited shows all its markers (callouts.ts draws it otherwise).
+            const quote = node.parent!;
+            const callout = quote.name === "Blockquote" && /^\s*>\s?\[!/.test(doc.lineAt(quote.from).text) && touches(quote.from, quote.to);
+            if (callout || touchesLines(node.from, node.from)) mark("cm-formatting cm-formatting-quote", node.from, node.to);
             else hideWithSpace(node);
             return;
+          }
 
           case "HorizontalRule":
             if (touchesLines(node.from, node.to)) mark("cm-formatting", node.from, node.to);
@@ -279,29 +340,55 @@ function build(view: EditorView): DecorationSet {
       return;
     }
     hide(node.from, textFrom);
-    const unresolved = !!href && state.facet(readingMode) && isNotePath(href) && missing(href);
+    const unresolved = !!href && reading && isNotePath(href) && missing(href);
     mark(`cm-link cm-rendered-link${unresolved ? " is-unresolved" : ""}`, textFrom, textTo, href);
     hide(textTo, node.to);
     // Only links that leave the vault get the external-link arrow (Obsidian's links to notes and headings have none).
     if (href && /^[a-z][a-z0-9+.-]*:/i.test(href.trim())) decos.push(externalIcon.range(node.to));
   }
 
-  // Only remote images are rendered (as a link chip, never fetched); local
-  // images stay as text until Grove can show vault files.
+  // A remote image is a link chip (never fetched); an image in the vault is
+  // drawn, and stays drawn while the caret passes it, as in Obsidian.
   function decorateImage(node: SyntaxNode) {
     const url = node.getChild("URL");
     const marks = node.getChildren("LinkMark");
-    if (!url || marks.length < 2 || touches(node.from, node.to)) return;
+    if (!url || marks.length < 2) return;
     const href = doc.sliceString(url.from, url.to);
-    if (!isRemoteUrl(href)) return;
     const alt = doc.sliceString(marks[0].to, marks[1].from);
-    decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
+    if (isRemoteUrl(href)) {
+      if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
+    } else if (IMAGE_EXT.test(href) && editing !== node.from) {
+      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt));
+      decos.push(Decoration.replace({ widget }).range(node.from, node.to));
+    }
+  }
+
+  // ![[embeds]]: an image like the one above; a note's text below the line
+  // while the caret is on it (its source showing), in place of it otherwise.
+  function decorateEmbed(node: SyntaxNode, target: SyntaxNode, alias: SyntaxNode | null): boolean {
+    const from = node.from - 1;
+    const src = doc.sliceString(target.from, target.to).trim();
+    if (IMAGE_EXT.test(src)) {
+      if (editing === from) return false;
+      const size = embedSize(alias ? doc.sliceString(alias.from, alias.to) : "");
+      decos.push(Decoration.replace({ widget: new ImageWidget(resolve(src), src, target.from - from, size) }).range(from, node.to));
+      return true;
+    }
+    if (/\.[a-z0-9]+$/i.test(src.split("#")[0]) && !/\.md$/i.test(src.split("#")[0])) return false; // other files stay links
+    const widget = new NoteEmbedWidget(src, resolve(src.split("#")[0]), state.facet(embedChain));
+    if (!touchesLines(from, node.to)) {
+      decos.push(Decoration.replace({ widget }).range(from, node.to));
+      return true;
+    }
+    decos.push(Decoration.widget({ widget, side: 1 }).range(doc.lineAt(node.to).to));
+    return false;
   }
 
   function decorateWikiLink(node: SyntaxNode) {
     const target = node.getChild("WikiLinkTarget");
     if (!target) return;
     const alias = node.getChild("WikiLinkAlias");
+    if (doc.sliceString(node.from - 1, node.from) === "!" && decorateEmbed(node, target, alias)) return;
     const href = doc.sliceString(target.from, target.to).trim();
     const cls = missing(href) ? "cm-wikilink is-unresolved" : "cm-wikilink";
     if (touches(node.from, node.to)) {
@@ -340,8 +427,34 @@ function build(view: EditorView): DecorationSet {
     else mark("cm-list-number", node.from, node.to);
   }
 
-  return Decoration.set(decos, true);
+  // Fences show while the selection is in the block; otherwise they hide,
+  // and the opening line carries the language (or, reading, a copy button).
+  function decorateCodeBlock(node: SyntaxNode) {
+    if (touchesLines(node.from, node.to)) return;
+    const first = doc.lineAt(node.from);
+    const last = doc.lineAt(node.to);
+    const info = node.getChild("CodeInfo");
+    const text = node.getChild("CodeText");
+    const lang = info ? doc.sliceString(info.from, info.to) : "";
+    hide(first.from, first.to);
+    if (last.number > first.number && /^\s*(```|~~~)/.test(last.text)) hide(last.from, last.to);
+    if (lang || reading) {
+      const widget = new CodeFlairWidget(lang, text ? doc.sliceString(text.from, text.to) : "", reading);
+      decos.push(Decoration.widget({ widget, side: 1 }).range(first.to));
+    }
+  }
+
+  return decos;
 }
+
+function build(view: EditorView): DecorationSet {
+  const reading = view.state.facet(readingMode);
+  const sel = reading || !view.hasFocus ? [] : view.state.selection.ranges;
+  return Decoration.set(decorate(view.state, view.visibleRanges, { sel, reading, view }), true);
+}
+
+// Rendered text (callout bodies, table cells, embedded notes) looks like Reading view.
+paintWith((state, view) => decorate(state, [{ from: 0, to: state.doc.length }], { sel: [], reading: true, view }), readingMode.of(true));
 
 const livePreviewPlugin = ViewPlugin.fromClass(
   class {
@@ -357,6 +470,7 @@ const livePreviewPlugin = ViewPlugin.fromClass(
         u.focusChanged ||
         syntaxTree(u.startState) !== syntaxTree(u.state) ||
         u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
+        u.startState.field(editingEmbed) !== u.state.field(editingEmbed) ||
         u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
       ) {
         this.decorations = build(u.view);
@@ -406,4 +520,4 @@ const linkClicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreview = [livePreviewPlugin, linkClicks];
+export const livePreview = [editingEmbed, livePreviewPlugin, linkClicks];

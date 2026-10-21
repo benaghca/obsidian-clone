@@ -8,6 +8,9 @@ import type { EditorView } from "@codemirror/view";
 const selectedText = (view: EditorView) =>
   view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join(view.state.lineBreak);
 
+/** Put text on the clipboard (a code block's copy button). */
+export const writeClipboard = (text: string) => navigator.clipboard.writeText(text).catch((err) => console.warn("Grove could not write the clipboard", err));
+
 export async function copySelection(view: EditorView, cut: boolean) {
   view.focus();
   if (document.execCommand(cut ? "cut" : "copy")) return;

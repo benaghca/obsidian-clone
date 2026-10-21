@@ -17,6 +17,7 @@ type Props = {
   min?: string;
   max?: string;
   step?: string;
+  alt?: string;
   [attr: `data-${string}`]: string | undefined;
   [attr: `aria-${string}`]: string | undefined;
   [event: `on${string}`]: ((e: any) => void) | undefined;
