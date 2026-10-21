@@ -20,6 +20,7 @@ import { commands, fromStored } from "./commands";
 import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
 import { frontmatterField } from "./editor/frontmatter";
+import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
@@ -231,6 +232,8 @@ function renderBacklinks() {
   backlinkCount.textContent = plural(from.size, "backlink");
 }
 ws.on((change) => {
+  // Links to notes that were just created (or deleted) are drawn again.
+  if (change === "files") for (const g of ws.groups()) ws.editors.viewOf(g).dispatch({ effects: filesChanged.of(null) });
   if (change === "doc" || change === "tabs" || change === "show") renderCounts();
   if (change === "links" || change === "tabs" || change === "show") renderBacklinks();
   if (change === "tabs" || change === "show" || change === "mode") renderEditorStatus();

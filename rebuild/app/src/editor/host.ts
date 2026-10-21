@@ -22,6 +22,8 @@ export interface EditorHost {
   formatLink(target: string, view: EditorView, display?: string): string;
   /** Show the editor menu at `at` for document position `pos` (the caret is already there). */
   contextMenu?(view: EditorView, at: { x: number; y: number }, pos: number, keyboard: boolean): void;
+  /** Whether a link target (from the note in `view`) points at a file: links to missing notes are drawn faded. */
+  linkExists?(target: string, view: EditorView): boolean;
   /** What the Properties block knows of the vault's properties (null until the app has the index). */
   properties?(): PropertyHost | null;
 }

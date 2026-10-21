@@ -11,7 +11,7 @@ import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, NoteRef, PropertyHost } from "./editor/host";
 import { type Edge, Layout } from "./layout";
-import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
+import { formatLink, type LinkStyle, linkTargets, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { createNote } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
@@ -81,6 +81,7 @@ export class Workspace {
   private closed: ClosedTab[] = [];
   private linkTimer = 0;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
+  private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
 
   constructor() {
     const host: EditorHost = {
@@ -94,6 +95,7 @@ export class Workspace {
         this.editorMenu?.(view, at, pos, keyboard);
       },
       properties: () => this.propertyHost,
+      linkExists: (target, view) => this.linkExists(target, this.editors.pathOf(view)),
     };
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {
@@ -219,6 +221,12 @@ export class Workspace {
     const out = this.notes.filter((n) => !this.isExcluded(n.path));
     this.included = { notes: this.notes, test: this.isExcluded, out };
     return out;
+  }
+
+  /** Whether a link target points at a file (sets of names and paths, made once per file list). */
+  linkExists(target: string, from: string | null): boolean {
+    if (this.targets?.files !== this.files) this.targets = { files: this.files, exists: linkTargets(this.files, this.notes) };
+    return this.targets.exists(target, from);
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatLink, relativePath, resolveLink, rewriteLinks } from "./internal";
+import { formatLink, linkTargets, relativePath, resolveLink, rewriteLinks } from "./internal";
 
 const notes = [
   { name: "Ideas", path: "Ideas.md" },
@@ -56,4 +56,12 @@ test("renaming a note rewrites the links to it, keeping headings and display tex
   ]);
   const abs = rewriteLinks("[[Old]]", "Projects/Plan.md", "Old.md", "Folder/New name.md", before, after, { format: "absolute", wikilinks: true });
   expect(abs.text).toBe("[[Folder/New name]]");
+});
+
+test("a link's target is known to exist or not without a scan (links to missing notes are drawn faded)", () => {
+  const files = [...notes.map((n) => ({ path: n.path, is_dir: false })), { path: "pic.png", is_dir: false }, { path: "Projects", is_dir: true }];
+  const exists = linkTargets(files, notes);
+  const found = ["Ideas", "ideas", "Ideas.md", "Plan#Goals", "#Heading in this note", "Projects/Plan", "projects/plan.md", "Sub/Deep note", "../Archive/Plan", "pic.png", "Deep%20note.md"];
+  expect(found.filter((t) => !exists(t, "Projects/Other.md"))).toEqual([]);
+  expect(["Missing", "Projects", "Nowhere/Plan", "pic"].filter((t) => exists(t, "Projects/Other.md"))).toEqual([]);
 });
