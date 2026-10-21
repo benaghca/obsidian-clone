@@ -25,7 +25,7 @@ import { h } from "../shell/dom";
 import { type OpenWhere, whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { camera, easeZoom, fitAround, hitTest, panBy, toScreen, toWorld, wheelZoom } from "./camera";
-import { type GraphModel, type GraphNode, nodeRadius } from "./data";
+import { type GraphModel, type GraphNode, nodeColor, nodeRadius } from "./data";
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { createGraphPanel } from "./panel";
 import { graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
@@ -247,17 +247,14 @@ export function createGraphView(host: GraphHost): GraphView {
     invalidate();
   }
 
-  /** Each node's colour: its group's (the first that matches), else by kind. */
+  /** Each node's colour: its group's (the first that matches), else by kind (nodeColor). */
   function applyColors(groups: ColorRule[]) {
     const c = colors ?? readColors();
     palette = [c.node, c.unresolved, c.tag, c.attachment, ...groups.map((g) => `#${g.rgb.toString(16).padStart(6, "0")}`)];
     paletteAlpha = [1, 0.5, 1, 1, ...groups.map(() => 1)];
     const n = model.nodes.length;
     colorOf = new Int16Array(n);
-    model.nodes.forEach((node, i) => {
-      const g = node.kind === "note" || node.kind === "attachment" ? groups.findIndex((gr) => gr.match(node)) : -1;
-      colorOf[i] = g >= 0 ? 4 + g : node.kind === "unresolved" ? 1 : node.kind === "tag" ? 2 : node.kind === "attachment" ? 3 : 0;
-    });
+    model.nodes.forEach((node, i) => (colorOf[i] = nodeColor(node, groups)));
     // Draw order: by colour, so each colour is one path.
     order = Int32Array.from({ length: n }, (_, i) => i).sort((a, b) => colorOf[a] - colorOf[b]);
   }

@@ -76,6 +76,20 @@ const missingId = (name: string) => `?${name.toLowerCase()}`;
 /** Obsidian's node radius for a number of links: 8, growing with the square root past about 6 links. */
 export const nodeRadius = (weight: number) => Math.max(8, 3 * Math.sqrt(weight + 1));
 
+/** Palette slots before the colour groups': a node's own colour by kind. */
+const KIND_COLOR: Record<NodeKind, number> = { note: 0, unresolved: 1, tag: 2, attachment: 3 };
+
+/**
+ * A node's colour: the first colour group that matches it, else its kind's.
+ * Groups colour notes only: in Obsidian 1.14.4 (observed) attachments, tags
+ * and missing notes keep their own colours whatever the query, even one
+ * matching everything.
+ */
+export function nodeColor(node: GraphNode, groups: readonly { match(node: GraphNode): boolean }[]): number {
+  const g = node.kind === "note" ? groups.findIndex((group) => group.match(node)) : -1;
+  return g >= 0 ? 4 + g : KIND_COLOR[node.kind];
+}
+
 export function buildGraph(src: GraphSource, opts: GraphOptions): GraphModel {
   const nodes: GraphNode[] = [];
   const index = new Map<string, number>();
