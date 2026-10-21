@@ -1,4 +1,53 @@
-# Round 11: cleanup 2 (Claude's notes)
+# Round 11: cleanup 2 (as merged)
+
+**Merged:** Claude's version (`rebuild/r11-claude`, `2caa41e`) as merge `25d73ac`, plus two small ports: Codex's Rust cleanup (`72ef916`: the `search`, `link_index` and `frontmatter` commands call `vault.index` directly instead of three `Vault` pass-through methods, `normalize_rel` validates in one pass and returns the path as given, one `listed()` helper in the vault tests) and Grok's dead-token find (`911a480`: `--anim-duration-slow` was defined twice and read nowhere). Three agents did the same brief; the comparison was headless (Vite preview of each branch, the round-start base `ff1debd` and Grok's uncommitted working tree, with the mock vault plus the round 10 `Project` and `Draft` notes, in headless Chromium; Obsidian 1.14.4 on a private Xvfb display in its own network namespace, scratch profile, copy of the test vault).
+
+## How the three compared
+
+Line counts from `rebuild/app` with the brief's commands (before = `ff1debd`: TS app 16,380, tests 1,623, CSS 3,191, Rust 3,202, total 24,396):
+
+| | Claude (merged) | Codex | Grok (uncommitted working tree) |
+|---|---:|---:|---:|
+| TypeScript, app | −86 | +54 | +171 |
+| TypeScript, tests | +93 | +99 | +106 |
+| CSS | −83 | −59 | −44 |
+| Rust | −35 | −107 | +2 |
+| **Total** | **−111** | **−13** | **+235** |
+| Largest file after | 657 (`workspace.ts`) | 650 (`graph/view.ts`) | 639 (`workspace.ts`) |
+| Bugs fixed | 3: Rust `is_note_path` emoji panic, stale All properties type icon, unlinked mentions and a `...` frontmatter line | 0 (kept every behaviour) | 1: the same `is_note_path` panic (byte compare) |
+| Committed | 37 small commits, one kind of change each | 13 commits | notes only; the cleanup was left uncommitted because the count rose |
+
+- **Visible behaviour:** five states (file tree, editor with the Properties block, command palette, Settings, graph) were pixel-identical to the base for all three, after a rerun of the base to confirm the harness is deterministic. Claude's own check covered 68 states light and dark; Codex's 9 dark states plus a 32-check CDP script; Grok's 9 dark states.
+- **Checks:** all three build and pass their tests. On the merged tree: `npm run build`, `npm test` (131 tests in 28 files), `npm run audit:offline`, `cargo build` and `cargo test` (30) pass.
+- **Why Claude:** the only version that made the app code clearly smaller (−204 lines before its new tests), with all four splits done, the most duplication actually merged (one tag reader per workspace via `perWorkspace.ts`, `liveData()` for the Tags and All properties views, `h()` field attributes, the settings `row()`/`toggleRow()` reuse) and three real bugs fixed in their own commits. Codex's split is just as clean but grew the TypeScript; Grok's grew everything and wasn't committed.
+
+## Ideas from the other two
+
+- **Codex (ported in `72ef916`):** the deepest Rust trim (−107): no `Vault` forwarding methods, shared alias/rename loops, `windows(2)`, slice `fill`, a vault-list test helper. Only the `fsutil.rs`/`lib.rs`/`vault.rs` pieces applied cleanly on Claude's tree; the `parse.rs`/`watch.rs` parts overlap Claude's own `frontmatter_close()` and watcher changes and were left out. Also worth keeping: its `scripts/check-cleanup.mjs`, a 32-check headless CDP script over search building, menus, tag caching and tab-strip actions (not ported: it is 178 lines and needs a running Vite server; a candidate for the shared harness later), and its simpler run-walking fuzzy `highlight()` (not ported: it needs sorted indices and saves ~6 lines).
+- **Grok (ported in `911a480`):** found the dead `--anim-duration-slow` token that neither other agent noticed. Its other ideas: `openNote.ts` (where an open lands, Back/Forward, Move to new window) out of `workspace.ts`, `hotkeys.css` out of `settings.css`, and a `spansOf` test; not ported, since Claude's splits already cover the same files.
+
+## Merged line counts (from `rebuild/app`)
+
+| | Round 10 merged (`ff1debd`) | Round 11 merged (`911a480`) | Change |
+|---|---:|---:|---:|
+| TypeScript, app | 16,380 | 16,294 | −86 |
+| TypeScript, tests | 1,623 | 1,716 | +93 |
+| CSS | 3,191 | 3,106 | −85 |
+| Rust | 3,202 | 3,137 | −65 |
+| **Total** | **24,396** | **24,253** | **−143** |
+
+Largest files: `workspace.ts` 657, `graph/view.ts` 649, `styles/settings.css` 647, `shell/pane.ts` 606, `appCommands.ts` 540. None over 660. New files: `vault.ts`, `shell/tabStrip.ts`, `graph/input.ts`, `editor/propertyFields.ts`, `perWorkspace.ts`, `shell/propertyIndex.test.ts`. No dependency, command, permission, capability or CSP change.
+
+## Known gaps left after the merge
+
+- Editor rendering: no callouts (`> [!note]`), tables stay raw Markdown, `![[Note]]` embeds and local images (`![[pic.png]]`, `![](pic.png)`) stay as text, no `==highlight==` or `%%comment%%` styling. Round 12 takes these.
+- Search pane and properties leftovers from round 10 (match-case toggle and sort menu, match counts, wrapped result lines, file collapse chevrons; File properties view; Rename/Delete property). Candidates for round 13.
+- Cleanup 2 reached −0.6%, not the 3–5% aim: round 8 already removed the easy duplication. Further size cuts now mean merging widgets (suggesters, side views) that behave differently; that is a design choice, not a cleanup.
+
+---
+
+# Claude's round notes (as written on `rebuild/r11-claude`)
+
 
 Branch `rebuild/r11-claude`, from `ff1debd`. No features, no visible change; 37 small commits (these notes included), one kind of change each.
 
