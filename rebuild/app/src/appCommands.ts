@@ -319,6 +319,7 @@ export function registerAppCommands(parts: AppParts) {
     // Splits. Obsidian has no default hotkeys for these.
     { id: "workspace:split-vertical", name: "Split right", icon: "separator-vertical", run: () => ws.split(ws.active, "right") },
     { id: "workspace:open-in-new-window", name: "Open current tab in new window", icon: "picture-in-picture-2", when: hasNote, run: () => api.openNoteWindow(ws.active.path!) },
+    { id: "workspace:move-to-new-window", name: "Move current tab to new window", icon: "picture-in-picture", when: hasNote, run: () => ws.moveToWindow(ws.active) },
     { id: "workspace:export-pdf", name: "Export to PDF...", icon: "file-down", when: hasNote, run: exportPdf },
     { id: "workspace:split-horizontal", name: "Split down", icon: "separator-horizontal", run: () => ws.split(ws.active, "bottom") },
     paneCommand("editor:focus-left", "Focus on tab group to the left", "left"),

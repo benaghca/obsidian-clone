@@ -98,6 +98,7 @@ const ICONS = {
   "panel-right": lucide.PanelRight,
   "pen-line": lucide.PenLine,
   percent: lucide.Percent,
+  "picture-in-picture": lucide.PictureInPicture,
   "picture-in-picture-2": lucide.PictureInPicture2,
   pilcrow: lucide.Pilcrow,
   pin: lucide.Pin,

@@ -278,6 +278,15 @@ export class Workspace {
     if (focus && tab.path) this.editors.viewOf(group).focus();
   }
 
+  /** "Move to new window": the note opens in a window of its own (its unsaved edits saved first) and leaves this one. */
+  async moveToWindow(tab: Tab) {
+    const path = tab.path;
+    if (!path) return;
+    await this.editors.flush((p) => p === path);
+    await api.openNoteWindow(path);
+    this.closeTab(tab);
+  }
+
   closeTab(tab: Tab) {
     this.closeTabs([tab]);
   }
