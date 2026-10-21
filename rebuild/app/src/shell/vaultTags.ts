@@ -9,7 +9,8 @@
 // the open note's unsaved tags.
 
 import { api, type SearchHit } from "../api";
-import { perWorkspace, type Workspace } from "../workspace";
+import { perWorkspace } from "../perWorkspace";
+import type { Workspace } from "../workspace";
 import { type Frontmatter, frontmatterTags, tagsByNote } from "./linksTags";
 
 const LIMIT = 100_000;

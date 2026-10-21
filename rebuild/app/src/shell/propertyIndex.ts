@@ -12,7 +12,8 @@ import { fixedType, type Property, type PropertyType, readFrontmatter, readPrope
 import type { PropertyHost } from "../editor/host";
 import { compareNames } from "../paths";
 import { settings } from "../settings/store";
-import { perWorkspace, type Workspace } from "../workspace";
+import { perWorkspace } from "../perWorkspace";
+import type { Workspace } from "../workspace";
 import { vaultTags } from "./vaultTags";
 
 export interface NoteProperties {

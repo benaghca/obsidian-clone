@@ -3,7 +3,7 @@ import { beforeEach, expect, it, vi } from "vitest";
 
 const frontmatter = vi.fn<(paths?: string[]) => Promise<Record<string, string>>>();
 vi.mock("../api", () => ({ api: { frontmatter: (paths?: string[]) => frontmatter(paths) } }));
-vi.mock("../workspace", () => ({ perWorkspace: <T>(create: (ws: unknown) => T) => create }));
+vi.mock("../perWorkspace", () => ({ perWorkspace: <T>(create: (ws: unknown) => T) => create }));
 vi.mock("./vaultTags", () => ({ vaultTags: () => ({ read: async () => new Map([["a.md", ["x"]]]) }) }));
 
 const { propertyIndex } = await import("./propertyIndex");

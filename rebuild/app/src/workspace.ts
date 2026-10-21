@@ -38,16 +38,6 @@ interface ClosedTab {
 
 const CLOSED_MAX = 20;
 
-/** One `create(ws)` per workspace (an index or cache every view shares), made the first time it is asked for. */
-export function perWorkspace<T>(create: (ws: Workspace) => T): (ws: Workspace) => T {
-  const made = new WeakMap<Workspace, T>();
-  return (ws) => {
-    let value = made.get(ws);
-    if (!value) made.set(ws, (value = create(ws)));
-    return value;
-  };
-}
-
 export class Workspace {
   readonly vault = new Vault(
     (change) => this.emit(change),
