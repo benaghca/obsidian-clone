@@ -15,59 +15,53 @@ pub(super) struct RawLink {
     pub(super) markdown: bool,
 }
 
-pub(super) fn parse_note(content: &str) -> (Vec<RawLink>, Vec<String>, Vec<Line>) {
+/// What the index keeps of a note (nothing, for other files and notes too large to index).
+#[derive(Default)]
+pub(super) struct Note {
+    pub(super) links: Vec<RawLink>,
+    /// Frontmatter aliases, lower case.
+    pub(super) aliases: Vec<String>,
+    pub(super) lines: Vec<Line>,
+}
+
+pub(super) fn parse_note(content: &str) -> Note {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let aliases = parse_aliases(content);
     let mut links = Vec::new();
     let mut lines = Vec::new();
-    let mut in_fence = false;
-    let mut fence_marker = 0u8;
-    let mut fence_len = 0usize;
+    // The open code fence's marker and length, while inside one.
+    let mut fence: Option<(u8, usize)> = None;
     for (idx, line) in content.lines().enumerate() {
-        let line_no = (idx as u32) + 1;
-        if in_fence {
-            if fence_close(line, fence_marker, fence_len) {
-                in_fence = false;
-            }
-            lines.push(Line {
-                lower: line.to_lowercase(),
-                text: line.to_string(),
-            });
-            continue;
-        }
-        if let Some((marker, len)) = fence_open(line) {
-            in_fence = true;
-            fence_marker = marker;
-            fence_len = len;
-            lines.push(Line {
-                lower: line.to_lowercase(),
-                text: line.to_string(),
-            });
-            continue;
-        }
-        let blanked = blank_inline_code(line);
-        for target in wiki_targets(&blanked) {
-            links.push(RawLink {
-                line: line_no,
-                text: line.to_string(),
-                target,
-                markdown: false,
-            });
-        }
-        for target in markdown_targets(&blanked) {
-            links.push(RawLink {
-                line: line_no,
-                text: line.to_string(),
-                target,
-                markdown: true,
-            });
-        }
         lines.push(Line {
             lower: line.to_lowercase(),
             text: line.to_string(),
         });
+        if let Some((marker, len)) = fence {
+            if fence_close(line, marker, len) {
+                fence = None;
+            }
+            continue;
+        }
+        fence = fence_open(line);
+        if fence.is_some() {
+            continue;
+        }
+        let blanked = blank_inline_code(line);
+        let wiki = wiki_targets(&blanked).into_iter().map(|t| (t, false));
+        let markdown = markdown_targets(&blanked).into_iter().map(|t| (t, true));
+        for (target, markdown) in wiki.chain(markdown) {
+            links.push(RawLink {
+                line: (idx as u32) + 1,
+                text: line.to_string(),
+                target,
+                markdown,
+            });
+        }
     }
-    (links, aliases, lines)
+    Note {
+        links,
+        aliases: parse_aliases(content),
+        lines,
+    }
 }
 
 fn fence_open(line: &str) -> Option<(u8, usize)> {

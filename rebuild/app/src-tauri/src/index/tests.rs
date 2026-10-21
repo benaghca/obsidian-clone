@@ -284,18 +284,7 @@ fn search_of_a_thousand_notes_stays_well_under_the_budget() {
     for n in 0..1000 {
         let path = format!("n{n}.md");
         let body = format!("note {n}\nline with token-{n} inside a garden of words\n");
-        let (links, aliases, lines) = parse_note(&body);
-        idx.files.insert(
-            path,
-            Node {
-                is_dir: false,
-                mtime_ms: 0,
-                size: body.len() as u64,
-                links,
-                aliases,
-                lines,
-            },
-        );
+        idx.insert_file(&path, 0, body.len() as u64, || body.clone());
     }
     idx.rebuild_maps();
     let started = Instant::now();
@@ -306,4 +295,33 @@ fn search_of_a_thousand_notes_stays_well_under_the_budget() {
         started.elapsed()
     );
     assert!(hits.iter().any(|h| h.path == "n42.md" && h.line == 2));
+}
+
+#[test]
+fn a_new_folder_is_indexed_like_a_scan() {
+    let dir = tmp_dir("adopt");
+    fs::write(dir.path.join("Top.md"), "top\n").unwrap();
+    let mut idx = Index::scan(&dir.path).unwrap();
+    fs::create_dir_all(dir.path.join("new/inner")).unwrap();
+    fs::create_dir_all(dir.path.join("new/.grove")).unwrap();
+    fs::write(dir.path.join("new/inner/Deep.md"), "[[Top]]\n").unwrap();
+    fs::write(dir.path.join("new/.grove/app.json"), "{}").unwrap();
+    fs::write(dir.path.join(format!("new/x.md{}", fsutil::TEMP_MARK)), "").unwrap();
+    idx.refresh_path(&dir.path, "new");
+    let paths: Vec<_> = idx.list().into_iter().map(|e| e.path).collect();
+    assert_eq!(
+        paths,
+        vec!["Top.md", "new", "new/inner", "new/inner/Deep.md"]
+    );
+    assert_eq!(
+        idx.resolve("new/inner/Deep.md", "Top").as_deref(),
+        Some("Top.md")
+    );
+    let rescan: Vec<_> = Index::scan(&dir.path)
+        .unwrap()
+        .list()
+        .into_iter()
+        .map(|e| e.path)
+        .collect();
+    assert_eq!(paths, rescan);
 }

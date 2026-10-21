@@ -11,20 +11,19 @@ mod tests;
 
 use crate::fsutil::{self, is_ignored_rel};
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit};
-use parse::{clean_target, parse_note, Line, RawLink};
+use parse::{clean_target, parse_note, Note};
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::Path;
 
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 
+#[derive(Default)]
 struct Node {
     is_dir: bool,
     mtime_ms: u64,
     size: u64,
-    links: Vec<RawLink>,
-    aliases: Vec<String>,
-    lines: Vec<Line>,
+    note: Note,
 }
 
 #[derive(Default)]
@@ -39,7 +38,7 @@ impl Index {
     pub fn scan(root: &Path) -> Result<Self, String> {
         let mut idx = Index::default();
         let rd = fs::read_dir(root).map_err(|e| format!("can't read {}: {e}", root.display()))?;
-        idx.walk(root, rd);
+        idx.add_children(root, "", rd);
         idx.rebuild_maps();
         Ok(idx)
     }
@@ -107,7 +106,7 @@ impl Index {
             let mut outs = Vec::new();
             let mut md_outs = Vec::new();
             let mut missing: Vec<String> = Vec::new();
-            for link in &node.links {
+            for link in &node.note.links {
                 let Some(dest) = self.resolve(path, &link.target) else {
                     let name = if link.markdown {
                         strip_md(&link.target)
@@ -180,7 +179,7 @@ impl Index {
                 continue;
             }
             let mut bucket = Vec::new();
-            for (i, line) in node.lines.iter().enumerate() {
+            for (i, line) in node.note.lines.iter().enumerate() {
                 if terms.iter().all(|t| line.lower.contains(t)) {
                     bucket.push(SearchHit {
                         path: path.clone(),
@@ -242,9 +241,7 @@ impl Index {
                     format!("{to}{}", &key[from.len()..])
                 };
                 if !node.is_dir && !is_note_path(&new_key) {
-                    node.links.clear();
-                    node.aliases.clear();
-                    node.lines.clear();
+                    node.note = Note::default();
                 }
                 self.files.insert(new_key, node);
             }
@@ -265,7 +262,9 @@ impl Index {
             Ok(md) if md.is_dir() => {
                 self.ensure_dirs(root, rel);
                 self.insert_dir(rel, fsutil::mtime_ms(&md));
-                self.adopt_children(root, rel);
+                if let Ok(rd) = fs::read_dir(&full) {
+                    self.add_children(root, rel, rd);
+                }
                 self.rebuild_maps();
             }
             Ok(md) if md.is_file() => {
@@ -279,22 +278,7 @@ impl Index {
 
     pub fn upsert_note(&mut self, root: &Path, rel: &str, content: &str, mtime_ms: u64, size: u64) {
         self.ensure_dirs(root, rel);
-        let (links, aliases, lines) = if is_note_path(rel) && size <= MAX_INDEX_BYTES {
-            parse_note(content)
-        } else {
-            (Vec::new(), Vec::new(), Vec::new())
-        };
-        self.files.insert(
-            rel.to_string(),
-            Node {
-                is_dir: false,
-                mtime_ms,
-                size,
-                links,
-                aliases,
-                lines,
-            },
-        );
+        self.insert_file(rel, mtime_ms, size, || content.to_string());
         self.rebuild_maps();
     }
 
@@ -313,31 +297,19 @@ impl Index {
                 return Some(found.clone());
             }
         }
+        // A partial path: the shortest file path that ends with it.
         let low = raw.trim_start_matches('/').to_lowercase();
         let suf = format!("/{low}");
         let suf_md = format!("/{low}.md");
-        let mut best: Option<&String> = None;
-        for path in self.files.keys() {
-            if self.files.get(path).is_some_and(|n| n.is_dir) {
-                continue;
-            }
-            let pl = path.to_lowercase();
-            if pl.ends_with(&suf) || pl.ends_with(&suf_md) {
-                best = Some(match best {
-                    None => path,
-                    Some(cur) => {
-                        if path.len() < cur.len()
-                            || (path.len() == cur.len() && path.as_str() < cur.as_str())
-                        {
-                            path
-                        } else {
-                            cur
-                        }
-                    }
-                });
-            }
-        }
-        best.cloned()
+        self.files
+            .iter()
+            .filter(|(path, node)| {
+                let pl = path.to_lowercase();
+                !node.is_dir && (pl.ends_with(&suf) || pl.ends_with(&suf_md))
+            })
+            .map(|(path, _)| path)
+            .min_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)))
+            .cloned()
     }
 
     fn has_child(&self, rel: &str) -> bool {
@@ -345,141 +317,87 @@ impl Index {
         self.files.keys().any(|k| k.starts_with(&prefix))
     }
 
-    fn walk(&mut self, root: &Path, rd: fs::ReadDir) {
+    /// Index the entries of the folder `rel` ("" for the vault) and everything below them,
+    /// keeping what is indexed already. Hidden folders, temp files and symlinks are skipped.
+    fn add_children(&mut self, root: &Path, rel: &str, rd: fs::ReadDir) {
         for entry in rd.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            if is_ignored_rel(&name) || ignored_name(&name) {
-                continue;
-            }
             let Ok(ft) = entry.file_type() else {
                 continue;
             };
-            if ft.is_symlink() {
+            if is_ignored_rel(&name) || ft.is_symlink() {
                 continue;
             }
-            let path = entry.path();
-            let Some(rel) = fsutil::rel_of(root, &path) else {
-                continue;
+            let child = if rel.is_empty() {
+                name
+            } else {
+                format!("{rel}/{name}")
             };
+            let known = self.files.contains_key(&child);
             if ft.is_dir() {
-                let mtime = entry.metadata().map(|m| fsutil::mtime_ms(&m)).unwrap_or(0);
-                self.insert_dir(&rel, mtime);
-                if let Ok(child) = fs::read_dir(&path) {
-                    self.walk(root, child);
+                if !known {
+                    let mtime = entry.metadata().map(|m| fsutil::mtime_ms(&m)).unwrap_or(0);
+                    self.insert_dir(&child, mtime);
                 }
-            } else if ft.is_file() {
+                if let Ok(rd) = fs::read_dir(entry.path()) {
+                    self.add_children(root, &child, rd);
+                }
+            } else if ft.is_file() && !known {
                 if let Ok(md) = entry.metadata() {
-                    self.read_file_node(root, &rel, &md);
+                    self.read_file_node(root, &child, &md);
                 }
             }
         }
     }
 
-    fn adopt_children(&mut self, root: &Path, rel: &str) {
-        let full = root.join(rel);
-        let Ok(rd) = fs::read_dir(&full) else {
-            return;
-        };
-        for entry in rd.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            if ignored_name(&name) {
-                continue;
-            }
-            let Ok(ft) = entry.file_type() else {
-                continue;
-            };
-            if ft.is_symlink() {
-                continue;
-            }
-            let child_rel = format!("{rel}/{name}");
-            if self.files.contains_key(&child_rel) {
-                if ft.is_dir() {
-                    self.adopt_children(root, &child_rel);
-                }
-                continue;
-            }
-            if ft.is_dir() {
-                let mtime = entry.metadata().map(|m| fsutil::mtime_ms(&m)).unwrap_or(0);
-                self.insert_dir(&child_rel, mtime);
-                self.adopt_children(root, &child_rel);
-            } else if ft.is_file() {
-                if let Ok(md) = entry.metadata() {
-                    self.read_file_node(root, &child_rel, &md);
-                }
-            }
-        }
-    }
-
+    /// Folder nodes for the folders above `rel` that have none (with no modified time).
     fn ensure_parent_nodes(&mut self, rel: &str) {
-        let mut acc = String::new();
-        let parts: Vec<&str> = rel.split('/').collect();
-        if parts.len() < 2 {
-            return;
-        }
-        for part in &parts[..parts.len() - 1] {
-            if !acc.is_empty() {
-                acc.push('/');
-            }
-            acc.push_str(part);
-            if !self.files.contains_key(&acc) {
-                self.insert_dir(&acc, 0);
+        for dir in parents(rel) {
+            if !self.files.contains_key(dir) {
+                self.insert_dir(dir, 0);
             }
         }
     }
 
+    /// Folder nodes for the folders above `rel`, with their modified times from disk.
     fn ensure_dirs(&mut self, root: &Path, rel: &str) {
-        let mut acc = String::new();
-        let parts: Vec<&str> = rel.split('/').collect();
-        if parts.len() < 2 {
-            return;
-        }
-        for part in &parts[..parts.len() - 1] {
-            if !acc.is_empty() {
-                acc.push('/');
-            }
-            acc.push_str(part);
-            let mtime = fs::metadata(root.join(&acc))
+        for dir in parents(rel) {
+            let mtime = fs::metadata(root.join(dir))
                 .map(|m| fsutil::mtime_ms(&m))
                 .unwrap_or(0);
-            self.insert_dir(&acc, mtime);
+            self.insert_dir(dir, mtime);
         }
     }
 
     fn insert_dir(&mut self, rel: &str, mtime_ms: u64) {
-        self.files.insert(
-            rel.to_string(),
-            Node {
-                is_dir: true,
-                mtime_ms,
-                size: 0,
-                links: Vec::new(),
-                aliases: Vec::new(),
-                lines: Vec::new(),
-            },
-        );
+        let node = Node {
+            is_dir: true,
+            mtime_ms,
+            ..Node::default()
+        };
+        self.files.insert(rel.to_string(), node);
+    }
+
+    /// A file's node. A note's text (from `read`) is parsed, unless it is too large to index.
+    fn insert_file(&mut self, rel: &str, mtime_ms: u64, size: u64, read: impl FnOnce() -> String) {
+        let note = if is_note_path(rel) && size <= MAX_INDEX_BYTES {
+            parse_note(&read())
+        } else {
+            Note::default()
+        };
+        let node = Node {
+            is_dir: false,
+            mtime_ms,
+            size,
+            note,
+        };
+        self.files.insert(rel.to_string(), node);
     }
 
     fn read_file_node(&mut self, root: &Path, rel: &str, md: &fs::Metadata) {
-        let size = md.len();
-        let mtime_ms = fsutil::mtime_ms(md);
-        let (links, aliases, lines) = if is_note_path(rel) && size <= MAX_INDEX_BYTES {
-            let bytes = fs::read(root.join(rel)).unwrap_or_default();
-            let text = String::from_utf8_lossy(&bytes);
-            parse_note(&text)
-        } else {
-            (Vec::new(), Vec::new(), Vec::new())
-        };
-        self.files.insert(
-            rel.to_string(),
-            Node {
-                is_dir: false,
-                mtime_ms,
-                size,
-                links,
-                aliases,
-                lines,
-            },
-        );
+        self.insert_file(rel, fsutil::mtime_ms(md), md.len(), || {
+            String::from_utf8_lossy(&fs::read(root.join(rel)).unwrap_or_default()).into_owned()
+        });
     }
 
     fn rebuild_maps(&mut self) {
@@ -497,7 +415,7 @@ impl Index {
                 names.entry(key).or_default().push(path.clone());
             }
             if is_note_path(path) {
-                for alias in &node.aliases {
+                for alias in &node.note.aliases {
                     self.by_alias
                         .entry(alias.clone())
                         .or_insert_with(|| path.clone());
@@ -515,39 +433,17 @@ impl Index {
         let mut idx = Index::default();
         for (path, content) in notes {
             // Parent folders exist in a real scan, so a directory rename has a node to move.
-            let mut acc = String::new();
-            let parts: Vec<&str> = path.split('/').collect();
-            if parts.len() >= 2 {
-                for part in &parts[..parts.len() - 1] {
-                    if !acc.is_empty() {
-                        acc.push('/');
-                    }
-                    acc.push_str(part);
-                    if !idx.files.contains_key(&acc) {
-                        idx.insert_dir(&acc, 0);
-                    }
-                }
-            }
-            let (links, aliases, lines) = parse_note(content);
-            idx.files.insert(
-                (*path).to_string(),
-                Node {
-                    is_dir: false,
-                    mtime_ms: 0,
-                    size: content.len() as u64,
-                    links,
-                    aliases,
-                    lines,
-                },
-            );
+            idx.ensure_parent_nodes(path);
+            idx.insert_file(path, 0, content.len() as u64, || content.to_string());
         }
         idx.rebuild_maps();
         idx
     }
 }
 
-fn ignored_name(name: &str) -> bool {
-    matches!(name, ".obsidian" | ".git" | ".trash") || name.contains(fsutil::TEMP_MARK)
+/// The folders above a path ("a" and "a/b" for "a/b/c.md").
+fn parents(rel: &str) -> impl Iterator<Item = &str> {
+    rel.match_indices('/').map(move |(i, _)| &rel[..i])
 }
 
 pub fn is_note_path(path: &str) -> bool {
