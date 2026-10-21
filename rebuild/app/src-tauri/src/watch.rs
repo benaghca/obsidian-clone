@@ -124,13 +124,12 @@ fn flush(app: &AppHandle, events: &[Event]) {
     }
 }
 
+/// What the events of one rename (one tracker) said: its two halves, or both ends at once.
 #[derive(Default)]
 struct RenamePart {
     from: Option<String>,
     to: Option<String>,
-    both_from: Option<String>,
-    both_to: Option<String>,
-    saw_both: bool,
+    both: Option<(Option<String>, Option<String>)>,
 }
 
 /// Group a burst of notify events into contract events.
@@ -169,35 +168,24 @@ pub fn coalesce(
             }
             EventKind::Modify(ModifyKind::Name(mode)) => match mode {
                 RenameMode::Both => {
-                    let (from, to) = rename_ends(root, event);
-                    if let Some(tracker) = event.attrs.tracker() {
-                        note_tracker(&mut order, &mut parts, tracker);
-                        let part = parts.get_mut(&tracker).unwrap();
-                        part.saw_both = true;
-                        part.both_from = from;
-                        part.both_to = to;
-                    } else {
-                        bare.push((from, to));
+                    let ends = rename_ends(root, event);
+                    match event.attrs.tracker() {
+                        Some(tracker) => part_of(&mut order, &mut parts, tracker).both = Some(ends),
+                        None => bare.push(ends),
                     }
                 }
-                RenameMode::From => {
+                RenameMode::From | RenameMode::To => {
+                    let path = visible(root, event).into_iter().next();
+                    let is_from = mode == RenameMode::From;
                     if let Some(tracker) = event.attrs.tracker() {
-                        note_tracker(&mut order, &mut parts, tracker);
-                        if let Some(path) = visible(root, event).into_iter().next() {
-                            parts.get_mut(&tracker).unwrap().from = Some(path);
+                        let part = part_of(&mut order, &mut parts, tracker);
+                        let end = if is_from { &mut part.from } else { &mut part.to };
+                        if path.is_some() {
+                            *end = path;
                         }
-                    } else if let Some(path) = visible(root, event).into_iter().next() {
-                        removes.insert(path);
-                    }
-                }
-                RenameMode::To => {
-                    if let Some(tracker) = event.attrs.tracker() {
-                        note_tracker(&mut order, &mut parts, tracker);
-                        if let Some(path) = visible(root, event).into_iter().next() {
-                            parts.get_mut(&tracker).unwrap().to = Some(path);
-                        }
-                    } else if let Some(path) = visible(root, event).into_iter().next() {
-                        creates.insert(path);
+                    } else if let Some(path) = path {
+                        let into = if is_from { &mut removes } else { &mut creates };
+                        into.insert(path);
                     }
                 }
                 RenameMode::Any | RenameMode::Other => {
@@ -228,17 +216,8 @@ pub fn coalesce(
         let Some(part) = parts.remove(&tracker) else {
             continue;
         };
-        if part.saw_both {
-            push_rename(
-                &mut renames,
-                &mut creates,
-                &mut removes,
-                part.both_from,
-                part.both_to,
-            );
-        } else {
-            push_rename(&mut renames, &mut creates, &mut removes, part.from, part.to);
-        }
+        let (from, to) = part.both.unwrap_or((part.from, part.to));
+        push_rename(&mut renames, &mut creates, &mut removes, from, to);
     }
 
     for path in renames.iter().flat_map(|(from, to)| [from, to]) {
@@ -273,11 +252,12 @@ pub fn coalesce(
     out
 }
 
-fn note_tracker(order: &mut Vec<usize>, parts: &mut HashMap<usize, RenamePart>, tracker: usize) {
-    if let std::collections::hash_map::Entry::Vacant(slot) = parts.entry(tracker) {
+/// The rename a tracker belongs to, noted in the order trackers were first seen.
+fn part_of<'a>(order: &mut Vec<usize>, parts: &'a mut HashMap<usize, RenamePart>, tracker: usize) -> &'a mut RenamePart {
+    parts.entry(tracker).or_insert_with(|| {
         order.push(tracker);
-        slot.insert(RenamePart::default());
-    }
+        RenamePart::default()
+    })
 }
 
 fn push_rename(
@@ -318,15 +298,8 @@ fn visible_files(root: &Path, event: &Event) -> Vec<String> {
 }
 
 fn rename_ends(root: &Path, event: &Event) -> (Option<String>, Option<String>) {
-    let from = event
-        .paths
-        .first()
-        .and_then(|path| crate::fsutil::rel_of(root, path));
-    let to = event
-        .paths
-        .get(1)
-        .and_then(|path| crate::fsutil::rel_of(root, path));
-    (from, to)
+    let end = |i: usize| event.paths.get(i).and_then(|path| crate::fsutil::rel_of(root, path));
+    (end(0), end(1))
 }
 
 #[cfg(test)]
