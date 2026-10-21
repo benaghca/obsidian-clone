@@ -1,0 +1,124 @@
+/* The right sidebar's views: outline, backlinks, outgoing links and tags. */
+
+.outline-view,
+.backlink-pane {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  /* room to scroll the last rows above the floating status bar */
+  padding: 4px 8px 32px;
+}
+.outline-item {
+  padding-left: calc(8px + var(--depth, 0) * 16px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: var(--cursor, default);
+}
+.backlink-header {
+  padding-left: 22px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.outgoing-link-item.is-unresolved .tree-item-inner {
+  color: var(--text-faint);
+}
+.tag-pane-tag {
+  padding-left: calc(22px + var(--depth, 0) * 17px);
+}
+.tag-pane-tag .collapse-icon {
+  left: calc(4px + var(--depth, 0) * 17px);
+}
+.tag-pane-tag-text {
+  color: var(--text-normal);
+}
+.backlink-header .collapse-icon {
+  left: 4px;
+}
+.backlink-section + .backlink-section {
+  margin-top: 8px;
+}
+.tree-item-flair {
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: var(--font-ui-smaller);
+  font-weight: 400;
+  color: var(--text-faint);
+}
+.search-result-container {
+  padding: 2px 0 4px;
+}
+.backlink-pane .search-result-file-title {
+  position: relative;
+  padding-left: 22px;
+}
+.backlink-pane .search-result-file-title .collapse-icon {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.search-result-file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backlink-pane .search-result-file-match {
+  margin-left: 12px;
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+/* Outgoing links, unlinked mentions: a card per mention, its line (up to
+   three lines of it) and under it a small button naming the note that
+   links the mention, as in Obsidian. */
+.backlink-pane .search-result-file-match.unlinked-mention {
+  display: block;
+  margin: 4px 4px 6px 4px;
+  padding: 6px 10px 8px;
+}
+.unlinked-mention-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.unlinked-mention-link {
+  --icon-size: var(--icon-xs);
+  --icon-stroke: var(--icon-xs-stroke-width);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
+  background: var(--background-primary);
+  transition:
+    background-color var(--anim-duration-fast) var(--anim-ease-out),
+    color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.unlinked-mention-link:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.search-result-more {
+  margin: 2px 0 4px 12px;
+  padding: 2px 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+  cursor: var(--cursor, default);
+}
+.search-result-more:hover {
+  text-decoration: underline;
+}
+.search-empty-state {
+  padding: 4px 6px 4px 22px;
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}

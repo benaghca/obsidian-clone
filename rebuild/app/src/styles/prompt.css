@@ -1,0 +1,142 @@
+/* The shared prompt: quick switcher, command palette and the other pickers
+   (shell/prompt.ts). */
+
+.modal-container {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  animation: grove-fade-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.modal-container.is-closing {
+  pointer-events: none;
+  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
+}
+.modal-bg {
+  position: absolute;
+  inset: 0;
+  background: var(--background-modifier-cover);
+}
+.prompt {
+  position: relative;
+  margin-top: 120px;
+  width: var(--prompt-width);
+  max-width: var(--prompt-max-width);
+  max-height: min(var(--prompt-max-height), calc(100vh - 160px));
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+  overflow: hidden;
+  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.is-closing .prompt {
+  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
+}
+.prompt-input-container {
+  position: relative;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.prompt-input {
+  width: 100%;
+  border: 0;
+  outline: none;
+  font: inherit;
+  font-size: 16px;
+  padding: 12px 36px 12px 14px;
+  color: var(--text-normal);
+  background: transparent;
+}
+.search-input-clear-button {
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  color: var(--text-faint);
+  cursor: var(--cursor, default);
+  transition: color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.search-input-clear-button:hover {
+  color: var(--text-muted);
+}
+.prompt-results {
+  overflow-y: auto;
+  padding: 6px;
+}
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border-radius: var(--radius-s);
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--text-normal);
+  cursor: default;
+}
+.suggestion-content {
+  flex: 1;
+  min-width: 0;
+}
+.suggestion-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.suggestion-aux {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.suggestion-hotkey {
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+}
+.suggestion-item.is-selected {
+  background: var(--background-modifier-hover);
+}
+.suggestion-note,
+.suggestion-action {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.suggestion-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.suggestion-highlight {
+  font-weight: 700;
+}
+.suggestion-empty {
+  padding: 8px 10px;
+  color: var(--text-muted);
+}
+.prompt-instructions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  white-space: nowrap;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.prompt-instruction-command {
+  font-weight: 600;
+  margin-right: 4px;
+}

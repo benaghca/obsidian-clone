@@ -1,5 +1,13 @@
 import "./styles/theme.css";
-import "./styles/app.css";
+import "./styles/base.css";
+import "./styles/sidedock.css";
+import "./styles/fileTree.css";
+import "./styles/sideViews.css";
+import "./styles/panes.css";
+import "./styles/tabs.css";
+import "./styles/noteView.css";
+import "./styles/menu.css";
+import "./styles/prompt.css";
 import "./styles/editor.css";
 import "./styles/motion.css";
 import "./styles/settings.css";

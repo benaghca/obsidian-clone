@@ -1,0 +1,134 @@
+/* The ribbon and the side docks (the left and right sidebars): their frame,
+   tab headers, resize edge and open/close motion (shell/sidedock.ts). */
+
+/* ----- ribbon ----- */
+
+.workspace-ribbon {
+  width: var(--ribbon-width);
+  flex: none;
+  background: var(--background-secondary);
+  border-right: 1px solid var(--background-modifier-border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.workspace-ribbon .sidebar-toggle-button {
+  height: var(--header-height);
+  width: 100%;
+  border-radius: 0;
+}
+.workspace-ribbon .sidebar-toggle-button:hover {
+  background: none;
+}
+.side-dock-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 6px;
+}
+.side-dock-ribbon-action {
+  padding: 4px;
+}
+/* The settings gear: at the foot of the ribbon only while the left sidebar
+   is closed (otherwise it is in the sidebar's vault footer, as in Obsidian). */
+.side-dock-settings {
+  margin-top: auto;
+  padding: 6px 0 8px;
+}
+.app-container:not(.is-left-sidebar-collapsed) .side-dock-settings {
+  display: none;
+}
+
+/* ----- side docks (left: files; right: backlinks, outline) ----- */
+
+/* Each dock animates its width, the one layout property animated in the
+   app, over --anim-duration-sidebar. The edge line is an inset shadow, so no
+   border width has to animate with it. The contents keep the dock's full
+   width and are clipped (anchored to the outer edge), so nothing inside
+   re-wraps; they fade out as the dock closes and back in as it opens. */
+.mod-sidedock {
+  --dock-width: var(--sidebar-width);
+  width: var(--dock-width);
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--background-secondary);
+  transition: width var(--anim-duration-sidebar) var(--anim-ease-out);
+}
+.mod-left-split {
+  --dock-width: var(--left-sidebar-width, var(--sidebar-width));
+  box-shadow: inset -1px 0 0 var(--background-modifier-border);
+}
+.mod-right-split {
+  --dock-width: var(--right-sidebar-width, 260px);
+  align-items: flex-end;
+  box-shadow: inset 1px 0 0 var(--background-modifier-border);
+}
+.mod-sidedock > * {
+  min-width: var(--dock-width);
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-out) calc(var(--anim-duration-sidebar) / 3);
+}
+.is-left-sidebar-collapsed .mod-left-split,
+.is-right-sidebar-collapsed .mod-right-split {
+  width: 0;
+  visibility: hidden;
+  transition:
+    width var(--anim-duration-sidebar) var(--anim-ease-out),
+    visibility 0s linear var(--anim-duration-sidebar);
+}
+.is-left-sidebar-collapsed .mod-left-split > *,
+.is-right-sidebar-collapsed .mod-right-split > * {
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-in);
+}
+/* restoring a saved layout, or dragging the edge: follow at once */
+.is-sidedock-instant .mod-sidedock,
+.is-sidedock-instant .mod-sidedock > *,
+.is-sidedock-resizing .mod-sidedock,
+.is-sidedock-resizing .mod-root .workspace-tab-header-container {
+  transition: none;
+}
+.is-sidedock-resizing {
+  cursor: ew-resize;
+  user-select: none;
+}
+.mod-sidedock > .workspace-leaf-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 5px;
+  min-width: 0;
+  z-index: 5;
+  cursor: ew-resize;
+  transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
+}
+.mod-sidedock > .workspace-leaf-resize-handle:hover,
+.is-sidedock-resizing .workspace-leaf-resize-handle {
+  background: linear-gradient(to right, var(--background-modifier-border-hover) 2px, transparent 2px);
+}
+.mod-sidedock > .workspace-tab-header-container {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 8px;
+  flex: none;
+}
+.mod-sidedock .workspace-tab-header.is-active {
+  background: var(--background-modifier-hover);
+  color: var(--icon-color-hover);
+  opacity: 1;
+}
+.workspace-leaf-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.workspace-leaf-content > * {
+  animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
+}

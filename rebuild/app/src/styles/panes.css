@@ -1,0 +1,194 @@
+/* The main workspace: tab groups in splits, their dividers, the active pane,
+   and dragging tabs between them (shell/pane.ts, shell/tabDrag.ts). */
+
+/* Splits lay their children out by flex-grow (each child's fraction), so a
+   window resize scales every pane; a divider drag writes two flex-grows. */
+.mod-root {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  position: relative;
+}
+.mod-root .workspace-split {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  position: relative;
+}
+.mod-root.mod-vertical,
+.mod-root .workspace-split.mod-vertical {
+  flex-direction: row;
+}
+.mod-root.mod-horizontal,
+.mod-root .workspace-split.mod-horizontal {
+  flex-direction: column;
+}
+.workspace-tabs {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--background-primary);
+}
+.workspace-leaf {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--background-primary);
+}
+
+/* Dividers between panes: a 1px line on the boundary with a wider grab
+   area, like Obsidian's. Hovering a moment or dragging lights it in the
+   accent (an opacity fade on a second bar, nothing else moves). */
+.workspace-leaf-resize-handle.mod-split {
+  position: absolute;
+  z-index: 6;
+}
+.mod-vertical > .workspace-leaf-resize-handle.mod-split {
+  top: 0;
+  bottom: 0;
+  left: var(--at);
+  width: 7px;
+  margin-left: -3px;
+  cursor: col-resize;
+}
+.mod-horizontal > .workspace-leaf-resize-handle.mod-split {
+  left: 0;
+  right: 0;
+  top: var(--at);
+  height: 7px;
+  margin-top: -3px;
+  cursor: row-resize;
+}
+.workspace-leaf-resize-handle.mod-split::before,
+.workspace-leaf-resize-handle.mod-split::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.mod-vertical > .workspace-leaf-resize-handle.mod-split::before {
+  left: 3px;
+  width: 1px;
+  background: var(--background-modifier-border);
+}
+.mod-horizontal > .workspace-leaf-resize-handle.mod-split::before {
+  top: 3px;
+  height: 1px;
+  background: var(--background-modifier-border);
+}
+.mod-vertical > .workspace-leaf-resize-handle.mod-split::after {
+  left: 2px;
+  width: 3px;
+}
+.mod-horizontal > .workspace-leaf-resize-handle.mod-split::after {
+  top: 2px;
+  height: 3px;
+}
+.workspace-leaf-resize-handle.mod-split::after {
+  background: var(--interactive-accent);
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-out);
+}
+.workspace-leaf-resize-handle.mod-split:hover::after {
+  opacity: 1;
+  transition-delay: 0.3s;
+}
+.workspace-leaf-resize-handle.mod-split.is-dragging::after {
+  opacity: 1;
+  transition-delay: 0s;
+}
+body.is-resizing-x,
+body.is-resizing-x * {
+  cursor: col-resize !important;
+}
+body.is-resizing-y,
+body.is-resizing-y * {
+  cursor: row-resize !important;
+}
+body.is-grabbing,
+body.is-grabbing * {
+  cursor: grabbing !important;
+}
+
+/* The active pane: with more than one, the others' active tab title and
+   view-header title read faint. Obsidian 1.14.4 (measured) dims just those
+   two, to its muted colour, and leaves the header icons alone; Grove dims
+   them one step further (faint), since muted proved hard to see side by
+   side, and now leaves the icons alone too. The note text never dims. */
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .workspace-tab-header.is-active .workspace-tab-header-inner,
+.mod-root.mod-has-splits .workspace-tabs:not(.mod-active) .view-header-title {
+  color: var(--text-faint);
+}
+
+/* Dragging a tab: where it will land, and the tab under the pointer. The
+   overlay is sized to the whole workspace and placed by a transform, so it
+   glides between places without layout. */
+.workspace-drop-overlay {
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 40;
+  pointer-events: none;
+  transform-origin: 0 0;
+  border-radius: var(--radius-m);
+  /* Obsidian's is a light accent at half strength: lighter and more
+     see-through than a dark accent tint. */
+  background: var(--drop-overlay);
+  opacity: 0;
+  transition:
+    transform var(--anim-duration-fast) var(--anim-ease-in-out),
+    opacity var(--anim-duration-fast) var(--anim-ease-out);
+}
+.workspace-drop-overlay.is-visible {
+  opacity: 1;
+}
+.workspace-drop-overlay.is-placing {
+  transition: none;
+}
+.workspace-drop-overlay.is-closing {
+  opacity: 0;
+  transition: opacity var(--anim-duration-fast) var(--anim-ease-in);
+}
+.drag-ghost {
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 60;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 4px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  box-shadow: var(--shadow-s);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
+  white-space: nowrap;
+  animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+.drag-ghost .svg-icon {
+  color: var(--icon-color);
+}
+.drag-ghost-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drag-ghost.is-closing {
+  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
+}
+.workspace-tab-header.is-being-dragged {
+  opacity: 0.5;
+}
+body.is-grabbing .workspace-tab-header:not(.is-active):hover .workspace-tab-header-inner {
+  background: transparent;
+}
