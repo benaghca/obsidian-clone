@@ -252,6 +252,26 @@ fn rename_moves_children_and_resolution_follows() {
 }
 
 #[test]
+fn frontmatter_returns_only_the_block() {
+    let idx = Index::from_notes(&[
+        ("Props.md", "---\ntitle: Hi\ntags: [a]\n---\nbody\n---\n"),
+        ("Dots.md", "---\ntitle: Dots\n...\nbody\n"),
+        ("Plain.md", "no frontmatter\n---\n"),
+        ("CRLF.md", "---\r\na: 1\r\n---\r\n"),
+    ]);
+    let all = idx.frontmatter(None);
+    assert_eq!(all.len(), 2);
+    assert_eq!(all["Props.md"], "---\ntitle: Hi\ntags: [a]\n---");
+    assert_eq!(all["CRLF.md"], "---\na: 1\n---");
+    let some = idx.frontmatter(Some(&[
+        "Props.md".to_string(),
+        "Plain.md".to_string(),
+        "Nope.md".to_string(),
+    ]));
+    assert_eq!(some.keys().collect::<Vec<_>>(), ["Props.md"]);
+}
+
+#[test]
 fn search_is_case_insensitive_and_ranks_names_first() {
     let idx = Index::from_notes(&[
         ("Garden.md", "flowers\n"),

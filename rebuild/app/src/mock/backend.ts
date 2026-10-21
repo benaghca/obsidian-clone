@@ -194,6 +194,15 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     },
     search: ({ query, limit }) => search(query, limit),
     link_index: () => linkIndex(),
+    frontmatter: ({ paths }) => {
+      const out: Record<string, string> = {};
+      for (const path of (paths as string[] | null) ?? [...files.keys()]) {
+        const lines = path.endsWith(".md") ? files.get(path)?.content.split("\n") : undefined;
+        const close = lines && lines[0].trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
+        if (close > 0 && close <= 2000) out[path] = lines!.slice(0, close + 1).join("\n");
+      }
+      return out;
+    },
     read_config: ({ name }) => {
       const key = configName(name);
       try {

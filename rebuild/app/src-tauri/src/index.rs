@@ -214,6 +214,22 @@ impl Index {
         name_hits
     }
 
+    /// Each note's frontmatter (see `Note::frontmatter`), for `paths` or every note. Notes
+    /// without one, and paths that aren't notes, are left out.
+    pub fn frontmatter(&self, paths: Option<&[String]>) -> BTreeMap<String, String> {
+        let block = |path: &String| {
+            let node = self
+                .files
+                .get(path)
+                .filter(|n| !n.is_dir && is_note_path(path))?;
+            node.note.frontmatter().map(|text| (path.clone(), text))
+        };
+        match paths {
+            Some(paths) => paths.iter().filter_map(block).collect(),
+            None => self.files.keys().filter_map(block).collect(),
+        }
+    }
+
     pub fn remove_tree(&mut self, rel: &str) {
         let prefix = format!("{rel}/");
         self.files
