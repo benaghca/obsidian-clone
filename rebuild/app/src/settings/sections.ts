@@ -34,8 +34,10 @@ type Key<F extends FileName> = keyof SettingsOf<F> & string;
 const get = <F extends FileName, K extends Key<F>>(file: F, key: K) => settings.get(file)[key];
 const set = <F extends FileName, K extends Key<F>>(file: F, key: K) => (value: SettingsOf<F>[K]) => void settings.set(file, key, value);
 
-function toggleRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: string, desc: string) {
-  return row({ name, desc, cls: "mod-toggle" }, toggle(get(file, key) as boolean, set(file, key) as (v: boolean) => void, name));
+/** `invert`: the toggle is on while the setting is false ("Use [[Wikilinks]]" is useMarkdownLinks off). */
+function toggleRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: string, desc: string, invert = false) {
+  const on = get(file, key) !== invert;
+  return row({ name, desc, cls: "mod-toggle" }, toggle(on, (v) => set(file, key)((v !== invert) as SettingsOf<F>[K]), name));
 }
 
 function dropdownRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: string, desc: string, options: [string, string][], onChange?: (v: string) => void) {
@@ -217,10 +219,7 @@ function editor(): HTMLElement[] {
           "Default editing mode",
         ),
       ),
-      row(
-        { name: "Show editing mode in status bar", desc: "Show the editing mode toggle in the status bar.", cls: "mod-toggle" },
-        toggle(get("core-plugins.json", "editor-status"), (on) => settings.set("core-plugins.json", "editor-status", on), "Show editing mode in status bar"),
-      ),
+      toggleRow("core-plugins.json", "editor-status", "Show editing mode in status bar", "Show the editing mode toggle in the status bar."),
     ),
     group(
       "Display",
@@ -311,10 +310,7 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement[] {
         ["absolute", "Path from vault folder"],
       ]),
       toggleRow("app.json", "alwaysUpdateLinks", "Automatically update internal links", "Turn off to be prompted to update links after renaming a file."),
-      row(
-        { name: "Use [[Wikilinks]]", desc: "Auto-generate Wikilinks for [[links]] instead of Markdown links. Disable this option to generate Markdown links instead.", cls: "mod-toggle" },
-        toggle(!get("app.json", "useMarkdownLinks"), (on) => settings.set("app.json", "useMarkdownLinks", !on), "Use [[Wikilinks]]"),
-      ),
+      toggleRow("app.json", "useMarkdownLinks", "Use [[Wikilinks]]", "Auto-generate Wikilinks for [[links]] instead of Markdown links. Disable this option to generate Markdown links instead.", true),
     ),
     group(
       "Trash",
