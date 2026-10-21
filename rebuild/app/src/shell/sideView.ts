@@ -72,23 +72,10 @@ export const afterPaint = (fn: () => void) => requestAnimationFrame(() => setTim
 /** A collapsible "Linked mentions"-style section with a count. */
 export function section(title: string, open: boolean, onToggle: (open: boolean) => void) {
   const count = h("div", { class: "tree-item-flair" });
-  const chevron = h("div", { class: `tree-item-icon collapse-icon${open ? "" : " is-collapsed"}` }, icon("chevron-down", 14));
   const body = h("div", { class: "search-result-container" });
-  body.hidden = !open;
-  const header = h(
-    "div",
-    {
-      class: "tree-item-self backlink-header",
-      onclick: () => {
-        body.hidden = !body.hidden;
-        chevron.classList.toggle("is-collapsed", body.hidden);
-        onToggle(!body.hidden);
-      },
-    },
-    chevron,
-    h("div", { class: "tree-item-inner" }, title),
-    count,
-  );
+  const chevron = foldToggle(body, !open, (collapsed) => onToggle(!collapsed));
+  // A click anywhere on the header folds the section, as one on its chevron does.
+  const header = h("div", { class: "tree-item-self backlink-header", onclick: () => chevron.click() }, chevron, h("div", { class: "tree-item-inner" }, title), count);
   return { el: h("div", { class: "backlink-section" }, header, body), body, count };
 }
 
