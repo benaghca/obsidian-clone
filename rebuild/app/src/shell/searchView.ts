@@ -83,19 +83,10 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   };
 }
 
-/** Where the words are in a line (every occurrence, any case), in order, overlaps merged. */
+/** Where the words are in a line (every occurrence, any case), in order (snippetParts takes overlaps). */
 function spansOf(text: string, words: string[]): Span[] {
   const lower = text.toLowerCase();
   const spans: Span[] = [];
-  for (const w of words) {
-    for (let i = lower.indexOf(w); i >= 0 && w; i = lower.indexOf(w, i + w.length)) spans.push({ from: i, to: i + w.length });
-  }
-  spans.sort((a, b) => a.from - b.from);
-  const out: Span[] = [];
-  for (const s of spans) {
-    const last = out[out.length - 1];
-    if (last && s.from <= last.to) last.to = Math.max(last.to, s.to);
-    else out.push({ ...s });
-  }
-  return out;
+  for (const w of words) for (let i = lower.indexOf(w); i >= 0; i = lower.indexOf(w, i + w.length)) spans.push({ from: i, to: i + w.length });
+  return spans.sort((a, b) => a.from - b.from);
 }

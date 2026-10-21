@@ -132,29 +132,30 @@ function scoped(q: Query, field: Field): Query | null {
   }
 }
 
+/** The terms, properties and line: groups in a query, depth first, each with whether it sits under a "-". */
+function* leaves(q: Query | null, negated = false): Generator<[Extract<Query, { op: "term" | "prop" | "line" }>, boolean]> {
+  if (!q) return;
+  if ("parts" in q) for (const p of q.parts) yield* leaves(p, negated);
+  else if (q.op === "not") yield* leaves(q.part, !negated);
+  else yield [q, negated];
+}
+
+/** What a term is looked for as in the text (a tag as "#tag"); null for file: and path:, which aren't. */
+const textOf = (q: { text: string; field: Field }) => (q.field === "file" || q.field === "path" ? null : q.field === "tag" ? `#${q.text}` : q.text);
+
 /** The words and phrases the backend's search must be asked for (each once), for matching and for showing lines. */
 export function termsOf(q: Query | null, out = new Set<string>()): Set<string> {
-  if (!q) return out;
-  if (q.op === "term") {
-    if (q.field === "any" || q.field === "content") out.add(q.text);
-    else if (q.field === "tag") out.add(`#${q.text}`);
-  } else if (q.op === "not") termsOf(q.part, out);
-  else if (q.op === "and" || q.op === "or") for (const p of q.parts) termsOf(p, out);
-  else if (q.op === "line") termsOf(q.part, out);
+  for (const [l] of leaves(q)) {
+    if (l.op === "line") termsOf(l.part, out);
+    else if (l.op === "term" && textOf(l)) out.add(textOf(l)!);
+  }
   return out;
 }
 
 /** Whether the query needs to know: the notes' tags, their properties. */
 export function needs(q: Query | null): { tags: boolean; props: boolean } {
-  const found = { tags: false, props: false };
-  const walk = (q: Query) => {
-    if (q.op === "term" && q.field === "tag") found.tags = true;
-    else if (q.op === "prop") found.props = true;
-    else if (q.op === "not" || q.op === "line") walk(q.part);
-    else if (q.op === "and" || q.op === "or") q.parts.forEach(walk);
-  };
-  if (q) walk(q);
-  return found;
+  const all = [...leaves(q)].map(([l]) => l);
+  return { tags: all.some((l) => l.op === "term" && l.field === "tag"), props: all.some((l) => l.op === "prop") };
 }
 
 /** A line of a note (1-based), as the backend's search returns it. */
@@ -233,32 +234,22 @@ export function matches(path: string, q: Query | null, facts: Facts): boolean {
  */
 export function shownLines(path: string, q: Query | null, facts: Facts, propLine: (key: string) => Line | null): Line[] {
   const out = new Map<number, Line>();
-  const walk = (q: Query) => {
-    if (q.op === "not") return;
-    else if (q.op === "and" || q.op === "or") q.parts.forEach(walk);
-    else if (q.op === "line") for (const l of lineHits(path, q.part, facts)) out.set(l.line, l);
-    else if (q.op === "prop") {
-      const l = matches(path, q, facts) ? propLine(q.key) : null;
-      if (l) out.set(l.line, l);
-    } else if (q.op === "term" && q.field !== "file" && q.field !== "path") {
-      const want = q.field === "tag" ? `#${q.text}` : q.text;
-      for (const l of facts.lines(want)?.get(path) ?? []) out.set(l.line, l);
-    }
-  };
-  if (q) walk(q);
+  for (const [l, negated] of leaves(q)) {
+    if (negated) continue;
+    const found = l.op === "line" ? lineHits(path, l.part, facts) : l.op === "prop" ? [matches(path, l, facts) && propLine(l.key)] : (facts.lines(textOf(l) ?? "")?.get(path) ?? []);
+    for (const line of found) if (line) out.set(line.line, line);
+  }
   return [...out.values()].sort((a, b) => a.line - b.line);
 }
 
 /** The words and phrases to highlight in shown lines (lower case, longest first). */
-export function highlightsOf(q: Query | null): string[] {
-  const out = new Set<string>();
-  const walk = (q: Query) => {
-    if (q.op === "term" && q.field !== "file" && q.field !== "path") out.add(q.field === "tag" ? `#${q.text}` : q.text);
-    else if (q.op === "and" || q.op === "or") q.parts.forEach(walk);
-    else if (q.op === "line") walk(q.part);
-    else if (q.op === "prop" && q.value) walk(q.value);
-  };
-  if (q) walk(q);
+export function highlightsOf(q: Query | null, out = new Set<string>()): string[] {
+  for (const [l, negated] of leaves(q)) {
+    if (negated) continue;
+    if (l.op === "line") highlightsOf(l.part, out);
+    else if (l.op === "prop") highlightsOf(l.value, out);
+    else if (textOf(l)) out.add(textOf(l)!);
+  }
   return [...out].sort((a, b) => b.length - a.length);
 }
 
