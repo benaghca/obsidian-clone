@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { calloutBody, calloutHeader, calloutKind } from "./callouts";
-import { embedSection, embedSize, embedStopped, splitSubpath } from "./embeds";
+import { embedSection, embedSize, embedStopped, resizedSize, splitSubpath } from "./embeds";
 import { alignments, splitRow } from "./tables";
 
 test("callout headers: type, title and fold marker", () => {
@@ -65,4 +65,11 @@ test("an embed stops at a cycle or five deep", () => {
   expect(embedStopped("B.md", "A.md", ["B.md", "C.md"])).toBe(true);
   expect(embedStopped("C.md", "A.md", ["B.md"])).toBe(false);
   expect(embedStopped("F.md", "A.md", ["B.md", "C.md", "D.md", "E.md", "G.md"])).toBe(true);
+});
+
+test("a resized image's size, written as Obsidian writes it", () => {
+  // ![[pic.png]] → ![[pic.png|358]], |200 and |100x30 → |358, a caption kept.
+  expect([null, "200", "100x30", "caption", "caption|200", ""].map((t) => resizedSize(t, 358))).toEqual(["|358", "358", "358", "caption|358", "caption|358", "358"]);
+  // ![alt](a.png) → ![alt|348](a.png), ![](a.png) → ![348](a.png), ![|80](a.png) → ![|128](a.png).
+  expect([resizedSize("alt", 348), resizedSize("", 348), resizedSize("|80", 128)]).toEqual(["alt|348", "348", "|128"]);
 });

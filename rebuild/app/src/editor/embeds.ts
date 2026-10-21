@@ -13,11 +13,12 @@
 
 import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
 import { type EditorView, WidgetType } from "@codemirror/view";
-import { h } from "../shell/dom";
-import { icon } from "../shell/icons";
+import { dragPointer, h, iconButton } from "../shell/dom";
+import { icon, type IconName } from "../shell/icons";
 import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { editorHost } from "./host";
+import { zoomImage } from "./imageZoom";
 import { destroyed, onDestroy, release, render } from "./render";
 
 export const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
@@ -112,8 +113,22 @@ export abstract class DrawnWidget extends WidgetType {
   }
 }
 
-/** "Edit this block", top right of an image, callout or table on hover. */
-export const editButton = () => h("div", { class: "embed-actions clickable-icon", "aria-label": "Edit this block", title: "Edit this block" }, icon("code-xml"));
+const action = (label: string, name: IconName) => iconButton(icon(name), label, undefined, "embed-action");
+/** "Edit this block" (after an image's "Zoom in"), top right of an image, callout or table on hover. */
+export const editButton = (...before: HTMLElement[]) => h("div", { class: "embed-actions" }, ...before, action("Edit this block", "code-xml"));
+
+/**
+ * What a resized image's alt text or alias becomes, `width` wide, as
+ * Obsidian writes it: the size replaced ("caption|200" → "caption|358",
+ * "100x30" → "358"), or added ("alt" → "alt|358", "" → "358"); null is a
+ * wiki embed without an alias, which gets "|358".
+ */
+export function resizedSize(text: string | null, width: number): string {
+  if (text === null) return `|${width}`;
+  const m = /^(?:([\s\S]*)\|)?\s*\d+(?:x\d+)?\s*$/.exec(text);
+  const caption = m ? m[1] : text || undefined;
+  return caption === undefined ? `${width}` : `${caption}|${width}`;
+}
 
 const missingBox = (text: string, onclick?: () => void) =>
   h("span", { class: `internal-embed file-embed mod-empty${onclick ? " is-clickable" : ""}`, onclick }, text);
@@ -125,6 +140,9 @@ export class ImageWidget extends DrawnWidget {
     readonly src: string,
     readonly srcAt: number,
     readonly size: EmbedSize,
+    /** Where the alt text or alias is from the embed's start, and what it says (null: none; a resize adds one there). */
+    readonly sizeAt: number,
+    readonly sizeText: string | null,
   ) {
     super();
   }
@@ -136,14 +154,34 @@ export class ImageWidget extends DrawnWidget {
     img.decoding = "async";
     if (size.width) img.width = size.width;
     if (size.height) img.height = size.height;
-    const edit = editButton();
-    const dom = h("span", { class: "internal-embed media-embed image-embed" }, img, edit);
-    edit.addEventListener("mousedown", (e) => {
+    const zoom = action("Zoom in", "zoom-in");
+    const actions = editButton(zoom);
+    const corner = h("div", { class: "image-resize-corner" });
+    const dom = h("span", { class: "internal-embed media-embed image-embed" }, img, actions, corner);
+    actions.addEventListener("mousedown", (e) => {
       e.preventDefault();
+      if (zoom.contains(e.target as Node)) return zoomImage(img, img.alt);
       const at = view.posAtDOM(dom);
       const from = at + this.srcAt;
       view.dispatch({ selection: EditorSelection.range(from, from + this.src.length), effects: editEmbed.of(at) });
       view.focus();
+    });
+    // Dragging the corner resizes the image as it goes; the size is written on release, one undo step.
+    corner.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || view.state.readOnly) return;
+      e.preventDefault();
+      const start = img.getBoundingClientRect().width;
+      let width = this.size.width;
+      const resize = (m: PointerEvent) => {
+        width = Math.max(16, Math.round(start + m.clientX - e.clientX));
+        img.width = width;
+        img.removeAttribute("height");
+      };
+      dragPointer(e, corner, resize, () => {
+        if (width === undefined || width === this.size.width) return;
+        const at = view.posAtDOM(dom) + this.sizeAt;
+        view.dispatch({ changes: { from: at, to: at + (this.sizeText?.length ?? 0), insert: resizedSize(this.sizeText, width) }, userEvent: "input.resize" });
+      });
     });
     let held: ReturnType<typeof host.image> | null = null;
     const load = () => {

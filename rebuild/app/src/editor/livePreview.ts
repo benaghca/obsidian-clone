@@ -356,7 +356,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     if (isRemoteUrl(href)) {
       if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
-      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt));
+      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
     }
   }
@@ -368,8 +368,12 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     const src = doc.sliceString(target.from, target.to).trim();
     if (IMAGE_EXT.test(src)) {
       if (editing === from) return false;
-      const size = embedSize(alias ? doc.sliceString(alias.from, alias.to) : "");
-      decos.push(Decoration.replace({ widget: new ImageWidget(resolve(src), src, target.from - from, size) }).range(from, node.to));
+      const aliasText = alias ? doc.sliceString(alias.from, alias.to) : null;
+      // No alias: a resize writes "|width" after the target (an empty "|" alias counts as one).
+      const sizeAt = (alias?.from ?? (doc.sliceString(target.to, target.to + 1) === "|" ? target.to + 1 : target.to)) - from;
+      const sizeText = aliasText ?? (doc.sliceString(target.to, target.to + 1) === "|" ? "" : null);
+      const widget = new ImageWidget(resolve(src), src, target.from - from, embedSize(aliasText ?? ""), sizeAt, sizeText);
+      decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }
     if (/\.[a-z0-9]+$/i.test(src.split("#")[0]) && !/\.md$/i.test(src.split("#")[0])) return false; // other files stay links
