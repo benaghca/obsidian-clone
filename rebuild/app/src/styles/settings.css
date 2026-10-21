@@ -387,11 +387,15 @@
   outline: none;
   transition: background-color var(--anim-duration-fast) var(--anim-ease-out);
 }
-.modal.mod-confirm button.mod-cta {
+/* white on the accent, white on red (the confirm dialog's buttons, hotkey chips and the Conflicts pill) */
+.modal.mod-confirm button.mod-cta,
+.setting-hotkey.mod-active {
   color: var(--text-on-accent);
   background: var(--interactive-accent);
 }
-.modal.mod-confirm button.mod-warning {
+.modal.mod-confirm button.mod-warning,
+.setting-group-filter.mod-error.is-active,
+.setting-hotkey.has-conflict {
   color: var(--text-on-accent);
   background: var(--background-modifier-error);
 }
@@ -547,10 +551,6 @@
   background: var(--background-modifier-error-tint);
   border-color: var(--background-modifier-error-tint);
 }
-.setting-group-filter.mod-error.is-active {
-  color: var(--text-on-accent);
-  background: var(--background-modifier-error);
-}
 .setting-group-filter-badge {
   padding: 0 5px;
   border-radius: 8px;
@@ -578,14 +578,6 @@
 .setting-hotkey.mod-empty,
 .setting-hotkey.mod-active {
   padding: 2px 8px;
-}
-.setting-hotkey.mod-active {
-  color: var(--text-on-accent);
-  background: var(--interactive-accent);
-}
-.setting-hotkey.has-conflict {
-  color: var(--text-on-accent);
-  background: var(--background-modifier-error);
 }
 .setting-hotkey .setting-delete-hotkey {
   --icon-size: 12px;
