@@ -11,11 +11,11 @@
 // When all of that has settled no frame is requested at all, and a hidden
 // graph (a background tab, a closed sidebar) does nothing until shown.
 //
-// The webview's canvas is drawn on the CPU (Cairo, in WebKitGTK). While the
-// graph moves, a canvas that turns out slow to draw is drawn at one pixel
-// per CSS pixel, then once more at full resolution when it comes to rest.
-// While it settles on its own (nobody touching it) a slow canvas is drawn
-// every other frame, leaving the rest of each frame to the editor.
+// The webview's canvas is drawn on the CPU in WebKitGTK. While the graph
+// moves, a canvas far too slow to draw at full resolution is drawn at one
+// pixel per CSS pixel, then once more at full resolution when it comes to
+// rest. While it settles on its own (nobody touching it) a slow canvas is
+// drawn every other frame, leaving the rest of each frame to the editor.
 // The graph follows the vault through the workspace's "links" and "files"
 // changes (which come a moment after a save, never on a keystroke), and an
 // update keeps every node that is still there where it is.
@@ -63,8 +63,17 @@ export interface GraphView {
 
 const CLICK_SLOP = 4;
 const REFRESH_DELAY = 200;
-/** A frame that takes longer than this (ms) to draw at full resolution is drawn at 1× while moving. */
+/** A canvas slower than this (ms) to draw is drawn every other frame while it settles on its own. */
 const SLOW_FRAME = 10;
+/**
+ * A frame that takes longer than this (ms) to draw at full resolution is
+ * drawn at 1× while moving. Only then: WebKitGTK resamples a canvas whose
+ * pixels don't match the screen's every time it composites the page, which
+ * costs more than drawing (measured on a 2× screen with 1,011 nodes: pan
+ * and wheel zoom at 1× had frames of 40–50 ms at p95, while full resolution
+ * held 60 fps with 7–12 ms of drawing).
+ */
+const TOO_SLOW = 24;
 
 /** Dev builds only: each frame's work (ms), for the measuring harness. */
 const devStats = import.meta.env.DEV
@@ -324,7 +333,7 @@ export function createGraphView(host: GraphHost): GraphView {
       const moving = more || touched;
       // WebKitGTK may not show a frame drawn right after the canvas was
       // resized until something else repaints: draw the next one too.
-      if (setRatio(moving && fullCost > SLOW_FRAME ? Math.min(dpr, lowRatio) : dpr)) more = true;
+      if (setRatio(moving && fullCost > TOO_SLOW ? Math.min(dpr, lowRatio) : dpr)) more = true;
       const t = performance.now();
       draw();
       lastCost = performance.now() - t;
