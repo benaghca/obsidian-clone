@@ -5,23 +5,19 @@
 // matching notes by name, as Obsidian sorts them by default, each with the
 // lines that matched (the first five), the words looked for highlighted.
 
-import { compareNames, noteName } from "../paths";
+import { noteName } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
-import type { Span } from "./mentions";
-import { propertyIndex } from "./propertyIndex";
-import { searchFacts } from "./searchFacts";
-import { highlightsOf, type Line, matches, needs, parseQuery, shownLines } from "./searchQuery";
+import { searchFacts, type VaultFacts } from "./searchFacts";
+import { highlightsOf, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
 import { highlighted, pagedRows } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
 
 export function createSearchView(ws: Workspace): { el: HTMLElement; search(query: string): void } {
-  const input = h("input", { class: "search-input", "aria-label": "Search" });
-  input.placeholder = "Search...";
-  input.type = "search";
+  const input = h("input", { class: "search-input", type: "search", placeholder: "Search...", "aria-label": "Search" });
   const info = h("div", { class: "search-results-info" });
   const results = h("div", { class: "search-results" });
   let seq = 0;
@@ -34,21 +30,12 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       results.replaceChildren();
       return;
     }
-    const [facts, props] = await Promise.all([
-      searchFacts(ws).facts([q]) ?? { lines: () => undefined },
-      needs(q).props ? propertyIndex(ws).notes() : null,
-    ]);
+    const facts: VaultFacts = (await searchFacts(ws).facts([q])) ?? { lines: () => undefined };
     if (mine !== seq) return;
-    // Excluded files (Settings → Files and links) are hidden from search.
-    const found = ws.notes.filter((n) => !ws.isExcluded(n.path) && matches(n.path, q, facts)).sort((a, b) => compareNames(a.name, b.name));
+    const found = matchingNotes(ws.vault.notes, q, facts, ws.vault.isExcluded);
     const words = highlightsOf(q);
-    const propLine = (path: string) => (key: string): Line | null => {
-      const note = props?.get(path);
-      const p = note?.props.find((x) => x.key.toLowerCase() === key);
-      return p && note ? { line: p.line + 2, text: note.lines[p.line] } : null;
-    };
     const row = ({ path }: { path: string }) => {
-      const lines = shownLines(path, q, facts, propLine(path));
+      const lines = shownLines(path, q, facts, (key) => propertyLine(facts.notes?.get(path), key));
       return h(
         "div",
         { class: "search-result" },
@@ -81,12 +68,4 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       input.dispatchEvent(new Event("input"));
     },
   };
-}
-
-/** Where the words are in a line (every occurrence, any case), in order (snippetParts takes overlaps). */
-function spansOf(text: string, words: string[]): Span[] {
-  const lower = text.toLowerCase();
-  const spans: Span[] = [];
-  for (const w of words) for (let i = lower.indexOf(w); i >= 0; i = lower.indexOf(w, i + w.length)) spans.push({ from: i, to: i + w.length });
-  return spans.sort((a, b) => a.from - b.from);
 }

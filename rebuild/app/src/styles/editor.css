@@ -107,9 +107,10 @@
   font-family: var(--font-monospace);
 }
 
-/* links */
+/* links (and Source mode's URLs) */
 .cm-wikilink,
-.cm-link {
+.cm-link,
+.is-source-mode .cm-s-url {
   color: var(--text-accent);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--text-accent) 40%, transparent);
@@ -153,8 +154,9 @@
     center / contain no-repeat;
 }
 
-/* tags */
-.cm-tag {
+/* tags (in Source mode too) */
+.cm-tag,
+.is-source-mode .cm-s-tag {
   color: var(--tag-color);
   background: var(--tag-background);
   border-radius: 2em;
@@ -186,7 +188,6 @@
 }
 .cm-task-checkbox {
   appearance: none;
-  -webkit-appearance: none;
   width: 0.95em;
   height: 0.95em;
   margin: 0 0.2em 0 0.05em;
@@ -252,18 +253,21 @@
   color: var(--text-faint);
 }
 
-/* [[ link suggester */
-.cm-editor .cm-tooltip.cm-link-suggest {
-  width: 300px;
+/* [[ link suggester, and the Properties block's suggestions (shell/suggest.ts) */
+.cm-editor .cm-tooltip.cm-link-suggest,
+.suggestion-container {
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-m);
   box-shadow: var(--shadow-s);
   font-family: var(--font-interface);
-  overflow: hidden;
-  /* CodeMirror keeps this element while the query is refined, so the
+  /* CodeMirror keeps the link suggester while the query is refined, so the
      entrance plays once per opening, not per keystroke */
   animation: grove-popover-in var(--anim-duration-fast) var(--anim-ease-out);
+}
+.cm-editor .cm-tooltip.cm-link-suggest {
+  width: 300px;
+  overflow: hidden;
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul {
   max-height: 300px;
@@ -326,12 +330,6 @@
 .is-source-mode .cm-s-link {
   color: var(--text-accent);
 }
-.is-source-mode .cm-s-url {
-  color: var(--text-accent);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--text-accent) 40%, transparent);
-  text-underline-offset: 2px;
-}
 /* Marks are faint (heading #, list markers, quote >, link brackets), but
    emphasis and code markers take their text's look, as in Obsidian. */
 .is-source-mode .cm-s-mark {
@@ -346,13 +344,6 @@
 .is-source-mode .cm-s-task {
   font-family: var(--font-monospace);
   color: var(--text-muted);
-}
-.is-source-mode .cm-s-tag {
-  color: var(--tag-color);
-  background: var(--tag-background);
-  border-radius: 2em;
-  padding: 0.1em 0.5em;
-  font-size: 0.875em;
 }
 
 /* ----- Settings → Editor: line numbers and folding ----- */
@@ -371,10 +362,6 @@
   min-width: 28px;
   padding: 0 8px 0 0;
   font-variant-numeric: tabular-nums;
-}
-.cm-editor .cm-gutter-lint,
-.cm-editor .cm-activeLineGutter {
-  background: transparent;
 }
 
 /* The fold chevron: in the margin, on hover; kept on folded lines. */

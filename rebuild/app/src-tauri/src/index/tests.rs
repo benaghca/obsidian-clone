@@ -345,3 +345,12 @@ fn a_new_folder_is_indexed_like_a_scan() {
         .collect();
     assert_eq!(paths, rescan);
 }
+
+#[test]
+fn names_ending_in_multibyte_characters_are_not_notes() {
+    assert!(!is_note_path("a😀"));
+    assert!(!is_note_path("dir/aé€"));
+    assert!(is_note_path("Ünïcode 😀.MD"));
+    let idx = Index::from_notes(&[("a😀", ""), ("b😀.md", "[[a😀]]\n")]);
+    assert_eq!(idx.resolve("b😀.md", "a😀").as_deref(), Some("a😀"));
+}

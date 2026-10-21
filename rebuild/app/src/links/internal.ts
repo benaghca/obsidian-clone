@@ -31,7 +31,7 @@ export function relativePath(fromDir: string, to: string): string {
 }
 
 /** The path part of a new link to `target` from the note at `from` (with .md; wikilinks drop it). */
-export function linkPath(target: string, from: string | null, notes: NoteLike[], format: LinkFormat): string {
+function linkPath(target: string, from: string | null, notes: NoteLike[], format: LinkFormat): string {
   if (format === "absolute") return target;
   if (format === "relative") return relativePath(parentDir(from ?? ""), target);
   const name = nameOf(target).toLowerCase();
@@ -56,6 +56,16 @@ export function formatLink(target: string, from: string | null, notes: NoteLike[
   return `[${display ?? nameOf(target)}](${encodeDest(path)}${subpath.replace(/ /g, "%20")})`;
 }
 
+/** A link target without its #heading, percent-decoded when it is encoded (markdown link destinations). */
+function bareTarget(target: string): string {
+  const t = target.split("#")[0].trim();
+  try {
+    return /%[0-9a-f]{2}/i.test(t) ? decodeURIComponent(t) : t;
+  } catch {
+    return t; // not encoded after all
+  }
+}
+
 /** Normalise "a/./b/../c" style paths; null if it climbs out of the vault. */
 function normalise(path: string): string | null {
   const out: string[] = [];
@@ -76,13 +86,8 @@ function normalise(path: string): string | null {
  * Markdown link destinations may be percent-encoded.
  */
 export function resolveLink(target: string, from: string | null, notes: NoteLike[]): string | null {
-  let t = target.split("#")[0].trim();
+  const t = bareTarget(target);
   if (!t) return null;
-  try {
-    if (/%[0-9a-f]{2}/i.test(t)) t = decodeURIComponent(t);
-  } catch {
-    // not encoded after all
-  }
   const withMd = /\.md$/i.test(t) ? t : `${t}.md`;
   const byPath = new Map(notes.map((n) => [n.path.toLowerCase(), n.path]));
   const fromDir = parentDir(from ?? "");
@@ -123,13 +128,8 @@ export function linkTargets(files: readonly { path: string; is_dir: boolean }[],
     names.add(fileName(lower)).add(nameOf(lower));
   }
   return (target: string, from: string | null): boolean => {
-    let t = target.split("#")[0].trim();
+    const t = bareTarget(target);
     if (!t) return true; // a heading in the same note
-    try {
-      if (/%[0-9a-f]{2}/i.test(t)) t = decodeURIComponent(t);
-    } catch {
-      // not encoded after all
-    }
     const lower = t.toLowerCase();
     if (!lower.includes("/")) return names.has(lower);
     return paths.has(lower) || resolveLink(t, from, notes) !== null;

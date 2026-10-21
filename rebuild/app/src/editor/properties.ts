@@ -17,24 +17,23 @@
 // A row's icon opens Obsidian's menu: Property type (chosen per name for
 // the whole vault; nothing is rewritten, a value that doesn't fit is shown
 // as it is with a warning, which offers to show it in the chosen type),
-// Cut, Copy, Paste and Remove. Name and value fields suggest what the vault
-// already uses (names with their type, a name's values, the vault's tags).
+// Cut, Copy, Paste and Remove. Name and value fields (propertyFields.ts)
+// suggest what the vault already uses (names with their type, a name's
+// values, the vault's tags).
 
 import { Facet, Prec, StateEffect, StateField, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, WidgetType } from "@codemirror/view";
 import { confirmDialog } from "../shell/confirm";
 import { h } from "../shell/dom";
-import { icon, type IconName } from "../shell/icons";
+import { icon } from "../shell/icons";
 import { type MenuItems, SEPARATOR, showMenu } from "../shell/menu";
-import { suggest, type SuggestItem } from "../shell/suggest";
+import type { SuggestItem } from "../shell/suggest";
 import {
   addLines,
   addProperty,
   asType,
   type Change,
-  CHOOSABLE_TYPES,
   fits,
-  fixedType,
   type Frontmatter,
   frontmatterField,
   type Property,
@@ -48,35 +47,12 @@ import {
 } from "./frontmatter";
 import { editorHost, type PropertyHost } from "./host";
 import { readingMode } from "./livePreview";
+import { editable, keyInput, TYPE_ICONS, TYPE_NAMES, typeItems } from "./propertyFields";
 
 export type PropertiesDisplay = "visible" | "hidden" | "source";
 
 /** Settings → Editor → Properties in document. */
 export const propertiesDisplay = Facet.define<PropertiesDisplay, PropertiesDisplay>({ combine: (values) => values[0] ?? "visible" });
-
-export const TYPE_ICONS: Record<PropertyType, IconName> = {
-  text: "text-align-start",
-  list: "list",
-  number: "binary",
-  checkbox: "square-check-big",
-  date: "calendar",
-  datetime: "clock",
-  tags: "tags",
-  aliases: "forward",
-  unknown: "file-question-mark",
-};
-
-const TYPE_NAMES: Record<PropertyType, string> = {
-  text: "Text",
-  list: "List",
-  number: "Number",
-  checkbox: "Checkbox",
-  date: "Date",
-  datetime: "Date & time",
-  tags: "Tags",
-  aliases: "Aliases",
-  unknown: "Unknown",
-};
 
 /** The vault's chosen property types changed (refreshPropertyTypes): blocks draw their rows again. */
 const typesChanged = StateEffect.define<null>();
@@ -467,8 +443,7 @@ class Block {
     const set = (v: Property["value"], part: string) => this.set(key, v, part, type);
     switch (type) {
       case "checkbox": {
-        const check = h("input", { class: "cm-task-checkbox", "data-part": "value" });
-        check.type = "checkbox";
+        const check = h("input", { class: "cm-task-checkbox", type: "checkbox", "data-part": "value" });
         check.checked = value === true;
         check.addEventListener("change", () => set(check.checked, "value"));
         box.append(check);
@@ -477,11 +452,8 @@ class Block {
       case "number":
       case "date":
       case "datetime": {
-        const input = h("input", { class: "property-input", "data-part": "value" });
-        input.type = type === "datetime" ? "datetime-local" : type;
+        const input = h("input", { class: "property-input", type: type === "datetime" ? "datetime-local" : type, value: value as string, placeholder: "Empty", "data-part": "value" });
         if (type === "number") input.step = "any";
-        input.value = value as string;
-        input.placeholder = "Empty";
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
         box.append(input);
@@ -534,89 +506,4 @@ class Block {
     add.addEventListener("blur", commit);
     box.append(add);
   }
-}
-
-/** The "Property type" submenu for a name (the row icon's menu, and the All properties view's). */
-export function typeItems(key: string, inferred: PropertyType, vault: PropertyHost | null): MenuItems {
-  const fixed = fixedType(key);
-  const chosen = vault?.typeOf(key) ?? null;
-  // Tags, aliases and cssclasses have their own type: the menu shows it, every item disabled.
-  const types = fixed ? [...new Set([...CHOOSABLE_TYPES, fixed])].sort((a, b) => TYPE_NAMES[a].localeCompare(TYPE_NAMES[b])) : CHOOSABLE_TYPES;
-  return [
-    !fixed && { title: `Automatic (${TYPE_NAMES[inferred]})`, icon: "loader", checked: !chosen, disabled: !vault, action: () => vault?.setType(key, null) },
-    ...types.map((t) => ({ title: TYPE_NAMES[t], icon: TYPE_ICONS[t], checked: chosen === t, disabled: !!fixed || !vault, action: () => vault?.setType(key, t) })),
-  ];
-}
-
-/** A key field, suggesting the vault's names: written on Enter or when left; Escape gives the old key back. */
-function keyInput(key: string, names: () => Promise<SuggestItem[]>, commit: (key: string) => void) {
-  const input = h("input", { class: "property-key-input", "data-part": "key", "aria-label": key || "New property" });
-  input.value = key;
-  suggest(input, {
-    className: "mod-property-key",
-    items: names,
-    choose: (item) => {
-      input.value = item.text;
-      finish();
-    },
-  });
-  let done = false;
-  const finish = () => {
-    if (done) return;
-    done = true;
-    commit(input.value.trim());
-    done = false;
-  };
-  input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      finish();
-    } else if (e.key === "Escape") {
-      e.preventDefault();
-      input.value = key;
-      finish();
-    }
-  });
-  input.addEventListener("blur", finish);
-  return input;
-}
-
-/**
- * A one-line text field (a plain-text editable span): `commit` on Enter or
- * when left, Escape undoes. It suggests `values` (a pick commits it, or goes
- * to `choose`).
- */
-function editable(
-  text: string,
-  commit: (text: string) => void,
-  leave: (el: HTMLElement) => void,
-  values: () => Promise<SuggestItem[]>,
-  choose?: (item: SuggestItem) => void,
-) {
-  const el = h("div", { class: "property-text", "data-part": "value" });
-  el.contentEditable = "plaintext-only";
-  el.textContent = text;
-  suggest(el, {
-    className: "mod-property-value",
-    items: values,
-    selectEmpty: !choose,
-    choose:
-      choose ??
-      ((item) => {
-        el.textContent = item.text;
-        leave(el);
-      }),
-  });
-  el.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === "Escape") {
-      e.preventDefault();
-      if (e.key === "Escape") el.textContent = text;
-      leave(el);
-    }
-  });
-  el.addEventListener("blur", () => {
-    const next = el.textContent!.replace(/\s*\n\s*/g, " ");
-    if (next !== text) commit(next);
-  });
-  return el;
 }

@@ -7,12 +7,12 @@
 
 import { listeners } from "../listeners";
 import { duration } from "../motion";
-import { dragPointer } from "./dom";
+import { dragPointer, h } from "./dom";
 
 export type Side = "left" | "right";
 
-export const MIN_DOCK_WIDTH = 160;
-export const MAX_DOCK_WIDTH = 560;
+const MIN_DOCK_WIDTH = 160;
+const MAX_DOCK_WIDTH = 560;
 
 export interface Sidedocks {
   isCollapsed(side: Side): boolean;
@@ -76,8 +76,7 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
   }
 
   function resizeHandle(side: Side): HTMLElement {
-    const handle = document.createElement("div");
-    handle.className = "workspace-leaf-resize-handle";
+    const handle = h("div", { class: "workspace-leaf-resize-handle" });
     handle.addEventListener("pointerdown", (down) => {
       if (down.button !== 0) return;
       down.preventDefault();

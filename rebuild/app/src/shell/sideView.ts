@@ -12,29 +12,70 @@ export interface SideView {
   setActive(active: boolean): void;
 }
 
+/**
+ * Vault-wide data a view shows (all tags, all property names), read only
+ * while the view is shown: `delay` ms after it goes stale (`changed()`), or
+ * when it is shown again after going stale while hidden. A read a newer one
+ * overtook is dropped; a failed one keeps the last data. Each read that
+ * lands is drawn with `render`.
+ */
+export function liveData<T>(initial: T, read: () => Promise<T>, render: () => void, what: string) {
+  let data = initial;
+  let active = false;
+  let stale = true;
+  let timer = 0;
+  let seq = 0;
+  async function refresh() {
+    const mine = ++seq;
+    try {
+      const next = await read();
+      if (mine === seq) data = next;
+    } catch (err) {
+      console.error(`Could not read ${what}`, err);
+    }
+    if (mine !== seq || !active) return;
+    stale = false;
+    render();
+  }
+  const schedule = (delay: number) => {
+    clearTimeout(timer);
+    if (active) timer = window.setTimeout(() => void refresh(), delay);
+  };
+  return {
+    get data() {
+      return data;
+    },
+    get active() {
+      return active;
+    },
+    get stale() {
+      return stale;
+    },
+    changed(delay: number) {
+      stale = true;
+      schedule(delay);
+    },
+    /** Returns whether `next` is a change; a view shown while stale reads again after `delay`. */
+    setActive(next: boolean, delay: number): boolean {
+      if (next === active) return false;
+      active = next;
+      if (active && stale) schedule(delay);
+      else if (!active) clearTimeout(timer);
+      return true;
+    },
+  };
+}
+
 /** Run after the current frame is painted, so a note switch shows first. */
 export const afterPaint = (fn: () => void) => requestAnimationFrame(() => setTimeout(fn, 0));
 
 /** A collapsible "Linked mentions"-style section with a count. */
 export function section(title: string, open: boolean, onToggle: (open: boolean) => void) {
   const count = h("div", { class: "tree-item-flair" });
-  const chevron = h("div", { class: `tree-item-icon collapse-icon${open ? "" : " is-collapsed"}` }, icon("chevron-down", 14));
   const body = h("div", { class: "search-result-container" });
-  body.hidden = !open;
-  const header = h(
-    "div",
-    {
-      class: "tree-item-self backlink-header",
-      onclick: () => {
-        body.hidden = !body.hidden;
-        chevron.classList.toggle("is-collapsed", body.hidden);
-        onToggle(!body.hidden);
-      },
-    },
-    chevron,
-    h("div", { class: "tree-item-inner" }, title),
-    count,
-  );
+  const chevron = foldToggle(body, !open, (collapsed) => onToggle(!collapsed));
+  // A click anywhere on the header folds the section, as one on its chevron does.
+  const header = h("div", { class: "tree-item-self backlink-header", onclick: () => chevron.click() }, chevron, h("div", { class: "tree-item-inner" }, title), count);
   return { el: h("div", { class: "backlink-section" }, header, body), body, count };
 }
 

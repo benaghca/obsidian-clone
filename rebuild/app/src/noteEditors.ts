@@ -97,11 +97,6 @@ export class NoteEditors {
     return this.pane(group).view;
   }
 
-  /** The element that scrolls a group's note. */
-  scrollerOf(group: Group): HTMLElement | null {
-    return this.pane(group).scroller;
-  }
-
   groupOfView(view: EditorView): Group | undefined {
     return this.paneOfView.get(view)?.group;
   }

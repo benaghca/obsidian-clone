@@ -5,31 +5,19 @@
 import { mergeNote } from "../fileOps";
 import { noteName, parentDir } from "../paths";
 import type { Workspace } from "../workspace";
-import { fuzzyRank } from "./fuzzy";
 import { hints, openPrompt, suggestionText } from "./prompt";
+import { type SwitcherItem, switcherItems } from "./switcherItems";
 
-interface NoteItem {
-  path: string;
-  name: string;
-  indices: number[];
-}
+type NoteItem = SwitcherItem & { path: string };
 
 export function openMergePrompt(ws: Workspace, path: string) {
-  const notes = ws.notes.filter((n) => n.path !== path);
+  const notes = ws.vault.notes.filter((n) => n.path !== path);
   openPrompt<NoteItem>({
     placeholder: `Merge "${noteName(path)}" into...`,
     emptyText: "No notes found.",
     instructions: hints("to merge"),
-    items(query) {
-      if (!query.trim()) {
-        const recent = ws.recent.filter((p) => p !== path);
-        const order = [...recent, ...notes.map((n) => n.path).filter((p) => !recent.includes(p))];
-        return order.flatMap((p) => (notes.some((n) => n.path === p) ? [{ path: p, name: noteName(p), indices: [] }] : [])).slice(0, 50);
-      }
-      return fuzzyRank(query, notes, (n) => n.name)
-        .slice(0, 50)
-        .map(({ item, indices }) => ({ path: item.path, name: item.name, indices }));
-    },
+    // The quick switcher's list (recent notes first), less its "create" row.
+    items: (query) => switcherItems(query, notes, ws.recent, path).filter((item): item is NoteItem => item.path !== null),
     render: (item, row) => suggestionText(row, item.name, item.indices, parentDir(item.path)),
     choose(item) {
       mergeNote(ws, path, item.path).catch((err) => console.warn(`Could not merge ${path}`, err));

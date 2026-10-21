@@ -1,6 +1,8 @@
 // Fuzzy subsequence matching for the quick switcher. Tighter matches (runs
 // of consecutive letters, word starts, earlier positions) score higher.
 
+import { h } from "./dom";
+
 export interface FuzzyMatch {
   score: number;
   /** Indices of matched characters in the candidate, for bolding. */
@@ -71,12 +73,7 @@ export function highlight(text: string, indices: number[]): DocumentFragment {
   let runMatched = false;
   const flush = () => {
     if (!run) return;
-    if (runMatched) {
-      const b = document.createElement("span");
-      b.className = "suggestion-highlight";
-      b.textContent = run;
-      frag.append(b);
-    } else frag.append(run);
+    frag.append(runMatched ? h("span", { class: "suggestion-highlight" }, run) : run);
     run = "";
   };
   for (let i = 0; i < text.length; i++) {

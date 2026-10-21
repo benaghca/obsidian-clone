@@ -64,11 +64,7 @@ export function toggle(value: boolean, onChange: (on: boolean) => void, label: s
 /** A native select (keyboard and screen readers come with it), drawn like Obsidian's. */
 export function dropdown<T extends string>(options: readonly (readonly [T, string])[], value: T, onChange: (v: T) => void, label: string): HTMLElement {
   const select = h("select", { class: "dropdown", "aria-label": label });
-  for (const [v, text] of options) {
-    const option = h("option", null, text);
-    option.value = v;
-    select.append(option);
-  }
+  for (const [v, text] of options) select.append(h("option", { value: v }, text));
   select.value = value;
   select.addEventListener("change", () => onChange(select.value as T));
   return h("div", { class: "dropdown-container" }, select, h("span", { class: "dropdown-chevron" }, icon("chevrons-up-down", 16)));
@@ -91,12 +87,7 @@ export interface SliderOptions {
 
 /** Restore-default button, value label, then the range input, as Obsidian lays them out. */
 export function slider(o: SliderOptions): HTMLElement[] {
-  const input = h("input", { class: "slider", "aria-label": o.label });
-  input.type = "range";
-  input.min = String(o.min);
-  input.max = String(o.max);
-  input.step = String(o.step);
-  input.value = String(o.value);
+  const input = h("input", { class: "slider", type: "range", min: String(o.min), max: String(o.max), step: String(o.step), value: String(o.value), "aria-label": o.label });
   const value = h("span", { class: "slider-value" });
   const restore =
     o.defaultValue === undefined
@@ -131,14 +122,13 @@ export interface TextOptions {
   onCommit?(v: string): void;
   type?: "text" | "number";
   cls?: string;
+  /** The id of a <datalist> to suggest from. */
+  list?: string;
 }
 
 export function textInput(o: TextOptions): HTMLInputElement {
-  const input = h("input", { class: `setting-input${o.cls ? ` ${o.cls}` : ""}`, "aria-label": o.label });
-  input.type = o.type ?? "text";
-  input.value = o.value;
-  input.spellcheck = false;
-  if (o.placeholder) input.placeholder = o.placeholder;
+  const cls = `setting-input${o.cls ? ` ${o.cls}` : ""}`;
+  const input = h("input", { class: cls, type: o.type ?? "text", value: o.value, placeholder: o.placeholder, list: o.list, spellcheck: "false", "aria-label": o.label });
   input.addEventListener("input", () => o.onInput(input.value));
   const commit = () => o.onCommit?.(input.value);
   input.addEventListener("change", commit);
@@ -148,9 +138,8 @@ export function textInput(o: TextOptions): HTMLInputElement {
   return input;
 }
 
-export function button(text: string, onClick: (e: MouseEvent) => void, mod?: "cta" | "warning"): HTMLButtonElement {
-  const el = h("button", { class: mod ? `mod-${mod}` : undefined }, text);
-  el.type = "button";
+export function button(text: string, onClick: (e: MouseEvent) => void): HTMLButtonElement {
+  const el = h("button", { type: "button" }, text);
   el.addEventListener("click", onClick);
   return el;
 }

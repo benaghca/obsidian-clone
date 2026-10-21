@@ -23,7 +23,7 @@ export interface Camera {
   zoomAt: ZoomAnchor | null;
 }
 
-export const MIN_SCALE = 1 / 128;
+const MIN_SCALE = 1 / 128;
 export const MAX_SCALE = 8;
 /** Wheel zoom: one notch (100px) zooms to about 71%, as in Obsidian. */
 const WHEEL_ZOOM = 0.0034;

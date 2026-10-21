@@ -215,7 +215,7 @@
   cursor: pointer;
 }
 
-/* Name and value suggestions (shell/suggest.ts), under the field. */
+/* Name and value suggestions (shell/suggest.ts), under the field; their box is the link suggester's (editor.css). */
 .suggestion-container {
   position: fixed;
   z-index: 100;
@@ -224,12 +224,6 @@
   max-height: 300px;
   overflow-y: auto;
   padding: 4px;
-  background: var(--background-primary);
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-m);
-  box-shadow: var(--shadow-s);
-  font-family: var(--font-interface);
-  animation: grove-popover-in var(--anim-duration-fast) var(--anim-ease-out);
 }
 .suggestion-container .suggestion-item {
   gap: 6px;

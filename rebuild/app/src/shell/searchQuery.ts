@@ -15,7 +15,8 @@
 // contain is handed in as facts: the lines the backend's search found per
 // term, the tags per note, the properties per note. Pure, tested on its own.
 
-import { fileName, isUnder, noteName } from "../paths";
+import { compareNames, fileName, isUnder, noteName } from "../paths";
+import type { Span } from "./mentions";
 
 export type Field = "any" | "content" | "file" | "path" | "tag";
 
@@ -251,6 +252,25 @@ export function highlightsOf(q: Query | null, out = new Set<string>()): string[]
     else if (textOf(l)) out.add(textOf(l)!);
   }
   return [...out].sort((a, b) => b.length - a.length);
+}
+
+/** The notes that pass a query, by name as Obsidian sorts results; excluded files are left out. */
+export function matchingNotes<N extends { name: string; path: string }>(notes: readonly N[], q: Query, facts: Facts, excluded: (path: string) => boolean): N[] {
+  return notes.filter((n) => !excluded(n.path) && matches(n.path, q, facts)).sort((a, b) => compareNames(a.name, b.name));
+}
+
+/** A property's line (1-based in the note) in a note's frontmatter lines, for showing it as a result. */
+export function propertyLine(fm: { props: readonly { key: string; line: number }[]; lines: readonly string[] } | undefined, key: string): Line | null {
+  const p = fm?.props.find((x) => x.key.toLowerCase() === key);
+  return p && fm ? { line: p.line + 2, text: fm.lines[p.line] } : null;
+}
+
+/** Where the words are in a line (every occurrence, any case), in order (snippetParts takes overlaps). */
+export function spansOf(text: string, words: string[]): Span[] {
+  const lower = text.toLowerCase();
+  const spans: Span[] = [];
+  for (const w of words) for (let i = lower.indexOf(w); i >= 0; i = lower.indexOf(w, i + w.length)) spans.push({ from: i, to: i + w.length });
+  return spans.sort((a, b) => a.from - b.from);
 }
 
 /** `path:"folder"` for a folder, quoted when it has spaces, as Obsidian writes it. */

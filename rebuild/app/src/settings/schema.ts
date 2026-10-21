@@ -30,7 +30,7 @@ const textList: Check = (v) => Array.isArray(v) && v.length <= 500 && v.every((x
 /** A font family name: letters, digits, spaces and a little punctuation, so it can go into CSS as is. */
 export const isFontName = (v: unknown): v is string => typeof v === "string" && v.length <= 80 && /^[\p{L}\p{N} _.\-]*$/u.test(v);
 /** "#rrggbb", or "" for Grove's own accent. */
-export const isColor = (v: unknown): v is string => typeof v === "string" && (v === "" || /^#[0-9a-f]{6}$/i.test(v));
+const isColor = (v: unknown): v is string => typeof v === "string" && (v === "" || /^#[0-9a-f]{6}$/i.test(v));
 
 const field = <T>(value: T, valid: Check): Field<T> => ({ default: value, valid });
 

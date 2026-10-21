@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { LinkIndex } from "../api";
 import { GRAPH, LOCAL_GRAPH, sanitize, serialize, defaults } from "../settings/schema";
-import { buildGraph, type GraphModel, nodeColor, nodeRadius } from "./data";
+import { buildGraph, type GraphModel, neighbours, nodeColor, nodeRadius } from "./data";
 import { matches, parseQuery } from "../shell/searchQuery";
 import { ALPHA_MIN, Simulation } from "./sim";
 
@@ -158,4 +158,13 @@ test("graph.json keeps Obsidian's keys and only what was changed; the local grap
   expect(read.colorGroups).toEqual([]);
   expect(read.textFadeMultiplier).toBeCloseTo(0.3);
   expect(sanitize(LOCAL_GRAPH, { localJumps: 9, localInterlinks: true }).values).toMatchObject({ localJumps: 1, localInterlinks: true, close: true });
+});
+
+test("neighbour lists hold each link at both ends", () => {
+  const { start, adj } = neighbours(4, [
+    { source: 0, target: 1, both: false },
+    { source: 2, target: 0, both: true },
+  ]);
+  const of = (i: number) => [...adj.slice(start[i], start[i + 1])].sort();
+  expect([of(0), of(1), of(2), of(3)]).toEqual([[1, 2], [0], [0], []]);
 });

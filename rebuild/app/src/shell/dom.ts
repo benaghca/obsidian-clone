@@ -6,6 +6,17 @@ type Props = {
   title?: string;
   role?: string;
   tabindex?: string;
+  // Fields: set as attributes before anything reads them (a value is the starting value).
+  type?: string;
+  value?: string;
+  placeholder?: string;
+  spellcheck?: "false";
+  contenteditable?: "plaintext-only";
+  id?: string;
+  list?: string;
+  min?: string;
+  max?: string;
+  step?: string;
   [attr: `data-${string}`]: string | undefined;
   [attr: `aria-${string}`]: string | undefined;
   [event: `on${string}`]: ((e: any) => void) | undefined;

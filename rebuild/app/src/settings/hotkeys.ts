@@ -10,7 +10,7 @@
 import { type Command, type CommandRegistry, type Hotkey, hotkeyFromEvent, hotkeyLabel, toStored } from "../commands";
 import { h, keyButton, pressable } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { extraButton } from "./controls";
+import { extraButton, row } from "./controls";
 import { settingsSession } from "./modal";
 import { settings } from "./store";
 
@@ -32,11 +32,7 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
   let capturing: string | null = null;
   let listeningForQuery = false;
 
-  const query = h("input", { class: "setting-hotkey-search", "aria-label": "Filter commands" });
-  query.type = "search";
-  query.placeholder = "Filter...";
-  query.spellcheck = false;
-  query.value = pendingQuery;
+  const query = h("input", { class: "setting-hotkey-search", type: "search", value: pendingQuery, placeholder: "Filter...", spellcheck: "false", "aria-label": "Filter commands" });
   pendingQuery = "";
   const byKey = keyButton(icon("keyboard", 16), "Search by hotkey", () => toggleListening(), "input-right-decorator");
 
@@ -76,12 +72,7 @@ export function createHotkeysPage(registry: CommandRegistry): HTMLElement {
       const keys = h("div", { class: "setting-command-hotkeys" });
       const restore = extraButton("rotate-ccw", "Restore default", () => settings.setHotkeys(cmd.id, null), "setting-restore-hotkey-button");
       const add = extraButton("circle-plus", "Customize this command", () => startCapture(cmd.id), "setting-add-hotkey-button");
-      const el = h(
-        "div",
-        { class: "setting-item mod-hotkey" },
-        h("div", { class: "setting-item-info" }, h("div", { class: "setting-item-name" }, cmd.name)),
-        h("div", { class: "setting-item-control" }, keys, restore, add),
-      );
+      const el = row({ name: cmd.name, cls: "mod-hotkey" }, keys, restore, add);
       return { cmd, el, keys, restore, add, text: cmd.name.toLowerCase() };
     });
   const byId = new Map(rows.map((r) => [r.cmd.id, r]));

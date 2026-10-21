@@ -464,16 +464,13 @@ fn parents(rel: &str) -> impl Iterator<Item = &str> {
 
 pub fn is_note_path(path: &str) -> bool {
     let base = basename(path);
-    base.len() > 3 && base[base.len() - 3..].eq_ignore_ascii_case(".md")
+    // `get`, not slicing: a name ending in a multi-byte character has no char boundary there.
+    base.len() > 3 && base.get(base.len() - 3..).is_some_and(|ext| ext.eq_ignore_ascii_case(".md"))
 }
 
 fn display_name(path: &str, is_dir: bool) -> String {
     let base = basename(path);
-    if !is_dir && is_note_path(base) {
-        base[..base.len() - 3].to_string()
-    } else {
-        base.to_string()
-    }
+    if is_dir { base } else { strip_md(base) }.to_string()
 }
 
 fn basename(path: &str) -> &str {

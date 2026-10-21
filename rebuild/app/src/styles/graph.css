@@ -65,22 +65,12 @@
 .graph-controls:not(.is-close) > .mod-animate {
   display: none;
 }
+/* Its buttons are clickable icons (base.css), placed in the corner. */
 .graph-controls-button {
   position: absolute;
   z-index: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   width: 28px;
   height: 24px;
-  border-radius: var(--radius-s);
-  color: var(--icon-color);
-  opacity: var(--icon-opacity);
-}
-.graph-controls-button:hover {
-  background: var(--background-modifier-hover);
-  color: var(--icon-color-hover);
-  opacity: 1;
 }
 .graph-controls-button:focus-visible {
   box-shadow: 0 0 0 2px var(--background-modifier-border-focus);

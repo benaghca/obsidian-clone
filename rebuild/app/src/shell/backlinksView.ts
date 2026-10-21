@@ -102,7 +102,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
 
   function renderLinked() {
     const path = pathOf();
-    const entries = path ? (ws.links.backlinks[path] ?? []) : [];
+    const entries = path ? (ws.vault.links.backlinks[path] ?? []) : [];
     // Skip the DOM work (and keep scroll and collapsed groups) when nothing changed.
     const key = `${path}\n${entries.map((b) => `${b.from}:${b.line}:${b.text}`).join("\n")}`;
     if (key === shownLinked) return;
@@ -149,7 +149,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     if (seq !== unlinkedSeq || pathOf() !== path) return; // superseded
     const mentions: Mention[] = [];
     for (const hit of hits) {
-      if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md") || ws.isExcluded(hit.path)) continue;
+      if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md") || ws.vault.isExcluded(hit.path)) continue;
       const spans = mentionSpans(hit.text, title);
       if (spans.length) mentions.push({ from: hit.path, line: hit.line, text: hit.text, count: spans.length, spans: () => spans });
     }

@@ -90,30 +90,21 @@ class SettingsStore {
     const values = this.values.get(file)!;
     if (JSON.stringify(values[key]) === JSON.stringify(value)) return true;
     values[key] = value;
-    this.changes.emit(file, key);
-    this.schedule(file);
+    this.changed(file, key);
     return true;
   }
 
   /** Set a command's hotkeys; null puts back its defaults. */
   setHotkeys(id: string, hotkeys: StoredHotkey[] | null) {
-    const next = { ...this.hotkeyMap };
-    if (hotkeys) next[id] = hotkeys;
-    else delete next[id];
-    this.hotkeyMap = next;
-    this.changes.emit("hotkeys.json", id);
-    this.schedule("hotkeys.json");
+    this.hotkeyMap = withEntry(this.hotkeyMap, id, hotkeys);
+    this.changed("hotkeys.json", id);
   }
 
   /** Choose a property name's type for the vault; null makes it automatic again. */
   setPropertyType(key: string, type: string | null) {
     if ((this.typeMap[key] ?? null) === type) return;
-    const next = { ...this.typeMap };
-    if (type) next[key] = type;
-    else delete next[key];
-    this.typeMap = next;
-    this.changes.emit("types.json", key);
-    this.schedule("types.json");
+    this.typeMap = withEntry(this.typeMap, key, type);
+    this.changed("types.json", key);
   }
 
   /** Write everything still waiting (the window is closing). */
@@ -124,7 +115,9 @@ class SettingsStore {
     }
   }
 
-  private schedule(file: SettingsFile) {
+  /** Tell the listeners at once, and write the file a moment later. */
+  private changed(file: SettingsFile, key: string) {
+    this.changes.emit(file, key);
     clearTimeout(this.timers.get(file));
     this.timers.set(
       file,
@@ -142,6 +135,14 @@ class SettingsStore {
           : serialize(FILES[file], this.values.get(file) as never, this.extras.get(file));
     api.writeConfig(file, text).catch((err) => console.warn(`Settings: could not save .grove/${file}`, err));
   }
+}
+
+/** A copy of a map with one entry set, or removed (null). */
+function withEntry<T>(map: Record<string, T>, key: string, value: T | null): Record<string, T> {
+  const next = { ...map };
+  if (value) next[key] = value;
+  else delete next[key];
+  return next;
 }
 
 export const settings = new SettingsStore();

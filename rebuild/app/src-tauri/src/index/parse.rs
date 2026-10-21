@@ -30,19 +30,19 @@ const MAX_FRONTMATTER_LINES: usize = 2000;
 impl Note {
     /// The note's frontmatter block, its `---` lines included, if the note starts with one.
     pub(super) fn frontmatter(&self) -> Option<String> {
-        if self.lines.first()?.text.trim() != "---" {
-            return None;
-        }
-        let close = 1 + self.lines[1..]
-            .iter()
-            .take(MAX_FRONTMATTER_LINES)
-            .position(|l| l.text.trim() == "---")?;
-        let lines: Vec<&str> = self.lines[..=close]
-            .iter()
-            .map(|l| l.text.as_str())
-            .collect();
-        Some(lines.join("\n"))
+        let texts = self.lines.iter().map(|l| l.text.as_str());
+        let close = frontmatter_close(texts.clone(), MAX_FRONTMATTER_LINES)?;
+        Some(texts.take(close + 1).collect::<Vec<_>>().join("\n"))
     }
+}
+
+/// The index of the `---` that closes a frontmatter starting on the first line, looking at most
+/// `limit` lines past it.
+fn frontmatter_close<'a>(mut lines: impl Iterator<Item = &'a str>, limit: usize) -> Option<usize> {
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    Some(1 + lines.take(limit).position(|l| l.trim() == "---")?)
 }
 
 pub(super) fn parse_note(content: &str) -> Note {
@@ -319,9 +319,10 @@ pub(super) fn clean_target(inner: &str) -> Option<String> {
 }
 
 fn parse_aliases(content: &str) -> Vec<String> {
-    let Some(lines) = frontmatter_lines(content) else {
+    let Some(close) = frontmatter_close(content.lines(), usize::MAX) else {
         return Vec::new();
     };
+    let lines: Vec<&str> = content.lines().take(close).skip(1).collect();
     let mut aliases = Vec::new();
     let mut i = 0;
     while i < lines.len() {
@@ -360,21 +361,6 @@ fn parse_aliases(content: &str) -> Vec<String> {
         i += 1;
     }
     aliases
-}
-
-fn frontmatter_lines(content: &str) -> Option<Vec<&str>> {
-    let mut lines = content.lines();
-    if lines.next().map(str::trim) != Some("---") {
-        return None;
-    }
-    let mut out = Vec::new();
-    for line in lines {
-        if line.trim() == "---" {
-            return Some(out);
-        }
-        out.push(line);
-    }
-    None
 }
 
 fn key_rest<'a>(line: &'a str, key: &str) -> Option<&'a str> {

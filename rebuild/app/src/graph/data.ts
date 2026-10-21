@@ -90,6 +90,23 @@ export function nodeColor(node: GraphNode, groups: readonly { match(node: GraphN
   return g >= 0 ? 4 + g : KIND_COLOR[node.kind];
 }
 
+/** Each node's neighbours, packed: node i's are `adj` from `start[i]` up to `start[i + 1]`. */
+export function neighbours(n: number, links: readonly GraphLink[]) {
+  const start = new Int32Array(n + 1);
+  for (const l of links) {
+    start[l.source + 1]++;
+    start[l.target + 1]++;
+  }
+  for (let i = 0; i < n; i++) start[i + 1] += start[i];
+  const adj = new Int32Array(start[n]);
+  const fill = start.slice();
+  for (const l of links) {
+    adj[fill[l.source]++] = l.target;
+    adj[fill[l.target]++] = l.source;
+  }
+  return { start, adj };
+}
+
 export function buildGraph(src: GraphSource, opts: GraphOptions): GraphModel {
   const nodes: GraphNode[] = [];
   const index = new Map<string, number>();

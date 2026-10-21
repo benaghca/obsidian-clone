@@ -22,7 +22,7 @@ import { countsField } from "./editor/counts";
 import { frontmatterField } from "./editor/frontmatter";
 import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
-import { newNote } from "./fileOps";
+import { fileSettings, newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
 import { excluder } from "./settings/exclude";
@@ -228,7 +228,7 @@ function renderCounts() {
 function renderBacklinks() {
   const path = ws.active.path;
   if (!path) return;
-  const from = new Set((ws.links.backlinks[path] ?? []).map((b) => b.from));
+  const from = new Set((ws.vault.links.backlinks[path] ?? []).map((b) => b.from));
   backlinkCount.textContent = plural(from.size, "backlink");
 }
 ws.on((change) => {
@@ -273,21 +273,21 @@ const sections = () =>
 
 const appSettings = () => settings.get("app.json");
 ws.newTabMode = () => (appSettings().defaultViewMode === "preview" ? "reading" : appSettings().livePreview ? "live" : "source");
-ws.editingMode = () => (appSettings().livePreview ? "live" : "source");
+fileSettings.editingMode = () => (appSettings().livePreview ? "live" : "source");
 ws.newTabBacklinks = () => commands.pluginEnabled("backlink") && settings.get("backlink.json").backlinkInDocument;
-ws.newNoteFolder = () => {
+fileSettings.newNoteFolder = () => {
   const a = appSettings();
   if (a.newFileLocation === "current") return ws.active.path ? parentDir(ws.active.path) : "";
   if (a.newFileLocation === "folder") return trimSlashes(a.newFileFolderPath);
   return "";
 };
-ws.permanentDelete = () => appSettings().trashOption === "none";
+fileSettings.permanentDelete = () => appSettings().trashOption === "none";
 ws.linkStyle = () => ({ format: appSettings().newLinkFormat, wikilinks: !appSettings().useMarkdownLinks });
-ws.confirmDelete = async (path) => {
+fileSettings.confirmDelete = async (path) => {
   if (!appSettings().promptDelete) return true;
-  const folder = ws.isFolder(path);
+  const folder = ws.vault.isFolder(path);
   const name = folder ? fileName(path) : noteName(path);
-  const where = ws.permanentDelete() ? "It will be permanently deleted." : "It will be moved to the vault's .trash folder.";
+  const where = fileSettings.permanentDelete() ? "It will be permanently deleted." : "It will be moved to the vault's .trash folder.";
   const r = await confirmDialog({
     title: folder ? "Delete folder" : "Delete file",
     message: `Are you sure you want to delete “${name}”${folder ? " and everything in it" : ""}? ${where}`,
@@ -298,7 +298,7 @@ ws.confirmDelete = async (path) => {
   if (r.dontAskAgain) settings.set("app.json", "promptDelete", false);
   return r.ok;
 };
-ws.confirmMerge = async (from, into) => {
+fileSettings.confirmMerge = async (from, into) => {
   if (!settings.get("note-composer.json").askBeforeMerging) return true;
   const r = await confirmDialog({
     title: "Merge file",
@@ -309,7 +309,7 @@ ws.confirmMerge = async (from, into) => {
   if (r.dontAskAgain) settings.set("note-composer.json", "askBeforeMerging", false);
   return r.ok;
 };
-ws.onRenamed = (from, to, before) => {
+fileSettings.renamed = (from, to, before) => {
   const ask = appSettings().alwaysUpdateLinks
     ? null
     : async (links: number, notes: number) => {
@@ -369,21 +369,9 @@ function applySettings(file: SettingsFile | null) {
   if (all || file === "app.json") {
     const a = appSettings();
     applyPageSettings(a);
-    const changed = setEditorConfig({
-      lineNumbers: a.showLineNumber,
-      foldHeading: a.foldHeading,
-      foldIndent: a.foldIndent,
-      spellcheck: a.spellcheck,
-      autoPairBrackets: a.autoPairBrackets,
-      autoPairMarkdown: a.autoPairMarkdown,
-      smartLists: a.smartIndentList,
-      useTab: a.useTab,
-      tabSize: a.tabSize,
-      properties: a.propertiesInDocument,
-    });
-    if (changed) ws.editors.reconfigure();
+    if (setEditorConfig(a)) ws.editors.reconfigure();
     const test = excluder(a.userIgnoreFilters);
-    if (ws.isExcluded !== test) ws.isExcluded = test;
+    if (ws.vault.isExcluded !== test) ws.vault.isExcluded = test;
   }
   if (all || file === "hotkeys.json") {
     commands.setCustomHotkeys(Object.fromEntries(Object.entries(settings.hotkeys).map(([id, list]) => [id, list.map(fromStored)])));
@@ -463,7 +451,7 @@ window.addEventListener("beforeunload", () => {
   void ws.editors.flush();
 });
 
-await ws.init(!!popoutNote);
+await ws.vault.open(!!popoutNote);
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
 bookmarks.load();
@@ -478,7 +466,7 @@ async function restoreLayout() {
   docks.setCollapsed("right", !layout.rightOpen, false);
   sidebar.setSortOrder(layout.fileSort);
   if (!(await ws.restoreLayout(loadWorkspace(ws.vault.path)))) {
-    await ws.open(ws.resolve("Welcome") ?? ws.notes[0]?.path ?? "");
+    await ws.open(ws.resolve("Welcome") ?? ws.vault.notes[0]?.path ?? "");
   }
   restored = true;
 }

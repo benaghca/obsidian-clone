@@ -4,13 +4,31 @@
 // (Workspace.followMove, Workspace.forget).
 
 import { api, type FileEntry } from "./api";
+import type { ViewMode } from "./editor/editor";
+import type { NoteRef } from "./editor/host";
 import { fileName, isUnder, movedPath, noteName, parentDir } from "./paths";
 import type { OpenWhere } from "./tabs";
 import type { Workspace } from "./workspace";
 
+/** What these ask of the settings (Settings → Editor, Files and links, Note composer); set by the app. */
+export const fileSettings = {
+  /** Where "Create new note" puts a note when no folder is given. */
+  newNoteFolder: () => "",
+  /** The editing mode new notes open in (Live Preview or Source mode). */
+  editingMode: (): ViewMode => "live",
+  /** Whether deleting removes for good instead of moving to the vault's .trash. */
+  permanentDelete: () => false,
+  /** Asked before a delete that wasn't confirmed already; false cancels it. */
+  confirmDelete: (_path: string): Promise<boolean> => Promise.resolve(true),
+  /** Asked before merging one note into another; false cancels. */
+  confirmMerge: (_from: string, _into: string): Promise<boolean> => Promise.resolve(true),
+  /** Told after a note or folder moved, with the notes as they were before (to update links). */
+  renamed: (_from: string, _to: string, _before: NoteRef[]) => {},
+};
+
 export async function createNote(ws: Workspace, path: string, content = ""): Promise<FileEntry> {
   const entry = await api.createNote(path, content);
-  await ws.refreshFiles();
+  await ws.vault.refreshFiles();
   return entry;
 }
 
@@ -18,25 +36,25 @@ export async function createNote(ws: Workspace, path: string, content = ""): Pro
  * Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (by default
  * where Settings → Files and links puts new notes) and open it for editing.
  */
-export async function newNote(ws: Workspace, folder: string = ws.newNoteFolder(), where?: OpenWhere): Promise<string> {
-  if (folder && !ws.isFolder(folder)) await api.createFolder(folder).catch(() => {});
+export async function newNote(ws: Workspace, folder: string = fileSettings.newNoteFolder(), where?: OpenWhere): Promise<string> {
+  if (folder && !ws.vault.isFolder(folder)) await api.createFolder(folder).catch(() => {});
   const entry = await createNote(ws, freeName(ws, folder, ".md"));
   await ws.open(entry.path, { where: where ?? (ws.active.path !== null || ws.active.type ? "tab" : false) });
   // A new note is for writing in, even when new tabs open in Reading view.
-  if (ws.active.path === entry.path && ws.active.mode === "reading") ws.setMode(ws.editingMode());
+  if (ws.active.path === entry.path && ws.active.mode === "reading") ws.setMode(fileSettings.editingMode());
   return entry.path;
 }
 
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
   const entry = await api.createFolder(freeName(ws, parent, ""));
-  await ws.refreshFiles();
+  await ws.vault.refreshFiles();
   return entry.path;
 }
 
 /** A free "Untitled" name in a folder: "Untitled", "Untitled 1", ... */
 function freeName(ws: Workspace, folder: string, ext: string) {
-  const taken = new Set(ws.files.map((f) => f.path.toLowerCase()));
+  const taken = new Set(ws.vault.files.map((f) => f.path.toLowerCase()));
   const at = (name: string) => `${folder ? folder + "/" : ""}${name}${ext}`;
   let name = "Untitled";
   for (let i = 1; taken.has(at(name).toLowerCase()); i++) name = `Untitled ${i}`;
@@ -46,7 +64,7 @@ function freeName(ws: Workspace, folder: string, ext: string) {
 /** Rename a note (keeping its folder and .md) or a folder. */
 export async function renameFile(ws: Workspace, path: string, newName: string) {
   newName = newName.trim().replace(/[\\/:]/g, "");
-  const isDir = ws.isFolder(path);
+  const isDir = ws.vault.isFolder(path);
   if (!newName || newName === (isDir ? fileName(path) : noteName(path))) return;
   const dir = parentDir(path);
   await relocate(ws, path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
@@ -60,23 +78,23 @@ export async function moveFile(ws: Workspace, path: string, folder: string) {
 
 /** Move a file or folder; the loaded notes and everything open follow. */
 async function relocate(ws: Workspace, from: string, to: string) {
-  const clash = ws.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
+  const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
   const under = (p: string) => isUnder(p, from);
   await ws.editors.flush(under);
-  const before = ws.notes;
+  const before = ws.vault.notes;
   await api.renamePath(from, to);
   const swap = (p: string) => movedPath(p, from, to);
   ws.editors.move(under, swap);
   await ws.followMove(swap);
-  ws.onRenamed?.(from, to, before);
+  fileSettings.renamed(from, to, before);
 }
 
 /** Obsidian's "Make a copy": "Name 1.md" beside the note, opened in the active tab. */
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
   await ws.saveNow(path);
   const content = await ws.editors.text(path);
-  const taken = new Set(ws.files.map((f) => f.path.toLowerCase()));
+  const taken = new Set(ws.vault.files.map((f) => f.path.toLowerCase()));
   const base = path.replace(/\.md$/, "");
   let n = 1;
   while (taken.has(`${base} ${n}.md`.toLowerCase())) n++;
@@ -92,7 +110,7 @@ export async function copyNote(ws: Workspace, path: string): Promise<string> {
  */
 export async function mergeNote(ws: Workspace, path: string, into: string) {
   if (path === into) return;
-  if (ws.confirmMerge && !(await ws.confirmMerge(path, into))) return;
+  if (!(await fileSettings.confirmMerge(path, into))) return;
   const [text, target] = await Promise.all([ws.editors.text(path), ws.editors.load(into)]);
   if (!target) return;
   const doc = ws.editors.doc(into) ?? target.doc;
@@ -110,10 +128,10 @@ export async function mergeNote(ws: Workspace, path: string, into: string) {
  * it was deleted.
  */
 export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
-  if (!opts.confirmed && ws.confirmDelete && !(await ws.confirmDelete(path))) return false;
+  if (!opts.confirmed && !(await fileSettings.confirmDelete(path))) return false;
   const under = (p: string) => isUnder(p, path);
   await ws.editors.flush(under);
-  await api.deletePath(path, ws.permanentDelete());
+  await api.deletePath(path, fileSettings.permanentDelete());
   ws.editors.forget(under);
   await ws.forget(under);
   return true;
@@ -128,7 +146,7 @@ export async function updateNoteText(ws: Workspace, path: string, next: string) 
   const doc = ws.editors.doc(path);
   if (!doc) {
     await api.writeNote(path, next);
-    ws.written(path);
+    ws.vault.written(path);
     return;
   }
   const lines = next.split("\n");

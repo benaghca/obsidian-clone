@@ -129,7 +129,7 @@ function createLocalGraphView(ws: Workspace, searchFor: (query: string) => void,
   });
   ws.on((change) => {
     if (change !== "show" && change !== "files") return;
-    const next = ws.active.path ?? (file && ws.notes.some((n) => n.path === file) ? file : null);
+    const next = ws.active.path ?? (file && ws.vault.notes.some((n) => n.path === file) ? file : null);
     if (next === file) return;
     file = next;
     view.refresh();

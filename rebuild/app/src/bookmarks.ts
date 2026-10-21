@@ -30,7 +30,7 @@ export class Bookmarks {
 
   /** Bookmarked paths that still exist, in the order they were added. */
   list(): string[] {
-    const existing = new Set(this.ws.files.map((f) => f.path));
+    const existing = new Set(this.ws.vault.files.map((f) => f.path));
     return this.paths.filter((p) => existing.has(p));
   }
 

@@ -320,7 +320,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function render() {
     rows.clear();
     const frag = document.createDocumentFragment() as unknown as HTMLElement;
-    renderNodes(buildTree(ws.files, sortOrder), 0, frag);
+    renderNodes(buildTree(ws.vault.files, sortOrder), 0, frag);
     list.replaceChildren(frag);
     markActive();
   }
@@ -386,7 +386,7 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
     const paths = bookmarks.list();
     list.replaceChildren(
       ...paths.map((path) => {
-        const entry = ws.files.find((f) => f.path === path)!;
+        const entry = ws.vault.files.find((f) => f.path === path)!;
         const row = h(
           "div",
           {

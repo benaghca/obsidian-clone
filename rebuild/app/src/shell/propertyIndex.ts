@@ -12,8 +12,9 @@ import { fixedType, type Property, type PropertyType, readFrontmatter, readPrope
 import type { PropertyHost } from "../editor/host";
 import { compareNames } from "../paths";
 import { settings } from "../settings/store";
+import { perWorkspace } from "../perWorkspace";
 import type { Workspace } from "../workspace";
-import { createTagReader } from "./vaultTags";
+import { vaultTags } from "./vaultTags";
 
 export interface NoteProperties {
   props: Property[];
@@ -34,34 +35,21 @@ export interface PropertyName {
 const BY_STORED = Object.fromEntries(Object.entries(STORED_TYPES).map(([type, stored]) => [stored, type as PropertyType]));
 
 /** The type chosen for a property name in this vault (types.json), or null: automatic, from its value. */
-export const chosenType = (key: string): PropertyType | null => fixedType(key) ?? BY_STORED[settings.propertyTypes[key]] ?? null;
+const chosenType = (key: string): PropertyType | null => fixedType(key) ?? BY_STORED[settings.propertyTypes[key]] ?? null;
 
 const parse = (lines: string[]): NoteProperties | null => {
   const props = readProperties(lines);
   return props ? { props, lines } : null;
 };
 
-const shared = new WeakMap<Workspace, ReturnType<typeof create>>();
-
 /** The workspace's properties index (one for every view that needs it). */
-export function propertyIndex(ws: Workspace) {
-  let index = shared.get(ws);
-  if (!index) shared.set(ws, (index = create(ws)));
-  return index;
-}
-
-function create(ws: Workspace) {
+export const propertyIndex = perWorkspace((ws: Workspace) => {
   const cache = new Map<string, { mtime: number; entry: NoteProperties | null }>();
   let reading: Promise<Map<string, NoteProperties>> | null = null;
-  const readTags = createTagReader(ws);
-  let tags: Promise<string[]> | null = null;
-  ws.on((change) => {
-    if (change === "files" || change === "links") tags = null;
-  });
 
   async function read(): Promise<Map<string, NoteProperties>> {
-    const notes = ws.includedNotes();
-    const mtimes = new Map(ws.files.map((f) => [f.path, f.mtime_ms]));
+    const notes = ws.vault.includedNotes();
+    const mtimes = new Map(ws.vault.files.map((f) => [f.path, f.mtime_ms]));
     const stale = notes.map((n) => n.path).filter((p) => !ws.editors.isLoaded(p) && cache.get(p)?.mtime !== mtimes.get(p));
     if (stale.length) {
       // Most of the vault (the first read): ask for everything in one go.
@@ -109,8 +97,8 @@ function create(ws: Workspace) {
   /** The values a property name has across the vault, sorted (for tags: every tag in the vault). */
   async function values(key: string): Promise<string[]> {
     if (key.toLowerCase() === "tags") {
-      tags ??= readTags().then((byNote) => [...new Set([...byNote.values()].flat())], () => []);
-      return dedupe(await tags);
+      const byNote = await vaultTags(ws).read().catch(() => new Map<string, string[]>());
+      return dedupe([...byNote.values()].flat());
     }
     const out: string[] = [];
     for (const { props } of (await notes()).values()) {
@@ -132,7 +120,7 @@ function create(ws: Workspace) {
   };
 
   return { notes, names, values, host };
-}
+});
 
 
 /** Case-insensitively unique (the first spelling kept), sorted by name. */

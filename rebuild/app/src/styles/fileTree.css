@@ -141,23 +141,6 @@
 .search-input-container {
   padding: 8px;
 }
-.search-input {
-  width: 100%;
-  font: inherit;
-  color: var(--text-normal);
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-s);
-  background: var(--background-primary);
-  outline: none;
-  transition:
-    border-color var(--anim-duration-fast) var(--anim-ease-out),
-    box-shadow var(--anim-duration-fast) var(--anim-ease-out);
-}
-.search-input:focus {
-  border-color: var(--background-modifier-border-hover);
-  box-shadow: 0 0 0 2px var(--background-modifier-active-hover);
-}
 .search-results {
   overflow-y: auto;
   padding: 0 8px 16px;

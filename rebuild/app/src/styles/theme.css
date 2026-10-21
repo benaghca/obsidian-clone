@@ -191,12 +191,10 @@
   --text-normal: #dadada;
   --text-muted: #b3b3b3;
   --text-faint: #666666;
-  --text-on-accent: #ffffff;
   --text-error: #fb464c;
   --text-warning: #e9973f;
   --background-modifier-error: #fb464c;
   --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.33);
-  --text-highlight-bg: rgba(255, 208, 0, 0.4);
 
   --icon-color: #b3b3b3;
   --icon-color-hover: #dadada;
@@ -222,7 +220,6 @@
   --graph-node-attachment: #e0de71;
   --graph-line: #3f3f3f;
 
-  --menu-background: var(--background-secondary);
   --menu-border-color: #3f3f3f;
   --menu-shadow: 0 1px 2px rgba(0, 0, 0, 0.121), 0 3.4px 6.7px rgba(0, 0, 0, 0.179), 0 15px 30px rgba(0, 0, 0, 0.3);
   --shadow-s: 0 1px 2px rgba(0, 0, 0, 0.121), 0 3.4px 6.7px rgba(0, 0, 0, 0.179), 0 15px 30px rgba(0, 0, 0, 0.3);

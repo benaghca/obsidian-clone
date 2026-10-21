@@ -103,9 +103,9 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
     measured = views().map((v) => ({
       group: v.group,
       pane: v.el.getBoundingClientRect(),
-      strip: v.strip.getBoundingClientRect(),
+      strip: v.strip.el.getBoundingClientRect(),
       tabs: v.group.tabs.flatMap((t) => {
-        const el = v.headers.get(t.id);
+        const el = v.strip.headers.get(t.id)?.el;
         if (!el) return [];
         const r = el.getBoundingClientRect();
         return [{ tab: t, left: r.left, right: r.right }];

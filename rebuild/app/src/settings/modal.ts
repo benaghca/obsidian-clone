@@ -20,7 +20,7 @@ export interface SettingsSection {
   shown?(): boolean;
   /** Left out of the settings search (Hotkeys, which has its own filter). */
   unsearchable?: boolean;
-  build(): HTMLElement;
+  build(): HTMLElement | HTMLElement[];
 }
 
 let lastSection = "general";
@@ -55,7 +55,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
 
   const sectionEl = (s: SettingsSection) => {
     let el = built.get(s.id);
-    if (!el) built.set(s.id, (el = h("div", { class: "setting-section", "data-section": s.id }, s.build())));
+    if (!el) built.set(s.id, (el = h("div", { class: "setting-section", "data-section": s.id }, ...[s.build()].flat())));
     return el;
   };
 
@@ -74,10 +74,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
   }
 
   // ----- search: every section's rows, filtered by name and description -----
-  const search = h("input", { class: "setting-search-input", "aria-label": "Search settings" });
-  search.type = "search";
-  search.placeholder = "Search settings...";
-  search.spellcheck = false;
+  const search = h("input", { class: "setting-search-input", type: "search", placeholder: "Search settings...", spellcheck: "false", "aria-label": "Search settings" });
   const emptyResult = h("div", { class: "setting-search-empty" }, "No settings match.");
 
   function runSearch() {
