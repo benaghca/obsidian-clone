@@ -16,6 +16,7 @@ import { livePreview, readingMode } from "./livePreview";
 import { propertiesBlock } from "./properties";
 import { sourceMode } from "./sourceMode";
 import { markdownSyntax } from "./syntax";
+import { tableKeys } from "./tableEdit";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
 const baseTheme = EditorView.theme({
@@ -39,7 +40,7 @@ export type ViewMode = "live" | "source" | "reading";
 export const viewModeCompartment = new Compartment();
 
 export const VIEW_MODES: Record<ViewMode, Extension> = {
-  live: [livePreview, blocks, propertiesBlock],
+  live: [livePreview, blocks, propertiesBlock, tableKeys],
   source: [EditorView.editorAttributes.of({ class: "is-source-mode" }), sourceMode],
   reading: [
     livePreview,
