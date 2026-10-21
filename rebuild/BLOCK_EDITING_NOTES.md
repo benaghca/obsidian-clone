@@ -1,3 +1,55 @@
+# Round 13: working inside rendered blocks (as merged)
+
+**Merged:** Claude's version (`rebuild/r13-claude`, `3368bb7`) as merge `1c8e82a`, with no ports. Three agents did the same brief from `5df7da9`. The comparison was headless: a Vite preview of each branch and of the round-start base, with the mock vault plus a shared `Blocks13` note (yellow, red, green and blue highlights; Python, JavaScript and Rust code blocks; an aligned table; a local image at `|200`; a `![[Tasks13]]` embed holding three tasks), in headless Chromium at 1280×1150. Obsidian 1.14.4 ran on a private Xvfb display in its own network namespace with a scratch profile and the same note in a copy of the test vault. For each version: Live Preview and Reading view shots, a right-click on a table cell (menu items recorded), hovering the image and pressing its "Zoom in" control, and ticking `alpha` in the embed and then opening `Tasks13` to check it was written there.
+
+## How the three compared
+
+Line counts from `rebuild/app` with the brief's commands (before = `5df7da9`: TS app 17,424, tests 1,804, CSS 3,323, Rust 3,219, total 25,770):
+
+| | Claude (merged) | Codex | Grok |
+|---|---:|---:|---:|
+| TypeScript, app | +737 | +580 | +1,026 |
+| TypeScript, tests | +224 | +175 | +182 |
+| CSS | +159 | +87 | +91 |
+| Rust | 0 | 0 | 0 |
+| **Total** | **+1,120** | **+842** | **+1,299** |
+| `index.js` gzip growth (whole round) | +20.9 kB | +40.6 kB | +41.4 kB (split into a preloaded shared chunk plus lazy language chunks) |
+| Callout spacing and fold memory (item 6) | both | fold only | both |
+| Commits | 10 + notes | 15 + notes | 3 + notes |
+
+- **Closest to Obsidian: Claude.** Side by side on the same note, its code colours match Obsidian's editor token for token where the others miss some: Python parameter names and `str` types, Rust's `println!` and variables (with `u32` left plain, as Obsidian does), and JavaScript's arrow-function parameters. Its table right-click menu is Obsidian's editor menu with Row ›, Column › and the two sorts appended, as Obsidian shows it. It also built the optional callout spacing. It reached that with the smallest bundle growth, by using the legacy stream modes Obsidian's editor uses for Python, Rust, Shell, YAML and XML, and reusing the JS/CSS/HTML grammars that were already bundled through Markdown. Weak spots: typing inside a screen-full 300-line code block is about 1.5 ms slower per key (still within a frame), and the image "Zoom in" button is hidden in Reading view.
+- **Codex:** the smallest code (+842) and the cleanest performance numbers (code-block and table typing back in the round-start range, by reusing Lezer tree fragments inside the edited block). It also guards embed task ticks against stale text and changed mtimes, keeps tables drawn while the menu is open, and committed a headless check script. Visible differences: fewer code colours than Obsidian (no parameter or macro colours), a click on the image itself opens the lightbox (Obsidian only zooms from the button), and no callout spacing. Its bundle grew about twice as much as Claude's.
+- **Grok:** every item built, with lazy language chunks served from the app's own origin. But its table right-click menu drops the editor items (only Row, Column and the sorts), the submenu separators and sort order were guesses (its notes say so), it moved shared CodeMirror into a new preloaded chunk, and it was the largest in lines.
+- **Checks:** all three build, pass their tests and the offline audit; in all three, ticking a task inside the embed wrote `- [x] alpha` to `Tasks13` and left the host note alone. On the merged tree on Cloud: `npm run build`, `npm test` (157 tests in 31 files), `npm run audit:offline`, `cargo build` and `cargo test` (31) pass.
+
+## Ideas from the other two
+
+- **Codex (not ported, handed to round 14):** reusing parse fragments inside the edited code block, which would win back Claude's ~1.5 ms in large code blocks; it fits a cleanup round that may touch `codeHighlight.ts` with no visible change. Its stale-tick guard (watched mtime plus exact painted text) is safer than Claude's path, which loads the note fresh through `ws.editors` and follows outside changes; worth folding in if it stays small. Not ported: zoom on a plain image click (Obsidian doesn't do that).
+- **Grok (not ported):** lazy, origin-served language chunks. With Claude's grammars at 16 kB there's little to save, and lazy loading would add a redraw path. Its stable, numeric-aware sort (`localeCompare` with `numeric: true`) is a detail to compare against Claude's sort in round 15.
+
+## Merged line counts (from `rebuild/app`)
+
+| | Round 12 merged (`5d347aa`) | Round 13 merged (`1c8e82a`) | Change |
+|---|---:|---:|---:|
+| TypeScript, app | 17,424 | 18,161 | +737 |
+| TypeScript, tests | 1,804 | 2,028 | +224 |
+| CSS | 3,323 | 3,482 | +159 |
+| Rust | 3,219 | 3,219 | 0 |
+| **Total** | **25,770** | **26,890** | **+1,120** |
+
+Largest files: `workspace.ts` 676, `graph/view.ts` 649, `styles/settings.css` 647, `shell/pane.ts` 625, `src-tauri/src/vault.rs` 561, `editor/livePreview.ts` 547, `appCommands.ts` 546. None over 680. New files: `editor/codeHighlight.ts` (224), `editor/tableEdit.ts` (186), `editor/imageZoom.ts` (58), plus tests. New dependencies, all bundled and on the audit allowlist with a reason: `@codemirror/lang-json`, `@codemirror/lang-sql`, `@codemirror/legacy-modes`, with `lang-javascript`, `lang-css` and `lang-html` now direct (they were already bundled). No permission, command, CSP or `tauri.conf.json` change.
+
+## Known gaps left after the merge
+
+- Typing inside a screen-full code block is ~1.5 ms slower per key (round 14 may recover it with no visible change).
+- The image "Zoom in" button is hidden in Reading view; check Obsidian. The image right-click menu (Copy image, Reset size …) isn't built.
+- Obsidian draws indent guides inside code blocks and a lighter code-block background; Grove has neither.
+- Tasks inside a callout or table *inside* an embedded note can't be ticked.
+- Tables stay source-on-touch (no in-place cell editor, in all three versions).
+- Round 15 (feature) picks these up together with the round 10 leftovers (search match-case and sort menu, File properties view, Rename/Delete property).
+
+---
+
 # Round 13: working inside rendered blocks (Claude's notes)
 
 Branch `rebuild/r13-claude`, from `5df7da9`. All six items of the brief are built, the optional one (callout spacing and fold state) included. One brief item is skipped because Obsidian doesn't have it: zoom controls in the image tab. One hard rule is not fully met: typing inside a long code block (see Performance).
