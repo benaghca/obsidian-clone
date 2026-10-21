@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Facts, highlightsOf, matches, parseQuery, pathQuery, shownLines, termsOf } from "./searchQuery";
+import { type Facts, highlightsOf, matches, matchingNotes, parseQuery, pathQuery, propertyLine, shownLines, spansOf, termsOf } from "./searchQuery";
 
 // The throwaway vault the cases were observed on in Obsidian 1.14.4.
 const VAULT: Record<string, string> = {
@@ -91,6 +91,22 @@ describe("search query", () => {
     ]);
     expect(shownLines("B.md", parseQuery("line:(alpha beta)"), facts, line)).toEqual([{ line: 7, text: "alpha beta on one line" }]);
     expect(highlightsOf(parseQuery('"star wars" alpha -beta file:x [status:draft]'))).toEqual(["star wars", "alpha", "draft"]);
+  });
+
+  it("builds the results: matching notes by name less excluded ones, a property's line, every match highlighted", () => {
+    const notes = Object.keys(VAULT).map((path) => ({ path, name: names(path) }));
+    const found = matchingNotes(notes, parseQuery("alpha")!, facts, (path) => path.startsWith("Projects/"));
+    expect(found.map((n) => n.name)).toEqual(["A", "B", "C", "Props"]);
+    const fm = { props: [{ key: "Status", line: 0 }, { key: "tags", line: 1 }], lines: ["Status: draft", "tags: [x]"] };
+    expect(propertyLine(fm, "tags")).toEqual({ line: 3, text: "tags: [x]" });
+    expect(propertyLine(fm, "status")).toEqual({ line: 2, text: "Status: draft" });
+    expect(propertyLine(undefined, "status")).toBeNull();
+    expect(spansOf("Alpha and alphabet, ALPHA", ["alpha", "and"])).toEqual([
+      { from: 0, to: 5 },
+      { from: 6, to: 9 },
+      { from: 10, to: 15 },
+      { from: 20, to: 25 },
+    ]);
   });
 
   it("writes Search in folder's path: as Obsidian does", () => {

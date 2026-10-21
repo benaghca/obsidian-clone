@@ -7,12 +7,14 @@
 
 import { api } from "../api";
 import { perWorkspace, type Workspace } from "../workspace";
-import { propertyIndex } from "./propertyIndex";
+import { type NoteProperties, propertyIndex } from "./propertyIndex";
 import { type Facts, type Line, needs, type Query, termsOf } from "./searchQuery";
 import { vaultTags } from "./vaultTags";
 
 export interface VaultFacts extends Facts {
   tags?: Map<string, string[]>;
+  /** Each note's properties and frontmatter lines (when the query asks about properties), for showing their lines. */
+  notes?: Map<string, NoteProperties>;
 }
 
 /** Terms remembered at most (the prefixes of what was typed, mostly). */
@@ -51,13 +53,14 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
   }
 
   async function properties() {
-    const out = new Map<string, Map<string, string[]>>();
-    for (const [path, { props }] of await propertyIndex(ws).notes()) {
+    const notes = await propertyIndex(ws).notes();
+    const props = new Map<string, Map<string, string[]>>();
+    for (const [path, note] of notes) {
       const byKey = new Map<string, string[]>();
-      for (const p of props) byKey.set(p.key.toLowerCase(), Array.isArray(p.value) ? p.value : [String(p.value)]);
-      out.set(path, byKey);
+      for (const p of note.props) byKey.set(p.key.toLowerCase(), Array.isArray(p.value) ? p.value : [String(p.value)]);
+      props.set(path, byKey);
     }
-    return out;
+    return { props, notes };
   }
 
   return {
@@ -75,9 +78,9 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
       if (!terms.size && !wantTags && !wantProps) return null;
       const tags = wantTags ? vaultTags(ws).read().catch(() => new Map<string, string[]>()) : undefined;
       const list = [...terms];
-      return Promise.all([Promise.all(list.map(linesOf)), tags, wantProps ? properties() : undefined]).then(([found, t, props]) => {
+      return Promise.all([Promise.all(list.map(linesOf)), tags, wantProps ? properties() : undefined]).then(([found, t, p]) => {
         const byTerm = new Map(list.map((term, i) => [term, found[i]]));
-        return { lines: (term) => byTerm.get(term), tags: t ?? undefined, props };
+        return { lines: (term) => byTerm.get(term), tags: t ?? undefined, props: p?.props, notes: p?.notes };
       });
     },
   };
