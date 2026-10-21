@@ -64,7 +64,7 @@ function codeKey(code: string): string | undefined {
 const comboOf = (mod: boolean, alt: boolean, shift: boolean, key: string) =>
   `${mod ? "Mod+" : ""}${alt ? "Alt+" : ""}${shift ? "Shift+" : ""}${key}`;
 
-export const hotkeyCombo = (hk: Hotkey) => comboOf(!!hk.mod, !!hk.alt, !!hk.shift, hk.key.toLowerCase());
+const hotkeyCombo = (hk: Hotkey) => comboOf(!!hk.mod, !!hk.alt, !!hk.shift, hk.key.toLowerCase());
 
 const MODIFIER_KEYS = new Set(["control", "shift", "alt", "meta", "os", "altgraph", "capslock", "fn", "dead", "process", "unidentified"]);
 

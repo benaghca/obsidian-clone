@@ -52,7 +52,7 @@ export interface Rect {
 
 const EPS = 1e-6;
 
-export const edgeDirection = (edge: Edge): Direction => (edge === "left" || edge === "right" ? "vertical" : "horizontal");
+const edgeDirection = (edge: Edge): Direction => (edge === "left" || edge === "right" ? "vertical" : "horizontal");
 const edgeIsAfter = (edge: Edge) => edge === "right" || edge === "bottom";
 
 /** The serialized form, as saved per vault. Tabs are whatever `saveTab` returns. */

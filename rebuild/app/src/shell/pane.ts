@@ -38,8 +38,8 @@ export interface Panes extends ColumnHolder {
  * across is Obsidian 1.14.4's (measured by dragging a divider as far as it
  * goes); below about that, words start breaking in the text column.
  */
-export const MIN_PANE_WIDTH = 200;
-export const MIN_PANE_HEIGHT = 120;
+const MIN_PANE_WIDTH = 200;
+const MIN_PANE_HEIGHT = 120;
 const minFor = (direction: Direction) => (direction === "vertical" ? MIN_PANE_WIDTH : MIN_PANE_HEIGHT);
 
 interface GroupView {

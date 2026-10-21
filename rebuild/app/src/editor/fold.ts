@@ -22,7 +22,7 @@ const foldKinds = Facet.define<FoldKinds, FoldKinds>({
 const HEADING = /^#{1,6}(\s|$)/;
 
 /** The range a line folds, if folding that kind of line is on. Headings fold their section; lists, quotes and code fold their block. */
-export function foldRangeAt(state: EditorState, line: Line): { from: number; to: number } | null {
+function foldRangeAt(state: EditorState, line: Line): { from: number; to: number } | null {
   const kinds = state.facet(foldKinds);
   if (HEADING.test(line.text) ? !kinds.heading : !kinds.indent) return null;
   return foldable(state, line.from, line.to);

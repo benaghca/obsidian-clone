@@ -46,7 +46,7 @@ const SKIP: [RegExp, (line: string) => boolean][] = [
 ];
 
 /** Index note names by their first word. Names without a word character can't be mentioned. */
-export function indexNames(notes: NoteRef[], selfPath: string | null): Map<string, Name[]> {
+function indexNames(notes: NoteRef[], selfPath: string | null): Map<string, Name[]> {
   const byFirst = new Map<string, Name[]>();
   const seen = new Set<string>();
   for (const note of notes) {

@@ -35,7 +35,7 @@ export interface PropertyName {
 const BY_STORED = Object.fromEntries(Object.entries(STORED_TYPES).map(([type, stored]) => [stored, type as PropertyType]));
 
 /** The type chosen for a property name in this vault (types.json), or null: automatic, from its value. */
-export const chosenType = (key: string): PropertyType | null => fixedType(key) ?? BY_STORED[settings.propertyTypes[key]] ?? null;
+const chosenType = (key: string): PropertyType | null => fixedType(key) ?? BY_STORED[settings.propertyTypes[key]] ?? null;
 
 const parse = (lines: string[]): NoteProperties | null => {
   const props = readProperties(lines);

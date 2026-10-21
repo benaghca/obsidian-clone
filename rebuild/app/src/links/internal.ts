@@ -31,7 +31,7 @@ export function relativePath(fromDir: string, to: string): string {
 }
 
 /** The path part of a new link to `target` from the note at `from` (with .md; wikilinks drop it). */
-export function linkPath(target: string, from: string | null, notes: NoteLike[], format: LinkFormat): string {
+function linkPath(target: string, from: string | null, notes: NoteLike[], format: LinkFormat): string {
   if (format === "absolute") return target;
   if (format === "relative") return relativePath(parentDir(from ?? ""), target);
   const name = nameOf(target).toLowerCase();

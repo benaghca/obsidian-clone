@@ -230,7 +230,7 @@ function place(el: HTMLElement, x: number, y: number) {
 }
 
 /** Close the open menu; it fades out on its own while the chosen action runs. */
-export function closeMenu() {
+function closeMenu() {
   if (!root) return;
   root.close();
   root = null;

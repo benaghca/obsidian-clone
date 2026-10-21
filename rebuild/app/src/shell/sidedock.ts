@@ -11,8 +11,8 @@ import { dragPointer, h } from "./dom";
 
 export type Side = "left" | "right";
 
-export const MIN_DOCK_WIDTH = 160;
-export const MAX_DOCK_WIDTH = 560;
+const MIN_DOCK_WIDTH = 160;
+const MAX_DOCK_WIDTH = 560;
 
 export interface Sidedocks {
   isCollapsed(side: Side): boolean;
