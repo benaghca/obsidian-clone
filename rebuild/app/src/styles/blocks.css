@@ -6,6 +6,36 @@
 .cm-highlight {
   background: var(--mark-background);
 }
+/* ==🔴coloured highlights==: the colour at 30%, as Obsidian's (yellow is the plain one) */
+.cm-highlight-red {
+  --highlight-color: var(--color-red);
+}
+.cm-highlight-orange {
+  --highlight-color: var(--color-orange);
+}
+.cm-highlight-yellow {
+  --highlight-color: var(--color-yellow);
+}
+.cm-highlight-green {
+  --highlight-color: var(--color-green);
+}
+.cm-highlight-blue {
+  --highlight-color: var(--color-blue);
+}
+.cm-highlight-purple {
+  --highlight-color: var(--color-purple);
+}
+.cm-highlight[class*="cm-highlight-"] {
+  background: color-mix(in srgb, var(--highlight-color) 30%, transparent);
+}
+.cm-highlight-swatch {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  background: var(--highlight-color);
+}
 .cm-comment {
   color: var(--text-faint);
 }

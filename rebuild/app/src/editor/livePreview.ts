@@ -23,6 +23,7 @@ import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
+import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
 import { embedChain, paintWith } from "./render";
@@ -132,6 +133,12 @@ const checkbox = [false, true].map((c) => Decoration.replace({ widget: new Check
 const externalIcon = Decoration.widget({ widget: new SpanWidget("cm-external-link"), side: 1 });
 const rule = Decoration.replace({ widget: new SpanWidget("cm-hr") });
 const decoCache = new Map<string, Decoration>();
+const swatches = new Map<HighlightColor, Decoration>();
+const swatch = (color: HighlightColor) => {
+  let d = swatches.get(color);
+  if (!d) swatches.set(color, (d = Decoration.replace({ widget: new SpanWidget(`cm-highlight-swatch cm-highlight-${color}`) })));
+  return d;
+};
 
 /** A mark or line decoration with a class, made once. */
 const cached = (kind: "mark" | "line", cls: string) => {
@@ -243,10 +250,24 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             mark(INLINE_FORMATS[name], node.from, node.to);
             return;
           case "Strikethrough":
-          case "Highlight":
             // Inner text only: a child can't cancel its parent's line-through.
             mark(INLINE_FORMATS[name], node.from + 2, node.to - 2);
             return;
+          case "Highlight": {
+            // ==🔴coloured==: the emoji is hidden, a swatch of its colour while the markup shows.
+            // While the markup shows, it is highlighted too.
+            const color = highlightColor(doc.sliceString(node.from + 2, node.from + 4));
+            const text = color ? node.from + 4 : node.from + 2;
+            const cls = color ? `cm-highlight cm-highlight-${color}` : "cm-highlight";
+            if (!touches(node.from, node.to)) {
+              hide(node.from + 2, text);
+              mark(cls, text, node.to - 2);
+            } else {
+              if (color) decos.push(swatch(color).range(node.from + 2, text));
+              mark(cls, node.from, node.to);
+            }
+            return;
+          }
 
           case "Comment":
             if (reading) hide(node.from, node.to);

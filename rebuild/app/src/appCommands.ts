@@ -18,6 +18,8 @@ import { openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
   clearFormatting,
+  HIGHLIGHT_COLORS,
+  type HighlightColor,
   insertBlock,
   insertFootnote,
   insertMarkdownLink,
@@ -26,6 +28,7 @@ import {
   type LineKind,
   setLineKind,
   toggleCheckbox,
+  toggleHighlight,
   toggleWrap,
 } from "./editor/format";
 import type { Edge } from "./layout";
@@ -445,7 +448,10 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:toggle-bold", "Toggle bold", "bold", toggleWrap("**"), mod("b")),
     editorCommand("editor:toggle-italics", "Toggle italic", "italic", toggleWrap("*"), mod("i")),
     editorCommand("editor:toggle-strikethrough", "Toggle strikethrough", "strikethrough", toggleWrap("~~")),
-    editorCommand("editor:toggle-highlight", "Toggle highlight", "highlighter", toggleWrap("==")),
+    editorCommand("editor:toggle-highlight", "Toggle highlight", "highlighter", toggleHighlight(null)),
+    ...(Object.keys(HIGHLIGHT_COLORS) as HighlightColor[]).map((c) =>
+      editorCommand(`editor:toggle-highlight-${c}`, `Toggle ${c} highlight`, "highlighter", toggleHighlight(c)),
+    ),
     editorCommand("editor:toggle-code", "Toggle code", "code-xml", toggleWrap("`")),
     editorCommand("editor:toggle-inline-math", "Toggle inline math", "sigma", toggleWrap("$")),
     editorCommand("editor:toggle-comments", "Toggle comment", "percent", toggleWrap("%%"), mod("/")),
