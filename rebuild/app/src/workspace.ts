@@ -10,6 +10,7 @@ import { api } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, PropertyHost } from "./editor/host";
+import { createEmbedHost } from "./embedHost";
 import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
@@ -78,6 +79,7 @@ export class Workspace {
       },
       properties: () => this.propertyHost,
       linkExists: (target, view) => this.vault.linkExists(target, this.editors.pathOf(view)),
+      embeds: createEmbedHost(this),
     };
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {

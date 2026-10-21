@@ -8,6 +8,7 @@
 import { api, type FileEntry, isTauri, type LinkIndex } from "./api";
 import type { NoteRef } from "./editor/host";
 import { linkTargets } from "./links/internal";
+import { listeners } from "./listeners";
 import { noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
@@ -22,6 +23,9 @@ export class Vault {
   isExcluded: (path: string) => boolean = () => false;
 
   private linkTimer = 0;
+  private modified = listeners<[string]>();
+  /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
+  readonly onModified = this.modified.on;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
   private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
 
@@ -86,6 +90,7 @@ export class Vault {
   private touch(path: string) {
     const entry = this.files.find((f) => f.path === path);
     if (entry) entry.mtime_ms = Date.now();
+    this.modified.emit(path);
   }
 
   /** We wrote a note to disk: it is modified now, and the link index is read again a moment later. */

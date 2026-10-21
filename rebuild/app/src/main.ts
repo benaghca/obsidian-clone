@@ -9,6 +9,7 @@ import "./styles/noteView.css";
 import "./styles/menu.css";
 import "./styles/prompt.css";
 import "./styles/editor.css";
+import "./styles/blocks.css";
 import "./styles/properties.css";
 import "./styles/motion.css";
 import "./styles/settings.css";

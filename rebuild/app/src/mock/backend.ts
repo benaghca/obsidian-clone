@@ -9,6 +9,17 @@ const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 /** [text](target) and ![alt](target); the target as written (without a title). */
 const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|([^)\s]*))[^)\n]*\)/g;
 
+/** A mock image's bytes: SVG text as it is, "png WxH #colour" painted into a PNG. */
+async function imageBytes(content: string): Promise<ArrayBuffer> {
+  const png = /^png (\d+)x(\d+) (#\w+)/.exec(content);
+  if (!png) return new TextEncoder().encode(content).buffer as ArrayBuffer;
+  const canvas = new OffscreenCanvas(Number(png[1]), Number(png[2]));
+  const ctx = canvas.getContext("2d")!;
+  ctx.fillStyle = png[3];
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  return (await canvas.convertToBlob({ type: "image/png" })).arrayBuffer();
+}
+
 export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   const files = new Map<string, { content: string; mtime: number }>();
   // `?synthetic=1000` on the dev page adds a generated 1,000-note vault (for measuring the graph).
@@ -156,6 +167,10 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     last_vault: () => vault,
     list_files: () => listFiles(),
     read_note: ({ path }) => need(path).content,
+    read_file_bytes: ({ path }) => {
+      if (!/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(path) || path.split("/").includes("..")) throw new Error(`not an image: ${path}`);
+      return imageBytes(need(path).content);
+    },
     write_note: ({ path, content }) => {
       files.set(path, { content, mtime: Date.now() });
     },
