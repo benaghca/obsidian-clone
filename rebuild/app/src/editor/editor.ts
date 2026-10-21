@@ -16,7 +16,7 @@ import { livePreview, readingMode } from "./livePreview";
 import { propertiesBlock } from "./properties";
 import { sourceMode } from "./sourceMode";
 import { markdownSyntax } from "./syntax";
-import { tableKeys } from "./tableEdit";
+import { tableKeys } from "./tables";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
 const baseTheme = EditorView.theme({

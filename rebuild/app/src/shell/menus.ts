@@ -11,7 +11,7 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
-import { editTable, type TableOp, tableModel, tableOps } from "../editor/tableEdit";
+import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
 import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";

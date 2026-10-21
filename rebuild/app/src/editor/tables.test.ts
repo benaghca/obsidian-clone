@@ -3,7 +3,7 @@ import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { markdownSyntax } from "./syntax";
-import { cellBelow, editTable, formatTable, nextCell, parseTable, previousCell, type TableOp, tableAt, tableOps } from "./tableEdit";
+import { cellBelow, editTable, formatTable, nextCell, parseTable, previousCell, type TableOp, tableAt, tableOps } from "./tables";
 
 // The table and the results below are what Obsidian 1.14.4 wrote (observed).
 const SOURCE = "| Name | Value | Note |\n| --- | :---: | ---: |\n| alpha | 1 | first |\n| beta longer | 22 | second |";
