@@ -23,7 +23,10 @@ export interface NoteProperties {
 
 export interface PropertyName {
   key: string;
+  /** Its type: the one chosen for it, else `inferred`. */
   type: PropertyType;
+  /** The type most of its values have. */
+  inferred: PropertyType;
   /** How many notes have it. */
   count: number;
 }
@@ -98,8 +101,8 @@ function create(ws: Workspace) {
       }
     }
     return [...found].map(([key, n]) => {
-      const common = [...n.types].sort((a, b) => b[1] - a[1])[0]?.[0];
-      return { key, count: n.count, type: chosenType(key) ?? common ?? "text" };
+      const inferred = [...n.types].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "text";
+      return { key, count: n.count, type: chosenType(key) ?? inferred, inferred };
     });
   }
 

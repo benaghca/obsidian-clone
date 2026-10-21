@@ -54,7 +54,7 @@ export type PropertiesDisplay = "visible" | "hidden" | "source";
 /** Settings → Editor → Properties in document. */
 export const propertiesDisplay = Facet.define<PropertiesDisplay, PropertiesDisplay>({ combine: (values) => values[0] ?? "visible" });
 
-const TYPE_ICONS: Record<PropertyType, IconName> = {
+export const TYPE_ICONS: Record<PropertyType, IconName> = {
   text: "text-align-start",
   list: "list",
   number: "binary",
@@ -400,20 +400,8 @@ class Block {
   /** The row icon's menu, as Obsidian's. */
   private menu(p: Property): MenuItems {
     const key = p.key;
-    const vault = this.vault;
-    const fixed = fixedType(key);
-    const chosen = vault?.typeOf(key) ?? null;
-    // Tags, aliases and cssclasses have their own type: the menu shows it, every item disabled.
-    const types = fixed ? [...new Set([...CHOOSABLE_TYPES, fixed])].sort((a, b) => TYPE_NAMES[a].localeCompare(TYPE_NAMES[b])) : CHOOSABLE_TYPES;
     return [
-      {
-        title: "Property type",
-        icon: "info",
-        submenu: [
-          !fixed && { title: `Automatic (${TYPE_NAMES[p.type]})`, icon: "loader", checked: !chosen, disabled: !vault, action: () => vault?.setType(key, null) },
-          ...types.map((t) => ({ title: TYPE_NAMES[t], icon: TYPE_ICONS[t], checked: chosen === t, disabled: !!fixed || !vault, action: () => vault?.setType(key, t) })),
-        ],
-      },
+      { title: "Property type", icon: "info", submenu: typeItems(key, p.type, this.vault) },
       { title: "Cut", icon: "scissors", action: () => void this.copy(key, true) },
       { title: "Copy", icon: "copy", action: () => void this.copy(key, false) },
       { title: "Paste", icon: "clipboard-check", action: () => void this.paste() },
@@ -546,6 +534,18 @@ class Block {
     add.addEventListener("blur", commit);
     box.append(add);
   }
+}
+
+/** The "Property type" submenu for a name (the row icon's menu, and the All properties view's). */
+export function typeItems(key: string, inferred: PropertyType, vault: PropertyHost | null): MenuItems {
+  const fixed = fixedType(key);
+  const chosen = vault?.typeOf(key) ?? null;
+  // Tags, aliases and cssclasses have their own type: the menu shows it, every item disabled.
+  const types = fixed ? [...new Set([...CHOOSABLE_TYPES, fixed])].sort((a, b) => TYPE_NAMES[a].localeCompare(TYPE_NAMES[b])) : CHOOSABLE_TYPES;
+  return [
+    !fixed && { title: `Automatic (${TYPE_NAMES[inferred]})`, icon: "loader", checked: !chosen, disabled: !vault, action: () => vault?.setType(key, null) },
+    ...types.map((t) => ({ title: TYPE_NAMES[t], icon: TYPE_ICONS[t], checked: chosen === t, disabled: !!fixed || !vault, action: () => vault?.setType(key, t) })),
+  ];
 }
 
 /** A key field, suggesting the vault's names: written on Enter or when left; Escape gives the old key back. */
