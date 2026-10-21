@@ -8,6 +8,7 @@ import { syntaxHighlighting, syntaxTree } from "@codemirror/language";
 import type { Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, type EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { tags as t, tagHighlighter } from "@lezer/highlight";
+import { eachCodeBlock } from "./codeHighlight";
 import { hashtag, wikiTarget } from "./syntax";
 
 const highlighter = tagHighlighter([
@@ -31,21 +32,13 @@ const codeEnd = Decoration.line({ class: "cm-codeblock cm-codeblock-end" });
 function codeBlocks(view: EditorView): DecorationSet {
   const decos: Range<Decoration>[] = [];
   const doc = view.state.doc;
-  for (const { from, to } of view.visibleRanges) {
-    syntaxTree(view.state).iterate({
-      from,
-      to,
-      enter: (node) => {
-        if (node.name !== "FencedCode") return node.name === "Document" || node.name.endsWith("List") || node.name === "ListItem" || node.name === "Blockquote";
-        const first = doc.lineAt(node.from).number;
-        const last = doc.lineAt(node.to).number;
-        for (let n = Math.max(first, doc.lineAt(from).number); n <= Math.min(last, doc.lineAt(to).number); n++) {
-          decos.push((n === first ? codeBegin : n === last ? codeEnd : codeLine).range(doc.line(n).from));
-        }
-        return false;
-      },
-    });
-  }
+  eachCodeBlock(view.state, view.visibleRanges, (node, from, to) => {
+    const first = doc.lineAt(node.from).number;
+    const last = doc.lineAt(node.to).number;
+    for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
+      decos.push((n === first ? codeBegin : n === last ? codeEnd : codeLine).range(doc.line(n).from));
+    }
+  });
   return Decoration.set(decos, true);
 }
 

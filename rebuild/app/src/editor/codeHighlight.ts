@@ -6,7 +6,7 @@
 // code is coloured, never the note's markdown or its inline HTML, and only
 // the visible part of it; rendered text (render.ts) paints the same marks.
 
-import { css } from "@codemirror/lang-css";
+import { cssLanguage } from "@codemirror/lang-css";
 import { htmlLanguage } from "@codemirror/lang-html";
 import { javascriptLanguage, jsxLanguage, tsxLanguage, typescriptLanguage } from "@codemirror/lang-javascript";
 import { jsonLanguage } from "@codemirror/lang-json";
@@ -34,7 +34,7 @@ const mdLanguage = new Language(mdData, (markdownLanguage.parser as MarkdownPars
 
 // A fence's language as Obsidian names it on the block (Live Preview's
 // label, top right), and what colours it. Names not listed show as written.
-const LANGUAGES: Record<string, [label: string | null, Language | null]> = {
+const LANGUAGES: Record<string, [label: string | null, Language]> = {
   js: ["JavaScript", javascriptLanguage],
   javascript: ["JavaScript", javascriptLanguage],
   jsx: ["JSX", jsxLanguage],
@@ -42,7 +42,7 @@ const LANGUAGES: Record<string, [label: string | null, Language | null]> = {
   typescript: ["TypeScript", typescriptLanguage],
   tsx: ["TypeScript-JSX", tsxLanguage],
   json: ["JSON", jsonLanguage],
-  css: ["CSS", css().language],
+  css: ["CSS", cssLanguage],
   html: ["HTML", htmlLanguage],
   xml: ["XML", xmlLanguage],
   svg: [null, xmlLanguage],
@@ -114,21 +114,27 @@ const mark = (cls: string) => {
   return d;
 };
 
-/** The colour marks of the fenced code in `ranges` of `state`. */
-export function codeMarks(state: EditorState, ranges: readonly { from: number; to: number }[]): Range<Decoration>[] {
-  const tree = syntaxTree(state);
-  const out: Range<Decoration>[] = [];
+type Ranges = readonly { from: number; to: number }[];
+
+/** Each fenced code block in `ranges` (in lists and quotes too), with the part of it in the range. */
+export function eachCodeBlock(state: EditorState, ranges: Ranges, fn: (block: { from: number; to: number }, from: number, to: number) => void) {
   for (const { from, to } of ranges) {
-    tree.iterate({
+    syntaxTree(state).iterate({
       from,
       to,
       enter: (n) => {
         if (n.name !== "FencedCode") return n.name === "Document" || n.name.endsWith("List") || n.name === "ListItem" || n.name === "Blockquote";
-        highlightTree(tree, highlighter, (f, t, cls) => out.push(mark(cls).range(f, t)), Math.max(from, n.from), Math.min(to, n.to));
+        fn(n, Math.max(from, n.from), Math.min(to, n.to));
         return false;
       },
     });
   }
+}
+
+/** The colour marks of the fenced code in `ranges` of `state`. */
+export function codeMarks(state: EditorState, ranges: Ranges): Range<Decoration>[] {
+  const out: Range<Decoration>[] = [];
+  eachCodeBlock(state, ranges, (_, from, to) => highlightTree(syntaxTree(state), highlighter, (a, b, cls) => out.push(mark(cls).range(a, b)), from, to));
   return out;
 }
 

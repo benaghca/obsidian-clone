@@ -108,6 +108,16 @@
 .callout.is-collapsed .callout-content {
   display: none;
 }
+.callout-content > .cm-blank {
+  display: none;
+}
+.callout-content > .cm-block-start,
+.callout-content > .cm-blank + :is(.cm-callout, .cm-table-widget) {
+  margin-top: 16px;
+}
+.callout-content > .cm-block-start.cm-h {
+  margin-top: 40px;
+}
 
 /* tables: a padded strip as wide as the column (whatever the table's width),
    scrolling sideways; words in cells stay whole */

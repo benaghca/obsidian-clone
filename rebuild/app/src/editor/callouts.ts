@@ -3,16 +3,18 @@
 // body rendered as Reading view renders it. The types and aliases are
 // Obsidian's; an unknown type looks like a note, titled after itself.
 // "[!type]-" starts folded and "[!type]+" open; the chevron (or the title)
-// folds and unfolds without touching the note. A click elsewhere in the box,
+// folds and unfolds without touching the note (and it stays so while the
+// note is open, as in Obsidian). A click elsewhere in the box,
 // or its "Edit this block" button, puts the caret in it, which shows the
 // source (blocks.ts).
 
-import type { EditorView } from "@codemirror/view";
+import { syntaxTree } from "@codemirror/language";
+import { Decoration, type EditorView } from "@codemirror/view";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import { DrawnWidget, editButton, isLinkEvent } from "./embeds";
 import { readingMode } from "./livePreview";
-import { decorate, onDestroy, type Painted, paintLines, paintRange, release } from "./render";
+import { decorate, onDestroy, type Painted, paintLines, paintRange, paintWith, release } from "./render";
 
 export interface CalloutHeader {
   /** As written, lower-cased ("tldr"). */
@@ -58,6 +60,9 @@ export const calloutBody = (text: string) =>
     .map((l) => l.replace(/^\s*> ?/, ""))
     .join("\n");
 
+/** The callouts folded or unfolded by a click, by their text: drawn again (scrolled away and back), they stay so. */
+const toggled = new WeakMap<EditorView, Set<string>>();
+
 export class CalloutWidget extends DrawnWidget {
   constructor(
     readonly text: string,
@@ -89,12 +94,16 @@ export class CalloutWidget extends DrawnWidget {
     if (fold) {
       title.append(fold);
       box.classList.add("is-collapsible");
-      box.classList.toggle("is-collapsed", header.fold === "-");
+      box.classList.toggle("is-collapsed", (header.fold === "-") !== !!toggled.get(view)?.has(this.text));
     }
     const dom = h("div", { class: "cm-callout" }, box, editButton());
     dom.addEventListener("mousedown", (e) => {
       if (e.button !== 0 || isLinkEvent(e)) return;
-      if (fold && title.contains(e.target as Node)) box.classList.toggle("is-collapsed");
+      if (fold && title.contains(e.target as Node)) {
+        box.classList.toggle("is-collapsed");
+        const set = toggled.get(view) ?? toggled.set(view, new Set()).get(view)!;
+        if (!set.delete(this.text)) set.add(this.text);
+      }
       else if (!view.state.facet(readingMode)) editAt(view, view.posAtDOM(dom));
       else return;
       e.preventDefault();
@@ -106,6 +115,26 @@ export class CalloutWidget extends DrawnWidget {
     return dom;
   }
 }
+
+// In a callout's body, as in Obsidian's, blocks sit 16 px apart (headings
+// 40) and blank lines take no room: rendered text marks the first line of
+// each block after the first, and the lines between blocks (styles/blocks.css
+// spaces them inside callouts only).
+const blockStart = Decoration.line({ class: "cm-block-start" });
+const blank = Decoration.line({ class: "cm-blank" });
+paintWith((state) => {
+  const doc = state.doc;
+  const out = [];
+  let next = 1; // the first line not yet in a block
+  for (let n = syntaxTree(state).topNode.firstChild; n; n = n.nextSibling) {
+    const first = doc.lineAt(n.from).number;
+    for (; next < first; next++) out.push(blank.range(doc.line(next).from));
+    if (n.from > 0) out.push(blockStart.range(doc.line(first).from));
+    next = doc.lineAt(n.to).number + 1;
+  }
+  for (; next <= doc.lines; next++) out.push(blank.range(doc.line(next).from));
+  return out;
+});
 
 /** Put the caret at `pos` in the editor (inside a block widget's source, which then shows). */
 export function editAt(view: EditorView, pos: number) {
