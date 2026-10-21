@@ -5,12 +5,13 @@
 //! A path written by `write_note` in the last 500ms is dropped too. Rename events carry
 //! `[from, to]`; a move into `.trash` is reported as `remove`.
 
-use crate::model::{ChangeKind, VaultChanged};
+use crate::model::{push_change, ChangeKind, VaultChanged};
 use crate::{lock, AppState};
 use notify::event::{AccessKind, AccessMode, EventKind, ModifyKind, RenameMode};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
+use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -37,23 +38,22 @@ pub fn run(
                 Err(_) => return,
             }
         } else {
-            let elapsed = started.unwrap_or_else(Instant::now).elapsed();
-            if elapsed >= MAX_WAIT {
-                flush(&app, &batch);
-                batch.clear();
-                started = None;
-                continue;
-            }
-            let timeout = QUIET.min(MAX_WAIT - elapsed);
-            match rx.recv_timeout(timeout) {
+            // Flush after QUIET without events, or once the batch is MAX_WAIT old.
+            let left = MAX_WAIT.saturating_sub(started.unwrap_or_else(Instant::now).elapsed());
+            let next = if left.is_zero() {
+                Err(RecvTimeoutError::Timeout)
+            } else {
+                rx.recv_timeout(QUIET.min(left))
+            };
+            match next {
                 Ok(msg) => msg,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                Err(RecvTimeoutError::Timeout) => {
                     flush(&app, &batch);
                     batch.clear();
                     started = None;
                     continue;
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+                Err(RecvTimeoutError::Disconnected) => return,
             }
         };
         match msg {
@@ -124,6 +124,7 @@ fn flush(app: &AppHandle, events: &[Event]) {
     }
 }
 
+#[derive(Default)]
 struct RenamePart {
     from: Option<String>,
     to: Option<String>,
@@ -240,13 +241,10 @@ pub fn coalesce(
         }
     }
 
-    for (from, to) in &renames {
-        creates.remove(from);
-        creates.remove(to);
-        removes.remove(from);
-        removes.remove(to);
-        modifies.remove(from);
-        modifies.remove(to);
+    for path in renames.iter().flat_map(|(from, to)| [from, to]) {
+        creates.remove(path);
+        removes.remove(path);
+        modifies.remove(path);
     }
     let overlap: Vec<String> = creates.intersection(&removes).cloned().collect();
     for path in overlap {
@@ -263,28 +261,22 @@ pub fn coalesce(
     removes.retain(|path| !suppress(path));
 
     let mut out = Vec::new();
-    push_kind(&mut out, ChangeKind::Remove, removes.into_iter().collect());
+    push_change(&mut out, ChangeKind::Remove, removes.into_iter().collect());
     for (from, to) in renames {
         out.push(VaultChanged {
             kind: ChangeKind::Rename,
             paths: vec![from, to],
         });
     }
-    push_kind(&mut out, ChangeKind::Create, creates.into_iter().collect());
-    push_kind(&mut out, ChangeKind::Modify, modifies.into_iter().collect());
+    push_change(&mut out, ChangeKind::Create, creates.into_iter().collect());
+    push_change(&mut out, ChangeKind::Modify, modifies.into_iter().collect());
     out
 }
 
 fn note_tracker(order: &mut Vec<usize>, parts: &mut HashMap<usize, RenamePart>, tracker: usize) {
     if let std::collections::hash_map::Entry::Vacant(slot) = parts.entry(tracker) {
         order.push(tracker);
-        slot.insert(RenamePart {
-            from: None,
-            to: None,
-            both_from: None,
-            both_to: None,
-            saw_both: false,
-        });
+        slot.insert(RenamePart::default());
     }
 }
 
@@ -304,12 +296,6 @@ fn push_rename(
             creates.insert(to);
         }
         _ => {}
-    }
-}
-
-fn push_kind(out: &mut Vec<VaultChanged>, kind: ChangeKind, paths: Vec<String>) {
-    if !paths.is_empty() {
-        out.push(VaultChanged { kind, paths });
     }
 }
 

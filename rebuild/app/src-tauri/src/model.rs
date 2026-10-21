@@ -82,3 +82,10 @@ pub struct VaultChanged {
     /// For `rename`, exactly `[from, to]`. A renamed directory covers everything under it.
     pub paths: Vec<String>,
 }
+
+/// Add a change to `out`, unless it has no paths.
+pub fn push_change(out: &mut Vec<VaultChanged>, kind: ChangeKind, paths: Vec<String>) {
+    if !paths.is_empty() {
+        out.push(VaultChanged { kind, paths });
+    }
+}
