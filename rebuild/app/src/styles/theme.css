@@ -45,6 +45,7 @@
   --text-faint: #ababab;
   --text-on-accent: #ffffff;
   --text-error: #e93147;
+  --text-warning: #ec7500;
   --background-modifier-error: #e93147;
   --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
   --text-highlight-bg: rgba(255, 208, 0, 0.4);
@@ -191,6 +192,7 @@
   --text-faint: #666666;
   --text-on-accent: #ffffff;
   --text-error: #fb464c;
+  --text-warning: #e9973f;
   --background-modifier-error: #fb464c;
   --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.33);
   --text-highlight-bg: rgba(255, 208, 0, 0.4);

@@ -40,6 +40,7 @@ export const APP = {
   livePreview: field(true, bool),
   showInlineTitle: field(true, bool),
   readableLineLength: field(true, bool),
+  propertiesInDocument: field<"visible" | "hidden" | "source">("visible", oneOf("visible", "hidden", "source")),
   showLineNumber: field(false, bool),
   foldHeading: field(true, bool),
   foldIndent: field(true, bool),

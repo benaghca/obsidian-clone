@@ -1,0 +1,207 @@
+/* Properties in document: the frontmatter as Obsidian's Properties block
+   (observed in Obsidian 1.14.4 at 16px text: a 16px/500 "Properties"
+   heading, rows 28px high and 3px apart, a 144px key column (a 20px icon,
+   then the key at 14px), values at 14px, tags as accent pills, "Add
+   property" 7px below the rows, 32px of space before the body). */
+
+.properties {
+  padding: 8px 0;
+  margin: 0 0 32px -4px;
+  font-family: var(--font-interface);
+  color: var(--text-muted);
+  cursor: default;
+  --icon-size: 16px;
+  --icon-stroke: 1.75px;
+}
+.properties-heading {
+  position: relative;
+  display: inline-flex;
+  padding: 4px;
+  margin-bottom: 8px;
+  line-height: 1.2;
+  cursor: pointer;
+  outline: none;
+}
+.properties-title {
+  font-weight: 500;
+  color: var(--text-normal);
+}
+/* The fold chevron sits in the margin and shows on hover (always while folded). */
+.properties-fold {
+  position: absolute;
+  left: -22px;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 6px 0 4px;
+  color: var(--text-faint);
+  opacity: 0;
+  --icon-size: var(--icon-xs);
+  --icon-stroke: var(--icon-xs-stroke-width);
+}
+.properties-fold .svg-icon {
+  transition: transform var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.properties-heading:hover .properties-fold,
+.properties-heading:focus-visible .properties-fold,
+.properties.is-collapsed .properties-fold {
+  opacity: 1;
+}
+.properties.is-collapsed .properties-fold .svg-icon {
+  transform: rotate(-90deg);
+}
+.properties.is-collapsed .properties-heading {
+  margin-bottom: 0;
+}
+.properties.is-collapsed .properties-content,
+.properties.is-empty .properties-rows {
+  display: none;
+}
+
+.properties-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.property {
+  display: flex;
+  min-height: 28px;
+  border-radius: 6px;
+  outline: none;
+}
+.property:focus,
+.property:focus-within {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+}
+.property-key {
+  display: flex;
+  align-items: center;
+  flex: none;
+  width: 144px;
+  border-radius: 6px 0 0 6px;
+}
+.property-key:focus-within {
+  background: var(--background-modifier-hover);
+}
+.property-icon {
+  display: flex;
+  flex: none;
+  width: 20px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.property-key-input,
+.property-input {
+  min-width: 0;
+  padding: 4px 8px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  font-size: 0.875em;
+  color: inherit;
+}
+.property-key-input {
+  flex: 1;
+}
+.property-value {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  font-size: 0.875em;
+  line-height: 1.5;
+  color: var(--text-normal);
+}
+.property-value .property-input {
+  font-size: inherit;
+}
+.property-value[data-type="list"],
+.property-value[data-type="tags"],
+.property-value[data-type="aliases"] {
+  padding: 2px 8px;
+}
+.property-text {
+  flex: 1;
+  min-width: 40px;
+  padding: 4px 8px;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.property-pill ~ .property-text {
+  padding: 0;
+}
+.property-text:empty::before {
+  content: "Empty";
+  color: var(--text-faint);
+}
+.property-pill ~ .property-text:empty::before {
+  content: none;
+}
+.property-value .cm-task-checkbox {
+  width: 16px;
+  height: 16px;
+  margin: 0 8px;
+}
+.property-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  line-height: 21px;
+  border-radius: 28px;
+}
+.property-pill.is-tag {
+  padding: 0 4px 0 9px;
+  color: var(--tag-color);
+  background: var(--tag-background);
+}
+.property-pill-remove {
+  display: flex;
+  color: var(--text-faint);
+  cursor: pointer;
+  --icon-size: 14px;
+}
+.property-pill.is-tag .property-pill-remove {
+  color: inherit;
+}
+.property-link {
+  color: var(--text-accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.property-unknown {
+  padding: 4px 8px;
+  white-space: pre-wrap;
+  color: var(--text-warning);
+  outline: none;
+}
+
+.properties-add {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 7px;
+  padding: 4px 4px 4px 6px;
+  border-radius: 5px;
+  font-size: 0.875em;
+  color: var(--text-muted);
+  cursor: pointer;
+  outline: none;
+  --icon-size: 14px;
+}
+.properties-add:hover,
+.properties-add:focus-visible {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* "Properties in document: Source" in Live Preview: the YAML as text. */
+.cm-line.cm-frontmatter {
+  font-family: var(--font-monospace);
+  font-size: 0.875em;
+  color: var(--text-muted);
+}

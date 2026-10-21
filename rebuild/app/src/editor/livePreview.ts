@@ -16,6 +16,7 @@ import {
 } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { isNotePath, isRemoteUrl } from "../links/external";
+import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
 
 /** Reading view: render everything, as if the selection touched nothing. */
@@ -154,7 +155,11 @@ function build(view: EditorView): DecorationSet {
   const hideWithSpace = (node: { from: number; to: number }) =>
     hide(node.from, doc.sliceString(node.to, node.to + 1) === " " ? node.to + 1 : node.to);
 
-  for (const visible of view.visibleRanges) {
+  // The frontmatter is the Properties block's (properties.ts), never markdown.
+  const bodyFrom = (state.field(frontmatterField, false)?.end ?? -1) + 1;
+  for (const { from, to } of view.visibleRanges) {
+    if (to < bodyFrom) continue;
+    const visible = { from: Math.max(from, bodyFrom), to };
     const lineClass = (cls: string, from: number, to: number) => {
       const start = Math.max(from, visible.from);
       const end = Math.min(to, visible.to);

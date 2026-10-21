@@ -9,6 +9,7 @@ import "./styles/noteView.css";
 import "./styles/menu.css";
 import "./styles/prompt.css";
 import "./styles/editor.css";
+import "./styles/properties.css";
 import "./styles/motion.css";
 import "./styles/settings.css";
 import "./styles/graph.css";
@@ -361,6 +362,7 @@ function applySettings(file: SettingsFile | null) {
       smartLists: a.smartIndentList,
       useTab: a.useTab,
       tabSize: a.tabSize,
+      properties: a.propertiesInDocument,
     });
     if (changed) ws.editors.reconfigure();
     const test = excluder(a.userIgnoreFilters);

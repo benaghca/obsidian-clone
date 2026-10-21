@@ -13,6 +13,7 @@ import { type Command, commands } from "./commands";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
+import { openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
   clearFormatting,
@@ -78,11 +79,11 @@ export function registerAppCommands(parts: AppParts) {
   const hasNote = () => !!ws.active.path;
   const note = () => ws.active.path!;
 
-  // Focus is in some other text field (the inline title, a search box):
-  // editor hotkeys leave it alone.
+  // Focus is in some other text field (the inline title, a search box, a
+  // field in the Properties block): editor hotkeys leave it alone.
   const typingElsewhere = () => {
     const el = document.activeElement as HTMLElement | null;
-    if (!el || el === document.body || ws.view.dom.contains(el)) return false;
+    if (!el || el === document.body || el === ws.view.contentDOM) return false;
     return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
   };
   const canEdit = () => hasNote() && ws.active.mode !== "reading" && !typingElsewhere();
@@ -161,8 +162,10 @@ export function registerAppCommands(parts: AppParts) {
   const setZoom = (level: number) => settings.set("appearance.json", "zoomLevel", Math.min(3, Math.max(-2.5, level)));
   const app = () => settings.get("app.json");
 
-  // Obsidian's "Add file property": a properties block at the top of the
-  // note (created if missing) with the caret on a new, empty line in it.
+  // Obsidian's "Add file property": a new row in the Properties block with
+  // its key field focused. Where the block isn't shown (Source mode, or
+  // "Properties in document" set to Source or Hidden): a new, empty line in
+  // the YAML (created if missing) with the caret on it.
   const addProperty = (view: EditorView) => {
     const doc = view.state.doc;
     const first = doc.line(1);
@@ -453,7 +456,19 @@ export function registerAppCommands(parts: AppParts) {
         openTemplatePrompt(templateNotes(), (path) => void insertTemplate(path));
       },
     },
-    editorCommand("markdown:add-metadata-property", "Add file property", "list-plus", addProperty, mod(";")),
+    {
+      id: "markdown:add-metadata-property",
+      name: "Add file property",
+      icon: "list-plus",
+      hotkeys: mod(";"),
+      // Also from Reading view and from a field in the block, as in Obsidian.
+      when: () => hasNote() && (!typingElsewhere() || ws.view.dom.contains(document.activeElement)),
+      run: () => {
+        if (openNewProperty(ws.view) || ws.active.mode === "reading") return;
+        addProperty(ws.view);
+        ws.view.focus();
+      },
+    },
     {
       ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
       when: () => canEdit() && (app().foldHeading || app().foldIndent),
