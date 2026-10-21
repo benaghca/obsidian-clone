@@ -107,9 +107,10 @@
   font-family: var(--font-monospace);
 }
 
-/* links */
+/* links (and Source mode's URLs) */
 .cm-wikilink,
-.cm-link {
+.cm-link,
+.is-source-mode .cm-s-url {
   color: var(--text-accent);
   text-decoration: underline;
   text-decoration-color: color-mix(in srgb, var(--text-accent) 40%, transparent);
@@ -153,8 +154,9 @@
     center / contain no-repeat;
 }
 
-/* tags */
-.cm-tag {
+/* tags (in Source mode too) */
+.cm-tag,
+.is-source-mode .cm-s-tag {
   color: var(--tag-color);
   background: var(--tag-background);
   border-radius: 2em;
@@ -325,12 +327,6 @@
 .is-source-mode .cm-s-link {
   color: var(--text-accent);
 }
-.is-source-mode .cm-s-url {
-  color: var(--text-accent);
-  text-decoration: underline;
-  text-decoration-color: color-mix(in srgb, var(--text-accent) 40%, transparent);
-  text-underline-offset: 2px;
-}
 /* Marks are faint (heading #, list markers, quote >, link brackets), but
    emphasis and code markers take their text's look, as in Obsidian. */
 .is-source-mode .cm-s-mark {
@@ -345,13 +341,6 @@
 .is-source-mode .cm-s-task {
   font-family: var(--font-monospace);
   color: var(--text-muted);
-}
-.is-source-mode .cm-s-tag {
-  color: var(--tag-color);
-  background: var(--tag-background);
-  border-radius: 2em;
-  padding: 0.1em 0.5em;
-  font-size: 0.875em;
 }
 
 /* ----- Settings → Editor: line numbers and folding ----- */
