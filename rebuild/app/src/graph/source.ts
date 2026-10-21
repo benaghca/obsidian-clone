@@ -11,7 +11,7 @@ import type { Workspace } from "../workspace";
 import { buildGraph, type GraphModel, type GraphNode } from "./data";
 import { type GraphQuery, isEmptyQuery, matchesQuery, parseGraphQuery } from "./query";
 
-/** A colour group: the notes and attachments it matches take its colour. */
+/** A colour group: the notes it matches take its colour. */
 export interface ColorRule {
   match(node: GraphNode): boolean;
   rgb: number;

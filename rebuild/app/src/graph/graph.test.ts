@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { LinkIndex } from "../api";
 import { GRAPH, LOCAL_GRAPH, sanitize, serialize, defaults } from "../settings/schema";
-import { buildGraph, type GraphModel, nodeRadius } from "./data";
+import { buildGraph, type GraphModel, nodeColor, nodeRadius } from "./data";
 import { isEmptyQuery, matchesQuery, parseGraphQuery } from "./query";
 import { ALPHA_MIN, Simulation } from "./sim";
 
@@ -71,6 +71,18 @@ test("node size follows Obsidian's: 8 up to about six links, then the square roo
   expect(nodeRadius(6)).toBe(8);
   expect(nodeRadius(7)).toBeCloseTo(8.485, 3);
   expect(nodeRadius(9)).toBeCloseTo(9.487, 3);
+});
+
+test("colour groups colour notes only, as observed in Obsidian", () => {
+  const src = { notes, attachments: ["pic.png"], links: index, tags: new Map([["A.md", ["x"]]]) };
+  const m = buildGraph(src, { ...base, showTags: true, showAttachments: true });
+  const all = { match: () => true };
+  const byLabel = (label: string) => m.nodes.find((n) => n.label === label)!;
+  // A group that matches everything: notes take it; the attachment, the tag and the missing note keep their own.
+  expect(["A", "pic.png", "#x", "Someday"].map((l) => nodeColor(byLabel(l), [all]))).toEqual([4, 3, 2, 1]);
+  // The first group that matches wins; no group, the note's own colour.
+  const isB = { match: (n: { label: string }) => n.label === "B" };
+  expect([nodeColor(byLabel("B"), [isB, all]), nodeColor(byLabel("C"), [isB, all]), nodeColor(byLabel("C"), [isB])]).toEqual([4, 5, 0]);
 });
 
 test("graph queries: words, path:, file: and tag:", () => {

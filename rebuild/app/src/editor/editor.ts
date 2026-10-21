@@ -9,8 +9,10 @@ import { Compartment, type EditorSelection, EditorState, type Extension, type Te
 import { drawSelection, EditorView, keymap } from "@codemirror/view";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
+import { frontmatterField } from "./frontmatter";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview, readingMode } from "./livePreview";
+import { propertiesBlock } from "./properties";
 import { sourceMode } from "./sourceMode";
 import { MarkerStyles, Tag, WikiLink } from "./syntax";
 import { wikilinkCompletion } from "./wikilinkComplete";
@@ -36,10 +38,11 @@ export type ViewMode = "live" | "source" | "reading";
 export const viewModeCompartment = new Compartment();
 
 export const VIEW_MODES: Record<ViewMode, Extension> = {
-  live: livePreview,
+  live: [livePreview, propertiesBlock],
   source: [EditorView.editorAttributes.of({ class: "is-source-mode" }), sourceMode],
   reading: [
     livePreview,
+    propertiesBlock,
     readingMode.of(true),
     EditorView.editable.of(false),
     EditorState.readOnly.of(true),
@@ -104,6 +107,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, MarkerStyles], addKeymap: false }),
+      frontmatterField,
       // Settings → Editor: line numbers, folding, spellcheck, pairing, lists, indentation.
       configExtensions(),
       viewModeCompartment.of(VIEW_MODES.live),

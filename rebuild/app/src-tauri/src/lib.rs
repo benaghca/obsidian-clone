@@ -1,8 +1,8 @@
 //! Tauri commands for the notes vault.
 //!
 //! The front end calls these with `invoke`. Paths are vault-relative and use `/`.
-//! `write_note` does not emit `vault-changed` (the save is the front end's own write, ignored
-//! for 500ms). `create_note`, `rename_path`, and `delete_path` update the index before they
+//! `write_note` does not emit `vault-changed` to the window that saved (the save is its own write,
+//! ignored for 500ms), only to other windows (a note's own window, or the main one). `create_note`, `rename_path`, and `delete_path` update the index before they
 //! return, and the watcher also emits `vault-changed` about 100ms later. Treat that event as
 //! idempotent and call `list_files` / `link_index` for the authoritative state.
 //!
@@ -25,7 +25,7 @@ mod watch;
 use crate::model::{FileEntry, LinkIndex, SearchHit, VaultInfo};
 use crate::watch::WatchMsg;
 use std::sync::{mpsc, Mutex};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
     pub(crate) inner: Mutex<Inner>,
@@ -76,7 +76,7 @@ pub fn run() {
                 .spawn(move || watch::run(handle, tx, rx))
                 .map_err(|err| -> Box<dyn std::error::Error> { Box::new(err) })?;
             // Last, so the state its commands use is in place before the page loads.
-            lockdown::create_main_window(app)?;
+            lockdown::create_main_window(app.handle())?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -93,6 +93,7 @@ pub fn run() {
             link_index,
             read_config,
             write_config,
+            open_note_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grove");
@@ -154,8 +155,29 @@ fn read_note(state: State<'_, AppState>, path: String) -> Result<String, String>
 }
 
 #[tauri::command]
-fn write_note(state: State<'_, AppState>, path: String, content: String) -> Result<(), String> {
-    with_vault(&state, |v| v.write_note(&path, &content))
+fn write_note(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    with_vault(&state, |v| v.write_note(&path, &content))?;
+    let change = model::VaultChanged {
+        kind: model::ChangeKind::Modify,
+        paths: vec![path],
+    };
+    let me = window.label().to_owned();
+    let _ = window.emit_filter("vault-changed", change, |target| match target {
+        tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => *label != me,
+        _ => false,
+    });
+    Ok(())
+}
+
+/// "Open in new window": the note (a percent-encoded vault path) in a window of its own.
+#[tauri::command]
+async fn open_note_window(app: AppHandle, note: String) -> Result<(), String> {
+    lockdown::create_note_window(&app, &note)
 }
 
 #[tauri::command]

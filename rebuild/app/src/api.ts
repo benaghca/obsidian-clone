@@ -105,6 +105,13 @@ export const api = {
   /** Write a settings file (JSON) into the vault's .grove folder. */
   writeConfig: (name: string, content: string) => call<void>("write_config", { name, content }),
   openExternal,
+  /** "Open in new window": the note in a window of its own (the browser preview only logs; `?note=` shows that window). */
+  openNoteWindow: async (path: string) => {
+    // Percent-encoded in full: the backend accepts nothing else in the URL.
+    const note = encodeURIComponent(path).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+    if (isTauri) await call<void>("open_note_window", { note });
+    else console.info(`[mock] would open ?note=${note} in a new window`);
+  },
   onVaultChanged: async (handler: (change: VaultChange) => void) =>
     (await load()).listen("vault-changed", (p) => handler(p as VaultChange)),
 };

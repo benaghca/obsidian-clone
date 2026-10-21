@@ -11,6 +11,7 @@ import { deleteMarkupBackward, insertNewlineContinueMarkupCommand } from "@codem
 import { Compartment, EditorSelection, EditorState, type Extension, Prec, type StateEffect } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { folding } from "./fold";
+import { type PropertiesDisplay, propertiesDisplay } from "./properties";
 
 export interface EditorConfig {
   lineNumbers: boolean;
@@ -22,6 +23,7 @@ export interface EditorConfig {
   smartLists: boolean;
   useTab: boolean;
   tabSize: number;
+  properties: PropertiesDisplay;
 }
 
 export const DEFAULT_EDITOR_CONFIG: EditorConfig = {
@@ -34,6 +36,7 @@ export const DEFAULT_EDITOR_CONFIG: EditorConfig = {
   smartLists: true,
   useTab: true,
   tabSize: 4,
+  properties: "visible",
 };
 
 const NONE: Extension = [];
@@ -112,6 +115,7 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
         EditorState.tabSize.of(c.tabSize),
       ]),
   },
+  { compartment: new Compartment(), ext: (c) => cached(`properties:${c.properties}`, () => propertiesDisplay.of(c.properties)) },
 ];
 
 let current: EditorConfig = { ...DEFAULT_EDITOR_CONFIG };

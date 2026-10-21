@@ -251,6 +251,11 @@ function editor(): HTMLElement {
       "Display",
       toggleRow("app.json", "showInlineTitle", "Inline title", "Display the filename as an editable title inline with the file contents."),
       toggleRow("app.json", "readableLineLength", "Readable line length", "Limit maximum line length. Less content fits onscreen, but long blocks of text are more readable."),
+      dropdownRow("app.json", "propertiesInDocument", "Properties in document", 'Choose how properties are displayed at the top of notes. Select "source" to show properties as raw YAML.', [
+        ["visible", "Visible"],
+        ["hidden", "Hidden"],
+        ["source", "Source"],
+      ]),
       toggleRow("app.json", "foldHeading", "Fold heading", "Lets you fold all content under a heading."),
       toggleRow("app.json", "foldIndent", "Fold indent", "Lets you fold part of an indentation, such as lists."),
       toggleRow("app.json", "showLineNumber", "Line numbers", "Show line numbers in the gutter."),

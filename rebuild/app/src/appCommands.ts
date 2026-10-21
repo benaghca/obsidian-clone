@@ -8,11 +8,13 @@ import { startCompletion } from "@codemirror/autocomplete";
 import { addCursorAbove, addCursorBelow, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
+import { api } from "./api";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
+import { openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
   clearFormatting,
@@ -78,11 +80,11 @@ export function registerAppCommands(parts: AppParts) {
   const hasNote = () => !!ws.active.path;
   const note = () => ws.active.path!;
 
-  // Focus is in some other text field (the inline title, a search box):
-  // editor hotkeys leave it alone.
+  // Focus is in some other text field (the inline title, a search box, a
+  // field in the Properties block): editor hotkeys leave it alone.
   const typingElsewhere = () => {
     const el = document.activeElement as HTMLElement | null;
-    if (!el || el === document.body || ws.view.dom.contains(el)) return false;
+    if (!el || el === document.body || el === ws.view.contentDOM) return false;
     return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
   };
   const canEdit = () => hasNote() && ws.active.mode !== "reading" && !typingElsewhere();
@@ -161,8 +163,10 @@ export function registerAppCommands(parts: AppParts) {
   const setZoom = (level: number) => settings.set("appearance.json", "zoomLevel", Math.min(3, Math.max(-2.5, level)));
   const app = () => settings.get("app.json");
 
-  // Obsidian's "Add file property": a properties block at the top of the
-  // note (created if missing) with the caret on a new, empty line in it.
+  // Obsidian's "Add file property": a new row in the Properties block with
+  // its key field focused. Where the block isn't shown (Source mode, or
+  // "Properties in document" set to Source or Hidden): a new, empty line in
+  // the YAML (created if missing) with the caret on it.
   const addProperty = (view: EditorView) => {
     const doc = view.state.doc;
     const first = doc.line(1);
@@ -176,6 +180,36 @@ export function registerAppCommands(parts: AppParts) {
     }
     view.dispatch({ changes: { from: 0, insert: "---\n\n---\n" }, selection: { anchor: 4 }, scrollIntoView: true, userEvent: "input" });
     return true;
+  };
+
+  // Export to PDF: the note as Reading view shows it (in the light scheme),
+  // printed through the webview, whose print dialog writes the PDF ("Print to
+  // File"). Only that pane is printed, all of it (base.css, @media print).
+  const exportPdf = () => {
+    const tab = ws.active;
+    const { mode } = tab;
+    const root = document.documentElement;
+    const dark = root.classList.contains("theme-dark");
+    const target = ws.view.dom.closest<HTMLElement>(".view-content");
+    const path: HTMLElement[] = [];
+    for (let el = target?.parentElement; el && el !== document.body; el = el.parentElement) path.push(el);
+    if (mode !== "reading") ws.setMode("reading", tab);
+    if (dark) root.classList.replace("theme-dark", "theme-light");
+    document.body.classList.add("is-printing");
+    target?.classList.add("print-target");
+    for (const el of path) el.classList.add("print-path");
+    let printing = true;
+    const done = () => {
+      if (!printing) return;
+      printing = false;
+      document.body.classList.remove("is-printing");
+      target?.classList.remove("print-target");
+      for (const el of path) el.classList.remove("print-path");
+      if (dark) root.classList.replace("theme-light", "theme-dark");
+      if (mode !== "reading") ws.setMode(mode, tab);
+    };
+    window.addEventListener("afterprint", done, { once: true });
+    window.print();
   };
 
   const editorCommand = (id: string, name: string, icon: IconName | undefined, run: (view: EditorView) => boolean, hotkeys?: Command["hotkeys"]): Command => ({
@@ -284,6 +318,8 @@ export function registerAppCommands(parts: AppParts) {
     { id: "workspace:toggle-pin", name: "Toggle pin", icon: "pin", run: () => ws.togglePin() },
     // Splits. Obsidian has no default hotkeys for these.
     { id: "workspace:split-vertical", name: "Split right", icon: "separator-vertical", run: () => ws.split(ws.active, "right") },
+    { id: "workspace:open-in-new-window", name: "Open current tab in new window", icon: "picture-in-picture-2", when: hasNote, run: () => api.openNoteWindow(ws.active.path!) },
+    { id: "workspace:export-pdf", name: "Export to PDF...", icon: "file-down", when: hasNote, run: exportPdf },
     { id: "workspace:split-horizontal", name: "Split down", icon: "separator-horizontal", run: () => ws.split(ws.active, "bottom") },
     paneCommand("editor:focus-left", "Focus on tab group to the left", "left"),
     paneCommand("editor:focus-right", "Focus on tab group to the right", "right"),
@@ -453,7 +489,19 @@ export function registerAppCommands(parts: AppParts) {
         openTemplatePrompt(templateNotes(), (path) => void insertTemplate(path));
       },
     },
-    editorCommand("markdown:add-metadata-property", "Add file property", "list-plus", addProperty, mod(";")),
+    {
+      id: "markdown:add-metadata-property",
+      name: "Add file property",
+      icon: "list-plus",
+      hotkeys: mod(";"),
+      // Also from Reading view and from a field in the block, as in Obsidian.
+      when: () => hasNote() && (!typingElsewhere() || ws.view.dom.contains(document.activeElement)),
+      run: () => {
+        if (openNewProperty(ws.view) || ws.active.mode === "reading") return;
+        addProperty(ws.view);
+        ws.view.focus();
+      },
+    },
     {
       ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
       when: () => canEdit() && (app().foldHeading || app().foldIndent),

@@ -45,6 +45,7 @@
   --text-faint: #ababab;
   --text-on-accent: #ffffff;
   --text-error: #e93147;
+  --text-warning: #ec7500;
   --background-modifier-error: #e93147;
   --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.2);
   --text-highlight-bg: rgba(255, 208, 0, 0.4);
@@ -70,7 +71,8 @@
   --slider-track: #dadada;
   --scrollbar-thumb: rgba(0, 0, 0, 0.1);
   --scrollbar-thumb-hover: rgba(0, 0, 0, 0.2);
-  --drop-overlay: hsla(var(--accent-h), var(--accent-s), 62%, 0.4);
+  /* Obsidian's is its (light) accent a little lighter, at half strength: about 85% light over white. */
+  --drop-overlay: hsla(var(--accent-h), var(--accent-s), 70%, 0.5);
 
   /* graph view (Obsidian's node, line and text colours, with Grove's teal for
      the hovered and the current note) */
@@ -191,6 +193,7 @@
   --text-faint: #666666;
   --text-on-accent: #ffffff;
   --text-error: #fb464c;
+  --text-warning: #e9973f;
   --background-modifier-error: #fb464c;
   --text-selection: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.33);
   --text-highlight-bg: rgba(255, 208, 0, 0.4);
@@ -213,7 +216,7 @@
   --slider-track: #3f3f3f;
   --scrollbar-thumb: rgba(255, 255, 255, 0.1);
   --scrollbar-thumb-hover: rgba(255, 255, 255, 0.2);
-  --drop-overlay: hsla(var(--accent-h), var(--accent-s), var(--accent-l-dark-text), 0.35);
+  --drop-overlay: hsla(var(--accent-h), var(--accent-s), calc(var(--accent-l-dark-text) + 5%), 0.5);
 
   --graph-node-tag: #44cf6e;
   --graph-node-attachment: #e0de71;

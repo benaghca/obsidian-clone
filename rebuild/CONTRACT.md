@@ -14,7 +14,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - `last_vault() -> Option<VaultInfo>`
 - `list_files() -> Vec<FileEntry { path (vault-relative, forward slashes), name (no .md), is_dir, mtime_ms, size }>` — recursive, skips `.obsidian`, `.git`, `.trash`, `.grove`.
 - `read_note(path: String) -> String`
-- `write_note(path: String, content: String) -> ()` — atomic write (temp file + rename). Front end debounces saves ~300ms.
+- `write_note(path: String, content: String) -> ()` — atomic write (temp file + rename). Front end debounces saves ~300ms. Other windows (a note's own window) get a `vault-changed` `modify` for it; the window that saved does not. Changed in round 9.
 - `create_note(path: String, content: String) -> FileEntry`
 - `create_folder(path: String) -> FileEntry` — creates an empty folder (the file explorer's "New folder"); errors if anything already exists at `path`. Added in round 4.
 - `rename_path(from: String, to: String) -> ()` — and returns nothing; front end updates links itself later.
@@ -29,6 +29,8 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
   - `markdown` (added in round 7, for the graph view): per note, the resolved targets of its `[text](path)` and `![alt](path)` links to files in the vault. URLs (anything with a scheme) and `#heading` anchors are not links here; the path is percent-decoded and resolved like a wikilink path (from the note's folder, then the vault). Notes with none are omitted.
   - `unresolved` (added in round 7): per note, the link targets (wikilinks and markdown links) that match no file, as written without heading, alias or a markdown link's `.md`, deduplicated case-insensitively. Notes with none are omitted.
   - Links in fenced or inline code are skipped in all four.
+
+- `open_note_window(note: String) -> ()` — "Open in new window": a window of its own (label `note-<n>`, the main window's settings, navigation guard and capability) on `index.html?note=<note>`. `note` is the vault path, percent-encoded in full (only `A-Za-z0-9%-._~`); anything else is refused. Added in round 9.
 
 ## Events (backend emits)
 - `vault-changed` payload `{ kind: "create"|"modify"|"remove"|"rename", paths: string[] }` from a debounced (~100ms) file watcher. Ignore changes caused by our own `write_note` within 500ms.

@@ -125,23 +125,22 @@ body.is-grabbing * {
   color: var(--text-faint);
 }
 
-/* Dragging a tab: where it will land, and the tab under the pointer. The
-   overlay is sized to the whole workspace and placed by a transform, so it
-   glides between places without layout. */
+/* Dragging a tab: where it will land, and the tab under the pointer
+   (observed in Obsidian 1.14.4: the accent a little lighter at half
+   strength, 8px corners, no inset, gliding in 100ms; the ghost a dark pill). */
 .workspace-drop-overlay {
   position: fixed;
   left: 0;
   top: 0;
   z-index: 40;
   pointer-events: none;
-  transform-origin: 0 0;
   border-radius: var(--radius-m);
-  /* Obsidian's is a light accent at half strength: lighter and more
-     see-through than a dark accent tint. */
   background: var(--drop-overlay);
   opacity: 0;
   transition:
     transform var(--anim-duration-fast) var(--anim-ease-in-out),
+    width var(--anim-duration-fast) var(--anim-ease-in-out),
+    height var(--anim-duration-fast) var(--anim-ease-in-out),
     opacity var(--anim-duration-fast) var(--anim-ease-out);
 }
 .workspace-drop-overlay.is-visible {
@@ -165,19 +164,19 @@ body.is-grabbing * {
   display: flex;
   align-items: center;
   gap: 6px;
-  max-width: 240px;
-  padding: 4px 10px;
-  border: 1px solid var(--background-modifier-border);
+  max-width: 300px;
+  padding: 6px 8px;
   border-radius: var(--radius-s);
-  background: var(--background-primary);
-  box-shadow: var(--shadow-s);
-  color: var(--text-normal);
+  background: rgba(0, 0, 0, 0.85);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  color: white;
   font-size: var(--font-ui-small);
+  font-weight: 500;
   white-space: nowrap;
   animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
 }
 .drag-ghost .svg-icon {
-  color: var(--icon-color);
+  color: inherit;
 }
 .drag-ghost-title {
   overflow: hidden;

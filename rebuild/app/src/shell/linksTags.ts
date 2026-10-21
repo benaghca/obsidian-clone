@@ -1,5 +1,6 @@
 // Pure helpers for the Outgoing links and Tags views (tested without the DOM).
 
+import { splitFrontmatter } from "../editor/frontmatter";
 import { compareNames } from "../paths";
 
 const WIKILINK = /!?\[\[([^\]|#^\n]*)(?:[#^][^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
@@ -91,21 +92,8 @@ function tagValue(raw: string): string | null {
  * a plain value (`a, b` or `a b`); with or without the #.
  */
 export function frontmatterTags(text: string): Frontmatter {
-  const none = { tags: [], end: 0 };
-  if (!text.startsWith("---")) return none;
-  const lines: string[] = [];
-  let at = 0;
-  // Only the frontmatter is split into lines, never a long note's body.
-  for (let n = 0; n < 2000; n++) {
-    const nl = text.indexOf("\n", at);
-    const line = (nl < 0 ? text.slice(at) : text.slice(at, nl)).replace(/\r$/, "");
-    if (n === 0 && line.trim() !== "---") return none;
-    if (n > 0 && (line.trim() === "---" || line.trim() === "...")) return { tags: parseTags(lines), end: n + 1 };
-    if (n > 0) lines.push(line);
-    if (nl < 0) break;
-    at = nl + 1;
-  }
-  return none;
+  const fm = text.startsWith("---") ? splitFrontmatter(text) : null;
+  return fm ? { tags: parseTags(fm.lines), end: fm.close + 1 } : { tags: [], end: 0 };
 }
 
 function parseTags(lines: string[]): string[] {
