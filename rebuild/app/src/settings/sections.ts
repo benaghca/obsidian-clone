@@ -58,7 +58,7 @@ function textRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: st
 function pathList(ws: Workspace, id: string, kind: "folder" | "note"): HTMLElement {
   const list = h("datalist");
   list.id = id;
-  const paths = kind === "folder" ? ws.files.filter((f) => f.is_dir).map((f) => f.path) : ws.notes.map((n) => n.path.replace(/\.md$/, ""));
+  const paths = kind === "folder" ? ws.vault.files.filter((f) => f.is_dir).map((f) => f.path) : ws.vault.notes.map((n) => n.path.replace(/\.md$/, ""));
   for (const p of paths.sort()) {
     const option = h("option");
     option.value = p;

@@ -93,7 +93,7 @@ export function createOutgoingView(ws: Workspace): SideView {
     const mine = ++run;
     const path = ws.active.path;
     const mentions: UnlinkedMention[] = [];
-    const scan = path ? scanUnlinked(ws.view.state.doc.toString(), ws.includedNotes(), path, mentions) : null;
+    const scan = path ? scanUnlinked(ws.view.state.doc.toString(), ws.vault.includedNotes(), path, mentions) : null;
     const step = () => {
       if (mine !== run || !active) return;
       const until = performance.now() + SLICE_MS;

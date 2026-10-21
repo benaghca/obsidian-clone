@@ -60,8 +60,8 @@ function create(ws: Workspace) {
   });
 
   async function read(): Promise<Map<string, NoteProperties>> {
-    const notes = ws.includedNotes();
-    const mtimes = new Map(ws.files.map((f) => [f.path, f.mtime_ms]));
+    const notes = ws.vault.includedNotes();
+    const mtimes = new Map(ws.vault.files.map((f) => [f.path, f.mtime_ms]));
     const stale = notes.map((n) => n.path).filter((p) => !ws.editors.isLoaded(p) && cache.get(p)?.mtime !== mtimes.get(p));
     if (stale.length) {
       // Most of the vault (the first read): ask for everything in one go.

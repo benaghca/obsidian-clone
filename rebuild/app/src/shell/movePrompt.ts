@@ -14,7 +14,7 @@ interface FolderItem {
 export function openMovePrompt(ws: Workspace, path: string) {
   const here = parentDir(path);
   // A folder can't move into itself or anything inside it.
-  const folders = ["", ...ws.files.filter((f) => f.is_dir).map((f) => f.path)].filter(
+  const folders = ["", ...ws.vault.files.filter((f) => f.is_dir).map((f) => f.path)].filter(
     (f) => f !== here && f !== path && !f.startsWith(path + "/"),
   );
   const label = (f: string) => f || "/";

@@ -40,7 +40,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     ]);
     if (mine !== seq) return;
     // Excluded files (Settings → Files and links) are hidden from search.
-    const found = ws.notes.filter((n) => !ws.isExcluded(n.path) && matches(n.path, q, facts)).sort((a, b) => compareNames(a.name, b.name));
+    const found = ws.vault.notes.filter((n) => !ws.vault.isExcluded(n.path) && matches(n.path, q, facts)).sort((a, b) => compareNames(a.name, b.name));
     const words = highlightsOf(q);
     const propLine = (path: string) => (key: string): Line | null => {
       const note = props?.get(path);

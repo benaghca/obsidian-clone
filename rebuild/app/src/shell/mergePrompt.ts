@@ -15,7 +15,7 @@ interface NoteItem {
 }
 
 export function openMergePrompt(ws: Workspace, path: string) {
-  const notes = ws.notes.filter((n) => n.path !== path);
+  const notes = ws.vault.notes.filter((n) => n.path !== path);
   openPrompt<NoteItem>({
     placeholder: `Merge "${noteName(path)}" into...`,
     emptyText: "No notes found.",

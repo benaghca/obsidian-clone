@@ -1,23 +1,23 @@
-// App state: the vault's files and link index, and the layout of tab groups
-// (splits, see layout.ts) with their tabs (tabs.ts). This module changes
-// them (opening, closing, splitting, moving, navigating, renaming and
-// deleting) and tells the views through change events. The editors that
-// show the notes are noteEditors.ts; the saved form of the layout is
-// savedLayout.ts.
+// App state: the open vault (vault.ts: its files and link index), and the
+// layout of tab groups (splits, see layout.ts) with their tabs (tabs.ts).
+// This module changes the layout (opening, closing, splitting, moving,
+// navigating, following renames and deletes) and tells the views through
+// change events. The editors that show the notes are noteEditors.ts; the
+// saved form of the layout is savedLayout.ts.
 
 import { EditorView } from "@codemirror/view";
-import { api, type FileEntry, isTauri, type LinkIndex, type VaultInfo } from "./api";
+import { api } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
-import type { EditorHost, NoteRef, PropertyHost } from "./editor/host";
+import type { EditorHost, PropertyHost } from "./editor/host";
 import { type Edge, Layout } from "./layout";
-import { formatLink, type LinkStyle, linkTargets, resolveLink } from "./links/internal";
+import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
-import { createNote } from "./fileOps";
+import { createNote, fileSettings } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
-import { noteName } from "./paths";
 import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
 import { type Group, type OpenWhere, parseViewEntry, type Tab, type ViewType, viewEntry } from "./tabs";
+import { Vault } from "./vault";
 
 /**
  * - "files": the vault's file list changed.
@@ -36,14 +36,13 @@ interface ClosedTab {
   index: number;
 }
 
-const LINK_INDEX_DELAY = 1000;
 const CLOSED_MAX = 20;
 
 export class Workspace {
-  vault: VaultInfo = { path: "", name: "" };
-  files: FileEntry[] = [];
-  notes: NoteRef[] = [];
-  links: LinkIndex = { outgoing: {}, backlinks: {} };
+  readonly vault = new Vault(
+    (change) => this.emit(change),
+    (path) => this.editors.reload(path),
+  );
   layout: Layout<Tab>;
   /** Recently shown notes, most recent first. */
   recent: string[] = [];
@@ -53,22 +52,8 @@ export class Workspace {
   newTabMode: () => ViewMode = () => "live";
   /** Whether a new tab shows backlinks under its note (Settings → Backlinks). */
   newTabBacklinks: () => boolean = () => false;
-  /** The editing mode new notes open in (Live Preview or Source mode). */
-  editingMode: () => ViewMode = () => "live";
-  /** Where "Create new note" puts a note when no folder is given (Settings → Files and links). */
-  newNoteFolder: () => string = () => "";
-  /** Whether deleting removes for good instead of moving to the vault's .trash. */
-  permanentDelete: () => boolean = () => false;
-  /** Asked before a delete that wasn't confirmed already; false cancels it. */
-  confirmDelete: ((path: string) => Promise<boolean>) | null = null;
   /** How new links are written (Settings → Files and links). */
   linkStyle: () => LinkStyle = () => ({ format: "shortest", wikilinks: true });
-  /** Asked before merging one note into another; false cancels. */
-  confirmMerge: ((from: string, into: string) => Promise<boolean>) | null = null;
-  /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
-  isExcluded: (path: string) => boolean = () => false;
-  /** Told after a note or folder moved, with the notes as they were before (to update links). */
-  onRenamed: ((from: string, to: string, before: NoteRef[]) => void) | null = null;
   /** The vault's properties, for the Properties block (set by the app). */
   propertyHost: PropertyHost | null = null;
   /** Each tab group's editor, and the notes they show. */
@@ -79,15 +64,12 @@ export class Workspace {
   private moves = listeners<[(path: string) => string]>();
   private shownKey = "";
   private closed: ClosedTab[] = [];
-  private linkTimer = 0;
-  private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
-  private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
 
   constructor() {
     const host: EditorHost = {
       openLink: (target, where, view) => void this.openLink(target, where, view ? this.editors.groupOfView(view) : undefined),
       openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
-      notes: () => this.includedNotes(),
+      notes: () => this.vault.includedNotes(),
       formatLink: (target, view, display) => this.linkTo(target, this.editors.pathOf(view), display),
       contextMenu: (view, at, pos, keyboard) => {
         const group = this.editors.groupOfView(view);
@@ -95,7 +77,7 @@ export class Workspace {
         this.editorMenu?.(view, at, pos, keyboard);
       },
       properties: () => this.propertyHost,
-      linkExists: (target, view) => this.linkExists(target, this.editors.pathOf(view)),
+      linkExists: (target, view) => this.vault.linkExists(target, this.editors.pathOf(view)),
     };
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {
@@ -104,7 +86,7 @@ export class Workspace {
       },
       loaded: () => this.settle(),
       changed: () => this.emit("doc"),
-      saved: (path) => this.written(path),
+      saved: (path) => this.vault.written(path),
     });
     this.layout = new Layout(this.blankTab());
     this.editors.viewOf(this.layout.activeGroup);
@@ -175,80 +157,19 @@ export class Workspace {
     }
   }
 
-  // ----- vault -----
-
-  /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
-  async init(reuse = false) {
-    const last = await api.lastVault();
-    if (isTauri && !(reuse && last)) {
-      const path =
-        last?.path ??
-        window.prompt("Vault folder to open", "/home/chris/workspaces/remote/grove-test-vault");
-      if (path) this.vault = await api.openVault(path);
-    } else {
-      this.vault = last ?? this.vault;
-    }
-    await this.refreshFiles();
-    void this.refreshLinks();
-    api.onVaultChanged((change) => void this.onVaultChanged(change.kind, change.paths));
-  }
-
-  async refreshFiles() {
-    this.files = await api.listFiles();
-    this.notes = this.files
-      .filter((f) => !f.is_dir && f.path.endsWith(".md"))
-      .map((f) => ({ name: noteName(f.path), path: f.path }));
-    this.emit("files");
-  }
-
-  async refreshLinks() {
-    this.links = await api.linkIndex();
-    this.emit("links");
-  }
+  // ----- links -----
 
   /**
    * Resolve a link target the way Obsidian does: a path from the vault
    * folder or from the linking note's folder, or a note name, any case.
    */
   resolve(target: string, from: string | null = this.active.path): string | null {
-    return resolveLink(target, from, this.notes);
-  }
-
-  /** The notes that aren't excluded (Settings → Files and links → Excluded files). */
-  includedNotes(): NoteRef[] {
-    const c = this.included;
-    if (c && c.notes === this.notes && c.test === this.isExcluded) return c.out;
-    const out = this.notes.filter((n) => !this.isExcluded(n.path));
-    this.included = { notes: this.notes, test: this.isExcluded, out };
-    return out;
-  }
-
-  /** Whether a link target points at a file (sets of names and paths, made once per file list). */
-  linkExists(target: string, from: string | null): boolean {
-    if (this.targets?.files !== this.files) this.targets = { files: this.files, exists: linkTargets(this.files, this.notes) };
-    return this.targets.exists(target, from);
+    return resolveLink(target, from, this.vault.notes);
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
   linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
-    return formatLink(target, from, this.notes, this.linkStyle(), display, subpath);
-  }
-
-  isFolder(path: string) {
-    return this.files.some((f) => f.path === path && f.is_dir);
-  }
-
-  /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
-  private touch(path: string) {
-    const entry = this.files.find((f) => f.path === path);
-    if (entry) entry.mtime_ms = Date.now();
-  }
-
-  /** We wrote a note to disk: it is modified now, and the link index is read again a moment later. */
-  written(path: string) {
-    this.touch(path);
-    clearTimeout(this.linkTimer);
-    this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
+    return formatLink(target, from, this.vault.notes, this.linkStyle(), display, subpath);
   }
 
   // ----- tabs -----
@@ -269,13 +190,10 @@ export class Workspace {
     if (group) this.select(group, tab);
   }
 
-  private select(group: Group, tab: Tab, focus = true) {
+  private select(group: Group, tab: Tab) {
     if (group.active === tab && this.layout.activeGroup === group && this.editors.shows(group, tab)) return;
-    group.active = tab;
-    this.layout.activeGroup = group;
-    this.editors.present(group);
-    this.settle();
-    if (focus && tab.path) this.editors.viewOf(group).focus();
+    this.show(group, tab);
+    if (tab.path) this.editors.viewOf(group).focus();
   }
 
   /** "Move to new window": the note opens in a window of its own (its unsaved edits saved first) and leaves this one. */
@@ -286,7 +204,7 @@ export class Workspace {
     const doc = this.editors.doc(path);
     if (doc) {
       await api.writeNote(path, doc.toString());
-      this.written(path);
+      this.vault.written(path);
     }
     await api.openNoteWindow(path);
     // Navigating or typing in the tab during the awaits keeps it here too.
@@ -361,7 +279,7 @@ export class Workspace {
   }
 
   canUndoClose() {
-    return this.closed.some((c) => c.saved.type || (c.saved.path && this.notes.some((n) => n.path === c.saved.path)));
+    return this.closed.some((c) => c.saved.type || (c.saved.path && this.vault.notes.some((n) => n.path === c.saved.path)));
   }
 
   /** Obsidian's "Undo close tab": reopen the last closed tab where it was (or in the active pane). */
@@ -519,7 +437,7 @@ export class Workspace {
   }
 
   /** Show `tab`, now the active tab of `group`, in the active pane. */
-  private show(group: Group, tab: Tab, layoutChanged: boolean) {
+  private show(group: Group, tab: Tab, layoutChanged = false) {
     group.active = tab;
     this.layout.activeGroup = group;
     this.editors.present(group);
@@ -595,7 +513,7 @@ export class Workspace {
       // A link to a note that doesn't exist yet: create it (a bare name goes where new notes go).
       let file = name.replace(/%20/g, " ").replace(/\.md$/i, "");
       if (!file.includes("/")) {
-        const folder = this.newNoteFolder();
+        const folder = fileSettings.newNoteFolder();
         file = folder ? `${folder}/${file}` : file;
       }
       path = (await createNote(this, `${file}.md`)).path;
@@ -603,16 +521,8 @@ export class Workspace {
     await this.open(path, { where, heading, group });
   }
 
-  /** Back and forward walk the active pane's own history. */
-  async goBack() {
-    await this.travel(-1);
-  }
-
-  async goForward() {
-    await this.travel(1);
-  }
-
-  private async travel(dir: 1 | -1) {
+  /** Back (-1) and forward (1) walk the active pane's own history. */
+  async travel(dir: 1 | -1) {
     const group = this.activeGroup;
     const tab = group.active;
     const from = dir < 0 ? tab.back : tab.forward;
@@ -659,7 +569,7 @@ export class Workspace {
   }
 
   private loadTab(saved: SavedTab): Tab | null {
-    const isNote = (p: unknown): p is string => typeof p === "string" && this.notes.some((n) => n.path === p);
+    const isNote = (p: unknown): p is string => typeof p === "string" && this.vault.notes.some((n) => n.path === p);
     return loadTab(saved, () => this.blankTab(), isNote);
   }
 
@@ -712,11 +622,11 @@ export class Workspace {
     }
     this.recent = this.recent.map(swap);
     this.moves.emit(swap);
-    await this.refreshFiles();
+    await this.vault.refreshFiles();
     this.emit("tabs");
     this.shownKey = "";
     this.settle();
-    void this.refreshLinks();
+    void this.vault.refreshLinks();
   }
 
   /** Files were deleted: tabs showing them go empty, and they leave every history. */
@@ -729,10 +639,10 @@ export class Workspace {
       if (tab.path && under(tab.path)) tab.path = null;
       if (tab.graphFile && under(tab.graphFile)) tab.graphFile = null;
     }
-    await this.refreshFiles();
+    await this.vault.refreshFiles();
     this.presentAll();
     this.settle();
-    void this.refreshLinks();
+    void this.vault.refreshLinks();
   }
 
   /** These tabs now show another note, from its top. */
@@ -748,14 +658,5 @@ export class Workspace {
   /** Save a note now (Obsidian's "Save current file"), if it has changes waiting. */
   async saveNow(path = this.active.path) {
     if (path) await this.editors.flush((p) => p === path);
-  }
-
-  // ----- outside changes -----
-
-  private async onVaultChanged(kind: string, paths: string[]) {
-    if (kind !== "modify") await this.refreshFiles();
-    else for (const path of paths) this.touch(path);
-    if (kind !== "remove") for (const path of paths) await this.editors.reload(path);
-    void this.refreshLinks();
   }
 }

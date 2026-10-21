@@ -23,7 +23,7 @@ export function openQuickSwitcher(ws: Workspace) {
       ["shift ↵", "to create"],
       ["esc", "to dismiss"],
     ],
-    items: (query) => switcherItems(query, ws.includedNotes(), ws.recent, ws.active.path),
+    items: (query) => switcherItems(query, ws.vault.includedNotes(), ws.recent, ws.active.path),
     render(item, row) {
       suggestionText(row, item.name, item.indices, item.path ? parentDir(item.path) : "");
       if (item.path === null) row.append(h("div", { class: "suggestion-aux" }, h("span", { class: "suggestion-action" }, "Enter to create")));

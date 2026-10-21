@@ -45,7 +45,7 @@ function create(ws: Workspace) {
     let found = lines.get(term);
     if (!found) {
       // Enough for every note to have a line even when most of the vault matches (the hits are round-robin).
-      const limit = Math.max(2000, ws.files.length * 4);
+      const limit = Math.max(2000, ws.vault.files.length * 4);
       found = api.search(term, limit).then(
         (hits) => {
           const out = new Map<string, Line[]>();

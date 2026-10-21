@@ -31,7 +31,7 @@ export async function updateLinks(
   // Which notes may link there: the link index's backlinks (wikilinks; read
   // now, before it refreshes) and a search for the names (markdown links).
   const sources = new Set<string>();
-  for (const p of pairs) for (const b of ws.links.backlinks[p.old] ?? []) sources.add(b.from);
+  for (const p of pairs) for (const b of ws.vault.links.backlinks[p.old] ?? []) sources.add(b.from);
   for (const p of pairs.slice(0, 20)) {
     for (const q of new Set([p.name, p.name.replace(/ /g, "%20")])) {
       const hits = await api.search(q, SEARCH_LIMIT).catch(() => []);
@@ -40,7 +40,7 @@ export async function updateLinks(
     }
   }
 
-  const after = ws.notes;
+  const after = ws.vault.notes;
   const edits: { path: string; text: string }[] = [];
   let links = 0;
   for (const src of sources) {

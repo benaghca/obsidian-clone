@@ -47,8 +47,8 @@ export function createGraphSource(ws: Workspace, local: boolean) {
       const tags = facts?.tags;
       const notes: string[] = [];
       const attachments: string[] = [];
-      for (const f of ws.files) {
-        if (f.is_dir || ws.isExcluded(f.path)) continue;
+      for (const f of ws.vault.files) {
+        if (f.is_dir || ws.vault.isExcluded(f.path)) continue;
         if (f.path.endsWith(".md")) notes.push(f.path);
         else attachments.push(f.path);
       }
@@ -58,7 +58,7 @@ export function createGraphSource(ws: Workspace, local: boolean) {
         include = (path) => shown.has(path) && (!base || base(path));
       }
       const model = buildGraph(
-        { notes, attachments, links: ws.links, tags },
+        { notes, attachments, links: ws.vault.links, tags },
         {
           showTags: cfg.showTags,
           showAttachments: cfg.showAttachments,

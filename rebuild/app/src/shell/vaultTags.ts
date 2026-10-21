@@ -21,7 +21,7 @@ export function createTagReader(ws: Workspace) {
     const out = new Map<string, Frontmatter>();
     await Promise.all(
       [...paths].map(async (path) => {
-        const mtime = ws.files.find((f) => f.path === path)?.mtime_ms ?? 0;
+        const mtime = ws.vault.files.find((f) => f.path === path)?.mtime_ms ?? 0;
         const cached = frontmatter.get(path);
         if (cached && cached.mtime === mtime && !ws.editors.isLoaded(path)) return void out.set(path, cached.fm);
         try {

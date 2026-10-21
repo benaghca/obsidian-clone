@@ -540,8 +540,8 @@ export function createGraphView(host: GraphHost): GraphView {
   // ----- timelapse -----
 
   function startTimelapse() {
-    const mtime = new Map(ws.files.map((f) => [f.path, f.mtime_ms]));
-    const paths = ws.files.filter((f) => !f.is_dir).map((f) => f.path);
+    const mtime = new Map(ws.vault.files.map((f) => [f.path, f.mtime_ms]));
+    const paths = ws.vault.files.filter((f) => !f.is_dir).map((f) => f.path);
     paths.sort((a, b) => (mtime.get(a) ?? 0) - (mtime.get(b) ?? 0) || a.localeCompare(b));
     reveal = { order: paths, shown: 0, perFrame: Math.max(1, Math.ceil(paths.length / 240)) };
     signature = "";
@@ -609,14 +609,14 @@ export function createGraphView(host: GraphHost): GraphView {
   themeWatch.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
   themeWatch.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
 
-  let excluded = ws.isExcluded;
+  let excluded = ws.vault.isExcluded;
   const offSettings = settings.on((file) => {
     // Settings → Files and links → Excluded files: those notes leave the graph
     // (checked once the app has applied the change, whichever listener runs first).
     if (file === "app.json" || file === null) {
       queueMicrotask(() => {
-        if (ws.isExcluded === excluded || disposed) return;
-        excluded = ws.isExcluded;
+        if (ws.vault.isExcluded === excluded || disposed) return;
+        excluded = ws.vault.isExcluded;
         scheduleRebuild(0);
       });
     }

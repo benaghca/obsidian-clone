@@ -117,7 +117,7 @@ export function registerAppCommands(parts: AppParts) {
     const prefix = folderPrefix(daily().folder);
     const pattern = dateNamePattern(daily().format || "YYYY-MM-DD");
     const out: { path: string; time: number }[] = [];
-    for (const n of ws.notes) {
+    for (const n of ws.vault.notes) {
       if (!n.path.startsWith(prefix)) continue;
       const time = pattern.parse(n.path.slice(prefix.length, -3));
       if (time !== null) out.push({ path: n.path, time });
@@ -139,7 +139,7 @@ export function registerAppCommands(parts: AppParts) {
   };
   async function openDailyNote() {
     const path = dailyPath(new Date());
-    const existing = ws.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
+    const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
     if (existing) return ws.open(existing.path);
     const template = daily().template.trim() ? ws.resolve(daily().template.trim(), null) : null;
     const entry = await createNote(ws, path, await templateText(template, noteName(path)));
@@ -148,7 +148,7 @@ export function registerAppCommands(parts: AppParts) {
 
   // ----- templates -----
   const templateFolder = () => trimSlashes(templates().folder);
-  const templateNotes = () => (templateFolder() ? ws.notes.filter((n) => n.path.startsWith(`${templateFolder()}/`)) : []);
+  const templateNotes = () => (templateFolder() ? ws.vault.notes.filter((n) => n.path.startsWith(`${templateFolder()}/`)) : []);
   async function insertTemplate(path: string) {
     const view = ws.view;
     const text = await templateText(path, ws.active.path ? noteName(ws.active.path) : "");
@@ -284,9 +284,9 @@ export function registerAppCommands(parts: AppParts) {
       name: "Random note: Open random note",
       plugin: "random-note",
       icon: "dices",
-      when: () => ws.includedNotes().length > 0,
+      when: () => ws.vault.includedNotes().length > 0,
       run: () => {
-        const notes = ws.includedNotes();
+        const notes = ws.vault.includedNotes();
         const others = notes.filter((n) => n.path !== ws.active.path);
         const pick = others[Math.floor(Math.random() * others.length)] ?? notes[0];
         void ws.open(pick.path);
@@ -332,9 +332,9 @@ export function registerAppCommands(parts: AppParts) {
     paneCommand("workspace:move-tab-up", "Move current tab to the tab group above", "top", true),
     paneCommand("workspace:move-tab-down", "Move current tab to the tab group below", "bottom", true),
     conditionalAction("app:go-back", "Navigate back", "arrow-left",
-      () => ws.goBack(), () => ws.active.back.length > 0, mod("arrowleft", { alt: true })),
+      () => ws.travel(-1), () => ws.active.back.length > 0, mod("arrowleft", { alt: true })),
     conditionalAction("app:go-forward", "Navigate forward", "arrow-right",
-      () => ws.goForward(), () => ws.active.forward.length > 0, mod("arrowright", { alt: true })),
+      () => ws.travel(1), () => ws.active.forward.length > 0, mod("arrowright", { alt: true })),
     // Obsidian has no default hotkeys for these two; Ctrl+Alt+[ / ] are Grove's.
     action("app:toggle-left-sidebar", "Toggle left sidebar", "panel-left", () => parts.docks.toggle("left"), mod("[", { alt: true })),
     action("app:toggle-right-sidebar", "Toggle right sidebar", "panel-right", () => parts.docks.toggle("right"), mod("]", { alt: true })),
@@ -380,7 +380,7 @@ export function registerAppCommands(parts: AppParts) {
     ),
     conditionalAction("file-explorer:move-file", "Move current file to another folder", "folder-tree", () => openMovePrompt(ws, note())),
     pluginAction("note-composer", "note-composer:merge-file", "Note composer: Merge current file with another file...", "git-merge",
-      () => openMergePrompt(ws, note()), () => hasNote() && ws.notes.length > 1),
+      () => openMergePrompt(ws, note()), () => hasNote() && ws.vault.notes.length > 1),
     {
       id: "file-explorer:reveal-active-file",
       name: "Files: Reveal current file in navigation",

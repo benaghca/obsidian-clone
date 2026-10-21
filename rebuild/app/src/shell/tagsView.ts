@@ -47,8 +47,8 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
     const open = ws.active.path;
     const tags: string[] = [];
     // Excluded files (Settings → Files and links) don't count.
-    for (const [path, list] of saved) if (path !== open && !ws.isExcluded(path)) tags.push(...list);
-    if (open?.endsWith(".md") && !ws.isExcluded(open)) tags.push(...tagsInText(ws.view.state.doc.toString()));
+    for (const [path, list] of saved) if (path !== open && !ws.vault.isExcluded(path)) tags.push(...list);
+    if (open?.endsWith(".md") && !ws.vault.isExcluded(open)) tags.push(...tagsInText(ws.view.state.doc.toString()));
     const tree = tagTree(tags);
     const key = JSON.stringify(tree);
     if (key === shown) return;
