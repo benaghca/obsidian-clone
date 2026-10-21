@@ -37,20 +37,11 @@ pub fn normalize_rel(rel: &str) -> Result<String, String> {
         || rel.contains('\\')
         || rel.contains('\0')
         || rel.contains(':')
+        || rel.split('/').any(|c| c.is_empty() || c == "." || c == ".." || ignored_component(c))
     {
         return Err(format!("invalid path: {rel}"));
     }
-    let mut parts = Vec::new();
-    for c in rel.split('/') {
-        if c.is_empty() || c == "." || c == ".." || ignored_component(c) {
-            return Err(format!("invalid path: {rel}"));
-        }
-        parts.push(c);
-    }
-    if parts.is_empty() {
-        return Err(format!("invalid path: {rel}"));
-    }
-    Ok(parts.join("/"))
+    Ok(rel.to_string())
 }
 
 /// `(relative, absolute)` for a user path, after symlink checks.

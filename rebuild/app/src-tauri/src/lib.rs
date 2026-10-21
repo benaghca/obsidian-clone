@@ -225,12 +225,12 @@ fn write_config(state: State<'_, AppState>, name: String, content: String) -> Re
 
 #[tauri::command]
 fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<SearchHit>, String> {
-    with_vault(&state, |v| Ok(v.search(&query, limit)))
+    with_vault(&state, |v| Ok(v.index.search(&query, limit)))
 }
 
 #[tauri::command]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
-    with_vault(&state, |v| Ok(v.link_index()))
+    with_vault(&state, |v| Ok(v.index.link_index()))
 }
 
 /// Each note's frontmatter block (only `paths`' when given), for the properties index.
@@ -239,5 +239,5 @@ fn frontmatter(
     state: State<'_, AppState>,
     paths: Option<Vec<String>>,
 ) -> Result<BTreeMap<String, String>, String> {
-    with_vault(&state, |v| Ok(v.frontmatter(paths.as_deref())))
+    with_vault(&state, |v| Ok(v.index.frontmatter(paths.as_deref())))
 }

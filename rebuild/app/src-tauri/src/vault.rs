@@ -6,8 +6,8 @@
 
 use crate::fsutil::{self, atomic_write};
 use crate::index::Index;
-use crate::model::{push_change, ChangeKind, FileEntry, LinkIndex, SearchHit, VaultChanged};
-use std::collections::{BTreeMap, HashMap};
+use crate::model::{push_change, ChangeKind, FileEntry, VaultChanged};
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -166,18 +166,6 @@ impl Vault {
         atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())
     }
 
-    pub fn search(&self, query: &str, limit: u32) -> Vec<SearchHit> {
-        self.index.search(query, limit)
-    }
-
-    pub fn link_index(&self) -> LinkIndex {
-        self.index.link_index()
-    }
-
-    pub fn frontmatter(&self, paths: Option<&[String]>) -> BTreeMap<String, String> {
-        self.index.frontmatter(paths)
-    }
-
     pub fn is_own_write(&self, rel: &str, now: Instant) -> bool {
         self.own_writes.get(rel).is_some_and(|until| now < *until)
     }
@@ -308,6 +296,10 @@ mod tests {
     use crate::fsutil::tmp_dir;
     use std::fs;
 
+    fn listed(vault: &Vault, path: &str) -> FileEntry {
+        vault.list_files().into_iter().find(|e| e.path == path).unwrap()
+    }
+
     #[test]
     fn write_create_rename_and_trash_round_trip() {
         let dir = tmp_dir("vault");
@@ -357,20 +349,13 @@ mod tests {
             Some("Renamed.md")
         );
         assert!(vault.index.resolve("Old.md", "Target").is_none());
-        assert!(vault
-            .list_files()
-            .iter()
-            .any(|e| e.path == "Renamed.md" && e.name == "Renamed"));
+        assert_eq!(listed(&vault, "Renamed.md").name, "Renamed");
         vault.rename_path("Renamed.md", "fresh/Moved.md").unwrap();
         assert!(dir.path.join("fresh").join("Moved.md").is_file());
-        assert!(vault
-            .list_files()
-            .iter()
-            .any(|e| e.path == "fresh" && e.is_dir && e.size == 0));
-        assert!(vault
-            .list_files()
-            .iter()
-            .any(|e| e.path == "fresh/Moved.md" && e.name == "Moved"));
+        let parent = listed(&vault, "fresh");
+        assert!(parent.is_dir);
+        assert_eq!(parent.size, 0);
+        assert_eq!(listed(&vault, "fresh/Moved.md").name, "Moved");
         assert!(vault.rename_path("nope.md", "x.md").is_err());
         assert!(vault.rename_path("../outside.md", "x.md").is_err());
 
@@ -379,11 +364,8 @@ mod tests {
         vault.index.refresh_path(&vault.root, "box");
         vault.rename_path("box", "carton").unwrap();
         assert!(dir.path.join("carton").join("a.md").is_file());
-        assert!(vault
-            .list_files()
-            .iter()
-            .any(|e| e.path == "carton" && e.is_dir));
-        assert!(vault.list_files().iter().any(|e| e.path == "carton/a.md"));
+        assert!(listed(&vault, "carton").is_dir);
+        assert_eq!(listed(&vault, "carton/a.md").path, "carton/a.md");
         assert!(vault.rename_path("carton", "carton/inner").is_err());
 
         vault.delete_path("fresh/Moved.md", false).unwrap();
@@ -447,7 +429,7 @@ mod tests {
             .iter()
             .all(|e| !e.path.starts_with(".grove")));
         assert!(reopened
-            .search("useWikilinks", 10)
+            .index.search("useWikilinks", 10)
             .iter()
             .all(|h| !h.path.starts_with(".grove")));
         // No temp files left behind.
@@ -468,10 +450,7 @@ mod tests {
         assert_eq!(made.path, "sub/Untitled");
         assert!(made.is_dir);
         assert!(dir.path.join("sub").join("Untitled").is_dir());
-        assert!(vault
-            .list_files()
-            .iter()
-            .any(|e| e.path == "sub/Untitled" && e.is_dir));
+        assert!(listed(&vault, "sub/Untitled").is_dir);
         assert!(vault.create_folder("sub/Untitled").is_err());
         assert!(vault.create_folder("../outside").is_err());
         assert!(vault.create_folder(".obsidian/x").is_err());
