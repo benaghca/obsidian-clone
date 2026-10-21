@@ -1,4 +1,63 @@
-# Round 10: properties and search, the way Obsidian has them (Claude's version)
+# Round 10: properties and search, the way Obsidian has them (as merged)
+
+**Merged:** Claude's version (`rebuild/r10-claude`, `8c8983a`) as merge `1325416`, plus two guards ported from Codex's version (`fb10dd7`). Three agents did the same brief; the comparison was headless (Vite preview + headless Chromium with the mock vault plus a `Project` note with seven typed properties and a `Draft` note with `status`/`rating`/`tags`, and Obsidian 1.14.4 on a private Xvfb display in its own network namespace with a scratch profile and the same two notes).
+
+## How the three compared
+
+The same eight queries were typed into each search pane and into Obsidian's:
+
+| Query | Obsidian 1.14.4 | Claude (merged) | Grok | Codex |
+|---|---|---|---|---|
+| `roadmap draft` (words on different lines) | Draft | Draft | **No matches** (same-line rule) | Draft |
+| `tag:planning` | the tagged notes | same | same | same |
+| `[status:draft]`, `[status]` | Draft | same | same | same (shows the whole note as context) |
+| `"Graph groups"` | Project | same | same | same |
+| `planning -tag:x` | notes with planning, not tagged x | same | same | same |
+| `file:Draft OR file:Welcome` | the two names, no lines | same | same | same, with a stray "1" count |
+| `line:(roadmap search)` | Draft | Draft | **No matches** | **No matches** (no `line:( )`) |
+
+| Item | Claude (merged) | Grok | Codex |
+|---|---|---|---|
+| Type menu | Obsidian's exactly: Property type ▸ Automatic (*Number*) ✓, Checkbox, Date, Date & time, List, Number, Text; Cut, Copy, Paste; Remove in red. Type stored in `.grove/types.json`; nothing in the note rewritten until the next edit, with Obsidian's "Display as number?" mismatch flow. | Flat menu (types inline, no Property type submenu, no Automatic); changing type rewrites the value at once. | Same menu shape, but both "Automatic" and the type are ticked, Remove isn't red; writes the converted value at once (Obsidian doesn't). |
+| Suggestions, "N properties", body-only counts | All work (`status` for `st`, `draft` for a status value). | All work. | All work. |
+| YAML safety | Read-only for `# comment`, `012`/`1e3`/`.5`/`0x1F`/`+5`/`1_000`/`.inf`/`10:30`; `...` closes no frontmatter, as Obsidian. | Read-only for the brief's cases; keeps a `...` closer. | Read-only for the brief's cases; duplicate names fall back to Source (ported). |
+| Export to PDF | No Properties block (observed: Obsidian's default export has none). | Prints the block (differs from Obsidian; not observed). | No block (observed). |
+| All properties view | Obsidian's layout, sorts, filter, `["name"]` search, type submenu on right-click; core plugin. | Works; core plugin. | Works; core plugin; smallest. |
+| Missing-note links | Link colour at 70% opacity (as observed in Obsidian), in Live Preview and Reading. | Faint grey at 50% (`--text-faint`), not Obsidian's look; Obsidian was not observed this round. | 70% opacity, as Obsidian. |
+| Move to new window | Tab menu + palette; checked in a Tauri window on Xvfb. A failed save still closed the tab (fixed at merge). | Tab menu + palette, mock only. | Tab menu + palette; refuses to close the tab if the save/open fails or the tab changed (ported). |
+| Wheel zoom (item 6) | Label size in whole device pixels (5 lines): WebKitGTK wheel p95 19–24 → 17–20 ms. | Skipped. | Skipped. |
+| Backend | One command, `frontmatter`, + `allow-frontmatter`. | One command, `note_frontmatters`, + permission. | None (reads notes in batches for a lazy snapshot; ~125 ms cold on 1,000 notes). |
+| Net lines | +1,428 | +1,884 (over the +1,500 cap) | **+493** |
+
+**Lockdown:** all three pass `npm run audit:offline`, `npm test`, `cargo build` and `cargo test`; none adds a dependency, network call, CSP or `tauri.conf.json` change.
+
+## Ideas from the other two
+
+- **Codex (ported in `fb10dd7`):** a frontmatter naming a property twice (any case) stays read-only instead of being rewritten; Move to new window writes the note directly (the autosave only logs a failure) and keeps the tab when the save or open fails, or when the tab navigated or was edited during the handoff. Also worth keeping in mind: its whole round was +493 lines with no backend change.
+- **Grok (not ported):** a flat fast path so simple graph filters keep their old matcher, and the search runner split out behind a fake search function so it is unit-tested without the backend (`searchRun.test.ts`), plus a properties-index test. The merged `shell/propertyIndex.ts` has no test of its own yet; round 11 adds one.
+
+## Merged line counts (from `rebuild/app`)
+
+| | Round 9 merged (`5ff2789`) | Round 10 merged | Change |
+|---|---:|---:|---:|
+| TypeScript, app | 15,240 | 16,380 | +1,140 |
+| TypeScript, tests | 1,445 | 1,623 | +178 |
+| CSS | 3,144 | 3,191 | +47 |
+| Rust | 3,129 | 3,202 | +73 |
+| **Total** | **22,958** | **24,396** | **+1,438** |
+
+Largest files: `workspace.ts` 761, `shell/pane.ts` 743, `graph/view.ts` 733, `styles/settings.css` 681, `editor/properties.ts` 622. None over 800. New files: `shell/searchView.ts`, `shell/searchFacts.ts`, `shell/propertyIndex.ts`, `shell/propertiesView.ts`, `shell/suggest.ts`; `graph/query.ts` removed (one parser in `shell/searchQuery.ts`).
+
+## Known gaps left after the merge
+
+- Search: no match-case toggle or sort menu in the pane; the result count counts files, Obsidian's counts matches ("5 results" for one note); long result lines are cut with "…" where Obsidian wraps them; no collapse chevron on result files; no regex, `section:`, `block:`, `task:`; at most five lines per note.
+- Properties: the "N properties" item isn't clickable (no File properties view); Rename and Delete property in the All properties menu are missing; a suggested name starts as Text, not its vault type; tag-field suggestions did not appear in the headless check when the field was focused from script (check by hand).
+- Word count differs slightly from Obsidian's on the same note (16 vs 18 words on `Project`).
+- Graph wheel zoom p95 is at the 20 ms edge on Xvfb; link stroking remains the cost.
+
+---
+
+# Claude's round notes (as written on `rebuild/r10-claude`)
 
 All six items are done; the gaps that remain are listed at the end. Branch `rebuild/r10-claude`, from `5ff2789`.
 
