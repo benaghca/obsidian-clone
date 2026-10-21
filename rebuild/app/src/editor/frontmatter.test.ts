@@ -58,6 +58,7 @@ test("properties and their types, as Obsidian reads them", () => {
 test("YAML Grove can't place line by line is shown as source", () => {
   expect(read("---\nnot a property\n---\n").props).toBeNull();
   expect(read("---\n- a list at the top\n---\n").props).toBeNull();
+  expect(read("---\nname: first\nName: second\n---\n").props).toBeNull();
   expect(read("---\n---\n").props).toEqual([]);
 });
 

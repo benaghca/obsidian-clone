@@ -213,6 +213,7 @@ const hasComment = (line: string) => /(^|\s)#/.test(line.replace(/"(?:[^"\\]|\\.
 /** The properties in a frontmatter's lines, or null if a line isn't one Grove can place. */
 export function readProperties(lines: readonly string[]): Property[] | null {
   const props: Property[] = [];
+  const keys = new Set<string>();
   const continues = (j: number) => /^[ \t]/.test(lines[j]) || /^-([ \t]|$)/.test(lines[j]);
   let i = 0;
   while (i < lines.length) {
@@ -223,7 +224,9 @@ export function readProperties(lines: readonly string[]): Property[] | null {
     }
     const m = KEY_LINE.exec(lines[i]);
     const key = m && unquoteKey(m[1]);
-    if (!m || key === null) return null;
+    // A name given twice (in any case) is ambiguous YAML: the block stays read-only, as Source.
+    if (!m || key === null || keys.has(key.toLowerCase())) return null;
+    keys.add(key.toLowerCase());
     // The lines under the key: indented ones, `- item` ones, and blank ones between those.
     let j = i + 1;
     for (let k = j; k < lines.length; k++) {

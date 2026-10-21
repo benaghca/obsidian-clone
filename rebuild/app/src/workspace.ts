@@ -282,9 +282,15 @@ export class Workspace {
   async moveToWindow(tab: Tab) {
     const path = tab.path;
     if (!path) return;
-    await this.editors.flush((p) => p === path);
+    // Write directly, not through the autosave (which only logs a failure): a failed save or open keeps the tab.
+    const doc = this.editors.doc(path);
+    if (doc) {
+      await api.writeNote(path, doc.toString());
+      this.written(path);
+    }
     await api.openNoteWindow(path);
-    this.closeTab(tab);
+    // Navigating or typing in the tab during the awaits keeps it here too.
+    if (tab.path === path && this.editors.doc(path) === doc && this.groupOf(tab)) this.closeTab(tab);
   }
 
   closeTab(tab: Tab) {
