@@ -7,7 +7,7 @@
 use crate::fsutil::{self, atomic_write};
 use crate::index::Index;
 use crate::model::{push_change, ChangeKind, FileEntry, LinkIndex, SearchHit, VaultChanged};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime};
@@ -172,6 +172,10 @@ impl Vault {
 
     pub fn link_index(&self) -> LinkIndex {
         self.index.link_index()
+    }
+
+    pub fn frontmatter(&self, paths: Option<&[String]>) -> BTreeMap<String, String> {
+        self.index.frontmatter(paths)
     }
 
     pub fn is_own_write(&self, rel: &str, now: Instant) -> bool {

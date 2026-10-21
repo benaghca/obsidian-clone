@@ -107,6 +107,35 @@ export function resolveLink(target: string, from: string | null, notes: NoteLike
   return (matches.find((n) => parentDir(n.path) === fromDir) ?? [...matches].sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0]).path;
 }
 
+/**
+ * A quick test of whether a link target points at a file in the vault (to
+ * draw links to missing notes faded): sets of the files' names and paths,
+ * made once per file list, so a test costs no scan of the vault. Paths it
+ * can't place itself ("../Note", a partial path) go through resolveLink.
+ */
+export function linkTargets(files: readonly { path: string; is_dir: boolean }[], notes: NoteLike[]) {
+  const names = new Set<string>();
+  const paths = new Set<string>();
+  for (const f of files) {
+    if (f.is_dir) continue;
+    const lower = f.path.toLowerCase();
+    paths.add(lower).add(stripMd(lower));
+    names.add(fileName(lower)).add(nameOf(lower));
+  }
+  return (target: string, from: string | null): boolean => {
+    let t = target.split("#")[0].trim();
+    if (!t) return true; // a heading in the same note
+    try {
+      if (/%[0-9a-f]{2}/i.test(t)) t = decodeURIComponent(t);
+    } catch {
+      // not encoded after all
+    }
+    const lower = t.toLowerCase();
+    if (!lower.includes("/")) return names.has(lower);
+    return paths.has(lower) || resolveLink(t, from, notes) !== null;
+  };
+}
+
 const WIKILINK = /(!?)\[\[([^\]|#\n]*)(#[^\]|\n]*)?(\|[^\]\n]*)?\]\]/g;
 const MDLINK = /(!?)\[([^\]\n]*)\]\(([^)\s]+)\)/g;
 

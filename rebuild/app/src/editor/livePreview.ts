@@ -5,7 +5,7 @@
 // with document length.
 
 import { syntaxTree } from "@codemirror/language";
-import { Facet, type Range, type Text } from "@codemirror/state";
+import { Facet, type Range, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -21,6 +21,9 @@ import { editorHost } from "./host";
 
 /** Reading view: render everything, as if the selection touched nothing. */
 export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
+
+/** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
+export const filesChanged = StateEffect.define<null>();
 
 /** An empty span drawn by CSS: a list bullet, a horizontal rule, the external link icon. */
 class SpanWidget extends WidgetType {
@@ -140,6 +143,11 @@ function build(view: EditorView): DecorationSet {
   const touches = (from: number, to: number) => sel.some((r) => r.from <= to && r.to >= from);
   const touchesLines = (from: number, to: number) => touches(doc.lineAt(from).from, doc.lineAt(to).to);
   const decos: Range<Decoration>[] = [];
+  // Links to missing notes are faded, as in Obsidian: wikilinks in both
+  // views, markdown links to notes only in Reading view. One set lookup per
+  // link drawn (links/internal.ts linkTargets).
+  const host = state.facet(editorHost);
+  const missing = (href: string) => !!host?.linkExists && !host.linkExists(href, view);
 
   const hide = (from: number, to: number) => {
     if (to > from) decos.push(hidden.range(from, to));
@@ -278,9 +286,11 @@ function build(view: EditorView): DecorationSet {
       return;
     }
     hide(node.from, textFrom);
-    mark("cm-link cm-rendered-link", textFrom, textTo, href);
+    const unresolved = !!href && state.facet(readingMode) && isNotePath(href) && missing(href);
+    mark(`cm-link cm-rendered-link${unresolved ? " is-unresolved" : ""}`, textFrom, textTo, href);
     hide(textTo, node.to);
-    decos.push(externalIcon.range(node.to));
+    // Only links that leave the vault get the external-link arrow (Obsidian's links to notes and headings have none).
+    if (href && /^[a-z][a-z0-9+.-]*:/i.test(href.trim())) decos.push(externalIcon.range(node.to));
   }
 
   // Only remote images are rendered (as a link chip, never fetched); local
@@ -300,15 +310,16 @@ function build(view: EditorView): DecorationSet {
     if (!target) return;
     const alias = node.getChild("WikiLinkAlias");
     const href = doc.sliceString(target.from, target.to).trim();
+    const cls = missing(href) ? "cm-wikilink is-unresolved" : "cm-wikilink";
     if (touches(node.from, node.to)) {
       for (const m of node.getChildren("WikiLinkMark")) mark("cm-formatting cm-formatting-link", m.from, m.to);
-      mark("cm-wikilink", target.from, target.to, href);
-      if (alias) mark("cm-wikilink", alias.from, alias.to, href);
+      mark(cls, target.from, target.to, href);
+      if (alias) mark(cls, alias.from, alias.to, href);
       return;
     }
     const shown = alias ?? target;
     hide(node.from, shown.from);
-    mark("cm-wikilink cm-rendered-link", shown.from, shown.to, href);
+    mark(`${cls} cm-rendered-link`, shown.from, shown.to, href);
     hide(shown.to, node.to);
   }
 
@@ -352,7 +363,8 @@ const livePreviewPlugin = ViewPlugin.fromClass(
         u.selectionSet ||
         u.focusChanged ||
         syntaxTree(u.startState) !== syntaxTree(u.state) ||
-        u.startState.facet(readingMode) !== u.state.facet(readingMode)
+        u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
+        u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
       ) {
         this.decorations = build(u.view);
       }

@@ -69,7 +69,7 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
         : null;
       const self = h(
         "div",
-        { class: "tree-item-self tag-pane-tag", title: `#${n.tag}`, onclick: () => searchFor(`#${n.tag}`) },
+        { class: "tree-item-self tag-pane-tag", title: `#${n.tag}`, onclick: () => searchFor(`tag:#${n.tag}`) },
         chevron,
         h("div", { class: "tree-item-inner" }, h("span", { class: "tag-pane-tag-text" }, `#${depth ? n.name : n.tag}`)),
         h("div", { class: "tree-item-flair" }, n.count.toLocaleString()),

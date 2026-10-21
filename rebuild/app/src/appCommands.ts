@@ -319,6 +319,7 @@ export function registerAppCommands(parts: AppParts) {
     // Splits. Obsidian has no default hotkeys for these.
     { id: "workspace:split-vertical", name: "Split right", icon: "separator-vertical", run: () => ws.split(ws.active, "right") },
     { id: "workspace:open-in-new-window", name: "Open current tab in new window", icon: "picture-in-picture-2", when: hasNote, run: () => api.openNoteWindow(ws.active.path!) },
+    { id: "workspace:move-to-new-window", name: "Move current tab to new window", icon: "picture-in-picture", when: hasNote, run: () => ws.moveToWindow(ws.active) },
     { id: "workspace:export-pdf", name: "Export to PDF...", icon: "file-down", when: hasNote, run: exportPdf },
     { id: "workspace:split-horizontal", name: "Split down", icon: "separator-horizontal", run: () => ws.split(ws.active, "bottom") },
     paneCommand("editor:focus-left", "Focus on tab group to the left", "left"),
@@ -431,6 +432,7 @@ export function registerAppCommands(parts: AppParts) {
       () => parts.toggleBacklinksInDocument(), hasNote),
     { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", plugin: "outgoing-link", icon: "link-2", run: () => showRight("outgoing") },
     { id: "tag-pane:open", name: "Tags view: Show tags", plugin: "tag-pane", icon: "tags", run: () => showRight("tags") },
+    { id: "properties:open", name: "Properties view: Show all properties", plugin: "properties", icon: "archive", run: () => showRight("properties") },
     { id: "outline:open", name: "Outline: Show outline", plugin: "outline", icon: "list", run: () => showRight("outline") },
     // Graph view: the global graph in a tab (Obsidian's Ctrl/Cmd+G), and the
     // open note's local graph to the right (as Obsidian opens it).

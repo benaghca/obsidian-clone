@@ -30,6 +30,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
   - `unresolved` (added in round 7): per note, the link targets (wikilinks and markdown links) that match no file, as written without heading, alias or a markdown link's `.md`, deduplicated case-insensitively. Notes with none are omitted.
   - Links in fenced or inline code are skipped in all four.
 
+- `frontmatter(paths?: string[]) -> { [path]: string }` — each note's frontmatter block, from its first line (`---`) to the closing `---` (both included), lines joined with `\n`; for `paths` only when given, every note otherwise. Notes without frontmatter (or with more than 2,000 lines of it) are left out. Read from the index, never from disk. For the properties index (All properties view, property suggestions, `[property]` search). Added in round 10.
 - `open_note_window(note: String) -> ()` — "Open in new window": a window of its own (label `note-<n>`, the main window's settings, navigation guard and capability) on `index.html?note=<note>`. `note` is the vault path, percent-encoded in full (only `A-Za-z0-9%-._~`); anything else is refused. Added in round 9.
 
 ## Events (backend emits)

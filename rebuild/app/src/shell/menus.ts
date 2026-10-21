@@ -254,7 +254,7 @@ export function createMenus(host: MenuHost) {
    * The file and view items shared by the active tab's menu and "More
    * options": view modes, splits, file actions, find, linked views.
    */
-  function viewItems(tab: Tab, path: string): MenuItems {
+  function viewItems(tab: Tab, path: string, tabMenu = false): MenuItems {
     const reading = tab.mode === "reading";
     const onTab = (fn: () => void) => () => {
       ws.activate(tab);
@@ -287,6 +287,8 @@ export function createMenus(host: MenuHost) {
           action: onTab(() => commands.run("editor:toggle-source")),
         }),
       SEPARATOR,
+      // The tab's own menu can also move it (Obsidian's tab menu has this; More options doesn't).
+      tabMenu && commands.menuItem("workspace:move-to-new-window", { title: "Move to new window", action: () => void ws.moveToWindow(tab).catch(warn(`move ${path} to a new window`)) }),
       commands.menuItem("workspace:split-vertical", { action: () => ws.split(tab, "right") }),
       commands.menuItem("workspace:split-horizontal", { action: () => ws.split(tab, "bottom") }),
       openInNewWindow(path),
@@ -330,7 +332,7 @@ export function createMenus(host: MenuHost) {
       { title: "Close all", icon: "x", action: () => ws.closeAll(group) },
       SEPARATOR,
       t.pinned ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) } : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
-      ...(isActive && t.path ? viewItems(t, t.path) : []),
+      ...(isActive && t.path ? viewItems(t, t.path, true) : []),
       ...(isActive && !t.path && t.type
         ? [SEPARATOR, ...graphViewItems(t)]
         : []),

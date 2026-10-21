@@ -15,6 +15,7 @@ fn main() {
             "delete_path",
             "search",
             "link_index",
+            "frontmatter",
             "read_config",
             "write_config",
             "open_note_window",

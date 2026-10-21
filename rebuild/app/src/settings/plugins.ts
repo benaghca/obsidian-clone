@@ -64,6 +64,12 @@ export const PLUGINS: CorePlugin[] = [
     icon: "list",
   },
   {
+    id: "properties",
+    name: "Properties view",
+    desc: "Show every property in the vault and how many notes use it. Turning it off removes the All properties tab, its command and the property count in the status bar.",
+    icon: "archive",
+  },
+  {
     id: "switcher",
     name: "Quick switcher",
     desc: "Jump to any note from the keyboard with Ctrl+O. Turning it off removes the switcher, its hotkey, its ribbon button and Go to file.",

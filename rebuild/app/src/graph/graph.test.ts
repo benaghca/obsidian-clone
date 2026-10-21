@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import type { LinkIndex } from "../api";
 import { GRAPH, LOCAL_GRAPH, sanitize, serialize, defaults } from "../settings/schema";
 import { buildGraph, type GraphModel, nodeColor, nodeRadius } from "./data";
-import { isEmptyQuery, matchesQuery, parseGraphQuery } from "./query";
+import { matches, parseQuery } from "../shell/searchQuery";
 import { ALPHA_MIN, Simulation } from "./sim";
 
 const links = (outgoing: Record<string, string[]>, extra: Partial<LinkIndex> = {}): LinkIndex => ({ outgoing, backlinks: {}, ...extra });
@@ -85,16 +85,16 @@ test("colour groups colour notes only, as observed in Obsidian", () => {
   expect([nodeColor(byLabel("B"), [isB, all]), nodeColor(byLabel("C"), [isB, all]), nodeColor(byLabel("C"), [isB])]).toEqual([4, 5, 0]);
 });
 
-test("graph queries: words, path:, file: and tag:", () => {
-  const q = parseGraphQuery('river path:"Projects/Big things" file:road tag:#idea');
-  expect(q).toEqual({ text: "river", paths: ["projects/big things"], files: ["road"], tags: ["idea"] });
-  expect(isEmptyQuery(parseGraphQuery("  "))).toBe(true);
+test("graph queries (the search syntax): words, path:, file: and tag:", () => {
+  const q = parseQuery('river path:"Projects/Big things" file:road tag:#idea');
+  expect(parseQuery("  ")).toBeNull();
   const tags = new Map([["Projects/Big things/roadmap.md", ["idea/later"]]]);
-  const hits = new Set(["Projects/Big things/roadmap.md"]);
-  expect(matchesQuery("Projects/Big things/roadmap.md", q, { tags, textHits: hits })).toBe(true);
-  expect(matchesQuery("Projects/Big things/roadmap.md", q, { tags, textHits: new Set() })).toBe(false);
-  expect(matchesQuery("Projects/roadmap.md", q, { tags, textHits: hits })).toBe(false);
-  expect(matchesQuery("a.md", parseGraphQuery("tag:idea"), { tags: new Map([["a.md", ["ideas"]]]) })).toBe(false);
+  const lines = (hits: string[]) => (term: string) => (term === "river" ? new Map(hits.map((p) => [p, [{ line: 1, text: "river" }]])) : undefined);
+  const hit = lines(["Projects/Big things/roadmap.md"]);
+  expect(matches("Projects/Big things/roadmap.md", q, { tags, lines: hit })).toBe(true);
+  expect(matches("Projects/Big things/roadmap.md", q, { tags, lines: lines([]) })).toBe(false);
+  expect(matches("Projects/roadmap.md", q, { tags, lines: hit })).toBe(false);
+  expect(matches("a.md", parseQuery("tag:idea"), { tags: new Map([["a.md", ["ideas"]]]), lines: () => undefined })).toBe(false);
 });
 
 test("the simulation settles, then stops; the same graph lays out the same way", () => {

@@ -19,6 +19,9 @@ import { Bookmarks } from "./bookmarks";
 import { commands, fromStored } from "./commands";
 import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
+import { frontmatterField } from "./editor/frontmatter";
+import { filesChanged } from "./editor/livePreview";
+import { refreshPropertyTypes } from "./editor/properties";
 import { newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
@@ -35,6 +38,7 @@ import { createMenus } from "./shell/menus";
 import { openMergePrompt } from "./shell/mergePrompt";
 import { openMovePrompt } from "./shell/movePrompt";
 import { createPanes } from "./shell/pane";
+import { propertyIndex } from "./shell/propertyIndex";
 import { warmUpPromptGlyphs } from "./shell/prompt";
 import { loadLayout, loadWorkspace, saveLayout, saveWorkspace } from "./shell/prefs";
 import { pathQuery } from "./shell/searchQuery";
@@ -47,6 +51,7 @@ import { Workspace } from "./workspace";
 
 const ws = new Workspace();
 const bookmarks = new Bookmarks(ws);
+ws.propertyHost = propertyIndex(ws).host;
 
 // Commands first: the views show their hotkeys. The views are filled into
 // `parts` below; commands only read them when they run.
@@ -103,7 +108,7 @@ const searchVault = (query: string) => {
   sidebar.searchFor(query);
   docks.setCollapsed("left", false);
 };
-const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(tag) });
+const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(`tag:${tag}`) });
 const sidebar = createSidebar(ws, bookmarks, () => menus);
 const rightSidebar = createRightSidebar(
   ws,
@@ -174,6 +179,8 @@ const backlinks = h(
   icon("link", 14),
   backlinkCount,
 );
+// "N properties": the open note's, as in Obsidian (not shown without frontmatter).
+const propertyCount = h("div", { class: "status-bar-item" });
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
 // The editing mode (Settings → Editor → Show editing mode in status bar), as
@@ -202,7 +209,7 @@ function renderEditorStatus() {
   editorStatus.setAttribute("aria-label", m.title);
   editorStatus.title = m.title;
 }
-const statusBar = h("div", { class: "status-bar" }, backlinks, editorStatus, words, chars);
+const statusBar = h("div", { class: "status-bar" }, backlinks, propertyCount, editorStatus, words, chars);
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 function renderCounts() {
@@ -214,6 +221,9 @@ function renderCounts() {
   const { words: w, chars: c } = counts;
   words.textContent = plural(w, "word");
   chars.textContent = plural(c, "character");
+  const props = ws.view.state.field(frontmatterField, false)?.props?.length ?? 0;
+  propertyCount.hidden = !props || !commands.pluginEnabled("properties");
+  propertyCount.textContent = `${props.toLocaleString()} ${props === 1 ? "property" : "properties"}`;
 }
 function renderBacklinks() {
   const path = ws.active.path;
@@ -222,6 +232,8 @@ function renderBacklinks() {
   backlinkCount.textContent = plural(from.size, "backlink");
 }
 ws.on((change) => {
+  // Links to notes that were just created (or deleted) are drawn again.
+  if (change === "files") for (const g of ws.groups()) ws.editors.viewOf(g).dispatch({ effects: filesChanged.of(null) });
   if (change === "doc" || change === "tabs" || change === "show") renderCounts();
   if (change === "links" || change === "tabs" || change === "show") renderBacklinks();
   if (change === "tabs" || change === "show" || change === "mode") renderEditorStatus();
@@ -319,7 +331,7 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["outline", "outline"], ["localgraph", "graph"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
   }
   // Graph view off: its tabs close, as Obsidian closes the plugin's views.
@@ -377,6 +389,7 @@ function applySettings(file: SettingsFile | null) {
     commands.setCustomHotkeys(Object.fromEntries(Object.entries(settings.hotkeys).map(([id, list]) => [id, list.map(fromStored)])));
   }
   if (all || file === "core-plugins.json") applyPlugins();
+  if (all || file === "types.json") refreshPropertyTypes(ws.groups().map((g) => ws.editors.viewOf(g)));
 }
 settings.on((file) => applySettings(file));
 applySettings(null);

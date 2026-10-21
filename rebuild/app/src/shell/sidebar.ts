@@ -2,7 +2,7 @@
 // with Obsidian's header buttons (new note, new folder, sort order, collapse
 // all), and the vault name footer.
 
-import { api, type FileEntry } from "../api";
+import type { FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
@@ -14,8 +14,8 @@ import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { type MenuItems, showMenu } from "./menu";
-import { matchesPath, parseSearchQuery } from "./searchQuery";
 import type { Menus } from "./menus";
+import { createSearchView } from "./searchView";
 
 export type LeftView = "files" | "search" | "bookmarks";
 
@@ -415,76 +415,4 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
     if (change === "files" || change === "tabs") render();
   });
   return h("div", { class: "nav-files" }, list);
-}
-
-function createSearchView(ws: Workspace): { el: HTMLElement; search(query: string): void } {
-  const input = h("input", { class: "search-input", "aria-label": "Search" });
-  input.placeholder = "Search...";
-  input.type = "search";
-  const results = h("div", { class: "search-results" });
-  let seq = 0;
-
-  input.addEventListener("input", async () => {
-    // `path:` (from "Search in folder") narrows the hits to a folder; on its
-    // own it lists the folder's notes.
-    const { text: query, path: folder } = parseSearchQuery(input.value);
-    const mine = ++seq;
-    let hits = query ? await api.search(query, folder ? 1000 : 100) : [];
-    if (mine !== seq) return;
-    if (folder) {
-      hits = query
-        ? hits.filter((hit) => matchesPath(hit.path, folder)).slice(0, 100)
-        : ws.notes.filter((n) => matchesPath(n.path, folder)).map((n) => ({ path: n.path, line: 0, text: "" }));
-    }
-    // Excluded files (Settings → Files and links) are hidden from search.
-    hits = hits.filter((hit) => !ws.isExcluded(hit.path));
-    const byFile = new Map<string, typeof hits>();
-    for (const hit of hits) byFile.set(hit.path, [...(byFile.get(hit.path) ?? []), hit]);
-    results.replaceChildren(
-      ...[...byFile].map(([path, fileHits]) =>
-        h(
-          "div",
-          { class: "search-result" },
-          h(
-            "div",
-            { class: "search-result-file-title", onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
-            noteName(path),
-            query ? h("span", { class: "search-result-count" }, String(fileHits.length)) : null,
-          ),
-          ...fileHits.filter((hit) => hit.line > 0).slice(0, 5).map((hit) =>
-            h(
-              "div",
-              { class: "search-result-file-match", onclick: () => void ws.open(path, { line: hit.line }) },
-              markMatch(hit.text.trim(), query),
-            ),
-          ),
-        ),
-      ),
-    );
-    if ((query || folder) && !hits.length) results.append(h("div", { class: "pane-empty" }, "No matches found."));
-  });
-
-  return {
-    el: h("div", { class: "search-view" }, h("div", { class: "search-input-container" }, input), results),
-    search(query) {
-      input.value = query;
-      input.dispatchEvent(new Event("input"));
-    },
-  };
-}
-
-function markMatch(text: string, query: string): DocumentFragment {
-  const frag = document.createDocumentFragment();
-  const i = text.toLowerCase().indexOf(query.toLowerCase());
-  if (i < 0) {
-    frag.append(text);
-    return frag;
-  }
-  const start = Math.max(0, i - 40);
-  frag.append(
-    (start ? "…" : "") + text.slice(start, i),
-    h("span", { class: "search-result-file-matched-text" }, text.slice(i, i + query.length)),
-    text.slice(i + query.length),
-  );
-  return frag;
 }

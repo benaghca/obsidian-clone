@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-frontmatter"
+description = "Enables the frontmatter command without any pre-configured scope."
+commands.allow = ["frontmatter"]
+
+[[permission]]
+identifier = "deny-frontmatter"
+description = "Denies the frontmatter command without any pre-configured scope."
+commands.deny = ["frontmatter"]

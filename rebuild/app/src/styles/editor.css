@@ -426,3 +426,9 @@
   font-size: 0.8em;
   cursor: var(--cursor, default);
 }
+/* A link to a note that doesn't exist yet: faded, its underline fainter (Obsidian 1.14.4, light and dark). */
+.cm-wikilink.is-unresolved,
+.cm-link.is-unresolved {
+  opacity: 0.7;
+  text-decoration-color: color-mix(in srgb, var(--text-accent) 30%, transparent);
+}

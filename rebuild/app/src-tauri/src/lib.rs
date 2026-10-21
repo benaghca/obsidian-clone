@@ -24,6 +24,7 @@ mod watch;
 
 use crate::model::{FileEntry, LinkIndex, SearchHit, VaultInfo};
 use crate::watch::WatchMsg;
+use std::collections::BTreeMap;
 use std::sync::{mpsc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -91,6 +92,7 @@ pub fn run() {
             delete_path,
             search,
             link_index,
+            frontmatter,
             read_config,
             write_config,
             open_note_window,
@@ -229,4 +231,13 @@ fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<S
 #[tauri::command]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
     with_vault(&state, |v| Ok(v.link_index()))
+}
+
+/// Each note's frontmatter block (only `paths`' when given), for the properties index.
+#[tauri::command]
+fn frontmatter(
+    state: State<'_, AppState>,
+    paths: Option<Vec<String>>,
+) -> Result<BTreeMap<String, String>, String> {
+    with_vault(&state, |v| Ok(v.frontmatter(paths.as_deref())))
 }

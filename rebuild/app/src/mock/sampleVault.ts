@@ -31,7 +31,12 @@ Type [[ to link another note. Tags like #getting-started and #ideas/later stay r
 Open [[Big note]] to try a 5,000-line note.
 `;
 
-const roadmap = `Planning notes for the rebuild. See [[Welcome]] for the feature tour.
+const roadmap = `---
+status: active
+due: 2026-11-01
+tags: [planning]
+---
+Planning notes for the rebuild. See [[Welcome]] for the feature tour.
 
 ## Milestones
 
@@ -47,7 +52,11 @@ const roadmap = `Planning notes for the rebuild. See [[Welcome]] for the feature
 - Keep \`write_note\` atomic.
 `;
 
-const ideas = `Loose ideas, most of them for #ideas/later.
+const ideas = `---
+status: draft
+rating: 3
+---
+Loose ideas, most of them for #ideas/later.
 
 - Daily notes template, see [[2026-10-19]]
 - A reading queue in [[Reading list]]
@@ -179,6 +188,8 @@ export function syntheticVault(n: number, links = n * 3): Record<string, string>
   const out: Record<string, string> = {};
   notes.forEach((note, i) => {
     const lines = [`# ${note.name}`, "", `Some text about ${note.name}.`, ""];
+    // Every fourth note has properties (for the properties index and [property] search).
+    if (i % 4 === 0) lines.unshift("---", `status: ${["draft", "active", "done"][i % 3]}`, `rating: ${i % 5}`, "---");
     let k = 0;
     for (const b of note.links) {
       const to = notes[b];

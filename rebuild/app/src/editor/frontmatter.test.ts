@@ -1,6 +1,6 @@
 import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
-import { addProperty, type Change, type Frontmatter, readFrontmatter, removeProperty, renameKey, setValue, yamlString } from "./frontmatter";
+import { addProperty, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, setValue, yamlString } from "./frontmatter";
 
 const NOTE = `---
 title: Hello world
@@ -107,4 +107,75 @@ test("adding a property: at the end, or a new frontmatter", () => {
   expect(added).toContain("empty:\nstatus: draft\n---\nBody");
   expect(apply("Body.\n", addProperty(null, "status"))).toBe("---\nstatus:\n---\nBody.\n");
   expect(read(apply("Body.\n", addProperty(null, "my key: x", "list", ["a"]))).props![0]).toMatchObject({ key: "my key: x", value: ["a"] });
+});
+
+test("YAML Grove could misread or rewrite is shown read-only, and stays as written", () => {
+  const note = `---
+octal: 012
+sci: 1e3
+half: .5
+hex: 0x1F
+plus: +5
+under: 1_000
+inf: .inf
+clock: 10:30
+trailing: value # a comment
+list:
+  - a # a comment
+flow: [a, 012]
+fine: 12.5
+---
+Body.
+`;
+  const fm = read(note);
+  expect(Object.fromEntries(fm.props!.map((p) => [p.key, p.type]))).toEqual({
+    octal: "unknown",
+    sci: "unknown",
+    half: "unknown",
+    hex: "unknown",
+    plus: "unknown",
+    under: "unknown",
+    inf: "unknown",
+    clock: "unknown",
+    trailing: "unknown",
+    list: "unknown",
+    flow: "unknown",
+    fine: "number",
+  });
+  // Read-only values keep their text as written, and an edit next to them leaves them alone.
+  expect(prop(fm, "octal").value).toBe("012");
+  expect(prop(fm, "trailing").value).toBe("value # a comment");
+  expect(apply(note, setValue(fm, prop(fm, "fine"), "13"))).toBe(note.replace("fine: 12.5", "fine: 13"));
+  // Text that looks like one of those numbers is quoted when Grove writes it.
+  for (const s of ["012", "1e3", ".5", "0x1F", "10:30"]) expect(yamlString(s)).toBe(JSON.stringify(s));
+});
+
+test("a `...` end line doesn't make frontmatter (as in Obsidian), so nothing is rewritten", () => {
+  expect(readFrontmatter(Text.of(["---", "title: Dots", "...", "Body"]))).toBeNull();
+  // Adding a property puts a new frontmatter above, leaving those lines as they were.
+  expect(apply("---\ntitle: Dots\n...\n", addProperty(null, "a", "text", "b"))).toBe("---\na: b\n---\n---\ntitle: Dots\n...\n");
+});
+
+test("which values fit a chosen type, and how they are shown in it (Obsidian's rules)", () => {
+  const p = (type: Property["type"], value: Property["value"]): Property => ({ key: "k", type, value, line: 0, count: 1 });
+  const text = p("text", "hello"), num = p("number", "42"), yes = p("checkbox", true), date = p("date", "2026-10-21");
+  const time = p("datetime", "2026-10-21T10:30"), list = p("list", ["a", "b"]), empty = p("text", "");
+  const fitting = (v: Property) => ["text", "number", "checkbox", "date", "datetime", "list"].filter((t) => fits(v, t as Property["type"]));
+  expect(fitting(text)).toEqual(["text", "list"]);
+  expect(fitting(num)).toEqual(["number"]);
+  expect(fitting(yes)).toEqual(["checkbox"]);
+  expect(fitting(date)).toEqual(["text", "date", "datetime", "list"]);
+  expect(fitting(time)).toEqual(["text", "date", "datetime", "list"]);
+  expect(fitting(list)).toEqual(["list"]);
+  expect(fitting(empty)).toHaveLength(6);
+  expect(fitting(p("text", "2026-10-21"))).toContain("date"); // a quoted date
+  expect([asType(text, "list"), asType(date, "datetime"), asType(time, "date")]).toEqual([["hello"], "2026-10-21T00:00", "2026-10-21"]);
+  // After "Display as ...?": adapted as Obsidian's Update does.
+  expect([asType(num, "text"), asType(list, "text"), asType(yes, "text"), asType(text, "number"), asType(time, "checkbox"), asType(num, "list")]).toEqual(["42", "a,b", "true", "", false, ["42"]]);
+});
+
+test("a value is written in the type it is shown as", () => {
+  const fm = read("---\nstatus: draft\ncount: 42\n---\n");
+  expect(setValue(fm, prop(fm, "status"), ["draft", "done"], "list").insert).toBe("status:\n  - draft\n  - done");
+  expect(setValue(fm, prop(fm, "count"), "43", "text").insert).toBe('count: "43"');
 });

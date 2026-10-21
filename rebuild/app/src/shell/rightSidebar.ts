@@ -1,4 +1,4 @@
-// Right sidebar: Backlinks, Outgoing links, Tags, Outline and Local graph,
+// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline and Local graph,
 // switched with icon tabs at the top like Obsidian's. Only the selected view,
 // and only while the sidebar is open, does any work.
 
@@ -10,10 +10,11 @@ import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { createOutgoingView } from "./outgoingView";
 import { createOutlineView } from "./outlineView";
+import { createPropertiesView } from "./propertiesView";
 import type { SideView } from "./sideView";
 import { createTagsView } from "./tagsView";
 
-export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "outline", "localgraph"] as const;
+export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "localgraph"] as const;
 export type RightView = (typeof RIGHT_VIEWS)[number];
 
 export interface RightSidebar {
@@ -41,6 +42,7 @@ export function createRightSidebar(
     backlinks: createBacklinksView(ws),
     outgoing: createOutgoingView(ws),
     tags: createTagsView(ws, searchFor),
+    properties: createPropertiesView(ws, searchFor),
     outline: createOutlineView(ws),
     localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
@@ -82,6 +84,7 @@ export function createRightSidebar(
       tab("backlinks", "link", "Backlinks"),
       tab("outgoing", "link-2", "Outgoing links"),
       tab("tags", "tags", "Tags"),
+      tab("properties", "archive", "All properties"),
       tab("outline", "list", "Outline"),
       tab("localgraph", "git-fork", "Local graph"),
     ),
@@ -120,7 +123,7 @@ function createLocalGraphView(ws: Workspace, searchFor: (query: string) => void,
     file: () => file,
     open: (path, where) => void ws.open(path, { where }),
     openMissing: (name, where) => void ws.openLink(name, where),
-    searchTag: (tag) => searchFor(tag),
+    searchTag: (tag) => searchFor(`tag:${tag}`),
     menu,
     panelClosed: true,
   });

@@ -24,6 +24,27 @@ pub(super) struct Note {
     pub(super) lines: Vec<Line>,
 }
 
+/// Frontmatter longer than this many lines is left alone, as the front end does.
+const MAX_FRONTMATTER_LINES: usize = 2000;
+
+impl Note {
+    /// The note's frontmatter block, its `---` lines included, if the note starts with one.
+    pub(super) fn frontmatter(&self) -> Option<String> {
+        if self.lines.first()?.text.trim() != "---" {
+            return None;
+        }
+        let close = 1 + self.lines[1..]
+            .iter()
+            .take(MAX_FRONTMATTER_LINES)
+            .position(|l| l.text.trim() == "---")?;
+        let lines: Vec<&str> = self.lines[..=close]
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        Some(lines.join("\n"))
+    }
+}
+
 pub(super) fn parse_note(content: &str) -> Note {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut links = Vec::new();

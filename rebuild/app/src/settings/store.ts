@@ -13,13 +13,15 @@ import {
   type FileName,
   sanitize,
   sanitizeHotkeys,
+  sanitizeTypes,
   serialize,
   serializeHotkeys,
+  serializeTypes,
   type SettingsOf,
   type StoredHotkey,
 } from "./schema";
 
-export type SettingsFile = FileName | "hotkeys.json";
+export type SettingsFile = FileName | "hotkeys.json" | "types.json";
 
 const WRITE_DELAY = 500;
 
@@ -27,6 +29,7 @@ class SettingsStore {
   private values = new Map<FileName, Record<string, unknown>>();
   private extras = new Map<FileName, Record<string, unknown>>();
   private hotkeyMap: Record<string, StoredHotkey[]> = {};
+  private typeMap: Record<string, string> = {};
   private timers = new Map<SettingsFile, number>();
   private changes = listeners<[file: SettingsFile | null, key: string | null]>();
   /** Called with the file and key that changed (both null after a load). */
@@ -48,6 +51,11 @@ class SettingsStore {
     return this.hotkeyMap;
   }
 
+  /** Property types chosen per name (types.json, in Obsidian's names: "multitext" for lists). */
+  get propertyTypes(): Readonly<Record<string, string>> {
+    return this.typeMap;
+  }
+
   /**
    * Read every settings file of the open vault. A missing file means
    * defaults; an unreadable one, or one that isn't JSON, too (with a
@@ -64,13 +72,14 @@ class SettingsStore {
       }
     };
     const files = Object.keys(FILES) as FileName[];
-    const [hotkeys, ...raws] = await Promise.all([read("hotkeys.json"), ...files.map(read)]);
+    const [hotkeys, types, ...raws] = await Promise.all([read("hotkeys.json"), read("types.json"), ...files.map(read)]);
     files.forEach((file, i) => {
       const { values, extra } = sanitize(FILES[file], raws[i]);
       this.values.set(file, values as Record<string, unknown>);
       this.extras.set(file, extra);
     });
     this.hotkeyMap = sanitizeHotkeys(hotkeys);
+    this.typeMap = sanitizeTypes(types);
     this.changes.emit(null, null);
   }
 
@@ -96,6 +105,17 @@ class SettingsStore {
     this.schedule("hotkeys.json");
   }
 
+  /** Choose a property name's type for the vault; null makes it automatic again. */
+  setPropertyType(key: string, type: string | null) {
+    if ((this.typeMap[key] ?? null) === type) return;
+    const next = { ...this.typeMap };
+    if (type) next[key] = type;
+    else delete next[key];
+    this.typeMap = next;
+    this.changes.emit("types.json", key);
+    this.schedule("types.json");
+  }
+
   /** Write everything still waiting (the window is closing). */
   flush() {
     for (const [file, timer] of [...this.timers]) {
@@ -117,7 +137,9 @@ class SettingsStore {
     const text =
       file === "hotkeys.json"
         ? serializeHotkeys(this.hotkeyMap)
-        : serialize(FILES[file], this.values.get(file) as never, this.extras.get(file));
+        : file === "types.json"
+          ? serializeTypes(this.typeMap)
+          : serialize(FILES[file], this.values.get(file) as never, this.extras.get(file));
     api.writeConfig(file, text).catch((err) => console.warn(`Settings: could not save .grove/${file}`, err));
   }
 }

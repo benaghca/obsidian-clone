@@ -9,9 +9,9 @@ import { EditorView } from "@codemirror/view";
 import { api, type FileEntry, isTauri, type LinkIndex, type VaultInfo } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
-import type { EditorHost, NoteRef } from "./editor/host";
+import type { EditorHost, NoteRef, PropertyHost } from "./editor/host";
 import { type Edge, Layout } from "./layout";
-import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
+import { formatLink, type LinkStyle, linkTargets, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { createNote } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
@@ -69,6 +69,8 @@ export class Workspace {
   isExcluded: (path: string) => boolean = () => false;
   /** Told after a note or folder moved, with the notes as they were before (to update links). */
   onRenamed: ((from: string, to: string, before: NoteRef[]) => void) | null = null;
+  /** The vault's properties, for the Properties block (set by the app). */
+  propertyHost: PropertyHost | null = null;
   /** Each tab group's editor, and the notes they show. */
   readonly editors: NoteEditors;
 
@@ -79,6 +81,7 @@ export class Workspace {
   private closed: ClosedTab[] = [];
   private linkTimer = 0;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
+  private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
 
   constructor() {
     const host: EditorHost = {
@@ -91,6 +94,8 @@ export class Workspace {
         if (group) this.focusGroup(group);
         this.editorMenu?.(view, at, pos, keyboard);
       },
+      properties: () => this.propertyHost,
+      linkExists: (target, view) => this.linkExists(target, this.editors.pathOf(view)),
     };
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {
@@ -218,6 +223,12 @@ export class Workspace {
     return out;
   }
 
+  /** Whether a link target points at a file (sets of names and paths, made once per file list). */
+  linkExists(target: string, from: string | null): boolean {
+    if (this.targets?.files !== this.files) this.targets = { files: this.files, exists: linkTargets(this.files, this.notes) };
+    return this.targets.exists(target, from);
+  }
+
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
   linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
     return formatLink(target, from, this.notes, this.linkStyle(), display, subpath);
@@ -265,6 +276,15 @@ export class Workspace {
     this.editors.present(group);
     this.settle();
     if (focus && tab.path) this.editors.viewOf(group).focus();
+  }
+
+  /** "Move to new window": the note opens in a window of its own (its unsaved edits saved first) and leaves this one. */
+  async moveToWindow(tab: Tab) {
+    const path = tab.path;
+    if (!path) return;
+    await this.editors.flush((p) => p === path);
+    await api.openNoteWindow(path);
+    this.closeTab(tab);
   }
 
   closeTab(tab: Tab) {

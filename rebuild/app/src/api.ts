@@ -100,6 +100,8 @@ export const api = {
   deletePath: (path: string, permanent = false) => call<void>("delete_path", { path, permanent }),
   search: (query: string, limit: number) => call<SearchHit[]>("search", { query, limit }),
   linkIndex: () => call<LinkIndex>("link_index"),
+  /** Each note's frontmatter block (`---` lines included), for `paths` or every note; notes without one are left out. */
+  frontmatter: (paths?: string[]) => call<Record<string, string>>("frontmatter", { paths: paths ?? null }),
   /** A settings file from the vault's .grove folder (null if there is none yet). */
   readConfig: (name: string) => call<string | null>("read_config", { name }),
   /** Write a settings file (JSON) into the vault's .grove folder. */
