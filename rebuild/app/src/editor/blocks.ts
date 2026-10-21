@@ -12,7 +12,7 @@
 
 import { syntaxTree } from "@codemirror/language";
 import { type EditorState, type Range, StateEffect, StateField, type Transaction } from "@codemirror/state";
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type WidgetType } from "@codemirror/view";
+import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, type WidgetType } from "@codemirror/view";
 import type { Tree } from "@lezer/common";
 import { CalloutWidget, calloutHeader } from "./callouts";
 import { frontmatterField } from "./frontmatter";
@@ -140,7 +140,28 @@ const focusSync = ViewPlugin.define((view) => ({
   },
 }));
 
+// Arrow keys step into a block from the line above or below it (its source
+// then shows), as in Obsidian, instead of jumping over it.
+const enter = (dir: 1 | -1) => (view: EditorView) => {
+  const { state } = view;
+  const head = state.selection.main;
+  const line = state.doc.lineAt(head.head);
+  const next = dir > 0 ? line.to + 1 : line.from - 1;
+  const block = head.empty && !state.facet(readingMode) && state.field(blocksField).list.find((b) => b.widget && b.from <= next && b.to >= next);
+  if (!block || next < 0 || next > state.doc.length) return false;
+  const target = state.doc.lineAt(dir > 0 ? block.from : block.to);
+  view.dispatch({ selection: { anchor: Math.min(target.to, target.from + head.head - line.from) }, scrollIntoView: true });
+  return true;
+};
+
 // Rendered text draws its blocks too (a table in a callout, a callout in an embedded note).
 paintWith((state) => scan(state, 0, state.doc.length).map((b) => b.deco.range(b.from, b.to)));
 
-export const blocks = [blocksField, focusSync];
+export const blocks = [
+  blocksField,
+  focusSync,
+  keymap.of([
+    { key: "ArrowDown", run: enter(1) },
+    { key: "ArrowUp", run: enter(-1) },
+  ]),
+];

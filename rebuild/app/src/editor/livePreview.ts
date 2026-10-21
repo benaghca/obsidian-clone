@@ -96,8 +96,8 @@ class RemoteImageWidget extends WidgetType {
 // A code block's language, top right (Live Preview), or its copy button,
 // shown on hover (Reading view), as in Obsidian.
 const LANGUAGES: Record<string, string> = {
-  js: "JavaScript", javascript: "JavaScript", ts: "TypeScript", typescript: "TypeScript", py: "Python", python: "Python",
-  rs: "Rust", rust: "Rust", sh: "Shell", bash: "Bash", json: "JSON", css: "CSS", html: "HTML", md: "Markdown", sql: "SQL",
+  js: "JavaScript", javascript: "JavaScript", ts: "TypeScript", typescript: "TypeScript", python: "Python",
+  rust: "Rust", bash: "Shell", sh: "Shell", json: "JSON", css: "CSS", html: "HTML",
 };
 
 class CodeFlairWidget extends WidgetType {
@@ -310,8 +310,9 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             return;
           case "QuoteMark": {
             // A callout being edited shows all its markers (callouts.ts draws it otherwise).
-            const quote = node.parent!;
-            const callout = quote.name === "Blockquote" && /^\s*>\s?\[!/.test(doc.lineAt(quote.from).text) && touches(quote.from, quote.to);
+            let quote = node.parent;
+            while (quote && quote.name !== "Blockquote") quote = quote.parent;
+            const callout = !!quote && /^\s*>\s?\[!/.test(doc.lineAt(quote.from).text) && touches(quote.from, quote.to);
             if (callout || touchesLines(node.from, node.from)) mark("cm-formatting cm-formatting-quote", node.from, node.to);
             else hideWithSpace(node);
             return;

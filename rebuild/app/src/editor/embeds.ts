@@ -54,8 +54,9 @@ export function embedSection(text: string, sub: string): string | null {
     if (at < 0) return null;
     let a = at;
     let b = at;
-    while (a > 0 && lines[a - 1].trim()) a--;
-    while (b + 1 < lines.length && lines[b + 1].trim()) b++;
+    const inPara = (l: string) => !!l.trim() && !/^#{1,6}\s/.test(l);
+    while (a > 0 && inPara(lines[a - 1])) a--;
+    while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
     lines[at] = lines[at].trimEnd().slice(0, -mark.length);
     return lines.slice(a, b + 1).join("\n");
   }
@@ -70,10 +71,14 @@ export function embedSection(text: string, sub: string): string | null {
     if (start < 0 && m[2].toLowerCase() === want) {
       start = i;
       level = m[1].length;
-    } else if (start >= 0 && m[1].length <= level) return lines.slice(start, i).join("\n");
+    } else if (start >= 0 && m[1].length <= level) return lines.slice(start, i).join("\n").trimEnd();
   }
-  return start < 0 ? null : lines.slice(start).join("\n");
+  return start < 0 ? null : lines.slice(start).join("\n").trimEnd();
 }
+
+/** Whether an embed of `path` shows only a chip: it is the note on screen (`top`) or one it is drawn inside of, or it is too deep. */
+export const embedStopped = (path: string, top: string | null, chain: readonly string[]) =>
+  chain.length >= MAX_DEPTH || path === top || chain.includes(path);
 
 /** A note's text without its frontmatter (an embed doesn't show it). */
 const body = (text: string) => {
@@ -172,7 +177,7 @@ export class NoteEmbedWidget extends WidgetType {
     const { path, chain } = this;
     const open = () => host?.openLink(this.target, false, view);
     if (!path || !embeds) return missingBox(`“${name}” is not created yet. Click to create.`, open);
-    if (chain.length >= MAX_DEPTH || [embeds.pathOf(view), ...chain].includes(path)) {
+    if (embedStopped(path, embeds.pathOf(view), chain)) {
       return h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path));
     }
     const content = h("div", { class: "markdown-embed-content" });
