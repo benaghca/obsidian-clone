@@ -3,10 +3,13 @@
 // YAML that properties use: one `key: value` per property, where the value
 // is text, a number, true or false, a date, a date and time, or a list
 // (`[a, b]` or `- a` lines). Anything else (nested maps, multi-line text,
-// anchors, comments inside a value) is a property of unknown type: shown,
-// never rewritten. A frontmatter Grove can't read line by line at all is
-// shown as source. Each edit replaces only the lines of the property it
-// changes, so the rest of the frontmatter stays exactly as written.
+// anchors, comments inside a value, numbers YAML readers disagree on such
+// as `012` or `1e3`) is a property of unknown type: shown, never rewritten.
+// A frontmatter Grove can't read line by line at all is shown as source.
+// Each edit replaces only the lines of the property it changes, so the rest
+// of the frontmatter stays exactly as written. A property's type can also
+// be chosen (Obsidian's "Property type", kept per name for the vault): a
+// value that doesn't fit it is shown as it is, as Obsidian does.
 // Pure, free of the DOM; tested on its own.
 
 import { StateField, type Text } from "@codemirror/state";
@@ -40,8 +43,9 @@ const MAX_LINES = 2000;
 
 /**
  * The frontmatter's lines (and the 0-based line of its closing `---`): a
- * first line of `---`, up to the next `---` (or `...`). Only those lines are
- * read, never a long note's body.
+ * first line of `---`, up to the next `---`. Only those lines are read,
+ * never a long note's body. A YAML `...` end line doesn't close it, as in
+ * Obsidian (such a note has no frontmatter, so nothing in it is rewritten).
  */
 export function splitFrontmatter(text: string | Iterable<string>): { lines: string[]; close: number } | null {
   const out: string[] = [];
@@ -49,7 +53,7 @@ export function splitFrontmatter(text: string | Iterable<string>): { lines: stri
   for (const raw of typeof text === "string" ? linesOf(text) : text) {
     const line = raw.replace(/\r$/, "");
     if (n === 0 && line.trim() !== "---") return null;
-    if (n > 0 && (line.trim() === "---" || line.trim() === "...")) return { lines: out, close: n };
+    if (n > 0 && line.trim() === "---") return { lines: out, close: n };
     if (n > 0) out.push(line);
     if (++n > MAX_LINES) return null;
   }
@@ -93,7 +97,10 @@ export const frontmatterField = StateField.define<Frontmatter | null>({
 
 const KEY_LINE = /^("(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^\s#\-?:,[\]{}&*!|>'"%@`][^:]*?)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$/;
 const ITEM_LINE = /^([ \t]*)-(?:[ \t]+(.*?))?[ \t]*$/;
-const NUMBER = /^[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+/** A number every YAML reader reads the same way and a number field writes back as written. */
+const NUMBER = /^-?(?:0|[1-9]\d*)(?:\.\d+)?$/;
+/** Anything else YAML may read as a number (`012`, `1e3`, `.5`, `0x1F`, `+1`, `1_000`, `.inf`, `1:30`): read-only. */
+const NUMBERISH = /^[-+]?(?:(?:\.\d+|\d[\d_]*(?:\.[\d_]*)?)(?:e[-+]?\d+)?|0[xob][\da-f_]+|\.(?:inf|nan)|\d[\d_]*(?::[0-5]?\d)+(?:\.[\d_]*)?)$/i;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/;
 
@@ -117,6 +124,7 @@ function scalar(raw: string): Scalar | null {
   if (NUMBER.test(v)) return { kind: "number", text: v };
   if (DATE.test(v)) return { kind: "date", text: v };
   if (DATETIME.test(v)) return { kind: "datetime", text: v };
+  if (NUMBERISH.test(v)) return null;
   return { kind: "string", text: v };
 }
 
@@ -153,6 +161,8 @@ function flowList(v: string): string[] | null {
 
 /** The type Obsidian gives a key whatever its value. */
 const KEY_TYPES: Record<string, PropertyType> = { tags: "tags", aliases: "aliases", cssclasses: "list" };
+/** A key's fixed type (tags, aliases, cssclasses), which the "Property type" menu can't change. */
+export const fixedType = (key: string): PropertyType | undefined => KEY_TYPES[key.toLowerCase()];
 
 function property(key: string, inline: string | undefined, rest: string[], line: number): Property {
   const count = 1 + rest.length;
@@ -241,6 +251,68 @@ function unquoteKey(raw: string): string | null {
   return raw.startsWith("'") ? raw.slice(1, -1).replace(/''/g, "'") : raw.trim();
 }
 
+// ----- types -----
+
+/** The types the "Property type" menu offers, in its order (Obsidian 1.14.4). */
+export const CHOOSABLE_TYPES: PropertyType[] = ["checkbox", "date", "datetime", "list", "number", "text"];
+
+/** Types as Obsidian names them in its types.json, and in "Display as ...?". */
+export const STORED_TYPES: Record<PropertyType, string> = {
+  text: "text",
+  list: "multitext",
+  number: "number",
+  checkbox: "checkbox",
+  date: "date",
+  datetime: "datetime",
+  tags: "tags",
+  aliases: "aliases",
+  unknown: "unknown",
+};
+
+const isText = (p: Property) => p.type === "text" || p.type === "date" || p.type === "datetime";
+
+/**
+ * Whether a value can be shown as `type` as it is (Obsidian's rules, as
+ * observed): any text as text, a date as a date or a date and time, any
+ * text or list as a list; an empty value as anything. Numbers, checkboxes
+ * and lists fit only their own type.
+ */
+export function fits(p: Property, type: PropertyType): boolean {
+  if (p.type === type || (p.type === "text" && p.value === "")) return true;
+  if (type === "text") return isText(p);
+  if (type === "date" || type === "datetime") return isText(p) && (DATE.test(p.value as string) || DATETIME.test(p.value as string));
+  if (type === "list") return isText(p) || p.type === "tags" || p.type === "aliases";
+  return false;
+}
+
+/**
+ * The value shown as `type`: as it is when it fits, otherwise adapted as
+ * Obsidian's "Display as ...?" Update does (a list's items joined by commas
+ * as text, text that isn't a number as an empty number, anything but `true`
+ * as an unticked checkbox). Shown only: it is written when it is edited.
+ */
+export function asType(p: Property, type: PropertyType): Property["value"] {
+  const v = p.value;
+  if (p.type === type) return v;
+  const text = Array.isArray(v) ? v.join(",") : String(v);
+  switch (type) {
+    case "checkbox":
+      return text === "true";
+    case "number":
+      return NUMBER.test(text) ? text : "";
+    case "date":
+      return DATE.test(text.slice(0, 10)) ? text.slice(0, 10) : "";
+    case "datetime":
+      return DATETIME.test(text) ? text : DATE.test(text) ? `${text}T00:00` : "";
+    case "list":
+    case "tags":
+    case "aliases":
+      return Array.isArray(v) ? v : text ? [text] : [];
+    default:
+      return text;
+  }
+}
+
 // ----- writing -----
 
 /** A string as a YAML scalar: plain when that reads back as the same text, double-quoted otherwise. */
@@ -279,9 +351,9 @@ const lastLineEnd = (fm: Frontmatter, p: Property) => fm.starts[p.line + p.count
 /** The key as written on a property's line (quoted or not). */
 const writtenKey = (fm: Frontmatter, p: Property) => KEY_LINE.exec(fm.lines[p.line])![1];
 
-/** Set a property's value: its lines are replaced, the key kept as written. */
-export function setValue(fm: Frontmatter, p: Property, value: Property["value"]): Change {
-  const lines = formatProperty(p.key, p.type, value);
+/** Set a property's value (written as `type`): its lines are replaced, the key kept as written. */
+export function setValue(fm: Frontmatter, p: Property, value: Property["value"], type = p.type): Change {
+  const lines = formatProperty(p.key, type, value);
   const insert = writtenKey(fm, p) + lines.slice(lines.indexOf(":", yamlKey(p.key).length));
   return { from: fm.starts[p.line], to: lastLineEnd(fm, p), insert };
 }
