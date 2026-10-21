@@ -1,5 +1,6 @@
 // "Move file to...": the shared prompt listing the vault's folders.
 
+import { moveFile } from "../fileOps";
 import { parentDir } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
@@ -39,7 +40,7 @@ export function openMovePrompt(ws: Workspace, path: string) {
       row.append(h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(label(item.path), item.indices))));
     },
     choose(item) {
-      ws.moveTo(path, item.path).catch((err) => console.warn(`Could not move ${path}`, err));
+      moveFile(ws, path, item.path).catch((err) => console.warn(`Could not move ${path}`, err));
     },
   });
 }

@@ -4,6 +4,7 @@
 
 import { api } from "../api";
 import type { NoteRef } from "../editor/host";
+import { updateNoteText } from "../fileOps";
 import { isUnder, movedPath } from "../paths";
 import type { Workspace } from "../workspace";
 import { type LinkStyle, rewriteLinks } from "./internal";
@@ -62,6 +63,6 @@ export async function updateLinks(
     }
   }
   if (!links || (ask && !(await ask(links, edits.length)))) return 0;
-  for (const e of edits) await ws.updateText(e.path, e.text).catch((err) => console.warn(`Could not update links in ${e.path}`, err));
+  for (const e of edits) await updateNoteText(ws, e.path, e.text).catch((err) => console.warn(`Could not update links in ${e.path}`, err));
   return links;
 }

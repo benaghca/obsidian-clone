@@ -12,6 +12,7 @@ import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
+import { renameFile } from "../fileOps";
 import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -709,7 +710,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       if (!path) return;
       const name = (title.textContent ?? "").replace(/\n/g, "");
       try {
-        await ws.rename(path, name);
+        await renameFile(ws, path, name);
       } catch (err) {
         console.warn(err);
         title.textContent = noteName(path);

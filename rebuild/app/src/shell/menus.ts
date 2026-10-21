@@ -11,6 +11,7 @@ import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { copySelection, paste } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
+import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, type Tab, tabTitle } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -69,7 +70,7 @@ export function createMenus(host: MenuHost) {
     title,
     icon: "trash-2",
     danger: true,
-    action: () => ws.remove(path).catch(warn(`delete ${path}`)),
+    action: () => deleteFile(ws, path).catch(warn(`delete ${path}`)),
   });
 
   const renameItem = (action: () => void): MenuEntry => ({ title: "Rename...", icon: "pen-line", action });
@@ -107,7 +108,7 @@ export function createMenus(host: MenuHost) {
       isNote && openInNewTab(() => void ws.open(path, { where: "tab" })),
       isNote && openToRight(() => void ws.open(path, { where: "right" })),
       SEPARATOR,
-      isNote && { title: "Make a copy", icon: "files", action: () => ws.makeCopy(path).catch(warn(`copy ${path}`)) },
+      isNote && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
       moveItem(path),
       bookmarkItem(path),
       isNote && mergeItem(path),

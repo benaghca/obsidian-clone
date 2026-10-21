@@ -6,6 +6,7 @@ import { api, type FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
+import { newFolder, renameFile } from "../fileOps";
 import { compareNames, noteName } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -208,7 +209,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       label.contentEditable = "false";
       const name = label.textContent ?? "";
       label.textContent = shown;
-      if (commit) ws.rename(path, name).catch((err) => console.warn(err));
+      if (commit) renameFile(ws, path, name).catch((err) => console.warn(err));
     };
     label.addEventListener("blur", () => finish(true), { once: true });
     label.onkeydown = (ev) => {
@@ -223,7 +224,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   async function newFolderIn(parent: string) {
     try {
-      const path = await ws.newFolder(parent);
+      const path = await newFolder(ws, parent);
       if (parent) expandTo(path);
       startRename(path);
     } catch (err) {

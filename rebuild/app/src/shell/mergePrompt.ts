@@ -2,6 +2,7 @@
 // The chosen note gets this note's text appended, and this note is deleted
 // (to the vault's .trash), like Obsidian's Note composer.
 
+import { mergeNote } from "../fileOps";
 import { noteName, parentDir } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
@@ -43,7 +44,7 @@ export function openMergePrompt(ws: Workspace, path: string) {
       row.append(content);
     },
     choose(item) {
-      ws.mergeInto(path, item.path).catch((err) => console.warn(`Could not merge ${path}`, err));
+      mergeNote(ws, path, item.path).catch((err) => console.warn(`Could not merge ${path}`, err));
     },
   });
 }

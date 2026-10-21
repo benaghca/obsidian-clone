@@ -10,6 +10,7 @@ import { Bookmarks } from "./bookmarks";
 import { commands, fromStored } from "./commands";
 import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
+import { newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
 import { excluder } from "./settings/exclude";
@@ -67,8 +68,7 @@ const menus = createMenus({
   },
   renameActive: () => panes.focusTitle(true),
   newNoteIn: (folder) =>
-    void ws
-      .newNote(folder)
+    void newNote(ws, folder)
       .then(() => panes.focusTitle(true))
       .catch((err) => console.warn("Could not create a note", err)),
   newFolderIn: (folder) => {

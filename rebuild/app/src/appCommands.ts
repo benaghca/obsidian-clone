@@ -12,6 +12,7 @@ import type { EditorView } from "@codemirror/view";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
+import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import {
   BLOCKS,
@@ -102,8 +103,8 @@ export function registerAppCommands(parts: AppParts) {
     parts.docks.setCollapsed("right", false);
   };
 
-  async function newNote(where?: OpenWhere) {
-    await ws.newNote("", where);
+  async function createNewNote(where?: OpenWhere) {
+    await newNote(ws, "", where);
     parts.panes.focusTitle(true);
   }
 
@@ -140,7 +141,7 @@ export function registerAppCommands(parts: AppParts) {
     const existing = ws.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
     if (existing) return ws.open(existing.path);
     const template = daily().template.trim() ? ws.resolve(daily().template.trim(), null) : null;
-    const entry = await ws.createNote(path, await templateText(template, noteName(path)));
+    const entry = await createNote(ws, path, await templateText(template, noteName(path)));
     await ws.open(entry.path);
   }
 
@@ -248,14 +249,14 @@ export function registerAppCommands(parts: AppParts) {
       hotkeys: mod("o"),
       run: () => openQuickSwitcher(ws),
     },
-    { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => newNote() },
-    { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => newNote(false) },
+    { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => createNewNote() },
+    { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => createNewNote(false) },
     {
       id: "file-explorer:new-file-in-new-pane",
       name: "Create note to the right",
       icon: "file-plus",
       hotkeys: mod("n", { shift: true }),
-      run: () => newNote("right"),
+      run: () => createNewNote("right"),
     },
     { id: "file-explorer:new-folder", name: "Files: Create new folder", icon: "folder-plus", run: () => parts.left.newFolderIn("") },
     { id: "daily-notes", name: "Daily notes: Open today's daily note", plugin: "daily-notes", icon: "calendar-days", run: () => openDailyNote() },
@@ -433,14 +434,14 @@ export function registerAppCommands(parts: AppParts) {
       name: "Delete current file",
       icon: "trash-2",
       when: hasNote,
-      run: () => ws.remove(note()).catch((err) => console.warn("Could not delete", err)),
+      run: () => deleteFile(ws, note()).catch((err) => console.warn("Could not delete", err)),
     },
     {
       id: "file-explorer:duplicate-file",
       name: "Make a copy of the current file",
       icon: "files",
       when: hasNote,
-      run: () => ws.makeCopy(note()).catch((err) => console.warn("Could not copy", err)),
+      run: () => copyNote(ws, note()).catch((err) => console.warn("Could not copy", err)),
     },
     {
       id: "file-explorer:move-file",

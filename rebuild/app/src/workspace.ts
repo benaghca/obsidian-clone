@@ -13,9 +13,9 @@ import type { EditorHost, NoteRef } from "./editor/host";
 import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
-import { duration, nextFrame, smoothScrollTo } from "./motion";
+import { createNote } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
-import { fileName, isUnder, movedPath, noteName, parentDir } from "./paths";
+import { noteName } from "./paths";
 import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
 import { type Group, type OpenWhere, parseViewEntry, type Tab, type ViewType, viewEntry } from "./tabs";
 
@@ -231,7 +231,7 @@ export class Workspace {
   }
 
   /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
-  private touch(path: string) {
+  touch(path: string) {
     const entry = this.files.find((f) => f.path === path);
     if (entry) entry.mtime_ms = Date.now();
   }
@@ -550,7 +550,7 @@ export class Workspace {
   /** Put the caret (or a selection) in the active pane's note and glide it into view. */
   jumpTo(selection: { anchor: number; head?: number }) {
     this.view.dispatch({ selection });
-    void this.glideTo(selection.anchor);
+    void this.editors.glide(this.activeGroup, selection.anchor);
     this.view.focus();
   }
 
@@ -568,39 +568,9 @@ export class Workspace {
         const folder = this.newNoteFolder();
         file = folder ? `${folder}/${file}` : file;
       }
-      path = (await this.createNote(`${file}.md`)).path;
+      path = (await createNote(this, `${file}.md`)).path;
     }
     await this.open(path, { where, heading, group });
-  }
-
-  /**
-   * Smoothly scroll a document position to the middle of the active pane. A
-   * long jump cuts to one screen short of the target first, so the editor
-   * never has to render every line in between.
-   */
-  private async glideTo(pos: number) {
-    const scroller = this.scroller;
-    const view = this.view;
-    if (!scroller || duration("slow") <= 0) {
-      view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
-      return;
-    }
-    const targetTop = () => {
-      const block = view.lineBlockAt(pos);
-      const docTop = view.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
-      const top = docTop + block.top - (scroller.clientHeight - block.height) / 2;
-      return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, top));
-    };
-    const distance = targetTop() - scroller.scrollTop;
-    if (Math.abs(distance) > 2 * scroller.clientHeight) {
-      scroller.scrollTop = targetTop() - Math.sign(distance) * scroller.clientHeight;
-      // Two frames: CodeMirror reads the new viewport, then measures its lines.
-      await nextFrame();
-      await nextFrame();
-    }
-    // Re-aimed every frame: line heights estimated before CodeMirror measured
-    // them can move the target a little while the scroll is under way.
-    await smoothScrollTo(scroller, targetTop);
   }
 
   /** Back and forward walk the active pane's own history. */
@@ -687,76 +657,15 @@ export class Workspace {
     return true;
   }
 
-  // ----- files -----
-
-  async createNote(path: string, content = ""): Promise<FileEntry> {
-    const entry = await api.createNote(path, content);
-    await this.refreshFiles();
-    return entry;
-  }
-
-  /**
-   * Create "Untitled.md" (or "Untitled 1.md", ...) in a folder (by default
-   * where Settings → Files and links puts new notes) and open it for editing.
-   */
-  async newNote(folder: string = this.newNoteFolder(), where?: OpenWhere): Promise<string> {
-    if (folder && !this.isFolder(folder)) await api.createFolder(folder).catch(() => {});
-    const entry = await this.createNote(this.freeName(folder, ".md"));
-    await this.open(entry.path, { where: where ?? (this.active.path !== null || this.active.type ? "tab" : false) });
-    // A new note is for writing in, even when new tabs open in Reading view.
-    if (this.active.path === entry.path && this.active.mode === "reading") this.setMode(this.editingMode());
-    return entry.path;
-  }
-
-  /** Create an empty "Untitled" folder; returns its path. */
-  async newFolder(parent = ""): Promise<string> {
-    const entry = await api.createFolder(this.freeName(parent, ""));
-    await this.refreshFiles();
-    return entry.path;
-  }
-
-  /** A free "Untitled" name in a folder: "Untitled", "Untitled 1", ... */
-  private freeName(folder: string, ext: string) {
-    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
-    const at = (name: string) => `${folder ? folder + "/" : ""}${name}${ext}`;
-    let name = "Untitled";
-    for (let i = 1; taken.has(at(name).toLowerCase()); i++) name = `Untitled ${i}`;
-    return at(name);
-  }
-
-  /** Rename a note (keeping its folder and .md) or a folder. */
-  async rename(path: string, newName: string) {
-    newName = newName.trim().replace(/[\\/:]/g, "");
-    const isDir = this.isFolder(path);
-    if (!newName || newName === (isDir ? fileName(path) : noteName(path))) return;
-    const dir = parentDir(path);
-    await this.relocate(path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
-  }
-
-  /** Move a note or folder into another folder ("" for the vault root). */
-  async moveTo(path: string, folder: string) {
-    const to = folder ? `${folder}/${fileName(path)}` : fileName(path);
-    if (to !== path) await this.relocate(path, to);
-  }
+  // ----- what is open follows the files -----
 
   /** Called with a path-mapping function after anything is renamed or moved. */
   onMove(fn: (swap: (path: string) => string) => void) {
     this.moves.on(fn);
   }
 
-  /**
-   * Move a file or folder, and everything open that points into it: tabs,
-   * their history, loaded notes and recents follow.
-   */
-  private async relocate(from: string, to: string) {
-    const clash = this.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
-    if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
-    const under = (p: string) => isUnder(p, from);
-    await this.editors.flush(under);
-    const before = this.notes;
-    await api.renamePath(from, to);
-    const swap = (p: string) => movedPath(p, from, to);
-    this.editors.move(under, swap);
+  /** A file or folder moved (see fileOps.ts): tabs, their history, closed tabs and recents follow. */
+  async followMove(swap: (path: string) => string) {
     const swapEntry = (e: string) => {
       const view = parseViewEntry(e);
       return !view ? swap(e) : view.file ? viewEntry({ type: view.type, graphFile: swap(view.file) }) : e;
@@ -778,82 +687,10 @@ export class Workspace {
     this.shownKey = "";
     this.settle();
     void this.refreshLinks();
-    this.onRenamed?.(from, to, before);
   }
 
-  /**
-   * Change a note's text from outside its editors (link updates after a
-   * rename): only the lines that differ are replaced, through the editor if
-   * the note is loaded (so it is undoable and saved as usual), else on disk.
-   */
-  async updateText(path: string, next: string) {
-    const doc = this.editors.doc(path);
-    if (!doc) {
-      await api.writeNote(path, next);
-      this.touch(path);
-      return;
-    }
-    const lines = next.split("\n");
-    if (lines.length !== doc.lines) {
-      this.editors.change(path, { changes: { from: 0, to: doc.length, insert: next } });
-      return;
-    }
-    const changes: { from: number; to: number; insert: string }[] = [];
-    lines.forEach((text, i) => {
-      const line = doc.line(i + 1);
-      if (line.text !== text) changes.push({ from: line.from, to: line.to, insert: text });
-    });
-    if (changes.length) this.editors.change(path, { changes });
-  }
-
-  /** Obsidian's "Make a copy": "Name 1.md" beside the note, opened in the active tab. */
-  async makeCopy(path: string): Promise<string> {
-    await this.saveNow(path);
-    const content = await this.editors.text(path);
-    const taken = new Set(this.files.map((f) => f.path.toLowerCase()));
-    const base = path.replace(/\.md$/, "");
-    let n = 1;
-    while (taken.has(`${base} ${n}.md`.toLowerCase())) n++;
-    const entry = await this.createNote(`${base} ${n}.md`, content);
-    await this.open(entry.path);
-    return entry.path;
-  }
-
-  /**
-   * Obsidian's "Merge entire file with...": append this note's text to
-   * another note (after a blank line), then delete this one. The other note
-   * opens where this one was.
-   */
-  async mergeInto(path: string, into: string) {
-    if (path === into) return;
-    if (this.confirmMerge && !(await this.confirmMerge(path, into))) return;
-    const [text, target] = await Promise.all([this.editors.text(path), this.editors.load(into)]);
-    if (!target) return;
-    const doc = this.editors.doc(into) ?? target.doc;
-    const sep = !doc.length ? "" : doc.sliceString(doc.length - 1) === "\n" ? "\n" : "\n\n";
-    this.editors.change(into, { changes: { from: doc.length, insert: sep + text } });
-    await this.saveNow(into);
-    const showing = this.layout.tabs().filter((t) => t.path === path);
-    await this.remove(path, { confirmed: true });
-    for (const tab of showing) {
-      tab.path = into;
-      tab.memory = null;
-    }
-    this.presentAll();
-    this.settle();
-  }
-
-  /**
-   * Delete a note or folder: to the vault's .trash, or for good, as Settings
-   * → Files and links says, after asking if it says to ask. Returns whether
-   * it was deleted.
-   */
-  async remove(path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
-    if (!opts.confirmed && this.confirmDelete && !(await this.confirmDelete(path))) return false;
-    const under = (p: string) => isUnder(p, path);
-    await this.editors.flush(under);
-    await api.deletePath(path, this.permanentDelete());
-    this.editors.forget(under);
+  /** Files were deleted: tabs showing them go empty, and they leave every history. */
+  async forget(under: (path: string) => boolean) {
     this.recent = this.recent.filter((p) => !under(p));
     this.closed = this.closed.filter((c) => !c.saved.path || !under(c.saved.path));
     for (const tab of this.layout.tabs()) {
@@ -866,7 +703,16 @@ export class Workspace {
     this.presentAll();
     this.settle();
     void this.refreshLinks();
-    return true;
+  }
+
+  /** These tabs now show another note, from its top. */
+  reopen(tabs: Tab[], path: string) {
+    for (const tab of tabs) {
+      tab.path = path;
+      tab.memory = null;
+    }
+    this.presentAll();
+    this.settle();
   }
 
   /** Save a note now (Obsidian's "Save current file"), if it has changes waiting. */

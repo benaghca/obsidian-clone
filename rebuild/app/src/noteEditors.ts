@@ -20,6 +20,7 @@ import { configEffects } from "./editor/config";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
+import { duration, nextFrame, smoothScrollTo } from "./motion";
 import { type Group, memoryOf, type Tab } from "./tabs";
 
 const SAVE_DELAY = 300;
@@ -292,6 +293,35 @@ export class NoteEditors {
     const docTop = view.documentTop - scroller.getBoundingClientRect().top;
     if (docTop >= 0) return null; // the title is still in view
     return view.lineBlockAtHeight(-docTop).from;
+  }
+
+  /**
+   * Smoothly scroll a document position to the middle of a group's editor.
+   * A long jump cuts to one screen short of the target first, so the editor
+   * never has to render every line in between.
+   */
+  async glide(group: Group, pos: number) {
+    const { scroller, view } = this.pane(group);
+    if (!scroller || duration("slow") <= 0) {
+      view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "center" }) });
+      return;
+    }
+    const targetTop = () => {
+      const block = view.lineBlockAt(pos);
+      const docTop = view.documentTop - scroller.getBoundingClientRect().top + scroller.scrollTop;
+      const top = docTop + block.top - (scroller.clientHeight - block.height) / 2;
+      return Math.max(0, Math.min(scroller.scrollHeight - scroller.clientHeight, top));
+    };
+    const distance = targetTop() - scroller.scrollTop;
+    if (Math.abs(distance) > 2 * scroller.clientHeight) {
+      scroller.scrollTop = targetTop() - Math.sign(distance) * scroller.clientHeight;
+      // Two frames: CodeMirror reads the new viewport, then measures its lines.
+      await nextFrame();
+      await nextFrame();
+    }
+    // Re-aimed every frame: line heights estimated before CodeMirror measured
+    // them can move the target a little while the scroll is under way.
+    await smoothScrollTo(scroller, targetTop);
   }
 
   /** Every transaction of every pane's editor comes through here. */
