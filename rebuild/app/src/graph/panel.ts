@@ -6,7 +6,7 @@
 // moves; the values are saved in .grove/graph.json through the settings
 // store. The open sections and whether the panel is open are saved too.
 
-import { button, setToggle, slider, toggle } from "../settings/controls";
+import { button, row, setToggle, slider, toggle } from "../settings/controls";
 import type { ColorGroup, GraphSettings } from "../settings/schema";
 import { h, keyButton, pressable } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
@@ -97,7 +97,7 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
   const toggleRow = (key: ToggleKey, name: string, invert = false) => {
     const t = toggle(invert ? !cfg()[key] : cfg()[key], (on) => host.set(key, invert ? !on : on), name);
     syncers.push(() => setToggle(t, invert ? !cfg()[key] : cfg()[key]));
-    return h("div", { class: "setting-item mod-toggle" }, h("div", { class: "setting-item-info" }, h("div", { class: "setting-item-name" }, name)), h("div", { class: "setting-item-control" }, t));
+    return row({ name, cls: "mod-toggle" }, t);
   };
 
   type SliderKey = "textFadeMultiplier" | "nodeSizeMultiplier" | "lineSizeMultiplier" | "centerStrength" | "repelStrength" | "linkStrength" | "linkDistance" | "localJumps";
@@ -119,12 +119,7 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
       if (value) value.textContent = cfg()[key].toFixed(digits);
       input.style.setProperty("--slider-fill", String((cfg()[key] - min) / (max - min)));
     });
-    return h(
-      "div",
-      { class: "setting-item mod-slider" },
-      h("div", { class: "setting-item-info" }, h("div", { class: "setting-item-name" }, name)),
-      h("div", { class: "setting-item-control" }, ...parts),
-    );
+    return row({ name, cls: "mod-slider" }, ...parts);
   };
 
   const syncers: (() => void)[] = [];
