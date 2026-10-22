@@ -581,9 +581,10 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     });
     // Clicking the empty space below the text puts the caret at the end, like Obsidian.
     scroller.addEventListener("mousedown", (e) => {
-      if (e.target === scroller || e.target === sizer) {
+      const view = ws.editors.viewOf(group);
+      // (The editor's own box reaches into the left margin, for the fold chevron.)
+      if (e.target === scroller || e.target === sizer || e.target === view.dom) {
         e.preventDefault();
-        const view = ws.editors.viewOf(group);
         view.focus();
         view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
       }
