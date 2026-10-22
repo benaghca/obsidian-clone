@@ -33,31 +33,14 @@ export const toggleWrap =
         return { changes: { from, insert: marker + marker }, range: EditorSelection.cursor(from + m) };
       }
       const text = state.sliceDoc(from, to);
-      if (text.length >= 2 * m && text.startsWith(marker) && text.endsWith(marker)) {
-        return {
-          changes: [
-            { from, to: from + m },
-            { from: to - m, to },
-          ],
-          range: EditorSelection.range(from, to - 2 * m),
-        };
-      }
-      if (outside) {
-        return {
-          changes: [
-            { from: from - m, to: from },
-            { from: to, to: to + m },
-          ],
-          range: EditorSelection.range(from - m, to - m),
-        };
-      }
-      return {
-        changes: [
-          { from, insert: marker },
-          { from: to, insert: marker },
-        ],
-        range: EditorSelection.range(from + m, to + m),
-      };
+      const inside = text.length >= 2 * m && text.startsWith(marker) && text.endsWith(marker);
+      // The markers inside the selection come off, or those around it, or it is wrapped; it keeps its text.
+      const set = state.changes(
+        inside ? [{ from, to: from + m }, { from: to - m, to }]
+        : outside ? [{ from: from - m, to: from }, { from: to, to: to + m }]
+        : [{ from, insert: marker }, { from: to, insert: marker }],
+      );
+      return { changes: set, range: EditorSelection.range(set.mapPos(from, 1), set.mapPos(to, -1)) };
     });
     update({ state, dispatch }, changes);
     return true;
