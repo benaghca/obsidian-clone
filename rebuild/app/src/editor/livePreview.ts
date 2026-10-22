@@ -462,6 +462,15 @@ const pointerUp = StateEffect.define<null>();
 /** Markup comes back around the selection in the focused editor, never in Reading view. */
 const revealAround = (view: EditorView) => (view.state.facet(readingMode) || !view.hasFocus ? [] : view.state.selection.ranges);
 
+/** A press at the left edge of newly revealed bold text belongs after its hidden opening marks. */
+function strongTextStart(state: EditorState, pos: number, revealed: readonly { from: number; to: number }[]) {
+  let node = syntaxTree(state).resolveInner(pos, 1);
+  while (node.parent && node.name !== "StrongEmphasis") node = node.parent;
+  if (node.name !== "StrongEmphasis" || revealed.some((r) => r.from <= node.to && r.to >= node.from)) return pos;
+  const mark = node.getChild("EmphasisMark");
+  return mark && mark.from <= pos && pos < mark.to ? mark.to : pos;
+}
+
 /**
  * Live Preview's decorations. While the mouse button is down the markup
  * shown stays as it was at the press, as in Obsidian: a click or a drag
@@ -506,7 +515,14 @@ export class LivePreview {
     const letGo = () => {
       held.abort();
       this.held = null;
-      const sel = this.view.state.selection;
+      let sel = this.view.state.selection;
+      if (!this.view.state.facet(readingMode) && event.detail === 1 && sel.main.empty) {
+        const anchor = strongTextStart(this.view.state, sel.main.head, this.revealed);
+        if (anchor !== sel.main.head) {
+          this.view.dispatch({ selection: { anchor } });
+          sel = this.view.state.selection;
+        }
+      }
       this.clicked = event.detail === 1 && sel !== before && sel.main.empty ? sel.main.head : null;
       this.view.dispatch({ effects: pointerUp.of(null) });
     };

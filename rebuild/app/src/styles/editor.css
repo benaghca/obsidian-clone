@@ -295,9 +295,11 @@
 }
 
 /* Source mode (src/editor/sourceMode.ts): Obsidian's raw markdown view. The
-   syntax stays highlighted in the normal text font; headings are bold at
-   the body size. */
-.is-source-mode .cm-s-heading,
+   syntax stays highlighted in the normal text font; heading sizes and weights
+   match Live Preview without its top padding. */
+.is-source-mode .cm-s-heading {
+  font-weight: inherit;
+}
 .is-source-mode .cm-s-strong {
   font-weight: 700;
 }
