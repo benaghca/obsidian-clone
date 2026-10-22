@@ -460,7 +460,6 @@ paintWith((state) => codeMarks(state, [{ from: 0, to: state.doc.length }]));
 
 /** The mouse button came up: markup is revealed around the selection again. */
 const pointerUp = StateEffect.define<null>();
-const UP = ["mouseup", "dragend", "blur"] as const;
 
 /** Markup comes back around the selection in the focused editor, never in Reading view. */
 const revealAround = (view: EditorView) => (view.state.facet(readingMode) || !view.hasFocus ? [] : view.state.selection.ranges);
@@ -477,7 +476,8 @@ export class LivePreview {
   revealed: readonly SelectionRange[];
   /** Where the last single click put the caret, for a double-click's word (`wordClick`). */
   clicked: number | null = null;
-  private letGo: (() => void) | null = null;
+  /** While the button is down: what stops listening for it to come up. */
+  private held: AbortController | null = null;
   constructor(readonly view: EditorView) {
     this.revealed = revealAround(view);
     this.decorations = this.build();
@@ -487,7 +487,7 @@ export class LivePreview {
     return Decoration.set(decorate(view.state, view.visibleRanges, { sel: this.revealed, reading: view.state.facet(readingMode), view }), true);
   }
   update(u: ViewUpdate) {
-    const held = this.letGo !== null;
+    const held = this.held !== null;
     if (
       (!held && (u.selectionSet || u.focusChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(pointerUp))))) ||
       u.docChanged ||
@@ -502,22 +502,21 @@ export class LivePreview {
     }
   }
   press(event: MouseEvent) {
-    if (event.button !== 0 || this.letGo) return;
+    if (event.button !== 0 || this.held) return;
     const before = this.view.state.selection;
-    const letGo = (this.letGo = () => {
-      this.unlisten();
+    const held = (this.held = new AbortController());
+    const letGo = () => {
+      held.abort();
+      this.held = null;
       const sel = this.view.state.selection;
       this.clicked = event.detail === 1 && sel !== before && sel.main.empty ? sel.main.head : null;
       this.view.dispatch({ effects: pointerUp.of(null) });
-    });
-    for (const type of UP) window.addEventListener(type, letGo);
-  }
-  private unlisten() {
-    for (const type of UP) window.removeEventListener(type, this.letGo!);
-    this.letGo = null;
+    };
+    // The end of a native drag, or the window losing focus, ends the press too.
+    for (const type of ["mouseup", "dragend", "blur"]) window.addEventListener(type, letGo, held);
   }
   destroy() {
-    if (this.letGo) this.unlisten();
+    this.held?.abort();
   }
 }
 

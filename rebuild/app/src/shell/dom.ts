@@ -65,17 +65,16 @@ export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: Poin
       apply(last);
     });
   };
+  const listening = new AbortController();
   const up = () => {
     cancelAnimationFrame(frame);
     apply(last);
-    el.removeEventListener("pointermove", move);
-    el.removeEventListener("pointerup", up);
-    el.removeEventListener("pointercancel", up);
+    listening.abort();
     done();
   };
-  el.addEventListener("pointermove", move);
-  el.addEventListener("pointerup", up);
-  el.addEventListener("pointercancel", up);
+  el.addEventListener("pointermove", move, listening);
+  el.addEventListener("pointerup", up, listening);
+  el.addEventListener("pointercancel", up, listening);
 }
 
 /**
