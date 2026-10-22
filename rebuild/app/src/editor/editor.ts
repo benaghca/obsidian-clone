@@ -4,8 +4,8 @@
 import { completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap } from "@codemirror/search";
-import { Compartment, type EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
-import { drawSelection, EditorView, keymap } from "@codemirror/view";
+import { Compartment, EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
+import { EditorView, keymap, layer, RectangleMarker, type ViewUpdate } from "@codemirror/view";
 import { blocks } from "./blocks";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
@@ -31,6 +31,33 @@ const baseTheme = EditorView.theme({
     backgroundColor: "var(--text-selection) !important",
   },
 });
+
+// The browser draws the selection and the caret, as in Obsidian, so a
+// selection hugs the text (no full-width bars on blank or wrapped lines, no
+// tint over list bullets). Drawn here is only what the browser can't show:
+// the other ranges of a multiple selection, and a cursor at the head of
+// every range but a plain caret.
+const redraw = (u: ViewUpdate) => u.docChanged || u.selectionSet || u.viewportChanged || u.geometryChanged;
+const drawnSelection = [
+  layer({
+    above: false,
+    class: "cm-selectionLayer",
+    update: redraw,
+    markers: (view) => {
+      const { ranges, main } = view.state.selection;
+      return ranges.flatMap((r) => (r === main ? [] : RectangleMarker.forRange(view, "cm-selectionBackground", r)));
+    },
+  }),
+  layer({
+    above: true,
+    class: "cm-cursorLayer",
+    update: redraw,
+    markers: (view) => {
+      const { ranges, main } = view.state.selection;
+      return ranges.flatMap((r) => (r === main && r.empty ? [] : RectangleMarker.forRange(view, "cm-cursor", EditorSelection.cursor(r.head, r.head > r.anchor ? -1 : 1))));
+    },
+  }),
+];
 
 /**
  * How a tab shows its note, like Obsidian's: Live Preview (the default),
@@ -107,7 +134,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
     extensions: [
       editorHost.of(host),
       withHistory ? history() : [],
-      drawSelection(),
+      drawnSelection,
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),
       markdownSyntax,

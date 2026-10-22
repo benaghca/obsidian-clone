@@ -5,47 +5,6 @@
   font-family: var(--font-text);
 }
 
-/* Caret blink. CodeMirror's cursor layer alternates between these two names to
-   restart the blink on every selection change; redefining them here (later in
-   the document than CodeMirror's own) turns the hard on/off into a short fade
-   out and back in. The caret is fully visible for the first 40% of each cycle,
-   so it never dims while typing. Nothing else in the editor content animates:
-   no transitions run on a keystroke or a selection change. */
-@keyframes cm-blink {
-  0%,
-  40% {
-    opacity: 1;
-  }
-  50%,
-  90% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-@keyframes cm-blink2 {
-  0%,
-  40% {
-    opacity: 1;
-  }
-  50%,
-  90% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer {
-  animation-timing-function: var(--anim-ease-in-out);
-}
-@media (prefers-reduced-motion: reduce) {
-  .cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer {
-    animation-timing-function: steps(1);
-  }
-}
-
 /* syntax markers that stay visible while the selection touches them */
 .cm-formatting {
   color: var(--text-faint);
