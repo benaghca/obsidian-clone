@@ -7,7 +7,7 @@
 // rendered callouts, tables and embeds show (render.ts).
 
 import { syntaxTree } from "@codemirror/language";
-import { type EditorState, type Range, StateEffect, type Text } from "@codemirror/state";
+import { type EditorState, type Range, type SelectionRange, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -451,39 +451,77 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
   return decos;
 }
 
-function build(view: EditorView): DecorationSet {
-  const reading = view.state.facet(readingMode);
-  const sel = reading || !view.hasFocus ? [] : view.state.selection.ranges;
-  return Decoration.set(decorate(view.state, view.visibleRanges, { sel, reading, view }), true);
-}
 
 // Rendered text (callout bodies, table cells, embedded notes) looks like Reading view.
 paintWith((state, view) => decorate(state, [{ from: 0, to: state.doc.length }], { sel: [], reading: true, view }), readingMode.of(true));
 paintWith((state) => codeMarks(state, [{ from: 0, to: state.doc.length }]));
 
-const livePreviewPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = build(view);
+/** The mouse button came up: markup is revealed around the selection again. */
+const pointerUp = StateEffect.define<null>();
+const UP = ["mouseup", "dragend", "blur"] as const;
+
+/** Markup comes back around the selection in the focused editor, never in Reading view. */
+const revealAround = (view: EditorView) => (view.state.facet(readingMode) || !view.hasFocus ? [] : view.state.selection.ranges);
+
+/**
+ * Live Preview's decorations. While the mouse button is down the markup
+ * shown stays as it was at the press, as in Obsidian: a click or a drag
+ * doesn't reveal `**` or `[[ ]]` under the pointer and move the text away
+ * from it. It catches up when the button comes up.
+ */
+export class LivePreview {
+  decorations: DecorationSet;
+  /** The ranges markup is revealed around. */
+  revealed: readonly SelectionRange[];
+  private letGo: (() => void) | null = null;
+  constructor(readonly view: EditorView) {
+    this.revealed = revealAround(view);
+    this.decorations = this.build();
+  }
+  build() {
+    const { view } = this;
+    return Decoration.set(decorate(view.state, view.visibleRanges, { sel: this.revealed, reading: view.state.facet(readingMode), view }), true);
+  }
+  update(u: ViewUpdate) {
+    const held = this.letGo !== null;
+    if (
+      (!held && (u.selectionSet || u.focusChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(pointerUp))))) ||
+      u.docChanged ||
+      u.viewportChanged ||
+      syntaxTree(u.startState) !== syntaxTree(u.state) ||
+      u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
+      u.startState.field(editingEmbed) !== u.state.field(editingEmbed) ||
+      u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
+    ) {
+      this.revealed = held ? this.revealed.map((r) => r.map(u.changes)) : revealAround(u.view);
+      this.decorations = this.build();
     }
-    update(u: ViewUpdate) {
-      if (
-        u.docChanged ||
-        u.viewportChanged ||
-        u.selectionSet ||
-        u.focusChanged ||
-        syntaxTree(u.startState) !== syntaxTree(u.state) ||
-        u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
-        u.startState.field(editingEmbed) !== u.state.field(editingEmbed) ||
-        u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
-      ) {
-        this.decorations = build(u.view);
-      }
-    }
+  }
+  press(event: MouseEvent) {
+    if (event.button !== 0 || this.letGo) return;
+    const letGo = (this.letGo = () => {
+      this.unlisten();
+      this.view.dispatch({ effects: pointerUp.of(null) });
+    });
+    for (const type of UP) window.addEventListener(type, letGo);
+  }
+  private unlisten() {
+    for (const type of UP) window.removeEventListener(type, this.letGo!);
+    this.letGo = null;
+  }
+  destroy() {
+    if (this.letGo) this.unlisten();
+  }
+}
+
+const livePreviewPlugin = ViewPlugin.fromClass(LivePreview, {
+  decorations: (v) => v.decorations,
+  eventObservers: {
+    mousedown(e) {
+      this.press(e);
+    },
   },
-  { decorations: (v) => v.decorations },
-);
+});
 
 // A plain click on a rendered link follows it; Ctrl/Cmd-click always does,
 // in a new tab for wikilinks (Ctrl/Cmd+Alt-click: in a new pane to the
