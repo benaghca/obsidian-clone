@@ -7,11 +7,12 @@
 // rendered callouts, tables and embeds show (render.ts).
 
 import { syntaxTree } from "@codemirror/language";
-import { type EditorState, type Range, type SelectionRange, StateEffect, type Text } from "@codemirror/state";
+import { EditorSelection, type EditorState, type Range, type SelectionRange, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
   EditorView,
+  type MouseSelectionStyle,
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
@@ -473,6 +474,8 @@ export class LivePreview {
   decorations: DecorationSet;
   /** The ranges markup is revealed around. */
   revealed: readonly SelectionRange[];
+  /** Where the last single click put the caret, for a double-click's word (`wordClick`). */
+  clicked: number | null = null;
   private letGo: (() => void) | null = null;
   constructor(readonly view: EditorView) {
     this.revealed = revealAround(view);
@@ -499,8 +502,11 @@ export class LivePreview {
   }
   press(event: MouseEvent) {
     if (event.button !== 0 || this.letGo) return;
+    const before = this.view.state.selection;
     const letGo = (this.letGo = () => {
       this.unlisten();
+      const sel = this.view.state.selection;
+      this.clicked = event.detail === 1 && sel !== before && sel.main.empty ? sel.main.head : null;
       this.view.dispatch({ effects: pointerUp.of(null) });
     });
     for (const type of UP) window.addEventListener(type, letGo);
@@ -522,6 +528,30 @@ const livePreviewPlugin = ViewPlugin.fromClass(LivePreview, {
     },
   },
 });
+
+/**
+ * A double-click selects the word its first click put the caret in. That
+ * click may have revealed markup (a bold word's `**`) and moved the word
+ * out from under the pointer; the second click shouldn't select the `**`.
+ */
+export const wordClick = (view: EditorView, event: MouseEvent): MouseSelectionStyle | null => {
+  const at = view.plugin(livePreviewPlugin)?.clicked;
+  const { main } = view.state.selection;
+  if (event.detail !== 2 || at == null || !main.empty || main.head !== at || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return null;
+  let word = view.state.wordAt(at);
+  if (!word) return null;
+  return {
+    update: (u) => void (word = word!.map(u.changes)),
+    get: (cur) => {
+      if (cur === event) return EditorSelection.create([word!]);
+      // Dragging on from there extends by words, as CodeMirror's own double-click does.
+      const pos = view.posAtCoords({ x: cur.clientX, y: cur.clientY }, false);
+      const there = view.state.wordAt(pos) ?? EditorSelection.cursor(pos);
+      const { from, to } = word!;
+      return EditorSelection.create([there.from < from ? EditorSelection.range(to, there.from) : EditorSelection.range(from, Math.max(to, there.to))]);
+    },
+  };
+};
 
 // A plain click on a rendered link follows it; Ctrl/Cmd-click always does,
 // in a new tab for wikilinks (Ctrl/Cmd+Alt-click: in a new pane to the
@@ -563,4 +593,4 @@ const linkClicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreview = [editingEmbed, livePreviewPlugin, linkClicks];
+export const livePreview = [editingEmbed, livePreviewPlugin, EditorView.mouseSelectionStyle.of(wordClick), linkClicks];

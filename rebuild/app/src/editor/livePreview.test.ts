@@ -4,7 +4,7 @@ import type { EditorView, ViewUpdate } from "@codemirror/view";
 import type { MarkdownParser } from "@lezer/markdown";
 import { expect, test, vi } from "vitest";
 import { editingEmbed } from "./embeds";
-import { checkedTaskText, LivePreview } from "./livePreview";
+import { checkedTaskText, LivePreview, wordClick } from "./livePreview";
 import { markdownSyntax, Tag, WikiLink } from "./syntax";
 
 const parser = (markdownLanguage.parser as MarkdownParser).configure([WikiLink, Tag]);
@@ -74,5 +74,23 @@ test("markup stays as it was while the mouse button is down, and catches up when
   expect(shown()).toEqual([]);
   release();
   expect(shown()).toEqual(["**", "**"]);
+  vi.unstubAllGlobals();
+});
+
+test("a double-click selects the word its first click landed in, though the click revealed markup", () => {
+  vi.stubGlobal("window", new EventTarget());
+  const { view, lp, press } = editor("Some **bold** text", 18);
+  press(1);
+  view.dispatch({ selection: { anchor: 9 } });
+  release();
+  expect(lp.clicked).toBe(9);
+  const second = { button: 0, detail: 2 } as MouseEvent;
+  const sel = wordClick(view as unknown as EditorView, second)!.get(second, false, false);
+  expect(view.state.sliceDoc(sel.main.from, sel.main.to)).toBe("bold");
+  // A press that put no caret down (a link, a checkbox) leaves double-clicks to CodeMirror.
+  press(1);
+  release();
+  expect(lp.clicked).toBe(null);
+  expect(wordClick(view as unknown as EditorView, second)).toBe(null);
   vi.unstubAllGlobals();
 });
