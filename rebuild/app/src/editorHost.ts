@@ -11,6 +11,7 @@ import { api, type FileEntry } from "./api";
 import { toggledTask } from "./editor/embeds";
 import type { EditorHost, EmbedHost } from "./editor/host";
 import { type NoteLike, resolveLink } from "./links/internal";
+import { listeners } from "./listeners";
 import type { Workspace } from "./workspace";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
@@ -40,13 +41,13 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
 function createEmbedHost(ws: Workspace): EmbedHost {
   const notes = new Map<string, Promise<string>>();
   const images = new Map<string, { url: Promise<string>; holders: number }>();
-  const watchers = new Map<string, Set<() => void>>();
+  const watchers = new Map<string, ReturnType<typeof listeners>>();
   let files: { list: FileEntry[]; out: NoteLike[] } | null = null;
 
   const modified = (path: string) => {
     notes.delete(path);
     images.delete(path); // its holders load it again, and let go of the old URL
-    for (const fn of [...(watchers.get(path) ?? [])]) fn();
+    watchers.get(path)?.emit();
   };
   ws.vault.onModified(modified);
 
@@ -96,13 +97,9 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       modified(path); // its embeds show it now, not when it is saved
     },
     watch(path, fn) {
-      let set = watchers.get(path);
-      if (!set) watchers.set(path, (set = new Set()));
-      set.add(fn);
-      return () => {
-        set.delete(fn);
-        if (!set.size) watchers.delete(path);
-      };
+      let watching = watchers.get(path);
+      if (!watching) watchers.set(path, (watching = listeners()));
+      return watching.on(fn);
     },
   };
 }
