@@ -19,7 +19,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, foldIn, foldToggle, highlighted, pagedRows } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, hitColumns, pagedRows } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -89,10 +89,9 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
         { class: "search-result-file-matches" },
         ...shown.slice(0, LINES).map((hit) => {
           const spans = spansOf(hit.text, words, matchCase);
-          const first = spans[0];
           return h(
             "div",
-            { class: "search-result-file-match", "data-preview-path": path, onclick: () => void ws.open(path, { line: hit.line, ch: first ? [first.from, first.to] : undefined }) },
+            { class: "search-result-file-match", "data-preview-path": path, onclick: (event: MouseEvent) => void ws.open(path, { line: hit.line, ch: hitColumns(event, spans) }) },
             ...highlighted(hit.text, spans),
           );
         }),

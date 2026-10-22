@@ -114,7 +114,7 @@ try {
   });
   await fill('input[aria-label=Search]', 'searchneedle'); await sleep(250);
   const hit = '.search-view .search-result-file-match[data-preview-path="Search18.md"]';
-  check(await run(selector => { const el = document.querySelector(selector); return el.getBoundingClientRect().height > 3 * parseFloat(getComputedStyle(el).lineHeight) && el.textContent.endsWith('surrounding context.'); }, hit), 'search snippet wraps and preserves surrounding context');
+  check(await run(selector => { const el = document.querySelector(selector); return el.getBoundingClientRect().height > 3 * parseFloat(getComputedStyle(el).lineHeight) && el.textContent.includes('SearchNeedle') && el.textContent.endsWith('…'); }, hit), 'search snippet wraps a bounded context window');
   await click(hit); await sleep(200);
   check(await evaluate('ws.active.path === "Search18.md" && ws.view.state.sliceDoc(ws.view.state.selection.main.from, ws.view.state.selection.main.to) === "SearchNeedle"'), 'search hit selects the matched text with original case');
   check(await evaluate('ws.view.state.doc.lineAt(ws.view.state.selection.main.from).number === 61 && ws.view.coordsAtPos(ws.view.state.selection.main.from).top < 750'), 'search opens scrolled to its matching line');
@@ -183,6 +183,18 @@ try {
   await hover('.backlink-pane .search-result-file-match[data-preview-path="BackFix18.md"]');
   check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover").getBoundingClientRect(), dock=document.querySelector(".mod-right-split").getBoundingClientRect();return popup.right <= dock.left && popup.left >= 0})()'), 'Backlinks preview sits beside its dock, leaving other rows uncovered');
   await press('Escape'); await key('Control', 0, 'keyUp');
+  await click('.backlink-pane [data-preview-path="BackFix18.md"] .search-result-file-matched-text:nth-of-type(2)');
+  check(await evaluate('ws.active.path === "BackFix18.md" && ws.view.state.selection.main.from === ws.view.state.doc.toString().lastIndexOf("[[LongFix18]]")'), 'second Backlinks highlight selects its own source range');
+  await fill('input[aria-label=Search]', 'NeedleFix'); await sleep(200);
+  await click('.search-view [data-preview-path="SearchFix18.md"] .search-result-file-matched-text:nth-of-type(2)');
+  check(await evaluate('ws.active.path === "SearchFix18.md" && ws.view.state.selection.main.from === ws.view.state.doc.line(1).text.lastIndexOf("NeedleFix")'), 'second Search highlight selects its own source range');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('TailFix18.md', 'padding '.repeat(30) + 'FarNeedleFix at the far side ' + 'padding '.repeat(30));
+    await ws.vault.refreshFiles();
+  });
+  await fill('input[aria-label=Search]', 'FarNeedleFix'); await sleep(200);
+  check(await evaluate('(()=>{const row=document.querySelector(`.search-view [data-preview-path="TailFix18.md"].search-result-file-match`);return row.textContent.startsWith("…") && row.textContent.endsWith("…") && row.textContent.length < 150 && row.getBoundingClientRect().height < 200})()'), 'a long search line shows a short window around the hit, with ellipses');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');

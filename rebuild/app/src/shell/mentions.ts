@@ -51,6 +51,7 @@ const LEAD = /^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|>[ \t]?)*/;
 export interface SnippetPart {
   text: string;
   hit: boolean;
+  range?: Span;
 }
 
 /**
@@ -73,9 +74,15 @@ export function snippetParts(text: string, spans: Span[], before = 60): SnippetP
     if (span.to <= at) continue;
     const from = Math.max(span.from, at);
     if (from > at) parts.push({ text: text.slice(at, from), hit: false });
-    parts.push({ text: text.slice(from, span.to), hit: true });
+    parts.push({ text: text.slice(from, span.to), hit: true, range: { from, to: span.to } });
     at = span.to;
   }
-  if (at < text.length) parts.push({ text: text.slice(at), hit: false });
+  let end = spans.length ? Math.min(text.length, at + before) : text.length;
+  if (end < text.length) {
+    const space = text.lastIndexOf(" ", end);
+    if (space > at) end = space;
+  }
+  if (at < end) parts.push({ text: text.slice(at, end), hit: false });
+  if (end < text.length) parts.push({ text: "…", hit: false });
   return parts;
 }

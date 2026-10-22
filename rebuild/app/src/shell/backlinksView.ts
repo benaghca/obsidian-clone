@@ -14,7 +14,7 @@ import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, foldIn, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, hitColumns, pagedRows, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -90,9 +90,8 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       {
         class: "search-result-file-match",
         "data-preview-path": m.from,
-        onclick: () => {
-          const first = spans[0];
-          void ws.open(m.from, { line: m.line, ch: first ? [first.from, first.to] : undefined });
+        onclick: (event: MouseEvent) => {
+          void ws.open(m.from, { line: m.line, ch: hitColumns(event, spans) });
         },
       },
       ...highlighted(m.text, spans),
