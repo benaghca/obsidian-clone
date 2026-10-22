@@ -1,0 +1,28 @@
+# Builds cinder.exe for experimental branches (claude/...), so a prototype can be tried without
+# building it locally. The exe is attached to the run as an artifact: open the run on GitHub's
+# Actions tab and download "cinder-windows" at the bottom of its summary page.
+name: prototype build
+
+on:
+  push:
+    branches: ['claude/**']
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release --locked
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cinder-windows
+          path: |
+            target/release/cinder.exe
+            LICENSE-MIT
+            LICENSE-APACHE
+            THIRD-PARTY-LICENSES.md
+          retention-days: 30
