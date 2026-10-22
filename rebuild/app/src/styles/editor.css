@@ -371,11 +371,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The fold chevron: in the margin, on hover; kept on folded lines. */
+/* The fold chevron: in the margin, on hover; kept on folded lines. The
+   editor reaches into the margin as far as the chevron, so the pointer stays
+   over the editor (and the chevron stays shown) on its way across. */
+.cm-editor {
+  margin-left: -22px;
+  padding-left: 22px;
+}
 .cm-fold-indicator {
   --icon-size: 14px;
   position: absolute;
-  left: -22px;
+  left: 0;
   width: 18px;
   height: 18px;
   display: flex;
