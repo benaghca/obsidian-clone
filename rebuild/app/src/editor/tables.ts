@@ -9,6 +9,7 @@ import { ChangeSet, EditorSelection, EditorState, Prec, StateEffect, StateField,
 import { EditorView, keymap, runScopeHandlers, type ViewUpdate } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { h } from "../shell/dom";
+import { pairingExtensions } from "./config";
 import { editorHost } from "./host";
 import { BlockWidget, decorate, editAt, editButton, isLinkEvent, onDestroy, type Painted, paintRange, readingMode, release } from "./render";
 
@@ -202,6 +203,7 @@ export class TableWidget extends BlockWidget {
               sync();
               return true;
             } }),
+            pairingExtensions(),
             keymap.of(defaultKeymap),
           ] }),
           dispatchTransactions(trs, cellView) {
@@ -212,7 +214,7 @@ export class TableWidget extends BlockWidget {
               const changes: { from: number; to: number; insert: string }[] = [];
               tr.changes.iterChanges((f, t, _f, _t, insert) => changes.push({ from: at + f, to: at + t, insert: insert.toString() }));
               const s = tr.state.selection.main;
-              view.dispatch({ changes, selection: EditorSelection.single(at + s.anchor, at + s.head), userEvent: tr.docChanged ? "input.type" : "select", annotations: tr.docChanged ? undefined : isolateHistory.of("after") });
+              view.dispatch({ changes, selection: EditorSelection.single(at + s.anchor, at + s.head), userEvent: tr.annotation(Transaction.userEvent) ?? (tr.docChanged ? "input.type" : "select"), annotations: tr.docChanged ? undefined : isolateHistory.of("after") });
             }
           },
         });
@@ -313,7 +315,7 @@ export function cellTransaction(tr: Transaction) {
     slashes = text[i] === "\\" ? slashes + 1 : 0;
   }
   const escaped = ChangeSet.of(corrections, tr.newDoc.length);
-  return { changes: tr.changes.compose(escaped), selection: tr.newSelection.map(escaped), userEvent: tr.annotation(Transaction.userEvent) };
+  return { changes: tr.changes.compose(escaped), selection: tr.newSelection.map(escaped), effects: StateEffect.mapEffects(tr.effects, escaped), userEvent: tr.annotation(Transaction.userEvent) };
 }
 
 // ----- editing -----

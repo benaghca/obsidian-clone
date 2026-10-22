@@ -1,15 +1,21 @@
+import { deleteBracketPair } from "@codemirror/autocomplete";
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { afterEach, expect, test } from "vitest";
 import { APP, defaults } from "../settings/schema";
-import { configExtensions, setEditorConfig } from "./config";
+import { configExtensions, pairingExtensions, setEditorConfig } from "./config";
+import { cellTransaction } from "./tables";
 import { markdownSyntax } from "./syntax";
 
 // Exercise the installed input handlers, falling back to ordinary replacement as the view does.
-function editor(doc = "", anchor = doc.length, head = anchor) {
-  let state = EditorState.create({ doc, selection: { anchor, head }, extensions: [markdownSyntax, configExtensions()] });
+function editor(doc = "", anchor = doc.length, head = anchor, cell = false) {
+  let state = EditorState.create({ doc, selection: { anchor, head }, extensions: cell
+    ? [pairingExtensions(), EditorState.transactionFilter.of(cellTransaction)]
+    : [markdownSyntax, configExtensions()] });
   const view = { get state() { return state; }, dispatch(...specs: TransactionSpec[]) { state = state.update(...specs).state; } } as unknown as EditorView;
   return {
+    get state() { return state; },
+    backspace: () => deleteBracketPair(view),
     type(text: string) {
       const { from, to } = state.selection.main;
       const insert = () => state.update(state.replaceSelection(text));
@@ -44,4 +50,26 @@ test("bracket and Markdown pairing settings remain independent", () => {
   setEditorConfig({ ...defaults(APP), autoPairMarkdown: false });
   expect(editor().type('"').doc).toBe('""');
   expect(editor().type("*").doc).toBe("*");
+});
+
+test("cell pairing retains closer effects through escaping and respects both settings", () => {
+  for (const [open, close] of [['"', '"'], ["`", "`"], ["*", "*"], ["(", ")"], ["[", "]"], ["{", "}"]]) {
+    const cell = editor("", 0, 0, true);
+    expect(cell.type(open)).toEqual({ doc: open + close, anchor: 1, head: 1 });
+    expect(cell.backspace()).toBe(true);
+    expect(cell.state.doc.toString()).toBe("");
+    cell.type(open);
+    cell.type("|"); // escaping shifts the tracked closer by two positions
+    expect(cell.type(close)).toEqual({ doc: open + "\\|" + close, anchor: 4, head: 4 });
+    expect(editor("word", 0, 4, true).type(open)).toEqual({ doc: open + "word" + close, anchor: 1, head: 5 });
+  }
+  expect(editor("word", 0, 4, true).type("_").doc).toBe("_word_");
+  setEditorConfig({ ...defaults(APP), autoPairMarkdown: false });
+  expect(editor("", 0, 0, true).type("*").doc).toBe("*");
+  expect(editor("", 0, 0, true).type("`").doc).toBe("`");
+  expect(editor("", 0, 0, true).type('"').doc).toBe('""');
+  setEditorConfig({ ...defaults(APP), autoPairBrackets: false });
+  expect(editor("", 0, 0, true).type('"').doc).toBe('"');
+  expect(editor("", 0, 0, true).type("(").doc).toBe("(");
+  expect(editor("", 0, 0, true).type("*").doc).toBe("**");
 });
