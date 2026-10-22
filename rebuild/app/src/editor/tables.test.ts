@@ -1,9 +1,10 @@
+import { history, redo, undo } from "@codemirror/commands";
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { markdownSyntax } from "./syntax";
-import { cellBelow, editTable, formatTable, nextCell, parseTable, previousCell, type TableOp, tableAt, tableOps } from "./tables";
+import { cellBelow, cellTransaction, editTable, formatTable, nextCell, parseTable, previousCell, type TableOp, tableAt, tableOps } from "./tables";
 
 // The table and the results below are what Obsidian 1.14.4 wrote (observed).
 const SOURCE = "| Name | Value | Note |\n| --- | :---: | ---: |\n| alpha | 1 | first |\n| beta longer | 22 | second |";
@@ -119,10 +120,59 @@ describe("table editing in the editor", () => {
     const sel = view.state.selection.main;
     expect(view.state.doc.lineAt(sel.head).number).toBe(7);
   });
+  it("keeps Tab, Shift+Tab and Enter in their target cells after editing", () => {
+    const view = editor(doc, at("alpha"));
+    for (const [op, cell] of [
+      [nextCell, { row: 1, col: 1 }],
+      [cellBelow, { row: 2, col: 1 }],
+      [cellBelow, { row: 3, col: 1 }],
+      [previousCell, { row: 3, col: 0 }],
+    ] as const) {
+      editTable(view, op, true);
+      expect(tableAt(view.state, view.state.selection.main.head)?.cell).toEqual(cell);
+    }
+  });
   it("puts the caret just inside an empty cell, so typing goes inside it (Tab in the last cell)", () => {
     const view = editor(doc, at("second"));
     editTable(view, nextCell, true);
     view.dispatch(view.state.replaceSelection("new"));
     expect(view.state.doc.line(7).text).toBe("| new            |       |        |");
+  });
+});
+
+describe("in-place cell input", () => {
+  it("escapes pipes without doubling existing escapes, and keeps pasted lines in the cell", () => {
+    const input = (doc: string, text: string) => {
+      const state = EditorState.create({ doc, selection: { anchor: doc.length }, extensions: EditorState.transactionFilter.of(cellTransaction) });
+      return state.update(state.replaceSelection(text)).state.doc.toString();
+    };
+    expect(input("", "a|b\nnext")).toBe("a\\|b<br>next");
+    expect(input("", "a\\|b")).toBe("a\\|b");
+    expect(input("\\", "|")).toBe("\\|");
+    expect(input("\\\\", "|")).toBe("\\\\\\|");
+    const state = EditorState.create({ doc: "a\\|b", extensions: EditorState.transactionFilter.of(cellTransaction) });
+    expect(state.update({ changes: { from: 1, to: 2 } }).state.doc.toString()).toBe("a\\|b");
+  });
+  it("maps the caret after an escaped pipe and undoes/redoes through the note's history", () => {
+    let state = EditorState.create({ doc: "alpha", selection: { anchor: 5 }, extensions: EditorState.transactionFilter.of(cellTransaction) });
+    const tr = state.update({ ...state.replaceSelection(" | next"), userEvent: "input.type" });
+    state = tr.state;
+    expect(state.doc.toString()).toBe("alpha \\| next");
+    expect(state.selection.main.head).toBe(state.doc.length);
+    let note = EditorState.create({ doc: SOURCE, extensions: [markdownSyntax, history()], selection: { anchor: SOURCE.indexOf("alpha") + 5 } });
+    const at = note.selection.main.head - tr.startState.doc.length;
+    const view = {
+      get state() { return note; },
+      dispatch(spec: Parameters<EditorState["update"]>[0]) { note = note.update(spec).state; },
+    } as unknown as EditorView;
+    const changes: { from: number; to: number; insert: string }[] = [];
+    tr.changes.iterChanges((f, t, _f, _t, text) => changes.push({ from: at + f, to: at + t, insert: text.toString() }));
+    view.dispatch({ changes, selection: { anchor: at + tr.newSelection.main.head }, userEvent: "input.type" });
+    expect(undo(view)).toBe(true);
+    expect(note.doc.toString()).toBe(SOURCE);
+    expect(tableAt(note, note.selection.main.head)?.cell).toEqual({ row: 1, col: 0 });
+    expect(redo(view)).toBe(true);
+    expect(note.sliceDoc(note.selection.main.head - 7, note.selection.main.head)).toBe("\\| next");
+    expect(tableAt(note, note.selection.main.head)?.cell).toEqual({ row: 1, col: 0 });
   });
 });
