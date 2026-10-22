@@ -215,8 +215,8 @@ export function registerAppCommands(parts: AppParts) {
     hotkeys,
     when: canEdit,
     run: () => {
-      run(ws.view);
       ws.view.focus();
+      run(ws.view);
     },
   });
   const lineKind = (id: string, name: string, icon: IconName, kind: LineKind) => editorCommand(id, name, icon, setLineKind(kind));
