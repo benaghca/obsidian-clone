@@ -9,16 +9,16 @@ import { EditorView } from "@codemirror/view";
 import { api } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
-import type { EditorHost, PropertyHost } from "./editor/host";
+import type { EditorHost, EmbedHost, PropertyHost } from "./editor/host";
 import { IMAGE_EXT } from "./editor/embeds";
-import { createEmbedHost } from "./embedHost";
+import { createEditorHost } from "./editorHost";
 import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { createNote, fileSettings } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
 import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
-import { type Group, type OpenWhere, parseViewEntry, type Tab, type ViewType, viewEntry } from "./tabs";
+import { type Group, type OpenWhere, parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, type ViewType, viewEntry } from "./tabs";
 import { Vault } from "./vault";
 
 /**
@@ -45,8 +45,6 @@ export class Workspace {
     (change) => this.emit(change),
     (path) => this.editors.reload(path),
   );
-  /** What embeds and image tabs read: notes' text and images' blob: URLs. */
-  readonly embeds = createEmbedHost(this);
   layout: Layout<Tab>;
   /** Recently shown notes, most recent first. */
   recent: string[] = [];
@@ -62,6 +60,8 @@ export class Workspace {
   propertyHost: PropertyHost | null = null;
   /** Each tab group's editor, and the notes they show. */
   readonly editors: NoteEditors;
+  /** What embeds and image tabs read: notes' text and images' blob: URLs. */
+  readonly embeds: EmbedHost;
 
   private nextTabId = 1;
   private changes = listeners<[Change, Group?]>();
@@ -70,20 +70,8 @@ export class Workspace {
   private closed: ClosedTab[] = [];
 
   constructor() {
-    const host: EditorHost = {
-      openLink: (target, where, view) => void this.openLink(target, where, view ? this.editors.groupOfView(view) : undefined),
-      openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
-      notes: () => this.vault.includedNotes(),
-      formatLink: (target, view, display) => this.linkTo(target, this.editors.pathOf(view), display),
-      contextMenu: (view, at, pos, keyboard) => {
-        const group = this.editors.groupOfView(view);
-        if (group) this.focusGroup(group);
-        this.editorMenu?.(view, at, pos, keyboard);
-      },
-      properties: () => this.propertyHost,
-      linkExists: (target, view) => this.vault.linkExists(target, this.editors.pathOf(view)),
-      embeds: this.embeds,
-    };
+    const host = createEditorHost(this);
+    this.embeds = host.embeds;
     this.editors = new NoteEditors(host, {
       shown: (group, path) => {
         if (path) this.recent = [path, ...this.recent.filter((p) => p !== path)].slice(0, 50);
@@ -465,16 +453,9 @@ export class Workspace {
     if (!where && current.pinned && (current.type || (current.path && current.path !== path))) where = "tab";
     const alreadyShown = !where && current.path === path && from === this.activeGroup;
     const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
-    if (!where && tab.type) {
-      // A graph tab becomes the note (Obsidian's click on a node); Back returns to the graph.
-      tab.back.push(viewEntry(tab));
-      tab.forward = [];
-      tab.type = undefined;
-      tab.viewFile = undefined;
-    } else if (!where && tab.path !== path && tab.path) {
-      tab.back.push(tab.path);
-      tab.forward = [];
-    }
+    // A graph tab becomes the note (Obsidian's click on a node); Back returns to the graph.
+    if (!where && (tab.type || tab.path !== path)) pushBack(tab);
+    tab.type = tab.viewFile = undefined;
     tab.path = path;
     this.show(group, tab, layoutChanged);
     const view = this.editors.viewOf(group);
@@ -499,10 +480,7 @@ export class Workspace {
   /** An image from the file list: shown in the tab (or where `where` says), as Obsidian's image view. */
   private openImage(path: string, where: OpenWhere) {
     const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab");
-    if (tab.path || tab.type) {
-      tab.back.push(tab.type ? viewEntry(tab) : tab.path!);
-      tab.forward = [];
-    }
+    pushBack(tab);
     tab.path = null;
     tab.type = "image";
     tab.viewFile = path;
@@ -620,17 +598,7 @@ export class Workspace {
 
   /** A file or folder moved (see fileOps.ts): tabs, their history, closed tabs and recents follow. */
   async followMove(swap: (path: string) => string) {
-    const swapEntry = (e: string) => {
-      const view = parseViewEntry(e);
-      return !view ? swap(e) : view.file ? viewEntry({ type: view.type, viewFile: swap(view.file) }) : e;
-    };
-    for (const tab of this.layout.tabs()) {
-      if (tab.path) tab.path = swap(tab.path);
-      if (tab.viewFile) tab.viewFile = swap(tab.viewFile);
-      tab.back = tab.back.map(swapEntry);
-      tab.forward = tab.forward.map(swapEntry);
-      if (tab.memory) tab.memory.path = swap(tab.memory.path);
-    }
+    for (const tab of this.layout.tabs()) tabFollowsMove(tab, swap);
     for (const c of this.closed) {
       if (c.saved.path) c.saved.path = swap(c.saved.path);
     }
@@ -647,12 +615,7 @@ export class Workspace {
   async forget(under: (path: string) => boolean) {
     this.recent = this.recent.filter((p) => !under(p));
     this.closed = this.closed.filter((c) => !c.saved.path || !under(c.saved.path));
-    for (const tab of this.layout.tabs()) {
-      tab.back = tab.back.filter((p) => !under(p));
-      tab.forward = tab.forward.filter((p) => !under(p));
-      if (tab.path && under(tab.path)) tab.path = null;
-      if (tab.viewFile && under(tab.viewFile)) tab.viewFile = null;
-    }
+    for (const tab of this.layout.tabs()) tabForgets(tab, under);
     await this.vault.refreshFiles();
     this.presentAll();
     this.settle();

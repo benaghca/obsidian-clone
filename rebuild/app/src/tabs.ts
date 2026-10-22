@@ -1,6 +1,7 @@
 // The tab model: what a tab shows (a note, the graph, or a local graph), its
-// own back/forward history and where it left its note. Pure data and
-// helpers; the workspace (workspace.ts) changes tabs and draws nothing.
+// own back/forward history and where it left its note, and how a tab follows
+// files that move or go. Pure data and helpers; the workspace (workspace.ts)
+// decides which tabs change and draws nothing.
 
 import type { EditorSelection } from "@codemirror/state";
 import type { ViewMode } from "./editor/editor";
@@ -53,6 +54,35 @@ export function parseViewEntry(entry: string): { type: ViewType; file: string | 
   if (!entry.startsWith("\0")) return null;
   const [, type, file] = entry.split("\0");
   return { type: type as ViewType, file: file || null };
+}
+
+/** The tab is about to show something else: what it shows now (if anything) goes on its back history. */
+export function pushBack(tab: Tab) {
+  const entry = tab.type ? viewEntry(tab) : tab.path;
+  if (!entry) return;
+  tab.back.push(entry);
+  tab.forward = [];
+}
+
+/** A file or folder moved (`swap` maps old paths to new): the tab's note, view, history and memory follow. */
+export function tabFollowsMove(tab: Tab, swap: (path: string) => string) {
+  const swapEntry = (e: string) => {
+    const view = parseViewEntry(e);
+    return !view ? swap(e) : view.file ? viewEntry({ type: view.type, viewFile: swap(view.file) }) : e;
+  };
+  if (tab.path) tab.path = swap(tab.path);
+  if (tab.viewFile) tab.viewFile = swap(tab.viewFile);
+  tab.back = tab.back.map(swapEntry);
+  tab.forward = tab.forward.map(swapEntry);
+  if (tab.memory) tab.memory.path = swap(tab.memory.path);
+}
+
+/** Files were deleted (`under` picks them): a tab showing one goes empty, and they leave its history. */
+export function tabForgets(tab: Tab, under: (path: string) => boolean) {
+  tab.back = tab.back.filter((p) => !under(p));
+  tab.forward = tab.forward.filter((p) => !under(p));
+  if (tab.path && under(tab.path)) tab.path = null;
+  if (tab.viewFile && under(tab.viewFile)) tab.viewFile = null;
 }
 
 /** The icon a view's tab shows (a note's tab has none). */

@@ -1,13 +1,15 @@
-// What ![[embeds]] read (editor/embeds.ts), one per workspace: a link
-// target resolved like any link (images by their name with its extension),
-// a note's text (its editor's, when it is open), and an image's bytes as a
-// blob: URL. Nothing is read until an embed is drawn. Notes' text is kept
-// by path until the file changes; an image's URL is revoked as soon as no
-// embed shows it, or when the file changes.
+// What the editors ask of the app (editor/host.ts), one per workspace:
+// following links, the vault's notes and properties, the editor menu, and
+// what ![[embeds]] read (editor/embeds.ts). For embeds: a link target
+// resolved like any link (images by their name with its extension), a
+// note's text (its editor's, when it is open), and an image's bytes as a
+// blob: URL. Nothing is read until an embed is drawn. Notes' text is kept by
+// path until the file changes; an image's URL is revoked as soon as no embed
+// shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
 import { toggledTask } from "./editor/embeds";
-import type { EmbedHost } from "./editor/host";
+import type { EditorHost, EmbedHost } from "./editor/host";
 import { type NoteLike, resolveLink } from "./links/internal";
 import type { Workspace } from "./workspace";
 
@@ -18,7 +20,24 @@ const mime = (path: string) => {
 };
 const MAX_NOTES = 100;
 
-export function createEmbedHost(ws: Workspace): EmbedHost {
+export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHost } {
+  return {
+    openLink: (target, where, view) => void ws.openLink(target, where, view ? ws.editors.groupOfView(view) : undefined),
+    openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
+    notes: () => ws.vault.includedNotes(),
+    formatLink: (target, view, display) => ws.linkTo(target, ws.editors.pathOf(view), display),
+    contextMenu: (view, at, pos, keyboard) => {
+      const group = ws.editors.groupOfView(view);
+      if (group) ws.focusGroup(group);
+      ws.editorMenu?.(view, at, pos, keyboard);
+    },
+    properties: () => ws.propertyHost,
+    linkExists: (target, view) => ws.vault.linkExists(target, ws.editors.pathOf(view)),
+    embeds: createEmbedHost(ws),
+  };
+}
+
+function createEmbedHost(ws: Workspace): EmbedHost {
   const notes = new Map<string, Promise<string>>();
   const images = new Map<string, { url: Promise<string>; holders: number }>();
   const watchers = new Map<string, Set<() => void>>();
