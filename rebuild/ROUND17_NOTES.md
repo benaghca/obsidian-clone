@@ -130,3 +130,130 @@ Brief's newline counting convention under `rebuild/app`, excluding `/gen/`:
 Markdown notes and PNG captures are excluded. No new app module was added;
 `tables.ts` remains below 500 lines. Commits are local only; nothing was
 pushed or merged.
+
+# Part B — editing quick wins
+
+Baseline: accepted Part A, `cd5e06c`. Each requested item has its own local
+commit and regression coverage:
+
+1. **Find focus and count** — `78a40a7`. Focus the editor before invoking
+   its command, allowing `openSearchPanel()` to retain its own field focus.
+   Keep CodeMirror's existing panel, move it to the top and add a small
+   `current / total` label. Count with the same query cursor used by search,
+   honoring case, regex and whole-word options. Cache matches by document
+   and query; closed search panels do no counting. Existing Enter,
+   Shift+Enter and Escape handling remains in CodeMirror. The count is
+   `0 / N` until a match is selected. Test: `editor/search.test.ts`, plus
+   the headless focus/navigation/button checks below.
+2. **Home after markers** — `9386f75`. Home first moves after list, task
+   and quote prefixes, then to column zero. Shift+Home preserves the anchor.
+   Ordered tasks and nested quote/list prefixes are included. Ordinary
+   lines keep CodeMirror's Home behavior; fenced/indented code is excluded.
+   Reuse the existing command module and keymap. Test: `editor/format.test.ts`.
+3. **Reading round-trip focus and title Enter** — `1587674`. After mode
+   reconfiguration, focus the editor when returning to an active editing
+   tab. Its selection is preserved, and inactive tabs do not steal focus.
+   Explicitly blur the inline title on Enter/ArrowDown, reusing its existing
+   rename-on-blur path even when the read-only editor cannot take focus.
+   Test: `workspace.test.ts`, plus an actual Reading title rename headlessly.
+4. **Pairing and code fences** — `bfe5a71`. Reuse CodeMirror's bracket
+   pairing, closer skipping and selection wrapping for double quotes,
+   backticks and asterisks. One cached pairing compartment honors both
+   settings independently; the existing Markdown selection wrapper handles
+   the remaining symbols. Enter after a new fence inserts a blank body and
+   matching closer in one transaction, preserving language and indentation;
+   an existing closer is not duplicated. Tests: `editor/config.test.ts` and
+   `editor/format.test.ts`.
+5. **Format the word at an interior caret** — `4555398`. `toggleWrap()` uses
+   the existing `state.wordAt()` API when the caret is strictly inside a
+   word. Bold, italic and comment wrap/unwrap the word while mapping the
+   caret back to the same text offset. Existing selection and empty-pair
+   behavior remains. Test: `editor/format.test.ts`.
+6. **Source headings and bold edge clicks** — `6fb40f6`. Reuse the existing
+   heading size/weight classes in Source mode, without Live Preview's
+   extra top-padding class. Heading spans inherit the line's weight.
+   A collapsed single press on hidden opening bold marks is clamped past
+   them on release. Already revealed raw marks and drag selections remain
+   reachable; the existing held-pointer rendering remains frozen until
+   release. Tests: `editor/sourceMode.test.ts`, `editor/livePreview.test.ts`.
+
+No new production module, dependency, backend change or abstraction layer.
+The three new test files cover search, pairing configuration and workspace
+mode focus. Production files remain under 650 lines.
+
+## Part B validation and observations
+
+Final required gates pass: `npm run build`, `npm test` (**186 tests in 36
+files**), `npm run audit:offline`, `cargo build`, `cargo test` (**32 tests**)
+and `git diff --check`.
+
+Vite and headless Chromium used the in-memory mock vault, a private profile,
+1280×800 at device scale 1. Pointer checks moved over each control before
+pressing/releasing it; no scripted DOM clicks were used:
+
+- Ctrl+F retains find-field focus and typing leaves the note unchanged.
+  Enter advances `1 / 4` to `2 / 4`; hovering and pressing Next advances to
+  `3 / 4`; Escape closes search, focuses the editor and retains the match.
+- Home twice and Shift+Home twice reach the expected positions/selections
+  on bullets, tasks, ordered lists and quotes.
+- Ctrl+E to Reading and back retains a nonzero caret, focuses it and accepts
+  typing there. In Reading, a real title press, Ctrl+A, typing and Enter
+  rename the mock note. Hovering and pressing the mode button returns to
+  focused editing.
+- Quotes, backticks and stars pair and skip closers. Quotes, brackets and
+  Markdown wrap selected text. Typing three backticks then Enter produces
+  an empty fenced body with its closer; a language suffix also works.
+- Ctrl+B, Ctrl+I and Ctrl+/ at an interior caret format the whole word and
+  toggle back without moving the caret within its text.
+- Source H1 computes to **25.888px / 700**, H2 to **23.392px / 680**, both
+  with **0px** top padding. Real pointer presses at the rendered bold
+  word's left edge (offsets 0, 1 and 3px) land inside `**`; typing stays bold.
+- Part A's table navigation, row creation, escaping, spaces, undo/redo,
+  held-pointer selection, hovered row/column menu actions, compact/ragged
+  tables, callout tables, Source and Reading regression harnesses pass.
+
+Scratch Obsidian 1.14.4 was observed again headlessly, with fresh HOME/XDG
+folders and a scratch vault under `/tmp`, inside an isolated network
+namespace. It pairs the three requested symbols at safe boundaries, skips
+an inserted closer, and leaves symbols literal inside/after a word. Those
+cases match Grove. One deliberate timing difference: Obsidian creates a
+closing fence on the third backtick; Grove creates it on Enter as requested.
+Grove retains CodeMirror's full search panel rather than adding a separate
+custom search-bar implementation. Source heading sizes/weights use the
+round 16 observations, verified by computed styles here.
+
+[Find with its count](round17-shots/partb-find.png) and
+[Source headings](round17-shots/partb-source-headings.png) are captured for
+review. The original Part A screenshots are retained.
+
+Performance: repeat the 70-insertion, alternating two-run probe against
+`cd5e06c`, extracted only inside this worktree's ignored scratch directory.
+For the 5,000-line note, median CDP-inclusive latency was **29.6–29.7 ms
+before / 29.1–29.5 ms after**, p95 **57.8–57.9 / 57.2–58.3 ms**. For the
+40-row table, median was **1.2–1.3 / 1.3 ms**, p95 **2.3–2.7 / 2.7–2.9 ms**.
+These short probes show no material new typing regression; sub-millisecond
+variation is not evidence of a speedup. Part A's recorded nested-editor
+cost remains. Search counting runs only while its panel is open; counts
+are reused when only the selection changes. No whole-document work was
+added to ordinary typing with search closed.
+
+Harnesses, timing output and a scratch baseline remain under ignored
+`rebuild/app/node_modules/.round17/` (`partb.mjs`, `full.mjs`, `edges.mjs`,
+`perf-partb.json`). No Tauri window, visible app window or real vault was
+opened. No WebKitGTK interaction run was performed. Nothing was pushed
+or merged.
+
+## Final app line counts after Part B
+
+Same tracked-file/newline convention, excluding `/gen/`, notes and PNGs.
+Part B deltas compare accepted Part A (`cd5e06c`) to the final app:
+
+- TypeScript production: **18,707 → 18,817 (+110)**.
+- TypeScript tests: **2,356 → 2,513 (+157)**.
+- TypeScript total: **21,063 → 21,330 (+267)**.
+- CSS: **3,564 → 3,572 (+8)**.
+- Rust: **3,104 → 3,104 (0)**.
+- Total app: **27,731 → 28,006 (+275)**.
+
+Across all of round 17 from `bae3fcb`: TypeScript **+514** (production
+**+307**, tests **+207**), CSS **+31**, Rust **0**; total **+545** lines.
