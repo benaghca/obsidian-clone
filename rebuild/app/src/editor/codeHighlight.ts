@@ -23,6 +23,7 @@ import { Decoration, type DecorationSet, type EditorView, ViewPlugin, type ViewU
 import { type ChangedRange, type SyntaxNode, type Tree, TreeFragment } from "@lezer/common";
 import { highlightTree, tags as t, tagHighlighter } from "@lezer/highlight";
 import { kept } from "../memo";
+import { afterPaint } from "../shell/sideView";
 
 // Python, Rust, Shell, YAML and XML are CodeMirror's legacy modes, as in
 // Obsidian's editor: a tenth of the size of their full parsers.
@@ -224,12 +225,10 @@ export const codeHighlight = ViewPlugin.fromClass(
         this.decorations = this.decorations.map(u.changes);
         if (!this.queued) {
           this.queued = true;
-          requestAnimationFrame(() =>
-            setTimeout(() => {
-              this.queued = false;
-              if (!this.gone) u.view.dispatch({ effects: rehighlight.of(null) });
-            }),
-          );
+          afterPaint(() => {
+            this.queued = false;
+            if (!this.gone) u.view.dispatch({ effects: rehighlight.of(null) });
+          });
         }
       } else if (u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state) || u.transactions.some((tr) => tr.effects.some((e) => e.is(rehighlight)))) {
         this.decorations = this.build(u.view);
