@@ -39,7 +39,7 @@ export function installHoverPreviews(ws: Workspace) {
     leaving = window.setTimeout(close, 180);
   };
 
-  function show(target: string, from: string | null, source: EditorView, rect: DOMRect) {
+  function show(target: string, from: string | null, source: EditorView, rect: DOMRect, side?: DOMRect) {
     const host = source.state.facet(editorHost);
     if (!host) return close();
     const [name, sub] = splitSubpath(target);
@@ -78,10 +78,14 @@ export function installHoverPreviews(ws: Workspace) {
     });
     dispose = () => { widget.destroy(dom); context.destroy(); };
     document.body.append(popup);
+    const toRight = side && innerWidth - side.right >= side.left;
+    if (side) popup.style.width = `${Math.max(0, Math.min(popup.offsetWidth, (toRight ? innerWidth - side.right : side.left) - 14))}px`;
     const width = popup.offsetWidth;
     const height = popup.offsetHeight;
-    popup.style.left = `${Math.max(8, Math.min(rect.left, innerWidth - width - 8))}px`;
-    popup.style.top = `${Math.max(8, Math.min(rect.bottom + 6 + height <= innerHeight - 8 ? rect.bottom + 6 : rect.top - height - 6, innerHeight - height - 8))}px`;
+    const left = side ? (toRight ? side.right + 6 : side.left - width - 6) : rect.left;
+    const top = side ? rect.top : rect.bottom + 6 + height <= innerHeight - 8 ? rect.bottom + 6 : rect.top - height - 6;
+    popup.style.left = `${Math.max(8, Math.min(left, innerWidth - width - 8))}px`;
+    popup.style.top = `${Math.max(8, Math.min(top, innerHeight - height - 8))}px`;
   }
 
   document.addEventListener("mousemove", (event) => {
@@ -89,7 +93,8 @@ export function installHoverPreviews(ws: Workspace) {
     if (popup?.contains(el)) return cancel();
     const view = EditorView.findFromDOM(el);
     const modified = /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
-    if (!modified && !view?.state.facet(readingMode)) return leave();
+    const allowed = modified || !!view?.state.facet(readingMode);
+    if (!allowed && !popup) return leave();
     const sidebar = el.closest<HTMLElement>("[data-preview-path]");
     const link = el.closest<HTMLElement>("[data-href]");
     let target = sidebar?.dataset.previewPath ?? link?.dataset.href;
@@ -110,7 +115,10 @@ export function installHoverPreviews(ws: Workspace) {
     if (key === next) {
       clearTimeout(leaving);
       if (popup || pending) return;
-    } else close();
+    } else {
+      if (!allowed) return leave();
+      close();
+    }
     key = next;
     if (!unlisten) {
       const controller = new AbortController();
@@ -129,7 +137,7 @@ export function installHoverPreviews(ws: Workspace) {
     }
     pending = window.setTimeout(() => {
       pending = 0;
-      show(target!, from, source, rect!);
+      show(target!, from, source, rect!, sidebar?.closest(".workspace-split.mod-sidedock")?.getBoundingClientRect());
     }, 350);
   });
   document.addEventListener("mouseout", (event) => { if (!event.relatedTarget) leave(); });

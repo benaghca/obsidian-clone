@@ -138,6 +138,38 @@ try {
   await shot('reading');
   await run(() => ws.setMode('live')); await sleep(100);
   check(await evaluate('getComputedStyle(document.querySelector(".cm-content > .cm-line.cm-h1")).fontSize !== "31px"'), 'Reading heading CSS leaves Live Preview typography alone');
+  // Stage 3: preview lifetime, scroll alignment, and side placement for result lists.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('HoverFix18.md', '# Links\n\nA paragraph above the links.\n\n[[LongFix18#Deep|heading]] and [[LongFix18#^block|block]]');
+    await api.createNote('LongFix18.md', '# Top\n\n' + 'Filler paragraph.\n\n'.repeat(24) + '## Deep\n\nBlock body ^block\n\n' + 'Tail paragraph.\n\n'.repeat(24));
+    await api.createNote('SearchFix18.md', 'FirstNeedleFix then SecondNeedleFix on one line\nAnother NeedleFix here\nNeedleFix tail');
+    await api.createNote('BackFix18.md', 'First [[LongFix18]] then [[LongFix18]] end');
+    await ws.vault.refreshFiles(); await ws.vault.refreshLinks(); await ws.open('HoverFix18.md');
+  });
+  const hover = async selector => {
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 20, y: 700 });
+    await key('Control', 2);
+    const p = await point(selector);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p, modifiers: 2 }); await sleep(450);
+    return p;
+  };
+  const headingPoint = await hover('[data-href="LongFix18#Deep"]');
+  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover"), target=popup.querySelector(".cm-h2");const top=target.getBoundingClientRect().top-popup.getBoundingClientRect().top;return top >= 8 && top <= 24})()'), 'heading preview scrolls the target near the popup top');
+  await key('Control', 0, 'keyUp');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: headingPoint.x + 1, y: headingPoint.y }); await sleep(300);
+  check(await evaluate('document.querySelectorAll(".hover-popover").length === 1'), 'releasing Ctrl on the same link keeps the preview open');
+  await press('Escape'); await hover('[data-href="LongFix18#^block"]');
+  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover"), target=[...popup.querySelectorAll(".cm-line")].find(el=>el.textContent.includes("Block body"));const top=target.getBoundingClientRect().top-popup.getBoundingClientRect().top;return top >= 8 && top <= 24})()'), 'block preview scrolls the target near the popup top');
+  await press('Escape'); await key('Control', 0, 'keyUp');
+  await run(() => grove.run('global-search:open')); await fill('input[aria-label=Search]', 'NeedleFix'); await sleep(200);
+  await hover('.search-view .search-result-file-match[data-preview-path="SearchFix18.md"]');
+  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover").getBoundingClientRect(), dock=document.querySelector(".mod-left-split").getBoundingClientRect();return popup.left >= dock.right && popup.right <= innerWidth})()'), 'Search preview sits beside its dock, leaving other rows uncovered');
+  await press('Escape'); await key('Control', 0, 'keyUp');
+  await run(async () => { await ws.open('LongFix18.md'); grove.run('backlink:open'); }); await sleep(250);
+  await hover('.backlink-pane .search-result-file-match[data-preview-path="BackFix18.md"]');
+  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover").getBoundingClientRect(), dock=document.querySelector(".mod-right-split").getBoundingClientRect();return popup.right <= dock.left && popup.left >= 0})()'), 'Backlinks preview sits beside its dock, leaving other rows uncovered');
+  await press('Escape'); await key('Control', 0, 'keyUp');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');

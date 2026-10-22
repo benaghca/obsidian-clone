@@ -28,7 +28,7 @@ function setup() {
   vi.stubGlobal("navigator", { platform: "Linux" });
   vi.stubGlobal("innerWidth", 1280);
   vi.stubGlobal("innerHeight", 800);
-  const source = { state: { facet: (facet: unknown) => facet === readingMode ? false : ({}) } };
+  const source = { state: { facet: (facet: unknown) => facet === readingMode ? false : ({}) }, posAtCoords: () => null };
   mocks.view = source;
   const rect = { x: 100, y: 100, left: 100, top: 100, bottom: 120 };
   const link = { dataset: { href: "Note" }, getBoundingClientRect: () => rect };
@@ -37,8 +37,9 @@ function setup() {
   installHoverPreviews(ws as unknown as Workspace);
   const event = (type: string, props = {}) => {
     const e = new Event(type);
-    Object.defineProperty(e, "target", { value: el });
-    Object.assign(e, { ctrlKey: true, ...props });
+    const { target = el, ...attributes } = props as { target?: unknown };
+    Object.defineProperty(e, "target", { value: target });
+    Object.assign(e, { ctrlKey: true, ...attributes });
     doc.dispatchEvent(e);
   };
   return event;
@@ -55,7 +56,7 @@ test("preview opens once after 350ms, stays through movement, and closes after 1
   event("mousemove");
   vi.advanceTimersByTime(500);
   expect(mocks.draw).toHaveBeenCalledTimes(1);
-  event("mousemove", { ctrlKey: false });
+  event("mousemove", { ctrlKey: false, target: { closest: () => null } });
   vi.advanceTimersByTime(179);
   expect(mocks.destroy).not.toHaveBeenCalled();
   vi.advanceTimersByTime(1);

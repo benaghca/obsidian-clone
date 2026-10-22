@@ -277,7 +277,7 @@ export class NoteEmbedWidget extends DrawnWidget {
             const section = embedSection(shown.text, sub);
             const target = section && content.querySelector<HTMLElement>(`[data-line="${section.line + 1}"]`);
             const popup = dom.closest<HTMLElement>(".hover-popover");
-            if (target && popup) popup.scrollTop = target.offsetTop - popup.offsetTop - 16;
+            if (target && popup) popup.scrollTop += target.getBoundingClientRect().top - popup.getBoundingClientRect().top - 16;
           }
         }
       }, () => {
