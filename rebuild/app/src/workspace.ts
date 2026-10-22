@@ -302,6 +302,7 @@ export class Workspace {
     tab.mode = mode;
     this.editors.showMode(tab);
     this.emit("mode");
+    if (mode !== "reading" && tab === this.active) this.view.focus();
   }
 
   cycleTab(dir: 1 | -1) {

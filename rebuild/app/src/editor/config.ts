@@ -12,6 +12,7 @@ import { Compartment, EditorSelection, EditorState, type Extension, Prec, type S
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { kept } from "../memo";
 import { APP, defaults, type SettingsOf } from "../settings/schema";
+import { closeCodeFence } from "./format";
 import { folding } from "./fold";
 import { propertiesDisplay } from "./properties";
 
@@ -34,8 +35,10 @@ const smartLists = Prec.high(
   ]),
 );
 
-const brackets = [
-  EditorState.languageData.of(() => [{ closeBrackets: { brackets: ["(", "[", "{"] } }]),
+const brackets = (pairBrackets: boolean, pairMarkdown: boolean) => [
+  EditorState.languageData.of(() => [{ closeBrackets: { brackets: [
+    ...(pairBrackets ? ["(", "[", "{", '\"'] : []), ...(pairMarkdown ? ["`", "*"] : []),
+  ] } }]),
   closeBrackets(),
   keymap.of(closeBracketsKeymap),
 ];
@@ -76,6 +79,14 @@ const spellcheck = [true, false].map((on) =>
 const memo = new Map<string, Extension>();
 const cached = (key: string, make: () => Extension) => kept(memo, key, make);
 
+/** Pairing shared by the note and its nested cell editors, without block-level Enter commands. */
+export function pairingExtensions(c: EditorConfig = current): Extension {
+  return cached(`pairs:${c.autoPairBrackets}:${c.autoPairMarkdown}`, () => [
+    c.autoPairBrackets || c.autoPairMarkdown ? brackets(c.autoPairBrackets, c.autoPairMarkdown) : NONE,
+    c.autoPairMarkdown ? markdownPairs : NONE,
+  ]);
+}
+
 const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[] = [
   { compartment: new Compartment(), ext: (c) => (c.showLineNumber ? cached("lines", () => lineNumbers()) : NONE) },
   {
@@ -83,8 +94,12 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
     ext: (c) => (c.foldHeading || c.foldIndent ? cached(`fold:${c.foldHeading}:${c.foldIndent}`, () => folding(c.foldHeading, c.foldIndent)) : NONE),
   },
   { compartment: new Compartment(), ext: (c) => spellcheck[c.spellcheck ? 0 : 1] },
-  { compartment: new Compartment(), ext: (c) => (c.autoPairBrackets ? brackets : NONE) },
-  { compartment: new Compartment(), ext: (c) => (c.autoPairMarkdown ? markdownPairs : NONE) },
+  {
+    compartment: new Compartment(), ext: (c) => cached(`typing:${c.autoPairBrackets}:${c.autoPairMarkdown}`, () => [
+      pairingExtensions(c),
+      c.autoPairMarkdown ? Prec.highest(keymap.of([{ key: "Enter", run: closeCodeFence }])) : NONE,
+    ]),
+  },
   { compartment: new Compartment(), ext: (c) => (c.smartIndentList ? smartLists : NONE) },
   {
     compartment: new Compartment(),

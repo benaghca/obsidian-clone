@@ -323,3 +323,26 @@
 .cm-code-em {
   font-style: italic;
 }
+
+/* The cell editor inherits the table's typography without note padding. */
+.cm-table-cell.cm-editor {
+  display: block;
+  margin: 0;
+  padding: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  background: transparent;
+}
+.cm-table-cell .cm-scroller {
+  font: inherit;
+  line-height: inherit;
+  overflow: visible;
+}
+.cm-table-cell .cm-content,
+.cm-table-cell .cm-line {
+  padding: 0;
+  min-height: 1.3em;
+}
+.cm-table-cell.cm-focused {
+  outline: none;
+}

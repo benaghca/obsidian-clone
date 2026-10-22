@@ -89,7 +89,7 @@ export function registerAppCommands(parts: AppParts) {
   // field in the Properties block): editor hotkeys leave it alone.
   const typingElsewhere = () => {
     const el = document.activeElement as HTMLElement | null;
-    if (!el || el === document.body || el === ws.view.contentDOM) return false;
+    if (!el || el === document.body || el === ws.view.contentDOM || (el.closest(".cm-table-cell") && ws.view.dom.contains(el))) return false;
     return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
   };
   const canEdit = () => hasNote() && ws.active.mode !== "reading" && !typingElsewhere();
@@ -215,8 +215,8 @@ export function registerAppCommands(parts: AppParts) {
     hotkeys,
     when: canEdit,
     run: () => {
-      run(ws.view);
       ws.view.focus();
+      run(ws.view);
     },
   });
   const lineKind = (id: string, name: string, icon: IconName, kind: LineKind) => editorCommand(id, name, icon, setLineKind(kind));

@@ -3,13 +3,14 @@
 
 import { completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { searchKeymap } from "@codemirror/search";
+import { getSearchQuery, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
-import { EditorView, keymap, layer, RectangleMarker } from "@codemirror/view";
+import { EditorView, keymap, layer, RectangleMarker, ViewPlugin } from "@codemirror/view";
 import { blocks } from "./blocks";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
+import { markdownHome } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview } from "./livePreview";
@@ -102,6 +103,63 @@ const contextMenu = EditorView.domEventHandlers({
   },
 });
 
+/** Use the search query's own cursor so case, regex and word options agree with navigation. */
+export function searchMatches(state: EditorState) {
+  const query = getSearchQuery(state);
+  const matches: { from: number; to: number }[] = [];
+  if (query.valid) {
+    const cursor = query.getCursor(state);
+    for (let next = cursor.next(); !next.done; next = cursor.next()) matches.push(next.value);
+  }
+  return matches;
+}
+
+export function searchMatchIndex(matches: ReturnType<typeof searchMatches>, { from, to }: { from: number; to: number }) {
+  return matches.findIndex((m) => (m.from === from && m.to === to) || (from === to && m.from <= from && from < m.to));
+}
+
+export function searchMatchAtOrAfter(matches: ReturnType<typeof searchMatches>, from: number) {
+  return matches.find((m) => m.from >= from) ?? matches[0];
+}
+
+const searchCounter = ViewPlugin.define((view) => {
+  let doc: Text | null = null;
+  let query: ReturnType<typeof getSearchQuery> | null = null;
+  let matches: ReturnType<typeof searchMatches> = [];
+  return { update(u) {
+    if (!searchPanelOpen(u.state)) return;
+    const next = getSearchQuery(u.state);
+    const changed = !query?.eq(next);
+    if (doc !== u.state.doc || changed) {
+      doc = u.state.doc;
+      query = next;
+      matches = searchMatches(u.state);
+    }
+    // Panels mount after plugins update. Keep CodeMirror's panel and its keyboard handling.
+    queueMicrotask(() => {
+      if (view.state !== u.state) return;
+      const field = view.dom.querySelector(".cm-search [name=search]");
+      if (!field) return;
+      const selection = view.state.selection.main;
+      if (changed && matches.length) {
+        const match = searchMatchAtOrAfter(matches, selection.from);
+        if (selection.from !== match.from || selection.to !== match.to) {
+          view.dispatch({ selection: { anchor: match.from, head: match.to }, scrollIntoView: true });
+          return;
+        }
+      }
+      let count = view.dom.querySelector(".cm-search-count");
+      if (!count) {
+        count = document.createElement("span");
+        count.className = "cm-search-count";
+        count.setAttribute("aria-live", "polite");
+        field.after(count);
+      }
+      count.textContent = `${searchMatchIndex(matches, selection) + 1} / ${matches.length}`;
+    });
+  } };
+});
+
 export interface NoteStateOptions {
   doc: string | Text;
   host: EditorHost;
@@ -134,10 +192,13 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       configExtensions(),
       viewModeCompartment.of(VIEW_MODES.live),
       contextMenu,
+      search({ top: true }),
+      searchCounter,
       wikilinkCompletion,
       counts ? countsField.init(() => counts) : countsField,
       keymap.of([
         ...completionKeymap,
+        { key: "Home", run: markdownHome(), shift: markdownHome(true) },
         ...defaultKeymap,
         ...historyKeymap,
         ...searchKeymap,

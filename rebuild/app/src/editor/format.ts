@@ -5,6 +5,7 @@
 // works on a bare EditorState in tests. They run only when invoked, never as
 // part of typing.
 
+import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, type EditorState, type StateCommand, type Transaction, type TransactionSpec } from "@codemirror/state";
 
 type Target = { state: EditorState; dispatch: (tr: Transaction) => void };
@@ -14,8 +15,8 @@ const update = (target: Target, spec: TransactionSpec) =>
 
 /**
  * Wrap each selection in `marker` (or unwrap it if it already is). With no
- * selection, an empty pair is inserted with the caret inside it, or removed
- * if the caret sits in an empty pair.
+ * selection, the word around an interior caret is formatted; elsewhere an
+ * empty pair is inserted with the caret inside it, or removed if already empty.
  */
 export const toggleWrap =
   (marker: string): StateCommand =>
@@ -26,9 +27,11 @@ export const toggleWrap =
       state.sliceDoc(from, to) === marker &&
       (m > 1 || (state.sliceDoc(from - 1, from) !== marker && state.sliceDoc(to, to + 1) !== marker));
     const changes = state.changeByRange((range) => {
-      const { from, to } = range;
+      const word = range.empty ? state.wordAt(range.head) : null;
+      const target = word && word.from < range.head && range.head < word.to ? word : range;
+      const { from, to } = target;
       const outside = from >= m && isMarker(from - m, from) && isMarker(to, to + m);
-      if (range.empty) {
+      if (target.empty) {
         if (outside) return { changes: { from: from - m, to: to + m }, range: EditorSelection.cursor(from - m) };
         return { changes: { from, insert: marker + marker }, range: EditorSelection.cursor(from + m) };
       }
@@ -40,7 +43,7 @@ export const toggleWrap =
         : outside ? [{ from: from - m, to: from }, { from: to, to: to + m }]
         : [{ from, insert: marker }, { from: to, insert: marker }],
       );
-      return { changes: set, range: EditorSelection.range(set.mapPos(from, 1), set.mapPos(to, -1)) };
+      return { changes: set, range: range.empty ? EditorSelection.cursor(set.mapPos(range.head, 1)) : EditorSelection.range(set.mapPos(from, 1), set.mapPos(to, -1)) };
     });
     update({ state, dispatch }, changes);
     return true;
@@ -129,6 +132,25 @@ function kindOf(prefix: string | undefined): LineKind {
   return "numbered";
 }
 
+/** Home toggles between the text after a list/quote marker and column zero. */
+export const markdownHome = (select = false): StateCommand => ({ state, dispatch }) => {
+  if (state.readOnly) return false;
+  const ranges = state.selection.ranges.map((range) => {
+    const line = state.doc.lineAt(range.head);
+    const m = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/.exec(line.text)!;
+    if (!m[0].trim()) return null;
+    for (let node = syntaxTree(state).resolveInner(line.from + m[0].length, 1); node.parent; node = node.parent) {
+      if (node.name === "FencedCode" || node.name === "CodeBlock") return null;
+    }
+    const start = line.from + m[0].length;
+    const head = range.head === start ? line.from : start;
+    return select ? EditorSelection.range(range.anchor, head) : EditorSelection.cursor(head);
+  });
+  if (ranges.some((r) => r === null)) return false;
+  dispatch(state.update({ selection: EditorSelection.create(ranges.filter((r) => r !== null), state.selection.mainIndex), scrollIntoView: true, userEvent: "select" }));
+  return true;
+};
+
 /** The lines touched by the selection, each once, in order. */
 function selectedLines(state: EditorState) {
   const seen = new Set<number>();
@@ -199,6 +221,21 @@ export const toggleCheckbox: StateCommand = ({ state, dispatch }) => {
     return { from: at, to: at + prefix.length, insert: "- [ ] " };
   });
   updateLines({ state, dispatch }, specs);
+  return true;
+};
+
+/** Complete a newly typed fence; an existing closing fence is left to normal Enter handling. */
+export const closeCodeFence: StateCommand = ({ state, dispatch }) => {
+  const { main } = state.selection;
+  if (state.readOnly || !main.empty || state.selection.ranges.length !== 1) return false;
+  const line = state.doc.lineAt(main.head);
+  const fence = /^([ \t]*)(`{3,}|~{3,})/.exec(line.text);
+  if (!fence || main.head !== line.to) return false;
+  let node = syntaxTree(state).resolveInner(line.from + fence[1].length, 1);
+  while (node.parent && node.name !== "FencedCode") node = node.parent;
+  if (node.name !== "FencedCode" || node.from !== line.from + fence[1].length || node.getChildren("CodeMark").length > 1) return false;
+  const insert = state.lineBreak + fence[1] + state.lineBreak + fence[1] + fence[2];
+  dispatch(state.update({ changes: { from: line.to, insert }, selection: { anchor: line.to + state.lineBreak.length + fence[1].length }, scrollIntoView: true, userEvent: "input" }));
   return true;
 };
 

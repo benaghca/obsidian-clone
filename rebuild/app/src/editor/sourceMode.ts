@@ -1,7 +1,7 @@
 // Source mode, as Obsidian draws it: the raw markdown, in the normal text
 // font, with its syntax highlighted (faint marks, accent links, bold,
 // italic, struck and code text, tags as pills, code blocks on a grey band)
-// but headings at the body size. Only active in Source mode: Live Preview
+// and headings at their rendered sizes. Only active in Source mode: Live Preview
 // and Reading view draw their own decorations and never load this.
 
 import { syntaxHighlighting, syntaxTree } from "@codemirror/language";
@@ -29,7 +29,7 @@ const codeBegin = Decoration.line({ class: "cm-codeblock cm-codeblock-begin" });
 const codeEnd = Decoration.line({ class: "cm-codeblock cm-codeblock-end" });
 const listLine = Decoration.line({ class: "cm-list-line" });
 
-/** The same code bands and list spacing as Live Preview (visible lines only). */
+/** The same code bands, list spacing and heading sizes as Live Preview (visible lines only). */
 export function sourceLines(view: EditorView): DecorationSet {
   const decos: Range<Decoration>[] = [];
   const doc = view.state.doc;
@@ -46,6 +46,9 @@ export function sourceLines(view: EditorView): DecorationSet {
       to,
       enter: (node) => {
         if (node.name === "ListMark") decos.push(listLine.range(doc.lineAt(node.from).from));
+        if (/^(?:ATX|Setext)Heading[1-6]$/.test(node.name)) {
+          decos.push(Decoration.line({ class: `cm-h${node.name.slice(-1)}` }).range(doc.lineAt(node.from).from));
+        }
       },
     });
   }

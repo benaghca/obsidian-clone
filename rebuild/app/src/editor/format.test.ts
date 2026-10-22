@@ -2,10 +2,12 @@ import { insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
 import { describe, expect, it, test } from "vitest";
 import {
+  closeCodeFence,
   insertBlock,
   insertFootnote,
   insertMarkdownLink,
   insertWikilink,
+  markdownHome,
   setLineKind,
   stripFormatting,
   toggleCheckbox,
@@ -128,4 +130,34 @@ test("coloured highlights, written as Obsidian writes them", () => {
   // Only the highlight around the caret is touched.
   expect(run(toggleHighlight("blue"), "==x== and w|ord ==y==")).toBe("==x== and ==🔵w|ord== ==y==");
   expect(run(toggleHighlight("yellow"), "a | b")).toBe("a ==🟡|== b");
+});
+
+
+test("Home and Shift+Home toggle after list/task/quote markers, excluding code", () => {
+  for (const prefix of ["- ", "  + ", "- [ ] ", "1. ", "12) ", "1. [x] ", "> ", "> > ", "> - [ ] "]) {
+    expect(run(markdownHome(), `${prefix}text|`)).toBe(`${prefix}|text`);
+    expect(run(markdownHome(), `${prefix}|text`)).toBe(`|${prefix}text`);
+    expect(run(markdownHome(true), `${prefix}text|`)).toBe(`${prefix}«text»`);
+    expect(run(markdownHome(true), `${prefix}|text`)).toBe(`«${prefix}»text`);
+  }
+  expect(run(markdownHome(), "plain|")).toBe("plain|");
+  expect(run(markdownHome(), "```md\n- code|\n```")).toBe("```md\n- code|\n```");
+});
+
+
+test("Enter closes a new code fence and keeps its language, indent and caret", () => {
+  expect(run(closeCodeFence, "```|")).toBe("```\n|\n```");
+  expect(run(closeCodeFence, "```ts|")).toBe("```ts\n|\n```");
+  expect(run(closeCodeFence, "  ~~~~js|")).toBe("  ~~~~js\n  |\n  ~~~~");
+  expect(run(closeCodeFence, "```ts|\n```")).toBe("```ts|\n```");
+  expect(run(closeCodeFence, "    ```|")).toBe("    ```|");
+});
+
+
+test("bold, italic and comment at an interior caret toggle the word and preserve its caret", () => {
+  for (const marker of ["**", "*", "%%"]) {
+    expect(run(toggleWrap(marker), "a wo|rd b")).toBe(`a ${marker}wo|rd${marker} b`);
+    expect(run(toggleWrap(marker), `a ${marker}wo|rd${marker} b`)).toBe("a wo|rd b");
+    expect(run(toggleWrap(marker), "a | b")).toBe(`a ${marker}|${marker} b`);
+  }
 });

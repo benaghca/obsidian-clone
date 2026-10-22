@@ -105,3 +105,29 @@ test("a double-click selects the word its first click landed in, though the clic
   expect(lp.clicked).toBe(null);
   expect(wordClick(view as unknown as EditorView, second)).toBe(null);
 });
+
+
+test("a press at bold's hidden left marks moves inside, while raw marks and drags remain reachable", () => {
+  const { view, shown, press } = editor("Some **bold** text", 18);
+  press(1);
+  view.dispatch({ selection: { anchor: 5 } });
+  release();
+  expect(view.state.selection.main.head).toBe(7);
+  expect(shown()).toEqual(["**", "**"]);
+  press(1);
+  view.dispatch({ selection: { anchor: 5 } }); // already shown: editing a raw marker is intentional
+  release();
+  expect(view.state.selection.main.head).toBe(5);
+  view.dispatch({ selection: { anchor: 18 } });
+  press(1);
+  view.dispatch({ selection: { anchor: 5, head: 9 } });
+  release();
+  expect(view.state.selection.main.from).toBe(5);
+  expect(view.state.selection.main.to).toBe(9);
+  view.hasFocus = false;
+  view.dispatch({ selection: { anchor: 5 } });
+  press(1);
+  view.hasFocus = true;
+  release();
+  expect(view.state.selection.main.head).toBe(7); // same position, but previously unfocused and hidden
+});

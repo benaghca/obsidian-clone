@@ -571,6 +571,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       const view = ws.editors.viewOf(group);
       if (e.key === "Enter" || e.key === "ArrowDown") {
         e.preventDefault();
+        title.blur();
         view.focus();
         view.dispatch({ selection: { anchor: 0 } });
       } else if (e.key === "Escape") {
