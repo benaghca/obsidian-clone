@@ -6,12 +6,11 @@ import { createGraphView } from "../graph/view";
 import { listeners } from "../listeners";
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
-import { h, iconButton } from "./dom";
-import { icon, type IconName } from "./icons";
+import { h } from "./dom";
 import { createOutgoingView } from "./outgoingView";
 import { createOutlineView } from "./outlineView";
 import { createFilePropertiesView, createPropertiesView } from "./propertiesView";
-import type { SideView } from "./sideView";
+import { type SideView, viewTabs } from "./sideView";
 import { createTagsView } from "./tagsView";
 
 export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "fileprops", "localgraph"] as const;
@@ -38,26 +37,26 @@ export function createRightSidebar(
     fileprops: createFilePropertiesView(ws),
     localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
-  const buttons = new Map<RightView, HTMLElement>();
   const selected = listeners<[RightView]>();
-  const content = h("div", { class: "workspace-leaf-content" });
   let current: RightView = "backlinks";
-
-  const tab = (name: RightView, iconName: IconName, label: string) => {
-    const button = iconButton(icon(iconName), label, () => select(name), "workspace-tab-header");
-    buttons.set(name, button);
-    return button;
-  };
-
-  function show(name: RightView) {
-    current = name;
-    for (const [n, b] of buttons) b.classList.toggle("is-active", n === name);
-    if (content.firstElementChild !== views[name].el) content.replaceChildren(views[name].el);
-  }
+  const tabs = viewTabs(
+    [
+      ["backlinks", "link", "Backlinks"],
+      ["outgoing", "link-2", "Outgoing links"],
+      ["tags", "tags", "Tags"],
+      ["properties", "archive", "All properties"],
+      ["outline", "list", "Outline"],
+      ["fileprops", "info", "File properties"],
+      ["localgraph", "git-fork", "Local graph"],
+    ],
+    (name: RightView) => views[name].el,
+    select,
+  );
 
   function select(name: RightView) {
     const changed = name !== current;
-    show(name);
+    current = name;
+    tabs.show(name);
     sync();
     if (changed) selected.emit(name);
   }
@@ -68,23 +67,8 @@ export function createRightSidebar(
     for (const [name, view] of Object.entries(views) as [RightView, SideView][]) view.setActive(open && name === current);
   }
 
-  const el = h(
-    "div",
-    { class: "workspace-split mod-sidedock mod-right-split" },
-    h(
-      "div",
-      { class: "workspace-tab-header-container", "data-tauri-drag-region": "" },
-      tab("backlinks", "link", "Backlinks"),
-      tab("outgoing", "link-2", "Outgoing links"),
-      tab("tags", "tags", "Tags"),
-      tab("properties", "archive", "All properties"),
-      tab("outline", "list", "Outline"),
-      tab("fileprops", "info", "File properties"),
-      tab("localgraph", "git-fork", "Local graph"),
-    ),
-    content,
-  );
-  show(current); // views start inactive; sync() wakes the selected one once the dock opens
+  const el = h("div", { class: "workspace-split mod-sidedock mod-right-split" }, tabs.header, tabs.content);
+  tabs.show(current); // views start inactive; sync() wakes the selected one once the dock opens
 
   return {
     el,
@@ -96,8 +80,8 @@ export function createRightSidebar(
     onSelect: selected.on,
     /** Show or remove a view (its core plugin turned on or off). Returns whether any view is left. */
     setEnabled(view: RightView, enabled: boolean) {
-      buttons.get(view)!.hidden = !enabled;
-      const available = RIGHT_VIEWS.filter((v) => !buttons.get(v)!.hidden);
+      tabs.buttons.get(view)!.hidden = !enabled;
+      const available = RIGHT_VIEWS.filter((v) => !tabs.buttons.get(v)!.hidden);
       if (!enabled && current === view && available.length) select(available[0]);
       if (!enabled && current === view) views[view].setActive(false);
       return available.length > 0;

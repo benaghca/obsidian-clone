@@ -2,8 +2,8 @@
 // the parts their trees share: collapsible sections with a count, chevrons
 // that fold a group, "Show N more" rows and highlighted matches.
 
-import { h } from "./dom";
-import { icon } from "./icons";
+import { h, iconButton } from "./dom";
+import { icon, type IconName } from "./icons";
 import { type Span, snippetParts } from "./mentions";
 
 export interface SideView {
@@ -62,6 +62,21 @@ export function liveData<T>(initial: T, read: () => Promise<T>, render: () => vo
       if (active && stale) schedule(delay);
       else if (!active) clearTimeout(timer);
       return true;
+    },
+  };
+}
+
+/** A sidebar's icon tabs over its content: `show` puts a view in and marks its tab; a click calls `select`. */
+export function viewTabs<K extends string>(tabs: readonly (readonly [K, IconName, string])[], viewOf: (name: K) => HTMLElement, select: (name: K) => void) {
+  const buttons = new Map(tabs.map(([name, iconName, label]) => [name, iconButton(icon(iconName), label, () => select(name), "workspace-tab-header")]));
+  const content = h("div", { class: "workspace-leaf-content" });
+  return {
+    buttons,
+    content,
+    header: h("div", { class: "workspace-tab-header-container", "data-tauri-drag-region": "" }, ...buttons.values()),
+    show(name: K) {
+      for (const [n, b] of buttons) b.classList.toggle("is-active", n === name);
+      if (content.firstElementChild !== viewOf(name)) content.replaceChildren(viewOf(name));
     },
   };
 }
