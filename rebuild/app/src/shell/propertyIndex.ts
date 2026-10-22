@@ -12,7 +12,7 @@ import { fixedType, type Property, type PropertyType, readFrontmatter, readPrope
 import type { PropertyHost } from "../editor/host";
 import { compareNames } from "../paths";
 import { settings } from "../settings/store";
-import { perWorkspace } from "../perWorkspace";
+import { kept, perWorkspace } from "../memo";
 import type { Workspace } from "../workspace";
 import { vaultTags } from "./vaultTags";
 
@@ -82,8 +82,7 @@ export const propertyIndex = perWorkspace((ws: Workspace) => {
     const found = new Map<string, { count: number; types: Map<PropertyType, number> }>();
     for (const { props } of (await notes()).values()) {
       for (const p of props) {
-        let n = found.get(p.key);
-        if (!n) found.set(p.key, (n = { count: 0, types: new Map() }));
+        const n = kept(found, p.key, () => ({ count: 0, types: new Map<PropertyType, number>() }));
         n.count++;
         if (p.type !== "unknown") n.types.set(p.type, (n.types.get(p.type) ?? 0) + 1);
       }

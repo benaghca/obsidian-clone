@@ -10,6 +10,7 @@ import { indentUnit } from "@codemirror/language";
 import { deleteMarkupBackward, insertNewlineContinueMarkupCommand } from "@codemirror/lang-markdown";
 import { Compartment, EditorSelection, EditorState, type Extension, Prec, type StateEffect } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
+import { kept } from "../memo";
 import { APP, defaults, type SettingsOf } from "../settings/schema";
 import { folding } from "./fold";
 import { propertiesDisplay } from "./properties";
@@ -73,11 +74,7 @@ const spellcheck = [true, false].map((on) =>
 );
 
 const memo = new Map<string, Extension>();
-const cached = (key: string, make: () => Extension) => {
-  let ext = memo.get(key);
-  if (!ext) memo.set(key, (ext = make()));
-  return ext;
-};
+const cached = (key: string, make: () => Extension) => kept(memo, key, make);
 
 const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[] = [
   { compartment: new Compartment(), ext: (c) => (c.showLineNumber ? cached("lines", () => lineNumbers()) : NONE) },

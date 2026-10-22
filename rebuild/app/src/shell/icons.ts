@@ -7,6 +7,7 @@
 // places that set neither.
 
 import * as lucide from "lucide";
+import { kept } from "../memo";
 
 type IconNode = [tag: string, attrs: Record<string, string | number | undefined>][];
 
@@ -189,9 +190,7 @@ function build(name: IconName): SVGElement {
 }
 
 export function icon(name: IconName, size = 18): SVGElement {
-  let svg = built.get(name);
-  if (!svg) built.set(name, (svg = build(name)));
-  const copy = svg.cloneNode(true) as SVGElement;
+  const copy = kept(built, name, () => build(name)).cloneNode(true) as SVGElement;
   copy.setAttribute("width", String(size));
   copy.setAttribute("height", String(size));
   return copy;

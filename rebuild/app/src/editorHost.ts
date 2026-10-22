@@ -12,6 +12,7 @@ import type { EditorHost, EmbedHost } from "./editor/host";
 import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
+import { kept } from "./memo";
 import type { Workspace } from "./workspace";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
@@ -97,9 +98,7 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       modified(path); // its embeds show it now, not when it is saved
     },
     watch(path, fn) {
-      let watching = watchers.get(path);
-      if (!watching) watchers.set(path, (watching = listeners()));
-      return watching.on(fn);
+      return kept(watchers, path, () => listeners()).on(fn);
     },
   };
 }

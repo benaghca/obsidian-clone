@@ -6,6 +6,7 @@
 // (or searched), so opening and switching each fit in a frame. The last
 // section shown is remembered while the app runs.
 
+import { kept } from "../memo";
 import { animateOut } from "../motion";
 import { h, keyButton } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
@@ -53,11 +54,7 @@ export function openSettings(sections: SettingsSection[], id?: string) {
   const contentContainer = h("div", { class: "vertical-tab-content-container" }, content);
   let selected = "";
 
-  const sectionEl = (s: SettingsSection) => {
-    let el = built.get(s.id);
-    if (!el) built.set(s.id, (el = h("div", { class: "setting-section", "data-section": s.id }, ...[s.build()].flat())));
-    return el;
-  };
+  const sectionEl = (s: SettingsSection) => kept(built, s.id, () => h("div", { class: "setting-section", "data-section": s.id }, ...[s.build()].flat()));
 
   function show(sectionId: string) {
     const s = listed.find((x) => x.id === sectionId) ?? listed[0];

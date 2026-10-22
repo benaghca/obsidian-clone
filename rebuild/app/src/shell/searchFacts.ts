@@ -6,7 +6,7 @@
 // the backend only about the term being typed.
 
 import { api } from "../api";
-import { perWorkspace } from "../perWorkspace";
+import { perWorkspace } from "../memo";
 import type { Workspace } from "../workspace";
 import { type NoteProperties, propertyIndex } from "./propertyIndex";
 import { type Facts, type Line, needs, type Query, termsOf } from "./searchQuery";

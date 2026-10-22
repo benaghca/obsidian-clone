@@ -21,6 +21,7 @@ import type { SyntaxNode } from "@lezer/common";
 import { writeClipboard } from "./clipboard";
 import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
+import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
@@ -118,11 +119,7 @@ const externalIcon = Decoration.widget({ widget: new SpanWidget("cm-external-lin
 const rule = Decoration.replace({ widget: new SpanWidget("cm-hr") });
 const decoCache = new Map<string, Decoration>();
 /** A decoration made once, by key. */
-const once = (key: string, make: () => Decoration) => {
-  let d = decoCache.get(key);
-  if (!d) decoCache.set(key, (d = make()));
-  return d;
-};
+const once = (key: string, make: () => Decoration) => kept(decoCache, key, make);
 const cached = (kind: "mark" | "line", cls: string) => once(`${kind} ${cls}`, () => (kind === "mark" ? Decoration.mark({ class: cls }) : Decoration.line({ class: cls })));
 // A coloured highlight's colour reaches CSS as --highlight-color, as a callout's does.
 const tint = (color: HighlightColor) => `--highlight-color: var(--color-${color})`;
