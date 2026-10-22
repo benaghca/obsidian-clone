@@ -327,6 +327,8 @@
 /* The cell editor inherits the table's typography without note padding. */
 .cm-table-cell.cm-editor {
   display: block;
+  margin: 0;
+  padding: 0;
   font-size: inherit;
   font-weight: inherit;
   background: transparent;
