@@ -222,6 +222,21 @@ export const toggleCheckbox: StateCommand = ({ state, dispatch }) => {
   return true;
 };
 
+/** Complete a newly typed fence; an existing closing fence is left to normal Enter handling. */
+export const closeCodeFence: StateCommand = ({ state, dispatch }) => {
+  const { main } = state.selection;
+  if (state.readOnly || !main.empty || state.selection.ranges.length !== 1) return false;
+  const line = state.doc.lineAt(main.head);
+  const fence = /^([ \t]*)(`{3,}|~{3,})/.exec(line.text);
+  if (!fence || main.head !== line.to) return false;
+  let node = syntaxTree(state).resolveInner(line.from + fence[1].length, 1);
+  while (node.parent && node.name !== "FencedCode") node = node.parent;
+  if (node.name !== "FencedCode" || node.from !== line.from + fence[1].length || node.getChildren("CodeMark").length > 1) return false;
+  const insert = state.lineBreak + fence[1] + state.lineBreak + fence[1] + fence[2];
+  dispatch(state.update({ changes: { from: line.to, insert }, selection: { anchor: line.to + state.lineBreak.length + fence[1].length }, scrollIntoView: true, userEvent: "input" }));
+  return true;
+};
+
 /**
  * Insert a block on its own line: on the caret's line if it is empty,
  * otherwise on a new line after it. `caret` is the offset within `text`

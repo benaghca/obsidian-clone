@@ -2,6 +2,7 @@ import { insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
 import { describe, expect, it, test } from "vitest";
 import {
+  closeCodeFence,
   insertBlock,
   insertFootnote,
   insertMarkdownLink,
@@ -141,4 +142,13 @@ test("Home and Shift+Home toggle after list/task/quote markers, excluding code",
   }
   expect(run(markdownHome(), "plain|")).toBe("plain|");
   expect(run(markdownHome(), "```md\n- code|\n```")).toBe("```md\n- code|\n```");
+});
+
+
+test("Enter closes a new code fence and keeps its language, indent and caret", () => {
+  expect(run(closeCodeFence, "```|")).toBe("```\n|\n```");
+  expect(run(closeCodeFence, "```ts|")).toBe("```ts\n|\n```");
+  expect(run(closeCodeFence, "  ~~~~js|")).toBe("  ~~~~js\n  |\n  ~~~~");
+  expect(run(closeCodeFence, "```ts|\n```")).toBe("```ts|\n```");
+  expect(run(closeCodeFence, "    ```|")).toBe("    ```|");
 });
