@@ -18,7 +18,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, foldToggle, highlighted, pagedRows } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, pagedRows } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -94,7 +94,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
           ),
         ),
       );
-      const chevron = foldToggle(matches, collapsed.has(path), (folded) => (folded ? collapsed.add(path) : collapsed.delete(path)));
+      const chevron = foldToggle(matches, collapsed.has(path), foldIn(collapsed, path));
       return h(
         "div",
         { class: "search-result" },

@@ -13,7 +13,7 @@ import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -61,10 +61,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
         const all = byFile.get(path)!;
         const matches = h("div", { class: "search-result-file-matches" });
         pagedRows(matches, all, matchRow, PAGE);
-        const chevron = foldToggle(matches, collapsedFiles.has(path), (collapsed) => {
-          if (collapsed) collapsedFiles.add(path);
-          else collapsedFiles.delete(path);
-        });
+        const chevron = foldToggle(matches, collapsedFiles.has(path), foldIn(collapsedFiles, path));
         return h(
           "div",
           { class: "search-result" },

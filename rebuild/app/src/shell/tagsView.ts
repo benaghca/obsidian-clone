@@ -8,7 +8,7 @@
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { type TagNode, tagsInText, tagTree } from "./linksTags";
-import { foldToggle, liveData, type SideView } from "./sideView";
+import { foldIn, foldToggle, liveData, type SideView } from "./sideView";
 import { vaultTags } from "./vaultTags";
 
 const DELAY = 300;
@@ -42,12 +42,7 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
     return nodes.map((n) => {
       const kids = h("div", { class: "tree-item-children" }, ...rows(n.children, depth + 1));
       const key = n.tag.toLowerCase();
-      const chevron = n.children.length
-        ? foldToggle(kids, collapsed.has(key), (folded) => {
-            if (folded) collapsed.add(key);
-            else collapsed.delete(key);
-          })
-        : null;
+      const chevron = n.children.length ? foldToggle(kids, collapsed.has(key), foldIn(collapsed, key)) : null;
       const self = h(
         "div",
         { class: "tree-item-self tag-pane-tag", title: `#${n.tag}`, onclick: () => searchFor(`tag:#${n.tag}`) },

@@ -113,6 +113,9 @@ export function foldToggle(group: HTMLElement, collapsed: boolean, onToggle: (co
   return chevron;
 }
 
+/** A foldToggle callback that keeps whether `key` is folded in `folded`. */
+export const foldIn = (folded: Set<string>, key: string) => (on: boolean) => void (on ? folded.add(key) : folded.delete(key));
+
 /**
  * Rows for `items`, `page` at a time (the first `now` at once, the rest of
  * the page just after they are painted), then a "Show N more" row that adds
