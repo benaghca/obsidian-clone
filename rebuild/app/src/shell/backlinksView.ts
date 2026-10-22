@@ -55,7 +55,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   /** Rows grouped per note; returns the number of mentions shown (Obsidian's count). */
   function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string) {
     const byFile = new Map<string, Mention[]>();
-    for (const m of mentions) byFile.set(m.from, [...(byFile.get(m.from) ?? []), m]);
+    for (const m of mentions) kept(byFile, m.from, () => []).push(m);
     const files = [...byFile.keys()].sort((a, b) => compareNames(noteName(a), noteName(b)));
     into.replaceChildren(
       ...files.map((path) => {
