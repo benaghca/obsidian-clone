@@ -326,6 +326,7 @@
 }
 .is-source-mode .cm-s-task {
   font-family: var(--font-monospace);
+  line-height: 1;
   color: var(--text-muted);
 }
 

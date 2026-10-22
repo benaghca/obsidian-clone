@@ -27,9 +27,10 @@ const highlighter = tagHighlighter([
 const codeLine = Decoration.line({ class: "cm-codeblock" });
 const codeBegin = Decoration.line({ class: "cm-codeblock cm-codeblock-begin" });
 const codeEnd = Decoration.line({ class: "cm-codeblock cm-codeblock-end" });
+const listLine = Decoration.line({ class: "cm-list-line" });
 
-/** Fenced code blocks get the same grey band as in Live Preview (visible lines only). */
-function codeBlocks(view: EditorView): DecorationSet {
+/** The same code bands and list spacing as Live Preview (visible lines only). */
+export function sourceLines(view: EditorView): DecorationSet {
   const decos: Range<Decoration>[] = [];
   const doc = view.state.doc;
   eachCodeBlock(view.state, view.visibleRanges, (node, from, to) => {
@@ -39,6 +40,15 @@ function codeBlocks(view: EditorView): DecorationSet {
       decos.push((n === first ? codeBegin : n === last ? codeEnd : codeLine).range(doc.line(n).from));
     }
   });
+  for (const { from, to } of view.visibleRanges) {
+    syntaxTree(view.state).iterate({
+      from,
+      to,
+      enter: (node) => {
+        if (node.name === "ListMark") decos.push(listLine.range(doc.lineAt(node.from).from));
+      },
+    });
+  }
   return Decoration.set(decos, true);
 }
 
@@ -46,10 +56,10 @@ const codeBlockPlugin = ViewPlugin.fromClass(
   class {
     decorations: DecorationSet;
     constructor(view: EditorView) {
-      this.decorations = codeBlocks(view);
+      this.decorations = sourceLines(view);
     }
     update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) this.decorations = codeBlocks(u.view);
+      if (u.docChanged || u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state)) this.decorations = sourceLines(u.view);
     }
   },
   { decorations: (v) => v.decorations },
