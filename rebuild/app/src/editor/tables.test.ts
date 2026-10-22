@@ -119,4 +119,10 @@ describe("table editing in the editor", () => {
     const sel = view.state.selection.main;
     expect(view.state.doc.lineAt(sel.head).number).toBe(7);
   });
+  it("puts the caret just inside an empty cell, so typing goes inside it (Tab in the last cell)", () => {
+    const view = editor(doc, at("second"));
+    editTable(view, nextCell, true);
+    view.dispatch(view.state.replaceSelection("new"));
+    expect(view.state.doc.line(7).text).toBe("| new            |       |        |");
+  });
 });

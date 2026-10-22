@@ -231,9 +231,11 @@ export function editTable(view: EditorView, op: TableOp, select = false, at = vi
   const lines = text.split("\n");
   const n = done.to.row === 0 ? 0 : done.to.row + 1;
   const start = found.from + lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0);
-  const target = splitRow(lines[n])[done.to.col] ?? { from: 2, to: 2 };
-  const end = start + target.from + done.table.rows[done.to.row][done.to.col].length;
-  const anchor = select ? start + target.from : end;
+  const cell = done.table.rows[done.to.row][done.to.col];
+  // An empty cell's caret goes just inside its left edge ("| "), so typing fills the padded cell, as in Obsidian.
+  const from = start + (cell ? splitRow(lines[n])[done.to.col].from : pipes(lines[n])[done.to.col] + 2);
+  const end = from + cell.length;
+  const anchor = select ? from : end;
   // Moving within a table already padded changes nothing (no empty undo step).
   view.dispatch({
     changes: text === state.sliceDoc(found.from, found.to) ? [] : { from: found.from, to: found.to, insert: text },
