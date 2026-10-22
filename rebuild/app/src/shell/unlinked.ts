@@ -10,6 +10,7 @@
 
 import { splitFrontmatter } from "../editor/frontmatter";
 import type { NoteRef } from "../editor/host";
+import { kept } from "../memo";
 
 export interface UnlinkedMention {
   /** The note mentioned. */
@@ -64,9 +65,7 @@ function indexNames(notes: NoteRef[], selfPath: string | null): Map<string, Name
       return /^\s+$/.test(between) ? "" : between;
     });
     const name: Name = { path: note.path, name: note.name, words, seps };
-    const list = byFirst.get(words[0]);
-    if (list) list.push(name);
-    else byFirst.set(words[0], [name]);
+    kept(byFirst, words[0], () => []).push(name);
   }
   // Longer names first, so "Project roadmap" wins over "Project" at the same place.
   for (const list of byFirst.values()) list.sort((a, b) => b.words.length - a.words.length);

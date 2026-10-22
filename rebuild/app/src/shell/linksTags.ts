@@ -1,6 +1,7 @@
 // Pure helpers for the Outgoing links and Tags views (tested without the DOM).
 
 import { splitFrontmatter } from "../editor/frontmatter";
+import { kept } from "../memo";
 import { compareNames } from "../paths";
 
 const WIKILINK = /!?\[\[([^\]|#^\n]*)(?:[#^][^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
@@ -145,9 +146,7 @@ export function tagsByNote(tagLines: NoteLine[], fenceLines: NoteLine[], frontma
   const fencesByPath = new Map<string, NoteLine[]>();
   for (const hit of fenceLines) {
     if (hit.line <= 0) continue;
-    const list = fencesByPath.get(hit.path);
-    if (list) list.push(hit);
-    else fencesByPath.set(hit.path, [hit]);
+    kept(fencesByPath, hit.path, () => []).push(hit);
   }
   /** Per note: [first, last] lines of each fenced block, inclusive, in order. */
   const ranges = new Map<string, [number, number][]>();
@@ -176,9 +175,7 @@ export function tagsByNote(tagLines: NoteLine[], fenceLines: NoteLine[], frontma
     if (ranges.get(hit.path)?.some(([a, b]) => hit.line >= a && hit.line <= b)) continue;
     const found = tagsInLine(hit.text);
     if (!found.length) continue;
-    const list = tags.get(hit.path);
-    if (list) list.push(...found);
-    else tags.set(hit.path, found);
+    kept(tags, hit.path, () => []).push(...found);
   }
   return tags;
 }
