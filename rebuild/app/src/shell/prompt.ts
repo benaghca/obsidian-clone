@@ -25,11 +25,6 @@ export interface PromptOptions<T> {
   restoreFocusOnChoose?: boolean;
 }
 
-export interface Prompt {
-  close(restoreFocus?: boolean): void;
-  readonly query: string;
-}
-
 /** The usual footer: navigate, what Enter does, dismiss. */
 export const hints = (enter: string): [string, string][] => [
   ["↑↓", "to navigate"],
@@ -49,8 +44,8 @@ let openCount = 0;
 /** Whether a prompt is open (hotkeys and menus leave the keyboard to it). */
 export const isPromptOpen = () => openCount > 0;
 
-export function openPrompt<T>(opts: PromptOptions<T>): Prompt | null {
-  if (document.querySelector(".modal-container:not(.is-closing)")) return null;
+export function openPrompt<T>(opts: PromptOptions<T>) {
+  if (document.querySelector(".modal-container:not(.is-closing)")) return;
   const restoreFocus = document.activeElement as HTMLElement | null;
 
   const input = h("input", { class: "prompt-input", placeholder: opts.placeholder, spellcheck: "false", "aria-label": opts.placeholder });
@@ -153,12 +148,6 @@ export function openPrompt<T>(opts: PromptOptions<T>): Prompt | null {
   openCount++;
   document.body.append(overlay);
   setQuery("");
-  return {
-    close,
-    get query() {
-      return input.value;
-    },
-  };
 }
 
 /**
