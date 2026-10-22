@@ -114,6 +114,14 @@ export function searchMatches(state: EditorState) {
   return matches;
 }
 
+export function searchMatchIndex(matches: ReturnType<typeof searchMatches>, { from, to }: { from: number; to: number }) {
+  return matches.findIndex((m) => (m.from === from && m.to === to) || (from === to && m.from <= from && from < m.to));
+}
+
+export function searchMatchAtOrAfter(matches: ReturnType<typeof searchMatches>, from: number) {
+  return matches.find((m) => m.from >= from) ?? matches[0];
+}
+
 const searchCounter = ViewPlugin.define((view) => {
   let doc: Text | null = null;
   let query: ReturnType<typeof getSearchQuery> | null = null;
@@ -121,17 +129,25 @@ const searchCounter = ViewPlugin.define((view) => {
   return { update(u) {
     if (!searchPanelOpen(u.state)) return;
     const next = getSearchQuery(u.state);
-    if (doc !== u.state.doc || !query?.eq(next)) {
+    const changed = !query?.eq(next);
+    if (doc !== u.state.doc || changed) {
       doc = u.state.doc;
       query = next;
       matches = searchMatches(u.state);
     }
-    const { from, to } = u.state.selection.main;
-    const text = `${matches.findIndex((m) => m.from === from && m.to === to) + 1} / ${matches.length}`;
     // Panels mount after plugins update. Keep CodeMirror's panel and its keyboard handling.
     queueMicrotask(() => {
+      if (view.state !== u.state) return;
       const field = view.dom.querySelector(".cm-search [name=search]");
       if (!field) return;
+      const selection = view.state.selection.main;
+      if (changed && matches.length) {
+        const match = searchMatchAtOrAfter(matches, selection.from);
+        if (selection.from !== match.from || selection.to !== match.to) {
+          view.dispatch({ selection: { anchor: match.from, head: match.to }, scrollIntoView: true });
+          return;
+        }
+      }
       let count = view.dom.querySelector(".cm-search-count");
       if (!count) {
         count = document.createElement("span");
@@ -139,7 +155,7 @@ const searchCounter = ViewPlugin.define((view) => {
         count.setAttribute("aria-live", "polite");
         field.after(count);
       }
-      count.textContent = text;
+      count.textContent = `${searchMatchIndex(matches, selection) + 1} / ${matches.length}`;
     });
   } };
 });
