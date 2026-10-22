@@ -38,7 +38,7 @@ export async function createNote(ws: Workspace, path: string, content = ""): Pro
  */
 export async function newNote(ws: Workspace, folder: string = fileSettings.newNoteFolder(), where?: OpenWhere): Promise<string> {
   if (folder && !ws.vault.isFolder(folder)) await api.createFolder(folder).catch(() => {});
-  const entry = await createNote(ws, freeName(ws, folder, ".md"));
+  const entry = await createNote(ws, freeName(ws, `${folder ? `${folder}/` : ""}Untitled`, ".md"));
   await ws.open(entry.path, { where: where ?? (ws.active.path !== null || ws.active.type ? "tab" : false) });
   // A new note is for writing in, even when new tabs open in Reading view.
   if (ws.active.path === entry.path && ws.active.mode === "reading") ws.setMode(fileSettings.editingMode());
@@ -47,18 +47,18 @@ export async function newNote(ws: Workspace, folder: string = fileSettings.newNo
 
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
-  const entry = await api.createFolder(freeName(ws, parent, ""));
+  const entry = await api.createFolder(freeName(ws, `${parent ? `${parent}/` : ""}Untitled`, ""));
   await ws.vault.refreshFiles();
   return entry.path;
 }
 
-/** A free "Untitled" name in a folder: "Untitled", "Untitled 1", ... */
-function freeName(ws: Workspace, folder: string, ext: string) {
+/** A path no file has: `stem` and `ext`, else with " 1", " 2", ... after the stem (only those, if `numbered`). */
+function freeName(ws: Workspace, stem: string, ext: string, numbered = false) {
   const taken = new Set(ws.vault.files.map((f) => f.path.toLowerCase()));
-  const at = (name: string) => `${folder ? folder + "/" : ""}${name}${ext}`;
-  let name = "Untitled";
-  for (let i = 1; taken.has(at(name).toLowerCase()); i++) name = `Untitled ${i}`;
-  return at(name);
+  for (let i = Number(numbered); ; i++) {
+    const path = `${stem}${i ? ` ${i}` : ""}${ext}`;
+    if (!taken.has(path.toLowerCase())) return path;
+  }
 }
 
 /** Rename a note (keeping its folder and .md) or a folder. */
@@ -94,11 +94,7 @@ async function relocate(ws: Workspace, from: string, to: string) {
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
   await ws.saveNow(path);
   const content = await ws.editors.text(path);
-  const taken = new Set(ws.vault.files.map((f) => f.path.toLowerCase()));
-  const base = path.replace(/\.md$/, "");
-  let n = 1;
-  while (taken.has(`${base} ${n}.md`.toLowerCase())) n++;
-  const entry = await createNote(ws, `${base} ${n}.md`, content);
+  const entry = await createNote(ws, freeName(ws, path.replace(/\.md$/, ""), ".md", true), content);
   await ws.open(entry.path);
   return entry.path;
 }
