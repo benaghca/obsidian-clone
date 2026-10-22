@@ -31,8 +31,9 @@ export interface EmbedSize {
 }
 
 /** "200", "200x100", "caption|200": the size Obsidian reads after the last "|" (an image's alias or alt text). */
+const SIZED = /^(?:([\s\S]*)\|)?\s*(\d+)(?:x(\d+))?\s*$/;
 export function embedSize(text: string): EmbedSize {
-  const m = /^(?:([\s\S]*)\|)?\s*(\d+)(?:x(\d+))?\s*$/.exec(text);
+  const m = SIZED.exec(text);
   return m ? { alt: m[1] ?? "", width: Number(m[2]), height: m[3] ? Number(m[3]) : undefined } : { alt: text };
 }
 
@@ -124,7 +125,7 @@ export const editingEmbed = StateField.define<number | null>({
  */
 export function resizedSize(text: string | null, width: number): string {
   if (text === null) return `|${width}`;
-  const m = /^(?:([\s\S]*)\|)?\s*\d+(?:x\d+)?\s*$/.exec(text);
+  const m = SIZED.exec(text);
   const caption = m ? m[1] : text || undefined;
   return caption === undefined ? `${width}` : `${caption}|${width}`;
 }
