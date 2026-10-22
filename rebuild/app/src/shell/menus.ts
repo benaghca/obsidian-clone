@@ -425,7 +425,7 @@ export function createMenus(host: MenuHost) {
       SEPARATOR,
       t.pinned ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) } : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
       linkedWith(t, ws.layout.tabs()).length
-        ? { title: "Unlink tab", icon: "unlink", action: () => ws.setLink(t, null) }
+        ? { title: "Unlink tab", icon: "link", action: () => ws.setLink(t, null) }
         : { title: "Link with tab...", icon: "link", action: () => host.linkTab(t) },
       ...(isActive && t.path ? viewItems(t, t.path, true) : []),
       ...(isActive && !t.path && t.type
