@@ -294,7 +294,7 @@ export function registerAppCommands(parts: AppParts) {
       () => ws.closeAllOthers(ws.active), () => ws.groups().some((g) => g.tabs.some((t) => t !== ws.active && !t.pinned))),
     conditionalAction("workspace:close-others-tab-group", "Close others in tab group", "x",
       () => ws.closeOthers(ws.active), () => ws.tabs.some((t) => t !== ws.active && !t.pinned)),
-    { id: "workspace:close-tab-group", name: "Close this tab group", icon: "x", run: () => ws.closeGroup(ws.activeGroup) },
+    { id: "workspace:close-tab-group", name: "Close this tab group", icon: "x", run: () => ws.closeTabs([...ws.activeGroup.tabs]) },
     conditionalAction("workspace:undo-close-pane", "Undo close tab", "undo-2",
       () => ws.undoCloseTab(), () => ws.canUndoClose(), mod("t", { shift: true })),
     conditionalAction("workspace:next-tab", "Go to next tab", "arrow-right",

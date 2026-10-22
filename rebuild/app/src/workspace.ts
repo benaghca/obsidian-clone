@@ -236,11 +236,6 @@ export class Workspace {
     if (this.active !== wasActive && this.active.path) this.view.focus();
   }
 
-  /** Close a whole tab group (its tabs can be brought back with Undo close tab). */
-  closeGroup(group: Group) {
-    this.closeTabs([...group.tabs]);
-  }
-
   /** Obsidian's "Close others", "Close tabs after" and "Close all" act within the tab's group and leave pinned tabs open. */
   closeOthers(tab: Tab) {
     this.closeTabs((this.layout.groupOf(tab)?.tabs ?? []).filter((t) => t !== tab && !t.pinned));
