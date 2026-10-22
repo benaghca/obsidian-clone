@@ -402,12 +402,7 @@ mod tests {
 
         vault.delete_path("fresh/Moved.md", false).unwrap();
         assert!(!dir.path.join("fresh").join("Moved.md").exists());
-        assert!(dir
-            .path
-            .join(".trash")
-            .join("fresh")
-            .join("Moved.md")
-            .is_file());
+        assert!(dir.path.join(".trash/fresh/Moved.md").is_file());
         assert!(!vault
             .list_files()
             .iter()
