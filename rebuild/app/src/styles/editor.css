@@ -5,6 +5,11 @@
   font-family: var(--font-text);
 }
 
+/* Inline spans cover Reading view's words, leaving the surrounding space alone. */
+.is-reading-mode .cm-reading-text {
+  cursor: text;
+}
+
 /* syntax markers that stay visible while the selection touches them */
 .cm-formatting {
   color: var(--text-faint);

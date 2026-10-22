@@ -192,6 +192,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
   for (const { from, to } of ranges) {
     if (to < bodyFrom) continue;
     const visible = { from: Math.max(from, bodyFrom), to };
+    if (reading) mark("cm-reading-text", visible.from, visible.to);
     const lineClass = (cls: string, from: number, to: number) => {
       const start = Math.max(from, visible.from);
       const end = Math.min(to, visible.to);

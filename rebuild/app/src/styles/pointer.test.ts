@@ -16,8 +16,13 @@ test("the hover chevron sits inside the editor's own margin, so reaching for it 
   expect(px(chevron, "left") + px(chevron, "width")).toBeLessThanOrEqual(px(editor, "padding-left"));
 });
 
-test("no stylesheet forces the text cursor: the browser shows it over text and editable areas only, as in Obsidian", () => {
+test("only Reading view's inline text forces the text cursor; margins and editable areas keep the browser's cursor", () => {
+  const selector = ".is-reading-mode .cm-reading-text";
+  const reading = rule(editorCss, selector);
+  expect(reading).toMatch(/cursor:\s*text;/);
   const sheets = import.meta.glob<string>("./*.css", { query: "?raw", import: "default", eager: true });
   expect(Object.keys(sheets).length).toBeGreaterThan(10);
-  for (const [file, css] of Object.entries(sheets)) expect(css, file).not.toMatch(/cursor:\s*text/);
+  for (const [file, css] of Object.entries(sheets)) {
+    expect(css.replace(`${selector} {${reading}}`, ""), file).not.toMatch(/cursor:\s*text/);
+  }
 });

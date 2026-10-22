@@ -5,6 +5,7 @@ import type { MarkdownParser } from "@lezer/markdown";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { editingEmbed } from "./embeds";
 import { checkedTaskText, LivePreview, wordClick } from "./livePreview";
+import { readingMode } from "./render";
 import { markdownSyntax, Tag, WikiLink } from "./syntax";
 
 const parser = (markdownLanguage.parser as MarkdownParser).configure([WikiLink, Tag]);
@@ -36,9 +37,9 @@ test("each task strikes its own line", () => {
 
 // A stand-in for the editor view: just what Live Preview reads, with
 // dispatch running the plugin's update as CodeMirror would.
-function editor(doc: string, caret: number) {
+function editor(doc: string, caret: number, reading = false) {
   const view = {
-    state: EditorState.create({ doc, selection: { anchor: caret }, extensions: [markdownSyntax, editingEmbed] }),
+    state: EditorState.create({ doc, selection: { anchor: caret }, extensions: [markdownSyntax, editingEmbed, readingMode.of(reading)] }),
     hasFocus: true,
     get visibleRanges() {
       return [{ from: 0, to: this.state.doc.length }];
@@ -65,6 +66,18 @@ function editor(doc: string, caret: number) {
 const release = () => window.dispatchEvent(new Event("mouseup"));
 beforeEach(() => vi.stubGlobal("window", new EventTarget()));
 afterEach(() => vi.unstubAllGlobals());
+
+test("Reading view gives plain paragraph text an inline cursor target without covering the line's blank space", () => {
+  const text = "Plain paragraph with **bold** text.";
+  for (const reading of [true, false]) {
+    const { lp } = editor(text, 0, reading);
+    const spans: [number, number][] = [];
+    lp.decorations.between(0, text.length, (from, to, d) => {
+      if (d.spec.class === "cm-reading-text") spans.push([from, to]);
+    });
+    expect(spans).toEqual(reading ? [[0, text.length]] : []);
+  }
+});
 
 test("markup stays as it was while the mouse button is down, and catches up when it comes up", () => {
   const { view, shown, press } = editor("Some **bold** text\n\nfar away", 25);
