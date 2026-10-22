@@ -13,6 +13,7 @@ import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
 import { renameFile } from "../fileOps";
+import { editAt } from "../editor/render";
 import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -581,14 +582,13 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       title.classList.remove("is-renaming");
       void commitTitle();
     });
-    // Clicking the empty space below the text puts the caret at the end, like Obsidian.
+    // Margins place the caret beside the line; only space below the text goes to the end.
     scroller.addEventListener("mousedown", (e) => {
       const view = ws.editors.viewOf(group);
       // (The editor's own box reaches into the left margin, for the fold chevron.)
       if (e.target === scroller || e.target === sizer || e.target === view.dom) {
         e.preventDefault();
-        view.focus();
-        view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+        editAt(view, { x: e.clientX, y: e.clientY });
       }
     });
 
