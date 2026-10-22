@@ -1,26 +1,16 @@
-// GitHub-style pipe tables (the parser's GFM Table node), drawn and edited
-// as Obsidian 1.14.4 does (observed). Drawn: the header row bold, each
-// column aligned as its ":---:" says, cells rendered as Reading view renders
-// inline markdown, a wide table scrolling sideways inside the readable
-// column. Obsidian edits the cells in place; here a click on a cell puts the
-// caret in that cell's source instead, which shows the table as markdown
-// while the caret is in it (blocks.ts). There Tab and Shift+Tab step to the
-// next and previous cell (Tab in the last one adds a row), Enter goes to the
-// cell below (in the last row it adds one), Shift+Enter writes <br>, and
-// the table menu's rows and columns: add, move, duplicate, delete, align
-// and sort. Every edit writes the whole table back padded as Obsidian pads
-// it (each column as wide as its widest cell, at least 3, and never
-// narrower than it was: deleting a long row leaves its column's width), in
-// one transaction: one undo step, touching only the table's lines.
+// GFM tables stay drawn in Live Preview. Only the active cell has a nested
+// editor; its changes and selection go to the note's existing undo history.
+// Row/column actions still use the same padded table formatter below.
 
 import { completionStatus } from "@codemirror/autocomplete";
+import { defaultKeymap, isolateHistory } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type EditorState, Prec } from "@codemirror/state";
-import { type EditorView, keymap } from "@codemirror/view";
+import { ChangeSet, EditorSelection, EditorState, Prec, Transaction } from "@codemirror/state";
+import { EditorView, keymap, runScopeHandlers, type ViewUpdate } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { h } from "../shell/dom";
 import { editorHost } from "./host";
-import { BlockWidget, decorate, editAt, onDestroy, type Painted, paintRange, readingMode, release } from "./render";
+import { BlockWidget, decorate, editAt, editButton, isLinkEvent, onDestroy, type Painted, paintRange, readingMode, release } from "./render";
 
 export type Align = "left" | "center" | "right" | "";
 
@@ -64,42 +54,248 @@ export function alignments(row: string): Align[] {
   });
 }
 
+const tableDOM = new WeakMap<HTMLElement, (widget: TableWidget) => void>();
+const tableSync = new WeakMap<EditorView, Set<(u?: ViewUpdate) => void>>();
+
 export class TableWidget extends BlockWidget {
+  updateDOM(dom: HTMLElement) {
+    tableDOM.get(dom)?.(this);
+    return true;
+  }
   toDOM(view: EditorView) {
-    const lines = this.text.split("\n");
-    const align = alignments(lines[1] ?? "");
-    const columns = splitRow(lines[0]).length;
-    const painted: Painted = decorate(this.text, view, this.chain);
     const table = h("table");
-    let at = 0;
-    lines.forEach((line, n) => {
-      const start = at;
-      at += line.length + 1;
-      if (n === 1) return;
-      const cells = splitRow(line).slice(0, columns);
-      const tr = h("tr");
-      for (let c = 0; c < columns; c++) {
-        const cell = cells[c] ?? { from: line.length, to: line.length };
-        const td = h(n === 0 ? "th" : "td", { "data-offset": String(start + cell.from) });
-        if (align[c]) td.style.textAlign = align[c];
-        paintRange(painted, td, start + cell.from, start + cell.to);
-        tr.append(td);
+    const dom = h("div", { class: "cm-table-widget" }, table, editButton());
+    let widget: TableWidget = this;
+    let painted: Painted | null = null;
+    let inner: EditorView | null = null;
+    let active: HTMLTableCellElement | null = null;
+    let range: { from: number; to: number } | null = null;
+    let syncing = false;
+    let dirty = true;
+    let dismissedAt: number | null = null;
+    let pending = false;
+    let held: AbortController | null = null;
+    const start = () => view.posAtDOM(dom);
+    const cellPos = (td: HTMLElement) => {
+      const row = (td.parentElement as HTMLTableRowElement).rowIndex;
+      const n = row === 0 ? 0 : row + 1;
+      const lines = widget.text.split("\n");
+      const line = lines[n];
+      const cell = splitRow(line)[(td as HTMLTableCellElement).cellIndex];
+      const offset = cell && cell.from !== cell.to ? cell.from : Math.min(cell?.from ?? line.length, line.lastIndexOf("|", (cell?.from ?? line.length) - 1) + 2);
+      return start() + lines.slice(0, n).reduce((sum, l) => sum + l.length + 1, 0) + offset;
+    };
+    const leave = (dir: number) => {
+      const from = start();
+      const anchor = dir < 0 ? Math.max(0, from - 1) : Math.min(view.state.doc.length, from + widget.text.length + 1);
+      view.dispatch({ selection: { anchor } });
+      dismissedAt = anchor;
+      view.focus();
+      sync();
+      return true;
+    };
+    const sync = () => {
+      if (!dom.isConnected) return;
+      const { state } = view;
+      const sel = state.selection.main;
+      if (!dirty && range && inner?.hasFocus && sel.head !== dismissedAt && sel.anchor === range.from + inner.state.selection.main.anchor && sel.head === range.from + inner.state.selection.main.head && state.sliceDoc(range.from, range.to) === inner.state.doc.toString()) return;
+      const from = start();
+      const found = tableAt(state, sel.head);
+      const direct = state.sliceDoc(from, from + widget.text.length) === widget.text;
+      const editing = direct && sel.head !== dismissedAt && !state.readOnly && !state.facet(readingMode) && (view.hasFocus || inner?.hasFocus);
+      const row = editing && found?.from === from && sel.from >= from && sel.to <= from + widget.text.length ? found.cell.row : -1;
+      const col = found?.cell.col ?? -1;
+      const target = table.rows[row]?.cells[col] ?? null;
+      if (active !== target) {
+        inner?.destroy();
+        inner = null;
+        active = target;
+        range = null;
+        dirty = true;
       }
-      if (n === 0) table.append(h("thead", null, tr));
-      else (table.tBodies[0] ?? table.appendChild(h("tbody"))).append(tr);
-    });
-    const cellPos = (e: Event, dom: HTMLElement) => view.posAtDOM(dom) + Number((e.target as Element).closest<HTMLElement>("[data-offset]")?.dataset.offset ?? 0);
-    const dom = this.box(view, "cm-table-widget", table, cellPos);
-    // Right-click: the editor's menu, with the table's items for that cell.
-    dom.addEventListener("contextmenu", (e) => {
-      const pos = cellPos(e, dom);
+      if (dirty) {
+        if (painted) release(painted);
+        painted = decorate(widget.text, view, widget.chain, (line) => widget.tick(view, dom, line));
+        const lines = widget.text.split("\n");
+        const align = alignments(lines[1] ?? "");
+        const columns = splitRow(lines[0]).length;
+        const rows = lines.filter((_, n) => n !== 1);
+        while (table.rows.length > rows.length) table.deleteRow(-1);
+        let offset = 0;
+        rows.forEach((line, r) => {
+          if (r === 1) offset += lines[1].length + 1;
+          const tr = table.rows[r] ?? (r === 0 ? table.createTHead() : table.tBodies[0] ?? table.createTBody()).insertRow();
+          while (tr.cells.length > columns) tr.deleteCell(-1);
+          const cells = splitRow(line);
+          for (let c = 0; c < columns; c++) {
+            const cell = cells[c] ?? { from: line.length, to: line.length };
+            const td = tr.cells[c] ?? tr.appendChild(h(r === 0 ? "th" : "td"));
+            const cellFrom = cell.from === cell.to ? Math.min(cell.from, line.lastIndexOf("|", cell.from - 1) + 2) : cell.from;
+            td.dataset.offset = String(offset + cellFrom);
+            td.dataset.end = String(offset + (cell.from === cell.to ? cellFrom : cell.to));
+            td.style.textAlign = align[c];
+            if (td !== active || !inner) {
+              td.replaceChildren();
+              paintRange(painted!, td, offset + cell.from, offset + cell.to);
+            }
+          }
+          offset += line.length + 1;
+        });
+        dirty = false;
+      }
+      // A newly drawn table may already contain the note's caret (undo or arrow entry).
+      active = row >= 0 ? table.rows[row]?.cells[col] ?? null : null;
+      if (!active) return;
+      range ??= { from: cellPos(active), to: from + Number(active.dataset.end) };
+      const at = range.from;
+      const text = state.sliceDoc(at, range.to);
+      const clamp = (p: number) => Math.max(0, Math.min(text.length, p - at));
+      const selection = EditorSelection.single(clamp(sel.anchor), clamp(sel.head));
+      syncing = true;
+      if (!inner) {
+        active.style.minWidth = `${active.getBoundingClientRect().width - 17}px`;
+        active.replaceChildren();
+        inner = new EditorView({
+          parent: active,
+          state: EditorState.create({ doc: text, selection, extensions: [
+            EditorView.editorAttributes.of({ class: "cm-table-cell" }),
+            EditorView.lineWrapping,
+            EditorState.transactionFilter.of((tr) => {
+              if (!tr.docChanged || syncing) return tr;
+              return cellTransaction(tr);
+            }),
+            EditorView.domEventHandlers({ blur() { queueMicrotask(sync); }, keydown(e, cellView) {
+              e.stopPropagation();
+              if (e.key === "Escape") return leave(1);
+              if ((e.ctrlKey || e.metaKey) && /^(z|y)$/i.test(e.key) && runScopeHandlers(view, e, "editor")) return true;
+              const go = (op: TableOp) => { editTable(view, op, true); sync(); return true; };
+              if (e.key === "Tab") return go(e.shiftKey ? previousCell : nextCell);
+              if (e.key === "Enter") {
+                if (e.shiftKey) { cellView.dispatch(cellView.state.replaceSelection("<br>")); return true; }
+                return go(cellBelow);
+              }
+              const s = cellView.state.selection.main;
+              if (!s.empty || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return false;
+              const left = e.key === "ArrowLeft" && s.head === 0;
+              const right = e.key === "ArrowRight" && s.head === cellView.state.doc.length;
+              const up = e.key === "ArrowUp" && cellView.coordsAtPos(s.head)?.top === cellView.coordsAtPos(0)?.top;
+              const down = e.key === "ArrowDown" && cellView.coordsAtPos(s.head)?.top === cellView.coordsAtPos(cellView.state.doc.length)?.top;
+              if (!left && !right && !up && !down) return false;
+              const model = tableModel(view.state, range!.from)!;
+              const { row, col } = model.cell;
+              if ((left || up) && row === 0 && (up || col === 0)) return leave(-1);
+              if ((right || down) && row === model.table.rows.length - 1 && (down || col === model.table.cols.length - 1)) return leave(1);
+              go(left ? previousCell : right ? nextCell : (t) => ({ table: t, to: { row: row + (up ? -1 : 1), col } }));
+              const dest = view.state.selection.main;
+              view.dispatch({ selection: { anchor: left || up ? dest.to : dest.from } });
+              sync();
+              return true;
+            } }),
+            keymap.of(defaultKeymap),
+          ] }),
+          dispatchTransactions(trs, cellView) {
+            cellView.update(trs);
+            if (syncing) return;
+            for (const tr of trs) {
+              const at = range!.from;
+              const changes: { from: number; to: number; insert: string }[] = [];
+              tr.changes.iterChanges((f, t, _f, _t, insert) => changes.push({ from: at + f, to: at + t, insert: insert.toString() }));
+              const s = tr.state.selection.main;
+              view.dispatch({ changes, selection: EditorSelection.single(at + s.anchor, at + s.head), userEvent: tr.docChanged ? "input.type" : "select", annotations: tr.docChanged ? undefined : isolateHistory.of("after") });
+            }
+          },
+        });
+      } else if (inner.state.doc.toString() !== text || !inner.state.selection.eq(selection)) {
+        inner.dispatch({ changes: inner.state.doc.toString() === text ? [] : { from: 0, to: inner.state.doc.length, insert: text }, selection });
+      }
+      syncing = false;
+      if (editing) inner.focus();
+    };
+    const schedule = (u?: ViewUpdate) => {
+      if (u?.transactions.some((tr) => tr.isUserEvent("undo") || tr.isUserEvent("redo"))) dismissedAt = null;
+      if (range && u?.docChanged) {
+        const old = range;
+        let within = true;
+        u.changes.iterChangedRanges((f, t) => { if (f < old.from || t > old.to) within = false; });
+        // Ordinary typing changes only the nested editor, keeping every other cell DOM intact.
+        if (within && inner) dirty = false;
+        range = within ? { from: u.changes.mapPos(old.from, -1), to: u.changes.mapPos(old.to, 1) } : null;
+      }
+      if (!pending) {
+        pending = true;
+        queueMicrotask(() => { pending = false; sync(); });
+      }
+    };
+    const listeners = tableSync.get(view) ?? new Set<(u?: ViewUpdate) => void>();
+    tableSync.set(view, listeners);
+    listeners.add(schedule);
+    tableDOM.set(dom, (next) => { widget = next; dirty = true; schedule(); });
+    dom.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || isLinkEvent(e) || view.state.readOnly || view.state.facet(readingMode)) return;
+      if (inner?.dom.contains(e.target as Node)) { e.stopPropagation(); return; }
       e.preventDefault();
-      if (!view.state.facet(readingMode)) editAt(view, pos);
+      e.stopPropagation();
+      const td = (e.target as Element).closest<HTMLTableCellElement>("td, th") ?? table.rows[0].cells[0];
+      dismissedAt = null;
+      if (view.state.sliceDoc(start(), start() + widget.text.length) !== widget.text) { editAt(view, start()); return; }
+      const row = (td.parentElement as HTMLTableRowElement).rowIndex;
+      const col = td.cellIndex;
+      if (!splitRow(widget.text.split("\n")[row === 0 ? 0 : row + 1])[col]) {
+        editTable(view, (table) => ({ table, to: { row, col } }), true, start());
+        view.focus();
+      } else editAt(view, cellPos(td));
+      sync();
+      inner!.focus();
+      const anchor = inner!.posAtCoords({ x: e.clientX, y: e.clientY }) ?? 0;
+      inner!.dispatch({ selection: { anchor } });
+      held?.abort();
+      held = new AbortController();
+      window.addEventListener("mousemove", (move) => {
+        if (!inner) return;
+        const head = inner.posAtCoords({ x: move.clientX, y: move.clientY }, false) ?? anchor;
+        inner.dispatch({ selection: { anchor, head } });
+      }, { signal: held.signal });
+      window.addEventListener("mouseup", () => held?.abort(), { signal: held.signal, once: true });
+    });
+    dom.addEventListener("contextmenu", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const td = (e.target as Element).closest<HTMLElement>("[data-offset]");
+      const pos = td ? cellPos(td) : start();
+      if (!view.state.facet(readingMode)) { dismissedAt = null; editAt(view, pos); }
       view.state.facet(editorHost)?.contextMenu?.(view, { x: e.clientX, y: e.clientY }, pos, false);
     });
-    onDestroy(dom, () => release(painted));
+    const outside = (e: MouseEvent) => {
+      if (inner && !dom.contains(e.target as Node) && !(e.target as Element).closest(".menu")) {
+        queueMicrotask(() => { dismissedAt = view.state.selection.main.head; sync(); });
+      }
+    };
+    window.addEventListener("mousedown", outside, true);
+    onDestroy(dom, () => {
+      window.removeEventListener("mousedown", outside, true);
+      listeners.delete(schedule);
+      held?.abort();
+      inner?.destroy();
+      if (painted) release(painted);
+    });
+    // posAtDOM is available after CodeMirror has attached the widget.
+    schedule();
     return dom;
   }
+}
+
+/** Escape delimiter pipes (also after deleting their escape) and keep pasted lines in one cell. */
+export function cellTransaction(tr: Transaction) {
+  const corrections: { from: number; to: number; insert: string }[] = [];
+  const text = tr.newDoc.toString();
+  let slashes = 0;
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "|" && slashes % 2 === 0) corrections.push({ from: i, to: i, insert: "\\" });
+    if (text[i] === "\n") corrections.push({ from: i, to: i + 1, insert: "<br>" });
+    slashes = text[i] === "\\" ? slashes + 1 : 0;
+  }
+  const escaped = ChangeSet.of(corrections, tr.newDoc.length);
+  return { changes: tr.changes.compose(escaped), selection: tr.newSelection.map(escaped), userEvent: tr.annotation(Transaction.userEvent) };
 }
 
 // ----- editing -----
@@ -262,11 +458,12 @@ const inTable = (fn: (view: EditorView) => boolean) => (view: EditorView) =>
   completionStatus(view.state) !== "active" && view.state.selection.ranges.length === 1 && !!tableAt(view.state, view.state.selection.main.head) && fn(view);
 
 /** The keys, ahead of list continuation and indenting, while the caret is in a table. */
-export const tableKeys = Prec.highest(
-  keymap.of([
+export const tableKeys = [
+  EditorView.updateListener.of((u) => { if (u.docChanged || u.selectionSet || u.focusChanged) tableSync.get(u.view)?.forEach((sync) => sync(u)); }),
+  Prec.highest(keymap.of([
     { key: "Tab", run: inTable((v) => editTable(v, nextCell, true)) },
     { key: "Shift-Tab", run: inTable((v) => editTable(v, previousCell, true)) },
     { key: "Enter", run: inTable((v) => editTable(v, cellBelow, true)) },
     { key: "Shift-Enter", run: inTable((v) => (v.dispatch({ ...v.state.replaceSelection("<br>"), userEvent: "input" }), true)) },
-  ]),
-);
+  ])),
+];

@@ -1,7 +1,7 @@
 // The block widgets of Live Preview and Reading view: callouts and tables
 // drawn in place of their lines (callouts.ts, tables.ts), and %%comment%%
-// blocks hidden in Reading view. While the selection is in a callout or a
-// table (in the focused editor) its source shows instead, as in Obsidian.
+// blocks hidden in Reading view. While the selection is in a
+// callout (in the focused editor) its source shows instead. Tables stay drawn.
 //
 // Replacing whole lines has to come from a state field, so the blocks are
 // kept in one: found among the syntax tree's top-level nodes, then mapped
@@ -78,7 +78,7 @@ function decorations(state: EditorState, list: Block[], focused: boolean): Decor
   const sel = reading || !focused ? [] : state.selection.ranges;
   const out: Range<Decoration>[] = [];
   for (const b of list) {
-    if (b.widget ? sel.some((r) => r.from <= b.to && r.to >= b.from) : !reading) continue;
+    if (b.widget ? !(b.widget instanceof TableWidget) && sel.some((r) => r.from <= b.to && r.to >= b.from) : !reading) continue;
     out.push(b.deco.range(b.from, b.to));
   }
   return Decoration.set(out);
