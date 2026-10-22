@@ -55,7 +55,7 @@ try {
   await evaluate('localStorage.clear()'); await send('Page.reload'); await sleep(700);
   await run(async () => {
     const { api } = await import('/src/api.ts');
-    await api.createNote('Round18.md', '# Heading\n\nalpha Alpha alpha\n\n#tag #nested/child\n\n![[Embedded18]]\n\nEnd.');
+    await api.createNote('Round18.md', '# Heading\n\nalpha Alpha alpha\n\n#tag #nested/child\n\n![[Embedded18]]\n\nEnd.\n\n## Subheading\n\nA paragraph with a soft\nline break.\n\nAnother paragraph.');
     await api.createNote('Embedded18.md', '# Embedded note\n\nEmbedded text with [[Welcome|a link]] and a checkbox.\n\n- [ ] Task');
     await ws.vault.refreshFiles(); await ws.open('Round18.md');
   });
@@ -131,6 +131,12 @@ try {
   await run(async () => { await ws.open('Round18.md'); ws.setMode('reading'); }); await sleep(100);
   await click('.markdown-embed-content .cm-h1 .cm-reading-text');
   check(await evaluate('ws.view.state.readOnly && !ws.view.contentDOM.innerText.includes("![[Embedded18]]")'), 'Reading embed text remains rendered and read-only');
+  const heading = '.is-reading-mode .cm-content > .cm-line.cm-h1';
+  check(await run(selector => { const s = getComputedStyle(document.querySelector(selector)); return s.fontSize === '31px' && s.paddingTop === '0px' && s.marginTop === '0px'; }, heading), 'Reading H1 is 31px without top padding or first-line margin');
+  check(await evaluate('(()=>{const s=getComputedStyle(document.querySelector(".is-reading-mode .cm-content > .cm-line.cm-h2"));return s.paddingTop === "0px" && s.marginTop === "16px"})()'), 'Reading secondary headings use margins rather than top padding');
+  await shot('reading');
+  await run(() => ws.setMode('live')); await sleep(100);
+  check(await evaluate('getComputedStyle(document.querySelector(".cm-content > .cm-line.cm-h1")).fontSize !== "31px"'), 'Reading heading CSS leaves Live Preview typography alone');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');
