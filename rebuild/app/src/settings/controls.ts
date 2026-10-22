@@ -85,16 +85,15 @@ export interface SliderOptions {
   defaultValue?: number;
 }
 
-/** Restore-default button, value label, then the range input, as Obsidian lays them out. */
-export function slider(o: SliderOptions): HTMLElement[] {
+/** Restore-default button, value label, then the range input, as Obsidian lays them out; `set` moves it (without telling `onInput`). */
+export function slider(o: SliderOptions): HTMLElement[] & { set(v: number): void } {
   const input = h("input", { class: "slider", type: "range", min: String(o.min), max: String(o.max), step: String(o.step), value: String(o.value), "aria-label": o.label });
   const value = h("span", { class: "slider-value" });
   const restore =
     o.defaultValue === undefined
       ? null
       : extraButton("rotate-ccw", "Restore default", () => {
-          input.value = String(o.defaultValue);
-          show();
+          set(o.defaultValue!);
           o.onInput(o.defaultValue!);
         });
   const show = () => {
@@ -104,12 +103,17 @@ export function slider(o: SliderOptions): HTMLElement[] {
     restore?.classList.toggle("is-disabled", v === o.defaultValue);
     input.setAttribute("aria-valuetext", o.format(v));
   };
+  const set = (v: number) => {
+    if (Number(input.value) === v) return;
+    input.value = String(v);
+    show();
+  };
   show();
   input.addEventListener("input", () => {
     show();
     o.onInput(Number(input.value));
   });
-  return [restore, value, input].filter(Boolean) as HTMLElement[];
+  return Object.assign([restore, value, input].filter(Boolean) as HTMLElement[], { set });
 }
 
 export interface TextOptions {
