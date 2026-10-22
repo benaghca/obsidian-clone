@@ -5,7 +5,7 @@
 
 import { animateOut } from "../motion";
 import { h } from "./dom";
-import { highlight } from "./fuzzy";
+import { fuzzyRank, highlight } from "./fuzzy";
 import { icon } from "./icons";
 
 export interface PromptOptions<T> {
@@ -37,6 +37,25 @@ export function suggestionText(row: HTMLElement, title: string, indices: number[
   const content = h("div", { class: "suggestion-content" }, h("div", { class: "suggestion-title" }, highlight(title, indices)));
   if (note) content.append(h("div", { class: "suggestion-note" }, note));
   row.append(content);
+}
+
+/**
+ * The prompt over a list, fuzzy-filtered by each item's label (the whole
+ * list, in its order, before anything is typed): "Move file to...", "Insert
+ * template", an image's "Swap file...".
+ */
+export function pickFrom<T>(
+  list: readonly T[],
+  label: (item: T) => string,
+  opts: Pick<PromptOptions<T>, "placeholder" | "emptyText" | "restoreFocusOnChoose"> & { enter: string; choose(item: T): void },
+) {
+  openPrompt<{ item: T; indices: number[] }>({
+    ...opts,
+    instructions: hints(opts.enter),
+    items: (query) => (query.trim() ? fuzzyRank(query, list, label) : list.map((item) => ({ item, indices: [] }))),
+    render: ({ item, indices }, row) => suggestionText(row, label(item), indices),
+    choose: ({ item }) => opts.choose(item),
+  });
 }
 
 let openCount = 0;
