@@ -6,6 +6,8 @@ import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirro
 import { getSearchQuery, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
 import { EditorView, keymap, layer, RectangleMarker, ViewPlugin } from "@codemirror/view";
+import { h } from "../shell/dom";
+import { icon } from "../shell/icons";
 import { blocks } from "./blocks";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
@@ -122,6 +124,43 @@ export function searchMatchAtOrAfter(matches: ReturnType<typeof searchMatches>, 
   return matches.find((m) => m.from >= from) ?? matches[0];
 }
 
+/** Rearrange the stock panel once, preserving its fields, handlers and keyboard scope. */
+function styleSearchPanel(panel: HTMLElement, field: HTMLInputElement) {
+  const focused = document.activeElement === field;
+  const selection = [field.selectionStart, field.selectionEnd] as const;
+  const button = (name: string, label: string, glyph: Parameters<typeof icon>[0]) => {
+    const el = panel.querySelector<HTMLButtonElement>(`button[name=${name}]`)!;
+    el.className = "clickable-icon";
+    el.setAttribute("aria-label", label);
+    el.title = label;
+    el.replaceChildren(icon(glyph));
+    return el;
+  };
+  const count = h("span", { class: "cm-search-count", "aria-live": "polite" });
+  const options = [...panel.querySelectorAll("label")].map((label, i) => {
+    const input = label.querySelector("input")!;
+    const title = ["Match case", "Regular expression", "Whole word"][i];
+    input.setAttribute("aria-label", title);
+    label.className = "cm-search-option clickable-icon";
+    label.title = title;
+    label.replaceChildren(input, icon((["case-sensitive", "regex", "whole-word"] as const)[i]));
+    return label;
+  });
+  const replace = panel.querySelector<HTMLInputElement>("[name=replace]");
+  const toggle = h("button", { type: "button", class: "clickable-icon", title: "Replace", "aria-label": "Replace", "aria-expanded": "false", onclick: () => {
+    toggle.setAttribute("aria-expanded", String(panel.classList.toggle("is-replacing")));
+  } }, icon("chevron-right"));
+  toggle.setAttribute("name", "toggle-replace");
+  const row = h("div", { class: "cm-search-row" }, replace && toggle,
+    h("div", { class: "cm-search-input" }, field, count),
+    button("prev", "Previous match", "arrow-up"), button("next", "Next match", "arrow-down"), ...options, button("close", "Close find", "x"));
+  const replacement = replace && h("div", { class: "cm-search-replace cm-search-row" }, replace,
+    panel.querySelector<HTMLButtonElement>("button[name=replace]")!,
+    panel.querySelector<HTMLButtonElement>("button[name=replaceAll]")!);
+  panel.replaceChildren(row, ...(replacement ? [replacement] : []));
+  if (focused) { field.focus(); field.setSelectionRange(...selection); }
+}
+
 const searchCounter = ViewPlugin.define((view) => {
   let doc: Text | null = null;
   let query: ReturnType<typeof getSearchQuery> | null = null;
@@ -138,7 +177,7 @@ const searchCounter = ViewPlugin.define((view) => {
     // Panels mount after plugins update. Keep CodeMirror's panel and its keyboard handling.
     queueMicrotask(() => {
       if (view.state !== u.state) return;
-      const field = view.dom.querySelector(".cm-search [name=search]");
+      const field = view.dom.querySelector<HTMLInputElement>(".cm-search [name=search]");
       if (!field) return;
       const selection = view.state.selection.main;
       if (changed && matches.length) {
@@ -148,13 +187,9 @@ const searchCounter = ViewPlugin.define((view) => {
           return;
         }
       }
-      let count = view.dom.querySelector(".cm-search-count");
-      if (!count) {
-        count = document.createElement("span");
-        count.className = "cm-search-count";
-        count.setAttribute("aria-live", "polite");
-        field.after(count);
-      }
+      const panel = field.closest<HTMLElement>(".cm-search")!;
+      if (!panel.querySelector(".cm-search-input")) styleSearchPanel(panel, field);
+      const count = panel.querySelector(".cm-search-count")!;
       count.textContent = `${searchMatchIndex(matches, selection) + 1} / ${matches.length}`;
     });
   } };

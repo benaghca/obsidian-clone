@@ -126,6 +126,8 @@ const ICONS = {
   plus: lucide.Plus,
   quote: lucide.Quote,
   replace: lucide.Replace,
+  regex: lucide.Regex,
+  "whole-word": lucide.WholeWord,
   "rotate-ccw": lucide.RotateCcw,
   ruler: lucide.Ruler,
   scissors: lucide.Scissors,

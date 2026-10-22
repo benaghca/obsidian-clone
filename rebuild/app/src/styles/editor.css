@@ -416,8 +416,82 @@
   text-decoration-color: color-mix(in srgb, var(--text-accent) 30%, transparent);
 }
 
+/* Keep CodeMirror's top panel and handlers, with compact Obsidian-style controls. */
+.cm-editor .cm-panel.cm-search {
+  padding: 6px;
+  background: var(--background-primary);
+  border-bottom: 1px solid var(--background-modifier-border);
+  --icon-size: var(--icon-s);
+}
+.cm-search-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.cm-search-input {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+}
+.cm-search-input:focus-within {
+  border-color: var(--interactive-accent);
+}
+.cm-editor .cm-search input.cm-textfield {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  font: inherit;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border-radius: var(--radius-s);
+  border: 0;
+  outline: 0;
+}
 .cm-search-count {
-  margin-right: 0.6em;
+  flex: none;
+  padding-right: 8px;
   color: var(--text-muted);
   font-size: var(--font-ui-small);
+}
+.cm-editor .cm-panel.cm-search :is(button, label) {
+  position: relative;
+  inset: auto;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  font: inherit;
+  background: transparent;
+}
+.cm-search .cm-search-option input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+.cm-search :is(button, label):hover,
+.cm-search-option:has(:checked) {
+  background: var(--background-modifier-hover);
+}
+.cm-search-option:has(:focus-visible) {
+  outline: 2px solid var(--interactive-accent);
+}
+.cm-search-replace {
+  display: none;
+  margin-top: 4px;
+  padding-left: 28px;
+}
+.cm-search.is-replacing .cm-search-replace {
+  display: flex;
+}
+.cm-search.is-replacing [name=toggle-replace] .svg-icon {
+  transform: rotate(90deg);
 }
