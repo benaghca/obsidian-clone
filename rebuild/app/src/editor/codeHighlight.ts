@@ -175,13 +175,42 @@ export function codeMarks(state: EditorState, ranges: Ranges, trees: readonly Co
   return out;
 }
 
+/** A code line's indent, as whole tab stops (a tab, or `tab` spaces). */
+export function indentStops(line: string, tab: number): number {
+  let col = 0;
+  for (const ch of line) {
+    if (ch === " ") col++;
+    else if (ch === "\t") col += tab - (col % tab);
+    else break;
+  }
+  return Math.floor(col / tab);
+}
+
+const guides = new Map<string, Decoration>();
+/** Obsidian's indent guides in the code in `ranges`: each indented line's width of tab stops, for CSS to draw (styles/editor.css). */
+function indentGuides(state: EditorState, ranges: Ranges): Range<Decoration>[] {
+  const out: Range<Decoration>[] = [];
+  const tab = state.tabSize;
+  eachCodeBlock(state, ranges, (_, from, to) => {
+    for (let pos = from; pos <= to; ) {
+      const line = state.doc.lineAt(pos);
+      const stops = indentStops(line.text, tab);
+      const style = `--indent: ${stops * tab}ch; --tab: ${tab}ch`;
+      if (stops) out.push((guides.get(style) ?? guides.set(style, Decoration.line({ attributes: { style } })).get(style)!).range(line.from));
+      pos = line.to + 1;
+    }
+  });
+  return out;
+}
+
 const rehighlight = StateEffect.define<null>();
 
 /**
- * Highlighting in the editor, all three modes: the visible code, again when
- * the viewport or the tree changes. An edit moves the marks with the text at
- * once and colours the code again just after that frame is drawn, so a key
- * press never waits for a code block's parse (it is one frame behind).
+ * Highlighting in the editor, all three modes, with the indent guides: the
+ * visible code, again when the viewport or the tree changes. An edit moves
+ * the marks with the text at once and colours the code again just after that
+ * frame is drawn, so a key press never waits for a code block's parse (it is
+ * one frame behind).
  */
 export const codeHighlight = ViewPlugin.fromClass(
   class {
@@ -217,7 +246,7 @@ export const codeHighlight = ViewPlugin.fromClass(
       const keep: CodeTree[] = [];
       const marks = codeMarks(view.state, view.visibleRanges, this.trees, keep);
       this.trees = keep;
-      return Decoration.set(marks, true);
+      return Decoration.set([...marks, ...indentGuides(view.state, view.visibleRanges)], true);
     }
   },
   { decorations: (v) => v.decorations },
