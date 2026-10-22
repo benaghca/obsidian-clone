@@ -287,3 +287,18 @@ No WebKitGTK numbers were taken; nothing on the graph or typing paths changed wh
 - **Item 6:** All properties doesn't list `aliases` and `cssclasses` at 0.
 - **Item 7:** links aren't saved with the layout.
 - **Not committed:** the Obsidian sandbox, the CDP scripts, the scratch vaults and the copy of the round's start are in the session scratchpad. The side-by-side screenshots are committed in `rebuild/round15-screens/`.
+
+## Round 15 comparison (added at merge)
+
+Three agents did this brief from `34e7be1`. Claude's branch was merged as is (`326d13f`); nothing was ported from the other two.
+
+| Rank | Model | Net lines | New Tauri command | Image menu (Live Preview) | Reading view image | Table-cell task boxes |
+|---|---|---:|---|---|---|---|
+| 1 | Claude | +767 (27,416) | none | Obsidian's groups, minus the two system-opener items | no hover buttons, click opens the lightbox | none (as Obsidian) |
+| 2 | Codex | +731 (27,380) | `open_image_file` | Obsidian's full menu | as Obsidian | drawn and tickable (Obsidian draws none) |
+| 3 | Grok | +783 (27,432) | none | 3 items (Copy image, Reset size, Reveal) | keeps Zoom in (Obsidian has none) | drawn and tickable |
+
+- **Why Claude:** closest to Obsidian as observed on every item (Reading-view images, no task boxes in table cells, no guides in Reading view), no new permission or command, and it found and fixed two real bugs (an image's resize corner inside a callout wrote into the callout's first line; wide right-sidebar views were clipped on the left). Checks after merge all pass.
+- **Codex's best idea:** search counts done lazily for the rendered results only, with case sensitivity passed to the backend, which made search typing faster than before, where Claude's is about 3 ms slower (still inside one frame). Not ported: the two search implementations don't combine cleanly. Folded into round 16's cleanup as a performance item. Its vault-wide property rename preflight (collision and ambiguous-YAML checks) is also noted for a later look. Its `open_image_file` command was not wanted: it widens the lockdown.
+- **Grok's best idea:** the smallest change set (8 commits) with a repeating-gradient indent guide that needs no extra elements. Not ported: Claude's guides already add no elements, and Grok's branch diverged from Obsidian on Reading-view images and table tasks.
+- **Checks after merge (on the owner's machine):** `npm run build`, `npm test` (166/166), `npm run audit:offline`, `cargo build`, `cargo test` (32/32) all pass.
