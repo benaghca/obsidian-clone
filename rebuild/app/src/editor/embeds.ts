@@ -19,7 +19,7 @@ import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { editorHost } from "./host";
 import { zoomImage } from "./imageZoom";
-import { DrawnWidget, editButton, onDestroy, readingMode, release, render, widgetAction } from "./render";
+import { DrawnWidget, editAt, editButton, isLinkEvent, onDestroy, readingMode, release, render, widgetAction } from "./render";
 
 export const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 const MAX_DEPTH = 5;
@@ -253,6 +253,14 @@ export class NoteEmbedWidget extends DrawnWidget {
     const content = h("div", { class: "markdown-embed-content" });
     const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", title: "Open link", onclick: open }, icon("maximize-2"));
     const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub ? "" : noteName(path)), content, link);
+    dom.addEventListener("mousedown", (event) => {
+      if (event.button !== 0 || this.preview || chain.length || view.state.readOnly || view.state.facet(readingMode) || isLinkEvent(event)) return;
+      if ((event.target as Element).closest("input, button, .markdown-embed-link") || dom.parentElement?.closest(".cm-callout, .cm-table-widget, .markdown-embed")) return;
+      event.preventDefault();
+      const at = view.posAtDOM(dom);
+      const line = view.state.doc.lineAt(at);
+      editAt(view, line.from + Math.max(0, line.text.lastIndexOf("![[", at - line.from)) + 3);
+    });
     let painted: ReturnType<typeof render> | null = null;
     let gone = false;
     const fill = () =>

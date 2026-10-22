@@ -118,6 +118,19 @@ try {
   check(await evaluate('ws.active.path === "Search18.md" && ws.view.state.sliceDoc(ws.view.state.selection.main.from, ws.view.state.selection.main.to) === "SearchNeedle"'), 'search hit selects the matched text with original case');
   check(await evaluate('ws.view.state.doc.lineAt(ws.view.state.selection.main.from).number === 61 && ws.view.coordsAtPos(ws.view.state.selection.main.from).top < 750'), 'search opens scrolled to its matching line');
   await shot('search');
+  await run(async () => { await ws.open('Round18.md'); ws.view.dispatch({ selection: { anchor: 0 } }); }); await sleep(100);
+  await click('.markdown-embed-content .cm-h1 .cm-reading-text');
+  check(await evaluate('ws.view.hasFocus && ws.view.state.selection.main.head === (ws.view.state.doc.toString().indexOf("![[Embedded18]]") + 3)'), 'embedded note text places caret on its embed source line');
+  check(await evaluate('ws.view.contentDOM.innerText.includes("![[Embedded18]]")'), 'embedded note click reveals its source');
+  await shot('embed');
+  await run(() => ws.view.dispatch({ selection: { anchor: 0 } }));
+  await click('.markdown-embed .cm-task-checkbox'); await sleep(350);
+  check(await run(async () => { const { api } = await import('/src/api.ts'); return (await api.readNote('Embedded18.md')).includes('[x] Task'); }), 'embedded task click still toggles the target task');
+  await click('.markdown-embed [data-href=Welcome]');
+  check(await evaluate('ws.active.path === "Welcome.md"'), 'embedded link click still navigates');
+  await run(async () => { await ws.open('Round18.md'); ws.setMode('reading'); }); await sleep(100);
+  await click('.markdown-embed-content .cm-h1 .cm-reading-text');
+  check(await evaluate('ws.view.state.readOnly && !ws.view.contentDOM.innerText.includes("![[Embedded18]]")'), 'Reading embed text remains rendered and read-only');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');
