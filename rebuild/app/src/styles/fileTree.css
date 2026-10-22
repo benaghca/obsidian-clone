@@ -148,9 +148,6 @@
 .search-view .search-input-clear-button {
   right: 20px;
 }
-.search-view .search-input-clear-button[hidden] {
-  display: none;
-}
 .search-results-info {
   display: flex;
   align-items: center;
