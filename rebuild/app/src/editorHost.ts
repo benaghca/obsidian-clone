@@ -60,21 +60,15 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     pathOf: (view) => ws.editors.pathOf(view),
     read(path) {
       if (ws.editors.isLoaded(path)) return ws.editors.text(path);
-      let text = notes.get(path);
-      if (!text) {
+      return kept(notes, path, () => {
         if (notes.size >= MAX_NOTES) notes.delete(notes.keys().next().value!);
-        notes.set(path, (text = api.readNote(path)));
+        const text = api.readNote(path);
         text.catch(() => notes.delete(path));
-      }
-      return text;
+        return text;
+      });
     },
     image(path) {
-      let entry = images.get(path);
-      if (!entry) {
-        const url = api.readFileBytes(path).then((bytes) => URL.createObjectURL(new Blob([bytes], { type: mime(path) })));
-        images.set(path, (entry = { url, holders: 0 }));
-      }
-      const held = entry;
+      const held = kept(images, path, () => ({ url: api.readFileBytes(path).then((bytes) => URL.createObjectURL(new Blob([bytes], { type: mime(path) }))), holders: 0 }));
       held.holders++;
       let released = false;
       return {

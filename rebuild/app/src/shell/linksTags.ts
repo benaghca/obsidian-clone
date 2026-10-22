@@ -197,16 +197,13 @@ export interface TagNode {
 export function tagTree(tags: string[]): TagNode[] {
   const nodes = new Map<string, TagNode>();
   const roots: TagNode[] = [];
-  const node = (tag: string): TagNode => {
-    const key = tag.toLowerCase();
-    let n = nodes.get(key);
-    if (n) return n;
-    const slash = tag.lastIndexOf("/");
-    n = { tag, name: tag.slice(slash + 1), count: 0, children: [] };
-    nodes.set(key, n);
-    (slash < 0 ? roots : node(tag.slice(0, slash)).children).push(n);
-    return n;
-  };
+  const node = (tag: string): TagNode =>
+    kept(nodes, tag.toLowerCase(), () => {
+      const slash = tag.lastIndexOf("/");
+      const n = { tag, name: tag.slice(slash + 1), count: 0, children: [] };
+      (slash < 0 ? roots : node(tag.slice(0, slash)).children).push(n);
+      return n;
+    });
   for (const tag of tags) {
     const parts = tag.split("/");
     for (let i = 1; i <= parts.length; i++) node(parts.slice(0, i).join("/")).count++;

@@ -20,6 +20,7 @@ import { configEffects } from "./editor/config";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
+import { kept } from "./memo";
 import { duration, nextFrame, smoothScrollTo } from "./motion";
 import { type Group, memoryOf, type Tab } from "./tabs";
 
@@ -84,13 +85,12 @@ export class NoteEditors {
 
   /** The tab group's editor, created with the group. */
   private pane(group: Group): Pane {
-    let pane = this.panes.get(group);
-    if (pane) return pane;
-    const view = new EditorView({ dispatchTransactions: (trs, v) => this.dispatch(trs, v) });
-    pane = { group, view, scroller: null, tab: null, path: null };
-    this.panes.set(group, pane);
-    this.paneOfView.set(view, pane);
-    return pane;
+    return kept(this.panes, group, () => {
+      const view = new EditorView({ dispatchTransactions: (trs, v) => this.dispatch(trs, v) });
+      const pane = { group, view, scroller: null, tab: null, path: null };
+      this.paneOfView.set(view, pane);
+      return pane;
+    });
   }
 
   viewOf(group: Group): EditorView {

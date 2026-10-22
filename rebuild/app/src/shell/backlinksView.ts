@@ -9,6 +9,7 @@
 // index, which the workspace refreshes a second after a save.
 
 import { api, type SearchHit } from "../api";
+import { kept } from "../memo";
 import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
@@ -106,12 +107,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     shownLinked = key;
     const resolved = new Map<string, boolean>();
     // Link targets resolve from the note they are in.
-    const isHere = (target: string, from: string) => {
-      const key = `${from}\n${target}`;
-      let here = resolved.get(key);
-      if (here === undefined) resolved.set(key, (here = ws.resolve(target, from) === path));
-      return here;
-    };
+    const isHere = (target: string, from: string) => kept(resolved, `${from}\n${target}`, () => ws.resolve(target, from) === path);
     // One row per line, however many links it has; the count is every link.
     const byLine = new Map<string, Mention>();
     for (const b of entries) {
