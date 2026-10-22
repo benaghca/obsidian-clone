@@ -95,15 +95,10 @@ class Menu {
   }
 
   private row(item: MenuEntry, i: number, withIcons: boolean) {
-    const cls = ["menu-item"];
-    if (item.disabled) cls.push("is-disabled");
-    if (item.danger) cls.push("is-warning");
-    if (item.label) cls.push("is-label");
-    if (item.checked) cls.push("is-checked");
-    if (item.submenu) cls.push("has-submenu");
+    const cls = ["menu-item", item.disabled && "is-disabled", item.danger && "is-warning", item.label && "is-label", item.checked && "is-checked", item.submenu && "has-submenu"];
     const row = h(
       "div",
-      { class: cls.join(" "), role: "menuitem", "aria-disabled": item.disabled ? "true" : undefined },
+      { class: cls.filter(Boolean).join(" "), role: "menuitem", "aria-disabled": item.disabled ? "true" : undefined },
       withIcons ? h("div", { class: "menu-item-icon" }, item.icon ? icon(item.icon, 16) : null) : null,
       h("div", { class: "menu-item-title" }, item.title),
       item.hotkey ? h("div", { class: "menu-item-hotkey" }, item.hotkey) : null,
