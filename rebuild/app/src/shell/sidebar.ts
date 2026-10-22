@@ -131,6 +131,13 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
   return root;
 }
 
+/** A row's (or the list's) right-click menu. */
+function contextMenu(e: MouseEvent, items: MenuItems) {
+  e.preventDefault();
+  e.stopPropagation();
+  showMenu(items, { x: e.clientX, y: e.clientY });
+}
+
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
@@ -165,11 +172,6 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     sorted.emit();
   }
 
-  function contextMenu(e: MouseEvent, items: MenuItems) {
-    e.preventDefault();
-    e.stopPropagation();
-    showMenu(items, { x: e.clientX, y: e.clientY });
-  }
   list.addEventListener("contextmenu", (e) => contextMenu(e, menus().vault()));
 
   function startRename(path: string) {
@@ -350,10 +352,7 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
               if (entry.is_dir) revealFolder(path);
               else void ws.open(path, { where: whereFromEvent(e) });
             },
-            oncontextmenu: (e: MouseEvent) => {
-              e.preventDefault();
-              showMenu(menus().file(entry), { x: e.clientX, y: e.clientY });
-            },
+            oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry)),
           },
           h("div", { class: "tree-item-icon" }, icon(entry.is_dir ? "folder-closed" : "file-text", 16)),
           h("div", { class: "tree-item-inner" }, entry.is_dir ? entry.name : noteName(path)),
