@@ -358,7 +358,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     if (isRemoteUrl(href)) {
       if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
-      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt);
+      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt, node.to - node.from);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
     }
   }
@@ -374,7 +374,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       // No alias: a resize writes "|width" after the target (an empty "|" alias counts as one).
       const sizeAt = (alias?.from ?? (doc.sliceString(target.to, target.to + 1) === "|" ? target.to + 1 : target.to)) - from;
       const sizeText = aliasText ?? (doc.sliceString(target.to, target.to + 1) === "|" ? "" : null);
-      const widget = new ImageWidget(resolve(src), src, target.from - from, embedSize(aliasText ?? ""), sizeAt, sizeText);
+      const widget = new ImageWidget(resolve(src), src, target.from - from, embedSize(aliasText ?? ""), sizeAt, sizeText, node.to - from);
       decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }

@@ -27,10 +27,10 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
     openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
     notes: () => ws.vault.includedNotes(),
     formatLink: (target, view, display) => ws.linkTo(target, ws.editors.pathOf(view), display),
-    contextMenu: (view, at, pos, keyboard) => {
+    contextMenu: (view, at, pos, keyboard, image) => {
       const group = ws.editors.groupOfView(view);
       if (group) ws.focusGroup(group);
-      ws.editorMenu?.(view, at, pos, keyboard);
+      ws.editorMenu?.(view, at, pos, keyboard, image);
     },
     properties: () => ws.propertyHost,
     linkExists: (target, view) => ws.vault.linkExists(target, ws.editors.pathOf(view)),

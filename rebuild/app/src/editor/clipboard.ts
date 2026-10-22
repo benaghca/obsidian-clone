@@ -12,6 +12,16 @@ const selectedText = (view: EditorView) =>
 /** Put text on the clipboard (a code block's copy button, Copy path, Copy URL). */
 export const writeClipboard = (text: string) => void navigator.clipboard.writeText(text).catch((err) => console.warn("Grove could not write the clipboard", err));
 
+/** Copy an image as PNG (the image menu's "Copy image"). */
+export async function copyImage(img: HTMLImageElement) {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  canvas.getContext("2d")!.drawImage(img, 0, 0);
+  const png = await new Promise<Blob | null>((done) => canvas.toBlob(done, "image/png"));
+  if (png) await navigator.clipboard.write([new ClipboardItem({ "image/png": png })]);
+}
+
 export async function copySelection(view: EditorView, cut: boolean) {
   view.focus();
   if (document.execCommand(cut ? "cut" : "copy")) return;

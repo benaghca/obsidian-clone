@@ -103,7 +103,7 @@ const menus = createMenus({
     sidebar.reveal(path);
   },
 });
-ws.editorMenu = (view, at, pos, keyboard) => showMenu(menus.editor(view, pos), at, { keyboard });
+ws.editorMenu = (view, at, pos, keyboard, image) => showMenu(image ? menus.image(view, image) : menus.editor(view, pos), at, { keyboard });
 
 const searchVault = (query: string) => {
   sidebar.searchFor(query);
