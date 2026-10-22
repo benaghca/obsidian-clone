@@ -34,6 +34,7 @@ import { type SettingsFile, settings } from "./settings/store";
 import { confirmDialog, isConfirmOpen } from "./shell/confirm";
 import { h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
+import { installHoverPreviews } from "./shell/hoverPreview";
 import { type MenuItems, showMenu } from "./shell/menu";
 import { createMenus } from "./shell/menus";
 import { createTabLinks } from "./shell/tabLinks";
@@ -52,6 +53,7 @@ import { readStored, store } from "./storage";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
+installHoverPreviews(ws);
 const bookmarks = new Bookmarks(ws);
 ws.propertyHost = propertyIndex(ws).host;
 

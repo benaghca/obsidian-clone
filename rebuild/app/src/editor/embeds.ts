@@ -236,6 +236,7 @@ export class NoteEmbedWidget extends DrawnWidget {
     readonly target: string,
     readonly path: string | null,
     readonly chain: readonly string[],
+    readonly preview = false,
   ) {
     super();
   }
@@ -246,7 +247,7 @@ export class NoteEmbedWidget extends DrawnWidget {
     const { path, chain } = this;
     const open = () => host?.openLink(this.target, false, view);
     if (!path || !embeds) return missingBox(`“${name}” is not created yet. Click to create.`, open);
-    if (embedStopped(path, embeds.pathOf(view), chain)) {
+    if (!this.preview && embedStopped(path, embeds.pathOf(view), chain)) {
       return h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path));
     }
     const content = h("div", { class: "markdown-embed-content" });
@@ -259,10 +260,20 @@ export class NoteEmbedWidget extends DrawnWidget {
         if (gone) return;
         if (painted) release(painted);
         content.replaceChildren();
-        const shown = embedPart(text, sub);
+        const shown = embedPart(text, this.preview ? "" : sub);
         if (shown === null) content.append(missingBox(`Unable to find “${sub}” in “${noteName(path)}”.`));
-        // Its tasks can be ticked: that writes the line in the embedded note.
-        else painted = render(content, shown.text, view, [...chain, path], (line) => embeds.toggleTask(path, shown.line + line));
+        // Ordinary embeds can tick tasks; page previews remain read-only.
+        else {
+          painted = render(content, shown.text, view, [...chain, path], this.preview ? undefined : (line) => embeds.toggleTask(path, shown.line + line));
+          if (this.preview && sub) {
+            const section = embedSection(shown.text, sub);
+            const target = section && content.querySelector<HTMLElement>(`[data-line="${section.line + 1}"]`);
+            const popup = dom.closest<HTMLElement>(".hover-popover");
+            if (target && popup) popup.scrollTop = target.offsetTop - popup.offsetTop - 16;
+          }
+        }
+      }, () => {
+        if (!gone) content.replaceChildren(missingBox(`“${name}” is not created yet.`));
       });
     fill();
     const unwatch = embeds.watch(path, fill);

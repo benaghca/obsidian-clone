@@ -90,7 +90,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
         ...shown.slice(0, LINES).map((hit) =>
           h(
             "div",
-            { class: "search-result-file-match", onclick: () => void ws.open(path, { line: hit.line }) },
+            { class: "search-result-file-match", "data-preview-path": path, onclick: () => void ws.open(path, { line: hit.line }) },
             ...highlighted(hit.text, spansOf(hit.text, words, matchCase)),
           ),
         ),
@@ -101,7 +101,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
         { class: "search-result" },
         h(
           "div",
-          { class: "search-result-file-title", onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
+          { class: "search-result-file-title", "data-preview-path": path, onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
           chevron,
           h("div", { class: "search-result-file-name" }, noteName(path)),
           n ? h("span", { class: "search-result-count" }, n.toLocaleString()) : null,

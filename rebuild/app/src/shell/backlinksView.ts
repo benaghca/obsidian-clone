@@ -68,7 +68,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
           { class: "search-result" },
           h(
             "div",
-            { class: "search-result-file-title", onclick: () => void ws.open(path) },
+            { class: "search-result-file-title", "data-preview-path": path, onclick: () => void ws.open(path) },
             chevron,
             h("div", { class: "search-result-file-name" }, noteName(path)),
             h("span", { class: "search-result-count" }, total(all).toLocaleString()),
@@ -89,6 +89,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       "div",
       {
         class: "search-result-file-match",
+        "data-preview-path": m.from,
         onclick: () => {
           const first = spans[0];
           void ws.open(m.from, { line: m.line, ch: first ? [first.from, first.to] : undefined });
