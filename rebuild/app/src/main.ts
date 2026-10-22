@@ -96,10 +96,7 @@ const menus = createMenus({
   moveFile: (path) => openMovePrompt(ws, path),
   mergeFile: (path) => openMergePrompt(ws, path),
   linkTab: (tab) => tabLinks.start(tab),
-  searchInFolder: (folder) => {
-    sidebar.searchFor(pathQuery(folder));
-    docks.setCollapsed("left", false);
-  },
+  searchInFolder: (folder) => searchVault(pathQuery(folder)),
   revealInTree: (path) => {
     sidebar.select("files");
     docks.setCollapsed("left", false);

@@ -2,7 +2,7 @@ import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
 import type { MarkdownParser } from "@lezer/markdown";
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { editingEmbed } from "./embeds";
 import { checkedTaskText, LivePreview, wordClick } from "./livePreview";
 import { markdownSyntax, Tag, WikiLink } from "./syntax";
@@ -63,9 +63,10 @@ function editor(doc: string, caret: number) {
   return { view, lp, shown, press };
 }
 const release = () => window.dispatchEvent(new Event("mouseup"));
+beforeEach(() => vi.stubGlobal("window", new EventTarget()));
+afterEach(() => vi.unstubAllGlobals());
 
 test("markup stays as it was while the mouse button is down, and catches up when it comes up", () => {
-  vi.stubGlobal("window", new EventTarget());
   const { view, shown, press } = editor("Some **bold** text\n\nfar away", 25);
   expect(shown()).toEqual([]);
   press(1);
@@ -74,11 +75,9 @@ test("markup stays as it was while the mouse button is down, and catches up when
   expect(shown()).toEqual([]);
   release();
   expect(shown()).toEqual(["**", "**"]);
-  vi.unstubAllGlobals();
 });
 
 test("a double-click selects the word its first click landed in, though the click revealed markup", () => {
-  vi.stubGlobal("window", new EventTarget());
   const { view, lp, press } = editor("Some **bold** text", 18);
   press(1);
   view.dispatch({ selection: { anchor: 9 } });
@@ -92,5 +91,4 @@ test("a double-click selects the word its first click landed in, though the clic
   release();
   expect(lp.clicked).toBe(null);
   expect(wordClick(view as unknown as EditorView, second)).toBe(null);
-  vi.unstubAllGlobals();
 });
