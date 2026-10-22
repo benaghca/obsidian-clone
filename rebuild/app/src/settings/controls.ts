@@ -148,8 +148,3 @@ export function button(text: string, onClick: (e: MouseEvent) => void): HTMLButt
 export function extraButton(name: IconName, label: string, onClick: (e: MouseEvent | KeyboardEvent) => void, cls = ""): HTMLElement {
   return keyButton(icon(name, 16), label, onClick, `extra-setting-button ${cls}`);
 }
-
-/** A section's heading-less description paragraph (General's statements). */
-export function note(...children: Child[]): HTMLElement {
-  return h("div", { class: "setting-item-description mod-standalone" }, ...children);
-}

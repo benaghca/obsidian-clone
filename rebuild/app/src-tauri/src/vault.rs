@@ -290,12 +290,10 @@ impl Vault {
             .list()
             .into_iter()
             .find(|e| e.path == rel)
-            .unwrap_or(FileEntry {
+            .unwrap_or_else(|| FileEntry {
                 path: rel.to_string(),
                 name: rel.to_string(),
-                is_dir: false,
-                mtime_ms: 0,
-                size: 0,
+                ..FileEntry::default()
             })
     }
 }
@@ -404,12 +402,7 @@ mod tests {
 
         vault.delete_path("fresh/Moved.md", false).unwrap();
         assert!(!dir.path.join("fresh").join("Moved.md").exists());
-        assert!(dir
-            .path
-            .join(".trash")
-            .join("fresh")
-            .join("Moved.md")
-            .is_file());
+        assert!(dir.path.join(".trash/fresh/Moved.md").is_file());
         assert!(!vault
             .list_files()
             .iter()

@@ -12,11 +12,12 @@ import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
 import { frontmatterField } from "./frontmatter";
 import { type EditorHost, editorHost } from "./host";
-import { livePreview, readingMode } from "./livePreview";
+import { livePreview } from "./livePreview";
 import { propertiesBlock } from "./properties";
+import { readingMode } from "./render";
 import { sourceMode } from "./sourceMode";
 import { markdownSyntax } from "./syntax";
-import { tableKeys } from "./tableEdit";
+import { tableKeys } from "./tables";
 import { wikilinkCompletion } from "./wikilinkComplete";
 
 const baseTheme = EditorView.theme({

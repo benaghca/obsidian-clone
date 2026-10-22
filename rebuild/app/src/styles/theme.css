@@ -36,6 +36,7 @@
   --background-modifier-border: #e0e0e0;
   --background-modifier-border-hover: #d4d4d4;
   --background-modifier-border-focus: #bdbdbd;
+  --focus-ring: 0 0 0 2px var(--background-modifier-border-focus);
   --background-modifier-cover: rgba(220, 220, 220, 0.4);
   --background-modifier-form-field: #ffffff;
   --background-modifier-error-tint: rgba(233, 49, 71, 0.1);

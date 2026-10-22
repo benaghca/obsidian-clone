@@ -153,7 +153,6 @@ const ICONS = {
   type: lucide.Type,
   "undo-2": lucide.Undo2,
   "wand-sparkles": lucide.WandSparkles,
-  "whole-word": lucide.WholeWord,
   x: lucide.X,
   zap: lucide.Zap,
   "zoom-in": lucide.ZoomIn,

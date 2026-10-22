@@ -28,6 +28,11 @@ export function setGraphSetting<K extends keyof GraphSettings & string>(local: b
   settings.set("graph.json", "local", next);
 }
 
+/** The settings that move the nodes (the simulation's forces), and those that change which nodes and links there are. */
+export const FORCE_KEYS = ["centerStrength", "repelStrength", "linkStrength", "linkDistance"] as const;
+export const DATA_KEYS = ["search", "showTags", "showAttachments", "hideUnresolved", "showOrphans", "colorGroups", "localJumps", "localBacklinks", "localForelinks", "localInterlinks"] as const;
+export const changedIn = (before: GraphSettings, after: GraphSettings, keys: readonly (keyof GraphSettings)[]) => keys.some((k) => !same(before[k], after[k]));
+
 /** Put one graph's settings back to their defaults (the panel's "Restore default settings"). The open sections and the zoom stay. */
 export function resetGraphSettings(local: boolean) {
   const now = graphSettings(local);

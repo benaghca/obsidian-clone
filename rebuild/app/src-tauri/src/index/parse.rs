@@ -157,24 +157,19 @@ fn blank_inline_code(line: &str) -> String {
     out.into_iter().collect()
 }
 
-fn wiki_targets(line: &str) -> Vec<String> {
-    let bytes = line.as_bytes();
+pub(super) fn wiki_targets(line: &str) -> Vec<String> {
     let mut out = Vec::new();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] == b'[' && bytes[i + 1] == b'[' {
-            if let Some(close) = find_bytes(bytes, i + 2, b']', b']') {
-                let inner = &line[i + 2..close];
-                if !inner.contains('[') && !inner.contains(']') {
-                    if let Some(target) = clean_target(inner) {
-                        out.push(target);
-                    }
-                }
-                i = close + 2;
-                continue;
-            }
+    let mut rest = line;
+    while let Some(open) = rest.find("[[") {
+        let after = &rest[open + 2..];
+        let Some(close) = after.find("]]") else {
+            break;
+        };
+        let inner = &after[..close];
+        if !inner.contains('[') && !inner.contains(']') {
+            out.extend(clean_target(inner));
         }
-        i += 1;
+        rest = &after[close + 2..];
     }
     out
 }
@@ -284,17 +279,6 @@ pub(super) fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn find_bytes(bytes: &[u8], from: usize, a: u8, b: u8) -> Option<usize> {
-    let mut i = from;
-    while i + 1 < bytes.len() {
-        if bytes[i] == a && bytes[i + 1] == b {
-            return Some(i);
-        }
-        i += 1;
-    }
-    None
-}
-
 pub(super) fn clean_target(inner: &str) -> Option<String> {
     let inner = inner.trim();
     if inner.is_empty() {
@@ -302,20 +286,9 @@ pub(super) fn clean_target(inner: &str) -> Option<String> {
     }
     // `\|` is how a table cell writes a literal pipe inside `[[Note|alias]]`.
     let normalized = inner.replace("\\|", "|");
-    let tgt = match normalized.split_once('|') {
-        Some((head, _)) => head,
-        None => normalized.as_str(),
-    };
-    let name = match tgt.split_once('#') {
-        Some((head, _)) => head,
-        None => tgt,
-    };
-    let name = name.trim();
-    if name.is_empty() {
-        None
-    } else {
-        Some(name.to_string())
-    }
+    let target = normalized.split('|').next().unwrap_or_default();
+    let name = target.split('#').next().unwrap_or_default().trim();
+    (!name.is_empty()).then(|| name.to_string())
 }
 
 fn parse_aliases(content: &str) -> Vec<String> {
@@ -404,9 +377,5 @@ fn yaml_scalar(s: &str) -> Option<String> {
         s
     };
     let s = s.trim();
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
+    (!s.is_empty()).then(|| s.to_string())
 }

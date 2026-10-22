@@ -46,7 +46,7 @@ import {
   STORED_TYPES,
 } from "./frontmatter";
 import { editorHost, type PropertyHost } from "./host";
-import { readingMode } from "./livePreview";
+import { readingMode } from "./render";
 import { editable, keyInput, TYPE_ICONS, TYPE_NAMES, typeItems } from "./propertyFields";
 
 export type PropertiesDisplay = "visible" | "hidden" | "source";
@@ -66,13 +66,18 @@ export function refreshPropertyTypes(views: EditorView[]) {
 /** Show the (empty) block on a note without frontmatter, for "Add file property". */
 const showEmpty = StateEffect.define<boolean>();
 
+/** Whether the frontmatter (if Grove can read it) shows as the block: Visible, or Source in Reading view. */
+function showsBlock(state: EditorState, fm = state.field(frontmatterField)) {
+  const display = state.facet(propertiesDisplay);
+  return display !== "hidden" && (!fm || !!fm.props) && (display === "visible" || state.facet(readingMode));
+}
+
 /** What the frontmatter's place shows: the block, nothing, or the YAML as source. */
 function build(state: EditorState, empty: boolean): DecorationSet {
   const fm = state.field(frontmatterField);
-  const display = state.facet(propertiesDisplay);
-  if (display === "hidden") return fm ? Decoration.set(Decoration.replace({ block: true }).range(0, fm.end)) : Decoration.none;
+  if (state.facet(propertiesDisplay) === "hidden") return fm ? Decoration.set(Decoration.replace({ block: true }).range(0, fm.end)) : Decoration.none;
   if (!fm) return empty ? Decoration.set(Decoration.widget({ widget: new PropertiesWidget("", typesVersion), block: true, side: -1 }).range(0)) : Decoration.none;
-  if (fm.props && (display === "visible" || state.facet(readingMode))) {
+  if (showsBlock(state, fm)) {
     return Decoration.set(Decoration.replace({ widget: new PropertiesWidget(state.doc.sliceString(0, fm.end), typesVersion), block: true }).range(0, fm.end));
   }
   const lines: Range<Decoration>[] = [];
@@ -84,8 +89,7 @@ const sourceLine = Decoration.line({ class: "cm-frontmatter" });
 /** Whether the frontmatter's lines are out of sight (the block, or hidden): the caret stays below them. */
 const covered = (state: EditorState) => {
   const fm = state.field(frontmatterField);
-  const display = state.facet(propertiesDisplay);
-  return fm && (display === "hidden" || (fm.props && (display === "visible" || state.facet(readingMode)))) ? fm : null;
+  return fm && (state.facet(propertiesDisplay) === "hidden" || showsBlock(state, fm)) ? fm : null;
 };
 
 const blockField = StateField.define<{ deco: DecorationSet; empty: boolean }>({
@@ -139,8 +143,7 @@ export function openNewProperty(view: EditorView): boolean {
   const state = view.state;
   if (!state.field(blockField, false)) return false;
   const fm = state.field(frontmatterField);
-  const display = state.facet(propertiesDisplay);
-  if (display === "hidden" || (fm && !fm.props) || (display === "source" && !state.facet(readingMode))) return false;
+  if (!showsBlock(state, fm)) return false;
   if (!fm) view.dispatch({ effects: showEmpty.of(true) });
   const block = view.dom.querySelector<HTMLElement>(".properties");
   const ctl = block && blocks.get(block);

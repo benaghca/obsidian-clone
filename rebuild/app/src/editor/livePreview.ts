@@ -7,7 +7,7 @@
 // rendered callouts, tables and embeds show (render.ts).
 
 import { syntaxTree } from "@codemirror/language";
-import { type EditorState, Facet, type Range, StateEffect, type Text } from "@codemirror/state";
+import { type EditorState, type Range, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
@@ -22,76 +22,61 @@ import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
+import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget, toggledTask } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
-import { embedChain, paintWith } from "./render";
-
-/** Reading view: render everything, as if the selection touched nothing. */
-export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
+import { DrawnWidget, embedChain, paintWith, readingMode } from "./render";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
 export const filesChanged = StateEffect.define<null>();
 
-/** An empty span drawn by CSS: a list bullet, a horizontal rule, the external link icon. */
+/** An empty span drawn by CSS: a list bullet, a horizontal rule, the external link icon, a highlight's swatch. */
 class SpanWidget extends WidgetType {
-  constructor(readonly cls: string) {
+  constructor(
+    readonly cls: string,
+    readonly style?: string,
+  ) {
     super();
   }
   eq(other: SpanWidget) {
-    return other.cls === this.cls;
+    return other.cls === this.cls && other.style === this.style;
   }
   toDOM() {
-    return h("span", { class: this.cls });
+    return h("span", { class: this.cls, style: this.style });
   }
 }
 
-class CheckboxWidget extends WidgetType {
+class CheckboxWidget extends DrawnWidget {
   constructor(readonly checked: boolean) {
     super();
-  }
-  eq(other: CheckboxWidget) {
-    return other.checked === this.checked;
   }
   toDOM(view: EditorView) {
     const box = h("input", { class: "cm-task-checkbox", type: "checkbox" });
     box.checked = this.checked;
     box.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      toggleTask(view, view.posAtDOM(box));
+      const line = view.state.doc.lineAt(view.posAtDOM(box));
+      const tick = toggledTask(line.text, 0);
+      if (tick) view.dispatch({ changes: { from: line.from + tick.at, to: line.from + tick.at + 1, insert: tick.insert }, userEvent: "input.toggle" });
     });
     return box;
   }
 }
 
-function toggleTask(view: EditorView, pos: number) {
-  const line = view.state.doc.lineAt(pos);
-  const m = /\[([ xX])\]/.exec(line.text.slice(pos - line.from));
-  if (!m) return;
-  const at = pos + m.index + 1;
-  view.dispatch({ changes: { from: at, to: at + 1, insert: m[1] === " " ? "x" : " " }, userEvent: "input.toggle" });
-}
-
 // A markdown image pointing at another machine. Grove never fetches it: the
 // image shows as a small link chip that opens the URL in the system browser
 // on click, like any other external link.
-class RemoteImageWidget extends WidgetType {
+class RemoteImageWidget extends DrawnWidget {
   constructor(
     readonly alt: string,
     readonly url: string,
   ) {
     super();
   }
-  eq(other: RemoteImageWidget) {
-    return other.alt === this.alt && other.url === this.url;
-  }
   toDOM() {
     const text = this.alt || hostOf(this.url);
     return h("span", { class: "cm-link cm-rendered-link cm-remote-embed", "data-href": this.url, title: `Remote image, not loaded: ${this.url}` }, text);
-  }
-  ignoreEvent() {
-    return false;
   }
 }
 
@@ -112,7 +97,7 @@ class CodeFlairWidget extends WidgetType {
   toDOM() {
     const copy = (e: Event) => {
       e.preventDefault();
-      void writeClipboard(this.code);
+      writeClipboard(this.code);
     };
     if (this.reading) return h("button", { class: "copy-code-button", "aria-label": "Copy", title: "Copy", onmousedown: copy }, icon("copy"));
     return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, codeLabel(this.lang));
@@ -133,19 +118,18 @@ const checkbox = [false, true].map((c) => Decoration.replace({ widget: new Check
 const externalIcon = Decoration.widget({ widget: new SpanWidget("cm-external-link"), side: 1 });
 const rule = Decoration.replace({ widget: new SpanWidget("cm-hr") });
 const decoCache = new Map<string, Decoration>();
-const swatches = new Map<HighlightColor, Decoration>();
-const swatch = (color: HighlightColor) => {
-  let d = swatches.get(color);
-  if (!d) swatches.set(color, (d = Decoration.replace({ widget: new SpanWidget(`cm-highlight-swatch cm-highlight-${color}`) })));
+/** A decoration made once, by key. */
+const once = (key: string, make: () => Decoration) => {
+  let d = decoCache.get(key);
+  if (!d) decoCache.set(key, (d = make()));
   return d;
 };
-
-/** A mark or line decoration with a class, made once. */
-const cached = (kind: "mark" | "line", cls: string) => {
-  let d = decoCache.get(`${kind} ${cls}`);
-  if (!d) decoCache.set(`${kind} ${cls}`, (d = kind === "mark" ? Decoration.mark({ class: cls }) : Decoration.line({ class: cls })));
-  return d;
-};
+const cached = (kind: "mark" | "line", cls: string) => once(`${kind} ${cls}`, () => (kind === "mark" ? Decoration.mark({ class: cls }) : Decoration.line({ class: cls })));
+// A coloured highlight's colour reaches CSS as --highlight-color, as a callout's does.
+const tint = (color: HighlightColor) => `--highlight-color: var(--color-${color})`;
+const swatch = (color: HighlightColor) => once(`swatch ${color}`, () => Decoration.replace({ widget: new SpanWidget("cm-highlight-swatch", tint(color)) }));
+const highlight = (color: HighlightColor | null) =>
+  color ? once(`highlight ${color}`, () => Decoration.mark({ class: "cm-highlight mod-color", attributes: { style: tint(color) } })) : cached("mark", "cm-highlight");
 
 /**
  * The text a checked task strikes through: from after "[x] " to the end of
@@ -258,13 +242,12 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             // While the markup shows, it is highlighted too.
             const color = highlightColor(doc.sliceString(node.from + 2, node.from + 4));
             const text = color ? node.from + 4 : node.from + 2;
-            const cls = color ? `cm-highlight cm-highlight-${color}` : "cm-highlight";
             if (!touches(node.from, node.to)) {
               hide(node.from + 2, text);
-              mark(cls, text, node.to - 2);
+              if (node.to - 2 > text) decos.push(highlight(color).range(text, node.to - 2));
             } else {
               if (color) decos.push(swatch(color).range(node.from + 2, text));
-              mark(cls, node.from, node.to);
+              decos.push(highlight(color).range(node.from, node.to));
             }
             return;
           }

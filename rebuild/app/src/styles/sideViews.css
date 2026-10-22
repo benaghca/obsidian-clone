@@ -26,9 +26,6 @@
 .tag-pane-tag {
   padding-left: calc(22px + var(--depth, 0) * 17px);
 }
-.tag-pane-tag .collapse-icon {
-  left: calc(4px + var(--depth, 0) * 17px);
-}
 .tag-pane-tag-text {
   color: var(--text-normal);
 }

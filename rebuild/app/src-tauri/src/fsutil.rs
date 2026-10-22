@@ -63,11 +63,7 @@ pub fn rel_of(root: &Path, path: &Path) -> Option<String> {
         .map(|c| c.as_os_str().to_string_lossy().into_owned())
         .collect::<Vec<_>>()
         .join("/");
-    if s.is_empty() || is_ignored_rel(&s) {
-        None
-    } else {
-        Some(s)
-    }
+    (!s.is_empty() && !is_ignored_rel(&s)).then_some(s)
 }
 
 fn ensure_inside(root: &Path, full: &Path) -> Result<(), String> {

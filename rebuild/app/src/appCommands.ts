@@ -11,9 +11,11 @@ import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
+import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
+import { addLines, frontmatterField } from "./editor/frontmatter";
 import { openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
@@ -171,18 +173,9 @@ export function registerAppCommands(parts: AppParts) {
   // "Properties in document" set to Source or Hidden): a new, empty line in
   // the YAML (created if missing) with the caret on it.
   const addProperty = (view: EditorView) => {
-    const doc = view.state.doc;
-    const first = doc.line(1);
-    if (first.text === "---") {
-      for (let i = 2; i <= doc.lines; i++) {
-        const line = doc.line(i);
-        if (line.text !== "---") continue;
-        view.dispatch({ changes: { from: line.from, insert: "\n" }, selection: { anchor: line.from }, scrollIntoView: true, userEvent: "input" });
-        return true;
-      }
-    }
-    view.dispatch({ changes: { from: 0, insert: "---\n\n---\n" }, selection: { anchor: 4 }, scrollIntoView: true, userEvent: "input" });
-    return true;
+    const fm = view.state.field(frontmatterField);
+    const line = addLines(fm, "");
+    view.dispatch({ changes: line, selection: { anchor: line.from + (fm ? 0 : 4) }, scrollIntoView: true, userEvent: "input" });
   };
 
   // Export to PDF: the note as Reading view shows it (in the light scheme),
@@ -298,10 +291,10 @@ export function registerAppCommands(parts: AppParts) {
     { id: "workspace:new-tab", name: "New tab", hotkeys: mod("t"), run: () => ws.newTab() },
     { id: "workspace:close", name: "Close current tab", icon: "x", hotkeys: mod("w"), run: () => ws.closeTab(ws.active) },
     conditionalAction("workspace:close-others", "Close all other tabs", "x",
-      () => ws.closeAllOthers(), () => ws.groups().some((g) => g.tabs.some((t) => t !== ws.active && !t.pinned))),
+      () => ws.closeAllOthers(ws.active), () => ws.groups().some((g) => g.tabs.some((t) => t !== ws.active && !t.pinned))),
     conditionalAction("workspace:close-others-tab-group", "Close others in tab group", "x",
       () => ws.closeOthers(ws.active), () => ws.tabs.some((t) => t !== ws.active && !t.pinned)),
-    { id: "workspace:close-tab-group", name: "Close this tab group", icon: "x", run: () => ws.closeGroup() },
+    { id: "workspace:close-tab-group", name: "Close this tab group", icon: "x", run: () => ws.closeGroup(ws.activeGroup) },
     conditionalAction("workspace:undo-close-pane", "Undo close tab", "undo-2",
       () => ws.undoCloseTab(), () => ws.canUndoClose(), mod("t", { shift: true })),
     conditionalAction("workspace:next-tab", "Go to next tab", "arrow-right",
@@ -394,19 +387,8 @@ export function registerAppCommands(parts: AppParts) {
         parts.left.reveal(note());
       },
     },
-    conditionalAction(
-      "workspace:copy-path",
-      "Copy current file path from vault folder",
-      "copy",
-      () => navigator.clipboard.writeText(note()).catch((err) => console.warn("Could not copy", err)),
-    ),
-    {
-      id: "workspace:copy-full-path",
-      name: "Copy current file path from system root",
-      icon: "hard-drive",
-      when: hasNote,
-      run: () => navigator.clipboard.writeText(systemPath(ws.vault.path, note())).catch((err) => console.warn("Could not copy", err)),
-    },
+    conditionalAction("workspace:copy-path", "Copy current file path from vault folder", "copy", () => writeClipboard(note())),
+    conditionalAction("workspace:copy-full-path", "Copy current file path from system root", "hard-drive", () => writeClipboard(systemPath(ws.vault.path, note()))),
     { id: "editor:save-file", name: "Save current file", hotkeys: mod("s"), when: hasNote, run: () => ws.saveNow() },
     pluginAction("bookmarks", "bookmarks:bookmark-current-file", "Bookmarks: Bookmark current file", "bookmark",
       () => bookmarks.toggle(note()), () => hasNote() && !bookmarks.has(note())),

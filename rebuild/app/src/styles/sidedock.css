@@ -123,7 +123,10 @@
   color: var(--icon-color-hover);
   opacity: 1;
 }
-.workspace-leaf-content {
+/* a sidebar's view, and the file explorer and search inside it (fileTree.css) */
+.workspace-leaf-content,
+.nav-files,
+.search-view {
   flex: 1;
   min-height: 0;
   display: flex;

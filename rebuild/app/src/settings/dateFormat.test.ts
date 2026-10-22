@@ -14,8 +14,7 @@ test("Moment-style tokens, as Obsidian's daily notes and templates use them", ()
 
 test("daily note names are recognised and ordered by their format", () => {
   const iso = dateNamePattern("YYYY-MM-DD");
-  expect(iso.regex.test("2026-10-03")).toBe(true);
-  expect(iso.regex.test("Meeting 2026-10-03")).toBe(false);
+  expect(iso.parse("Meeting 2026-10-03")).toBeNull();
   expect(iso.parse("2026-10-03")).toBe(new Date(2026, 9, 3).getTime());
   const long = dateNamePattern("dddd, MMMM Do YYYY");
   expect(long.parse(formatDate(d, "dddd, MMMM Do YYYY"))).toBe(new Date(2026, 9, 3).getTime());

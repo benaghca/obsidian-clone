@@ -82,7 +82,6 @@
   font-weight: 600;
 }
 .cm-formatting-header {
-  font-weight: 400;
   margin-right: 0.05em;
 }
 
@@ -248,9 +247,6 @@
 .cm-line.cm-codeblock-end {
   border-radius: 0 0 var(--radius-s) var(--radius-s);
   padding-bottom: 0.4em;
-}
-.cm-formatting-code-fence {
-  color: var(--text-faint);
 }
 
 /* [[ link suggester, and the Properties block's suggestions (shell/suggest.ts) */

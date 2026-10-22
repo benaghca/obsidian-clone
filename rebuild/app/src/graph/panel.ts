@@ -94,9 +94,9 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
   // ----- rows -----
 
   type ToggleKey = "showTags" | "showAttachments" | "hideUnresolved" | "showOrphans" | "showArrow" | "localBacklinks" | "localForelinks" | "localInterlinks";
-  const toggleRow = (key: ToggleKey, name: string, invert = false) => {
-    const t = toggle(invert ? !cfg()[key] : cfg()[key], (on) => host.set(key, invert ? !on : on), name);
-    syncers.push(() => setToggle(t, invert ? !cfg()[key] : cfg()[key]));
+  const toggleRow = (key: ToggleKey, name: string) => {
+    const t = toggle(cfg()[key], (on) => host.set(key, on), name);
+    syncers.push(() => setToggle(t, cfg()[key]));
     return row({ name, cls: "mod-toggle" }, t);
   };
 

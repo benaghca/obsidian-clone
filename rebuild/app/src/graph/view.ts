@@ -24,12 +24,13 @@ import { duration } from "../motion";
 import { h } from "../shell/dom";
 import type { OpenWhere } from "../tabs";
 import type { Workspace } from "../workspace";
-import { camera, easeZoom, fitAround, hitTest, panBy, toScreen, toWorld, wheelZoom } from "./camera";
+import { camera, easeZoom, fitAround, hitTest, panBy, toWorld, wheelZoom } from "./camera";
 import { type GraphModel, type GraphNode, neighbours, nodeColor, nodeRadius } from "./data";
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
-import { graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
+import { devStats, setProbe } from "./probe";
+import { changedIn, DATA_KEYS, FORCE_KEYS, graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
 import { Simulation } from "./sim";
 import { type ColorRule, createGraphSource, type Facts } from "./source";
 import type { GraphSettings } from "../settings/schema";
@@ -53,14 +54,7 @@ export interface GraphHost {
   panelClosed?: boolean;
 }
 
-export interface GraphView {
-  el: HTMLElement;
-  /** Shown or hidden: a hidden graph does no work at all. */
-  setActive(active: boolean): void;
-  /** The local graph's note changed. */
-  refresh(): void;
-  dispose(): void;
-}
+export type GraphView = ReturnType<typeof createGraphView>;
 
 const REFRESH_DELAY = 200;
 /** A canvas slower than this (ms) to draw is drawn every other frame while it settles on its own. */
@@ -74,16 +68,6 @@ const SLOW_FRAME = 10;
  * held 60 fps with 7–12 ms of drawing).
  */
 const TOO_SLOW = 24;
-
-/** Dev builds only: each frame's work (ms), for the measuring harness. */
-const devStats = import.meta.env.DEV
-  ? (ms: number, nodes: number, running: boolean) => {
-      const w = window as unknown as { __graphWork?: number[]; __graphNodes?: number; __graphRunning?: boolean };
-      (w.__graphWork ??= []).push(ms);
-      w.__graphNodes = nodes;
-      w.__graphRunning = running;
-    }
-  : null;
 
 /** When a key was last pressed outside a graph: graphs settling on their own wait for typing to pause. */
 let lastKey = -Infinity;
@@ -99,7 +83,7 @@ window.addEventListener(
 /** Where the global graph's nodes were, per vault, so reopening it starts from its settled layout. */
 const layouts = new Map<string, Map<string, [number, number]>>();
 
-export function createGraphView(host: GraphHost): GraphView {
+export function createGraphView(host: GraphHost) {
   const { ws, local } = host;
   const canvas = h("canvas", { class: "graph-canvas" });
   const ctx = canvas.getContext("2d", { alpha: false })!;
@@ -540,18 +524,12 @@ export function createGraphView(host: GraphHost): GraphView {
     const before = cfg;
     cfg = graphSettings(local);
     panel.sync();
-    const forcesChanged =
-      before.centerStrength !== cfg.centerStrength ||
-      before.repelStrength !== cfg.repelStrength ||
-      before.linkStrength !== cfg.linkStrength ||
-      before.linkDistance !== cfg.linkDistance;
     applyForces();
-    if (forcesChanged) {
+    if (changedIn(before, cfg, FORCE_KEYS)) {
       sim.reheat(0.3);
       sim.alphaTarget = 0;
     }
-    const dataKeys: (keyof GraphSettings)[] = ["search", "showTags", "showAttachments", "hideUnresolved", "showOrphans", "colorGroups", "localJumps", "localBacklinks", "localForelinks", "localInterlinks"];
-    if (dataKeys.some((k) => JSON.stringify(before[k]) !== JSON.stringify(cfg[k]))) {
+    if (changedIn(before, cfg, DATA_KEYS)) {
       if (before.showTags !== cfg.showTags) source.forget();
       void rebuild();
     }
@@ -578,32 +556,13 @@ export function createGraphView(host: GraphHost): GraphView {
     }
   };
   const offWorkspace = ws.on(onChange);
-  // For the measuring harness (dev builds): a node's and an empty spot's client coordinates.
-  const probe = () => {
-    const rect = canvas.getBoundingClientRect();
-    const at = (i: number) => {
-      const [x, y] = toScreen(cam, sim.x[i], sim.y[i]);
-      return [rect.left + x, rect.top + y];
-    };
-    // The most linked node on screen (clear of the settings panel).
-    let best = -1;
-    for (let i = 0; i < model.nodes.length; i++) {
-      const [cx, cy] = at(i);
-      if (cx < rect.left + 60 || cx > rect.right - 300 || cy < rect.top + 60 || cy > rect.bottom - 60) continue;
-      if (best < 0 || model.nodes[i].weight > model.nodes[best].weight) best = i;
-    }
-    let empty: number[] | null = null;
-    for (let gy = 40; gy < cam.height - 40 && !empty; gy += 20) {
-      for (let gx = 40; gx < cam.width - 300 && !empty; gx += 20) if (nodeAt(gx, gy) < 0) empty = [rect.left + gx, rect.top + gy];
-    }
-    return { node: best >= 0 ? at(best) : null, empty, scale: cam.scale, nodes: model.nodes.length, links: model.links.length };
-  };
   // The current note: the local graph's middle, or the note last shown in the global graph's place.
   focusId = local ? (host.file?.() ?? null) : (ws.active.path ?? ws.recent[0] ?? null);
 
   return {
     el,
-    setActive(next) {
+    /** Shown or hidden: a hidden graph does no work at all. */
+    setActive(next: boolean) {
       if (next === active || disposed) return;
       active = next;
       if (!active) {
@@ -614,7 +573,7 @@ export function createGraphView(host: GraphHost): GraphView {
         resize.disconnect();
         return;
       }
-      if (import.meta.env.DEV) (window as unknown as { __graphProbe?: () => unknown }).__graphProbe = probe;
+      setProbe(canvas, cam, () => ({ model, x: sim.x, y: sim.y }), nodeAt);
       resize.observe(el);
       colors = null;
       background = "";
@@ -622,6 +581,7 @@ export function createGraphView(host: GraphHost): GraphView {
       if (stale || !built) void rebuild();
       invalidate();
     },
+    /** The local graph's note changed. */
     refresh() {
       if (local) {
         focusId = host.file?.() ?? null;

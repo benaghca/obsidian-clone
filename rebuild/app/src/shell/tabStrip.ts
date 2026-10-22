@@ -17,16 +17,10 @@ import type { Menus } from "./menus";
 import type { GroupView } from "./pane";
 import { startTabDrag } from "./tabDrag";
 
-export interface TabStrip {
-  el: HTMLElement;
-  /** The row of tab headers. */
-  tabList: HTMLElement;
-  /** Each tab's header by tab id (the drag code measures them). */
-  headers: Map<number, { el: HTMLElement; title: HTMLElement; close: HTMLElement }>;
-  render(): void;
-}
+export type TabStrip = ReturnType<typeof createTabStrip>;
 
-export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, views: () => GroupView[]): TabStrip {
+export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, views: () => GroupView[]) {
+  /** The row of tab headers. */
   const tabList = h("div", { class: "workspace-tab-header-container-inner" });
   const tabListButton = iconButton(icon("chevron-down"), "Show tab list", () =>
     showMenu(menus().tabList(group), tabListButton, { align: "right" }),
@@ -40,7 +34,8 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
     h("div", { class: "workspace-tab-header-tab-list" }, tabListButton),
     iconButton(icon("panel-right"), "Toggle right sidebar", () => commands.run("app:toggle-right-sidebar"), "sidebar-toggle-button mod-right"),
   );
-  const headers: TabStrip["headers"] = new Map();
+  /** Each tab's header by tab id (the drag code measures them). */
+  const headers = new Map<number, { el: HTMLElement; title: HTMLElement; close: HTMLElement }>();
   let rendered = false;
 
   function tabHeader(tab: Tab) {

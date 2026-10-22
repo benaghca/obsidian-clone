@@ -7,13 +7,8 @@
 
 .modal.mod-settings,
 .modal.mod-confirm {
-  position: relative;
   align-self: center;
-  background: var(--background-primary);
   border: 1px solid var(--modal-border-color);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-l);
-  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
 }
 .modal.mod-settings {
   width: min(1100px, 90vw);
@@ -22,24 +17,24 @@
   overflow: hidden;
   font-size: var(--font-ui-medium);
 }
-.is-closing .modal.mod-settings,
-.is-closing .modal.mod-confirm {
-  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
-}
 .mod-settings-container {
   align-items: center;
 }
-.modal.mod-settings .modal-close-button {
+/* the close button, and small icon buttons beside controls */
+.modal.mod-settings .modal-close-button,
+.extra-setting-button {
   --icon-size: var(--icon-s);
   --icon-stroke: var(--icon-s-stroke-width);
-  position: absolute;
-  top: 6px;
-  right: 12px;
-  z-index: 2;
   width: 24px;
   height: 24px;
   padding: 4px;
   color: var(--text-muted);
+}
+.modal.mod-settings .modal-close-button {
+  position: absolute;
+  top: 6px;
+  right: 12px;
+  z-index: 2;
 }
 .vertical-tabs-container {
   display: flex;
@@ -116,7 +111,7 @@
 .setting-input:focus,
 .graph-color-group-query:focus {
   border-color: var(--background-modifier-border-focus);
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  box-shadow: var(--focus-ring);
 }
 .search-input-container input {
   width: 100%;
@@ -180,7 +175,7 @@
 .vertical-tab-nav-item:focus-visible,
 .extra-setting-button:focus-visible,
 .setting-group-filter:focus-visible {
-  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
+  box-shadow: var(--focus-ring);
 }
 
 /* ----- the selected section ----- */
@@ -320,9 +315,7 @@
   transform: translateX(20px);
 }
 .checkbox-container:focus-visible {
-  box-shadow:
-    inset 0 4px 10px rgba(0, 0, 0, 0.07),
-    0 0 0 2px var(--background-modifier-border-focus);
+  box-shadow: inset 0 4px 10px rgba(0, 0, 0, 0.07), var(--focus-ring);
 }
 
 /* dropdowns and buttons (the graph panel's and the confirm dialog's too) */
@@ -365,9 +358,7 @@
 .dropdown:focus-visible,
 .modal.mod-settings button:focus-visible,
 .graph-controls button:focus-visible {
-  box-shadow:
-    var(--input-shadow),
-    0 0 0 2px var(--background-modifier-border-focus);
+  box-shadow: var(--input-shadow), var(--focus-ring);
 }
 .dropdown-chevron {
   --icon-size: 14px;
@@ -457,14 +448,7 @@
   color: var(--text-normal);
 }
 
-/* small icon buttons beside controls */
 .extra-setting-button {
-  --icon-size: var(--icon-s);
-  --icon-stroke: var(--icon-s-stroke-width);
-  width: 24px;
-  height: 24px;
-  padding: 4px;
-  color: var(--text-muted);
   outline: none;
 }
 .extra-setting-button.is-disabled {
@@ -522,15 +506,19 @@
   flex-wrap: wrap;
   gap: 6px;
 }
-.setting-group-filter {
+/* pills: the filters, and the hotkeys (further down) */
+.setting-group-filter,
+.setting-hotkey {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
-  border: 1px solid var(--background-modifier-border);
   border-radius: 24px;
   font-size: var(--font-ui-smaller);
   line-height: 1.3;
+}
+.setting-group-filter {
+  padding: 4px 8px;
+  border: 1px solid var(--background-modifier-border);
   color: var(--text-muted);
   cursor: var(--cursor, default);
   outline: none;
@@ -564,14 +552,8 @@
   gap: 4px;
 }
 .setting-hotkey {
-  display: flex;
-  align-items: center;
-  gap: 4px;
   padding: 2px 4px 2px 8px;
-  border-radius: 24px;
   background: var(--background-modifier-hover);
-  font-size: var(--font-ui-smaller);
-  line-height: 1.3;
   white-space: nowrap;
   color: var(--text-normal);
 }

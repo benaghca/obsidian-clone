@@ -1,7 +1,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { loadTab, saveTab } from "./savedLayout";
-import { parseViewEntry, type Tab, tabTitle, viewEntry, whereFromEvent } from "./tabs";
+import { parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, tabTitle, viewEntry, whereFromEvent } from "./tabs";
 
 const blank = (): Tab => ({ id: 1, path: null, back: [], forward: [], mode: "live", pinned: false, backlinks: false, memory: null });
 const notes = new Set(["A.md", "Folder/B.md"]);
@@ -17,6 +17,20 @@ describe("tabs", () => {
     expect(tabTitle(blank())).toBe("New tab");
     expect(parseViewEntry(viewEntry({ type: "image", viewFile: "pics/a.png" }))).toEqual({ type: "image", file: "pics/a.png" });
     expect(tabTitle({ ...blank(), type: "image", viewFile: "pics/a.png" })).toBe("a");
+  });
+
+  it("history keeps what a tab showed, and follows files that move or go", () => {
+    const tab: Tab = { ...blank(), type: "localgraph", viewFile: "A.md", back: ["Folder/B.md"], forward: ["A.md"] };
+    pushBack(tab);
+    expect([tab.back, tab.forward]).toEqual([["Folder/B.md", "\0localgraph\0A.md"], []]);
+    tabFollowsMove(tab, (p) => p.replace("Folder/", "Moved/").replace(/^A\.md$/, "C.md"));
+    expect([tab.viewFile, tab.back]).toEqual(["C.md", ["Moved/B.md", "\0localgraph\0C.md"]]);
+    // A view's history entry isn't a file path: only the view itself lets go of the file.
+    tabForgets(tab, (p) => p === "C.md" || p.startsWith("Moved/"));
+    expect([tab.viewFile, tab.back]).toEqual([null, ["\0localgraph\0C.md"]]);
+    const empty = blank();
+    pushBack(empty);
+    expect(empty.back).toEqual([]);
   });
 
   it("modifier clicks open in a new tab or to the right", () => {

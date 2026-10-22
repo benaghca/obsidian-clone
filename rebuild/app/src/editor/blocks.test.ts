@@ -89,4 +89,6 @@ test("ticking a task in an embedded note writes that line of the note", () => {
   const later = embedPart(note, "Later")!;
   expect(tick(later.line + 1)?.split("\n")[9]).toBe("1. [x] numbered");
   expect(toggledTask(note, 3)).toBeNull(); // a heading
+  // A line on its own, as a Live Preview checkbox ticks it.
+  expect(toggledTask("  * [X] nested\t+ [ ] not this one", 0)).toEqual({ at: 5, insert: " " });
 });

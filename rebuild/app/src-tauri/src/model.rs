@@ -24,7 +24,7 @@ impl VaultInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct FileEntry {
     /// Vault-relative, forward slashes, no leading slash.
     pub path: String,

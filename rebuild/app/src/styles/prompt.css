@@ -19,23 +19,30 @@
   inset: 0;
   background: var(--background-modifier-cover);
 }
-.prompt {
+/* the box of every modal: the prompt, settings (settings.css) and the confirm dialog */
+.prompt,
+.modal.mod-settings,
+.modal.mod-confirm {
   position: relative;
+  background: var(--background-primary);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
+}
+.is-closing .prompt,
+.is-closing .modal.mod-settings,
+.is-closing .modal.mod-confirm {
+  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
+}
+.prompt {
   margin-top: 120px;
   width: var(--prompt-width);
   max-width: var(--prompt-max-width);
   max-height: min(var(--prompt-max-height), calc(100vh - 160px));
   display: flex;
   flex-direction: column;
-  background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-l);
   overflow: hidden;
-  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
-}
-.is-closing .prompt {
-  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .prompt-input-container {
   position: relative;

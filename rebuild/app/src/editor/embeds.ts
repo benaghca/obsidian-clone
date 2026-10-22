@@ -12,14 +12,14 @@
 // embeds deep, shows as a small file chip instead.
 
 import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
-import { type EditorView, WidgetType } from "@codemirror/view";
-import { dragPointer, h, iconButton } from "../shell/dom";
-import { icon, type IconName } from "../shell/icons";
+import type { EditorView } from "@codemirror/view";
+import { dragPointer, h } from "../shell/dom";
+import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { editorHost } from "./host";
 import { zoomImage } from "./imageZoom";
-import { destroyed, onDestroy, release, render } from "./render";
+import { DrawnWidget, editButton, onDestroy, release, render, widgetAction } from "./render";
 
 export const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 const MAX_DEPTH = 5;
@@ -31,8 +31,9 @@ export interface EmbedSize {
 }
 
 /** "200", "200x100", "caption|200": the size Obsidian reads after the last "|" (an image's alias or alt text). */
+const SIZED = /^(?:([\s\S]*)\|)?\s*(\d+)(?:x(\d+))?\s*$/;
 export function embedSize(text: string): EmbedSize {
-  const m = /^(?:([\s\S]*)\|)?\s*(\d+)(?:x(\d+))?\s*$/.exec(text);
+  const m = SIZED.exec(text);
   return m ? { alt: m[1] ?? "", width: Number(m[2]), height: m[3] ? Number(m[3]) : undefined } : { alt: text };
 }
 
@@ -116,26 +117,6 @@ export const editingEmbed = StateField.define<number | null>({
   },
 });
 
-/** Clicks on links inside a widget go to Live Preview's link handling; anything else is the widget's. */
-export const isLinkEvent = (e: Event) => !!(e.target as Element).closest?.("[data-href]");
-
-/** A widget drawn from plain fields (equal when they are), that lets go of what it drew (render.ts onDestroy). */
-export abstract class DrawnWidget extends WidgetType {
-  eq(other: WidgetType) {
-    return other.constructor === this.constructor && JSON.stringify(other) === JSON.stringify(this);
-  }
-  destroy(dom: HTMLElement) {
-    destroyed(dom);
-  }
-  ignoreEvent(e: Event) {
-    return !isLinkEvent(e);
-  }
-}
-
-const action = (label: string, name: IconName) => iconButton(icon(name), label, undefined, "embed-action");
-/** "Edit this block" (after an image's "Zoom in"), top right of an image, callout or table on hover. */
-export const editButton = (...before: HTMLElement[]) => h("div", { class: "embed-actions" }, ...before, action("Edit this block", "code-xml"));
-
 /**
  * What a resized image's alt text or alias becomes, `width` wide, as
  * Obsidian writes it: the size replaced ("caption|200" → "caption|358",
@@ -144,7 +125,7 @@ export const editButton = (...before: HTMLElement[]) => h("div", { class: "embed
  */
 export function resizedSize(text: string | null, width: number): string {
   if (text === null) return `|${width}`;
-  const m = /^(?:([\s\S]*)\|)?\s*\d+(?:x\d+)?\s*$/.exec(text);
+  const m = SIZED.exec(text);
   const caption = m ? m[1] : text || undefined;
   return caption === undefined ? `${width}` : `${caption}|${width}`;
 }
@@ -173,7 +154,7 @@ export class ImageWidget extends DrawnWidget {
     img.decoding = "async";
     if (size.width) img.width = size.width;
     if (size.height) img.height = size.height;
-    const zoom = action("Zoom in", "zoom-in");
+    const zoom = widgetAction("Zoom in", "zoom-in");
     const actions = editButton(zoom);
     const corner = h("div", { class: "image-resize-corner" });
     const dom = h("span", { class: "internal-embed media-embed image-embed" }, img, actions, corner);

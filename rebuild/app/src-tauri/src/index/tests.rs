@@ -1,4 +1,4 @@
-use super::parse::{markdown_targets, percent_decode};
+use super::parse::{markdown_targets, percent_decode, wiki_targets};
 use super::*;
 use crate::fsutil::tmp_dir;
 use serde_json::json;
@@ -30,55 +30,27 @@ fn sample() -> Index {
 #[test]
 fn resolves_names_paths_aliases_and_skips_code() {
     let idx = sample();
-    assert_eq!(
-        idx.resolve("Hello.md", "world").as_deref(),
-        Some("world.md")
-    );
-    assert_eq!(
-        idx.resolve("Hello.md", "WORLD").as_deref(),
-        Some("world.md")
-    );
-    assert_eq!(
-        idx.resolve("sub/Deep.md", "Hello#Heading").as_deref(),
-        Some("Hello.md")
-    );
-    assert_eq!(
-        idx.resolve("a/Source.md", "Note").as_deref(),
-        Some("a/Note.md")
-    );
-    assert_eq!(
-        idx.resolve("b/Source.md", "Note").as_deref(),
-        Some("b/Note.md")
-    );
-    assert_eq!(idx.resolve("Root.md", "Note").as_deref(), Some("a/Note.md"));
-    assert_eq!(
-        idx.resolve("Root.md", "b/Note").as_deref(),
-        Some("b/Note.md")
-    );
-    assert_eq!(
-        idx.resolve("Root.md", "b/Note.md").as_deref(),
-        Some("b/Note.md")
-    );
-    assert_eq!(
-        idx.resolve("sub/Deep.md", "../world").as_deref(),
-        Some("world.md")
-    );
-    assert_eq!(
-        idx.resolve("Root.md", "pic.png").as_deref(),
-        Some("pic.png")
-    );
-    assert_eq!(
-        idx.resolve("Root.md", "Nickname").as_deref(),
-        Some("Nick.md")
-    );
-    assert_eq!(
-        idx.resolve("Root.md", "second name").as_deref(),
-        Some("Nick.md")
-    );
-    // A real note name wins over an alias.
-    assert_eq!(idx.resolve("Root.md", "Hello").as_deref(), Some("Hello.md"));
-    assert!(idx.resolve("Root.md", "missing").is_none());
-    assert!(idx.resolve("Root.md", "#Heading").is_none());
+    // (linking note, link target, the note it resolves to)
+    for (from, target, want) in [
+        ("Hello.md", "world", Some("world.md")),
+        ("Hello.md", "WORLD", Some("world.md")),
+        ("sub/Deep.md", "Hello#Heading", Some("Hello.md")),
+        ("a/Source.md", "Note", Some("a/Note.md")),
+        ("b/Source.md", "Note", Some("b/Note.md")),
+        ("Root.md", "Note", Some("a/Note.md")),
+        ("Root.md", "b/Note", Some("b/Note.md")),
+        ("Root.md", "b/Note.md", Some("b/Note.md")),
+        ("sub/Deep.md", "../world", Some("world.md")),
+        ("Root.md", "pic.png", Some("pic.png")),
+        ("Root.md", "Nickname", Some("Nick.md")),
+        ("Root.md", "second name", Some("Nick.md")),
+        // A real note name wins over an alias.
+        ("Root.md", "Hello", Some("Hello.md")),
+        ("Root.md", "missing", None),
+        ("Root.md", "#Heading", None),
+    ] {
+        assert_eq!(idx.resolve(from, target).as_deref(), want, "{target} from {from}");
+    }
 
     let links = idx.link_index();
     let value = serde_json::to_value(&links).unwrap();
@@ -122,36 +94,17 @@ fn markdown_links_and_unresolved_targets_for_the_graph() {
         ("img.png", ""),
     ]);
     let links = idx.link_index();
-    assert_eq!(
-        links.markdown.get("a.md").unwrap(),
-        &vec!["Design.md".to_string()]
-    );
-    assert_eq!(
-        links.markdown.get("b/c.md").unwrap(),
-        &vec![
-            "a.md".to_string(),
-            "My Note.md".to_string(),
-            "img.png".to_string()
-        ]
-    );
-    assert_eq!(
-        links.markdown.get("My Note.md").unwrap(),
-        &vec!["a.md".to_string()]
-    );
+    assert_eq!(links.markdown["a.md"], ["Design.md"]);
+    assert_eq!(links.markdown["b/c.md"], ["a.md", "My Note.md", "img.png"]);
+    assert_eq!(links.markdown["My Note.md"], ["a.md"]);
     // Markdown links stay out of the wikilink maps the Backlinks and Outgoing views use.
     assert!(links.outgoing.get("a.md").is_none());
     assert!(links.backlinks.get("Design.md").is_none());
-    assert_eq!(
-        links.outgoing.get("Design.md").unwrap(),
-        &vec!["a.md".to_string()]
-    );
+    assert_eq!(links.outgoing["Design.md"], ["a.md"]);
     // Inline code and `[[x]](a.md)` are not markdown links.
     assert!(links.markdown.get("Design.md").is_none());
-    assert_eq!(
-        links.unresolved.get("Design.md").unwrap(),
-        // Per line: wikilinks first, then markdown links.
-        &vec!["Nowhere".to_string(), "x".to_string(), "Gone".to_string()]
-    );
+    // Per line: wikilinks first, then markdown links.
+    assert_eq!(links.unresolved["Design.md"], ["Nowhere", "x", "Gone"]);
     assert!(links.unresolved.get("a.md").is_none());
 }
 
@@ -175,14 +128,20 @@ fn markdown_target_parsing() {
 }
 
 #[test]
+fn wikilink_target_parsing() {
+    assert_eq!(
+        wiki_targets("[[a#h|x]] ![[b]] [[c\\|d]] [[ ]] [[e[f]] [[g]] [[h"),
+        vec!["a", "b", "c", "g"]
+    );
+    assert!(wiki_targets("[[a[[b]] [[|x]] [[#h]]").is_empty());
+}
+
+#[test]
 fn duplicate_links_on_one_line_dedupe_outgoing() {
     let idx = Index::from_notes(&[("a.md", "[[Hello]] and [[hello]]\n"), ("Hello.md", "x\n")]);
     let links = idx.link_index();
-    assert_eq!(
-        links.outgoing.get("a.md").unwrap(),
-        &vec!["Hello.md".to_string()]
-    );
-    assert_eq!(links.backlinks.get("Hello.md").unwrap().len(), 2);
+    assert_eq!(links.outgoing["a.md"], ["Hello.md"]);
+    assert_eq!(links.backlinks["Hello.md"].len(), 2);
 }
 
 #[test]

@@ -7,6 +7,7 @@
 
 import { version } from "../../package.json";
 import { commands } from "../commands";
+import { writeClipboard } from "../editor/clipboard";
 import { systemPath } from "../paths";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
@@ -26,7 +27,6 @@ export interface SettingsContext {
   ws: Workspace;
   /** The ribbon's actions, which can be shown or hidden (Interface → Ribbon). */
   ribbon: { actions: { id: string; label: string; icon: IconName }[]; isShown(id: string): boolean; setShown(id: string, shown: boolean): void };
-  copyText(text: string): void;
 }
 
 // Bind a control to one setting.
@@ -72,7 +72,7 @@ function general(ctx: SettingsContext): HTMLElement[] {
       }),
       row(
         { name: "Settings folder", desc: [h("div", null, "This vault's settings are plain JSON files in its .grove folder, so they travel with the vault."), h("div", { class: "setting-item-path" }, config)] },
-        button("Copy path", () => ctx.copyText(config)),
+        button("Copy path", () => writeClipboard(config)),
       ),
     ),
   ];

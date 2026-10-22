@@ -16,8 +16,8 @@ import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, type Wi
 import type { Tree } from "@lezer/common";
 import { CalloutWidget, calloutHeader } from "./callouts";
 import { frontmatterField } from "./frontmatter";
-import { filesChanged, readingMode } from "./livePreview";
-import { embedChain, paintWith } from "./render";
+import { filesChanged } from "./livePreview";
+import { embedChain, paintWith, readingMode } from "./render";
 import { TableWidget } from "./tables";
 
 interface Block {

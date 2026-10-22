@@ -14,17 +14,7 @@ export type Side = "left" | "right";
 const MIN_DOCK_WIDTH = 160;
 const MAX_DOCK_WIDTH = 560;
 
-export interface Sidedocks {
-  isCollapsed(side: Side): boolean;
-  setCollapsed(side: Side, collapsed: boolean, animate?: boolean): void;
-  toggle(side: Side): void;
-  width(side: Side): number;
-  setWidth(side: Side, px: number): void;
-  /** A drag handle that resizes the dock, for its inner edge. */
-  resizeHandle(side: Side): HTMLElement;
-  /** Called after a dock opens, closes or is resized by the user. */
-  onChange(fn: (side: Side) => void): void;
-}
+export type Sidedocks = ReturnType<typeof createSidedocks>;
 
 export interface ColumnHolder {
   /**
@@ -36,7 +26,7 @@ export interface ColumnHolder {
 
 const clampWidth = (px: number) => Math.round(Math.min(MAX_DOCK_WIDTH, Math.max(MIN_DOCK_WIDTH, px)));
 
-export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks {
+export function createSidedocks(app: HTMLElement, pane: ColumnHolder) {
   const collapsedClass = (side: Side) => `is-${side}-sidebar-collapsed`;
   const dock = (side: Side) => app.querySelector<HTMLElement>(`.mod-${side}-split`)!;
   const changes = listeners<[Side]>();
@@ -75,6 +65,7 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
     app.style.setProperty(`--${side}-sidebar-width`, `${clampWidth(px)}px`);
   }
 
+  /** A drag handle that resizes the dock, for its inner edge. */
   function resizeHandle(side: Side): HTMLElement {
     const handle = h("div", { class: "workspace-leaf-resize-handle" });
     handle.addEventListener("pointerdown", (down) => {
@@ -94,10 +85,11 @@ export function createSidedocks(app: HTMLElement, pane: ColumnHolder): Sidedocks
   return {
     isCollapsed,
     setCollapsed,
-    toggle: (side) => setCollapsed(side, !isCollapsed(side)),
+    toggle: (side: Side) => setCollapsed(side, !isCollapsed(side)),
     width,
     setWidth,
     resizeHandle,
+    /** Called after a dock opens, closes or is resized by the user. */
     onChange: changes.on,
   };
 }

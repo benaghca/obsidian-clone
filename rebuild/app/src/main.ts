@@ -269,7 +269,6 @@ const sections = () =>
   settingsSections({
     ws,
     ribbon: { actions: RIBBON.filter(ribbonPluginOn), isShown: (id) => !ribbonHidden.has(id), setShown: setRibbonShown },
-    copyText: (text) => void navigator.clipboard.writeText(text).catch((err) => console.warn("Could not copy", err)),
   });
 
 const appSettings = () => settings.get("app.json");

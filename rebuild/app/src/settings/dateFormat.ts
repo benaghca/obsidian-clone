@@ -7,7 +7,7 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const TOKENS = /\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|dd|d|HH|H|hh|h|mm|m|ss|s|A|a|Q|WW|W/g;
 
-const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+const pad = (n: number) => String(n).padStart(2, "0");
 const ordinal = (n: number) => {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;
@@ -65,7 +65,7 @@ const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
  * A pattern matching names written in a format, with the date parts
  * captured, for telling daily notes apart and putting them in order.
  */
-export function dateNamePattern(format: string): { regex: RegExp; parse(name: string): number | null } {
+export function dateNamePattern(format: string): { parse(name: string): number | null } {
   const order: string[] = [];
   let src = "";
   let last = 0;
@@ -85,7 +85,6 @@ export function dateNamePattern(format: string): { regex: RegExp; parse(name: st
   src += escape(format.slice(last));
   const regex = new RegExp(`^${src}$`);
   return {
-    regex,
     parse(name) {
       const m = regex.exec(name);
       if (!m) return null;

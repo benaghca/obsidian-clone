@@ -3,13 +3,19 @@
 // second renderer: a throwaway EditorState of the text is decorated by the
 // same code as Live Preview and the block widgets (they register here with
 // paintWith), and those decorations are painted into plain DOM, lines as
-// .cm-line, marks as spans, widgets as their own DOM.
+// .cm-line, marks as spans, widgets as their own DOM. Also what the drawn
+// widgets (callouts, tables, embeds) share: letting go of what they drew,
+// "Edit this block", and a click that puts the caret in their source.
 
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorState, type Extension, Facet, type Range, RangeSet } from "@codemirror/state";
-import type { Decoration, DecorationSet, EditorView, WidgetType } from "@codemirror/view";
-import { h } from "../shell/dom";
+import { type Decoration, type DecorationSet, type EditorView, WidgetType } from "@codemirror/view";
+import { h, iconButton } from "../shell/dom";
+import { icon, type IconName } from "../shell/icons";
 import { markdownSyntax } from "./syntax";
+
+/** Reading view: render everything, as if the selection touched nothing. */
+export const readingMode = Facet.define<boolean, boolean>({ combine: (values) => values.some(Boolean) });
 
 /** The notes an embed is drawn inside of, outermost first (not counting the note on screen): the cycle and depth guard. */
 export const embedChain = Facet.define<readonly string[], readonly string[]>({ combine: (v) => v[0] ?? [] });
@@ -26,14 +32,64 @@ export function paintWith(decorate: Decorator, ext: Extension = []) {
 
 const cleanups = new WeakMap<Element, () => void>();
 
-/** Run `fn` when `dom` (a widget's) is destroyed; see `destroyed`. */
+/** Run `fn` when `dom`, a DrawnWidget's, is destroyed. */
 export function onDestroy(dom: Element, fn: () => void) {
   cleanups.set(dom, fn);
 }
 
-export function destroyed(dom: Element) {
-  cleanups.get(dom)?.();
-  cleanups.delete(dom);
+/** Clicks on links inside a widget go to Live Preview's link handling; anything else is the widget's. */
+export const isLinkEvent = (e: Event) => !!(e.target as Element).closest?.("[data-href]");
+
+/** A widget drawn from plain fields (equal when they are), that lets go of what it drew (onDestroy). */
+export abstract class DrawnWidget extends WidgetType {
+  eq(other: WidgetType) {
+    return other.constructor === this.constructor && JSON.stringify(other) === JSON.stringify(this);
+  }
+  destroy(dom: HTMLElement) {
+    cleanups.get(dom)?.();
+    cleanups.delete(dom);
+  }
+  ignoreEvent(e: Event) {
+    return !isLinkEvent(e);
+  }
+}
+
+export const widgetAction = (label: string, name: IconName) => iconButton(icon(name), label, undefined, "embed-action");
+/** "Edit this block" (after an image's "Zoom in"), top right of an image, callout or table on hover. */
+export const editButton = (...before: HTMLElement[]) => h("div", { class: "embed-actions" }, ...before, widgetAction("Edit this block", "code-xml"));
+
+/** Put the caret at `pos` in the editor (inside a block widget's source, which then shows). */
+export function editAt(view: EditorView, pos: number) {
+  view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+  view.focus();
+}
+
+/** A callout or a table, drawn in place of its lines (blocks.ts) from their text. */
+export abstract class BlockWidget extends DrawnWidget {
+  constructor(
+    readonly text: string,
+    readonly chain: readonly string[],
+    /** Bumped to draw it again when files its embeds point at may have changed. */
+    readonly files = 0,
+  ) {
+    super();
+  }
+  /**
+   * Its box, with "Edit this block": a click on it (not on a link, nor one
+   * `own` takes) puts the caret in its source at `pos`, outside Reading view.
+   */
+  protected box(view: EditorView, cls: string, content: HTMLElement, pos: (e: MouseEvent, dom: HTMLElement) => number, own?: (e: MouseEvent) => boolean) {
+    const dom = h("div", { class: cls }, content, editButton());
+    dom.addEventListener("mousedown", (e) => {
+      if (e.button !== 0 || isLinkEvent(e)) return;
+      if (!own?.(e)) {
+        if (view.state.facet(readingMode)) return;
+        editAt(view, pos(e, dom));
+      }
+      e.preventDefault();
+    });
+    return dom;
+  }
 }
 
 /** Decorated text, ready to paint; `widgets` collects what was drawn, so it can be let go of. */
