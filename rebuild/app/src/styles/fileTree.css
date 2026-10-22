@@ -200,6 +200,8 @@
   line-height: 1.3;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  overflow: visible;
+  text-overflow: clip;
 }
 .search-view .search-result-file-match:last-child {
   border-bottom: 0;

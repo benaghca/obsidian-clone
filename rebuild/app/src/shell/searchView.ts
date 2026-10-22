@@ -87,13 +87,15 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       const matches = h(
         "div",
         { class: "search-result-file-matches" },
-        ...shown.slice(0, LINES).map((hit) =>
-          h(
+        ...shown.slice(0, LINES).map((hit) => {
+          const spans = spansOf(hit.text, words, matchCase);
+          const first = spans[0];
+          return h(
             "div",
-            { class: "search-result-file-match", "data-preview-path": path, onclick: () => void ws.open(path, { line: hit.line }) },
-            ...highlighted(hit.text, spansOf(hit.text, words, matchCase)),
-          ),
-        ),
+            { class: "search-result-file-match", "data-preview-path": path, onclick: () => void ws.open(path, { line: hit.line, ch: first ? [first.from, first.to] : undefined }) },
+            ...highlighted(hit.text, spans),
+          );
+        }),
       );
       const chevron = foldToggle(matches, collapsed.has(path), foldIn(collapsed, path));
       return h(

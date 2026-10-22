@@ -105,6 +105,19 @@ try {
   await run(() => { ws.setMode('live'); ws.view.dispatch({ selection: { anchor: 0 } }); });
   await click('.cm-tag + .cm-tag');
   check(await evaluate('document.querySelector("input[aria-label=Search]").value === "tag:#nested/child"'), 'nested tag names remain intact');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('Search18.md', Array.from({ length: 60 }, (_, i) => 'Context line ' + i).join('\n') + '\n' +
+      'A long line of surrounding context before SearchNeedle, followed by enough additional words to wrap across several sidebar lines without cutting off the surrounding context.');
+    await ws.vault.refreshFiles();
+  });
+  await fill('input[aria-label=Search]', 'searchneedle'); await sleep(250);
+  const hit = '.search-view .search-result-file-match[data-preview-path="Search18.md"]';
+  check(await run(selector => { const el = document.querySelector(selector); return el.getBoundingClientRect().height > 3 * parseFloat(getComputedStyle(el).lineHeight) && el.textContent.endsWith('surrounding context.'); }, hit), 'search snippet wraps and preserves surrounding context');
+  await click(hit); await sleep(200);
+  check(await evaluate('ws.active.path === "Search18.md" && ws.view.state.sliceDoc(ws.view.state.selection.main.from, ws.view.state.selection.main.to) === "SearchNeedle"'), 'search hit selects the matched text with original case');
+  check(await evaluate('ws.view.state.doc.lineAt(ws.view.state.selection.main.from).number === 61 && ws.view.coordsAtPos(ws.view.state.selection.main.from).top < 750'), 'search opens scrolled to its matching line');
+  await shot('search');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');
