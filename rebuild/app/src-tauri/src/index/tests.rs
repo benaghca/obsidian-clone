@@ -60,15 +60,6 @@ fn resolves_names_paths_aliases_and_skips_code() {
         json!(["Hello.md", "world.md"])
     );
     assert_eq!(value["outgoing"]["Code.md"], json!(["world.md"]));
-    assert!(
-        value["outgoing"]
-            .get("Code.md")
-            .unwrap()
-            .as_array()
-            .unwrap()
-            .len()
-            == 1
-    );
     let backs = value["backlinks"]["world.md"].as_array().unwrap();
     assert!(backs.iter().any(|b| b["from"] == "Hello.md"
         && b["line"] == 1
