@@ -20,50 +20,42 @@ export interface SideView {
  * lands is drawn with `render`.
  */
 export function liveData<T>(initial: T, read: () => Promise<T>, render: () => void, what: string) {
-  let data = initial;
-  let active = false;
-  let stale = true;
   let timer = 0;
   let seq = 0;
   async function refresh() {
     const mine = ++seq;
     try {
       const next = await read();
-      if (mine === seq) data = next;
+      if (mine === seq) live.data = next;
     } catch (err) {
       console.error(`Could not read ${what}`, err);
     }
-    if (mine !== seq || !active) return;
-    stale = false;
+    if (mine !== seq || !live.active) return;
+    live.stale = false;
     render();
   }
   const schedule = (delay: number) => {
     clearTimeout(timer);
-    if (active) timer = window.setTimeout(() => void refresh(), delay);
+    if (live.active) timer = window.setTimeout(() => void refresh(), delay);
   };
-  return {
-    get data() {
-      return data;
-    },
-    get active() {
-      return active;
-    },
-    get stale() {
-      return stale;
-    },
+  const live = {
+    data: initial,
+    active: false,
+    stale: true,
     changed(delay: number) {
-      stale = true;
+      live.stale = true;
       schedule(delay);
     },
     /** Returns whether `next` is a change; a view shown while stale reads again after `delay`. */
     setActive(next: boolean, delay: number): boolean {
-      if (next === active) return false;
-      active = next;
-      if (active && stale) schedule(delay);
-      else if (!active) clearTimeout(timer);
+      if (next === live.active) return false;
+      live.active = next;
+      if (live.active && live.stale) schedule(delay);
+      else if (!live.active) clearTimeout(timer);
       return true;
     },
   };
+  return live;
 }
 
 /** A sidebar's icon tabs over its content: `show` puts a view in and marks its tab; a click calls `select`. */
