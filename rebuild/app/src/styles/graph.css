@@ -76,19 +76,16 @@
   box-shadow: var(--focus-ring);
   outline: none;
 }
-/* Open: Restore default settings and Close sit in the first header row. */
-.graph-controls > .mod-close {
+/* Open: Close and Restore default settings sit in the first header row.
+   Closed: a gear in the same corner, and below it the wand. */
+.graph-controls > .mod-close,
+.graph-controls > .mod-open {
   top: 6px;
   right: 6px;
 }
 .graph-controls > .mod-reset {
   top: 6px;
   right: 34px;
-}
-/* Closed: a gear, and below it the wand. */
-.graph-controls > .mod-open {
-  top: 6px;
-  right: 6px;
 }
 .graph-controls > .mod-animate {
   top: 38px;
