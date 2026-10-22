@@ -299,6 +299,12 @@ mod tests {
         event
     }
 
+    /// One contract event.
+    fn one(kind: ChangeKind, paths: &[&str]) -> Vec<VaultChanged> {
+        let paths = paths.iter().map(|p| p.to_string()).collect();
+        vec![VaultChanged { kind, paths }]
+    }
+
     #[test]
     fn groups_and_suppresses_our_own_writes() {
         let root = Path::new("/vault");
@@ -307,13 +313,7 @@ mod tests {
             vec![at(root, "a.md")],
         );
         let out = coalesce(root, &[modify.clone()], |_| false);
-        assert_eq!(
-            out,
-            vec![VaultChanged {
-                kind: ChangeKind::Modify,
-                paths: vec!["a.md".into()],
-            }]
-        );
+        assert_eq!(out, one(ChangeKind::Modify, &["a.md"]));
         assert!(coalesce(root, &[modify], |path| path == "a.md").is_empty());
 
         let temp = kind(
@@ -357,26 +357,14 @@ mod tests {
         both = both.set_tracker(7);
         // Saving the source must not swallow a later real rename.
         let out = coalesce(root, &[from, to, both], |path| path == "a.md");
-        assert_eq!(
-            out,
-            vec![VaultChanged {
-                kind: ChangeKind::Rename,
-                paths: vec!["a.md".into(), "b.md".into()],
-            }]
-        );
+        assert_eq!(out, one(ChangeKind::Rename, &["a.md", "b.md"]));
 
         let trash = kind(
             EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
             vec![at(root, "note.md"), at(root, ".trash/note.md")],
         );
         let out = coalesce(root, &[trash], |_| false);
-        assert_eq!(
-            out,
-            vec![VaultChanged {
-                kind: ChangeKind::Remove,
-                paths: vec!["note.md".into()],
-            }]
-        );
+        assert_eq!(out, one(ChangeKind::Remove, &["note.md"]));
     }
 
     #[test]
@@ -392,13 +380,7 @@ mod tests {
         .set_tracker(3);
         assert!(coalesce(root, &[save.clone()], |path| path == "note.md").is_empty());
         let out = coalesce(root, &[save], |_| false);
-        assert_eq!(
-            out,
-            vec![VaultChanged {
-                kind: ChangeKind::Create,
-                paths: vec!["note.md".into()],
-            }]
-        );
+        assert_eq!(out, one(ChangeKind::Create, &["note.md"]));
     }
 
     #[test]
@@ -410,24 +392,12 @@ mod tests {
             vec![at(root, "a.md")],
         );
         let out = coalesce(root, &[create, modify], |_| false);
-        assert_eq!(
-            out,
-            vec![VaultChanged {
-                kind: ChangeKind::Create,
-                paths: vec!["a.md".into()],
-            }]
-        );
+        assert_eq!(out, one(ChangeKind::Create, &["a.md"]));
 
         let removed = kind(EventKind::Remove(RemoveKind::File), vec![at(root, "a.md")]);
         let created = kind(EventKind::Create(CreateKind::File), vec![at(root, "a.md")]);
         let out = coalesce(root, &[removed, created], |_| false);
-        assert_eq!(
-            out,
-            vec![VaultChanged {
-                kind: ChangeKind::Modify,
-                paths: vec!["a.md".into()],
-            }]
-        );
+        assert_eq!(out, one(ChangeKind::Modify, &["a.md"]));
 
         let dir = tmp_dir("watchdir");
         let sub = dir.path.join("sub");
