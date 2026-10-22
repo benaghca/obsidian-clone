@@ -15,6 +15,7 @@ import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
+import { addLines, frontmatterField } from "./editor/frontmatter";
 import { openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
@@ -172,18 +173,9 @@ export function registerAppCommands(parts: AppParts) {
   // "Properties in document" set to Source or Hidden): a new, empty line in
   // the YAML (created if missing) with the caret on it.
   const addProperty = (view: EditorView) => {
-    const doc = view.state.doc;
-    const first = doc.line(1);
-    if (first.text === "---") {
-      for (let i = 2; i <= doc.lines; i++) {
-        const line = doc.line(i);
-        if (line.text !== "---") continue;
-        view.dispatch({ changes: { from: line.from, insert: "\n" }, selection: { anchor: line.from }, scrollIntoView: true, userEvent: "input" });
-        return true;
-      }
-    }
-    view.dispatch({ changes: { from: 0, insert: "---\n\n---\n" }, selection: { anchor: 4 }, scrollIntoView: true, userEvent: "input" });
-    return true;
+    const fm = view.state.field(frontmatterField);
+    const line = addLines(fm, "");
+    view.dispatch({ changes: line, selection: { anchor: line.from + (fm ? 0 : 4) }, scrollIntoView: true, userEvent: "input" });
   };
 
   // Export to PDF: the note as Reading view shows it (in the light scheme),

@@ -1,6 +1,6 @@
 import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
-import { addProperty, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, setValue, yamlString } from "./frontmatter";
+import { addLines, addProperty, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, setValue, yamlString } from "./frontmatter";
 
 const NOTE = `---
 title: Hello world
@@ -108,6 +108,10 @@ test("adding a property: at the end, or a new frontmatter", () => {
   expect(added).toContain("empty:\nstatus: draft\n---\nBody");
   expect(apply("Body.\n", addProperty(null, "status"))).toBe("---\nstatus:\n---\nBody.\n");
   expect(read(apply("Body.\n", addProperty(null, "my key: x", "list", ["a"]))).props![0]).toMatchObject({ key: "my key: x", value: ["a"] });
+  // "Add file property" in Source mode: an empty line before the closing --- (one with trailing spaces too).
+  const trailing = "---\na: 1\n--- \nbody\n---\n";
+  expect(apply(trailing, addLines(read(trailing), ""))).toBe("---\na: 1\n\n--- \nbody\n---\n");
+  expect(apply("body\n", addLines(null, ""))).toBe("---\n\n---\nbody\n");
 });
 
 test("YAML Grove could misread or rewrite is shown read-only, and stays as written", () => {
