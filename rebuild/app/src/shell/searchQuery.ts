@@ -11,9 +11,11 @@
 //   content:alpha      in the text only, not the name
 //   [status]           has the property; [status:draft] its value contains
 //                      it ([status:draft OR done] either)
-// Matching is case-insensitive. The query is parsed once; what the notes
-// contain is handed in as facts: the lines the backend's search found per
-// term, the tags per note, the properties per note. Pure, tested on its own.
+// Matching is case-insensitive, unless the search view's "Match case" is on
+// (tags and property names never are). The query is parsed once; what the
+// notes contain is handed in as facts: the lines the backend's search found
+// per term, the tags per note, the properties per note. Pure, tested on its
+// own.
 
 import { compareNames, fileName, isUnder, noteName } from "../paths";
 import type { Span } from "./mentions";
@@ -23,7 +25,7 @@ export type Field = "any" | "content" | "file" | "path" | "tag";
 export type Query =
   | { op: "and" | "or"; parts: Query[] }
   | { op: "not"; part: Query }
-  /** A word or phrase, lower case, looked for in `field`. */
+  /** A word or phrase, lower case (as typed with Match case), looked for in `field`. */
   | { op: "term"; text: string; field: Field }
   /** Every term of `part` on one line. */
   | { op: "line"; part: Query }
@@ -33,8 +35,9 @@ export type Query =
 const FIELDS = new Set(["file", "path", "tag", "line", "content"]);
 
 /** The query, or null when there is nothing to search for. */
-export function parseQuery(input: string): Query | null {
+export function parseQuery(input: string, matchCase = false): Query | null {
   let at = 0;
+  const fold = (text: string) => (matchCase ? text : text.toLowerCase());
   /** Inside [property:...], where "]" ends a word. */
   let inProperty = false;
   const peek = () => input[at];
@@ -87,11 +90,11 @@ export function parseQuery(input: string): Query | null {
     if (op && FIELDS.has(op[1].toLowerCase())) {
       at += op[0].length;
       const name = op[1].toLowerCase();
-      const inner = peek() === "(" ? (at++, group(")", "any")) : term(word(), "any");
+      const inner = peek() === "(" ? (at++, group(")", "any")) : term(fold(word()), "any");
       if (!inner) return null;
       return name === "line" ? { op: "line", part: inner } : scoped(inner, name as Field);
     }
-    return term(word(), field);
+    return term(fold(word()), field);
   };
   const property = (): Query | null => {
     at++; // [
@@ -114,8 +117,8 @@ export function parseQuery(input: string): Query | null {
 const all = (parts: Query[]): Query | null => (parts.length > 1 ? { op: "and", parts } : (parts[0] ?? null));
 
 const term = (text: string, field: Field): Query | null => {
-  const t = text.trim().toLowerCase();
-  return t ? { op: "term", text: field === "tag" ? t.replace(/^#/, "") : field === "path" ? t.replace(/^\/+|\/+$/g, "") : t, field } : null;
+  const t = text.trim();
+  return t ? { op: "term", text: field === "tag" ? t.toLowerCase().replace(/^#/, "") : field === "path" ? t.replace(/^\/+|\/+$/g, "") : t, field } : null;
 };
 
 /** `file:(a OR b)`: the operator's field given to every term inside. */
@@ -172,7 +175,12 @@ export interface Facts {
   tags?: ReadonlyMap<string, readonly string[]>;
   /** Properties per path, as name → values (needed for [property] terms). */
   props?: ReadonlyMap<string, ReadonlyMap<string, readonly string[]>>;
+  /** Match case: the terms were parsed as typed, and the lines hold them so. */
+  matchCase?: boolean;
 }
+
+/** Text as terms are compared with it. */
+const fold = (facts: Facts, text: string) => (facts.matchCase ? text : text.toLowerCase());
 
 /** Whether a line (or a property's value) holds the query, as text. */
 function holds(q: Query, text: string): boolean {
@@ -194,7 +202,7 @@ function holds(q: Query, text: string): boolean {
 function lineHits(path: string, q: Query, facts: Facts): Line[] {
   const seen = new Map<number, Line>();
   for (const t of termsOf(q)) for (const l of facts.lines(t)?.get(path) ?? []) seen.set(l.line, l);
-  return [...seen.values()].filter((l) => holds(q, l.text.toLowerCase()));
+  return [...seen.values()].filter((l) => holds(q, fold(facts, l.text)));
 }
 
 /** Whether a file passes the query. */
@@ -211,19 +219,19 @@ export function matches(path: string, q: Query | null, facts: Facts): boolean {
       return lineHits(path, q.part, facts).length > 0;
     case "prop": {
       const values = facts.props?.get(path)?.get(q.key);
-      return !!values && (!q.value || values.some((v) => holds(q.value!, v.toLowerCase())));
+      return !!values && (!q.value || values.some((v) => holds(q.value!, fold(facts, v))));
     }
   }
-  const lower = path.toLowerCase();
+  const folded = fold(facts, path);
   switch (q.field) {
     case "file":
-      return fileName(lower).includes(q.text);
+      return fileName(folded).includes(q.text);
     case "path":
-      return lower.includes(q.text);
+      return folded.includes(q.text);
     case "tag":
       return (facts.tags?.get(path) ?? []).some((t) => isUnder(t.toLowerCase(), q.text));
     case "any":
-      if (noteName(lower).includes(q.text)) return true;
+      if (noteName(folded).includes(q.text)) return true;
   }
   return !!facts.lines(q.text)?.get(path)?.length;
 }
@@ -243,7 +251,7 @@ export function shownLines(path: string, q: Query | null, facts: Facts, propLine
   return [...out.values()].sort((a, b) => a.line - b.line);
 }
 
-/** The words and phrases to highlight in shown lines (lower case, longest first). */
+/** The words and phrases to highlight in shown lines (as the terms are, longest first). */
 export function highlightsOf(q: Query | null, out = new Set<string>()): string[] {
   for (const [l, negated] of leaves(q)) {
     if (negated) continue;
@@ -265,12 +273,25 @@ export function propertyLine(fm: { props: readonly { key: string; line: number }
   return p && fm ? { line: p.line + 2, text: fm.lines[p.line] } : null;
 }
 
-/** Where the words are in a line (every occurrence, any case), in order (snippetParts takes overlaps). */
-export function spansOf(text: string, words: string[]): Span[] {
-  const lower = text.toLowerCase();
+/** Where the words are in a line (every occurrence, any case unless `matchCase`), in order (snippetParts takes overlaps). */
+export function spansOf(text: string, words: string[], matchCase = false): Span[] {
+  const folded = matchCase ? text : text.toLowerCase();
   const spans: Span[] = [];
-  for (const w of words) for (let i = lower.indexOf(w); i >= 0; i = lower.indexOf(w, i + w.length)) spans.push({ from: i, to: i + w.length });
+  for (const w of words) for (let i = folded.indexOf(w); i >= 0; i = folded.indexOf(w, i + w.length)) spans.push({ from: i, to: i + w.length });
   return spans.sort((a, b) => a.from - b.from);
+}
+
+/** A result's count beside its name, as Obsidian's: the words' occurrences in its lines (overlapping ones once). */
+export function matchCount(lines: readonly Line[], words: string[], matchCase = false): number {
+  let count = 0;
+  for (const { text } of lines) {
+    let end = -1;
+    for (const s of spansOf(text, words, matchCase)) {
+      if (s.from >= end) count++;
+      end = Math.max(end, s.to);
+    }
+  }
+  return count;
 }
 
 /** `path:"folder"` for a folder, quoted when it has spaces, as Obsidian writes it. */

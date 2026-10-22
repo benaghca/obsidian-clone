@@ -129,9 +129,86 @@
 .search-input-container {
   padding: 8px;
 }
+/* the search view, at Obsidian's sizes: the field with its Match case
+   toggle and clear button, "N results" and the sort order, then each note's
+   title row (a fold chevron, its count) over one card of its lines */
+.search-view .search-input-container {
+  padding: 12px 12px 8px;
+}
+.search-view .search-input-container > .svg-icon {
+  left: 20px;
+}
+.search-view .search-input-container input {
+  padding-right: 62px;
+}
+.search-view .search-input-container .input-right-decorator {
+  right: 44px;
+  padding: 2px 4px;
+}
+.search-view .search-input-clear-button {
+  right: 20px;
+}
+.search-view .search-input-clear-button[hidden] {
+  display: none;
+}
+.search-results-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+.search-results-result-count {
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+.search-results-info .dropdown {
+  min-width: 0;
+  height: 24px;
+  padding: 0 26px 0 8px;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  background: transparent;
+  box-shadow: none;
+}
+.search-results-info .dropdown-chevron {
+  right: 6px;
+}
 .search-results {
   overflow-y: auto;
-  padding: 0 8px 16px;
+  padding: 12px;
+}
+.search-view .search-result-file-title {
+  position: relative;
+  padding: 4px 8px 4px 24px;
+  font-weight: 400;
+}
+.search-view .search-result-file-title .collapse-icon {
+  left: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+.search-view .search-result-file-matches {
+  margin: 4px 0 8px;
+  background: var(--background-primary);
+  border-radius: var(--radius-s);
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+  overflow: hidden;
+}
+.search-view .search-result-file-match {
+  margin: 0;
+  padding: 8px 20px 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+  line-height: 1.3;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.search-view .search-result-file-match:last-child {
+  border-bottom: 0;
 }
 .search-result-file-title {
   display: flex;
@@ -168,8 +245,4 @@
   color: var(--text-normal);
   border-radius: 2px;
 }
-.search-results-info {
-  padding: 0 14px 6px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
+

@@ -98,8 +98,12 @@ export function foldToggle(group: HTMLElement, collapsed: boolean, onToggle: (co
   return chevron;
 }
 
-/** Rows for `items`, `page` at a time, then a "Show N more" row that adds four pages more. */
-export function pagedRows<T>(into: HTMLElement, items: T[], row: (item: T) => Node, page: number) {
+/**
+ * Rows for `items`, `page` at a time (the first `now` at once, the rest of
+ * the page just after they are painted), then a "Show N more" row that adds
+ * four pages more.
+ */
+export function pagedRows<T>(into: HTMLElement, items: T[], row: (item: T) => Node, page: number, now = page) {
   const more = h("div", { class: "search-result-more" });
   let shown = 0;
   const showMore = (n: number) => {
@@ -110,7 +114,8 @@ export function pagedRows<T>(into: HTMLElement, items: T[], row: (item: T) => No
   };
   more.addEventListener("click", () => showMore(page * 4));
   into.append(more);
-  showMore(page);
+  showMore(now);
+  if (now < page) afterPaint(() => more.isConnected && shown === now && showMore(page - now));
 }
 
 /** A line with the columns in `spans` highlighted, as search results show them. */

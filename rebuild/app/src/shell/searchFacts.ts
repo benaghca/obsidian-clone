@@ -23,13 +23,20 @@ const KEEP = 200;
 
 /** The workspace's facts (one cache for every search and graph). */
 export const searchFacts = perWorkspace((ws: Workspace) => {
-  const lines = new Map<string, Promise<Map<string, Line[]>>>();
+  // By term, and with Match case by term as typed.
+  const kept = [new Map<string, Promise<Map<string, Line[]>>>(), new Map<string, Promise<Map<string, Line[]>>>()];
+  const forgetLines = () => kept.forEach((m) => m.clear());
   ws.on((change) => {
-    if (change === "files" || change === "links") lines.clear();
+    if (change === "files" || change === "links") forgetLines();
   });
 
-  /** The lines with a term, per note. The backend finds lines with all its words; a phrase is then looked for whole. */
-  function linesOf(term: string) {
+  /**
+   * The lines with a term, per note. The backend finds lines with all its
+   * words, in any case; a phrase is then looked for whole, and with Match
+   * case the term as typed.
+   */
+  function linesOf(term: string, matchCase: boolean) {
+    const lines = kept[Number(matchCase)];
     let found = lines.get(term);
     if (!found) {
       // Enough for every note to have a line even when most of the vault matches (the hits are round-robin).
@@ -38,7 +45,7 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
         (hits) => {
           const out = new Map<string, Line[]>();
           for (const hit of hits) {
-            if (hit.line <= 0 || (term.includes(" ") && !hit.text.toLowerCase().includes(term))) continue;
+            if (hit.line <= 0 || ((matchCase || term.includes(" ")) && !(matchCase ? hit.text : hit.text.toLowerCase()).includes(term))) continue;
             const list = out.get(hit.path);
             if (list) list.push(hit);
             else out.set(hit.path, [hit]);
@@ -66,11 +73,11 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
 
   return {
     forget() {
-      lines.clear();
+      forgetLines();
       vaultTags(ws).forget();
     },
     /** What `queries` need (and the tags, if `withTags`), or null when they need nothing from the backend. */
-    facts(queries: (Query | null)[], withTags = false): Promise<VaultFacts> | null {
+    facts(queries: (Query | null)[], withTags = false, matchCase = false): Promise<VaultFacts> | null {
       const terms = new Set<string>();
       for (const q of queries) termsOf(q, terms);
       const need = queries.map(needs);
@@ -79,9 +86,9 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
       if (!terms.size && !wantTags && !wantProps) return null;
       const tags = wantTags ? vaultTags(ws).read().catch(() => new Map<string, string[]>()) : undefined;
       const list = [...terms];
-      return Promise.all([Promise.all(list.map(linesOf)), tags, wantProps ? properties() : undefined]).then(([found, t, p]) => {
+      return Promise.all([Promise.all(list.map((term) => linesOf(term, matchCase))), tags, wantProps ? properties() : undefined]).then(([found, t, p]) => {
         const byTerm = new Map(list.map((term, i) => [term, found[i]]));
-        return { lines: (term) => byTerm.get(term), tags: t ?? undefined, props: p?.props, notes: p?.notes };
+        return { lines: (term) => byTerm.get(term), tags: t ?? undefined, props: p?.props, notes: p?.notes, matchCase };
       });
     },
   };

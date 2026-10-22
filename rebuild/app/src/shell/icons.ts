@@ -33,6 +33,7 @@ const ICONS = {
   "calendar-days": lucide.CalendarDays,
   "calendar-minus": lucide.CalendarMinus,
   "calendar-plus": lucide.CalendarPlus,
+  "case-sensitive": lucide.CaseSensitive,
   check: lucide.Check,
   "chevron-down": lucide.ChevronDown,
   "chevron-right": lucide.ChevronRight,

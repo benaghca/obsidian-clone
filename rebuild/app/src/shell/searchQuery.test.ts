@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Facts, highlightsOf, matches, matchingNotes, parseQuery, pathQuery, propertyLine, shownLines, spansOf, termsOf } from "./searchQuery";
+import { type Facts, highlightsOf, matchCount, matches, matchingNotes, parseQuery, pathQuery, propertyLine, shownLines, spansOf, termsOf } from "./searchQuery";
 
 // The throwaway vault the cases were observed on in Obsidian 1.14.4.
 const VAULT: Record<string, string> = {
@@ -112,5 +112,38 @@ describe("search query", () => {
   it("writes Search in folder's path: as Obsidian does", () => {
     expect(pathQuery("Projects/Big ideas")).toBe('path:"Projects/Big ideas" ');
     expect(search(pathQuery("Projects"))).toEqual(["Roadmap"]);
+  });
+
+  it("matches case when asked, and counts the matches per note, as Obsidian 1.14.4 does", () => {
+    const notes: Record<string, string> = {
+      "Other.md": "---\nstatus: done\n---\n\nalpha beta alpha gamma\nAlpha again",
+      "Props.md": "---\ntags:\n  - alpha\n---\n\nBody text with Alpha and alpha and ALPHA.",
+      "Upper.md": "Only ALPHA here",
+    };
+    // The backend's lines for a term (any case), kept only where the term is as typed with Match case.
+    const factsFor = (matchCase: boolean): Facts => ({
+      matchCase,
+      lines: (term) =>
+        new Map(
+          Object.entries(notes).flatMap(([path, text]) => {
+            const hits = text.split("\n").flatMap((t, i) => ((matchCase ? t : t.toLowerCase()).includes(term) ? [{ line: i + 1, text: t }] : []));
+            return hits.length ? [[path, hits]] : [];
+          }),
+        ),
+    });
+    const counts = (query: string, matchCase: boolean) => {
+      const q = parseQuery(query, matchCase);
+      const f = factsFor(matchCase);
+      return Object.keys(notes)
+        .filter((path) => matches(path, q, f))
+        .map((path) => `${names(path)} ${matchCount(shownLines(path, q, f, () => null), highlightsOf(q), matchCase)}`);
+    };
+    expect(counts("alpha", false)).toEqual(["Other 3", "Props 4", "Upper 1"]);
+    expect(counts("alpha", true)).toEqual(["Other 2", "Props 2"]);
+    expect(counts("ALPHA", true)).toEqual(["Props 1", "Upper 1"]);
+    expect(counts("-alpha", true)).toEqual(["Upper 0"]);
+    expect(counts("file:upper", true)).toEqual([]);
+    expect(spansOf("Alpha alpha", ["alpha"], true)).toEqual([{ from: 6, to: 11 }]);
+    expect(matchCount([{ line: 1, text: "star wars and stars" }], ["star wars", "star"])).toBe(2);
   });
 });
