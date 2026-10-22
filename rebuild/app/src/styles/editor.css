@@ -375,7 +375,6 @@
 .cm-line > .cm-fold-indicator,
 .cm-line .cm-fold-indicator.is-collapsed {
   position: relative;
-  left: auto;
   display: inline-flex;
   width: 0;
   overflow: visible;
