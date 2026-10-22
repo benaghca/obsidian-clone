@@ -7,11 +7,12 @@
 // rendered callouts, tables and embeds show (render.ts).
 
 import { syntaxTree } from "@codemirror/language";
-import { type EditorState, type Range, StateEffect, type Text } from "@codemirror/state";
+import { EditorSelection, type EditorState, type Range, type SelectionRange, StateEffect, type Text } from "@codemirror/state";
 import {
   Decoration,
   type DecorationSet,
   EditorView,
+  type MouseSelectionStyle,
   ViewPlugin,
   type ViewUpdate,
   WidgetType,
@@ -20,6 +21,7 @@ import type { SyntaxNode } from "@lezer/common";
 import { writeClipboard } from "./clipboard";
 import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
+import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
@@ -117,11 +119,7 @@ const externalIcon = Decoration.widget({ widget: new SpanWidget("cm-external-lin
 const rule = Decoration.replace({ widget: new SpanWidget("cm-hr") });
 const decoCache = new Map<string, Decoration>();
 /** A decoration made once, by key. */
-const once = (key: string, make: () => Decoration) => {
-  let d = decoCache.get(key);
-  if (!d) decoCache.set(key, (d = make()));
-  return d;
-};
+const once = (key: string, make: () => Decoration) => kept(decoCache, key, make);
 const cached = (kind: "mark" | "line", cls: string) => once(`${kind} ${cls}`, () => (kind === "mark" ? Decoration.mark({ class: cls }) : Decoration.line({ class: cls })));
 // A coloured highlight's colour reaches CSS as --highlight-color, as a callout's does.
 const tint = (color: HighlightColor) => `--highlight-color: var(--color-${color})`;
@@ -194,6 +192,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
   for (const { from, to } of ranges) {
     if (to < bodyFrom) continue;
     const visible = { from: Math.max(from, bodyFrom), to };
+    if (reading) mark("cm-reading-text", visible.from, visible.to);
     const lineClass = (cls: string, from: number, to: number) => {
       const start = Math.max(from, visible.from);
       const end = Math.min(to, visible.to);
@@ -301,6 +300,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             return false;
 
           case "ListMark":
+            lineClass("cm-list-line", node.from, node.from);
             decorateListMark(node);
             return;
 
@@ -451,39 +451,105 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
   return decos;
 }
 
-function build(view: EditorView): DecorationSet {
-  const reading = view.state.facet(readingMode);
-  const sel = reading || !view.hasFocus ? [] : view.state.selection.ranges;
-  return Decoration.set(decorate(view.state, view.visibleRanges, { sel, reading, view }), true);
-}
 
 // Rendered text (callout bodies, table cells, embedded notes) looks like Reading view.
 paintWith((state, view) => decorate(state, [{ from: 0, to: state.doc.length }], { sel: [], reading: true, view }), readingMode.of(true));
 paintWith((state) => codeMarks(state, [{ from: 0, to: state.doc.length }]));
 
-const livePreviewPlugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet;
-    constructor(view: EditorView) {
-      this.decorations = build(view);
+/** The mouse button came up: markup is revealed around the selection again. */
+const pointerUp = StateEffect.define<null>();
+
+/** Markup comes back around the selection in the focused editor, never in Reading view. */
+const revealAround = (view: EditorView) => (view.state.facet(readingMode) || !view.hasFocus ? [] : view.state.selection.ranges);
+
+/**
+ * Live Preview's decorations. While the mouse button is down the markup
+ * shown stays as it was at the press, as in Obsidian: a click or a drag
+ * doesn't reveal `**` or `[[ ]]` under the pointer and move the text away
+ * from it. It catches up when the button comes up.
+ */
+export class LivePreview {
+  decorations: DecorationSet;
+  /** The ranges markup is revealed around. */
+  revealed: readonly SelectionRange[];
+  /** Where the last single click put the caret, for a double-click's word (`wordClick`). */
+  clicked: number | null = null;
+  /** While the button is down: what stops listening for it to come up. */
+  private held: AbortController | null = null;
+  constructor(readonly view: EditorView) {
+    this.revealed = revealAround(view);
+    this.decorations = this.build();
+  }
+  build() {
+    const { view } = this;
+    return Decoration.set(decorate(view.state, view.visibleRanges, { sel: this.revealed, reading: view.state.facet(readingMode), view }), true);
+  }
+  update(u: ViewUpdate) {
+    const held = this.held !== null;
+    if (
+      (!held && (u.selectionSet || u.focusChanged || u.transactions.some((tr) => tr.effects.some((e) => e.is(pointerUp))))) ||
+      u.docChanged ||
+      u.viewportChanged ||
+      syntaxTree(u.startState) !== syntaxTree(u.state) ||
+      u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
+      u.startState.field(editingEmbed) !== u.state.field(editingEmbed) ||
+      u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
+    ) {
+      this.revealed = held ? this.revealed.map((r) => r.map(u.changes)) : revealAround(u.view);
+      this.decorations = this.build();
     }
-    update(u: ViewUpdate) {
-      if (
-        u.docChanged ||
-        u.viewportChanged ||
-        u.selectionSet ||
-        u.focusChanged ||
-        syntaxTree(u.startState) !== syntaxTree(u.state) ||
-        u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
-        u.startState.field(editingEmbed) !== u.state.field(editingEmbed) ||
-        u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
-      ) {
-        this.decorations = build(u.view);
-      }
-    }
+  }
+  press(event: MouseEvent) {
+    if (event.button !== 0 || this.held) return;
+    const before = this.view.state.selection;
+    const held = (this.held = new AbortController());
+    const letGo = () => {
+      held.abort();
+      this.held = null;
+      const sel = this.view.state.selection;
+      this.clicked = event.detail === 1 && sel !== before && sel.main.empty ? sel.main.head : null;
+      this.view.dispatch({ effects: pointerUp.of(null) });
+    };
+    // The end of a native drag, or the window losing focus, ends the press too.
+    for (const type of ["mouseup", "dragend", "blur"]) window.addEventListener(type, letGo, held);
+  }
+  destroy() {
+    this.held?.abort();
+  }
+}
+
+const livePreviewPlugin = ViewPlugin.fromClass(LivePreview, {
+  decorations: (v) => v.decorations,
+  eventObservers: {
+    mousedown(e) {
+      this.press(e);
+    },
   },
-  { decorations: (v) => v.decorations },
-);
+});
+
+/**
+ * A double-click selects the word its first click put the caret in. That
+ * click may have revealed markup (a bold word's `**`) and moved the word
+ * out from under the pointer; the second click shouldn't select the `**`.
+ */
+export const wordClick = (view: EditorView, event: MouseEvent): MouseSelectionStyle | null => {
+  const at = view.plugin(livePreviewPlugin)?.clicked;
+  const { main } = view.state.selection;
+  if (event.detail !== 2 || at == null || !main.empty || main.head !== at || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return null;
+  let word = view.state.wordAt(at);
+  if (!word) return null;
+  return {
+    update: (u) => void (word = word!.map(u.changes)),
+    get: (cur) => {
+      if (cur === event) return EditorSelection.create([word!]);
+      // Dragging on from there extends by words, as CodeMirror's own double-click does.
+      const pos = view.posAtCoords({ x: cur.clientX, y: cur.clientY }, false);
+      const there = view.state.wordAt(pos) ?? EditorSelection.cursor(pos);
+      const { from, to } = word!;
+      return EditorSelection.create([there.from < from ? EditorSelection.range(to, there.from) : EditorSelection.range(from, Math.max(to, there.to))]);
+    },
+  };
+};
 
 // A plain click on a rendered link follows it; Ctrl/Cmd-click always does,
 // in a new tab for wikilinks (Ctrl/Cmd+Alt-click: in a new pane to the
@@ -525,4 +591,4 @@ const linkClicks = EditorView.domEventHandlers({
   },
 });
 
-export const livePreview = [editingEmbed, livePreviewPlugin, linkClicks];
+export const livePreview = [editingEmbed, livePreviewPlugin, EditorView.mouseSelectionStyle.of(wordClick), linkClicks];

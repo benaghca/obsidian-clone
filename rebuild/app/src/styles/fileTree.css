@@ -115,10 +115,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.vault-profile-actions {
-  display: flex;
-  gap: 2px;
-}
 .pane-empty {
   padding: 16px;
   color: var(--text-muted);
@@ -147,9 +143,6 @@
 }
 .search-view .search-input-clear-button {
   right: 20px;
-}
-.search-view .search-input-clear-button[hidden] {
-  display: none;
 }
 .search-results-info {
   display: flex;
@@ -185,7 +178,8 @@
   padding: 4px 8px 4px 24px;
   font-weight: 400;
 }
-.search-view .search-result-file-title .collapse-icon {
+.search-view .search-result-file-title .collapse-icon,
+.backlink-pane .search-result-file-title .collapse-icon {
   left: 4px;
   top: 50%;
   transform: translateY(-50%);

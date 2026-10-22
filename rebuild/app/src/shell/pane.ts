@@ -13,6 +13,7 @@ import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
 import { renameFile } from "../fileOps";
+import { editAt } from "../editor/render";
 import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -320,8 +321,12 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     },
     /** Focus the active pane's inline title, selecting it for a rename. */
     focusTitle: (selectAll: boolean) => viewFor(ws.activeGroup).focusTitle(selectAll),
-    // Every pane's width scales with the workspace's (sizes are fractions),
-    // so each holds its own column for its share of the change.
+    /**
+     * The panes are about to change width by `delta` px, following `dock`'s
+     * width transition: keep the note columns from re-wrapping on the way.
+     * Every pane's width scales with the workspace's (sizes are fractions),
+     * so each holds its own column for its share of the change.
+     */
     holdColumn(delta: number, dock?: Animation) {
       const rects = ws.layout.rects();
       for (const [group, r] of rects) viewFor(group).holdColumn(delta * r.w, dock);
@@ -366,9 +371,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       if (mode === shownMode) return;
       shownMode = mode;
       modeButton.replaceChildren(icon(reading ? "pen-line" : "book-open"));
-      const label = reading
-        ? "Current view: reading\nClick to edit\nCtrl+Click to open to the right"
-        : "Current view: editing\nClick to read\nCtrl+Click to open to the right";
+      const label = `Current view: ${reading ? "reading\nClick to edit" : "editing\nClick to read"}\nCtrl+Click to open to the right`;
       modeButton.setAttribute("aria-label", label);
       modeButton.title = label;
     }
@@ -579,13 +582,13 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       title.classList.remove("is-renaming");
       void commitTitle();
     });
-    // Clicking the empty space below the text puts the caret at the end, like Obsidian.
+    // Margins place the caret beside the line; only space below the text goes to the end.
     scroller.addEventListener("mousedown", (e) => {
-      if (e.target === scroller || e.target === sizer) {
+      const view = ws.editors.viewOf(group);
+      // (The editor's own box reaches into the left margin, for the fold chevron.)
+      if (e.target === scroller || e.target === sizer || e.target === view.dom) {
         e.preventDefault();
-        const view = ws.editors.viewOf(group);
-        view.focus();
-        view.dispatch({ selection: { anchor: view.state.doc.length }, scrollIntoView: true });
+        editAt(view, { x: e.clientX, y: e.clientY });
       }
     });
 

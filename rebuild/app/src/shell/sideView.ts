@@ -2,8 +2,8 @@
 // the parts their trees share: collapsible sections with a count, chevrons
 // that fold a group, "Show N more" rows and highlighted matches.
 
-import { h } from "./dom";
-import { icon } from "./icons";
+import { h, iconButton } from "./dom";
+import { icon, type IconName } from "./icons";
 import { type Span, snippetParts } from "./mentions";
 
 export interface SideView {
@@ -20,48 +20,55 @@ export interface SideView {
  * lands is drawn with `render`.
  */
 export function liveData<T>(initial: T, read: () => Promise<T>, render: () => void, what: string) {
-  let data = initial;
-  let active = false;
-  let stale = true;
   let timer = 0;
   let seq = 0;
   async function refresh() {
     const mine = ++seq;
     try {
       const next = await read();
-      if (mine === seq) data = next;
+      if (mine === seq) live.data = next;
     } catch (err) {
       console.error(`Could not read ${what}`, err);
     }
-    if (mine !== seq || !active) return;
-    stale = false;
+    if (mine !== seq || !live.active) return;
+    live.stale = false;
     render();
   }
   const schedule = (delay: number) => {
     clearTimeout(timer);
-    if (active) timer = window.setTimeout(() => void refresh(), delay);
+    if (live.active) timer = window.setTimeout(() => void refresh(), delay);
   };
-  return {
-    get data() {
-      return data;
-    },
-    get active() {
-      return active;
-    },
-    get stale() {
-      return stale;
-    },
+  const live = {
+    data: initial,
+    active: false,
+    stale: true,
     changed(delay: number) {
-      stale = true;
+      live.stale = true;
       schedule(delay);
     },
     /** Returns whether `next` is a change; a view shown while stale reads again after `delay`. */
     setActive(next: boolean, delay: number): boolean {
-      if (next === active) return false;
-      active = next;
-      if (active && stale) schedule(delay);
-      else if (!active) clearTimeout(timer);
+      if (next === live.active) return false;
+      live.active = next;
+      if (live.active && live.stale) schedule(delay);
+      else if (!live.active) clearTimeout(timer);
       return true;
+    },
+  };
+  return live;
+}
+
+/** A sidebar's icon tabs over its content: `show` puts a view in and marks its tab; a click calls `select`. */
+export function viewTabs<K extends string>(tabs: readonly (readonly [K, IconName, string])[], viewOf: (name: K) => HTMLElement, select: (name: K) => void) {
+  const buttons = new Map(tabs.map(([name, iconName, label]) => [name, iconButton(icon(iconName), label, () => select(name), "workspace-tab-header")]));
+  const content = h("div", { class: "workspace-leaf-content" });
+  return {
+    buttons,
+    content,
+    header: h("div", { class: "workspace-tab-header-container", "data-tauri-drag-region": "" }, ...buttons.values()),
+    show(name: K) {
+      for (const [n, b] of buttons) b.classList.toggle("is-active", n === name);
+      if (content.firstElementChild !== viewOf(name)) content.replaceChildren(viewOf(name));
     },
   };
 }
@@ -97,6 +104,9 @@ export function foldToggle(group: HTMLElement, collapsed: boolean, onToggle: (co
   );
   return chevron;
 }
+
+/** A foldToggle callback that keeps whether `key` is folded in `folded`. */
+export const foldIn = (folded: Set<string>, key: string) => (on: boolean) => void (on ? folded.add(key) : folded.delete(key));
 
 /**
  * Rows for `items`, `page` at a time (the first `now` at once, the rest of

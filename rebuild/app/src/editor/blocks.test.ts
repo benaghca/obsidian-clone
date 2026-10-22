@@ -1,8 +1,24 @@
-import { expect, test } from "vitest";
+import type { EditorView } from "@codemirror/view";
+import { expect, test, vi } from "vitest";
 import { calloutBody, calloutHeader, calloutKind } from "./callouts";
 import { embedPart, embedSection, embedSize, embedStopped, resetSize, resizedSize, splitSubpath } from "./embeds";
-import { toggledTask } from "./render";
+import { editAt, toggledTask } from "./render";
 import { alignments, splitRow } from "./tables";
+
+test("margin clicks use the pointer's line, while clicks below the document reach its end", () => {
+  const view = {
+    state: { doc: { length: 100 } },
+    posAtCoords: vi.fn(({ y }: { y: number }) => y < 80 ? 12 : 100),
+    dispatch: vi.fn(),
+    focus: vi.fn(),
+  };
+  for (const [y, anchor] of [[40, 12], [120, 100]]) {
+    editAt(view as unknown as EditorView, { x: 8, y });
+    expect(view.posAtCoords).toHaveBeenLastCalledWith({ x: 8, y }, false);
+    expect(view.dispatch).toHaveBeenLastCalledWith({ selection: { anchor }, scrollIntoView: true });
+  }
+  expect(view.focus).toHaveBeenCalledTimes(2);
+});
 
 test("callout headers: type, title and fold marker", () => {
   expect(calloutHeader("> [!note]")).toEqual({ type: "note", title: "", fold: "" });

@@ -133,11 +133,11 @@
   --font-ui-smaller: 12px;
   --line-height: 1.5;
 
-  --h1-size: 1.75em;
-  --h2-size: 1.375em;
-  --h3-size: 1.25em;
-  --h4-size: 1.125em;
-  --h5-size: 1em;
+  --h1-size: 1.618em;
+  --h2-size: 1.462em;
+  --h3-size: 1.318em;
+  --h4-size: 1.188em;
+  --h5-size: 1.076em;
 
   --file-line-width: 700px;
   --ribbon-width: 29px;

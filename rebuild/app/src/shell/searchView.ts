@@ -10,6 +10,7 @@
 // after the results are painted, so counting never holds up a key.
 
 import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
+import { kept } from "../memo";
 import { dropdown } from "../settings/controls";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
@@ -18,7 +19,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, foldToggle, highlighted, pagedRows } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, pagedRows } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -79,7 +80,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     const words = highlightsOf(q);
     const lines = (path: string) => shownLines(path, q, facts, (key) => propertyLine(facts.notes?.get(path), key));
     const counts = new Map<string, number>();
-    const countOf = (path: string, shown = lines(path)) => counts.get(path) ?? counts.set(path, matchCount(shown, words, matchCase)).get(path)!;
+    const countOf = (path: string, shown?: ReturnType<typeof lines>) => kept(counts, path, () => matchCount(shown ?? lines(path), words, matchCase));
     const row = ({ path }: { path: string }) => {
       const shown = lines(path);
       const n = countOf(path, shown);
@@ -94,7 +95,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
           ),
         ),
       );
-      const chevron = foldToggle(matches, collapsed.has(path), (folded) => (folded ? collapsed.add(path) : collapsed.delete(path)));
+      const chevron = foldToggle(matches, collapsed.has(path), foldIn(collapsed, path));
       return h(
         "div",
         { class: "search-result" },

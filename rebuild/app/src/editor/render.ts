@@ -58,9 +58,10 @@ export const widgetAction = (label: string, name: IconName) => iconButton(icon(n
 /** "Edit this block" (after an image's "Zoom in"), top right of an image, callout or table on hover. */
 export const editButton = (...before: HTMLElement[]) => h("div", { class: "embed-actions" }, ...before, widgetAction("Edit this block", "code-xml"));
 
-/** Put the caret at `pos` in the editor (inside a block widget's source, which then shows). */
-export function editAt(view: EditorView, pos: number) {
-  view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
+/** Put the caret at a document position or pointer coordinates (including the note's margins). */
+export function editAt(view: EditorView, pos: number | { x: number; y: number }) {
+  const anchor = typeof pos === "number" ? pos : view.posAtCoords(pos, false) ?? view.state.doc.length;
+  view.dispatch({ selection: { anchor }, scrollIntoView: true });
   view.focus();
 }
 

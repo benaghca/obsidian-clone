@@ -9,11 +9,12 @@
 // index, which the workspace refreshes a second after a save.
 
 import { api, type SearchHit } from "../api";
+import { kept } from "../memo";
 import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -54,17 +55,14 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   /** Rows grouped per note; returns the number of mentions shown (Obsidian's count). */
   function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string) {
     const byFile = new Map<string, Mention[]>();
-    for (const m of mentions) byFile.set(m.from, [...(byFile.get(m.from) ?? []), m]);
+    for (const m of mentions) kept(byFile, m.from, () => []).push(m);
     const files = [...byFile.keys()].sort((a, b) => compareNames(noteName(a), noteName(b)));
     into.replaceChildren(
       ...files.map((path) => {
         const all = byFile.get(path)!;
         const matches = h("div", { class: "search-result-file-matches" });
         pagedRows(matches, all, matchRow, PAGE);
-        const chevron = foldToggle(matches, collapsedFiles.has(path), (collapsed) => {
-          if (collapsed) collapsedFiles.add(path);
-          else collapsedFiles.delete(path);
-        });
+        const chevron = foldToggle(matches, collapsedFiles.has(path), foldIn(collapsedFiles, path));
         return h(
           "div",
           { class: "search-result" },
@@ -109,12 +107,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     shownLinked = key;
     const resolved = new Map<string, boolean>();
     // Link targets resolve from the note they are in.
-    const isHere = (target: string, from: string) => {
-      const key = `${from}\n${target}`;
-      let here = resolved.get(key);
-      if (here === undefined) resolved.set(key, (here = ws.resolve(target, from) === path));
-      return here;
-    };
+    const isHere = (target: string, from: string) => kept(resolved, `${from}\n${target}`, () => ws.resolve(target, from) === path);
     // One row per line, however many links it has; the count is every link.
     const byLine = new Map<string, Mention>();
     for (const b of entries) {

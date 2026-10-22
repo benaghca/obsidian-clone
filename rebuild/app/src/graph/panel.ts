@@ -111,14 +111,7 @@ export function createGraphPanel(host: PanelHost): { el: HTMLElement; shadow: HT
       format: (v) => v.toFixed(digits),
       onInput: (v) => host.set(key, v),
     });
-    const input = parts.find((p) => p instanceof HTMLInputElement) as HTMLInputElement;
-    syncers.push(() => {
-      if (Number(input.value) === cfg()[key]) return;
-      input.value = String(cfg()[key]);
-      const value = parts.find((p) => p.classList.contains("slider-value"));
-      if (value) value.textContent = cfg()[key].toFixed(digits);
-      input.style.setProperty("--slider-fill", String((cfg()[key] - min) / (max - min)));
-    });
+    syncers.push(() => parts.set(cfg()[key]));
     return row({ name, cls: "mod-slider" }, ...parts);
   };
 

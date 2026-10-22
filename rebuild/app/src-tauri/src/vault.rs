@@ -252,19 +252,17 @@ impl Vault {
         let Ok(fresh) = Index::scan(&self.root) else {
             return Vec::new();
         };
-        let old: Vec<String> = self.index.paths().cloned().collect();
-        let new: Vec<String> = fresh.paths().cloned().collect();
         let mut removed = Vec::new();
         let mut created = Vec::new();
         let mut modified = Vec::new();
-        for path in &old {
+        for path in self.index.paths() {
             if !fresh.contains(path) {
                 removed.push(path.clone());
             } else if !fresh.is_dir(path) && self.index.stamp(path) != fresh.stamp(path) {
                 modified.push(path.clone());
             }
         }
-        for path in &new {
+        for path in fresh.paths() {
             if !self.index.contains(path) {
                 created.push(path.clone());
             }

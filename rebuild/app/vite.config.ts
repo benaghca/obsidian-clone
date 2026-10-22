@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import tauriConf from "./src-tauri/tauri.conf.json" with { type: "json" };
 
@@ -28,6 +29,8 @@ export default defineConfig(({ mode }) => ({
     headers: { "Content-Security-Policy": cspHeader(security.csp) },
   },
   envPrefix: ["VITE_", "TAURI_ENV_*"],
+  // Tests read stylesheets as text (`?raw`); Vitest hands CSS over empty unless told otherwise.
+  test: { css: true },
   build: {
     target: "es2022",
     // No source maps in release builds (the dev server always serves them);

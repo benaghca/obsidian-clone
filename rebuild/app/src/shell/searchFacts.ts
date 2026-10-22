@@ -6,7 +6,7 @@
 // the backend only about the term being typed.
 
 import { api } from "../api";
-import { perWorkspace } from "../perWorkspace";
+import { kept, perWorkspace } from "../memo";
 import type { Workspace } from "../workspace";
 import { type NoteProperties, propertyIndex } from "./propertyIndex";
 import { type Facts, type Line, needs, type Query, termsOf } from "./searchQuery";
@@ -24,8 +24,8 @@ const KEEP = 200;
 /** The workspace's facts (one cache for every search and graph). */
 export const searchFacts = perWorkspace((ws: Workspace) => {
   // By term, and with Match case by term as typed.
-  const kept = [new Map<string, Promise<Map<string, Line[]>>>(), new Map<string, Promise<Map<string, Line[]>>>()];
-  const forgetLines = () => kept.forEach((m) => m.clear());
+  const caches = [new Map<string, Promise<Map<string, Line[]>>>(), new Map<string, Promise<Map<string, Line[]>>>()];
+  const forgetLines = () => caches.forEach((m) => m.clear());
   ws.on((change) => {
     if (change === "files" || change === "links") forgetLines();
   });
@@ -36,28 +36,24 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
    * case the term as typed.
    */
   function linesOf(term: string, matchCase: boolean) {
-    const lines = kept[Number(matchCase)];
-    let found = lines.get(term);
-    if (!found) {
+    const lines = caches[Number(matchCase)];
+    return kept(lines, term, () => {
       // Enough for every note to have a line even when most of the vault matches (the hits are round-robin).
       const limit = Math.max(2000, ws.vault.files.length * 4);
-      found = api.search(term, limit).then(
+      const found = api.search(term, limit).then(
         (hits) => {
           const out = new Map<string, Line[]>();
           for (const hit of hits) {
             if (hit.line <= 0 || ((matchCase || term.includes(" ")) && !(matchCase ? hit.text : hit.text.toLowerCase()).includes(term))) continue;
-            const list = out.get(hit.path);
-            if (list) list.push(hit);
-            else out.set(hit.path, [hit]);
+            kept(out, hit.path, () => []).push(hit);
           }
           return out;
         },
         () => new Map(),
       );
       if (lines.size >= KEEP) lines.delete(lines.keys().next().value!);
-      lines.set(term, found);
-    }
-    return found;
+      return found;
+    });
   }
 
   async function properties() {

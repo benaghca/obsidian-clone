@@ -159,10 +159,7 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
   }
 
   function finish(drop: boolean) {
-    window.removeEventListener("pointermove", move);
-    window.removeEventListener("pointerup", onUp);
-    window.removeEventListener("pointercancel", onCancel);
-    window.removeEventListener("keydown", onKey, true);
+    listening.abort();
     cancelAnimationFrame(frame);
     if (!dragging) return;
     if (drop) {
@@ -191,8 +188,9 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
     finish(false);
   };
 
-  window.addEventListener("pointermove", move);
-  window.addEventListener("pointerup", onUp);
-  window.addEventListener("pointercancel", onCancel);
-  window.addEventListener("keydown", onKey, true);
+  const listening = new AbortController();
+  window.addEventListener("pointermove", move, listening);
+  window.addEventListener("pointerup", onUp, listening);
+  window.addEventListener("pointercancel", onCancel, listening);
+  window.addEventListener("keydown", onKey, { capture: true, signal: listening.signal });
 }

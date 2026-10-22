@@ -49,11 +49,6 @@
   position: relative;
   padding-left: 22px;
 }
-.backlink-pane .search-result-file-title .collapse-icon {
-  left: 4px;
-  top: 50%;
-  transform: translateY(-50%);
-}
 .search-result-file-name {
   overflow: hidden;
   text-overflow: ellipsis;

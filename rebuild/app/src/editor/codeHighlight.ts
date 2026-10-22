@@ -22,6 +22,8 @@ import { type ChangeSet, type EditorState, type Range, StateEffect } from "@code
 import { Decoration, type DecorationSet, type EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { type ChangedRange, type SyntaxNode, type Tree, TreeFragment } from "@lezer/common";
 import { highlightTree, tags as t, tagHighlighter } from "@lezer/highlight";
+import { kept } from "../memo";
+import { afterPaint } from "../shell/sideView";
 
 // Python, Rust, Shell, YAML and XML are CodeMirror's legacy modes, as in
 // Obsidian's editor: a tenth of the size of their full parsers.
@@ -98,11 +100,7 @@ const highlighter = tagHighlighter(
 ]);
 
 const marks = new Map<string, Decoration>();
-const mark = (cls: string) => {
-  let d = marks.get(cls);
-  if (!d) marks.set(cls, (d = Decoration.mark({ class: cls })));
-  return d;
-};
+const mark = (cls: string) => kept(marks, cls, () => Decoration.mark({ class: cls }));
 
 type Ranges = readonly { from: number; to: number }[];
 
@@ -196,7 +194,7 @@ function indentGuides(state: EditorState, ranges: Ranges): Range<Decoration>[] {
       const line = state.doc.lineAt(pos);
       const stops = indentStops(line.text, tab);
       const style = `--indent: ${stops * tab}ch; --tab: ${tab}ch`;
-      if (stops) out.push((guides.get(style) ?? guides.set(style, Decoration.line({ attributes: { style } })).get(style)!).range(line.from));
+      if (stops) out.push(kept(guides, style, () => Decoration.line({ attributes: { style } })).range(line.from));
       pos = line.to + 1;
     }
   });
@@ -227,12 +225,10 @@ export const codeHighlight = ViewPlugin.fromClass(
         this.decorations = this.decorations.map(u.changes);
         if (!this.queued) {
           this.queued = true;
-          requestAnimationFrame(() =>
-            setTimeout(() => {
-              this.queued = false;
-              if (!this.gone) u.view.dispatch({ effects: rehighlight.of(null) });
-            }),
-          );
+          afterPaint(() => {
+            this.queued = false;
+            if (!this.gone) u.view.dispatch({ effects: rehighlight.of(null) });
+          });
         }
       } else if (u.viewportChanged || syntaxTree(u.startState) !== syntaxTree(u.state) || u.transactions.some((tr) => tr.effects.some((e) => e.is(rehighlight)))) {
         this.decorations = this.build(u.view);

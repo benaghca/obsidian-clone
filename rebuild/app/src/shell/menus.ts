@@ -18,9 +18,8 @@ import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
-import { fuzzyRank } from "./fuzzy";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
-import { hints, openPrompt, suggestionText } from "./prompt";
+import { pickFrom } from "./prompt";
 
 export interface MenuHost {
   ws: Workspace;
@@ -85,8 +84,15 @@ export function createMenus(host: MenuHost) {
   const mergeItem = (path: string): MenuEntry | false =>
     on("note-composer") && { title: "Merge entire file with...", icon: "git-merge", action: () => host.mergeFile(path) };
   const revealItem = (path: string): MenuEntry => ({ title: "Reveal file in navigation", icon: "folder-open", action: () => host.revealInTree(path) });
-  const openInNewTab = (open: () => void): MenuEntry => ({ title: "Open in new tab", icon: "file-plus", action: open });
-  const openToRight = (open: () => void): MenuEntry => ({ title: "Open to the right", icon: "separator-vertical", action: open });
+  const openItems = (open: (where: "tab" | "right") => void): MenuEntry[] => [
+    { title: "Open in new tab", icon: "file-plus", action: () => open("tab") },
+    { title: "Open to the right", icon: "separator-vertical", action: () => open("right") },
+  ];
+  const openFile = (path: string) => openItems((where) => void ws.open(path, { where }));
+  const splitItems = (t: Tab) => [
+    commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
+    commands.menuItem("workspace:split-horizontal", { action: () => ws.split(t, "bottom") }),
+  ];
   const openInNewWindow = (path: string): MenuEntry => ({
     title: "Open in new window",
     icon: "picture-in-picture-2",
@@ -113,9 +119,7 @@ export function createMenus(host: MenuHost) {
     }
     const isNote = path.endsWith(".md");
     return [
-      isNote && openInNewTab(() => void ws.open(path, { where: "tab" })),
-      isNote && openToRight(() => void ws.open(path, { where: "right" })),
-      isNote && openInNewWindow(path),
+      ...(isNote ? [...openFile(path), openInNewWindow(path)] : []),
       SEPARATOR,
       isNote && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
       moveItem(path),
@@ -153,34 +157,28 @@ export function createMenus(host: MenuHost) {
       ? []
       : link.kind === "internal"
         ? [
-            openInNewTab(() => void ws.openLink(link.target, "tab", group)),
-            openToRight(() => void ws.openLink(link.target, "right", group)),
+            ...openItems((where) => void ws.openLink(link.target, where, group)),
             !!linked && openInNewWindow(linked),
           ]
         : [
             { title: "Open link", icon: "external-link", action: () => api.openExternal(link.url).catch(warn(`open ${link.url}`)) },
             { title: "Copy URL", icon: "copy", action: () => writeClipboard(link.url) },
           ];
-    const editLink: MenuItems =
-      link?.kind === "internal" && !reading
-        ? [
-            {
-              title: "Edit link",
-              icon: "text-cursor-input",
-              action: () => {
-                view.focus();
-                view.dispatch({ selection: { anchor: link.from, head: link.to } });
-              },
-            },
-          ]
-        : [];
+    const editLink: MenuEntry | false = link?.kind === "internal" && !reading && {
+      title: "Edit link",
+      icon: "text-cursor-input",
+      action: () => {
+        view.focus();
+        view.dispatch({ selection: { anchor: link.from, head: link.to } });
+      },
+    };
     return [
       ...linkItems,
       SEPARATOR,
       !reading && cmd("editor:insert-wikilink", { title: "Add link", icon: "link" }),
       !reading && cmd("editor:insert-link", { title: "Add external link", icon: "external-link" }),
       SEPARATOR,
-      ...editLink,
+      editLink,
       !reading &&
         link?.kind !== "internal" && {
           title: "Format",
@@ -265,13 +263,11 @@ export function createMenus(host: MenuHost) {
     // Swap: another image in its place, linked as the link settings say, keeping its alt text or alias and size.
     const swap = () => {
       const images = ws.vault.files.filter((f) => IMAGE_EXT.test(f.path) && f.path !== path).map((f) => f.path);
-      openPrompt<{ path: string; indices: number[] }>({
+      pickFrom(images, (p) => p, {
         placeholder: "Choose a file...",
         emptyText: "No images found.",
-        instructions: hints("to select"),
-        items: (query) => (query.trim() ? fuzzyRank(query, images, (p) => p).map(({ item, indices }) => ({ path: item, indices })) : images.map((p) => ({ path: p, indices: [] }))),
-        render: (item, row) => suggestionText(row, item.path, item.indices),
-        choose: (item) => replace(from, to, "!" + ws.linkTo(item.path, ws.editors.pathOf(view), sizeText ?? undefined)),
+        enter: "to select",
+        choose: (p) => replace(from, to, "!" + ws.linkTo(p, ws.editors.pathOf(view), sizeText ?? undefined)),
       });
     };
     return [
@@ -280,8 +276,7 @@ export function createMenus(host: MenuHost) {
       edit && { title: "Remove image", icon: "image-minus", action: () => replace(from, to, "") },
       edit && { title: "Reset size", icon: "rotate-ccw", disabled: !reset, action: () => reset && replace(from + reset.from, from + reset.to, reset.insert) },
       SEPARATOR,
-      openInNewTab(() => void ws.open(path, { where: "tab" })),
-      openToRight(() => void ws.open(path, { where: "right" })),
+      ...openFile(path),
       openInNewWindow(path),
       SEPARATOR,
       renameItem(() => host.renameInTree(path)),
@@ -381,8 +376,7 @@ export function createMenus(host: MenuHost) {
       SEPARATOR,
       // The tab's own menu can also move it (Obsidian's tab menu has this; More options doesn't).
       tabMenu && commands.menuItem("workspace:move-to-new-window", { title: "Move to new window", action: () => void ws.moveToWindow(tab).catch(warn(`move ${path} to a new window`)) }),
-      commands.menuItem("workspace:split-vertical", { action: () => ws.split(tab, "right") }),
-      commands.menuItem("workspace:split-horizontal", { action: () => ws.split(tab, "bottom") }),
+      ...splitItems(tab),
       openInNewWindow(path),
       SEPARATOR,
       renameItem(onTab(() => host.renameActive())),
@@ -428,16 +422,7 @@ export function createMenus(host: MenuHost) {
         ? { title: "Unlink tab", icon: "link", action: () => ws.setLink(t, null) }
         : { title: "Link with tab...", icon: "link", action: () => host.linkTab(t) },
       ...(isActive && t.path ? viewItems(t, t.path, true) : []),
-      ...(isActive && !t.path && t.type
-        ? [SEPARATOR, ...graphViewItems(t)]
-        : []),
-      ...(isActive && !t.path && !t.type
-        ? [
-            SEPARATOR,
-            commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
-            commands.menuItem("workspace:split-horizontal", { action: () => ws.split(t, "bottom") }),
-          ]
-        : []),
+      ...(isActive && !t.path ? [SEPARATOR, ...(t.type ? graphViewItems(t) : splitItems(t))] : []),
     ];
   }
 
@@ -470,8 +455,7 @@ export function createMenus(host: MenuHost) {
   function graphViewItems(t: Tab): MenuItems {
     const file = t.type === "localgraph" ? t.viewFile : null;
     return [
-      commands.menuItem("workspace:split-vertical", { action: () => ws.split(t, "right") }),
-      commands.menuItem("workspace:split-horizontal", { action: () => ws.split(t, "bottom") }),
+      ...splitItems(t),
       SEPARATOR,
       !!file && { title: `Open ${noteName(file)}`, icon: "file-text", action: () => void ws.open(file, { where: "tab" }) },
       !!file && revealItem(file),
@@ -493,8 +477,7 @@ export function createMenus(host: MenuHost) {
     return [
       { title: noteName(path), label: true },
       SEPARATOR,
-      openInNewTab(() => void ws.open(path, { where: "tab" })),
-      openToRight(() => void ws.open(path, { where: "right" })),
+      ...openFile(path),
       SEPARATOR,
       moveItem(path),
       bookmarkItem(path),

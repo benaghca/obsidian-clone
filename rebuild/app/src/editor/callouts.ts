@@ -10,6 +10,7 @@
 
 import { syntaxTree } from "@codemirror/language";
 import { Decoration, type EditorView } from "@codemirror/view";
+import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import { BlockWidget, decorate, onDestroy, type Painted, paintLines, paintRange, paintWith, release } from "./render";
@@ -91,7 +92,7 @@ export class CalloutWidget extends BlockWidget {
     const dom = this.box(view, "cm-callout", box, (_, dom) => view.posAtDOM(dom), (e) => {
       if (!fold || !title.contains(e.target as Node)) return false;
       box.classList.toggle("is-collapsed");
-      const set = toggled.get(view) ?? toggled.set(view, new Set()).get(view)!;
+      const set = kept(toggled, view, () => new Set<string>());
       if (!set.delete(this.text)) set.add(this.text);
       return true;
     });

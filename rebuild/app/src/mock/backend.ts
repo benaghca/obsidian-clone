@@ -2,6 +2,7 @@
 // Implements the commands in rebuild/CONTRACT.md against sampleVault().
 
 import type { Backlink, FileEntry, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
+import { resolveLink } from "../links/internal";
 import { fileName, noteName } from "../paths";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
@@ -101,25 +102,9 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     return hits;
   }
 
+  // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
   function linkIndex(): LinkIndex {
-    const byName = new Map<string, string>();
-    for (const path of files.keys()) byName.set(noteName(path).toLowerCase(), path);
-    const byPath = new Map<string, string>();
-    for (const path of files.keys()) byPath.set(path.toLowerCase(), path);
-    /** A markdown link's target: a path from the note's folder or the vault, or a note name. */
-    const resolveMd = (from: string, target: string) => {
-      const dir = from.includes("/") ? from.slice(0, from.lastIndexOf("/") + 1) : "";
-      for (const p of [dir + target, target, `${dir}${target}.md`, `${target}.md`]) {
-        const parts: string[] = [];
-        for (const part of p.split("/")) {
-          if (part === "..") parts.pop();
-          else if (part && part !== ".") parts.push(part);
-        }
-        const hit = byPath.get(parts.join("/").toLowerCase());
-        if (hit) return hit;
-      }
-      return target.includes("/") ? undefined : byName.get(target.replace(/\.md$/i, "").toLowerCase());
-    };
+    const notes = [...files.keys()].map((path) => ({ name: noteName(path), path }));
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
     const markdown: Record<string, string[]> = {};
@@ -128,13 +113,13 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       const out = new Set<string>();
       const md = new Set<string>();
       const missing = new Map<string, string>();
-      const lines = f.content.split("\n");
-      lines.forEach((text, i) => {
+      const unknown = (name: string) => missing.has(name.toLowerCase()) || missing.set(name.toLowerCase(), name);
+      f.content.split("\n").forEach((text, i) => {
         for (const m of text.matchAll(WIKILINK)) {
           const name = m[1].trim();
-          const target = byName.get(name.toLowerCase());
+          const target = resolveLink(name, path, notes);
           if (!target) {
-            if (!missing.has(name.toLowerCase())) missing.set(name.toLowerCase(), name);
+            unknown(name);
             continue;
           }
           out.add(target);
@@ -143,18 +128,9 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
         for (const m of text.matchAll(MDLINK)) {
           const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
           if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
-          let target = raw.replace(/^\.\//, "");
-          try {
-            target = decodeURIComponent(target);
-          } catch {
-            // not percent-encoded
-          }
-          const hit = resolveMd(path, target);
+          const hit = resolveLink(raw, path, notes);
           if (hit) md.add(hit);
-          else {
-            const name = target.replace(/\.md$/i, "");
-            if (!missing.has(name.toLowerCase())) missing.set(name.toLowerCase(), name);
-          }
+          else unknown(raw.replace(/^\.\//, "").replace(/\.md$/i, ""));
         }
       });
       if (out.size) outgoing[path] = [...out];

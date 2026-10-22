@@ -12,10 +12,11 @@ import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } fro
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { editInPlace, h, iconButton } from "./dom";
-import { icon, type IconName } from "./icons";
+import { icon } from "./icons";
 import { type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
 import { createSearchView } from "./searchView";
+import { viewTabs } from "./sideView";
 
 export type LeftView = "files" | "search" | "bookmarks";
 
@@ -33,18 +34,18 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
       explorer.reveal(path);
     }),
   };
-  const tabButtons = new Map<LeftView, HTMLElement>();
-  const content = h("div", { class: "workspace-leaf-content" });
-
-  const tab = (name: LeftView, iconName: IconName, label: string) => {
-    const button = iconButton(icon(iconName), label, () => select(name), "workspace-tab-header");
-    tabButtons.set(name, button);
-    return button;
-  };
+  const tabs = viewTabs(
+    [
+      ["files", "folder-closed", "Files"],
+      ["search", "search", "Search"],
+      ["bookmarks", "bookmark", "Bookmarks"],
+    ],
+    (name: LeftView) => views[name],
+    select,
+  );
 
   function select(name: LeftView) {
-    for (const [n, b] of tabButtons) b.classList.toggle("is-active", n === name);
-    if (content.firstElementChild !== views[name]) content.replaceChildren(views[name]);
+    tabs.show(name);
     if (name === "search") views.search.querySelector("input")?.focus();
   }
 
@@ -57,14 +58,8 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
   const el = h(
     "div",
     { class: "workspace-split mod-sidedock mod-left-split" },
-    h(
-      "div",
-      { class: "workspace-tab-header-container", "data-tauri-drag-region": "" },
-      tab("files", "folder-closed", "Files"),
-      tab("search", "search", "Search"),
-      tab("bookmarks", "bookmark", "Bookmarks"),
-    ),
-    content,
+    tabs.header,
+    tabs.content,
     // The vault name, and Obsidian's settings button at the right. (Obsidian
     // also has help here; help would mean the network, so Grove has none.)
     footer,
@@ -96,8 +91,8 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     onSortChange: explorer.onSortChange,
     /** Show or remove the Bookmarks view (its core plugin turned on or off). */
     setBookmarksEnabled(enabled: boolean) {
-      tabButtons.get("bookmarks")!.hidden = !enabled;
-      if (!enabled && content.firstElementChild === views.bookmarks) select("files");
+      tabs.buttons.get("bookmarks")!.hidden = !enabled;
+      if (!enabled && tabs.content.firstElementChild === views.bookmarks) select("files");
     },
     /** The footer under the views (vault name; the settings button goes here). */
     footer,
@@ -136,6 +131,13 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
   return root;
 }
 
+/** A row's (or the list's) right-click menu. */
+function contextMenu(e: MouseEvent, items: MenuItems) {
+  e.preventDefault();
+  e.stopPropagation();
+  showMenu(items, { x: e.clientX, y: e.clientY });
+}
+
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
@@ -170,11 +172,6 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     sorted.emit();
   }
 
-  function contextMenu(e: MouseEvent, items: MenuItems) {
-    e.preventDefault();
-    e.stopPropagation();
-    showMenu(items, { x: e.clientX, y: e.clientY });
-  }
   list.addEventListener("contextmenu", (e) => contextMenu(e, menus().vault()));
 
   function startRename(path: string) {
@@ -355,10 +352,7 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
               if (entry.is_dir) revealFolder(path);
               else void ws.open(path, { where: whereFromEvent(e) });
             },
-            oncontextmenu: (e: MouseEvent) => {
-              e.preventDefault();
-              showMenu(menus().file(entry), { x: e.clientX, y: e.clientY });
-            },
+            oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry)),
           },
           h("div", { class: "tree-item-icon" }, icon(entry.is_dir ? "folder-closed" : "file-text", 16)),
           h("div", { class: "tree-item-inner" }, entry.is_dir ? entry.name : noteName(path)),

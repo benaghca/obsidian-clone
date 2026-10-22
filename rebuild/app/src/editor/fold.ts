@@ -137,15 +137,13 @@ const hoverChevron = ViewPlugin.fromClass(
       view.dom.addEventListener("mouseleave", this.onLeave);
     }
     onMove = (e: MouseEvent) => {
-      if (e.target === this.el || this.el.contains(e.target as Node)) return;
+      if (this.el.contains(e.target as Node)) return;
       this.x = e.clientX;
       this.y = e.clientY;
       this.frame ||= requestAnimationFrame(this.place);
     };
-    onLeave = (e: MouseEvent) => {
-      if (e.relatedTarget && this.el.contains(e.relatedTarget as Node)) return;
-      this.hide();
-    };
+    // The chevron is inside the editor, so leaving the editor is leaving both.
+    onLeave = () => this.hide();
     place = () => {
       this.frame = 0;
       const { view } = this;

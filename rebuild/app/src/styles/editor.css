@@ -5,45 +5,9 @@
   font-family: var(--font-text);
 }
 
-/* Caret blink. CodeMirror's cursor layer alternates between these two names to
-   restart the blink on every selection change; redefining them here (later in
-   the document than CodeMirror's own) turns the hard on/off into a short fade
-   out and back in. The caret is fully visible for the first 40% of each cycle,
-   so it never dims while typing. Nothing else in the editor content animates:
-   no transitions run on a keystroke or a selection change. */
-@keyframes cm-blink {
-  0%,
-  40% {
-    opacity: 1;
-  }
-  50%,
-  90% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-@keyframes cm-blink2 {
-  0%,
-  40% {
-    opacity: 1;
-  }
-  50%,
-  90% {
-    opacity: 0;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-.cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer {
-  animation-timing-function: var(--anim-ease-in-out);
-}
-@media (prefers-reduced-motion: reduce) {
-  .cm-editor.cm-focused > .cm-scroller > .cm-cursorLayer {
-    animation-timing-function: steps(1);
-  }
+/* Inline spans cover Reading view's words, leaving the surrounding space alone. */
+.is-reading-mode .cm-reading-text {
+  cursor: text;
 }
 
 /* syntax markers that stay visible while the selection touches them */
@@ -54,32 +18,46 @@
   text-decoration: none;
 }
 
-/* headings */
-.cm-line.cm-h {
-  font-weight: 700;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
+/* headings, as measured in Obsidian 1.14.4: each level its own size, line
+   height, weight and tracking; 16px above a heading in the note itself */
+.cm-content > .cm-line.cm-h {
+  padding-top: 16px;
 }
 .cm-line.cm-h1 {
   font-size: var(--h1-size);
-  padding-top: 0.3em;
+  line-height: 1.2;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 .cm-line.cm-h2 {
   font-size: var(--h2-size);
-  padding-top: 0.3em;
+  line-height: 1.2;
+  font-weight: 680;
+  letter-spacing: -0.011em;
 }
 .cm-line.cm-h3 {
   font-size: var(--h3-size);
-  font-weight: 600;
+  line-height: 1.3;
+  font-weight: 660;
+  letter-spacing: -0.008em;
 }
 .cm-line.cm-h4 {
   font-size: var(--h4-size);
-  font-weight: 600;
+  line-height: 1.4;
+  font-weight: 640;
+  letter-spacing: -0.005em;
 }
-.cm-line.cm-h5,
-.cm-line.cm-h6 {
+.cm-line.cm-h5 {
   font-size: var(--h5-size);
+  line-height: 1.5;
+  font-weight: 620;
+  letter-spacing: -0.002em;
+}
+.cm-line.cm-h6 {
+  font-size: 1em;
+  line-height: 1.5;
   font-weight: 600;
+  letter-spacing: 0;
 }
 .cm-formatting-header {
   margin-right: 0.05em;
@@ -163,7 +141,10 @@
   font-size: 0.875em;
 }
 
-/* lists */
+/* lists: Obsidian's lines are a little apart (1.2px above and below) */
+.cm-line.cm-list-line {
+  padding-block: 0.075em;
+}
 .cm-list-bullet {
   display: inline-block;
   position: relative;
@@ -350,6 +331,7 @@
 }
 .is-source-mode .cm-s-task {
   font-family: var(--font-monospace);
+  line-height: 1;
   color: var(--text-muted);
 }
 
@@ -371,11 +353,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* The fold chevron: in the margin, on hover; kept on folded lines. */
+/* The fold chevron: in the margin, on hover; kept on folded lines. The
+   editor reaches into the margin as far as the chevron, so the pointer stays
+   over the editor (and the chevron stays shown) on its way across. */
+.cm-editor {
+  margin-left: -22px;
+  padding-left: 22px;
+}
 .cm-fold-indicator {
   --icon-size: 14px;
   position: absolute;
-  left: -22px;
+  left: 0;
   width: 18px;
   height: 18px;
   display: flex;
@@ -393,7 +381,6 @@
 .cm-line > .cm-fold-indicator,
 .cm-line .cm-fold-indicator.is-collapsed {
   position: relative;
-  left: auto;
   display: inline-flex;
   width: 0;
   overflow: visible;

@@ -8,6 +8,7 @@
 import { listeners } from "../listeners";
 import { duration } from "../motion";
 import { dragPointer, h } from "./dom";
+import type { Panes } from "./pane";
 
 export type Side = "left" | "right";
 
@@ -16,17 +17,9 @@ const MAX_DOCK_WIDTH = 560;
 
 export type Sidedocks = ReturnType<typeof createSidedocks>;
 
-export interface ColumnHolder {
-  /**
-   * The pane is about to change width by `delta` px, following `dock`'s
-   * width transition: keep the note column from re-wrapping on the way.
-   */
-  holdColumn(delta: number, dock?: Animation): void;
-}
-
 const clampWidth = (px: number) => Math.round(Math.min(MAX_DOCK_WIDTH, Math.max(MIN_DOCK_WIDTH, px)));
 
-export function createSidedocks(app: HTMLElement, pane: ColumnHolder) {
+export function createSidedocks(app: HTMLElement, pane: Pick<Panes, "holdColumn">) {
   const collapsedClass = (side: Side) => `is-${side}-sidebar-collapsed`;
   const dock = (side: Side) => app.querySelector<HTMLElement>(`.mod-${side}-split`)!;
   const changes = listeners<[Side]>();

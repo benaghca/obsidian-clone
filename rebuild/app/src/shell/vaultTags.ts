@@ -9,7 +9,7 @@
 // the open note's unsaved tags.
 
 import { api, type SearchHit } from "../api";
-import { perWorkspace } from "../perWorkspace";
+import { perWorkspace } from "../memo";
 import type { Workspace } from "../workspace";
 import { type Frontmatter, frontmatterTags, tagsByNote } from "./linksTags";
 
