@@ -11,6 +11,7 @@ import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
+import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
@@ -394,19 +395,8 @@ export function registerAppCommands(parts: AppParts) {
         parts.left.reveal(note());
       },
     },
-    conditionalAction(
-      "workspace:copy-path",
-      "Copy current file path from vault folder",
-      "copy",
-      () => navigator.clipboard.writeText(note()).catch((err) => console.warn("Could not copy", err)),
-    ),
-    {
-      id: "workspace:copy-full-path",
-      name: "Copy current file path from system root",
-      icon: "hard-drive",
-      when: hasNote,
-      run: () => navigator.clipboard.writeText(systemPath(ws.vault.path, note())).catch((err) => console.warn("Could not copy", err)),
-    },
+    conditionalAction("workspace:copy-path", "Copy current file path from vault folder", "copy", () => writeClipboard(note())),
+    conditionalAction("workspace:copy-full-path", "Copy current file path from system root", "hard-drive", () => writeClipboard(systemPath(ws.vault.path, note()))),
     { id: "editor:save-file", name: "Save current file", hotkeys: mod("s"), when: hasNote, run: () => ws.saveNow() },
     pluginAction("bookmarks", "bookmarks:bookmark-current-file", "Bookmarks: Bookmark current file", "bookmark",
       () => bookmarks.toggle(note()), () => hasNote() && !bookmarks.has(note())),

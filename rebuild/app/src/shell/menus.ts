@@ -9,7 +9,7 @@ import type { EditorView } from "@codemirror/view";
 import { api, type FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
-import { copySelection, paste } from "../editor/clipboard";
+import { copySelection, paste, writeClipboard } from "../editor/clipboard";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
 import { copyNote, deleteFile } from "../fileOps";
@@ -40,18 +40,14 @@ const warn = (what: string) => (err: unknown) => console.warn(`Could not ${what}
 export function createMenus(host: MenuHost) {
   const { ws, bookmarks } = host;
 
-  function copyText(text: string) {
-    navigator.clipboard.writeText(text).catch(warn("copy to the clipboard"));
-  }
-
   /** "Copy path" with Obsidian's two choices. */
   function copyPath(path: string): MenuEntry {
     return {
       title: "Copy path",
       icon: "clipboard",
       submenu: [
-        { title: "From vault folder", action: () => copyText(path) },
-        { title: "From system root", action: () => copyText(systemPath(ws.vault.path, path)) },
+        { title: "From vault folder", action: () => writeClipboard(path) },
+        { title: "From system root", action: () => writeClipboard(systemPath(ws.vault.path, path)) },
       ],
     };
   }
@@ -157,7 +153,7 @@ export function createMenus(host: MenuHost) {
           ]
         : [
             { title: "Open link", icon: "external-link", action: () => api.openExternal(link.url).catch(warn(`open ${link.url}`)) },
-            { title: "Copy URL", icon: "copy", action: () => copyText(link.url) },
+            { title: "Copy URL", icon: "copy", action: () => writeClipboard(link.url) },
           ];
     const editLink: MenuItems =
       link?.kind === "internal" && !reading

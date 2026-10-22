@@ -97,7 +97,7 @@ class CodeFlairWidget extends WidgetType {
   toDOM() {
     const copy = (e: Event) => {
       e.preventDefault();
-      void writeClipboard(this.code);
+      writeClipboard(this.code);
     };
     if (this.reading) return h("button", { class: "copy-code-button", "aria-label": "Copy", title: "Copy", onmousedown: copy }, icon("copy"));
     return h("span", { class: "code-block-flair", "aria-label": "Copy", title: "Copy", onmousedown: copy }, codeLabel(this.lang));
