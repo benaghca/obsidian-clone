@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareNames, fileName, isUnder, movedPath, noteName, parentDir, systemPath, trimSlashes } from "./paths";
+import { compareFiles, compareNames, fileName, isUnder, movedPath, noteName, parentDir, SORT_ORDERS, type SortOrder, systemPath, trimSlashes } from "./paths";
 
 describe("paths", () => {
   it("names and folders", () => {
@@ -24,4 +24,22 @@ describe("paths", () => {
     expect(systemPath("C:\\v", "A/B.md")).toBe("C:\\v\\A\\B.md");
     expect(["Note 10", "note 2", "Apple"].sort(compareNames)).toEqual(["Apple", "note 2", "Note 10"]);
   });
+});
+
+it("files in Obsidian's six sort orders, ties by name", () => {
+  const files = [
+    { name: "b", mtime_ms: 3, ctime_ms: 1 },
+    { name: "a", mtime_ms: 1, ctime_ms: 3 },
+    { name: "Note 10", mtime_ms: 2, ctime_ms: 2 },
+    { name: "Note 2", mtime_ms: 2, ctime_ms: 2 },
+  ];
+  const sorted = (order: SortOrder) => [...files].sort(compareFiles(order)).map((f) => f.name);
+  expect(SORT_ORDERS.map(([o]) => sorted(o))).toEqual([
+    ["a", "b", "Note 2", "Note 10"],
+    ["Note 10", "Note 2", "b", "a"],
+    ["b", "Note 2", "Note 10", "a"],
+    ["a", "Note 2", "Note 10", "b"],
+    ["a", "Note 2", "Note 10", "b"],
+    ["b", "Note 2", "Note 10", "a"],
+  ]);
 });

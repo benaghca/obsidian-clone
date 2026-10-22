@@ -21,12 +21,13 @@ async function imageBytes(content: string): Promise<ArrayBuffer> {
 }
 
 export function createMockBackend(): { invoke: Invoke; listen: Listen } {
-  const files = new Map<string, { content: string; mtime: number }>();
+  const files = new Map<string, { content: string; mtime: number; ctime: number }>();
+  const put = (path: string, content: string) => files.set(path, { content, mtime: Date.now(), ctime: files.get(path)?.ctime ?? Date.now() });
   // `?synthetic=1000` on the dev page adds a generated 1,000-note vault (for measuring the graph).
   const synthetic = Number(new URLSearchParams(location.search).get("synthetic")) || 0;
   const vaultFiles = { ...sampleVault(), ...(synthetic > 0 ? syntheticVault(Math.min(synthetic, 20000)) : {}) };
   for (const [path, content] of Object.entries(vaultFiles)) {
-    files.set(path, { content, mtime: Date.now() });
+    put(path, content);
   }
   // Folders made with create_folder that hold no files yet.
   const emptyDirs = new Set<string>();
@@ -44,7 +45,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
 
   function entry(path: string): FileEntry {
     const f = files.get(path)!;
-    return { path, name: noteName(path), is_dir: false, mtime_ms: f.mtime, size: f.content.length };
+    return { path, name: noteName(path), is_dir: false, mtime_ms: f.mtime, ctime_ms: f.ctime, size: f.content.length };
   }
 
   function need(path: string) {
@@ -64,6 +65,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       name: fileName(path),
       is_dir: true,
       mtime_ms: 0,
+      ctime_ms: 0,
       size: 0,
     }));
     for (const path of files.keys()) out.push(entry(path));
@@ -172,18 +174,18 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       return imageBytes(need(path).content);
     },
     write_note: ({ path, content }) => {
-      files.set(path, { content, mtime: Date.now() });
+      put(path, content);
     },
     create_note: ({ path, content }) => {
       if (files.has(path)) throw new Error(`Already exists: ${path}`);
-      files.set(path, { content, mtime: Date.now() });
+      put(path, content);
       for (const dir of [...emptyDirs]) if (path.startsWith(dir + "/")) emptyDirs.delete(dir);
       return entry(path);
     },
     create_folder: ({ path }) => {
       if (files.has(path) || listFiles().some((e) => e.path === path)) throw new Error(`Already exists: ${path}`);
       emptyDirs.add(path);
-      return { path, name: noteName(path), is_dir: true, mtime_ms: Date.now(), size: 0 };
+      return { path, name: noteName(path), is_dir: true, mtime_ms: Date.now(), ctime_ms: 0, size: 0 };
     },
     rename_path: ({ from, to }) => {
       if (listFiles().some((e) => e.path === to)) throw new Error(`Already exists: ${to}`);

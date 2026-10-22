@@ -14,6 +14,8 @@ export interface FileEntry {
   name: string;
   is_dir: boolean;
   mtime_ms: number;
+  /** When it was created (its modified time where the file system doesn't keep that; 0 for folders). */
+  ctime_ms: number;
   size: number;
 }
 

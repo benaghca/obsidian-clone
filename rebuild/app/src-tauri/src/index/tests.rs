@@ -170,7 +170,7 @@ fn scan_skips_hidden_dirs_and_names_notes() {
         hello.size,
         fs::metadata(dir.path.join("Hello.md")).unwrap().len()
     );
-    assert!(hello.mtime_ms > 0);
+    assert!(hello.mtime_ms > 0 && hello.ctime_ms > 0);
     let sub = list.iter().find(|e| e.path == "sub").unwrap();
     assert!(sub.is_dir);
     assert_eq!(sub.name, "sub");
@@ -263,7 +263,7 @@ fn search_of_a_thousand_notes_stays_well_under_the_budget() {
     for n in 0..1000 {
         let path = format!("n{n}.md");
         let body = format!("note {n}\nline with token-{n} inside a garden of words\n");
-        idx.insert_file(&path, 0, body.len() as u64, || body.clone());
+        idx.insert_file(&path, Stamp::sized(body.len()), || body.clone());
     }
     idx.rebuild_maps();
     let started = Instant::now();

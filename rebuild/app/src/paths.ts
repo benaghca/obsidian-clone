@@ -23,3 +23,25 @@ export function systemPath(vault: string, path: string): string {
 
 /** Names in Obsidian's order: case ignored, numbers by value ("Note 2" before "Note 10"). One collator, made once (fast for sorting a vault). */
 export const compareNames = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" }).compare;
+
+export type SortOrder = "alphabetical" | "alphabeticalReverse" | "byModifiedTime" | "byModifiedTimeReverse" | "byCreatedTime" | "byCreatedTimeReverse";
+
+/** Obsidian's file orders, as its file explorer's sort menu and search view name them. */
+export const SORT_ORDERS: [SortOrder, string][] = [
+  ["alphabetical", "File name (A to Z)"],
+  ["alphabeticalReverse", "File name (Z to A)"],
+  ["byModifiedTime", "Modified time (new to old)"],
+  ["byModifiedTimeReverse", "Modified time (old to new)"],
+  ["byCreatedTime", "Created time (new to old)"],
+  ["byCreatedTimeReverse", "Created time (old to new)"],
+];
+
+/** Files in `order`: by name, or by time with ties by name. */
+export function compareFiles(order: SortOrder) {
+  return (a: { name: string; mtime_ms: number; ctime_ms: number }, b: typeof a) => {
+    if (order === "alphabetical") return compareNames(a.name, b.name);
+    if (order === "alphabeticalReverse") return compareNames(b.name, a.name);
+    const age = order.startsWith("byCreated") ? b.ctime_ms - a.ctime_ms : b.mtime_ms - a.mtime_ms;
+    return (order.endsWith("Reverse") ? -age : age) || compareNames(a.name, b.name);
+  };
+}
