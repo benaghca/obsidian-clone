@@ -1,4 +1,4 @@
-// What the pointer meets in the editor: the fold chevron's hover area.
+// What the pointer meets in the editor: the fold chevron's hover area, and the cursor.
 import { expect, test } from "vitest";
 import editorCss from "./editor.css?raw";
 
@@ -14,4 +14,10 @@ test("the hover chevron sits inside the editor's own margin, so reaching for it 
   // ...far enough to hold the whole chevron, right up to the text.
   expect(px(chevron, "left")).toBeGreaterThanOrEqual(0);
   expect(px(chevron, "left") + px(chevron, "width")).toBeLessThanOrEqual(px(editor, "padding-left"));
+});
+
+test("no stylesheet forces the text cursor: the browser shows it over text and editable areas only, as in Obsidian", () => {
+  const sheets = import.meta.glob<string>("./*.css", { query: "?raw", import: "default", eager: true });
+  expect(Object.keys(sheets).length).toBeGreaterThan(10);
+  for (const [file, css] of Object.entries(sheets)) expect(css, file).not.toMatch(/cursor:\s*text/);
 });
