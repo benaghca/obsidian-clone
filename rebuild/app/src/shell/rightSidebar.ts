@@ -1,4 +1,4 @@
-// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline and Local graph,
+// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline, File properties and Local graph,
 // switched with icon tabs at the top like Obsidian's. Only the selected view,
 // and only while the sidebar is open, does any work.
 
@@ -10,11 +10,11 @@ import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { createOutgoingView } from "./outgoingView";
 import { createOutlineView } from "./outlineView";
-import { createPropertiesView } from "./propertiesView";
+import { createFilePropertiesView, createPropertiesView } from "./propertiesView";
 import type { SideView } from "./sideView";
 import { createTagsView } from "./tagsView";
 
-export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "localgraph"] as const;
+export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "fileprops", "localgraph"] as const;
 export type RightView = (typeof RIGHT_VIEWS)[number];
 
 export type RightSidebar = ReturnType<typeof createRightSidebar>;
@@ -35,6 +35,7 @@ export function createRightSidebar(
     tags: createTagsView(ws, searchFor),
     properties: createPropertiesView(ws, searchFor),
     outline: createOutlineView(ws),
+    fileprops: createFilePropertiesView(ws),
     localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
   const buttons = new Map<RightView, HTMLElement>();
@@ -78,6 +79,7 @@ export function createRightSidebar(
       tab("tags", "tags", "Tags"),
       tab("properties", "archive", "All properties"),
       tab("outline", "list", "Outline"),
+      tab("fileprops", "info", "File properties"),
       tab("localgraph", "git-fork", "Local graph"),
     ),
     content,

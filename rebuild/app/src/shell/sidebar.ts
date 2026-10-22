@@ -11,7 +11,7 @@ import { listeners } from "../listeners";
 import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
-import { h, iconButton } from "./dom";
+import { editInPlace, h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
@@ -179,26 +179,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function startRename(path: string) {
     const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
-    if (!label) return;
-    const shown = label.textContent ?? "";
-    label.contentEditable = "plaintext-only";
-    label.focus();
-    getSelection()?.selectAllChildren(label);
-    const finish = (commit: boolean) => {
-      label.contentEditable = "false";
-      const name = label.textContent ?? "";
-      label.textContent = shown;
-      if (commit) renameFile(ws, path, name).catch((err) => console.warn(err));
-    };
-    label.addEventListener("blur", () => finish(true), { once: true });
-    label.onkeydown = (ev) => {
-      if (ev.key === "Enter" || ev.key === "Escape") {
-        ev.preventDefault();
-        label.onkeydown = null;
-        if (ev.key === "Escape") label.textContent = shown;
-        label.blur();
-      }
-    };
+    if (label) editInPlace(label, (name) => renameFile(ws, path, name).catch((err) => console.warn(err)));
   }
 
   async function newFolderIn(parent: string) {

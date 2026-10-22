@@ -69,6 +69,7 @@
 }
 .mod-sidedock > * {
   min-width: var(--dock-width);
+  max-width: var(--dock-width);
   transition: opacity var(--anim-duration-fast) var(--anim-ease-out) calc(var(--anim-duration-sidebar) / 3);
 }
 .is-left-sidebar-collapsed .mod-left-split,

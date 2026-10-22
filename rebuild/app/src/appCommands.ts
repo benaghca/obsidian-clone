@@ -418,6 +418,7 @@ export function registerAppCommands(parts: AppParts) {
     { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", plugin: "outgoing-link", icon: "link-2", run: () => showRight("outgoing") },
     { id: "tag-pane:open", name: "Tags view: Show tags", plugin: "tag-pane", icon: "tags", run: () => showRight("tags") },
     { id: "properties:open", name: "Properties view: Show all properties", plugin: "properties", icon: "archive", run: () => showRight("properties") },
+    { id: "properties:open-local", name: "Properties view: Show file properties", plugin: "properties", icon: "info", run: () => showRight("fileprops") },
     { id: "outline:open", name: "Outline: Show outline", plugin: "outline", icon: "list", run: () => showRight("outline") },
     // Graph view: the global graph in a tab (Obsidian's Ctrl/Cmd+G), and the
     // open note's local graph to the right (as Obsidian opens it).

@@ -180,8 +180,9 @@ const backlinks = h(
   icon("link", 14),
   backlinkCount,
 );
-// "N properties": the open note's, as in Obsidian (not shown without frontmatter).
-const propertyCount = h("div", { class: "status-bar-item" });
+// "N properties": the open note's, as in Obsidian (not shown without
+// frontmatter); a click shows them in the File properties view.
+const propertyCount = h("div", { class: "status-bar-item mod-clickable", onclick: () => commands.run("properties:open-local") });
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
 // The editing mode (Settings → Editor → Show editing mode in status bar), as
@@ -331,7 +332,7 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["localgraph", "graph"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["fileprops", "properties"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
   }
   // Graph view off: its tabs close, as Obsidian closes the plugin's views.

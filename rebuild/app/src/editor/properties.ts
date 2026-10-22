@@ -152,6 +152,13 @@ export function openNewProperty(view: EditorView): boolean {
   return true;
 }
 
+/** The File properties view's rows: `view`'s note's properties, as its block shows them but without the heading (`render` again when they change). */
+export function propertyRows(view: EditorView): { el: HTMLElement; render(): void } {
+  const block = new Block(view, false);
+  block.render();
+  return block;
+}
+
 class PropertiesWidget extends WidgetType {
   /** `source`: the frontmatter as written; with the types' version, what makes two widgets the same. */
   constructor(
@@ -194,17 +201,21 @@ class Block {
   /** Values shown in their chosen type after "Display as ...?" (that type, by name). */
   private readonly updated = new Map<string, PropertyType>();
 
-  constructor(private readonly view: EditorView) {
+  /** `heading`: the "Properties" heading that folds it (the File properties view has none). */
+  constructor(
+    private readonly view: EditorView,
+    heading = true,
+  ) {
     this.rows = h("div", { class: "properties-rows" });
-    const heading = h(
+    const title = heading && h(
       "div",
       { class: "properties-heading", tabindex: "0", onclick: () => this.fold(), onkeydown: (e: KeyboardEvent) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), this.fold()) },
       h("div", { class: "properties-fold" }, icon("chevron-down")),
       h("div", { class: "properties-title" }, "Properties"),
     );
     const add = h("div", { class: "properties-add", tabindex: "0", onclick: () => this.newRow(), onkeydown: (e: KeyboardEvent) => e.key === "Enter" && this.newRow() }, icon("plus"), "Add property");
-    this.el = h("div", { class: "properties" }, heading, h("div", { class: "properties-content" }, this.rows, add));
-    this.el.classList.toggle("is-collapsed", folded.has(view));
+    this.el = h("div", { class: "properties" }, title, h("div", { class: "properties-content" }, this.rows, add));
+    this.el.classList.toggle("is-collapsed", heading && folded.has(view));
     // Select all in a field selects that field only. The block sits inside the
     // editor's contenteditable, so the browser's own select-all would take the
     // whole note and the next keys would land in its body.
