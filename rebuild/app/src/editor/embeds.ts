@@ -93,15 +93,6 @@ export function embedPart(text: string, sub: string): NotePart | null {
   return part && { text: part.text, line: part.line + skip };
 }
 
-/** Ticking line `line` of a note's text: where its task's box is and what it becomes (null: not a task). */
-export function toggledTask(text: string, line: number): { at: number; insert: string } | null {
-  const lines = text.split("\n");
-  const m = /^([ \t>]*(?:[-*+]|\d+[.)])[ \t]+\[)([^\]\n])\]/.exec(lines[line] ?? "");
-  if (!m) return null;
-  const at = lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0) + m[1].length;
-  return { at, insert: m[2] === " " ? "x" : " " };
-}
-
 /** Whether an embed of `path` shows only a chip: it is the note on screen (`top`) or one it is drawn inside of, or it is too deep. */
 export const embedStopped = (path: string, top: string | null, chain: readonly string[]) =>
   chain.length >= MAX_DEPTH || path === top || chain.includes(path);

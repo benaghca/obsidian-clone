@@ -77,7 +77,8 @@ export class CalloutWidget extends BlockWidget {
     const body = calloutBody(this.text);
     let painted: Painted | null = null;
     if (body.trim()) {
-      painted = decorate(body, view, this.chain);
+      // Its tasks can be ticked: line k of the body is line k + 1 of the callout.
+      painted = decorate(body, view, this.chain, (line) => this.tick(view, dom, line + 1));
       paintLines(painted, content);
     }
     const fold = header.fold ? h("div", { class: "callout-fold" }, icon("chevron-down")) : null;

@@ -22,11 +22,11 @@ import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget, toggledTask } from "./embeds";
+import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
-import { DrawnWidget, embedChain, paintWith, readingMode } from "./render";
+import { DrawnWidget, embedChain, paintWith, readingMode, tickLine } from "./render";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
 export const filesChanged = StateEffect.define<null>();
@@ -56,9 +56,7 @@ class CheckboxWidget extends DrawnWidget {
     box.checked = this.checked;
     box.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      const line = view.state.doc.lineAt(view.posAtDOM(box));
-      const tick = toggledTask(line.text, 0);
-      if (tick) view.dispatch({ changes: { from: line.from + tick.at, to: line.from + tick.at + 1, insert: tick.insert }, userEvent: "input.toggle" });
+      tickLine(view, view.state.doc.lineAt(view.posAtDOM(box)).number);
     });
     return box;
   }

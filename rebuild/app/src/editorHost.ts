@@ -8,8 +8,8 @@
 // shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
-import { toggledTask } from "./editor/embeds";
 import type { EditorHost, EmbedHost } from "./editor/host";
+import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import type { Workspace } from "./workspace";
