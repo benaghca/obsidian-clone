@@ -54,14 +54,7 @@ export interface GraphHost {
   panelClosed?: boolean;
 }
 
-export interface GraphView {
-  el: HTMLElement;
-  /** Shown or hidden: a hidden graph does no work at all. */
-  setActive(active: boolean): void;
-  /** The local graph's note changed. */
-  refresh(): void;
-  dispose(): void;
-}
+export type GraphView = ReturnType<typeof createGraphView>;
 
 const REFRESH_DELAY = 200;
 /** A canvas slower than this (ms) to draw is drawn every other frame while it settles on its own. */
@@ -90,7 +83,7 @@ window.addEventListener(
 /** Where the global graph's nodes were, per vault, so reopening it starts from its settled layout. */
 const layouts = new Map<string, Map<string, [number, number]>>();
 
-export function createGraphView(host: GraphHost): GraphView {
+export function createGraphView(host: GraphHost) {
   const { ws, local } = host;
   const canvas = h("canvas", { class: "graph-canvas" });
   const ctx = canvas.getContext("2d", { alpha: false })!;
@@ -568,7 +561,8 @@ export function createGraphView(host: GraphHost): GraphView {
 
   return {
     el,
-    setActive(next) {
+    /** Shown or hidden: a hidden graph does no work at all. */
+    setActive(next: boolean) {
       if (next === active || disposed) return;
       active = next;
       if (!active) {
@@ -587,6 +581,7 @@ export function createGraphView(host: GraphHost): GraphView {
       if (stale || !built) void rebuild();
       invalidate();
     },
+    /** The local graph's note changed. */
     refresh() {
       if (local) {
         focusId = host.file?.() ?? null;

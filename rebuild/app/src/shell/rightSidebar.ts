@@ -17,16 +17,7 @@ import { createTagsView } from "./tagsView";
 export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "localgraph"] as const;
 export type RightView = (typeof RIGHT_VIEWS)[number];
 
-export interface RightSidebar {
-  el: HTMLElement;
-  readonly view: RightView;
-  select(view: RightView): void;
-  /** Re-check which view should be working (after the sidebar opens or closes). */
-  sync(): void;
-  onSelect(fn: (view: RightView) => void): void;
-  /** Show or remove a view (its core plugin turned on or off). Returns whether any view is left. */
-  setEnabled(view: RightView, enabled: boolean): boolean;
-}
+export type RightSidebar = ReturnType<typeof createRightSidebar>;
 
 /**
  * `searchFor` runs a vault search in the left sidebar (a click on a tag);
@@ -37,7 +28,7 @@ export function createRightSidebar(
   isOpen: () => boolean,
   searchFor: (query: string) => void,
   graphMenu: (path: string, at: { x: number; y: number }) => void,
-): RightSidebar {
+) {
   const views: Record<RightView, SideView> = {
     backlinks: createBacklinksView(ws),
     outgoing: createOutgoingView(ws),
@@ -70,6 +61,7 @@ export function createRightSidebar(
     if (changed) selected.emit(name);
   }
 
+  /** Re-check which view should be working (after the sidebar opens or closes). */
   function sync() {
     const open = isOpen();
     for (const [name, view] of Object.entries(views) as [RightView, SideView][]) view.setActive(open && name === current);
@@ -100,7 +92,8 @@ export function createRightSidebar(
     select,
     sync,
     onSelect: selected.on,
-    setEnabled(view, enabled) {
+    /** Show or remove a view (its core plugin turned on or off). Returns whether any view is left. */
+    setEnabled(view: RightView, enabled: boolean) {
       buttons.get(view)!.hidden = !enabled;
       const available = RIGHT_VIEWS.filter((v) => !buttons.get(v)!.hidden);
       if (!enabled && current === view && available.length) select(available[0]);

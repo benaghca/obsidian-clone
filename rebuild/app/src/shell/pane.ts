@@ -20,18 +20,11 @@ import { dragPointer, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
 import type { Menus } from "./menus";
-import type { ColumnHolder } from "./sidedock";
 import { createBacklinksView } from "./backlinksView";
 import type { SideView } from "./sideView";
 import { createTabStrip, type TabStrip } from "./tabStrip";
 
-export interface Panes extends ColumnHolder {
-  el: HTMLElement;
-  /** Whether backlinks may show under notes (the Backlinks core plugin is on). */
-  setBacklinksAllowed(allowed: boolean): void;
-  /** Focus the active pane's inline title, selecting it for a rename. */
-  focusTitle(selectAll: boolean): void;
-}
+export type Panes = ReturnType<typeof createPanes>;
 
 /**
  * No pane can be dragged smaller than this (px), across or down. 200px
@@ -63,7 +56,7 @@ export interface PaneExtras {
 }
 
 /** `menus` is read when a menu opens (it is built after the panes). */
-export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtras): Panes {
+export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtras) {
   const root = h("div", { class: "workspace-split mod-vertical mod-root" });
   const views = new Map<Group, GroupView>();
 
@@ -320,14 +313,16 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
 
   return {
     el: root,
-    setBacklinksAllowed(allowed) {
+    /** Whether backlinks may show under notes (the Backlinks core plugin is on). */
+    setBacklinksAllowed(allowed: boolean) {
       backlinksAllowed = allowed;
       for (const v of views.values()) v.renderBacklinks();
     },
-    focusTitle: (selectAll) => viewFor(ws.activeGroup).focusTitle(selectAll),
+    /** Focus the active pane's inline title, selecting it for a rename. */
+    focusTitle: (selectAll: boolean) => viewFor(ws.activeGroup).focusTitle(selectAll),
     // Every pane's width scales with the workspace's (sizes are fractions),
     // so each holds its own column for its share of the change.
-    holdColumn(delta, dock) {
+    holdColumn(delta: number, dock?: Animation) {
       const rects = ws.layout.rects();
       for (const [group, r] of rects) viewFor(group).holdColumn(delta * r.w, dock);
     },

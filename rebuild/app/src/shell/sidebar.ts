@@ -28,29 +28,10 @@ export const SORT_ORDERS: [SortOrder, string][] = [
   ["byModifiedTimeReverse", "Modified time (old to new)"],
 ];
 
-export interface LeftSidebar {
-  el: HTMLElement;
-  select(view: LeftView): void;
-  /** Expand the folders above a path and scroll it into view. */
-  reveal(path: string): void;
-  collapseAll(): void;
-  /** Start an inline rename of a row. */
-  renameInTree(path: string): void;
-  /** Create an "Untitled" folder and start renaming it. */
-  newFolderIn(parent: string): void;
-  /** Show the search view running this query. */
-  searchFor(query: string): void;
-  readonly sortOrder: SortOrder;
-  setSortOrder(order: SortOrder): void;
-  onSortChange(fn: () => void): void;
-  /** Show or remove the Bookmarks view (its core plugin turned on or off). */
-  setBookmarksEnabled(enabled: boolean): void;
-  /** The footer under the views (vault name; the settings button goes here). */
-  footer: HTMLElement;
-}
+export type LeftSidebar = ReturnType<typeof createSidebar>;
 
 /** `menus` is read when a menu opens (it is built after the sidebar). */
-export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => Menus): LeftSidebar {
+export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => Menus) {
   const explorer = createFileExplorer(ws, menus);
   const searchView = createSearchView(ws);
   const views = {
@@ -101,27 +82,33 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
   return {
     el,
     select,
-    reveal: (path) => explorer.reveal(path),
-    collapseAll: () => explorer.collapseAll(),
-    renameInTree: (path) => {
+    /** Expand the folders above a path and scroll it into view. */
+    reveal: explorer.reveal,
+    collapseAll: explorer.collapseAll,
+    /** Start an inline rename of a row. */
+    renameInTree(path: string) {
       select("files");
       explorer.reveal(path);
       explorer.startRename(path);
     },
-    newFolderIn: (parent) => void explorer.newFolderIn(parent),
-    searchFor: (query) => {
+    /** Create an "Untitled" folder and start renaming it. */
+    newFolderIn: (parent: string) => void explorer.newFolderIn(parent),
+    /** Show the search view running this query. */
+    searchFor(query: string) {
       select("search");
       searchView.search(query);
     },
     get sortOrder() {
       return explorer.sortOrder;
     },
-    setSortOrder: (order) => explorer.setSortOrder(order),
-    onSortChange: (fn) => explorer.onSortChange(fn),
-    setBookmarksEnabled(enabled) {
+    setSortOrder: explorer.setSortOrder,
+    onSortChange: explorer.onSortChange,
+    /** Show or remove the Bookmarks view (its core plugin turned on or off). */
+    setBookmarksEnabled(enabled: boolean) {
       tabButtons.get("bookmarks")!.hidden = !enabled;
       if (!enabled && content.firstElementChild === views.bookmarks) select("files");
     },
+    /** The footer under the views (vault name; the settings button goes here). */
     footer,
   };
 }
