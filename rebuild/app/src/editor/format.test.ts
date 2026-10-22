@@ -152,3 +152,12 @@ test("Enter closes a new code fence and keeps its language, indent and caret", (
   expect(run(closeCodeFence, "```ts|\n```")).toBe("```ts|\n```");
   expect(run(closeCodeFence, "    ```|")).toBe("    ```|");
 });
+
+
+test("bold, italic and comment at an interior caret toggle the word and preserve its caret", () => {
+  for (const marker of ["**", "*", "%%"]) {
+    expect(run(toggleWrap(marker), "a wo|rd b")).toBe(`a ${marker}wo|rd${marker} b`);
+    expect(run(toggleWrap(marker), `a ${marker}wo|rd${marker} b`)).toBe("a wo|rd b");
+    expect(run(toggleWrap(marker), "a | b")).toBe(`a ${marker}|${marker} b`);
+  }
+});

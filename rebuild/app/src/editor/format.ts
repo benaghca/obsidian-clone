@@ -15,8 +15,8 @@ const update = (target: Target, spec: TransactionSpec) =>
 
 /**
  * Wrap each selection in `marker` (or unwrap it if it already is). With no
- * selection, an empty pair is inserted with the caret inside it, or removed
- * if the caret sits in an empty pair.
+ * selection, the word around an interior caret is formatted; elsewhere an
+ * empty pair is inserted with the caret inside it, or removed if already empty.
  */
 export const toggleWrap =
   (marker: string): StateCommand =>
@@ -27,9 +27,11 @@ export const toggleWrap =
       state.sliceDoc(from, to) === marker &&
       (m > 1 || (state.sliceDoc(from - 1, from) !== marker && state.sliceDoc(to, to + 1) !== marker));
     const changes = state.changeByRange((range) => {
-      const { from, to } = range;
+      const word = range.empty ? state.wordAt(range.head) : null;
+      const target = word && word.from < range.head && range.head < word.to ? word : range;
+      const { from, to } = target;
       const outside = from >= m && isMarker(from - m, from) && isMarker(to, to + m);
-      if (range.empty) {
+      if (target.empty) {
         if (outside) return { changes: { from: from - m, to: to + m }, range: EditorSelection.cursor(from - m) };
         return { changes: { from, insert: marker + marker }, range: EditorSelection.cursor(from + m) };
       }
@@ -41,7 +43,7 @@ export const toggleWrap =
         : outside ? [{ from: from - m, to: from }, { from: to, to: to + m }]
         : [{ from, insert: marker }, { from: to, insert: marker }],
       );
-      return { changes: set, range: EditorSelection.range(set.mapPos(from, 1), set.mapPos(to, -1)) };
+      return { changes: set, range: range.empty ? EditorSelection.cursor(set.mapPos(range.head, 1)) : EditorSelection.range(set.mapPos(from, 1), set.mapPos(to, -1)) };
     });
     update({ state, dispatch }, changes);
     return true;
