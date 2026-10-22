@@ -164,26 +164,21 @@ export function createMenus(host: MenuHost) {
             { title: "Open link", icon: "external-link", action: () => api.openExternal(link.url).catch(warn(`open ${link.url}`)) },
             { title: "Copy URL", icon: "copy", action: () => writeClipboard(link.url) },
           ];
-    const editLink: MenuItems =
-      link?.kind === "internal" && !reading
-        ? [
-            {
-              title: "Edit link",
-              icon: "text-cursor-input",
-              action: () => {
-                view.focus();
-                view.dispatch({ selection: { anchor: link.from, head: link.to } });
-              },
-            },
-          ]
-        : [];
+    const editLink: MenuEntry | false = link?.kind === "internal" && !reading && {
+      title: "Edit link",
+      icon: "text-cursor-input",
+      action: () => {
+        view.focus();
+        view.dispatch({ selection: { anchor: link.from, head: link.to } });
+      },
+    };
     return [
       ...linkItems,
       SEPARATOR,
       !reading && cmd("editor:insert-wikilink", { title: "Add link", icon: "link" }),
       !reading && cmd("editor:insert-link", { title: "Add external link", icon: "external-link" }),
       SEPARATOR,
-      ...editLink,
+      editLink,
       !reading &&
         link?.kind !== "internal" && {
           title: "Format",
