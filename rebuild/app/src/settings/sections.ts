@@ -13,7 +13,7 @@ import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import type { Workspace } from "../workspace";
 import { formatDate } from "./dateFormat";
-import { button, dropdown, extraButton, group, row, slider, textInput, toggle } from "./controls";
+import { button, dropdown, extraButton, group, row, slider, type SliderOptions, textInput, toggle } from "./controls";
 import { installedFonts } from "./fonts";
 import { createHotkeysPage, showHotkeysFor } from "./hotkeys";
 import { openSettings, refreshSettingsNav, type SettingsSection } from "./modal";
@@ -49,6 +49,9 @@ function dropdownRow<F extends FileName, K extends Key<F>>(file: F, key: K, name
     }, name),
   );
 }
+
+/** A slider, labelled with the row's name. */
+const sliderRow = (name: string, desc: string, o: Omit<SliderOptions, "label">) => row({ name, desc, cls: "mod-slider" }, ...slider({ ...o, label: name }));
 
 function textRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: string, desc: string, placeholder: string, list?: string) {
   const input = textInput({ value: get(file, key) as string, placeholder, label: name, list, onInput: (v) => void settings.set(file, key, v.trim() as SettingsOf<F>[K]) });
@@ -150,19 +153,15 @@ function appearance(): HTMLElement[] {
       fontRow("interfaceFontFamily", "Interface font", "Set base font for all of Grove. Only fonts installed on this computer, chosen by name."),
       fontRow("textFontFamily", "Text font", "Set font for editing and reading views."),
       fontRow("monospaceFontFamily", "Monospace font", "Set font for places like code blocks and frontmatter."),
-      row(
-        { name: "Font size", desc: "Font size in pixels that affects editing and reading views.", cls: "mod-slider" },
-        ...slider({
-          min: 10,
-          max: 30,
-          step: 1,
-          value: get("appearance.json", "baseFontSize"),
-          defaultValue: APPEARANCE.baseFontSize.default,
-          label: "Font size",
-          format: (v) => String(v),
-          onInput: set("appearance.json", "baseFontSize"),
-        }),
-      ),
+      sliderRow("Font size", "Font size in pixels that affects editing and reading views.", {
+        min: 10,
+        max: 30,
+        step: 1,
+        value: get("appearance.json", "baseFontSize"),
+        defaultValue: APPEARANCE.baseFontSize.default,
+        format: (v) => String(v),
+        onInput: set("appearance.json", "baseFontSize"),
+      }),
     ),
   ];
 }
@@ -182,19 +181,15 @@ function interfaceSection(ctx: SettingsContext): HTMLElement[] {
     ),
     group(
       "Advanced",
-      row(
-        { name: "Zoom level", desc: "Controls the overall zoom level of the app.", cls: "mod-slider" },
-        ...slider({
-          min: -2.5,
-          max: 3,
-          step: 0.5,
-          value: get("appearance.json", "zoomLevel"),
-          defaultValue: 0,
-          label: "Zoom level",
-          format: (v) => `${Math.round(zoomFactor(v) * 100)}%`,
-          onInput: set("appearance.json", "zoomLevel"),
-        }),
-      ),
+      sliderRow("Zoom level", "Controls the overall zoom level of the app.", {
+        min: -2.5,
+        max: 3,
+        step: 0.5,
+        value: get("appearance.json", "zoomLevel"),
+        defaultValue: 0,
+        format: (v) => `${Math.round(zoomFactor(v) * 100)}%`,
+        onInput: set("appearance.json", "zoomLevel"),
+      }),
     ),
   ];
 }
@@ -241,10 +236,7 @@ function editor(): HTMLElement[] {
       toggleRow("app.json", "autoPairMarkdown", "Auto-pair Markdown syntax", "Pair symbols automatically for bold, italic, code, and more."),
       toggleRow("app.json", "smartIndentList", "Smart lists", "Automatically set indentation and place list items correctly."),
       toggleRow("app.json", "useTab", "Indent using tabs", "Use tabs to indent by pressing the “Tab” key. Turn this off to indent using spaces."),
-      row(
-        { name: "Indent visual width", desc: "Number of spaces a tab character will render as.", cls: "mod-slider" },
-        ...slider({ min: 1, max: 8, step: 1, value: get("app.json", "tabSize"), defaultValue: 4, label: "Indent visual width", format: String, onInput: set("app.json", "tabSize") }),
-      ),
+      sliderRow("Indent visual width", "Number of spaces a tab character will render as.", { min: 1, max: 8, step: 1, value: get("app.json", "tabSize"), defaultValue: 4, format: String, onInput: set("app.json", "tabSize") }),
     ),
   ];
 }
