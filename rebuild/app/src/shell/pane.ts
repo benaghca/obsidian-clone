@@ -320,8 +320,12 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     },
     /** Focus the active pane's inline title, selecting it for a rename. */
     focusTitle: (selectAll: boolean) => viewFor(ws.activeGroup).focusTitle(selectAll),
-    // Every pane's width scales with the workspace's (sizes are fractions),
-    // so each holds its own column for its share of the change.
+    /**
+     * The panes are about to change width by `delta` px, following `dock`'s
+     * width transition: keep the note columns from re-wrapping on the way.
+     * Every pane's width scales with the workspace's (sizes are fractions),
+     * so each holds its own column for its share of the change.
+     */
     holdColumn(delta: number, dock?: Animation) {
       const rects = ws.layout.rects();
       for (const [group, r] of rects) viewFor(group).holdColumn(delta * r.w, dock);
