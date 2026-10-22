@@ -16,7 +16,7 @@ import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
 import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
-import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
+import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { fuzzyRank } from "./fuzzy";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
@@ -34,6 +34,8 @@ export interface MenuHost {
   moveFile(path: string): void;
   /** Pick a note to merge this one into (Obsidian's Note composer). */
   mergeFile(path: string): void;
+  /** "Link with tab...": pick the pane whose tab this one links with. */
+  linkTab(tab: Tab): void;
   revealInTree(path: string): void;
   /** Show the search view limited to a folder. */
   searchInFolder(folder: string): void;
@@ -422,6 +424,9 @@ export function createMenus(host: MenuHost) {
       { title: "Close all", icon: "x", action: () => ws.closeAll(group) },
       SEPARATOR,
       t.pinned ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) } : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
+      linkedWith(t, ws.layout.tabs()).length
+        ? { title: "Unlink tab", icon: "unlink", action: () => ws.setLink(t, null) }
+        : { title: "Link with tab...", icon: "link", action: () => host.linkTab(t) },
       ...(isActive && t.path ? viewItems(t, t.path, true) : []),
       ...(isActive && !t.path && t.type
         ? [SEPARATOR, ...graphViewItems(t)]

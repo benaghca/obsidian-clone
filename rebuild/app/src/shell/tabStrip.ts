@@ -8,7 +8,7 @@
 
 import { commands } from "../commands";
 import { duration, easing } from "../motion";
-import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
+import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
@@ -40,6 +40,12 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
 
   function tabHeader(tab: Tab) {
     const title = h("div", { class: "workspace-tab-header-inner-title" });
+    // Linked with another tab ("Link with tab..."): a click unlinks it.
+    const linked = h(
+      "div",
+      { class: "workspace-tab-header-status-icon mod-linked", "aria-label": "Unlink tab", title: "Unlink tab", onpointerdown: (e: PointerEvent) => e.stopPropagation(), onclick: () => ws.setLink(tab, null) },
+      icon("link", 14),
+    );
     // Close button; on a pinned tab, a pin that unpins it (as in Obsidian).
     const close = h("div", {
       class: "workspace-tab-header-inner-close-button",
@@ -69,7 +75,7 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
           showMenu(menus().tab(tab), { x: e.clientX, y: e.clientY });
         },
       },
-      h("div", { class: "workspace-tab-header-inner" }, title, close),
+      h("div", { class: "workspace-tab-header-inner" }, title, linked, close),
     );
     return { el, title, close };
   }
@@ -101,6 +107,7 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
         else delete el.dataset.icon;
       }
       el.classList.toggle("is-active", tab === group.active);
+      el.classList.toggle("is-linked", linkedWith(tab, ws.layout.tabs()).length > 0);
       if (el.classList.contains("is-pinned") !== tab.pinned || !close.firstChild) {
         el.classList.toggle("is-pinned", tab.pinned);
         close.replaceChildren(icon(tab.pinned ? "pin" : "x", 14));

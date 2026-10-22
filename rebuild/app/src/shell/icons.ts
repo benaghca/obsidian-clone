@@ -155,6 +155,7 @@ const ICONS = {
   "triangle-alert": lucide.TriangleAlert,
   type: lucide.Type,
   "undo-2": lucide.Undo2,
+  unlink: lucide.Unlink,
   "wand-sparkles": lucide.WandSparkles,
   x: lucide.X,
   zap: lucide.Zap,

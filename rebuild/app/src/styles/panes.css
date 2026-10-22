@@ -41,6 +41,18 @@
   flex-direction: column;
   background: var(--background-primary);
 }
+/* "Link with tab...": the pane under the pointer, lit in the accent colour */
+.is-linking-tab .workspace-tabs.is-link-target .workspace-leaf {
+  position: relative;
+}
+.is-linking-tab .workspace-tabs.is-link-target .workspace-leaf::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: var(--radius-m);
+  background: hsla(var(--accent-h), var(--accent-s), var(--accent-l), 0.4);
+  pointer-events: none;
+}
 
 /* Dividers between panes: a 1px line on the boundary with a wider grab
    area, like Obsidian's. Hovering a moment or dragging lights it in the

@@ -36,6 +36,7 @@ import { h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
 import { type MenuItems, showMenu } from "./shell/menu";
 import { createMenus } from "./shell/menus";
+import { createTabLinks } from "./shell/tabLinks";
 import { openMergePrompt } from "./shell/mergePrompt";
 import { openMovePrompt } from "./shell/movePrompt";
 import { createPanes } from "./shell/pane";
@@ -75,6 +76,7 @@ commands.suspended = () => suspended() || isSettingsOpen() || isConfirmOpen();
 commands.pluginEnabled = (plugin) => settings.get("core-plugins.json")[plugin as PluginId] ?? true;
 if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands, settings }); // for poking at from devtools
 
+const tabLinks = createTabLinks(ws);
 const menus = createMenus({
   ws,
   bookmarks,
@@ -93,6 +95,7 @@ const menus = createMenus({
   },
   moveFile: (path) => openMovePrompt(ws, path),
   mergeFile: (path) => openMergePrompt(ws, path),
+  linkTab: (tab) => tabLinks.start(tab),
   searchInFolder: (folder) => {
     sidebar.searchFor(pathQuery(folder));
     docks.setCollapsed("left", false);
