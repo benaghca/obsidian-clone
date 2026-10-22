@@ -18,7 +18,7 @@ import { CalloutWidget, calloutHeader } from "./callouts";
 import { frontmatterField } from "./frontmatter";
 import { filesChanged } from "./livePreview";
 import { embedChain, paintWith, readingMode } from "./render";
-import { TableWidget } from "./tables";
+import { tableSource, TableWidget } from "./tables";
 
 interface Block {
   from: number;
@@ -78,7 +78,7 @@ function decorations(state: EditorState, list: Block[], focused: boolean): Decor
   const sel = reading || !focused ? [] : state.selection.ranges;
   const out: Range<Decoration>[] = [];
   for (const b of list) {
-    if (b.widget ? !(b.widget instanceof TableWidget) && sel.some((r) => r.from <= b.to && r.to >= b.from) : !reading) continue;
+    if (b.widget ? (!(b.widget instanceof TableWidget) || state.field(tableSource, false) === b.from) && sel.some((r) => r.from <= b.to && r.to >= b.from) : !reading) continue;
     out.push(b.deco.range(b.from, b.to));
   }
   return Decoration.set(out);
@@ -130,6 +130,7 @@ const blocksField = StateField.define<Blocks>({
       list === value.list &&
       focused === value.focused &&
       !tr.selection &&
+      tr.startState.field(tableSource, false) === tr.state.field(tableSource, false) &&
       tr.startState.facet(readingMode) === tr.state.facet(readingMode);
     return same ? value : { list, scanned, focused, deco: decorations(tr.state, list, focused) };
   },

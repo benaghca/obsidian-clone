@@ -4,7 +4,7 @@ import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { markdownSyntax } from "./syntax";
-import { cellBelow, cellTransaction, editTable, formatTable, nextCell, parseTable, previousCell, type TableOp, tableAt, tableOps } from "./tables";
+import { cellBelow, cellTransaction, editTable, editTableSource, formatTable, nextCell, parseTable, previousCell, type TableOp, tableAt, tableOps, tableSource } from "./tables";
 
 // The table and the results below are what Obsidian 1.14.4 wrote (observed).
 const SOURCE = "| Name | Value | Note |\n| --- | :---: | ---: |\n| alpha | 1 | first |\n| beta longer | 22 | second |";
@@ -175,4 +175,20 @@ describe("in-place cell input", () => {
     expect(note.sliceDoc(note.selection.main.head - 7, note.selection.main.head)).toBe("\\| next");
     expect(tableAt(note, note.selection.main.head)?.cell).toEqual({ row: 1, col: 0 });
   });
+});
+
+
+it("table source editing is explicit, survives edits, and ends outside that table", () => {
+  let state = EditorState.create({ doc: `Before\n\n${SOURCE}\n\nAfter`, extensions: [markdownSyntax, tableSource] });
+  const from = state.doc.toString().indexOf("| Name");
+  state = state.update({ selection: { anchor: from + 2 } }).state;
+  expect(state.field(tableSource)).toBeNull(); // clicking a cell keeps the table drawn
+  state = state.update({ selection: { anchor: from }, effects: editTableSource.of(from) }).state;
+  expect(state.field(tableSource)).toBe(from);
+  state = state.update({ selection: { anchor: from + 3 }, changes: { from: from + 2, insert: "X" } }).state;
+  expect(state.field(tableSource)).toBe(from);
+  state = state.update({ changes: { from: 0, insert: "Prefix\n" } }).state;
+  expect(state.field(tableSource)).toBe(from + 7);
+  state = state.update({ selection: { anchor: 0 } }).state;
+  expect(state.field(tableSource)).toBeNull();
 });

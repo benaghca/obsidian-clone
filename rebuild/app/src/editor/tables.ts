@@ -5,7 +5,7 @@
 import { completionStatus } from "@codemirror/autocomplete";
 import { defaultKeymap, isolateHistory } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
-import { ChangeSet, EditorSelection, EditorState, Prec, Transaction } from "@codemirror/state";
+import { ChangeSet, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { EditorView, keymap, runScopeHandlers, type ViewUpdate } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { h } from "../shell/dom";
@@ -53,6 +53,17 @@ export function alignments(row: string): Align[] {
     return left && right ? "center" : right ? "right" : left ? "left" : "";
   });
 }
+
+/** Explicit source editing lasts while the caret stays in this table. */
+export const editTableSource = StateEffect.define<number | null>();
+export const tableSource = StateField.define<number | null>({
+  create: () => null,
+  update(value, tr) {
+    if (value !== null) value = tr.changes.mapPos(value, -1);
+    for (const e of tr.effects) if (e.is(editTableSource)) value = e.value;
+    return value !== null && tableAt(tr.state, tr.state.selection.main.head)?.from === value ? value : null;
+  },
+});
 
 const tableDOM = new WeakMap<HTMLElement, (widget: TableWidget) => void>();
 const tableSync = new WeakMap<EditorView, Set<(u?: ViewUpdate) => void>>();
@@ -102,7 +113,7 @@ export class TableWidget extends BlockWidget {
       const from = start();
       const found = tableAt(state, sel.head);
       const direct = state.sliceDoc(from, from + widget.text.length) === widget.text;
-      const editing = direct && sel.head !== dismissedAt && !state.readOnly && !state.facet(readingMode) && (view.hasFocus || inner?.hasFocus);
+      const editing = direct && state.field(tableSource, false) !== from && sel.head !== dismissedAt && !state.readOnly && !state.facet(readingMode) && (view.hasFocus || inner?.hasFocus);
       const row = editing && found?.from === from && sel.from >= from && sel.to <= from + widget.text.length ? found.cell.row : -1;
       const col = found?.cell.col ?? -1;
       const target = table.rows[row]?.cells[col] ?? null;
@@ -235,6 +246,13 @@ export class TableWidget extends BlockWidget {
       if (inner?.dom.contains(e.target as Node)) { e.stopPropagation(); return; }
       e.preventDefault();
       e.stopPropagation();
+      if ((e.target as Element).closest(".embed-actions")) {
+        const anchor = start();
+        view.dispatch({ selection: { anchor }, effects: editTableSource.of(anchor), scrollIntoView: true });
+        view.focus();
+        return;
+      }
+      if (view.state.field(tableSource, false) != null) view.dispatch({ effects: editTableSource.of(null) });
       const td = (e.target as Element).closest<HTMLTableCellElement>("td, th") ?? table.rows[0].cells[0];
       dismissedAt = null;
       if (view.state.sliceDoc(start(), start() + widget.text.length) !== widget.text) { editAt(view, start()); return; }
@@ -459,6 +477,7 @@ const inTable = (fn: (view: EditorView) => boolean) => (view: EditorView) =>
 
 /** The keys, ahead of list continuation and indenting, while the caret is in a table. */
 export const tableKeys = [
+  tableSource,
   EditorView.updateListener.of((u) => { if (u.docChanged || u.selectionSet || u.focusChanged) tableSync.get(u.view)?.forEach((sync) => sync(u)); }),
   Prec.highest(keymap.of([
     { key: "Tab", run: inTable((v) => editTable(v, nextCell, true)) },
