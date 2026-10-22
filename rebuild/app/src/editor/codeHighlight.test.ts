@@ -1,7 +1,7 @@
 import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { codeLabel, codeLanguage, codeMarks } from "./codeHighlight";
+import { codeLabel, codeLanguage, codeMarks, indentStops } from "./codeHighlight";
 import { markdownSyntax } from "./syntax";
 
 /** Each coloured token of `doc` as "text=kind". */
@@ -50,4 +50,9 @@ describe("code highlighting", () => {
   it("finds code inside lists and quotes", () => {
     expect(marked("- item\n\n  ```py\n  pass\n  ```\n> ```sql\n> SELECT\n> ```")).toEqual(["pass=keyword", "SELECT=keyword"]);
   });
+});
+
+it("indent guides: a code line's indent in whole tab stops (a tab, or four spaces), as Obsidian draws them", () => {
+  expect(["\tif (a) {", "\t\tb();", "  two", "    four", "      six", "  \tmixed", "none"].map((l) => indentStops(l, 4))).toEqual([1, 2, 0, 1, 1, 1, 0]);
+  expect(indentStops("    x", 2)).toBe(2);
 });

@@ -48,8 +48,10 @@
 :is(.cm-callout, .cm-table-widget, .image-embed):hover > .embed-actions {
   opacity: 1;
 }
+/* none in Reading view, nor on an image inside a callout, table or embed (as in Obsidian) */
 .is-reading-mode .embed-actions,
-.markdown-embed .embed-actions {
+.markdown-embed .embed-actions,
+:is(.cm-callout, .cm-table-widget) .image-embed > .embed-actions {
   display: none;
 }
 
@@ -153,7 +155,8 @@
   cursor: nwse-resize;
   touch-action: none;
 }
-.is-reading-mode .image-resize-corner {
+.is-reading-mode .image-resize-corner,
+:is(.cm-callout, .cm-table-widget, .markdown-embed) .image-resize-corner {
   display: none;
 }
 

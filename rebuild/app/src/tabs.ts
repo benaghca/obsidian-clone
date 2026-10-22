@@ -25,6 +25,8 @@ export interface Tab {
   type?: ViewType;
   /** The note a local graph shows (it follows the note open in the active pane), or the image an image tab shows. */
   viewFile?: string | null;
+  /** "Link with tab...": tabs with the same link show the same note. */
+  link?: number;
 }
 
 /** The views a tab can show instead of a note. */
@@ -63,6 +65,28 @@ export function pushBack(tab: Tab) {
   tab.back.push(entry);
   tab.forward = [];
 }
+
+let links = 0;
+
+/** The other tabs linked with `tab`. */
+export const linkedWith = (tab: Tab, all: readonly Tab[]) => (tab.link ? all.filter((t) => t !== tab && t.link === tab.link) : []);
+
+/** "Link with tab...": `tab` joins `to`, and the tabs `to` is linked with already. */
+export function linkTabs(tab: Tab, to: Tab, all: readonly Tab[]) {
+  unlinkTab(tab, all);
+  to.link ??= ++links;
+  tab.link = to.link;
+}
+
+/** "Unlink tab": and a link left with one tab goes. */
+export function unlinkTab(tab: Tab, all: readonly Tab[]) {
+  const rest = linkedWith(tab, all);
+  tab.link = undefined;
+  if (rest.length === 1) rest[0].link = undefined;
+}
+
+/** The tabs linked with `tab` that don't show the note it shows (views stay as they are). */
+export const behindLink = (tab: Tab, all: readonly Tab[]) => (tab.path ? linkedWith(tab, all).filter((t) => !t.type && t.path !== tab.path) : []);
 
 /** A file or folder moved (`swap` maps old paths to new): the tab's note, view, history and memory follow. */
 export function tabFollowsMove(tab: Tab, swap: (path: string) => string) {

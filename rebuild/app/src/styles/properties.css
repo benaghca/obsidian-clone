@@ -235,3 +235,28 @@
   color: var(--text-muted);
   --icon-size: 16px;
 }
+
+/* File properties (shell/propertiesView.ts): the block's rows in the right
+   sidebar, as Obsidian draws them there (observed): 12px around, no
+   heading, a line under each row, a 135px key column, 15px text. */
+.file-properties {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 12px 32px;
+  font-size: var(--font-ui-medium);
+}
+.file-properties .properties {
+  margin: 0;
+  padding: 0;
+}
+.file-properties .properties-rows {
+  gap: 0;
+}
+.file-properties .property {
+  border-bottom: 1px solid var(--background-modifier-border);
+  border-radius: 0;
+}
+.file-properties .property-key {
+  width: 135px;
+}

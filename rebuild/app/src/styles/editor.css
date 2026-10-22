@@ -248,6 +248,17 @@
   border-radius: 0 0 var(--radius-s) var(--radius-s);
   padding-bottom: 0.4em;
 }
+/* Obsidian's indent guides, in Live Preview and Source mode: a faint line
+   at the start of each tab stop of a code line's indent (codeHighlight.ts) */
+.cm-line.cm-codeblock {
+  background-image: repeating-linear-gradient(to right, var(--indent-guide-color) 0 1px, transparent 1px var(--tab));
+  background-size: var(--indent, 0) 100%;
+  background-position: 1em 0;
+  background-repeat: no-repeat;
+}
+.is-reading-mode .cm-line.cm-codeblock {
+  background-image: none;
+}
 
 /* [[ link suggester, and the Properties block's suggestions (shell/suggest.ts) */
 .cm-editor .cm-tooltip.cm-link-suggest,

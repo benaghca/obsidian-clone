@@ -18,7 +18,7 @@ import { listeners } from "./listeners";
 import { createNote, fileSettings } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
 import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
-import { type Group, type OpenWhere, parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, type ViewType, viewEntry } from "./tabs";
+import { type Group, linkTabs, type OpenWhere, parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, unlinkTab, type ViewType, viewEntry } from "./tabs";
 import { Vault } from "./vault";
 
 /**
@@ -286,6 +286,13 @@ export class Workspace {
   /** Obsidian's "Toggle backlinks in document", per tab. */
   toggleBacklinks(tab: Tab = this.active) {
     tab.backlinks = !tab.backlinks;
+    this.emit("tabs");
+  }
+
+  /** "Link with tab..." (with `to`), or "Unlink tab" (null). */
+  setLink(tab: Tab, to: Tab | null) {
+    if (to) linkTabs(tab, to, this.layout.tabs());
+    else unlinkTab(tab, this.layout.tabs());
     this.emit("tabs");
   }
 

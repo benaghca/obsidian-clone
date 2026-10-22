@@ -1,6 +1,6 @@
 import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
-import { addLines, addProperty, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, setValue, yamlString } from "./frontmatter";
+import { addLines, addProperty, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, rewriteProperty, setValue, yamlString } from "./frontmatter";
 
 const NOTE = `---
 title: Hello world
@@ -183,4 +183,19 @@ test("a value is written in the type it is shown as", () => {
   const fm = read("---\nstatus: draft\ncount: 42\n---\n");
   expect(setValue(fm, prop(fm, "status"), ["draft", "done"], "list").insert).toBe("status:\n  - draft\n  - done");
   expect(setValue(fm, prop(fm, "count"), "43", "text").insert).toBe('count: "43"');
+});
+
+test("All properties' Rename and Delete property in a note, as Obsidian writes them", () => {
+  const rewrite = (note: string, key: string, to: string | null) => {
+    const change = rewriteProperty(Text.of(note.split("\n")), key, to);
+    return change && apply(note, change);
+  };
+  const note = "---\nstatus: draft\ntags:\n  - alpha\n  - beta\nrating: 3\n---\n\nBody";
+  expect(rewrite(note, "status", "state")).toBe(note.replace("status:", "state:"));
+  expect(rewrite(note, "tags", null)).toBe("---\nstatus: draft\nrating: 3\n---\n\nBody");
+  expect(rewrite(note, "rating", null)).toBe("---\nstatus: draft\ntags:\n  - alpha\n  - beta\n---\n\nBody");
+  // Left alone: no such property, a name the note already has, a frontmatter it can't read line by line.
+  expect(rewrite(note, "missing", "x")).toBeNull();
+  expect(rewrite(note, "status", "rating")).toBeNull();
+  expect(rewrite("---\nstatus: a\nStatus: b\n---\n", "status", null)).toBeNull();
 });

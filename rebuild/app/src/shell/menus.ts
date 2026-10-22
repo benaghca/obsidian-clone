@@ -9,14 +9,18 @@ import type { EditorView } from "@codemirror/view";
 import { api, type FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
-import { copySelection, paste, writeClipboard } from "../editor/clipboard";
+import { copyImage, copySelection, paste, writeClipboard } from "../editor/clipboard";
+import { IMAGE_EXT, resetSize } from "../editor/embeds";
+import type { ImageRef } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
 import { copyNote, deleteFile } from "../fileOps";
 import { noteName, systemPath } from "../paths";
-import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
+import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
+import { fuzzyRank } from "./fuzzy";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
+import { hints, openPrompt, suggestionText } from "./prompt";
 
 export interface MenuHost {
   ws: Workspace;
@@ -30,6 +34,8 @@ export interface MenuHost {
   moveFile(path: string): void;
   /** Pick a note to merge this one into (Obsidian's Note composer). */
   mergeFile(path: string): void;
+  /** "Link with tab...": pick the pane whose tab this one links with. */
+  linkTab(tab: Tab): void;
   revealInTree(path: string): void;
   /** Show the search view limited to a folder. */
   searchInFolder(folder: string): void;
@@ -251,6 +257,45 @@ export function createMenus(host: MenuHost) {
     ];
   }
 
+  /** Right-click on an image in a note (Obsidian's image menu, without Open in default app and Show in system explorer, as everywhere in Grove). */
+  function image(view: EditorView, { path, img, from, to, sizeAt, sizeText }: ImageRef): MenuItems {
+    const edit = !view.state.readOnly;
+    const reset = resetSize(view.state.sliceDoc(from, to), sizeAt, sizeText);
+    const replace = (start: number, end: number, insert: string) => view.dispatch({ changes: { from: start, to: end, insert }, userEvent: "input" });
+    // Swap: another image in its place, linked as the link settings say, keeping its alt text or alias and size.
+    const swap = () => {
+      const images = ws.vault.files.filter((f) => IMAGE_EXT.test(f.path) && f.path !== path).map((f) => f.path);
+      openPrompt<{ path: string; indices: number[] }>({
+        placeholder: "Choose a file...",
+        emptyText: "No images found.",
+        instructions: hints("to select"),
+        items: (query) => (query.trim() ? fuzzyRank(query, images, (p) => p).map(({ item, indices }) => ({ path: item, indices })) : images.map((p) => ({ path: p, indices: [] }))),
+        render: (item, row) => suggestionText(row, item.path, item.indices),
+        choose: (item) => replace(from, to, "!" + ws.linkTo(item.path, ws.editors.pathOf(view), sizeText ?? undefined)),
+      });
+    };
+    return [
+      { title: "Copy image", icon: "copy", action: () => void copyImage(img).catch(warn("copy the image")) },
+      edit && { title: "Swap file...", icon: "arrow-left-right", action: swap },
+      edit && { title: "Remove image", icon: "image-minus", action: () => replace(from, to, "") },
+      edit && { title: "Reset size", icon: "rotate-ccw", disabled: !reset, action: () => reset && replace(from + reset.from, from + reset.to, reset.insert) },
+      SEPARATOR,
+      openInNewTab(() => void ws.open(path, { where: "tab" })),
+      openToRight(() => void ws.open(path, { where: "right" })),
+      openInNewWindow(path),
+      SEPARATOR,
+      renameItem(() => host.renameInTree(path)),
+      moveItem(path),
+      bookmarkItem(path),
+      SEPARATOR,
+      copyPath(path),
+      SEPARATOR,
+      revealItem(path),
+      SEPARATOR,
+      deleteItem(path, "Delete image"),
+    ];
+  }
+
   /** A table's rows and columns (Obsidian's table menu, at the end of the editor's). */
   function tableItems(view: EditorView, pos: number, { table: model, cell }: NonNullable<ReturnType<typeof tableModel>>): MenuItems {
     // An item that can't apply here (Move row up on the header) isn't shown, as in Obsidian.
@@ -379,6 +424,9 @@ export function createMenus(host: MenuHost) {
       { title: "Close all", icon: "x", action: () => ws.closeAll(group) },
       SEPARATOR,
       t.pinned ? { title: "Unpin", icon: "pin-off", action: () => ws.togglePin(t) } : { title: "Pin", icon: "pin", action: () => ws.togglePin(t) },
+      linkedWith(t, ws.layout.tabs()).length
+        ? { title: "Unlink tab", icon: "link", action: () => ws.setLink(t, null) }
+        : { title: "Link with tab...", icon: "link", action: () => host.linkTab(t) },
       ...(isActive && t.path ? viewItems(t, t.path, true) : []),
       ...(isActive && !t.path && t.type
         ? [SEPARATOR, ...graphViewItems(t)]
@@ -461,7 +509,7 @@ export function createMenus(host: MenuHost) {
     ];
   }
 
-  return { file, vault, editor, tab, tabList, moreOptions, graphNode };
+  return { file, vault, editor, image, tab, tabList, moreOptions, graphNode };
 }
 
 export type Menus = ReturnType<typeof createMenus>;

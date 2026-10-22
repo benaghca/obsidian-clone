@@ -20,14 +20,24 @@ export interface EditorHost {
   notes(): NoteRef[];
   /** A new link to the note at `target` from the note in `view`, as the link settings ask ([[wikilink]] or [markdown](link)). */
   formatLink(target: string, view: EditorView, display?: string): string;
-  /** Show the editor menu at `at` for document position `pos` (the caret is already there). */
-  contextMenu?(view: EditorView, at: { x: number; y: number }, pos: number, keyboard: boolean): void;
+  /** Show the editor menu at `at` for document position `pos` (the caret is already there), or an image's menu. */
+  contextMenu?(view: EditorView, at: { x: number; y: number }, pos: number, keyboard: boolean, image?: ImageRef): void;
   /** Whether a link target (from the note in `view`) points at a file: links to missing notes are drawn faded. */
   linkExists?(target: string, view: EditorView): boolean;
   /** What the Properties block knows of the vault's properties (null until the app has the index). */
   properties?(): PropertyHost | null;
   /** The files `![[embeds]]` show. */
   embeds?: EmbedHost;
+}
+
+/** An image right-clicked in a note: its file and element, where its embed is, and its alt text or alias (from the embed's start). */
+export interface ImageRef {
+  path: string;
+  img: HTMLImageElement;
+  from: number;
+  to: number;
+  sizeAt: number;
+  sizeText: string | null;
 }
 
 /** Embedded notes and images, read only when drawn and cached by the app. */

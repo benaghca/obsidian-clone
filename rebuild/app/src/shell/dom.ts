@@ -78,6 +78,36 @@ export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: Poin
   el.addEventListener("pointercancel", up);
 }
 
+/**
+ * Edit `label`'s text where it is, all of it selected (Obsidian's inline
+ * rename): Enter or leaving it commits, Escape gives up. The label shows its
+ * old text again; `commit` gets what was typed (the old text, given up).
+ */
+export function editInPlace(label: HTMLElement, commit: (text: string) => void) {
+  const shown = label.textContent ?? "";
+  label.contentEditable = "plaintext-only";
+  label.focus();
+  getSelection()?.selectAllChildren(label);
+  label.addEventListener(
+    "blur",
+    () => {
+      label.contentEditable = "false";
+      const text = label.textContent ?? "";
+      label.textContent = shown;
+      commit(text);
+    },
+    { once: true },
+  );
+  label.onkeydown = (ev) => {
+    if (ev.key === "Enter" || ev.key === "Escape") {
+      ev.preventDefault();
+      label.onkeydown = null;
+      if (ev.key === "Escape") label.textContent = shown;
+      label.blur();
+    }
+  };
+}
+
 /** Make an element a keyboard button: in the Tab order, and Enter or Space presses it like a click. */
 export function pressable<E extends HTMLElement>(el: E, onPress: (e: MouseEvent | KeyboardEvent) => void): E {
   el.tabIndex = 0;

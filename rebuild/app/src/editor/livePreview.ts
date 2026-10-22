@@ -22,11 +22,11 @@ import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget, toggledTask } from "./embeds";
+import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
-import { DrawnWidget, embedChain, paintWith, readingMode } from "./render";
+import { DrawnWidget, embedChain, paintWith, readingMode, tickLine } from "./render";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
 export const filesChanged = StateEffect.define<null>();
@@ -56,9 +56,7 @@ class CheckboxWidget extends DrawnWidget {
     box.checked = this.checked;
     box.addEventListener("mousedown", (e) => {
       e.preventDefault();
-      const line = view.state.doc.lineAt(view.posAtDOM(box));
-      const tick = toggledTask(line.text, 0);
-      if (tick) view.dispatch({ changes: { from: line.from + tick.at, to: line.from + tick.at + 1, insert: tick.insert }, userEvent: "input.toggle" });
+      tickLine(view, view.state.doc.lineAt(view.posAtDOM(box)).number);
     });
     return box;
   }
@@ -360,7 +358,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     if (isRemoteUrl(href)) {
       if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
-      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt);
+      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt, node.to - node.from);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
     }
   }
@@ -376,7 +374,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       // No alias: a resize writes "|width" after the target (an empty "|" alias counts as one).
       const sizeAt = (alias?.from ?? (doc.sliceString(target.to, target.to + 1) === "|" ? target.to + 1 : target.to)) - from;
       const sizeText = aliasText ?? (doc.sliceString(target.to, target.to + 1) === "|" ? "" : null);
-      const widget = new ImageWidget(resolve(src), src, target.from - from, embedSize(aliasText ?? ""), sizeAt, sizeText);
+      const widget = new ImageWidget(resolve(src), src, target.from - from, embedSize(aliasText ?? ""), sizeAt, sizeText, node.to - from);
       decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }

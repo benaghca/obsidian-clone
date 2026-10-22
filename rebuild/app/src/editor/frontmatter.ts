@@ -375,6 +375,18 @@ export function removeProperty(fm: Frontmatter, p: Property): Change {
   return { from: fm.starts[p.line], to: next < fm.lines.length ? fm.starts[next] : fm.closeFrom, insert: "" };
 }
 
+/**
+ * All properties' Rename (`to`) or Delete property (null) in one note: the
+ * change, or null when the note has no such property it can read line by
+ * line, or (renaming) already has one called `to`.
+ */
+export function rewriteProperty(doc: Text, key: string, to: string | null): Change | null {
+  const fm = readFrontmatter(doc);
+  const p = fm?.props?.find((q) => q.key === key);
+  if (!fm || !p || (to !== null && fm.props!.some((q) => q.key === to))) return null;
+  return to === null ? removeProperty(fm, p) : renameKey(fm, p, to);
+}
+
 /** Add a property at the end of the frontmatter (a new frontmatter if the note has none). */
 export function addProperty(fm: Frontmatter | null, key: string, type: PropertyType = "text", value: Property["value"] = ""): Change {
   return addLines(fm, formatProperty(key, type, value));

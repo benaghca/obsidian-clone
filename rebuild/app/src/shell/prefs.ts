@@ -1,9 +1,9 @@
 // Small per-vault layout preferences, kept in the webview's localStorage
 // (storage.ts). Missing or unreadable storage just means defaults.
 
+import { SORT_ORDERS, type SortOrder } from "../paths";
 import { readStored, store } from "../storage";
 import { RIGHT_VIEWS, type RightView } from "./rightSidebar";
-import { SORT_ORDERS, type SortOrder } from "./sidebar";
 
 export interface VaultLayout {
   rightOpen: boolean;

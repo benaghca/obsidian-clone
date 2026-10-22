@@ -8,25 +8,16 @@ import { commands } from "../commands";
 import { slideHeight } from "../motion";
 import { newFolder, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
-import { compareNames, noteName } from "../paths";
+import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
-import { h, iconButton } from "./dom";
+import { editInPlace, h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
-import { type MenuItems, showMenu } from "./menu";
+import { type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
 import { createSearchView } from "./searchView";
 
 export type LeftView = "files" | "search" | "bookmarks";
-
-export type SortOrder = "alphabetical" | "alphabeticalReverse" | "byModifiedTime" | "byModifiedTimeReverse";
-
-export const SORT_ORDERS: [SortOrder, string][] = [
-  ["alphabetical", "File name (A to Z)"],
-  ["alphabeticalReverse", "File name (Z to A)"],
-  ["byModifiedTime", "Modified time (new to old)"],
-  ["byModifiedTimeReverse", "Modified time (old to new)"],
-];
 
 export type LeftSidebar = ReturnType<typeof createSidebar>;
 
@@ -130,13 +121,12 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
     if (entry.is_dir) dirs.set(entry.path, node);
   }
   const byName = (a: TreeNode, b: TreeNode) => compareNames(a.entry.name, b.entry.name);
+  const inOrder = compareFiles(order);
   // Folders first, by name (reversed for Z to A); files in the chosen order.
   const compare = (a: TreeNode, b: TreeNode) => {
     if (a.entry.is_dir !== b.entry.is_dir) return Number(b.entry.is_dir) - Number(a.entry.is_dir);
-    if (a.entry.is_dir || order === "alphabetical") return order === "alphabeticalReverse" ? byName(b, a) : byName(a, b);
-    if (order === "alphabeticalReverse") return byName(b, a);
-    const age = b.entry.mtime_ms - a.entry.mtime_ms;
-    return (order === "byModifiedTime" ? age : -age) || byName(a, b);
+    if (a.entry.is_dir) return order === "alphabeticalReverse" ? byName(b, a) : byName(a, b);
+    return inOrder(a.entry, b.entry);
   };
   const sortNodes = (nodes: TreeNode[]) => {
     nodes.sort(compare);
@@ -155,7 +145,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   const sortButton = iconButton(icon("arrow-up-narrow-wide"), "Change sort order", () => {
     showMenu(
-      SORT_ORDERS.map(([order, title]) => ({ title, checked: order === sortOrder, action: () => setSortOrder(order) })),
+      // In pairs (name, modified, created), as in Obsidian.
+      SORT_ORDERS.flatMap(([order, title], i) => [i % 2 ? null : SEPARATOR, { title, checked: order === sortOrder, action: () => setSortOrder(order) }]),
       sortButton,
     );
   });
@@ -188,26 +179,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function startRename(path: string) {
     const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
-    if (!label) return;
-    const shown = label.textContent ?? "";
-    label.contentEditable = "plaintext-only";
-    label.focus();
-    getSelection()?.selectAllChildren(label);
-    const finish = (commit: boolean) => {
-      label.contentEditable = "false";
-      const name = label.textContent ?? "";
-      label.textContent = shown;
-      if (commit) renameFile(ws, path, name).catch((err) => console.warn(err));
-    };
-    label.addEventListener("blur", () => finish(true), { once: true });
-    label.onkeydown = (ev) => {
-      if (ev.key === "Enter" || ev.key === "Escape") {
-        ev.preventDefault();
-        label.onkeydown = null;
-        if (ev.key === "Escape") label.textContent = shown;
-        label.blur();
-      }
-    };
+    if (label) editInPlace(label, (name) => renameFile(ws, path, name).catch((err) => console.warn(err)));
   }
 
   async function newFolderIn(parent: string) {

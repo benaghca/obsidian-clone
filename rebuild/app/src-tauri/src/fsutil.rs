@@ -15,8 +15,16 @@ pub const CONFIG_DIR: &str = ".grove";
 const SKIP_DIRS: &[&str] = &[".obsidian", ".git", ".trash", CONFIG_DIR];
 
 pub fn mtime_ms(md: &fs::Metadata) -> u64 {
-    md.modified()
-        .ok()
+    epoch_ms(md.modified())
+}
+
+/// When the file was created (its modified time where the file system doesn't keep that).
+pub fn ctime_ms(md: &fs::Metadata) -> u64 {
+    epoch_ms(md.created().or_else(|_| md.modified()))
+}
+
+fn epoch_ms(time: io::Result<SystemTime>) -> u64 {
+    time.ok()
         .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
         .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or(0)

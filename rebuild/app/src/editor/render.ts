@@ -64,6 +64,25 @@ export function editAt(view: EditorView, pos: number) {
   view.focus();
 }
 
+/** Ticking line `line` of a note's text: where its task's box is and what it becomes (null: not a task). */
+export function toggledTask(text: string, line: number): { at: number; insert: string } | null {
+  const lines = text.split("\n");
+  const m = /^([ \t>]*(?:[-*+]|\d+[.)])[ \t]+\[)([^\]\n])\]/.exec(lines[line] ?? "");
+  if (!m) return null;
+  const at = lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0) + m[1].length;
+  return { at, insert: m[2] === " " ? "x" : " " };
+}
+
+/** Tick the task on line `n` (from 1) of the editor's note. */
+export function tickLine(view: EditorView, n: number) {
+  const line = view.state.doc.line(n);
+  const tick = toggledTask(line.text, 0);
+  if (tick) view.dispatch({ changes: { from: line.from + tick.at, to: line.from + tick.at + 1, insert: tick.insert }, userEvent: "input.toggle" });
+}
+
+/** Where a block widget drawn inside rendered text (an embed, a callout) sends a tick: to that text's onTask, by its own line. */
+const outerTasks = new WeakMap<Element, (line: number) => void>();
+
 /** A callout or a table, drawn in place of its lines (blocks.ts) from their text. */
 export abstract class BlockWidget extends DrawnWidget {
   constructor(
@@ -89,6 +108,12 @@ export abstract class BlockWidget extends DrawnWidget {
       e.preventDefault();
     });
     return dom;
+  }
+  /** Tick the task on line `line` (from 0) of its text, `dom`: where it is drawn inside of, or the note on screen. */
+  protected tick(view: EditorView, dom: HTMLElement, line: number) {
+    const outer = outerTasks.get(dom);
+    if (outer) outer(line);
+    else tickLine(view, view.state.doc.lineAt(view.posAtDOM(dom)).number + line);
   }
 }
 
@@ -119,7 +144,10 @@ function widgetDom(p: Painted, widget: WidgetType, pos: number): HTMLElement {
   const dom = widget.toDOM(p.view);
   // A task's checkbox would toggle the note on screen, not this text: it goes to onTask, ahead of the widget's own handler.
   const { onTask } = p;
-  if (dom instanceof HTMLInputElement && !onTask) dom.disabled = true;
+  if (widget instanceof BlockWidget && onTask) {
+    const at = p.state.doc.lineAt(pos).number - 1;
+    outerTasks.set(dom, (line) => onTask(at + line));
+  } else if (dom instanceof HTMLInputElement && !onTask) dom.disabled = true;
   else if (dom instanceof HTMLInputElement && onTask) {
     dom.addEventListener(
       "mousedown",

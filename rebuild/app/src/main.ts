@@ -36,6 +36,7 @@ import { h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
 import { type MenuItems, showMenu } from "./shell/menu";
 import { createMenus } from "./shell/menus";
+import { createTabLinks } from "./shell/tabLinks";
 import { openMergePrompt } from "./shell/mergePrompt";
 import { openMovePrompt } from "./shell/movePrompt";
 import { createPanes } from "./shell/pane";
@@ -75,6 +76,7 @@ commands.suspended = () => suspended() || isSettingsOpen() || isConfirmOpen();
 commands.pluginEnabled = (plugin) => settings.get("core-plugins.json")[plugin as PluginId] ?? true;
 if (import.meta.env.DEV) Object.assign(window, { ws, grove: commands, settings }); // for poking at from devtools
 
+const tabLinks = createTabLinks(ws);
 const menus = createMenus({
   ws,
   bookmarks,
@@ -93,6 +95,7 @@ const menus = createMenus({
   },
   moveFile: (path) => openMovePrompt(ws, path),
   mergeFile: (path) => openMergePrompt(ws, path),
+  linkTab: (tab) => tabLinks.start(tab),
   searchInFolder: (folder) => {
     sidebar.searchFor(pathQuery(folder));
     docks.setCollapsed("left", false);
@@ -103,7 +106,7 @@ const menus = createMenus({
     sidebar.reveal(path);
   },
 });
-ws.editorMenu = (view, at, pos, keyboard) => showMenu(menus.editor(view, pos), at, { keyboard });
+ws.editorMenu = (view, at, pos, keyboard, image) => showMenu(image ? menus.image(view, image) : menus.editor(view, pos), at, { keyboard });
 
 const searchVault = (query: string) => {
   sidebar.searchFor(query);
@@ -180,8 +183,9 @@ const backlinks = h(
   icon("link", 14),
   backlinkCount,
 );
-// "N properties": the open note's, as in Obsidian (not shown without frontmatter).
-const propertyCount = h("div", { class: "status-bar-item" });
+// "N properties": the open note's, as in Obsidian (not shown without
+// frontmatter); a click shows them in the File properties view.
+const propertyCount = h("div", { class: "status-bar-item mod-clickable", onclick: () => commands.run("properties:open-local") });
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
 // The editing mode (Settings → Editor → Show editing mode in status bar), as
@@ -331,7 +335,7 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["localgraph", "graph"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["fileprops", "properties"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
   }
   // Graph view off: its tabs close, as Obsidian closes the plugin's views.

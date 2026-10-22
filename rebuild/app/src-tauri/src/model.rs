@@ -32,6 +32,8 @@ pub struct FileEntry {
     pub name: String,
     pub is_dir: bool,
     pub mtime_ms: u64,
+    /// When it was created (its modified time where the file system doesn't keep that; 0 for folders).
+    pub ctime_ms: u64,
     pub size: u64,
 }
 

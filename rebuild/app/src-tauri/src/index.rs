@@ -18,11 +18,36 @@ use std::path::Path;
 
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 
+/// A file's modified and created times (ms since the epoch, 0 when unknown) and size.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+pub struct Stamp {
+    pub mtime_ms: u64,
+    pub ctime_ms: u64,
+    pub size: u64,
+}
+
+impl Stamp {
+    pub fn of(md: &fs::Metadata) -> Self {
+        Stamp {
+            mtime_ms: fsutil::mtime_ms(md),
+            ctime_ms: fsutil::ctime_ms(md),
+            size: md.len(),
+        }
+    }
+
+    #[cfg(test)]
+    fn sized(size: usize) -> Self {
+        Stamp {
+            size: size as u64,
+            ..Stamp::default()
+        }
+    }
+}
+
 #[derive(Default)]
 struct Node {
     is_dir: bool,
-    mtime_ms: u64,
-    size: u64,
+    stamp: Stamp,
     note: Note,
 }
 
@@ -50,8 +75,9 @@ impl Index {
                 path: path.clone(),
                 name: display_name(path, node.is_dir),
                 is_dir: node.is_dir,
-                mtime_ms: node.mtime_ms,
-                size: node.size,
+                mtime_ms: node.stamp.mtime_ms,
+                ctime_ms: node.stamp.ctime_ms,
+                size: node.stamp.size,
             })
             .collect()
     }
@@ -64,9 +90,9 @@ impl Index {
         self.files.get(rel).is_some_and(|n| n.is_dir)
     }
 
-    /// `(mtime_ms, size)` for files. Directories report size 0.
-    pub fn stamp(&self, rel: &str) -> Option<(u64, u64)> {
-        self.files.get(rel).map(|n| (n.mtime_ms, n.size))
+    /// Its times and size. Directories report size 0.
+    pub fn stamp(&self, rel: &str) -> Option<Stamp> {
+        self.files.get(rel).map(|n| n.stamp)
     }
 
     pub fn paths(&self) -> impl Iterator<Item = &String> {
@@ -292,9 +318,9 @@ impl Index {
         }
     }
 
-    pub fn upsert_note(&mut self, root: &Path, rel: &str, content: &str, mtime_ms: u64, size: u64) {
+    pub fn upsert_note(&mut self, root: &Path, rel: &str, content: &str, stamp: Stamp) {
         self.ensure_dirs(root, rel);
-        self.insert_file(rel, mtime_ms, size, || content.to_string());
+        self.insert_file(rel, stamp, || content.to_string());
         self.rebuild_maps();
     }
 
@@ -388,30 +414,32 @@ impl Index {
     fn insert_dir(&mut self, rel: &str, mtime_ms: u64) {
         let node = Node {
             is_dir: true,
-            mtime_ms,
+            stamp: Stamp {
+                mtime_ms,
+                ..Stamp::default()
+            },
             ..Node::default()
         };
         self.files.insert(rel.to_string(), node);
     }
 
     /// A file's node. A note's text (from `read`) is parsed, unless it is too large to index.
-    fn insert_file(&mut self, rel: &str, mtime_ms: u64, size: u64, read: impl FnOnce() -> String) {
-        let note = if is_note_path(rel) && size <= MAX_INDEX_BYTES {
+    fn insert_file(&mut self, rel: &str, stamp: Stamp, read: impl FnOnce() -> String) {
+        let note = if is_note_path(rel) && stamp.size <= MAX_INDEX_BYTES {
             parse_note(&read())
         } else {
             Note::default()
         };
         let node = Node {
             is_dir: false,
-            mtime_ms,
-            size,
+            stamp,
             note,
         };
         self.files.insert(rel.to_string(), node);
     }
 
     fn read_file_node(&mut self, root: &Path, rel: &str, md: &fs::Metadata) {
-        self.insert_file(rel, fsutil::mtime_ms(md), md.len(), || {
+        self.insert_file(rel, Stamp::of(md), || {
             String::from_utf8_lossy(&fs::read(root.join(rel)).unwrap_or_default()).into_owned()
         });
     }
@@ -450,7 +478,7 @@ impl Index {
         for (path, content) in notes {
             // Parent folders exist in a real scan, so a directory rename has a node to move.
             idx.ensure_parent_nodes(path);
-            idx.insert_file(path, 0, content.len() as u64, || content.to_string());
+            idx.insert_file(path, Stamp::sized(content.len()), || content.to_string());
         }
         idx.rebuild_maps();
         idx

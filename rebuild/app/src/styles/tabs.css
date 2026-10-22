@@ -106,6 +106,17 @@
   background: var(--background-modifier-hover);
   color: var(--icon-color-hover);
 }
+/* linked with another tab ("Link with tab..."): an accent link icon before the close button, which unlinks it */
+.workspace-tab-header-status-icon {
+  --icon-size: var(--icon-xs);
+  --icon-stroke: var(--icon-xs-stroke-width);
+  display: none;
+  padding: 2px;
+  color: var(--text-accent);
+}
+.workspace-tab-header.is-linked .workspace-tab-header-status-icon {
+  display: flex;
+}
 /* centred on the tabs' 28px row, so they line up with the tab titles */
 .workspace-tab-header-new-tab,
 .workspace-tab-header-tab-list {

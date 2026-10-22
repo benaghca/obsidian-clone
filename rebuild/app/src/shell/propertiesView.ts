@@ -1,18 +1,23 @@
-// All properties (Obsidian's Properties view core plugin): every property
-// name in the vault with its type's icon and how many notes have it, in the
-// right sidebar. Sorted as Obsidian's sort menu offers (by frequency by
+// Obsidian's Properties view core plugin, in the right sidebar. All
+// properties: every property name in the vault with its type's icon and how
+// many notes have it. Sorted as Obsidian's sort menu offers (by frequency by
 // default), with a filter field behind its search button. A click searches
-// for the name ([name]); right-click offers its Property type. It reads the
-// properties index (propertyIndex.ts) only while shown: when a vault change
-// settles, and a moment after the open note's frontmatter changes.
+// for the name ([name]); right-click offers Rename (in place, as Obsidian
+// renames it), Property type and Delete property, the two that rewrite
+// every note having it. It reads the properties index (propertyIndex.ts)
+// only while shown: when a vault change settles, and a moment after the
+// open note's frontmatter changes. File properties: the open note's
+// properties, editable, as its Properties block shows them.
 
-import { frontmatterField } from "../editor/frontmatter";
+import type { EditorView } from "@codemirror/view";
+import { frontmatterField, rewriteProperty } from "../editor/frontmatter";
+import { propertyRows } from "../editor/properties";
 import { TYPE_ICONS, typeItems } from "../editor/propertyFields";
 import { compareNames } from "../paths";
 import { settings } from "../settings/store";
 import { readStored, store } from "../storage";
 import type { Workspace } from "../workspace";
-import { h, iconButton } from "./dom";
+import { editInPlace, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { SEPARATOR, showMenu } from "./menu";
 import { type PropertyName, propertyIndex } from "./propertyIndex";
@@ -35,6 +40,20 @@ const compare: Record<Sort, (a: PropertyName, b: PropertyName) => number> = {
   frequency: (a, b) => b.count - a.count || compareNames(a.key, b.key),
   frequencyReverse: (a, b) => a.count - b.count || compareNames(a.key, b.key),
 };
+
+/**
+ * Rename a property (`to`) or delete it (null) in every note that has it,
+ * through the notes' editors, so each is saved like any edit. A note whose
+ * frontmatter Grove can't read line by line, or that already has a property
+ * called `to`, is left as it is.
+ */
+async function rewriteEverywhere(ws: Workspace, key: string, to: string | null) {
+  for (const [path, note] of await propertyIndex(ws).notes()) {
+    if (!note.props.some((p) => p.key === key) || !(await ws.editors.load(path))) continue;
+    const change = rewriteProperty(ws.editors.doc(path)!, key, to);
+    if (change) ws.editors.change(path, { changes: change, userEvent: "input.property" });
+  }
+}
 
 export function createPropertiesView(ws: Workspace, searchFor: (query: string) => void): SideView {
   const saved = readStored(SORT_KEY);
@@ -83,26 +102,40 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
     if (key === shown) return;
     shown = key;
     list.replaceChildren(
-      ...rows.map((n) =>
-        h(
+      ...rows.map((n) => {
+        const name = h("div", { class: "tree-item-inner" }, n.key);
+        const rename = () =>
+          editInPlace(name, (text) => {
+            const to = text.trim();
+            if (to && to !== n.key) void rewriteEverywhere(ws, n.key, to).catch((err) => console.warn(`Could not rename ${n.key}`, err));
+          });
+        return h(
           "div",
           { class: "tree-item" },
           h(
             "div",
             {
               class: "tree-item-self tag-pane-tag",
-              onclick: () => searchFor(`["${n.key}"]`),
+              onclick: () => !name.isContentEditable && searchFor(`["${n.key}"]`),
               oncontextmenu: (e: MouseEvent) => {
                 e.preventDefault();
-                showMenu([{ title: "Property type", icon: "list", submenu: () => typeItems(n.key, n.inferred, ws.propertyHost) }], { x: e.clientX, y: e.clientY });
+                showMenu(
+                  [
+                    { title: "Rename", icon: "pen-line", action: rename },
+                    { title: "Property type", icon: "menu", submenu: () => typeItems(n.key, n.inferred, ws.propertyHost) },
+                    SEPARATOR,
+                    { title: "Delete property", icon: "trash-2", danger: true, action: () => void rewriteEverywhere(ws, n.key, null).catch((err) => console.warn(`Could not delete ${n.key}`, err)) },
+                  ],
+                  { x: e.clientX, y: e.clientY },
+                );
               },
             },
             h("div", { class: "tree-item-icon" }, icon(TYPE_ICONS[n.type])),
-            h("div", { class: "tree-item-inner" }, n.key),
+            name,
             h("div", { class: "tree-item-flair" }, n.count.toLocaleString()),
           ),
-        ),
-      ),
+        );
+      }),
     );
     empty.hidden = rows.length > 0;
   }
@@ -122,4 +155,38 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
   });
 
   return { el, setActive: (next) => void names.setActive(next, 0) };
+}
+
+/** File properties: the open note's properties, as its Properties block shows them, without the heading. */
+export function createFilePropertiesView(ws: Workspace): SideView {
+  const el = h("div", { class: "file-properties" });
+  let active = false;
+  let shown: { path: string; view: EditorView; fm: unknown; rows: ReturnType<typeof propertyRows> } | null = null;
+  function update() {
+    if (!active) return;
+    const path = ws.active.path;
+    const view = ws.view;
+    const fm = path ? view.state.field(frontmatterField, false) : null;
+    if (!path) {
+      shown = null;
+      el.replaceChildren();
+    } else if (shown?.path !== path || shown.view !== view) {
+      shown = { path, view, fm, rows: propertyRows(view) };
+      el.replaceChildren(shown.rows.el);
+    } else if (shown.fm !== fm) {
+      // Only when its frontmatter changed: nothing to do while typing in the body.
+      shown.fm = fm;
+      shown.rows.render();
+    }
+  }
+  ws.on((change) => (change === "doc" || change === "show") && update());
+  settings.on((file) => file === "types.json" && shown?.rows.render());
+  return {
+    el,
+    setActive(next) {
+      active = next;
+      shown = null;
+      update();
+    },
+  };
 }

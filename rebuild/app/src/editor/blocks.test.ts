@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { calloutBody, calloutHeader, calloutKind } from "./callouts";
-import { embedPart, embedSection, embedSize, embedStopped, resizedSize, splitSubpath, toggledTask } from "./embeds";
+import { embedPart, embedSection, embedSize, embedStopped, resetSize, resizedSize, splitSubpath } from "./embeds";
+import { toggledTask } from "./render";
 import { alignments, splitRow } from "./tables";
 
 test("callout headers: type, title and fold marker", () => {
@@ -91,4 +92,29 @@ test("ticking a task in an embedded note writes that line of the note", () => {
   expect(toggledTask(note, 3)).toBeNull(); // a heading
   // A line on its own, as a Live Preview checkbox ticks it.
   expect(toggledTask("  * [X] nested\t+ [ ] not this one", 0)).toEqual({ at: 5, insert: " " });
+});
+
+test("a task in a callout's body: body line k is line k + 1 of the callout, through callouts inside it", () => {
+  const callout = "> [!note] Tasks\n> - [ ] one\n> > [!tip]\n> > - [x] two";
+  const body = calloutBody(callout).split("\n");
+  expect(body[0]).toBe("- [ ] one");
+  expect(toggledTask(callout, 0 + 1)).toEqual({ at: callout.indexOf("[ ]") + 1, insert: "x" });
+  // The inner callout starts on the body's line 1: its body's line 0 is the body's line 2, the callout's line 3.
+  expect(calloutBody(body.slice(1).join("\n"))).toBe("- [x] two");
+  expect(toggledTask(callout, 0 + 1 + 1 + 1)).toEqual({ at: callout.indexOf("[x]") + 1, insert: " " });
+});
+
+test("Reset size drops an image's size as Obsidian does", () => {
+  // The embed, where its alt text or alias starts, and what that says (as ImageWidget has them).
+  const reset = (embed: string, sizeAt: number, sizeText: string | null) => {
+    const r = resetSize(embed, sizeAt, sizeText);
+    return r && embed.slice(0, r.from) + r.insert + embed.slice(r.to);
+  };
+  expect(reset("![[pic.png|200]]", 11, "200")).toBe("![[pic.png]]");
+  expect(reset("![[pic.png|caption|200]]", 11, "caption|200")).toBe("![[pic.png|caption]]");
+  expect(reset("![alt|150](pic.png)", 2, "alt|150")).toBe("![alt](pic.png)");
+  expect(reset("![150](pic.png)", 2, "150")).toBe("![](pic.png)");
+  expect(reset("![[pic.png|100x50]]", 11, "100x50")).toBe("![[pic.png]]");
+  expect(reset("![[pic.png]]", 10, null)).toBeNull();
+  expect(reset("![alt](pic.png)", 2, "alt")).toBeNull();
 });

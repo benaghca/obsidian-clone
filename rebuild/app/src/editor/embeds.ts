@@ -19,7 +19,7 @@ import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { editorHost } from "./host";
 import { zoomImage } from "./imageZoom";
-import { DrawnWidget, editButton, onDestroy, release, render, widgetAction } from "./render";
+import { DrawnWidget, editButton, onDestroy, readingMode, release, render, widgetAction } from "./render";
 
 export const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 const MAX_DEPTH = 5;
@@ -93,15 +93,6 @@ export function embedPart(text: string, sub: string): NotePart | null {
   return part && { text: part.text, line: part.line + skip };
 }
 
-/** Ticking line `line` of a note's text: where its task's box is and what it becomes (null: not a task). */
-export function toggledTask(text: string, line: number): { at: number; insert: string } | null {
-  const lines = text.split("\n");
-  const m = /^([ \t>]*(?:[-*+]|\d+[.)])[ \t]+\[)([^\]\n])\]/.exec(lines[line] ?? "");
-  if (!m) return null;
-  const at = lines.slice(0, line).reduce((n, l) => n + l.length + 1, 0) + m[1].length;
-  return { at, insert: m[2] === " " ? "x" : " " };
-}
-
 /** Whether an embed of `path` shows only a chip: it is the note on screen (`top`) or one it is drawn inside of, or it is too deep. */
 export const embedStopped = (path: string, top: string | null, chain: readonly string[]) =>
   chain.length >= MAX_DEPTH || path === top || chain.includes(path);
@@ -130,6 +121,21 @@ export function resizedSize(text: string | null, width: number): string {
   return caption === undefined ? `${width}` : `${caption}|${width}`;
 }
 
+/**
+ * "Reset size" on an image's embed text (`sizeAt`, `sizeText`: its alt text
+ * or alias, as ImageWidget has them): the change that drops the size, as
+ * Obsidian writes it ("![[a.png|200]]" → "![[a.png]]", "![alt|150](a.png)"
+ * → "![alt](a.png)", "![150](a.png)" → "![](a.png)"); null: it has none.
+ */
+export function resetSize(embed: string, sizeAt: number, sizeText: string | null): { from: number; to: number; insert: string } | null {
+  const m = sizeText === null ? null : SIZED.exec(sizeText);
+  if (!m) return null;
+  const caption = m[1] ?? "";
+  // A wiki embed's "|" goes with its size when nothing is left.
+  const from = !caption && embed[sizeAt - 1] === "|" ? sizeAt - 1 : sizeAt;
+  return { from, to: sizeAt + sizeText!.length, insert: caption };
+}
+
 const missingBox = (text: string, onclick?: () => void) =>
   h("span", { class: `internal-embed file-embed mod-empty${onclick ? " is-clickable" : ""}`, onclick }, text);
 
@@ -143,11 +149,14 @@ export class ImageWidget extends DrawnWidget {
     /** Where the alt text or alias is from the embed's start, and what it says (null: none; a resize adds one there). */
     readonly sizeAt: number,
     readonly sizeText: string | null,
+    /** The embed's length in the note. */
+    readonly length: number,
   ) {
     super();
   }
   toDOM(view: EditorView) {
-    const host = view.state.facet(editorHost)?.embeds;
+    const editor = view.state.facet(editorHost);
+    const host = editor?.embeds;
     const { path, size } = this;
     if (!path || !host) return missingBox(`“${this.src}” could not be found.`);
     const img = h("img", { alt: size.alt || fileName(path) });
@@ -165,6 +174,22 @@ export class ImageWidget extends DrawnWidget {
       const from = at + this.srcAt;
       view.dispatch({ selection: EditorSelection.range(from, from + this.src.length), effects: editEmbed.of(at) });
       view.focus();
+    });
+    // Reading view zooms on a click, and on a right-click too (as Obsidian's
+    // does); elsewhere a right-click shows the image's menu. In a callout,
+    // table or embed the image is part of that block, as in Obsidian: no
+    // menu, buttons or resize corner of its own (styles/blocks.css).
+    const zoomIn = (e: MouseEvent) => {
+      e.preventDefault();
+      zoomImage(img, img.alt);
+    };
+    img.addEventListener("click", (e) => view.state.facet(readingMode) && zoomIn(e));
+    dom.addEventListener("contextmenu", (e) => {
+      if (view.state.facet(readingMode)) return zoomIn(e);
+      if (dom.parentElement?.closest(".cm-callout, .cm-table-widget, .markdown-embed")) return;
+      e.preventDefault();
+      const from = view.posAtDOM(dom);
+      editor?.contextMenu?.(view, { x: e.clientX, y: e.clientY }, from, false, { path, img, from, to: from + this.length, sizeAt: this.sizeAt, sizeText: this.sizeText });
     });
     // Dragging the corner resizes the image as it goes; the size is written on release, one undo step.
     corner.addEventListener("pointerdown", (e) => {

@@ -1,7 +1,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { loadTab, saveTab } from "./savedLayout";
-import { parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, tabTitle, viewEntry, whereFromEvent } from "./tabs";
+import { behindLink, linkedWith, linkTabs, parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, tabTitle, unlinkTab, viewEntry, whereFromEvent } from "./tabs";
 
 const blank = (): Tab => ({ id: 1, path: null, back: [], forward: [], mode: "live", pinned: false, backlinks: false, memory: null });
 const notes = new Set(["A.md", "Folder/B.md"]);
@@ -56,5 +56,20 @@ describe("tabs", () => {
     expect(back.memory?.selection?.main.head).toBe(5);
     expect(loadTab({ ...saved, path: "Gone.md" }, blank, isNote)).toBeNull();
     expect(loadTab(saveTab({ ...blank(), type: "localgraph", viewFile: "Gone.md" }), blank, isNote)).toMatchObject({ type: "localgraph", viewFile: null });
+  });
+
+  it("links tabs (Link with tab...): linked tabs follow the note one opens, views stay, a lone link goes", () => {
+    const [a, b, c, d] = [1, 2, 3, 4].map((id) => ({ ...blank(), id, path: `${id}.md` }));
+    const all = [a, b, c, d];
+    linkTabs(a, b, all);
+    linkTabs(c, b, all);
+    expect(linkedWith(b, all)).toEqual([a, c]);
+    a.path = "New.md";
+    c.type = "graph";
+    expect(behindLink(a, all)).toEqual([b]);
+    expect(behindLink(d, all)).toEqual([]);
+    unlinkTab(c, all);
+    unlinkTab(a, all);
+    expect(all.map((t) => t.link)).toEqual([undefined, undefined, undefined, undefined]);
   });
 });

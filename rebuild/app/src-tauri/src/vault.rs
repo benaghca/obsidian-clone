@@ -5,7 +5,7 @@
 //! `link_index` already sees the change.
 
 use crate::fsutil::{self, atomic_write};
-use crate::index::Index;
+use crate::index::{Index, Stamp};
 use crate::model::{push_change, ChangeKind, FileEntry, VaultChanged};
 use std::collections::HashMap;
 use std::fs;
@@ -94,8 +94,7 @@ impl Vault {
             return Err(e.to_string());
         }
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index
-            .upsert_note(&self.root, &rel, content, fsutil::mtime_ms(&md), md.len());
+        self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
         Ok(())
     }
 
@@ -106,8 +105,7 @@ impl Vault {
         }
         atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index
-            .upsert_note(&self.root, &rel, content, fsutil::mtime_ms(&md), md.len());
+        self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
         Ok(self.entry_for(&rel))
     }
 
