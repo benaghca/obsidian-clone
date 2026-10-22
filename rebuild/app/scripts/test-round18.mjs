@@ -88,6 +88,23 @@ try {
   await chord('h'); await sleep(150);
   check(await evaluate('document.activeElement?.name === "replace"'), 'Ctrl+H reveals and focuses replacement field');
   await press('Escape');
+  // Tags search unless the Live Preview caret is already touching their source.
+  await run(() => { ws.view.dispatch({ selection: { anchor: 0 } }); ws.view.focus(); });
+  await click('.cm-tag');
+  check(await evaluate('document.querySelector("input[aria-label=Search]").value === "tag:#tag"'), 'Live Preview tag click opens tag search');
+  await run(() => {
+    const at = ws.view.state.doc.toString().indexOf('#tag') + 2;
+    ws.view.dispatch({ selection: { anchor: at } }); ws.view.focus();
+    document.querySelector('input[aria-label=Search]').value = '';
+  });
+  await click('.cm-tag');
+  check(await evaluate('document.querySelector("input[aria-label=Search]").value === "" && ws.view.hasFocus'), 'click inside the active tag keeps editing');
+  await run(() => ws.setMode('reading')); await sleep(100);
+  await click('.cm-tag');
+  check(await evaluate('document.querySelector("input[aria-label=Search]").value === "tag:#tag"'), 'Reading tag click opens tag search');
+  await run(() => { ws.setMode('live'); ws.view.dispatch({ selection: { anchor: 0 } }); });
+  await click('.cm-tag + .cm-tag');
+  check(await evaluate('document.querySelector("input[aria-label=Search]").value === "tag:#nested/child"'), 'nested tag names remain intact');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');

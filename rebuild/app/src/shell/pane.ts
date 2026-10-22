@@ -13,7 +13,8 @@ import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
 import { renameFile } from "../fileOps";
-import { editAt } from "../editor/render";
+import { EditorView } from "@codemirror/view";
+import { editAt, readingMode } from "../editor/render";
 import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -50,7 +51,7 @@ interface GroupView {
   dispose(): void;
 }
 
-/** What graph tabs need from the rest of the app. */
+/** What panes need from the rest of the app. */
 export interface PaneExtras {
   /** Search the vault for a tag (a tag node was clicked). */
   searchTag(tag: string): void;
@@ -60,6 +61,27 @@ export interface PaneExtras {
 export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtras) {
   const root = h("div", { class: "workspace-split mod-vertical mod-root" });
   const views = new Map<Group, GroupView>();
+  let pressedTag: HTMLElement | null = null;
+  root.addEventListener("mousedown", (event) => {
+    pressedTag = null;
+    const tag = (event.target as Element).closest<HTMLElement>(".cm-tag");
+    const view = tag && EditorView.findFromDOM(tag);
+    if (event.button !== 0 || !tag || !view) return;
+    const from = view.posAtDOM(tag);
+    const to = from + (tag.textContent?.length ?? 0);
+    if (!view.state.facet(readingMode) && view.state.selection.ranges.some((r) => r.from <= to && r.to >= from)) return;
+    pressedTag = tag;
+    event.preventDefault();
+    event.stopPropagation();
+  }, true);
+  root.addEventListener("click", (event) => {
+    const tag = (event.target as Element).closest<HTMLElement>(".cm-tag");
+    const pressed = pressedTag;
+    pressedTag = null;
+    if (event.button !== 0 || !event.isTrusted || !tag || tag !== pressed) return;
+    event.preventDefault();
+    extras.searchTag(tag.textContent ?? "");
+  });
 
   // ----- graph tabs -----
 
