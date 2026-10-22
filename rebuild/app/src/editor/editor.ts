@@ -4,8 +4,8 @@
 import { completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { searchKeymap } from "@codemirror/search";
-import { Compartment, EditorSelection, EditorState, type Extension, type Text } from "@codemirror/state";
-import { EditorView, keymap, layer, RectangleMarker, type ViewUpdate } from "@codemirror/view";
+import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
+import { EditorView, keymap, layer, RectangleMarker } from "@codemirror/view";
 import { blocks } from "./blocks";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
@@ -37,26 +37,16 @@ const baseTheme = EditorView.theme({
 // tint over list bullets). Drawn here is only what the browser can't show:
 // the other ranges of a multiple selection, and a cursor at the head of
 // every range but a plain caret.
-const redraw = (u: ViewUpdate) => u.docChanged || u.selectionSet || u.viewportChanged || u.geometryChanged;
+const drawn = (cls: string, above: boolean, mark: (view: EditorView, r: SelectionRange, main: boolean) => readonly RectangleMarker[]) =>
+  layer({
+    above,
+    class: cls,
+    update: (u) => u.docChanged || u.selectionSet || u.viewportChanged || u.geometryChanged,
+    markers: (view) => view.state.selection.ranges.flatMap((r) => mark(view, r, r === view.state.selection.main)),
+  });
 const drawnSelection = [
-  layer({
-    above: false,
-    class: "cm-selectionLayer",
-    update: redraw,
-    markers: (view) => {
-      const { ranges, main } = view.state.selection;
-      return ranges.flatMap((r) => (r === main ? [] : RectangleMarker.forRange(view, "cm-selectionBackground", r)));
-    },
-  }),
-  layer({
-    above: true,
-    class: "cm-cursorLayer",
-    update: redraw,
-    markers: (view) => {
-      const { ranges, main } = view.state.selection;
-      return ranges.flatMap((r) => (r === main && r.empty ? [] : RectangleMarker.forRange(view, "cm-cursor", EditorSelection.cursor(r.head, r.head > r.anchor ? -1 : 1))));
-    },
-  }),
+  drawn("cm-selectionLayer", false, (view, r, main) => (main ? [] : RectangleMarker.forRange(view, "cm-selectionBackground", r))),
+  drawn("cm-cursorLayer", true, (view, r, main) => (main && r.empty ? [] : RectangleMarker.forRange(view, "cm-cursor", EditorSelection.cursor(r.head, r.head > r.anchor ? -1 : 1)))),
 ];
 
 /**
