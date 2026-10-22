@@ -165,8 +165,8 @@ const moved = <T>(list: T[], from: number, to: number) => {
 const withRows = (t: Table, rows: string[][]) => ({ ...t, rows });
 const emptyRow = (t: Table) => t.cols.map(() => "");
 /** The same change to every row's cells and to the columns. */
-const columns = (t: Table, fn: <T>(list: T[], fresh: T) => T[], fresh = ""): Table => ({
-  rows: t.rows.map((r) => fn(r, fresh)),
+const columns = (t: Table, fn: <T>(list: T[], fresh: T) => T[]): Table => ({
+  rows: t.rows.map((r) => fn(r, "")),
   cols: fn<Column>(t.cols, { align: "", width: 0 }),
 });
 const align = (t: Table, col: number, a: Align) => ({ ...t, cols: t.cols.with(col, { ...t.cols[col], align: a }) });

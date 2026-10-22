@@ -36,15 +36,15 @@ function longestMotion(el: Element): number {
 }
 
 /**
- * Add `cls` (whose CSS plays the exit animation or transition), wait for it
+ * Add "is-closing" (whose CSS plays the exit animation or transition), wait for it
  * to end, then remove the element. A timeout covers events that never come
  * (element hidden, animation interrupted); with motion reduced to 0ms the
  * element goes at once.
  */
-export function animateOut(el: Element, cls = "is-closing"): Promise<void> {
+export function animateOut(el: Element): Promise<void> {
   return new Promise((resolve) => {
-    if (!el.isConnected || el.classList.contains(cls)) return resolve(); // gone, or already on its way out
-    el.classList.add(cls);
+    if (!el.isConnected || el.classList.contains("is-closing")) return resolve(); // gone, or already on its way out
+    el.classList.add("is-closing");
     const ms = longestMotion(el);
     let timer = 0;
     const done = (e?: Event) => {

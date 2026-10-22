@@ -7,7 +7,7 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
 const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const TOKENS = /\[([^\]]*)\]|YYYY|YY|MMMM|MMM|MM|M|Do|DD|D|dddd|ddd|dd|d|HH|H|hh|h|mm|m|ss|s|A|a|Q|WW|W/g;
 
-const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+const pad = (n: number) => String(n).padStart(2, "0");
 const ordinal = (n: number) => {
   const s = ["th", "st", "nd", "rd"];
   const v = n % 100;

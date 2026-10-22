@@ -156,8 +156,8 @@ export class Workspace {
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
-  linkTo(target: string, from: string | null = this.active.path, display?: string, subpath = ""): string {
-    return formatLink(target, from, this.vault.notes, this.linkStyle(), display, subpath);
+  linkTo(target: string, from: string | null, display?: string): string {
+    return formatLink(target, from, this.vault.notes, this.linkStyle(), display);
   }
 
   // ----- tabs -----
@@ -237,7 +237,7 @@ export class Workspace {
   }
 
   /** Close a whole tab group (its tabs can be brought back with Undo close tab). */
-  closeGroup(group: Group = this.activeGroup) {
+  closeGroup(group: Group) {
     this.closeTabs([...group.tabs]);
   }
 
@@ -247,7 +247,7 @@ export class Workspace {
   }
 
   /** "Close all other tabs": every other unpinned tab, in every group. */
-  closeAllOthers(tab: Tab = this.active) {
+  closeAllOthers(tab: Tab) {
     this.closeTabs(this.layout.tabs().filter((t) => t !== tab && !t.pinned));
   }
 
@@ -385,8 +385,8 @@ export class Workspace {
   }
 
   /** The group beside the active one, if any. */
-  neighbour(edge: Edge, group: Group = this.activeGroup): Group | null {
-    return this.layout.neighbour(group, edge);
+  neighbour(edge: Edge): Group | null {
+    return this.layout.neighbour(this.activeGroup, edge);
   }
 
   /** Obsidian's "Focus on tab group to the left" and friends. */
