@@ -125,10 +125,6 @@
   right: 4px;
   padding: 3px;
 }
-.search-input-container .input-right-decorator.is-active {
-  color: var(--interactive-accent);
-  opacity: 1;
-}
 .vertical-tab-header-group-container {
   flex: 1;
   overflow-y: auto;
@@ -454,6 +450,7 @@
 .extra-setting-button.is-disabled {
   opacity: 0.4;
 }
+.search-input-container .input-right-decorator.is-active,
 .extra-setting-button.mod-active {
   color: var(--interactive-accent);
   opacity: 1;

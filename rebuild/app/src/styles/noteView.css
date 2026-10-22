@@ -12,7 +12,9 @@
   padding: 0 8px;
   color: var(--text-muted);
 }
-.view-header-nav-buttons {
+.view-header-nav-buttons,
+.view-actions,
+.vault-profile-actions {
   display: flex;
   gap: 2px;
 }
@@ -34,10 +36,6 @@
   color: var(--text-normal);
   overflow: hidden;
   text-overflow: ellipsis;
-}
-.view-actions {
-  display: flex;
-  gap: 2px;
 }
 
 /* note view: readable line width, re-centered as the pane resizes */
