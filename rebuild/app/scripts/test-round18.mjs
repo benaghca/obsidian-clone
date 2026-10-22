@@ -66,6 +66,7 @@ try {
   check(await evaluate('document.querySelector(".cm-search-input .cm-search-count")?.textContent === "1 / 3"'), 'count is inside find field wrapper');
   check(await evaluate('document.querySelector(".cm-panels-top .cm-search-row") !== null'), 'compact find bar is in the top panel');
   check(await evaluate('document.querySelector(".cm-search [name=next] svg") !== null'), 'find actions use bundled icons');
+  check(await evaluate('(()=>{const row=document.querySelector(".cm-search-row").getBoundingClientRect();const close=document.querySelector(".cm-search [name=close]").getBoundingClientRect();return Math.abs(close.y + close.height / 2 - row.y - row.height / 2) < 2})()'), 'Close button aligns with the compact toolbar row');
   await click('.cm-search [name=next]');
   check(await evaluate('document.querySelector(".cm-search-count").textContent === "2 / 3"'), 'real Next click advances match');
   await click('.cm-search [name=prev]');

@@ -507,3 +507,7 @@
 .is-reading-mode .cm-content > .cm-line.cm-h1 {
   font-size: 31px;
 }
+/* Override CodeMirror's absolutely positioned close control inside our flex row. */
+.cm-editor .cm-panel.cm-search button[name=close] {
+  position: static;
+}
