@@ -10,6 +10,7 @@ import { blocks } from "./blocks";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
+import { markdownHome } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview } from "./livePreview";
@@ -181,6 +182,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       counts ? countsField.init(() => counts) : countsField,
       keymap.of([
         ...completionKeymap,
+        { key: "Home", run: markdownHome(), shift: markdownHome(true) },
         ...defaultKeymap,
         ...historyKeymap,
         ...searchKeymap,

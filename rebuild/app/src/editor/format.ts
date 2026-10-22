@@ -5,6 +5,7 @@
 // works on a bare EditorState in tests. They run only when invoked, never as
 // part of typing.
 
+import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, type EditorState, type StateCommand, type Transaction, type TransactionSpec } from "@codemirror/state";
 
 type Target = { state: EditorState; dispatch: (tr: Transaction) => void };
@@ -128,6 +129,25 @@ function kindOf(prefix: string | undefined): LineKind {
   if (/^[-*+]/.test(prefix)) return "bullet";
   return "numbered";
 }
+
+/** Home toggles between the text after a list/quote marker and column zero. */
+export const markdownHome = (select = false): StateCommand => ({ state, dispatch }) => {
+  if (state.readOnly) return false;
+  const ranges = state.selection.ranges.map((range) => {
+    const line = state.doc.lineAt(range.head);
+    const m = /^[ \t]*(?:>[ \t]*)*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?)?/.exec(line.text)!;
+    if (!m[0].trim()) return null;
+    for (let node = syntaxTree(state).resolveInner(line.from + m[0].length, 1); node.parent; node = node.parent) {
+      if (node.name === "FencedCode" || node.name === "CodeBlock") return null;
+    }
+    const start = line.from + m[0].length;
+    const head = range.head === start ? line.from : start;
+    return select ? EditorSelection.range(range.anchor, head) : EditorSelection.cursor(head);
+  });
+  if (ranges.some((r) => r === null)) return false;
+  dispatch(state.update({ selection: EditorSelection.create(ranges.filter((r) => r !== null), state.selection.mainIndex), scrollIntoView: true, userEvent: "select" }));
+  return true;
+};
 
 /** The lines touched by the selection, each once, in order. */
 function selectedLines(state: EditorState) {
