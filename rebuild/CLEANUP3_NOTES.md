@@ -309,3 +309,18 @@ All of this ran from the session scratchpad and is not committed.
 - **The mock backend's link resolution.** It is a dev fixture, and the screenshot comparisons depend on it. Changing it would change the baseline that every check here compares against.
 - **`appCommands.ts`, `menus.ts` and `settings/sections.ts`.** They are mostly data, and none is near the limit.
 - **Comments.** None were removed to save lines. The ones that moved (interface notes onto returned objects) kept their text.
+
+## Round 14 comparison (added at merge)
+
+Three agents did this brief from `98e4a99`. Claude's branch was merged as is (`476b5c6`); nothing was ported from the other two.
+
+| Rank | Model | Net lines | Splits done | Bugs fixed | Visible change (headless before/after, 5 states) |
+|---|---|---:|---|---|---|
+| 1 | Claude | −241 (26,649) | `workspace.ts` 639, `graph/view.ts` 609 | 1 (Add file property with a `--- ` close) | none (2 stray pixels in the tab strip, also seen once on Codex) |
+| 2 | Codex | −28 (26,862) | `workspace.ts` 648, `graph/view.ts` 620 | 0 | none |
+| 3 | Grok | −11 (26,879) | `workspace.ts` 540, `graph/view.ts` 641 | 0 | none |
+
+- **Why Claude:** the only branch that made a real dent in the size, while also uniting the round 12–13 block code (one table module, one widget kit for callouts/tables/embeds, one task-toggle rule, one colour path to CSS, one image-size regex), fixing a real bug and keeping every screenshot and written Markdown identical.
+- **Codex's best idea:** pure table helpers in their own `editor/tableData.ts`, and moving shared editor facets into `editor/host.ts` so nothing imports Live Preview just to read a facet. Not ported: Claude's merged table module already covers the first, and the second would conflict with Claude's `editorHost.ts` rename. Worth a look next cleanup.
+- **Grok's best idea:** recolour code only when an edit touches a fence, and the cleanest `workspace.ts` split (an `openNote.ts` that owns where notes open and Back/Forward). Not ported: Claude measured fence-only recolouring as noise or a pixel change, and two different `workspace.ts` splits can't be combined cleanly.
+- **Checks after merge (on the owner's machine):** `npm run build`, `npm test` (158/158), `npm run audit:offline`, `cargo build`, `cargo test` (32/32) all pass.
