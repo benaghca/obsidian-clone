@@ -302,6 +302,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
             return false;
 
           case "ListMark":
+            lineClass("cm-list-line", node.from, node.from);
             decorateListMark(node);
             return;
 
