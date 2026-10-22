@@ -2,7 +2,8 @@
    footer and the search view (shell/sidebar.ts). Tree rows are shared with
    the right sidebar's views. */
 
-.nav-files {
+.nav-files,
+.search-view {
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -132,12 +133,6 @@
 }
 
 /* search */
-.search-view {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  flex: 1;
-}
 .search-input-container {
   padding: 8px;
 }

@@ -7,13 +7,8 @@
 
 .modal.mod-settings,
 .modal.mod-confirm {
-  position: relative;
   align-self: center;
-  background: var(--background-primary);
   border: 1px solid var(--modal-border-color);
-  border-radius: var(--radius-l);
-  box-shadow: var(--shadow-l);
-  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
 }
 .modal.mod-settings {
   width: min(1100px, 90vw);
@@ -21,10 +16,6 @@
   display: flex;
   overflow: hidden;
   font-size: var(--font-ui-medium);
-}
-.is-closing .modal.mod-settings,
-.is-closing .modal.mod-confirm {
-  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .mod-settings-container {
   align-items: center;
