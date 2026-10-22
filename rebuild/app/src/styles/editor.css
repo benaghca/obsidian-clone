@@ -497,14 +497,14 @@
 }
 
 /* Reading headings use spacing outside the line; paragraphs still use source lines. */
-.is-reading-mode .cm-content > .cm-line.cm-h {
+.is-reading-mode .cm-line.cm-h {
   padding-top: 0;
   margin-top: 16px;
 }
-.is-reading-mode .cm-content > .cm-line.cm-h:first-child {
+.is-reading-mode .cm-line.cm-h:first-child {
   margin-top: 0;
 }
-.is-reading-mode .cm-content > .cm-line.cm-h1 {
+.is-reading-mode .cm-line.cm-h1 {
   font-size: 31px;
 }
 /* Override CodeMirror's absolutely positioned close control inside our flex row. */

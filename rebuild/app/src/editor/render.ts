@@ -101,7 +101,7 @@ export abstract class BlockWidget extends DrawnWidget {
   protected box(view: EditorView, cls: string, content: HTMLElement, pos: (e: MouseEvent, dom: HTMLElement) => number, own?: (e: MouseEvent) => boolean) {
     const dom = h("div", { class: cls }, content, editButton());
     dom.addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || isLinkEvent(e)) return;
+      if (e.defaultPrevented || e.button !== 0 || isLinkEvent(e)) return;
       if (!own?.(e)) {
         if (view.state.facet(readingMode)) return;
         editAt(view, pos(e, dom));

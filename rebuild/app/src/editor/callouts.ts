@@ -89,7 +89,14 @@ export class CalloutWidget extends BlockWidget {
       box.classList.toggle("is-collapsed", (header.fold === "-") !== !!toggled.get(view)?.has(this.text));
     }
     // The title folds and unfolds it (in Reading view too).
-    const dom = this.box(view, "cm-callout", box, (_, dom) => view.posAtDOM(dom), (e) => {
+    const dom = this.box(view, "cm-callout", box, (e, dom) => {
+      const start = view.state.doc.lineAt(view.posAtDOM(dom));
+      const row = (e.target as Element).closest<HTMLElement>(".callout-content > .cm-line[data-line]");
+      if (!(e.target as Element).closest(".markdown-embed") || !row) return start.from;
+      const line = view.state.doc.line(Math.min(view.state.doc.lines, start.number + Number(row.dataset.line)));
+      return line.from + Math.max(0, line.text.indexOf("![[")) + 3;
+    }, (e) => {
+      if ((e.target as Element).closest(".markdown-embed-link")) return true;
       if (!fold || !title.contains(e.target as Node)) return false;
       box.classList.toggle("is-collapsed");
       const set = kept(toggled, view, () => new Set<string>());

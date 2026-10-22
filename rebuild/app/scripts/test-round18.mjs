@@ -195,6 +195,20 @@ try {
   });
   await fill('input[aria-label=Search]', 'FarNeedleFix'); await sleep(200);
   check(await evaluate('(()=>{const row=document.querySelector(`.search-view [data-preview-path="TailFix18.md"].search-result-file-match`);return row.textContent.startsWith("…") && row.textContent.endsWith("…") && row.textContent.length < 150 && row.getBoundingClientRect().height < 200})()'), 'a long search line shows a short window around the hit, with ellipses');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('CalloutFix18.md', 'Before.\n\n> [!note] Callout\n> Embedded below.\n> ![[Embedded18]]\n\nAfter.');
+    await ws.vault.refreshFiles(); await ws.open('CalloutFix18.md');
+  }); await sleep(100);
+  await click('.cm-callout .markdown-embed .cm-h1 .cm-reading-text');
+  check(await evaluate('ws.view.hasFocus && ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === "> ![[Embedded18]]" && ws.view.contentDOM.innerText.includes("![[Embedded18]]")'), 'callout embed click reveals the embed source line, not the callout header');
+  await run(() => { ws.view.dispatch({ selection: { anchor: 0 } }); }); await sleep(100);
+  await click('.cm-callout .markdown-embed-link');
+  check(await evaluate('ws.active.path === "Embedded18.md"'), 'callout embed Open link control still navigates');
+  await run(async () => { await ws.open('Round18.md'); ws.setMode('reading'); }); await sleep(100);
+  check(await evaluate('(()=>{const s=getComputedStyle(document.querySelector(".markdown-embed-content .cm-h1"));return s.fontSize === "31px" && s.paddingTop === "0px"})()'), 'Reading embedded H1 follows the Reading heading size and padding');
+  await run(() => ws.setMode('live')); await sleep(100);
+  check(await evaluate('getComputedStyle(document.querySelector(".markdown-embed-content .cm-h1")).fontSize !== "31px"'), 'embedded H1 keeps Live Preview typography in editing mode');
   assert.deepEqual(errors, [], 'no uncaught browser errors');
 } finally {
   socket?.close(); browser.kill('SIGTERM'); server.kill('SIGTERM');
