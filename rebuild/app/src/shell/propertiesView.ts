@@ -10,7 +10,7 @@
 // properties, editable, as its Properties block shows them.
 
 import type { EditorView } from "@codemirror/view";
-import { frontmatterField, readFrontmatter, removeProperty, renameKey } from "../editor/frontmatter";
+import { frontmatterField, rewriteProperty } from "../editor/frontmatter";
 import { propertyRows } from "../editor/properties";
 import { TYPE_ICONS, typeItems } from "../editor/propertyFields";
 import { compareNames } from "../paths";
@@ -47,13 +47,11 @@ const compare: Record<Sort, (a: PropertyName, b: PropertyName) => number> = {
  * frontmatter Grove can't read line by line, or that already has a property
  * called `to`, is left as it is.
  */
-async function rewriteProperty(ws: Workspace, key: string, to: string | null) {
+async function rewriteEverywhere(ws: Workspace, key: string, to: string | null) {
   for (const [path, note] of await propertyIndex(ws).notes()) {
     if (!note.props.some((p) => p.key === key) || !(await ws.editors.load(path))) continue;
-    const fm = readFrontmatter(ws.editors.doc(path)!);
-    const p = fm?.props?.find((q) => q.key === key);
-    if (!fm || !p || (to !== null && fm.props!.some((q) => q.key === to))) continue;
-    ws.editors.change(path, { changes: to === null ? removeProperty(fm, p) : renameKey(fm, p, to), userEvent: "input.property" });
+    const change = rewriteProperty(ws.editors.doc(path)!, key, to);
+    if (change) ws.editors.change(path, { changes: change, userEvent: "input.property" });
   }
 }
 
@@ -109,7 +107,7 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
         const rename = () =>
           editInPlace(name, (text) => {
             const to = text.trim();
-            if (to && to !== n.key) void rewriteProperty(ws, n.key, to).catch((err) => console.warn(`Could not rename ${n.key}`, err));
+            if (to && to !== n.key) void rewriteEverywhere(ws, n.key, to).catch((err) => console.warn(`Could not rename ${n.key}`, err));
           });
         return h(
           "div",
@@ -126,7 +124,7 @@ export function createPropertiesView(ws: Workspace, searchFor: (query: string) =
                     { title: "Rename", icon: "pen-line", action: rename },
                     { title: "Property type", icon: "menu", submenu: () => typeItems(n.key, n.inferred, ws.propertyHost) },
                     SEPARATOR,
-                    { title: "Delete property", icon: "trash-2", danger: true, action: () => void rewriteProperty(ws, n.key, null).catch((err) => console.warn(`Could not delete ${n.key}`, err)) },
+                    { title: "Delete property", icon: "trash-2", danger: true, action: () => void rewriteEverywhere(ws, n.key, null).catch((err) => console.warn(`Could not delete ${n.key}`, err)) },
                   ],
                   { x: e.clientX, y: e.clientY },
                 );
