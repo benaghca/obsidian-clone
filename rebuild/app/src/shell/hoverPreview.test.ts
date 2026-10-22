@@ -62,6 +62,17 @@ test("preview opens once after 350ms, stays through movement, and closes after 1
   expect(mocks.destroy).toHaveBeenCalled();
 });
 
+test("releasing Ctrl while the pointer remains on the link keeps the preview", () => {
+  const event = setup();
+  event("mousemove");
+  vi.advanceTimersByTime(350);
+  expect(mocks.draw).toHaveBeenCalledTimes(1);
+  // The modifier opens the preview. Leaving both the link and the popover is what closes it.
+  event("mousemove", { ctrlKey: false });
+  vi.advanceTimersByTime(500);
+  expect(mocks.destroy).not.toHaveBeenCalled();
+});
+
 test("leaving cancels pending work; returning and Escape can restart it", () => {
   const event = setup();
   event("mousemove");
