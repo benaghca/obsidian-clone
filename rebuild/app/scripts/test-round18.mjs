@@ -138,6 +138,19 @@ try {
   await shot('reading');
   await run(() => ws.setMode('live')); await sleep(100);
   check(await evaluate('getComputedStyle(document.querySelector(".cm-content > .cm-line.cm-h1")).fontSize !== "31px"'), 'Reading heading CSS leaves Live Preview typography alone');
+  await run(async () => { await ws.open('Round18.md'); ws.view.dispatch({ selection: { anchor: 0 } }); });
+  const tagStart = await run(() => {
+    const tag = document.querySelector('.cm-tag'), range = document.createRange();
+    range.setStart(tag.firstChild, 1); range.setEnd(tag.firstChild, 3);
+    const r = range.getBoundingClientRect(); return { x: r.left, y: r.y + r.height / 2, end: r.right + 100 };
+  });
+  const queryBeforeDrag = await evaluate('document.querySelector("input[aria-label=Search]").value');
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: tagStart.x, y: tagStart.y });
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: tagStart.x, y: tagStart.y, button: 'left', clickCount: 1 });
+  for (let x = tagStart.x + 5; x < tagStart.end; x += 5) await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y: tagStart.y, buttons: 1 });
+  await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: tagStart.end, y: tagStart.y, button: 'left', clickCount: 1 }); await sleep(100);
+  check(await evaluate('!ws.view.state.selection.main.empty'), 'dragging from a tag selects text normally');
+  check(await evaluate('document.querySelector("input[aria-label=Search]").value') === queryBeforeDrag, 'tag drag does not launch a search');
   // Stage 3: preview lifetime, scroll alignment, and side placement for result lists.
   await run(async () => {
     const { api } = await import('/src/api.ts');

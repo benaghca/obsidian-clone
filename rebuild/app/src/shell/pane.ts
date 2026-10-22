@@ -62,6 +62,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
   const root = h("div", { class: "workspace-split mod-vertical mod-root" });
   const views = new Map<Group, GroupView>();
   let pressedTag: HTMLElement | null = null;
+  let tagPress = { x: 0, y: 0 };
   root.addEventListener("mousedown", (event) => {
     pressedTag = null;
     const tag = (event.target as Element).closest<HTMLElement>(".cm-tag");
@@ -71,9 +72,11 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     const to = from + (tag.textContent?.length ?? 0);
     if (!view.state.facet(readingMode) && view.state.selection.ranges.some((r) => r.from <= to && r.to >= from)) return;
     pressedTag = tag;
-    event.preventDefault();
-    event.stopPropagation();
+    tagPress = { x: event.clientX, y: event.clientY };
   }, true);
+  root.addEventListener("mousemove", (event) => {
+    if (pressedTag && Math.hypot(event.clientX - tagPress.x, event.clientY - tagPress.y) > 3) pressedTag = null;
+  });
   root.addEventListener("click", (event) => {
     const tag = (event.target as Element).closest<HTMLElement>(".cm-tag");
     const pressed = pressedTag;
