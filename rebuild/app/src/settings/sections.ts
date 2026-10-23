@@ -232,6 +232,7 @@ function editor(): HTMLElement[] {
     group(
       "Behavior",
       toggleRow("app.json", "spellcheck", "Spellcheck", "Turn on the spellchecker. It runs inside the app with the system's dictionaries; nothing is sent anywhere."),
+      toggleRow("app.json", "autoConvertHTML", "Auto convert HTML", "Convert pasted web formatting to Markdown."),
       toggleRow("app.json", "autoPairBrackets", "Auto-pair brackets", "Pair brackets and quotes automatically."),
       toggleRow("app.json", "autoPairMarkdown", "Auto-pair Markdown syntax", "Pair symbols automatically for bold, italic, code, and more."),
       toggleRow("app.json", "smartIndentList", "Smart lists", "Automatically set indentation and place list items correctly."),

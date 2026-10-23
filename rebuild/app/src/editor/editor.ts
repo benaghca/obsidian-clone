@@ -9,6 +9,7 @@ import { EditorView, keymap, layer, RectangleMarker, ViewPlugin } from "@codemir
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { blocks } from "./blocks";
+import { clipboard } from "./clipboard";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
@@ -227,6 +228,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       configExtensions(),
       viewModeCompartment.of(VIEW_MODES.live),
       contextMenu,
+      clipboard,
       search({ top: true }),
       searchCounter,
       wikilinkCompletion,

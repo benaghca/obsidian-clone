@@ -4,7 +4,14 @@
 // clipboard API is the fallback where a webview refuses them. Also how the
 // app copies text it shows (paths, URLs, a code block).
 
-import type { EditorView } from "@codemirror/view";
+import { isolateHistory } from "@codemirror/commands";
+import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
+import { EditorSelection, Facet } from "@codemirror/state";
+import { EditorView, keymap } from "@codemirror/view";
+import { frontmatterField } from "./frontmatter";
+import { htmlToMarkdown } from "./htmlToMarkdown";
+
+export const autoConvertHTML = Facet.define<boolean, boolean>({ combine: values => values[0] ?? true });
 
 const selectedText = (view: EditorView) =>
   view.state.selection.ranges.map((r) => view.state.sliceDoc(r.from, r.to)).join(view.state.lineBreak);
@@ -32,12 +39,73 @@ export async function copySelection(view: EditorView, cut: boolean) {
 }
 
 export async function paste(view: EditorView, plain: boolean) {
+  if (view.state.readOnly) return;
   view.focus();
   if (!plain && document.execCommand("paste")) return;
   try {
+    if (!plain && navigator.clipboard.read) {
+      const items = await navigator.clipboard.read().catch(() => []);
+      const item = items.find(item => item.types.includes("text/html"));
+      if (item) {
+        const html = await (await item.getType("text/html")).text();
+        const text = item.types.includes("text/plain") ? await (await item.getType("text/plain")).text() : "";
+        if (insertRich(view, html, text)) return;
+      }
+    }
     const text = await navigator.clipboard.readText();
-    view.dispatch(view.state.replaceSelection(text), { userEvent: "input.paste", scrollIntoView: true });
+    insertText(view, text);
   } catch (err) {
     console.warn("Grove could not read the clipboard", err);
   }
 }
+
+// Protect YAML and code in both editing modes, including a selection that
+// starts outside a code block but ends inside it. No scan runs while typing.
+function protectedSelection(view: EditorView): boolean {
+  const { state } = view;
+  const fm = state.field(frontmatterField, false);
+  if (fm && state.selection.ranges.some(r => r.from <= fm.end)) return true;
+  const to = Math.max(...state.selection.ranges.map(r => r.to));
+  const tree = ensureSyntaxTree(state, to, 100) ?? syntaxTree(state);
+  let code = false;
+  for (const r of state.selection.ranges) tree.iterate({ from: r.from, to: r.to, enter(node) {
+    if (/^(FencedCode|CodeBlock|InlineCode)$/.test(node.name)) code = true;
+  } });
+  return code;
+}
+
+function insertText(view: EditorView, text: string) {
+  if (view.state.readOnly) return;
+  view.dispatch(view.state.replaceSelection(text), {
+    userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full"),
+  });
+}
+
+function insertRich(view: EditorView, html: string, plain: string): boolean {
+  if (!html || !view.state.facet(autoConvertHTML) || protectedSelection(view)) return false;
+  const markdown = htmlToMarkdown(html);
+  if (markdown == null || markdown === plain) return false;
+  insertText(view, markdown);
+  return true;
+}
+
+/** One paste handler, shared by native keyboard and context-menu paste. */
+export const clipboard = [
+  keymap.of([{ key: "Mod-Shift-v", run: view => { void paste(view, true); return true; } }]),
+  EditorView.domEventHandlers({ paste(event, view) {
+    if (view.state.readOnly) return true;
+    const data = event.clipboardData;
+    if (!data || data.files.length) return false;
+    const text = data.getData("text/plain");
+    if (insertRich(view, data.getData("text/html"), text)) return true;
+    // URL paste keeps the word selected; the caret change belongs to Part B.
+    if (/^(?:https?:\/\/|mailto:|www\.)\S+$/i.test(text) && view.state.selection.ranges.some(r => !r.empty) && !protectedSelection(view)) {
+      view.dispatch(view.state.changeByRange(r => ({
+        changes: { from: r.from, to: r.to, insert: r.empty ? text : `[${view.state.sliceDoc(r.from, r.to)}](${text})` },
+        range: r.empty ? EditorSelection.cursor(r.from + text.length) : EditorSelection.range(r.from + 1, r.to + 1),
+      })), { userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full") });
+      return true;
+    }
+    return false; // CodeMirror retains its ordinary, linewise and multi-cursor paste.
+  } }),
+];
