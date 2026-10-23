@@ -1,0 +1,84 @@
+TOOLBAR [
+  {
+    label: 'Drag to add card',
+    icon: 'svg-icon lucide-sticky-note',
+    rect: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    }
+  },
+  {
+    label: 'Drag to add note from vault',
+    icon: 'svg-icon lucide-file-text',
+    rect: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    }
+  },
+  {
+    label: 'Drag to add media from vault',
+    icon: 'svg-icon lucide-file-image',
+    rect: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    }
+  }
+]
+NEW {
+	"nodes":[
+		{"id":"8a79fd99a878d11b","x":-187,"y":-69,"width":250,"height":60,"type":"text","text":""}
+	],
+	"edges":[]
+}
+TYPED {
+	"nodes":[
+		{"id":"8a79fd99a878d11b","x":-187,"y":-69,"width":250,"height":60,"type":"text","text":""}
+	],
+	"edges":[]
+}
+ESCAPE {
+  editors: 0,
+  focused: 'mod-linux is-frameless is-hidden-frameless obsidian-app styled-scrollbars is-focused theme-light show-inline-title is-floating-nav auto-full-screen show-ribbon show-view-header'
+}
+END_TEXT {
+	"nodes":[
+		{"id":"8a79fd99a878d11b","x":-187,"y":-69,"width":250,"height":60,"type":"text","text":"# Part B\n\n**Edited** card\n\n[[BNotePartB1792774086518.canvas]]"}
+	],
+	"edges":[]
+}
+PICKER Drag to add note from vault BNotePartB1792774086518.canvas↑↓to navigate↵to openshift ↵to createescto dismiss
+Drag to add note from vault {
+	"nodes":[
+		{"id":"0c3d998df8bd460a","x":0,"y":0,"width":400,"height":400,"type":"file","file":"BNotePartB1792774086518.canvas.md"},
+		{"id":"8a79fd99a878d11b","x":-187,"y":-69,"width":250,"height":60,"type":"text","text":"# Part B\n\n**Edited** card\n\n[[BNotePartB1792774086518.canvas]]"}
+	],
+	"edges":[]
+}
+PICKER Drag to add media from vault BMediaPartB1792774086518.canvas.svg↑↓to navigate↵to openescto dismiss
+Drag to add media from vault {
+	"nodes":[
+		{"id":"8a79fd99a878d11b","x":-187,"y":-69,"width":250,"height":60,"type":"text","text":"# Part B\n\n**Edited** card\n\n[[BNotePartB1792774086518.canvas]]"},
+		{"id":"0c3d998df8bd460a","x":0,"y":0,"width":400,"height":400,"type":"file","file":"BNotePartB1792774086518.canvas.md"},
+		{"id":"98b1ca58c8b00bd3","x":-200,"y":-200,"width":400,"height":200,"type":"file","file":"BMediaPartB1792774086518.canvas.svg"}
+	],
+	"edges":[]
+}
+SAVED "{\n\t\"nodes\":[\n\t\t{\"id\":\"8a79fd99a878d11b\",\"x\":-187,\"y\":-69,\"width\":250,\"height\":60,\"type\":\"text\",\"text\":\"# Part B\\n\\n**Edited** card\\n\\n[[BNotePartB1792774086518.canvas]]\"},\n\t\t{\"id\":\"0c3d998df8bd460a\",\"x\":0,\"y\":0,\"width\":400,\"height\":400,\"type\":\"file\",\"file\":\"BNotePartB1792774086518.canvas.md\"},\n\t\t{\"id\":\"98b1ca58c8b00bd3\",\"x\":-200,\"y\":-200,\"width\":400,\"height\":200,\"type\":\"file\",\"file\":\"BMediaPartB1792774086518.canvas.svg\"}\n\t],\n\t\"edges\":[]\n}"
