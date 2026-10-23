@@ -23,6 +23,7 @@ const ICONS = {
   "arrow-up": lucide.ArrowUp,
   "arrow-up-narrow-wide": lucide.ArrowUpNarrowWide,
   "arrow-up-z-a": lucide.ArrowUpZA,
+  "gallery-vertical": lucide.GalleryVertical,
   binary: lucide.Binary,
   bold: lucide.Bold,
   "book-open": lucide.BookOpen,

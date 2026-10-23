@@ -1,5 +1,5 @@
 // Left sidebar: icon tabs (Files / Search / Bookmarks), the file explorer
-// with Obsidian's header buttons (new note, new folder, sort order, collapse
+// with Obsidian's header buttons (new note, new folder, sort order, auto-reveal, collapse
 // all), and the vault name footer.
 
 import type { FileEntry } from "../api";
@@ -143,6 +143,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const rows = new Map<string, HTMLElement>();
   const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
+  let autoReveal = false;
   const list = h("div", { class: "nav-files-container" });
 
   const sortButton = iconButton(icon("arrow-up-narrow-wide"), "Change sort order", () => {
@@ -152,6 +153,13 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       sortButton,
     );
   });
+  const revealButton = iconButton(icon("gallery-vertical"), "Auto-reveal current file", () => {
+    autoReveal = !autoReveal;
+    revealButton.classList.toggle("is-active", autoReveal);
+    revealButton.setAttribute("aria-pressed", String(autoReveal));
+    if (autoReveal && ws.active.path) reveal(ws.active.path);
+  });
+  revealButton.setAttribute("aria-pressed", "false");
   const actions = h(
     "div",
     { class: "nav-header" },
@@ -161,6 +169,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       iconButton(icon("square-pen"), "New note", () => commands.run("file-explorer:new-file")),
       iconButton(icon("folder-plus"), "New folder", () => commands.run("file-explorer:new-folder")),
       sortButton,
+      revealButton,
       iconButton(icon("chevrons-down-up"), "Collapse all", () => commands.run("file-explorer:collapse-all")),
     ),
   );
@@ -316,9 +325,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   ws.on((change) => {
     if (change === "files") render();
     if (change === "tabs") {
-      // Reveal the active note's folder, as Obsidian does.
       const path = ws.active.path;
-      if (path && !rows.has(path)) expandTo(path);
+      if (autoReveal && path) reveal(path);
       else markActive();
     }
   });

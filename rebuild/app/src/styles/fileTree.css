@@ -11,6 +11,10 @@
   justify-content: center;
   gap: 2px;
 }
+.nav-buttons-container .clickable-icon.is-active {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
 .nav-files-container {
   flex: 1;
   overflow-y: auto;
