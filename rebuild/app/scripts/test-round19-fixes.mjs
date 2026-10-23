@@ -51,4 +51,72 @@ await withBrowser(async ({ send, run, key, press, chord, move, click, fill, poin
       check(true, `${mode}: ${callout ? 'callout' : 'quote'} indentation stays after >`);
     }
   }
+  const longName = 'VeryLongTitleNoteForPreviewWrappingAndIconOverlapCheck';
+  await run(async (fm, longName) => {
+    const { api } = await import('/src/api.ts');
+    for (const [name, text] of [
+      ['PreviewDeep', '# Top\n\n' + 'Filler.\n\n'.repeat(30) + '## Deep\n\nTarget.\n\n' + 'Tail.\n\n'.repeat(30)],
+      ['PreviewEnd', '# Top\n\n' + 'Filler.\n\n'.repeat(30) + '## Deep\n\nTarget.'],
+      [longName, 'Short body.'], ['PreviewEmpty', ''],
+    ]) await api.createNote(name + '.md', fm + text);
+    await ws.vault.refreshFiles();
+  }, fm, longName);
+  const hover = async (target, mode) => {
+    await move({ x: 20, y: 900 });
+    await key('Control', 2);
+    const p = mode === 'source' ? await textPoint(target, 3) : await point(`[data-href="${target}"]`);
+    await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...p, modifiers: 2 });
+    await sleep(500); await key('Control', 0, 'keyUp');
+    check(await run(() => !!document.querySelector('.hover-popover')), mode + ': native hover opens preview');
+  };
+  const headerVisible = () => run(() => {
+    const p = document.querySelector('.hover-popover'), t = p.querySelector('.markdown-embed-title'), i = p.querySelector('.markdown-embed-link');
+    if (!t || !i) return false;
+    const r = p.getBoundingClientRect(), a = t.getBoundingClientRect(), b = i.getBoundingClientRect();
+    return a.top >= r.top && a.bottom <= r.bottom && b.top >= r.top && b.bottom <= r.bottom;
+  });
+  for (const mode of ['live', 'source', 'reading']) {
+    await fixture(`[[PreviewDeep#Deep]] [[PreviewEnd#Deep]] [[${longName}]] [[PreviewEmpty]] [[Missing${mode}]]`, mode);
+    await click('.inline-title');
+    for (const target of ['PreviewDeep#Deep', 'PreviewEnd#Deep']) {
+      await hover(target, mode);
+      check(await headerVisible(), mode + ': deep heading preview keeps title and Open visible');
+      const body = await run(() => {
+        const p = document.querySelector('.hover-popover'), c = p.querySelector('.markdown-embed-content'), t = c.querySelector('.cm-h2');
+        return { height: p.offsetHeight, y: t.getBoundingClientRect().top - c.getBoundingClientRect().top, bodyScroll: c.scrollTop, outerScroll: p.scrollTop };
+      });
+      assert.ok(body.height <= 400 && body.y >= 15 && body.y <= 17 && body.bodyScroll > 0 && body.outerScroll === 0, JSON.stringify(body));
+      check(true, mode + ': heading aligns 16px inside the scrolling body, including at note end');
+      const p = await point('.hover-popover .markdown-embed-content'); await move(p);
+      await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...p, deltaX: 0, deltaY: 180 }); await sleep(80);
+      check(await headerVisible(), mode + ': native body scrolling keeps the preview header visible');
+      await press('Escape');
+    }
+    await hover(longName, mode);
+    const wrapping = await run(() => {
+      const p = document.querySelector('.hover-popover'), t = p.querySelector('.markdown-embed-title'), i = p.querySelector('.markdown-embed-link').getBoundingClientRect();
+      const range = document.createRange(); range.selectNodeContents(t);
+      const rects = [...range.getClientRects()];
+      return p.scrollWidth === p.clientWidth && p.offsetHeight < 300 && rects.length > 1 && rects.every(r => r.right <= i.left - 3);
+    });
+    check(wrapping, mode + ': long preview title wraps clear of Open, without horizontal overflow');
+    await click('.hover-popover .markdown-embed-link');
+    check(await run(name => ws.active.path === name + '.md' && !document.querySelector('.hover-popover'), longName), mode + ': real Open click navigates');
+    // Return to the link fixture after navigation.
+    await run(async path => { await ws.open(path); }, `Fixes${sequence}.md`); await sleep(100);
+    await click('.inline-title');
+    for (const target of ['PreviewEmpty', `Missing${mode}`]) {
+      await hover(target, mode);
+      check(await headerVisible(), mode + ': empty/missing preview has title and Open icon');
+      check(await run(target => {
+        const p = document.querySelector('.hover-popover');
+        return p.offsetHeight < 250 && p.querySelector('.markdown-embed-title').textContent === target && p.scrollWidth === p.clientWidth;
+      }, target), mode + ': empty/missing preview shrinks to content');
+      if (target.startsWith('Missing')) {
+        await click('.hover-popover .markdown-embed-link');
+        check(await run(target => ws.active.path === target + '.md' && !document.querySelector('.hover-popover'), target), mode + ': missing preview Open creates its note');
+      } else await press('Escape');
+    }
+  }
+
 });

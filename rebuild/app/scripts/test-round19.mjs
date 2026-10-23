@@ -80,10 +80,10 @@ try {
   check(await evaluate('ws.active.path === "Short19.md" && !document.querySelector(".hover-popover")'), 'native Open link click opens the previewed note and dismisses preview');
   await run(async()=>{await ws.open('Hover19.md'); ws.view.contentDOM.blur();}); await sleep(150);
   await hover('[data-href=Long19]');
-  check(await evaluate('(()=>{const p=document.querySelector(".hover-popover");return p.offsetHeight===400 && p.scrollHeight>p.clientHeight})()'), 'long preview is capped at 400px and scrolls');
+  check(await evaluate('(()=>{const p=document.querySelector(".hover-popover");return p.offsetHeight===400 && p.querySelector(".markdown-embed-content").scrollHeight>p.querySelector(".markdown-embed-content").clientHeight})()'), 'long preview is capped at 400px and scrolls');
   await shot('hover-long'); await press('Escape');
   await hover('[data-href="Long19#Deep"]');
-  check(await evaluate('(()=>{const p=document.querySelector(".hover-popover"),t=p.querySelector(".cm-h2");const y=t.getBoundingClientRect().top-p.getBoundingClientRect().top;return p.querySelector(".markdown-embed-title").textContent==="Long19" && y>=8 && y<=24})()'), 'heading preview keeps its file title and existing target alignment');
+  check(await evaluate('(()=>{const p=document.querySelector(".hover-popover"),t=p.querySelector(".cm-h2");const y=t.getBoundingClientRect().top-p.querySelector(".markdown-embed-content").getBoundingClientRect().top;return p.querySelector(".markdown-embed-title").textContent==="Long19" && y>=8 && y<=24})()'), 'heading preview keeps its file title and existing target alignment');
   await press('Escape');
   await send('Emulation.setDeviceMetricsOverride',{width:800,height:520,deviceScaleFactor:1,mobile:false});
   await run(async()=>{await ws.open('Hover19.md');ws.view.contentDOM.blur();});await sleep(150);

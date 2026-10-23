@@ -246,13 +246,17 @@ export class NoteEmbedWidget extends DrawnWidget {
     const [name, sub] = splitSubpath(this.target);
     const { path, chain } = this;
     const open = () => host?.openLink(this.target, false, view);
-    if (!path || !embeds) return missingBox(`“${name}” is not created yet. Click to create.`, open);
-    if (!this.preview && embedStopped(path, embeds.pathOf(view), chain)) {
+    if ((!path || !embeds) && !this.preview) return missingBox(`“${name}” is not created yet. Click to create.`, open);
+    if (!this.preview && path && embeds && embedStopped(path, embeds.pathOf(view), chain)) {
       return h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path));
     }
     const content = h("div", { class: "markdown-embed-content" });
     const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", title: "Open link", onclick: open }, icon("maximize-2"));
-    const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub && !this.preview ? "" : noteName(path)), content, link);
+    const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub && !this.preview ? "" : noteName(path ?? name)), content, link);
+    if (!path || !embeds) {
+      content.append(missingBox(`“${name}” is not created yet. Click to create.`, open));
+      return dom;
+    }
     dom.addEventListener("mousedown", (event) => {
       if (event.button !== 0 || this.preview || chain.length || view.state.readOnly || view.state.facet(readingMode) || isLinkEvent(event)) return;
       if ((event.target as Element).closest("input, button, .markdown-embed-link") || dom.parentElement?.closest(".cm-callout, .cm-table-widget, .markdown-embed")) return;
@@ -268,6 +272,7 @@ export class NoteEmbedWidget extends DrawnWidget {
         if (gone) return;
         if (painted) release(painted);
         content.replaceChildren();
+        content.style.paddingBottom = "";
         const shown = embedPart(text, this.preview ? "" : sub);
         if (shown === null) content.append(missingBox(`Unable to find “${sub}” in “${noteName(path)}”.`));
         // Ordinary embeds can tick tasks; page previews remain read-only.
@@ -276,8 +281,11 @@ export class NoteEmbedWidget extends DrawnWidget {
           if (this.preview && sub) {
             const section = embedSection(shown.text, sub);
             const target = section && content.querySelector<HTMLElement>(`[data-line="${section.line + 1}"]`);
-            const popup = dom.closest<HTMLElement>(".hover-popover");
-            if (target && popup) popup.scrollTop += target.getBoundingClientRect().top - popup.getBoundingClientRect().top - 16;
+            if (target) {
+              // A deep heading can lead the body even when it is near the note's end.
+              if (content.scrollHeight > content.clientHeight) content.style.paddingBottom = `${Math.max(0, content.clientHeight - target.getBoundingClientRect().height - 16)}px`;
+              content.scrollTop += target.getBoundingClientRect().top - content.getBoundingClientRect().top - 16;
+            }
           }
         }
       }, () => {
