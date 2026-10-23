@@ -15,6 +15,7 @@ import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { noteName } from "./paths";
 import type { Workspace } from "./workspace";
+import { recentNotes } from "./shell/switcherItems";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
 const mime = (path: string) => {
@@ -35,11 +36,7 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
         if (!ws.vault.isExcluded(path) && !ws.vault.linkExists(target, null) && !candidates.has(path.toLowerCase()))
           candidates.set(path.toLowerCase(), { name: target, path });
       }
-      const recent = ws.recent.flatMap(path => {
-        const key = path.toLowerCase(), item = candidates.get(key);
-        candidates.delete(key);
-        return item ? [item] : [];
-      });
+      const recent = recentNotes(candidates, ws.recent.map(path => path.toLowerCase()));
       return [...recent, ...candidates.values()];
     },
     formatLink: (target, view, display) => ws.linkTo(target, ws.editors.pathOf(view), display),
