@@ -1,7 +1,7 @@
 // Real-pointer checks for the tab/header chrome and bounded inline titles.
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
-await withBrowser(async ({ send, run, click, press, chord, check }) => {
+await withBrowser(async ({ send, run, click, press, chord, point, move, check }) => {
   await run(async () => {
     const { api } = await import('/src/api.ts');
     await api.createFolder('00 - System');
@@ -40,4 +40,51 @@ await withBrowser(async ({ send, run, click, press, chord, check }) => {
     }), `${width}px ${mode}: long rename wraps without horizontal clipping`);
     await press('Escape');
   }
+  await click('.view-header-title-container'); await sleep(80);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    for (const name of ['Current', 'Background']) await api.createNote(`Tab${name}.md`, '---\ntags: [geometry]\n---\n# Heading\nA paragraph.');
+    await ws.vault.refreshFiles();
+    await ws.open('TabCurrent.md'); window.currentTab = ws.active;
+    await ws.open('TabBackground.md', { where: 'tab' }); window.backgroundTab = ws.active;
+  });
+  const current = '.workspace-tab-header[aria-label="TabCurrent.md"]';
+  const background = '.workspace-tab-header[aria-label="TabBackground.md"]';
+  const mouse = async (type, p) => send('Input.dispatchMouseEvent', { type, ...p, button: 'left', clickCount: 1 });
+  for (const mode of ['live', 'source', 'reading']) {
+    await run(mode => { ws.setMode(mode, currentTab); ws.setMode(mode, backgroundTab); ws.activate(currentTab); }, mode); await sleep(200);
+    const from = await point(background);
+    await move(from);
+    check(await run(() => ws.active === currentTab), `${mode}: hovering the background tab keeps the current note`);
+    await mouse('mousePressed', from);
+    check(await run(() => ws.active === currentTab), `${mode}: pressing the background tab does not switch notes`);
+    await mouse('mouseReleased', from); await sleep(80);
+    check(await run(() => ws.active === backgroundTab), `${mode}: pointer up without dragging activates the clicked tab`);
+    // Repeated clicks at the same coordinates, with no mouse move between them.
+    for (let i = 0; i < 2; i++) { await mouse('mousePressed', from); await mouse('mouseReleased', from); }
+    check(await run(() => ws.active === backgroundTab && !document.querySelector('.drag-ghost')), `${mode}: stationary repeated tab clicks stay active without starting a drag`);
+    await click(current);
+    const end = await point(current);
+    end.x -= 25;
+    await move(from); await mouse('mousePressed', from);
+    for (let i = 1; i <= 8; i++) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: from.x + (end.x - from.x) * i / 8, y: from.y, button: 'left', buttons: 1 }); await sleep(16);
+    }
+    check(await run(() => ws.active === currentTab && !!document.querySelector('.drag-ghost')), `${mode}: dragging a background tab keeps the current note visible`);
+    await mouse('mouseReleased', end); await sleep(250);
+    check(await run(() => ws.active === currentTab && ws.tabs.indexOf(backgroundTab) < ws.tabs.indexOf(currentTab)), `${mode}: reordering a background tab preserves the source pane's current note`);
+    // A second drag splits off the background tab, still leaving the source on Current.
+    const start = await point(background);
+    const edge = await run(() => { const r = ws.view.dom.closest('.workspace-tabs').getBoundingClientRect(); return { x: r.right - 20, y: r.top + r.height / 2 }; });
+    await move(start); await mouse('mousePressed', start);
+    for (let i = 1; i <= 8; i++) {
+      await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: start.x + (edge.x - start.x) * i / 8, y: start.y + (edge.y - start.y) * i / 8, button: 'left', buttons: 1 }); await sleep(16);
+    }
+    check(await run(() => ws.active === currentTab), `${mode}: the source stays on Current before a split drop`);
+    await mouse('mouseReleased', edge); await sleep(250);
+    check(await run(() => ws.groupOf(currentTab).active === currentTab && ws.groupOf(backgroundTab) !== ws.groupOf(currentTab) && ws.groupOf(backgroundTab).active === backgroundTab), `${mode}: split drop leaves the source pane's active tab unchanged`);
+    await run(() => { ws.moveTab(backgroundTab, ws.groupOf(currentTab), ws.groupOf(currentTab).tabs.length); ws.activate(currentTab); }); await sleep(250);
+  }
+
 });

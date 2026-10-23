@@ -161,7 +161,10 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
   function finish(drop: boolean) {
     listening.abort();
     cancelAnimationFrame(frame);
-    if (!dragging) return;
+    if (!dragging) {
+      if (drop) ws.activate(tab);
+      return;
+    }
     if (drop) {
       update();
       const t = target;
