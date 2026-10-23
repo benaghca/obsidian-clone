@@ -40,7 +40,7 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
   };
   await run(async () => {
     const { api } = await import('/src/api.ts');
-    for (const path of ['DragA', 'DragB', 'DragC', 'DragFolder', 'DragFolder/Child', 'DragOpen']) await api.createFolder(path);
+    for (const path of ['DragA', 'DragB', 'DragC', 'DragFolder', 'DragFolder/Child', 'DragOpen', 'DragB/DragFolder']) await api.createFolder(path);
     for (const [path, body] of Object.entries({
       'DragA/First.md': 'First', 'DragA/A1.md': 'Collision source', 'DragA/Cancel.md': 'Cancel', 'DragA/Uniq.md': 'Unique note',
       'DragB/A1.md': 'Collision destination', 'DragFolder/Child/Inside.md': 'Inside',
@@ -84,6 +84,7 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
   check(await run(() => ws.active.path === 'DragB/First.md'), 'open note tab follows the first move');
   await clean('drop');
   await drag('DragA/A1.md', 'DragB/A1.md', 'DragB/A1 1.md');
+  check(await run(() => ws.active.path === 'DragB/First.md'), 'dragging a closed note does not open it');
   check(await has('DragB/A1.md'), 'colliding destination is retained; file row targets its parent');
   await drag('DragFolder', 'DragC', 'DragC/DragFolder');
   await open('DragC'); await open('DragC/DragFolder'); await open('DragC/DragFolder/Child');
@@ -91,6 +92,9 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
   check(await run(() => !document.querySelector('.is-being-dragged-over') && document.querySelector('.drag-ghost-destination').hidden), 'folder over its child refuses the target and hides the Move into line');
   await release(end); check(await has('DragC/DragFolder/Child/Inside.md'), 'refused descendant drop changes nothing');
   await clean('refused drop');
+
+  await drag('DragC/DragFolder', 'DragB', 'DragB/DragFolder 1');
+  check(await has('DragB/DragFolder') && await has('DragB/DragFolder 1/Child/Inside.md'), 'folder collision numbers the directory and carries its children');
 
   const blank = await run(selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.bottom - 60 }; }, list);
   end = await begin('DragB/First.md', blank);
@@ -109,6 +113,38 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
   check(await has('DragA/Cancel.md'), 'Escape leaves the source in place');
   end = await begin('DragA/Cancel.md', 'DragC'); await sleep(800); await press('Escape'); await release(end);
   check(!await collapsed('DragC'), 'auto-expanded folder stays open after Escape');
+
+  // Cancellation must restore focus and remove every temporary window listener.
+  await click('.cm-content');
+  await run(() => { window.beforeDragFocus = document.activeElement; });
+  const windowId = (await send('Runtime.evaluate', { expression: 'window' })).result.objectId;
+  const listeners = async () => (await send('DOMDebugger.getEventListeners', { objectId: windowId })).listeners.map(l => `${l.type}:${l.useCapture}:${l.scriptId}:${l.lineNumber}`).sort();
+  const baselineListeners = await listeners();
+  end = await begin('DragA/Cancel.md', 'DragB'); await press('Escape'); await release(end);
+  check(await run(() => document.activeElement === beforeDragFocus), 'Escape restores the original editor focus');
+  assert.deepEqual(await listeners(), baselineListeners, 'Escape releases all drag listeners');
+
+  // A second headless page steals focus, delivering a real window blur.
+  await send('Page.bringToFront');
+  end = await begin('DragA/Cancel.md', 'DragB');
+  const other = await send('Target.createTarget', { url: 'about:blank', background: false });
+  await sleep(150);
+  await clean('window blur');
+  await send('Target.closeTarget', { targetId: other.targetId });
+  await send('Page.bringToFront'); await release(end);
+  check(await has('DragA/Cancel.md'), 'window blur leaves the file in place');
+  assert.deepEqual(await listeners(), baselineListeners, 'blur releases all drag listeners');
+
+  // Native touch cancellation exercises pointercancel without synthetic DOM events.
+  const touch = await point(row('DragA/Cancel.md'));
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...touch, id: 1 }] });
+  await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: touch.x + 8, y: touch.y, id: 1 }] });
+  await sleep(80);
+  check(await run(() => !!document.querySelector('.drag-ghost')), 'native touch movement starts the same pointer drag');
+  await send('Input.dispatchTouchEvent', { type: 'touchCancel', touchPoints: [] }); await sleep(80);
+  await clean('pointercancel');
+  check(await has('DragA/Cancel.md'), 'pointercancel leaves the file in place');
+  assert.deepEqual(await listeners(), baselineListeners, 'pointercancel releases all drag listeners');
 
   // A real move must take the existing confirmation/shortest-link/undo path.
   await run(async () => { await ws.open('DragLinks.md'); await ws.vault.refreshLinks(); });
@@ -170,4 +206,14 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
     await press('Escape'); await release(middle); await clean('auto-scroll Escape');
     check(await has('Scroll000.md'), 'auto-scroll cancellation never moves the file');
   }
+  await run(selector => { document.querySelector(selector).scrollTop = 800; }, list);
+  const topEdge = await run(selector => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.top + 25 }; }, list);
+  end = await begin('Scroll040.md', topEdge);
+  const beforeTop = await run(selector => document.querySelector(selector).scrollTop, list);
+  await sleep(250);
+  check(await run((selector, before) => document.querySelector(selector).scrollTop < before - 70, list, beforeTop), 'top edge scrolls upwards');
+  await press('Escape'); await release(end);
+  const cancelledTop = await run(selector => document.querySelector(selector).scrollTop, list); await sleep(150);
+  assert.equal(await run(selector => document.querySelector(selector).scrollTop, list), cancelledTop, 'Escape stops a running edge-scroll loop');
+  await clean('top-edge Escape');
 });
