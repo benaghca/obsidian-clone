@@ -13,6 +13,7 @@ import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
+import { noteName } from "./paths";
 import type { Workspace } from "./workspace";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
@@ -26,7 +27,21 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
   return {
     openLink: (target, where, view) => void ws.openLink(target, where, view ? ws.editors.groupOfView(view) : undefined),
     openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
-    notes: () => ws.vault.includedNotes(),
+    linkCandidates: () => {
+      const candidates = new Map(ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path))
+        .map(f => [f.path.toLowerCase(), { name: noteName(f.path), path: f.path }]));
+      for (const targets of Object.values(ws.vault.links.unresolved ?? {})) for (const target of targets) {
+        const path = /\.md$/i.test(target) ? target : `${target}.md`;
+        if (!ws.vault.isExcluded(path) && !ws.vault.linkExists(target, null) && !candidates.has(path.toLowerCase()))
+          candidates.set(path.toLowerCase(), { name: target, path });
+      }
+      const recent = ws.recent.flatMap(path => {
+        const key = path.toLowerCase(), item = candidates.get(key);
+        candidates.delete(key);
+        return item ? [item] : [];
+      });
+      return [...recent, ...candidates.values()];
+    },
     formatLink: (target, view, display) => ws.linkTo(target, ws.editors.pathOf(view), display),
     contextMenu: (view, at, pos, keyboard, image) => {
       const group = ws.editors.groupOfView(view);

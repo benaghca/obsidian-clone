@@ -20,3 +20,11 @@ test("returning from Reading focuses the active editor after reconfiguration wit
   Workspace.prototype.setMode.call(ws, "source", { mode: "reading", path: "other.md" } as Tab);
   expect(order).toEqual(["configure", "mode"]);
 });
+
+test("link formatting qualifies attachment names shared by multiple folders", () => {
+  const ws = { vault: { notes: [], files: [
+    { name: "photo.png", path: "A/photo.png", is_dir: false },
+    { name: "photo.png", path: "B/photo.png", is_dir: false },
+  ] }, linkStyle: () => ({ format: "shortest", wikilinks: true }) } as unknown as Workspace;
+  expect(Workspace.prototype.linkTo.call(ws, "B/photo.png", "Note.md")).toBe("[[B/photo.png]]");
+});

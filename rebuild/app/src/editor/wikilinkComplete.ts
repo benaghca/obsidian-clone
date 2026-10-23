@@ -1,5 +1,5 @@
 // The [[ link suggester. closeBrackets turns "[[" into "[[]]" with the caret
-// in the middle; this source then offers note names, fuzzy-filtered and
+// in the middle; this source offers files and unresolved targets, filtered and
 // ranked by CodeMirror's matcher. The footer hint is drawn by CSS.
 
 import {
@@ -28,12 +28,13 @@ function applyLink(view: EditorView, completion: Completion, from: number, to: n
 
 function wikilinkSource(ctx: CompletionContext): CompletionResult | null {
   const before = ctx.matchBefore(/\[\[[^[\]|#\n]*$/);
-  if (!before) return null;
+  if (!before || ctx.state.readOnly) return null;
   const host = ctx.state.facet(editorHost);
   if (!host) return null;
-  const options: Completion[] = host.notes().map((note) => ({
+  const options: Completion[] = host.linkCandidates().map((note, index) => ({
     label: note.name,
-    detail: parentDir(note.path) || undefined,
+    detail: !note.name.includes("/") && parentDir(note.path) ? `${parentDir(note.path)}/` : undefined,
+    sortText: String(index).padStart(8, "0"),
     apply: applyLink,
     type: "note",
     path: note.path,
