@@ -1,24 +1,13 @@
 // Tiny DOM helpers for the app chrome.
 
 type Child = Node | string | null | undefined | false;
-type Props = {
-  class?: string;
-  title?: string;
-  role?: string;
-  tabindex?: string;
-  // Fields: set as attributes before anything reads them (a value is the starting value).
-  type?: string;
-  value?: string;
-  placeholder?: string;
+// Fields are attributes; value is the starting value, before callers read it.
+type Props = Partial<Record<
+  "class" | "title" | "role" | "tabindex" | "type" | "value" | "placeholder" |
+  "id" | "list" | "min" | "max" | "step" | "alt" | "style", string
+>> & {
   spellcheck?: "false";
   contenteditable?: "plaintext-only";
-  id?: string;
-  list?: string;
-  min?: string;
-  max?: string;
-  step?: string;
-  alt?: string;
-  style?: string;
   [attr: `data-${string}`]: string | undefined;
   [attr: `aria-${string}`]: string | undefined;
   [event: `on${string}`]: ((e: any) => void) | undefined;
