@@ -81,6 +81,13 @@ export function htmlToMarkdown(html: string): string | null {
       const marker = "`".repeat(Math.max(1, ...Array.from(value.matchAll(/`+/g), m => m[0].length + 1)));
       return literal(marker + (/^`|`$/.test(value) ? " " + value + " " : value) + marker);
     }
+    if (tag === "SPAN") {
+      const { fontWeight, fontStyle } = (node as HTMLElement).style;
+      let styled = text;
+      if (fontStyle === "italic") { rich = true; styled = wrap(styled, "_"); }
+      if (/^(bold|[6-9]00)$/.test(fontWeight)) { rich = true; styled = wrap(styled, "**"); }
+      return styled;
+    }
     if (/^(B|STRONG|I|EM|S|DEL|STRIKE)$/.test(tag)) {
       // Google Docs wraps the whole fragment in <b style="font-weight:normal">.
       if ((tag === "B" || tag === "STRONG") && /^(normal|400)$/.test((node as HTMLElement).style.fontWeight)) return text;
