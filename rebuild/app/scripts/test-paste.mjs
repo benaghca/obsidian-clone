@@ -113,13 +113,13 @@ await withBrowser(async ({ send, run, click, chord, key, press, check }) => {
   assert.equal(await text(), '---\ntags: [paste]PLAIN\n---\n\nSTART\n');
   check(true, 'Source: pasting inside frontmatter uses plain text');
   await chord('z');
-  // URL selection behavior is preserved for Part B's separate caret change.
+  // A URL over selected text leaves the caret after the entire link.
   await reset('word'); await click('.cm-content'); await chord('End');
   for (let i=0;i<4;i++) await press('ArrowLeft', 8);
   await run(() => navigator.clipboard.writeText('https://example.com'));
   await chord('v'); await sleep(100);
   assert.equal(await text(), prefix + '[word](https://example.com)');
-  check(await run(() => ws.view.state.sliceDoc(ws.view.state.selection.main.from, ws.view.state.selection.main.to) === 'word'), 'URL-over-selection still leaves word selected (Part B untouched)');
+  check(await run(() => ws.view.state.selection.main.empty && ws.view.state.selection.main.head === ws.view.state.doc.length), 'URL-over-selection leaves the caret after the entire link');
   await reset('word'); await click('.cm-content .cm-line'); await chord('End');
   for (let i=0;i<4;i++) await press('ArrowLeft', 8);
   await key('Control', 2); await key('Shift', 10); await press('V', 10); await key('Shift', 2, 'keyUp'); await key('Control', 0, 'keyUp'); await sleep(100);

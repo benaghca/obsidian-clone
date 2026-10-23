@@ -91,11 +91,11 @@ function insertRich(view: EditorView, html: string, plain: string): boolean {
 }
 
 function insertUrl(view: EditorView, text: string): boolean {
-  // URL paste keeps the word selected; the caret change belongs to Part B.
-  if (/^(?:https?:\/\/|mailto:|www\.)\S+$/i.test(text) && view.state.selection.ranges.some(r => !r.empty) && !protectedSelection(view)) {
+  if (/^(?:https?:\/\/|mailto:|xmpp:|www\.)\S+$/i.test(text) && view.state.selection.ranges.some(r => !r.empty) && !protectedSelection(view)) {
+    const url = /^www\./i.test(text) ? "https://" + text : text;
     view.dispatch(view.state.changeByRange(r => ({
-      changes: { from: r.from, to: r.to, insert: r.empty ? text : `[${view.state.sliceDoc(r.from, r.to)}](${text})` },
-      range: r.empty ? EditorSelection.cursor(r.from + text.length) : EditorSelection.range(r.from + 1, r.to + 1),
+      changes: { from: r.from, to: r.to, insert: r.empty ? url : `[${view.state.sliceDoc(r.from, r.to)}](${url})` },
+      range: r.empty ? EditorSelection.cursor(r.from + url.length) : EditorSelection.cursor(r.to + url.length + 4),
     })), { userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full") });
     return true;
   }

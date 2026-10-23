@@ -60,4 +60,36 @@ await withBrowser(async ({ send, run, move, click, point, chord, press, fill, ch
     await press('Escape');
   }
 
+  await send('Page.bringToFront');
+  await send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  const prefix = '---\ntags: [paste]\n---\n\n', url = 'https://example.com';
+  await run(async prefix => {
+    const {api}=await import('/src/api.ts'); await api.createNote('URLCaret.md', prefix+'word tail');
+    await ws.vault.refreshFiles(); await ws.open('URLCaret.md');
+  }, prefix);
+  for (const mode of ['live','source','reading']) {
+    await run((mode,prefix) => {ws.setMode(mode); ws.view.dispatch({changes:{from:prefix.length,to:ws.view.state.doc.length,insert:'word tail'}});}, mode,prefix);
+    await sleep(120);
+    const wordEnd = await run(prefix => {const r=ws.view.coordsAtPos(prefix.length+4);return {x:r.left,y:(r.top+r.bottom)/2};},prefix);
+    await click(wordEnd);
+    for (let i=0;i<4;i++) await press('ArrowLeft',8);
+    await run(url => navigator.clipboard.writeText(url),url);
+    await chord('v'); await sleep(100);
+    if (mode === 'reading') {
+      check(await run(prefix=>ws.view.state.doc.toString()===prefix+'word tail',prefix), 'Reading: native URL paste remains read-only');
+      continue;
+    }
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+`[word](${url}) tail`);
+    check(await run(end => ws.view.state.selection.main.empty && ws.view.state.selection.main.head===end,prefix.length+url.length+8), `${mode}: URL-over-selection caret follows the whole link, before trailing text`);
+    await send('Input.insertText',{text:'!'});
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+`[word](${url})! tail`);
+    check(true, `${mode}: typing after URL paste inserts outside the link`);
+    await chord('z'); await chord('z');
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+'word tail');
+    check(true, `${mode}: typing and URL paste undo separately`);
+    await run(() => navigator.clipboard.writeText('www.example.com')); await chord('v'); await sleep(100);
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+'[word](https://www.example.com) tail');
+    check(await run(()=>ws.view.state.selection.main.empty), `${mode}: www URL normalization remains intact`);
+  }
+
 });

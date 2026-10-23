@@ -258,3 +258,34 @@ row into the input and kept focus there without changing the active file.
 Its public recent-file list in this scratch profile also contained newly
 created files; Grove follows the brief's explicit recently-*opened* rule
 and retains its existing exclusion of the active note.
+
+## 3. URL paste: caret after the entire generated link
+
+The shared clipboard URL handler now collapses each insertion's selection
+to the end of `[word](url)`. The generated link and its following text stay
+intact; typing continues outside the link. Native and async/context-menu
+paste share that handler, and plain-text paste stays plain.
+
+**Correction to Part A's baseline description:** CodeMirror's Markdown
+language support already installed `pasteURLAsLink`; that library handler
+ran before Grove's handler and retained the word selection. Disable that
+support option so the existing shared clipboard handler owns this paste
+and its caret/undo behavior. No extra paste handler was added. Preserve the
+library's `www.` → `https://www.` normalization and `xmpp:` recognition.
+The offline audit's existing literal `https://` prefix exception now also
+names `src/editor/clipboard.ts`, where that text-only normalization moved;
+no remote host or network API is allowed by this exception.
+
+The updated Part A suite passes. New native tests on frontmatter notes in
+Live Preview and Source verify the caret before trailing text, typing
+outside the link, separate undo steps for typing and paste, and www URL
+normalization. Reading rejects URL paste and stays read-only. The Part B
+browser suite now passes **39 named checks** across the three modes.
+
+Observation limitation: in this Obsidian 1.14.4 scratch run, native Ctrl+V
+over the selected `word` produced `[word](https://example.com)` but selected
+the **whole generated link** (public API anchor 0/head 27 on the body line,
+confirmed by the DOM selection), rather than collapsing the caret. Grove
+implements the brief's explicit requested collapsed caret after the whole
+link. This difference is recorded instead of claiming that observation
+showed a caret.
