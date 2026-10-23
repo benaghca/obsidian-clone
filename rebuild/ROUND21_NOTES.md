@@ -349,3 +349,82 @@ including mjs/JSON, of which **+190** are TS/CSS/Rust.
 
 Committed locally only; nothing pushed or merged. The supplied
 `.r21-codex-task.md` remains untracked. Part B complete. Stop here.
+
+# Stage 3 — Grok's four confirmed bugs
+
+Cherry-picked `6388d5f` as `7e52c70`, adding the hunter's findings and
+`test-r21-bugs.mjs` to `npm test`. The supplied regression reproduced all
+four bugs before fixes. Each fix has its own local commit and coverage:
+
+- **`9dccbed` — Google Docs spans.** Recognize inline span font weights
+  `bold`/600–900 and `font-style:italic`, reuse the existing marker wrapper,
+  and mark that fragment rich. The normal-weight outer Docs wrapper still
+  unwraps. Four added converter cases cover numeric/named bold, italic,
+  combined styles and surrounding unformatted text. Production TS **+7**.
+- **`2911342` — table cells.** Install the existing `clipboard` extension
+  in the nested cell editor. A compartment inherits the note's HTML setting
+  and follows changes while the cell stays active. Reuse `cellTransaction`
+  to escape pipes and convert pasted newlines to `<br>`; no second paste
+  handler or table formatter was added. Native tests verify bold HTML,
+  one-step undo in the note history, multiline paste without extra rows,
+  setting off/on in the active cell, and one rendered table in Reading.
+  Production TS **+8**.
+- **`ed30506` — preformatted DOM lines.** Replace the fence's `textContent`
+  extraction with a small text walk that retains literal whitespace and
+  adds DOM line boundaries for block elements and `<br>`. Keep language
+  classes, fence sizing and the existing literal-whitespace protection.
+  Added cases cover div lines, br lines, mixed real/DOM breaks, blank block
+  lines, and three literal newlines. The converter is **122 lines**, still
+  well under the brief's limit. Production TS **+17**.
+- **`47872ef` — Tab retains the selected path.** Allow the shared prompt's
+  existing `setQuery` callback to retain a matching row; the switcher
+  supplies the selected path. Ordinary query edits still reset to the first
+  result. Completion keeps its row even if the fuzzy result limit would
+  omit it, preserves that limit and scrolls the selected row into view.
+  Native hover, Tab, repeated Tab without pointer movement, and Enter pass
+  for same-name notes with frontmatter in Live Preview, Source and Reading;
+  another fixture covers more than 50 tied names. Production TS **+3**.
+
+The prior notes' proposed Google Docs span improvement is now implemented.
+These fixes add no dependency, backend command, permission, network call,
+CSS, animation or document-wide typing scan. All app tests use headless
+Chromium, private profiles, and the in-memory mock vault. No visible app or
+owner's real vault was opened; Obsidian/Tauri were not launched in stage 3.
+
+## Stage 3 verification
+
+All required gates passed:
+
+- `npm test`: **4** browser-discovery tests, **231** TypeScript unit tests in
+  **41** files, and **560** named browser checks, including the supplied
+  `test-r21-bugs.mjs` regression (**25** checks) and the expanded converter
+  suite (**46** cases plus its native integration checks).
+- The real-pointer geometry suite passed on plain/frontmatter notes in
+  Live Preview, Source and Reading: rendered lines within **1px** of
+  CodeMirror's top, zero direct-child vertical margins, and fold arrows
+  visible after stationary fold/unfold clicks with no pointer movement.
+- Ctrl+O, Ctrl+P and right-click menus opened within two frames without
+  animations; no sampled opening frame exceeded 20ms (maximum **17.1ms**).
+- `npm run build` and `npm run audit:offline`: passed; **130** source files,
+  release output, CSP, capabilities and dependencies checked.
+- `git diff --check`: passed.
+
+## Stage 3 net tracked app lines
+
+Same newline convention under `rebuild/app`, excluding `/gen/`, notes and
+images; mjs/JSON reported separately. Compare completed Part B `685dc5f`,
+including the hunter's regression:
+
+- Production TypeScript: **19,616 → 19,651 (+35)**.
+- TypeScript tests: **3,054 → 3,054 (0)**; new cases run in the browser suites.
+- TypeScript total: **22,670 → 22,705 (+35)**.
+- CSS: **3,733 → 3,733 (0)**.
+- Rust: **3,104 → 3,104 (0)**.
+- TS/CSS/Rust total: **29,507 → 29,542 (+35)**.
+- JavaScript mjs tests/tools: **1,771 → 1,928 (+157)**.
+- JSON: **2,229 → 2,229 (0)**; the existing test command gained the regression.
+- Stage 3 total including mjs/JSON: **+192**. Beyond the cherry-pick alone:
+  production TS **+35**, test TS/CSS/Rust/JSON **0**, mjs **+37** (**+72** total).
+
+All commits are local; nothing pushed or merged. Both supplied task files
+remain untracked. Stage 3 complete. Stop here.
