@@ -8,6 +8,8 @@
 // DOM is kept per group and per split and only moved when the tree changes,
 // so a split, a close or a tab move never rebuilds an editor.
 
+import { canvasViewports } from "../canvas/navigation";
+import { createCanvasView } from "../canvas/view";
 import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
@@ -403,17 +405,17 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     let shownCrumb = "";
     function renderHeader() {
       const tab = group.active;
-      const path = tab.path;
+      const path = tab.type === "canvas" ? tab.viewFile : tab.path;
       back.classList.toggle("is-disabled", tab.back.length === 0);
       forward.classList.toggle("is-disabled", tab.forward.length === 0);
       actions.hidden = !path && !tab.type;
       modeButton.hidden = !!tab.type;
       renderMode();
-      const crumb = tab.type ? `\0${tab.type}` : (path ?? "");
+      const crumb = tab.type && tab.type !== "canvas" ? `\0${tab.type}\0${tab.viewFile ?? ""}` : (path ?? "");
       if (crumb === shownCrumb) return;
       shownCrumb = crumb;
       breadcrumb.replaceChildren();
-      if (tab.type) {
+      if (tab.type && tab.type !== "canvas") {
         breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "image" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph"));
         return;
       }
@@ -425,7 +427,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
           h("span", { class: "view-header-breadcrumb-separator" }, "/"),
         );
       }
-      breadcrumb.append(h("span", { class: "view-header-title" }, noteName(path)));
+      breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "canvas" ? tabTitle(tab) : noteName(path)));
     }
 
     // ----- note view -----
@@ -473,13 +475,25 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       void held.url.then((url) => shownImage?.held === held && (picture.src = url), () => {});
     }
 
+    let canvas: ReturnType<typeof createCanvasView> | null = null;
+    let canvasPath: string | null = null;
+    let canvasTab: Tab | null = null;
     function renderView() {
       const tab = group.active;
       const path = tab.path;
       const image = tab.type === "image" ? (tab.viewFile ?? null) : null;
-      const graph = tab.type && !image ? graphFor(tab) : null;
+      const board = tab.type === "canvas" ? tab.viewFile ?? null : null;
+      if (!board) canvasViewports.delete(tab);
+      if (board !== canvasPath || tab !== canvasTab) {
+        canvas?.dispose();
+        canvasPath = board;
+        canvasTab = tab;
+        canvas = board ? createCanvasView(ws, board, group, tab) : null;
+        if (canvas) { leaf.append(canvas.el); canvas.el.focus({ preventScroll: true }); }
+      }
+      const graph = tab.type === "graph" || tab.type === "localgraph" ? graphFor(tab) : null;
       scroller.hidden = !path || !!graph;
-      empty.hidden = !!path || !!graph || !!image;
+      empty.hidden = !!path || !!graph || !!image || !!board;
       imageView.hidden = !image;
       renderImage(image);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
@@ -654,6 +668,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         hold?.cancel();
         backlinks?.setActive(false);
         renderImage(null);
+        canvas?.dispose();
         el.remove();
       },
     };

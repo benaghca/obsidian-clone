@@ -30,7 +30,7 @@ export interface Tab {
 }
 
 /** The views a tab can show instead of a note. */
-export type ViewType = "graph" | "localgraph" | "image";
+export type ViewType = "graph" | "localgraph" | "image" | "canvas";
 
 interface TabMemory {
   path: string;
@@ -110,13 +110,13 @@ export function tabForgets(tab: Tab, under: (path: string) => boolean) {
 }
 
 /** The icon a view's tab shows (a note's tab has none). */
-export const viewIcon = (tab: Tab) => (tab.type === "image" ? "image" : tab.type ? "git-fork" : null);
+export const viewIcon = (tab: Tab) => (tab.type === "canvas" ? "layout-dashboard" : tab.type === "image" ? "image" : tab.type ? "git-fork" : null);
 
 /** A tab's title: its note's name, the view's name, or "New tab". */
 export function tabTitle(tab: Tab): string {
   if (tab.type === "graph") return "Graph view";
   if (tab.type === "localgraph") return tab.viewFile ? `Graph of ${noteName(tab.viewFile)}` : "Local graph";
-  if (tab.type === "image") return fileName(tab.viewFile ?? "").replace(/\.[^.]+$/, "");
+  if (tab.type === "image" || tab.type === "canvas") return fileName(tab.viewFile ?? "").replace(/\.[^.]+$/, "");
   return tab.path ? noteName(tab.path) : "New tab";
 }
 

@@ -1,0 +1,76 @@
+.canvas-view {
+  position: relative;
+  overflow: hidden;
+  scrollbar-gutter: auto;
+  background-color: var(--background-primary);
+  background-image: radial-gradient(circle at .7px .7px, var(--background-modifier-border) .7px, transparent .7px);
+  padding: 0;
+}
+.canvas-world { position: absolute; transform-origin: 0 0; will-change: transform; }
+.canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; z-index: 1; }
+.canvas-node {
+  position: absolute;
+  border: 1px solid var(--background-modifier-border);
+  z-index: 2;
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%);
+}
+.canvas-node.is-colored {
+  border-color: color-mix(in srgb, var(--canvas-color) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--canvas-color) 70%, transparent), 0 .5px 1px .5px rgb(0 0 0 / 10%);
+}
+.canvas-node-content {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 16px;
+  border-radius: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.canvas-node.is-colored > .canvas-node-content { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); }
+.canvas-node-content img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.canvas-node-file:has(> .canvas-node-content > img) > .canvas-node-content { padding: 0; overflow: hidden; }
+.canvas-node-group { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); z-index: auto; }
+.canvas-group-label:empty { display: none; }
+.canvas-node-group:not(.is-colored) > .canvas-group-label { background: color-mix(in srgb, var(--canvas-color) 10%, transparent); color: var(--text-muted); }
+.canvas-group-label {
+  z-index: 2;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: -1px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--canvas-color);
+  color: white;
+  font-size: 22.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.canvas-edge-label {
+  z-index: 1;
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--background-primary);
+  font-size: 20px;
+  white-space: nowrap;
+}
+.canvas-node .embed-actions, .canvas-node .markdown-embed-link, .canvas-node .image-resize-corner { display: none; }
+
+.canvas-file-label { position: absolute; bottom: calc(100% + 4px); color: var(--text-faint); font-size: 14px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.canvas-node-content .cm-line.cm-h1 { font-size: 25.888px;
+  line-height: 1.2; }
+.canvas-node-file .canvas-node-content > img { display: block; width: 100%; height: 100%; }
+
+.canvas-controls { position: absolute; top: 10px; right: 10px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+.canvas-controls .clickable-icon { width: 32px; height: 32px; border-radius: 0; }
+.canvas-controls .clickable-icon + .clickable-icon { border-top: 1px solid var(--background-modifier-border); }
+.canvas-controls .clickable-icon:first-child { border-radius: 4px 4px 0 0; }
+.canvas-controls .clickable-icon:last-child { border-radius: 0 0 4px 4px; }
+.canvas-view:focus { outline: none; }
+.canvas-view.is-grabbable, .canvas-view.is-grabbable * { cursor: grab; }
+.canvas-view.is-panning, .canvas-view.is-panning * { cursor: grabbing; user-select: none; }

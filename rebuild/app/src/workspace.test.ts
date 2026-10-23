@@ -28,3 +28,8 @@ test("link formatting qualifies attachment names shared by multiple folders", ()
   ] }, linkStyle: () => ({ format: "shortest", wikilinks: true }) } as unknown as Workspace;
   expect(Workspace.prototype.linkTo.call(ws, "B/photo.png", "Note.md")).toBe("[[B/photo.png]]");
 });
+
+test("canvas wikilinks resolve as attachments instead of creating a markdown note", () => {
+  const ws = { vault: { notes: [], files: [{ name: "Board.canvas", path: "Folder/Board.canvas", is_dir: false }] }, active: { path: "Note.md" } } as unknown as Workspace;
+  expect(Workspace.prototype.resolve.call(ws, "Board.canvas")).toBe("Folder/Board.canvas");
+});

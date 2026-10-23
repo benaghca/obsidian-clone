@@ -6,7 +6,7 @@
 import { api, type FileEntry } from "./api";
 import type { ViewMode } from "./editor/editor";
 import type { NoteRef } from "./editor/host";
-import { fileName, isUnder, movedPath, noteName, parentDir } from "./paths";
+import { fileName, isUnder, movedPath, parentDir } from "./paths";
 import type { OpenWhere } from "./tabs";
 import type { Workspace } from "./workspace";
 
@@ -45,6 +45,19 @@ export async function newNote(ws: Workspace, folder: string = fileSettings.newNo
   return entry.path;
 }
 
+// Serialize creation so two stationary clicks cannot choose the same free name.
+let creatingCanvas = Promise.resolve();
+export function newCanvas(ws: Workspace, folder = fileSettings.newNoteFolder()): Promise<string> {
+  const next = creatingCanvas.then(async () => {
+    if (folder && !ws.vault.isFolder(folder)) await api.createFolder(folder).catch(() => {});
+    const entry = await createNote(ws, freeName(ws, `${folder ? `${folder}/` : ""}Untitled`, ".canvas"), '{}');
+    await ws.open(entry.path, { where: ws.active.path !== null || ws.active.type ? "tab" : false });
+    return entry.path;
+  });
+  creatingCanvas = next.then(() => {}, () => {});
+  return next;
+}
+
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
   const entry = await api.createFolder(freeName(ws, `${parent ? `${parent}/` : ""}Untitled`, ""));
@@ -61,15 +74,16 @@ function freeName(ws: Workspace, stem: string, ext: string, numbered = false) {
   }
 }
 
-/** Rename a note (keeping its folder and .md) or a folder. */
+/** Rename a note/canvas (keeping its folder and extension) or a folder. */
 export async function renameFile(ws: Workspace, path: string, newName: string) {
   newName = newName.trim();
   if (!newName || newName === "." || newName === "..") throw new Error("Enter a file or folder name.");
   if (/[\\/:\x00-\x1f]/.test(newName)) throw new Error("Names cannot contain /, \\ or : or control characters.");
   const isDir = ws.vault.isFolder(path);
-  if (newName === (isDir ? fileName(path) : noteName(path))) return;
+  const ext = isDir ? "" : /\.canvas$/i.test(path) ? path.slice(-7) : ".md";
+  if (newName === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return;
   const dir = parentDir(path);
-  await relocate(ws, path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
+  await relocate(ws, path, `${dir ? dir + "/" : ""}${newName}${ext}`);
 }
 
 /** Move a note or folder into another folder ("" for the vault root). */
@@ -99,11 +113,12 @@ async function relocate(ws: Workspace, from: string, to: string) {
   fileSettings.renamed(from, to, before);
 }
 
-/** Obsidian's "Make a copy": "Name 1.md" beside the note, opened in the active tab. */
+/** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
   await ws.saveNow(path);
-  const content = await ws.editors.text(path);
-  const entry = await createNote(ws, freeName(ws, path.replace(/\.md$/, ""), ".md", true), content);
+  const ext = /\.canvas$/i.test(path) ? path.slice(-7) : ".md";
+  const content = await (ext.toLowerCase() === ".canvas" ? api.readNote(path) : ws.editors.text(path));
+  const entry = await createNote(ws, freeName(ws, path.slice(0, -ext.length), ext, true), content);
   await ws.open(entry.path);
   return entry.path;
 }

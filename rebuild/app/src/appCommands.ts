@@ -13,7 +13,7 @@ import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
-import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
+import { copyNote, createNote, deleteFile, newCanvas, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import { addLines, frontmatterField } from "./editor/frontmatter";
 import { openNewProperty } from "./editor/properties";
@@ -84,6 +84,8 @@ const folderPrefix = (folder: string) => (trimSlashes(folder) ? `${trimSlashes(f
 export function registerAppCommands(parts: AppParts) {
   const { ws, bookmarks } = parts;
   const hasNote = () => !!ws.active.path;
+  const file = () => ws.active.path ?? (ws.active.type === "canvas" ? ws.active.viewFile : null);
+  const hasFile = () => !!file();
   const note = () => ws.active.path!;
 
   // Focus is in some other text field (the inline title, a search box, a
@@ -260,6 +262,7 @@ export function registerAppCommands(parts: AppParts) {
       () => openCommandPalette(commands), undefined, mod("p")),
     pluginAction("switcher", "switcher:open", "Quick switcher: Open quick switcher", "navigation",
       () => openQuickSwitcher(ws), undefined, mod("o")),
+    action("canvas:new-file", "Create new canvas", "layout-dashboard", () => newCanvas(ws)),
     { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => createNewNote() },
     { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => createNewNote(false) },
     action(
@@ -354,7 +357,11 @@ export function registerAppCommands(parts: AppParts) {
 
     // ----- the open file -----
     conditionalAction("workspace:edit-file-title", "Rename file", "pen-line",
-      () => parts.panes.focusTitle(true), hasNote, [{ key: "f2" }]),
+      () => {
+        if (ws.active.type !== "canvas") return parts.panes.focusTitle(true);
+        showLeft("files");
+        parts.left.renameInTree(file()!);
+      }, hasFile, [{ key: "f2" }]),
     conditionalAction(
       "app:delete-file",
       "Delete current file",
@@ -365,7 +372,7 @@ export function registerAppCommands(parts: AppParts) {
       "file-explorer:duplicate-file",
       "Make a copy of the current file",
       "files",
-      () => copyNote(ws, note()).catch((err) => console.warn("Could not copy", err)),
+      () => copyNote(ws, file()!).catch((err) => console.warn("Could not copy", err)), hasFile,
     ),
     conditionalAction("file-explorer:move-file", "Move current file to another folder", "folder-tree", () => openMovePrompt(ws, note())),
     pluginAction("note-composer", "note-composer:merge-file", "Note composer: Merge current file with another file...", "git-merge",

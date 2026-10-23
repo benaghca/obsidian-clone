@@ -152,7 +152,7 @@ export class Workspace {
    * folder or from the linking note's folder, or a note name, any case.
    */
   resolve(target: string, from: string | null = this.active.path): string | null {
-    return resolveLink(target, from, this.vault.notes);
+    return resolveLink(target, from, this.vault.notes) ?? resolveLink(target, from, this.vault.files.filter(f => !f.is_dir));
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
@@ -446,7 +446,7 @@ export class Workspace {
     path: string,
     opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
   ) {
-    if (IMAGE_EXT.test(path)) return this.openImage(path, opts.where ?? false);
+    if (IMAGE_EXT.test(path) || /\.canvas$/i.test(path)) return this.openAttachment(path, opts.where ?? false, opts.group);
     const state = await this.editors.load(path);
     if (!state) return;
     const from = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
@@ -481,11 +481,13 @@ export class Workspace {
   }
 
   /** An image from the file list: shown in the tab (or where `where` says), as Obsidian's image view. */
-  private openImage(path: string, where: OpenWhere) {
-    const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab");
+  private openAttachment(path: string, where: OpenWhere, from = this.activeGroup) {
+    if (!where && from.active.pinned && from.active.viewFile !== path) where = "tab";
+    const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
     pushBack(tab);
     tab.path = null;
-    tab.type = "image";
+    tab.type = /\.canvas$/i.test(path) ? "canvas" : "image";
+    this.recent = [path, ...this.recent.filter(p => p !== path)].slice(0, 50);
     tab.viewFile = path;
     this.show(group, tab, layoutChanged);
   }

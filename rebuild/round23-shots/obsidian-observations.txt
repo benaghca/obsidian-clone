@@ -1,0 +1,119 @@
+Obsidian 1.14.4, headless Ozone, private HOME/XDG/profile, scratch vault.
+Network namespace: unshare -Urn, loopback only.
+Rendered DOM/computed metrics and public workspace API only.
+
+RIBBON [
+  { label: null, icon: 'svg-icon sidebar-toggle-button-icon' },
+  { label: 'Open quick switcher', icon: 'svg-icon lucide-file-search' },
+  { label: 'Open graph view', icon: 'svg-icon lucide-git-fork' },
+  {
+    label: 'Create new canvas',
+    icon: 'svg-icon lucide-layout-dashboard'
+  },
+  {
+    label: "Open today's daily note",
+    icon: 'svg-icon lucide-calendar'
+  },
+  { label: 'Insert template', icon: 'svg-icon lucide-files' },
+  { label: 'Open command palette', icon: 'svg-icon lucide-terminal' },
+  { label: 'Create new base', icon: 'svg-icon lucide-layout-list' }
+]
+ACTUAL EMPTY Untitled 7.canvas "{}"
+ACTUAL CLEARED "{}" node count 0
+CONTROLS [
+  {
+    label: 'Canvas settings',
+    text: '',
+    icon: 'svg-icon lucide-settings'
+  },
+  { label: 'Zoom in', text: '', icon: 'svg-icon lucide-plus' },
+  { label: 'Reset zoom', text: '', icon: 'svg-icon lucide-rotate-cw' },
+  {
+    label: 'Zoom to fit\n(Shift + 1)',
+    text: '',
+    icon: 'svg-icon lucide-maximize'
+  },
+  { label: 'Zoom out', text: '', icon: 'svg-icon lucide-minus' },
+  { label: 'Undo', text: '', icon: 'svg-icon lucide-undo-2' },
+  { label: 'Redo', text: '', icon: 'svg-icon lucide-redo-2' },
+  {
+    label: 'Canvas help',
+    text: '',
+    icon: 'svg-icon lucide-help-circle'
+  }
+]
+EXACT [{"s":".canvas-node .markdown-preview-view","padding":"0px 16px","font":"16px / 24px \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif","background":"rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box","attrs":[["class","markdown-preview-view markdown-rendered node-insert-event show-indentation-guide allow-fold-headings allow-fold-lists"]]},{"s":".canvas-node h1","padding":"0px","font":"700 25.888px / 31.0656px \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif","background":"rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box","attrs":[["data-heading","Text card"],["dir","auto"]]},{"s":".canvas-node p","padding":"0px","font":"16px / 24px \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif","background":"rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box","attrs":[["dir","auto"]]},{"s":".canvas-node-file .canvas-node-label"},{"s":".canvas-edges foreignObject"},{"s":".canvas-edges .canvas-path-label"},{"s":".canvas-background pattern","padding":"0px","font":"15px / 19.5px \"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif","background":"rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box","attrs":[["id","07e682ec047238fd"],["patternUnits","userSpaceOnUse"],["x","468"],["y","360.6060606060606"],["width","15.757575757575758"],["height","15.757575757575758"]]},{"s":".canvas-background circle","padding":"0px","font":"15px / 19.5px \"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif","background":"rgba(0, 0, 0, 0) none repeat scroll 0% 0% / auto padding-box border-box","attrs":[["cx","0.7"],["cy","0.7"],["r","0.7"]]}]
+INITIAL {
+  grid: '15.757575757575758',
+  radius: '0.7',
+  nodes: [
+    {
+      width: 850.9091186523438,
+      x: 386.54547119140625,
+      y: 139.2589874267578
+    }
+  ]
+}
+WHEEL {
+  grid: '15.757575757575758',
+  radius: '0.7',
+  nodes: [
+    {
+      width: 850.9091186523438,
+      x: 386.54547119140625,
+      y: 46.259002685546875
+    }
+  ]
+}
+MAXZOOM {
+  grid: '40',
+  radius: '0.7',
+  nodes: [ { width: 2160, x: -249.5384521484375, y: -497.95794677734375 } ]
+}
+MINZOOM {
+  grid: '10',
+  radius: '0.7',
+  nodes: [ { width: 67.5, x: 778.826904296875, y: 409.7654724121094 } ]
+}
+FIT {
+  grid: '15.757575757575758',
+  radius: '0.7',
+  nodes: [
+    {
+      width: 850.9091186523438,
+      x: 386.54547119140625,
+      y: 139.2589874267578
+    }
+  ]
+}
+SPACE {
+  grid: '15.757575757575758',
+  radius: '0.7',
+  nodes: [
+    { width: 850.9091796875, x: 426.54541015625, y: 179.2589874267578 }
+  ]
+}
+MIDDLE {
+  grid: '15.757575757575758',
+  radius: '0.7',
+  nodes: [
+    {
+      width: 850.9091796875,
+      x: 466.54541015625,
+      y: 219.25900268554688
+    }
+  ]
+}
+TIP Create new canvas
+MENU Open in new tab
+Open to the right
+Open in new window
+Make a copy
+Move file to...
+Bookmark...
+Copy path
+Open version history
+Open in default app
+Show in system explorer
+Rename...
+Delete

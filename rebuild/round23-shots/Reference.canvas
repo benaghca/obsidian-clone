@@ -1,0 +1,33 @@
+{
+	"nodes":[
+		{"id":"group","type":"group","x":-40,"y":-80,"width":1080,"height":620,"color":"6","label":"Canvas reference"},
+		{"id":"note","type":"file","file":"Note.md","subpath":"#Section","x":780,"y":250,"width":240,"height":200},
+		{"id":"text0","type":"text","text":"# Text card\n**Bold** and [[Target]].\n- [ ] Read only","x":0,"y":0,"width":240,"height":200,"color":"1"},
+		{"id":"text1","type":"text","text":"Color 1","x":260,"y":0,"width":240,"height":200,"color":"2"},
+		{"id":"text2","type":"text","text":"Color 2","x":520,"y":0,"width":240,"height":200,"color":"3"},
+		{"id":"text3","type":"text","text":"Color 3","x":780,"y":0,"width":240,"height":200,"color":"4"},
+		{"id":"text4","type":"text","text":"Color 4","x":0,"y":250,"width":240,"height":200,"color":"5"},
+		{"id":"text5","type":"text","text":"Color 5","x":260,"y":250,"width":240,"height":200,"color":"6"},
+		{"id":"text6","type":"text","text":"Color hex","x":520,"y":250,"width":240,"height":200,"color":"#3467ab"},
+		{"id":"image","type":"file","file":"diagram.svg","x":0,"y":550,"width":240,"height":131},
+		{"id":"link","type":"link","url":"https://example.invalid/no-fetch","x":280,"y":550,"width":340,"height":100}
+	],
+	"edges":[
+		{"id":"edge0","fromNode":"text0","fromSide":"top","toNode":"text1","toSide":"top","toEnd":"none","label":"Connection"},
+		{"id":"edge1","fromNode":"text1","fromSide":"right","toNode":"text2","toSide":"top","fromEnd":"arrow"},
+		{"id":"edge2","fromNode":"text2","fromSide":"bottom","toNode":"text3","toSide":"top"},
+		{"id":"edge3","fromNode":"text3","fromSide":"left","toNode":"text4","toSide":"top","fromEnd":"arrow","toEnd":"none"},
+		{"id":"edge4","fromNode":"text4","fromSide":"top","toNode":"text5","toSide":"right"},
+		{"id":"edge5","fromNode":"text5","fromSide":"right","toNode":"text6","toSide":"right","fromEnd":"arrow"},
+		{"id":"edge6","fromNode":"text6","fromSide":"bottom","toNode":"text0","toSide":"right","toEnd":"none"},
+		{"id":"edge7","fromNode":"text0","fromSide":"left","toNode":"text1","toSide":"right","fromEnd":"arrow"},
+		{"id":"edge8","fromNode":"text1","fromSide":"top","toNode":"text2","toSide":"bottom"},
+		{"id":"edge9","fromNode":"text2","fromSide":"right","toNode":"text3","toSide":"bottom","fromEnd":"arrow","toEnd":"none"},
+		{"id":"edge10","fromNode":"text3","fromSide":"bottom","toNode":"text4","toSide":"bottom"},
+		{"id":"edge11","fromNode":"text4","fromSide":"left","toNode":"text5","toSide":"bottom","fromEnd":"arrow"},
+		{"id":"edge12","fromNode":"text5","fromSide":"top","toNode":"text6","toSide":"left","toEnd":"none"},
+		{"id":"edge13","fromNode":"text6","fromSide":"right","toNode":"text0","toSide":"left","fromEnd":"arrow"},
+		{"id":"edge14","fromNode":"text0","fromSide":"bottom","toNode":"text1","toSide":"left"},
+		{"id":"edge15","fromNode":"text1","fromSide":"left","toNode":"text2","toSide":"left","fromEnd":"arrow","toEnd":"none"}
+	]
+}
