@@ -1,8 +1,7 @@
 import { confirmDialog } from "../shell/confirm";
 import { h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { showMenu } from "../shell/menu";
-import { hints, openPrompt } from "../shell/prompt";
+import { closeMenu, showMenu } from "../shell/menu";
 import { settings } from "../settings/store";
 import type { CanvasNode } from "./model";
 
@@ -34,27 +33,28 @@ export function canvasHelp() {
 }
 export function selectionMenu(world: HTMLElement, remove: () => void, zoom: () => void,
   edit: (node: CanvasNode) => void, recolor: (nodes: CanvasNode[]) => void) {
-  let selected: CanvasNode[] = [];
-  const toolbar = h("div", { class: "canvas-selection-menu", role: "toolbar", "aria-label": "Selection" });
+  let selected: CanvasNode[] = [], disposed = false;
+  const toolbar = h("div", { class: "canvas-selection-menu", tabindex: "-1", role: "toolbar", "aria-label": "Selection" });
   const colorButton = keyButton(icon("palette"), "Set color", () => {
     const choose = (color?: string) => {
-      selected.forEach(node => { node.color = color; }); recolor(selected);
+      if (disposed) return;
+      const changed = selected.filter(node => node.color !== color);
+      if (changed.length) { changed.forEach(node => { node.color = color; }); recolor(changed); }
     };
+    const custom = h("input", { type: "color", "aria-label": "Custom color" });
+    custom.value = /^#[0-9a-f]{6}$/i.test(selected[0]?.color ?? "") ? selected[0].color! : "#000000";
+    custom.addEventListener("change", () => { choose(custom.value); closeMenu(); });
     showMenu([
       ...["Default", "Red", "Orange", "Yellow", "Green", "Cyan", "Purple"].map((title, i) => ({
-        title, content: h("span", { class: "canvas-swatch", style: `background:${i ? `var(--color-${title.toLowerCase()})` : "var(--background-modifier-border-focus)"}` }),
+        title, checked: selected.every(node => (node.color ?? "0") === String(i)), content: h("span", { class: "canvas-swatch", style: `background:${i ? `var(--color-${title.toLowerCase()})` : "var(--background-modifier-border-focus)"}` }),
         action: () => choose(i ? String(i) : undefined),
       })),
-      { title: "Custom color", content: h("span", { class: "canvas-swatch mod-custom" }), action: () => openPrompt({
-        placeholder: "Hex color (#rrggbb)", instructions: hints("to set color"), emptyText: "Enter a hex color.",
-        items: query => /^#[0-9a-f]{6}$/i.test(query) ? [query] : [],
-        render: (value, row) => { row.textContent = value; }, choose: value => choose(value),
-      }) },
-    ], colorButton, { className: "canvas-color-menu" });
+      { title: "Custom color", content: h("span", { class: "canvas-swatch mod-custom" }, custom) },
+    ], toolbar, { className: "canvas-color-menu", align: "center" });
   });
-  const editButton = keyButton(icon("square-pen"), "Edit", () => { if (selected.length === 1) edit(selected[0]); });
-  toolbar.append(keyButton(icon("trash-2"), "Remove", remove), colorButton,
-    keyButton(icon("scan-search"), "Zoom to selection\n(Shift + 2)", zoom), editButton);
+  const editButton = keyButton(icon("square-pen"), "Edit", () => { closeMenu(); if (selected.length === 1) edit(selected[0]); });
+  toolbar.append(keyButton(icon("trash-2"), "Remove", () => { closeMenu(); remove(); }), colorButton,
+    keyButton(icon("scan-search"), "Zoom to selection\n(Shift + 2)", () => { closeMenu(); zoom(); }), editButton);
   world.append(toolbar);
   return {
     update(nodes: CanvasNode[]) {
@@ -65,6 +65,6 @@ export function selectionMenu(world: HTMLElement, remove: () => void, zoom: () =
       toolbar.style.left = `${(left + right) / 2}px`;
       toolbar.style.top = `${Math.min(...nodes.map(n => n.y))}px`;
     },
-    dispose: () => toolbar.remove(),
+    dispose() { disposed = true; if (toolbar.classList.contains("has-active-menu")) closeMenu(); toolbar.remove(); },
   };
 }

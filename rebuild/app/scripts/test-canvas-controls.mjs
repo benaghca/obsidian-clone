@@ -31,19 +31,27 @@ await withBrowser(async ({run,send,open,read,click,point,move,press,chord,check,
    check(await run(label=>document.querySelector('.tooltip')?.textContent===label&&!document.querySelector('.tooltip').getAnimations().length,label),label+': native hover uses instant shared tooltip');
  }
  await shot('grove-controls');
+ await color('Default');check(await read()===original,'Choosing the existing default color does not rewrite canvas bytes or add history');
  await color('Red');check((await data()).nodes[0].color==='1','Preset red writes Obsidian color 1');
  check(await run(()=>document.querySelector('[data-node-id="a"]').classList.contains('is-colored')),'Preset color updates rendered card immediately');
  await click(button('Set color'));const at=await point(button('Set color'));await press('Escape');await stationary(at);
  check(await run(()=>!!document.querySelector('.canvas-color-menu')),'Stationary Set color click reopens the shared palette');
  await press('Escape');await color('Purple');check((await data()).nodes[0].color==='6','Preset purple writes Obsidian color 6');
- await click(button('Set color'));await click('.canvas-color-menu [aria-label="Custom color"]');await send('Input.insertText',{text:'#123abc'});await press('Enter');await sleep(350);
- check((await data()).nodes[0].color==='#123abc','Custom hex color is preserved exactly in canvas JSON');
+ await click(button('Set color'));await click('.canvas-color-menu input[type="color"]');await sleep(150);await shot('grove-native-color-picker');
+ await press('Escape');await sleep(80);if(await run(()=>!!document.querySelector('.canvas-color-menu')))await press('Escape');
+ check((await data()).nodes[0].color==='6','Native custom-color picker opens and cancellation preserves the selected color');
+ await click(button('Set color'));await press('End');await press('Enter');await sleep(100);
+ check(await run(()=>document.activeElement===document.querySelector('.canvas-color-menu input[type="color"]')),'Keyboard selection opens the native custom-color control');await shot('grove-keyboard-color-picker');await press('Escape');
+ if(await run(()=>!!document.querySelector('.canvas-color-menu')))await press('Escape');
+
+ await chord('z');await sleep(350);check((await data()).nodes[0].color==='1','Native picker dismissal keeps immediate keyboard undo available');
+ await press('Z',10);await sleep(350);check((await data()).nodes[0].color==='6','Immediate keyboard redo survives the canvas rebuild');await click('[data-node-id="a"]');
  await color('Default');check(!('color' in (await data()).nodes[0]),'Default removes the color field');
- await color('Green');const saved=await read();
+ await color('Green');const saved=await read();await click(button('Set color'));check(await run(()=>document.querySelector('.canvas-color-menu [aria-label="Green"]').classList.contains('is-checked')),'Palette marks the current selected-card color');await press('Escape');await move({x:1100,y:700});await shot('grove-toolbar-green');
  await writeFile(new URL('../../round25-shots/Grove-controls.canvas',import.meta.url),saved);
  check((await data()).nodes[0].extra.keep&&(await data()).future.keep.join(',')==='1,2'&&(await data()).edges[0].extra===42,'Toolbar save preserves unknown node, root and edge data');
  await click(button('Undo'));await sleep(350);check(!('color' in (await data()).nodes[0]),'Undo button restores preceding canvas document');
- const undoAt=await point(button('Undo'));await stationary(undoAt);await sleep(350);check((await data()).nodes[0].color==='#123abc','Repeated stationary Undo applies the next checkpoint');
+ const undoAt=await point(button('Undo'));await stationary(undoAt);await sleep(350);check((await data()).nodes[0].color==='6','Repeated stationary Undo applies the next checkpoint');
  await click(button('Redo'));await sleep(350);check(!('color' in (await data()).nodes[0]),'Redo button restores color removal');
  await stationary(await point(button('Redo')));await sleep(350);check(await read()===saved,'Repeated stationary Redo restores the saved toolbar edit');
  await click('[data-node-id="a"]');const transform=await run(()=>document.querySelector('.canvas-world').style.transform);
@@ -62,6 +70,9 @@ await withBrowser(async ({run,send,open,read,click,point,move,press,chord,check,
  await click(button('Canvas settings'));await click('.menu-item:nth-child(3)');const locked=await read();await click('[data-node-id="a"]');await press('Delete');await sleep(350);
  check(await read()===locked&&await run(()=>document.querySelector('.canvas-view').classList.contains('is-readonly')),'Read-only prevents deletion and hides edit controls');
  await click(button('Canvas settings'));await click('.menu-item:nth-child(3)');
+ await click('[data-node-id="a"]');await click(button('Set color'));
+ await run(async()=>{const{api}=await import('/src/api.ts');const path=ws.active.viewFile,data=JSON.parse(await api.readNote(path));data.nodes[0].x+=40;await api.writeNote(path,JSON.stringify(data));ws.vault.written(path);});await sleep(150);
+ check(await run(()=>!document.querySelector('.canvas-color-menu')),'External canvas reload closes the stale selection palette');
  await click(button('Canvas help'));check(await run(()=>document.querySelector('.canvas-help')?.textContent.includes('Shift + 2')),'Canvas help opens a local shortcut dialog');await press('Escape');await stationary(await point(button('Canvas help')));check(await run(()=>!!document.querySelector('.canvas-help')),'Stationary help click reopens the dialog');await press('Escape');
  await click('[data-node-id="b"]');const removeAt=await point(button('Remove'));await click(removeAt);await sleep(350);await stationary(removeAt);check((await data()).nodes.length===1&&(await data()).edges.length===0,'Remove deletes the selected card and its incident edge');
  await open('History.canvas','{}');await click('.canvas-card-menu [aria-label="Drag to add card"]');await press('Escape');await sleep(350);await chord('z');await sleep(350);

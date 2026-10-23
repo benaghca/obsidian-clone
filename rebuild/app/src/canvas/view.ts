@@ -76,7 +76,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     let next = from.pop();
     while (next === source) next = from.pop();
     if (next === undefined) return;
-    to.push(source); changed(next, true);
+    to.push(source); changed(next, true); el.focus({ preventScroll: true });
   }
   let cleanups: (() => void)[] = [];
   const clear = () => { stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };

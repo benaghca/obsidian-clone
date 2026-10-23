@@ -42,7 +42,7 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
     formatLink: (target, view, display, subpath) => ws.linkTo(target, ws.editors.pathOf(view), display, subpath),
     async linkDocument(target, view) {
       const current = ws.editors.pathOf(view);
-      if (!target) return { path: current, state: view.state, current: true };
+      if (!target) return current ? { path: current, state: view.state, current: true } : null;
       const path = ws.resolve(target, view.state.facet(editorHost)?.embeds?.pathOf(view) ?? current);
       if (!path || !/\.md$/i.test(path)) return null;
       if (path === current) return { path, state: view.state, current: true };

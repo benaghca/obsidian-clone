@@ -35,7 +35,7 @@ type MenuAnchor = { x: number; y: number } | HTMLElement;
 
 interface MenuOptions {
   /** Dropdowns: line the menu up with the anchor's left (default) or right edge. */
-  align?: "left" | "right";
+  align?: "left" | "center" | "right";
   className?: string;
   /** Opened from the keyboard: highlight the first item straight away. */
   keyboard?: boolean;
@@ -92,7 +92,7 @@ class Menu {
       clearTimeout(this.timer);
     });
     // The menu never takes focus, so a press inside it must not move focus either.
-    this.el.addEventListener("mousedown", (e) => e.preventDefault());
+    this.el.addEventListener("mousedown", e => { if (!(e.target as Element).closest("input")) e.preventDefault(); });
   }
 
   private row(item: MenuEntry, i: number, withIcons: boolean) {
@@ -108,7 +108,7 @@ class Menu {
     );
     if (item.content) { row.replaceChildren(item.content); row.setAttribute("aria-label", item.title); }
     row.addEventListener("mousemove", () => this.hover(i));
-    row.addEventListener("click", () => this.activate(i, false));
+    row.addEventListener("click", e => { if (!(e.target as Element).closest("input")) this.activate(i, false); });
     return row;
   }
 
@@ -171,6 +171,8 @@ class Menu {
       this.openChild(i, keyboard);
       return;
     }
+    const input = item.content?.querySelector<HTMLInputElement>('input[type="color"]');
+    if (input) { input.focus(); input.showPicker(); return; }
     closeMenu();
     item.action?.();
   }
@@ -227,14 +229,16 @@ function place(el: HTMLElement, x: number, y: number) {
 }
 
 /** Close the open menu and release its input listeners. */
-function closeMenu() {
+export function closeMenu() {
   if (!root) return;
+  const focused = root.contains(document.activeElement!);
   root.close();
   root = null;
+  if (focused && anchorEl?.isConnected) anchorEl.focus({ preventScroll: true });
   anchorEl?.classList.remove("has-active-menu");
   anchorEl = null;
   window.removeEventListener("keydown", onKey, true);
-  document.removeEventListener("mousedown", onPress, true);
+  document.removeEventListener("pointerdown", onPress, true);
   window.removeEventListener("blur", closeMenu);
   window.removeEventListener("resize", closeMenu);
 }
@@ -257,7 +261,7 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
   let y: number;
   if (at instanceof HTMLElement) {
     const r = at.getBoundingClientRect();
-    x = opts.align === "right" ? r.right - size.width : r.left;
+    x = opts.align === "right" ? r.right - size.width : opts.align === "center" ? r.left + (r.width - size.width) / 2 : r.left;
     y = r.bottom + 4;
     if (y + size.height > innerHeight - EDGE && r.top - size.height - 4 >= EDGE) y = r.top - size.height - 4;
     at.classList.add("has-active-menu");
@@ -273,7 +277,7 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
   root = menu;
   if (opts.keyboard) menu.first();
   window.addEventListener("keydown", onKey, true);
-  document.addEventListener("mousedown", onPress, true);
+  document.addEventListener("pointerdown", onPress, true);
   window.addEventListener("blur", closeMenu);
   window.addEventListener("resize", closeMenu);
 }

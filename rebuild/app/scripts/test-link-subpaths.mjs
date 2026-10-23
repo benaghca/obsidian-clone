@@ -46,12 +46,13 @@ await withBrowser(async({run,send,open,click,move,point,press,double,check,shot}
  await run(()=>{const path='Target-live.md';ws.editors.change(path,{changes:{from:ws.editors.doc(path).length,insert:'\nChanged externally.'},userEvent:'input'});});
  await accept();check(await run(()=>ws.view.state.doc.toString().endsWith('[[Target-live^Item two')),'A stale block suggestion does not insert a link or overwrite a changed target');
  check((await text('Target-live.md')).endsWith('Changed externally.')&&!/- Item two \^/.test(await text('Target-live.md')),'Concurrent target edits survive a stale block choice');
- await open('Suggest.canvas',{nodes:[{id:'card',type:'text',x:0,y:0,width:500,height:320,text:'# Card heading\n\nCard paragraph.\n\n'}],edges:[]});
- await double('.canvas-node');await press('End',2);await send('Input.insertText',{text:'[[#'});await sleep(230);check((await labels())[0]==='Card heading','Canvas text editor lists its own headings');await accept();await press('Escape');await sleep(350);
- check(await run(async()=>{const{api}=await import('/src/api.ts');return JSON.parse(await api.readNote('Suggest.canvas')).nodes[0].text.endsWith('[[#Card heading]]');}),'Canvas-local heading completion saves through the canvas document');
+ const board={nodes:[{id:'card',type:'text',x:0,y:0,width:500,height:320,text:'# Card heading\n\nCard paragraph.\n\n'}],edges:[]};
+ await open('LocalSuggest.canvas',board);await double('.canvas-node');await press('End',2);await send('Input.insertText',{text:'[[#'});await sleep(230);
+ check(!(await labels()).length,'Canvas-local fragment completion matches Obsidian with no note-local headings');await press('Escape');
+ await open('Suggest.canvas',board);await double('.canvas-node');await press('End',2);await send('Input.insertText',{text:'[[Target-live#'});await sleep(230);
+ check((await labels())[0]==='Top **bold**','Canvas editor resolves headings in vault notes');await accept();await press('Escape');await sleep(350);
+ check(await run(async()=>{const{api}=await import('/src/api.ts');return JSON.parse(await api.readNote('Suggest.canvas')).nodes[0].text.endsWith('[[Target-live#Top **bold**]]');}),'Canvas heading completion saves through the canvas document');
  await double('.canvas-node');await press('End',2);await send('Input.insertText',{text:'\n\n[[Target-live^Item'});await sleep(230);check((await labels())[0]==='Item one','Canvas editor resolves vault block choices');await accept();await press('Escape');await sleep(350);
  check(/- Item one \^[a-z0-9]{6}/.test(await text('Target-live.md')),'Canvas block choice adds the ID through the vault note editor');
- await double('.canvas-node');await press('End',2);await send('Input.insertText',{text:'\n\n[[^Card paragraph'});await sleep(230);await accept();await press('Escape');await sleep(350);
- check(await run(async()=>{const{api}=await import('/src/api.ts');const s=JSON.parse(await api.readNote('Suggest.canvas')).nodes[0].text,id=/Card paragraph\. \^([a-z0-9]{6})/.exec(s)?.[1];return !!id&&s.endsWith(`[[#^${id}]]`);}),'Canvas-local block IDs and links stay inside the card document');
  await shot('grove-canvas-suggestions');
 }, {height:800,screenshots:new URL('../../round25-shots/',import.meta.url).pathname});
