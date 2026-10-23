@@ -81,6 +81,19 @@ await withBrowser(async ({ send, run, click, chord, press, move }) => {
     await sleep(150);
     const cellDoc = await doc();
     check(cellDoc.includes('**bold**'), `Live Preview table cell converts bold HTML, got ${JSON.stringify(cellDoc)}`);
+    await chord('z'); await sleep(80);
+    check(await doc() === table, 'table-cell rich paste is one undo step in the note history');
+    await write('<p><b>first</b></p><p>second</p>', 'first\nsecond');
+    await chord('v'); await sleep(100);
+    check((await doc()).includes('**first**<br><br>second') && (await doc()).split('\n').length === table.split('\n').length, 'multiline HTML stays in one cell without adding table rows');
+    await run(async () => { const {settings}=await import('/src/settings/store.ts'); settings.set('app.json','autoConvertHTML',false); });
+    await write('<b>OFF</b>', 'OFF'); await chord('v'); await sleep(100);
+    check((await doc()).includes('OFF') && !(await doc()).includes('**OFF**'), 'active cell inherits Auto convert HTML being switched off');
+    await run(async () => { const {settings}=await import('/src/settings/store.ts'); settings.set('app.json','autoConvertHTML',true); });
+    await write('<b>ON</b>', 'ON'); await chord('v'); await sleep(100);
+    check((await doc()).includes('**ON**'), 'active cell inherits Auto convert HTML being switched back on');
+    await run(() => ws.setMode('reading')); await sleep(100);
+    check(await run(() => document.querySelectorAll('.cm-content table').length === 1 && !!document.querySelector('.cm-content table .cm-strong')), 'Reading renders a single table with the converted cell formatting');
   }
 
   await run(async () => {
