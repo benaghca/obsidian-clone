@@ -7,10 +7,11 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run && npm run test:geometry",
+    "test": "vitest run && npm run test:geometry && npm run test:fixes",
     "audit:offline": "npm run build && node scripts/audit-offline.mjs",
     "tauri": "tauri",
-    "test:geometry": "node scripts/test-geometry.mjs"
+    "test:geometry": "node scripts/test-geometry.mjs",
+    "test:fixes": "node scripts/test-round19-fixes.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

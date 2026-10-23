@@ -170,15 +170,30 @@ function selectedLines(state: EditorState) {
 
 /** Tab/Shift+Tab: use normal indentation, then renumber only the affected lists in the same undo step. */
 export const indentList = (outdent = false): StateCommand => ({ state, dispatch }) => {
+  if (state.readOnly) return false;
   const roots = new Map<number, SyntaxNode>();
   const moved = new Set<number>();
-  for (const line of selectedLines(state)) {
-    const marker = /^([ \t>]*)\d+[.)][ \t]+/.exec(line.text);
+  const items: SyntaxNode[] = [];
+  const carried = new Set<number>();
+  const lines = new Map(selectedLines(state).map(line => [line.number, line]));
+  for (const line of [...lines.values()]) {
+    const marker = /^([ \t>]*)(?:[-*+]|\d+[.)])[ \t]+/.exec(line.text);
     if (!marker) continue;
     const tree = ensureSyntaxTree(state, line.to, 100) ?? syntaxTree(state);
     const mark = tree.resolveInner(line.from + marker[1].length + 1, -1);
-    if (mark.name !== "ListMark" || mark.parent?.parent?.name !== "OrderedList") continue;
-    moved.add(mark.from);
+    if (mark.name !== "ListMark" || mark.parent?.name !== "ListItem") continue;
+    if (items.some(item => item.from <= mark.from && item.to >= mark.to)) continue;
+    items.push(mark.parent);
+    const collect = (node: SyntaxNode) => {
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.name === "OrderedList") carried.add(child.getChild("ListItem")!.getChild("ListMark")!.from);
+        collect(child);
+      }
+    };
+    collect(mark.parent);
+    // Move the whole item, including continuation paragraphs and nested lists.
+    for (let n = line.number; n <= state.doc.lineAt(mark.parent.to).number; n++) lines.set(n, state.doc.line(n));
+    if (mark.parent.parent?.name === "OrderedList") moved.add(mark.from);
     let root: SyntaxNode | null = null;
     for (let node: SyntaxNode | null = mark; node; node = node.parent) {
       if (node.name === "OrderedList" || node.name === "BulletList") root = node;
@@ -189,11 +204,13 @@ export const indentList = (outdent = false): StateCommand => ({ state, dispatch 
     if (!roots.size || !tr.docChanged) return dispatch(tr);
     const changes: { from: number; to: number; insert: string }[] = [];
     const movedTo = new Set([...moved].map((pos) => tr.changes.mapPos(pos, 1)));
+    const carriedTo = new Set([...carried].map(pos => tr.changes.mapPos(pos, 1)));
     for (const root of roots.values()) {
       const from = tr.changes.mapPos(root.from, -1), to = tr.changes.mapPos(root.to, 1);
       const tree = ensureSyntaxTree(tr.state, to, 100) ?? syntaxTree(tr.state);
       tree.iterate({ from, to, enter(ref) {
         if (ref.name !== "OrderedList") return;
+        if (carriedTo.has(ref.node.getChild("ListItem")!.getChild("ListMark")!.from)) return false;
         let number = 1;
         for (const item of ref.node.getChildren("ListItem")) {
           const mark = item.getChild("ListMark")!;
@@ -212,13 +229,16 @@ export const indentList = (outdent = false): StateCommand => ({ state, dispatch 
     const fixes = ChangeSet.of(changes, tr.newDoc.length);
     dispatch(state.update({ changes: tr.changes.compose(fixes), selection: tr.newSelection.map(fixes), userEvent: tr.annotation(Transaction.userEvent) }));
   };
-  // As in Obsidian, a list level is at least four spaces, even with a smaller text indent setting.
-  if (roots.size && /^ {1,3}$/.test(state.facet(indentUnit))) {
-    const changes = selectedLines(state).map((line) => {
-      const space = /^[ \t]*/.exec(line.text)![0];
-      return outdent
-        ? { from: line.from, to: line.from + space.length, insert: indentString(state, Math.max(0, countColumn(space, state.tabSize) - 4)) }
-        : { from: line.from, insert: "    " };
+  // List levels are at least four spaces; indentation belongs inside quotes.
+  if (roots.size) {
+    const step = Math.max(4, countColumn(state.facet(indentUnit), state.tabSize));
+    const changes = [...lines.values()].sort((a, b) => a.from - b.from).map((line) => {
+      const quote = /^[ \t]*(?:>[ \t]?)+/.exec(line.text)?.[0] ?? "";
+      const space = /^[ \t]*/.exec(line.text.slice(quote.length))![0];
+      const from = line.from + quote.length;
+      const columns = Math.max(0, countColumn(space, state.tabSize) + (outdent ? -step : step));
+      // Tabs after > start at the quote's column, so use spaces for a full level.
+      return { from, to: from + space.length, insert: quote ? " ".repeat(columns) : indentString(state, columns) };
     });
     apply(state.update({ changes, userEvent: outdent ? "delete.dedent" : "input.indent" }));
     return true;

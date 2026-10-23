@@ -1,4 +1,4 @@
-// Round 19 bugs. These assert the brief's list behavior and fail on current code.
+// Permanent regressions from the round 19 hunter pass.
 import { deleteCharBackward, history, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { indentUnit } from "@codemirror/language";
@@ -77,4 +77,17 @@ test("two list Backspaces are two undo steps", () => {
   expect(state.doc.toString()).toBe("- a\nnested");
   expect(undo({ state, dispatch })).toBe(true);
   expect(state.doc.toString()).toBe("- a\n    nested");
+});
+
+test("moving a parent preserves a non-default child number", () => {
+  expect(run(indentList(), "1. a\n2. |b\n    5. child\n3. c")).toBe("1. a\n    1. |b\n        5. child\n2. c");
+  expect(run(indentList(true), "1. a\n    1. |b\n        5. child\n2. c")).toBe("1. a\n2. |b\n    5. child\n3. c");
+});
+
+test("a selection including children carries their numbering unchanged", () => {
+  expect(run(indentList(), "1. a\n2. «b\n    5. child\n    9. other»\n3. c")).toBe("1. a\n    1. «b\n        5. child\n        9. other»\n2. c");
+});
+
+test("default tabs inside quotes still make a full list level", () => {
+  expect(run(indentList(), "> 1. first\n> 2. |second\n> 3. third", "\t")).toBe("> 1. first\n>     1. |second\n> 2. third");
 });
