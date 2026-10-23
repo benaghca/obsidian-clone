@@ -1,8 +1,8 @@
-// Cut, Copy, Paste and Paste as plain text for the editor's context menu.
-// These run only from a click in that menu (a user gesture). The native
-// commands go through CodeMirror's own clipboard handling; the async
-// clipboard API is the fallback where a webview refuses them. Also how the
-// app copies text it shows (paths, URLs, a code block).
+// Clipboard commands and the note's single native paste handler.
+// The context menu uses native clipboard commands first and the async
+// clipboard API as a fallback. Native HTML paste and that fallback share
+// conversion; ordinary text stays with CodeMirror's clipboard handling.
+// Also how the app copies paths, URLs, code blocks and images.
 
 import { isolateHistory } from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
