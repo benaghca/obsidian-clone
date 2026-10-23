@@ -1,0 +1,5 @@
+Playwright Chromium: all checks passed.
+Input: page.mouse.move/down/up, second click sends down/up without movement.
+Frontmatter: Live Preview, Source, Reading; styled tooltip has zero animations; numbered creation with exact Obsidian empty bytes ({}).
+Canvas: all node types, 16 edges, wikilink click, heading subpath scroll, byte preservation.
+External link: zero remote requests before/after two explicit mouse clicks; opener adapter called twice.
