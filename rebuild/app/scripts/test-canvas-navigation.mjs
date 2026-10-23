@@ -24,7 +24,7 @@ await withBrowser(async ({send,run,click,move,point,check,press,shot})=>{
   const initial=await state();
   const data=JSON.parse(fixture), left=Math.min(...data.nodes.map(n=>n.x)),right=Math.max(...data.nodes.map(n=>n.x+n.width)),top=Math.min(...data.nodes.map(n=>n.y)),bottom=Math.max(...data.nodes.map(n=>n.y+n.height));
   check(near(initial.s,Math.min(1,initial.w/((right-left)*1.1),initial.h/((bottom-top)*1.1)))&&near(initial.x,initial.w/2-(left+right)/2*initial.s),'Opening fit uses observed 10% extent padding and actual bounds');
-  check(await run(()=>[...document.querySelectorAll('.canvas-controls .clickable-icon')].map(e=>e.getAttribute('aria-label')).join('|')==='Zoom in|Reset zoom|Zoom to fit\n(Shift + 1)|Zoom out'),'Zoom controls match observed order and Lucide icons');
+  check(await run(()=>[...document.querySelectorAll('.canvas-controls .clickable-icon')].map(e=>e.getAttribute('aria-label')).join('|')==='Canvas settings|Zoom in|Reset zoom|Zoom to fit\n(Shift + 1)|Zoom out|Undo|Redo|Canvas help'),'Zoom controls match observed order and Lucide icons');
   for(const [label,selector] of [['Zoom in',button('Zoom in')],['Reset zoom',button('Reset zoom')],['Zoom to fit\n(Shift + 1)',fit],['Zoom out',button('Zoom out')]]){
     await move({x:500,y:780});await move(await point(selector));await sleep(600);
     check(await run(label=>{const e=document.querySelector('.tooltip');return e?.textContent===label&&e.getAnimations().length===0;},label),label+': native hover has styled tooltip without animation');

@@ -14,6 +14,7 @@ import { h } from "../shell/dom";
 import type { Group, Tab } from "../tabs";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
+import { canvasReadOnly } from "./controls";
 import { canvasCards, editTextCard } from "./cards";
 import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
@@ -64,10 +65,13 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   function changed(next: string, redraw = false) {
     if (next === source) return;
     source = next;
+    navigation.updateHistory(undo.some(text => text !== source), redo.some(text => text !== source));
     clearTimeout(timer); timer = window.setTimeout(save, 300);
     if (redraw) draw();
   }
   function history(forward: boolean) {
+    if (canvasReadOnly.has(el)) return;
+    stopText?.();
     const from = forward ? redo : undo, to = forward ? undo : redo;
     let next = from.pop();
     while (next === source) next = from.pop();
@@ -76,9 +80,9 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   }
   let cleanups: (() => void)[] = [];
   const clear = () => { stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
-  const navigation = canvasNavigation(el, world, tab, path);
+  const navigation = canvasNavigation(el, world, tab, path, history, () => draw());
   const disposeCards = canvasCards(el, world, ws, (node: CanvasNode) => {
-    if (gone) return;
+    if (gone || canvasReadOnly.has(el)) return;
     stopText?.();
     undo.push(source); redo = [];
     selectAfterDraw = node.id; editAfterDraw = node.type === "text" ? node.id : undefined;
@@ -105,6 +109,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const bounds = boundsOf();
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
+    const edits = new Map<string, () => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
     const updateEdges: { edge: typeof edges[number]; line: SVGPathElement; label?: HTMLElement }[] = [];
     edges.forEach((edge, i) => {
@@ -201,7 +206,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (node.type === "text") {
         paint(node.text ?? "");
         const edit = () => {
-          if (card.classList.contains("is-editing")) return;
+          if (canvasReadOnly.has(el) || card.classList.contains("is-editing")) return;
           stopText?.();
           if (painted) { release(painted); painted = undefined; }
           let checkpoint = false;
@@ -210,6 +215,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
             node.text = text; changed(editCanvas(source, [node]));
           }, repaint => { stopText = undefined; if (repaint) paint(node.text ?? ""); });
         };
+        edits.set(node.id, edit);
         card.addEventListener("dblclick", event => {
           if (!event.isTrusted || (event.target as Element).closest("a, [data-href], input, .cm-editor, .canvas-node-resizer")) return;
           event.stopPropagation(); edit();
@@ -221,7 +227,11 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
     cleanups.push(canvasEditing(el, world, nodes, changed => {
       const ids = new Set(changed.map(n => n.id));
-      for (const n of changed) Object.assign(cards.get(n.id)!.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
+      for (const n of changed) {
+        const card = cards.get(n.id)!;
+        Object.assign(card.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
+        card.classList.toggle("is-colored", !!n.color); card.style.setProperty("--canvas-color", color(n.color));
+      }
       for (const { edge, line, label } of updateEdges) if (ids.has(edge.fromNode) || ids.has(edge.toNode)) {
         const curve = edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge);
         line.setAttribute("d", curve.path);
@@ -233,10 +243,11 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (next === source) return;
       undo.push(source); redo = [];
       changed(next, !!deleted?.size);
-    }, history, selectedId));
+    }, history, nodes => navigation.zoomTo(nodes), node => edits.get(node.id)?.(), selectedId));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);
+    navigation.updateHistory(undo.some(text => text !== source), redo.some(text => text !== source));
   }
   const flush = () => { if (timer) save(); };
   window.addEventListener("beforeunload", flush);

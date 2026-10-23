@@ -12,6 +12,7 @@ import { icon, type IconName } from "./icons";
 
 export interface MenuEntry {
   title: string;
+  content?: HTMLElement;
   icon?: IconName;
   action?: () => void;
   disabled?: boolean;
@@ -35,6 +36,7 @@ type MenuAnchor = { x: number; y: number } | HTMLElement;
 interface MenuOptions {
   /** Dropdowns: line the menu up with the anchor's left (default) or right edge. */
   align?: "left" | "right";
+  className?: string;
   /** Opened from the keyboard: highlight the first item straight away. */
   keyboard?: boolean;
 }
@@ -104,6 +106,7 @@ class Menu {
       item.checked ? h("div", { class: "menu-item-icon mod-checked" }, icon("check", 16)) : null,
       item.submenu ? h("div", { class: "menu-item-icon mod-submenu" }, icon("chevron-right", 16)) : null,
     );
+    if (item.content) { row.replaceChildren(item.content); row.setAttribute("aria-label", item.title); }
     row.addEventListener("mousemove", () => this.hover(i));
     row.addEventListener("click", () => this.activate(i, false));
     return row;
@@ -247,6 +250,7 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
   if (sameAnchor) return;
   const menu = new Menu(items, null);
   if (!menu.items.length) return;
+  if (opts.className) menu.el.classList.add(opts.className);
   document.body.append(menu.el);
   const size = menu.el.getBoundingClientRect();
   let x: number;

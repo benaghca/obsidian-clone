@@ -196,6 +196,7 @@ export const FILES = {
   "backlink.json": BACKLINK,
   "note-composer.json": NOTE_COMPOSER,
   "graph.json": GRAPH,
+  "canvas.json": { snapToGrid: field(true, bool), snapToObjects: field(true, bool) },
 } satisfies Record<string, Spec>;
 
 export type FileName = keyof typeof FILES;

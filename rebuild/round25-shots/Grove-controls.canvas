@@ -1,0 +1,22 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{
+			"id":"a",
+			"type":"text",
+			"x":0,
+			"y":0,
+			"width":280,
+			"height":170,
+			"text":"Card A",
+			"extra":{"keep":true},
+			"color":"4"
+		},
+		{"id":"b","type":"text","x":430,"y":60,"width":220,"height":120,"text":"Card B"}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","toNode":"b","extra":42}
+	]
+}

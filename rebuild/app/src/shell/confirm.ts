@@ -10,7 +10,7 @@ interface ConfirmOptions {
   title: string;
   message: string | Node;
   confirm: string;
-  cancel?: string;
+  cancel?: string | false;
   /** Red confirm button (deleting). */
   warning?: boolean;
   /** Show a "Don't ask again" checkbox. */
@@ -34,7 +34,7 @@ export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAsk
       h("div", { class: "modal-title" }, o.title),
       h("div", { class: "modal-content" }, o.message),
       o.dontAskAgain ? h("label", { class: "modal-checkbox" }, box, "Don't ask again") : null,
-      h("div", { class: "modal-button-container" }, yes, no),
+      h("div", { class: "modal-button-container" }, yes, o.cancel === false ? null : no),
     );
     const overlay = h("div", { class: "modal-container mod-dim mod-settings-container" }, h("div", { class: "modal-bg", onclick: () => done(false) }), modal);
     let finished = false;

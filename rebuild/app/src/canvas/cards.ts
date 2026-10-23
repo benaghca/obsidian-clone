@@ -8,6 +8,7 @@ import { icon } from "../shell/icons";
 import { hints, openPrompt, pickFrom, suggestionText } from "../shell/prompt";
 import { switcherItems } from "../shell/switcherItems";
 import type { Workspace } from "../workspace";
+import { canvasReadOnly } from "./controls";
 import type { CanvasNode } from "./model";
 
 export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode) => void) {
@@ -17,7 +18,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     return { x: Math.round(((x ?? r.left + r.width / 2) - r.left - m.e) / m.a), y: Math.round(((y ?? r.top + r.height / 2) - r.top - m.f) / m.a) };
   };
   function insert(type: "text" | "file", p: { x: number; y: number }, width = 250, height = 60, file?: string) {
-    if (gone) return;
+    if (gone || canvasReadOnly.has(el)) return;
     add({ id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), x: Math.round(p.x - width / 2), y: Math.round(p.y - height / 2), width, height, type, ...(file ? { file } : { text: "" }) });
   }
   function pickNote(p = point()) {
@@ -65,7 +66,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   }
   el.append(toolbar);
   const doubleClick = (e: MouseEvent) => {
-    if (e.isTrusted && !e.defaultPrevented && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu")) insert("text", point(e.clientX, e.clientY));
+    if (e.isTrusted && !e.defaultPrevented && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) insert("text", point(e.clientX, e.clientY));
   };
   el.addEventListener("dblclick", doubleClick);
   return () => { gone = true; cancelDrag?.(); toolbar.remove(); el.removeEventListener("dblclick", doubleClick); };
