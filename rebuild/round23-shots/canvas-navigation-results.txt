@@ -1,0 +1,37 @@
+PASS Opening fit uses observed 10% extent padding and actual bounds
+PASS Zoom controls match observed order and Lucide icons
+PASS Zoom in: native hover has styled tooltip without animation
+PASS Zoom in: repeated stationary click keeps board active and dismisses tooltip
+PASS Reset zoom: native hover has styled tooltip without animation
+PASS Reset zoom: repeated stationary click keeps board active and dismisses tooltip
+PASS Zoom to fit
+(Shift + 1): native hover has styled tooltip without animation
+PASS Zoom to fit
+(Shift + 1): repeated stationary click keeps board active and dismisses tooltip
+PASS Zoom out: native hover has styled tooltip without animation
+PASS Zoom out: repeated stationary click keeps board active and dismisses tooltip
+PASS Repeated stationary Zoom in clicks each apply sqrt(2)
+PASS Reset zoom is 100%
+PASS Wheel/trackpad pans both axes at observed rate
+PASS Ctrl+wheel zooms around pointer at observed rate
+PASS Maximum zoom is 2x
+PASS Minimum zoom is 1/16x and grid coarsens to 10px
+PASS Fit button returns to initial framing
+PASS space drag follows native pointer without selecting or navigating cards
+PASS middle drag follows native pointer without selecting or navigating cards
+PASS Space-held stationary click on wikilink never follows it
+PASS Refreshing canvas contents preserves its live viewport
+PASS Switching tabs preserves live canvas viewport
+PASS Same canvas in a new tab has independent initial fit
+PASS Closing second canvas tab restores first tab viewport
+PASS Reopening in a reused tab resets to fit, matching Obsidian
+PASS Shift+1 fits the focused canvas
+PASS Resizing preserves world center and zoom
+PASS Small, offset canvas centers on its nodes without zooming past 100%
+PASS Generated fixture renders 300 cards and 400 edges
+FRAMES pan {"samples":70,"p95":16.700000000000728,"max":16.80000000000109}
+PASS 300-card/400-edge pan presentation frames stay under 20ms
+FRAMES zoom {"samples":70,"p95":16.799999999999272,"max":16.80000000000109}
+PASS 300-card/400-edge zoom presentation frames stay under 20ms
+PASS Pan/zoom transforms one world without changing card DOM or geometry
+PASS Pan, zoom and tab changes leave canvas bytes unchanged
