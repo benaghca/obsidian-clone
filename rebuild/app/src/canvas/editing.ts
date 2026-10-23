@@ -115,14 +115,14 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   el.addEventListener("keydown", e => {
     if ((e.target as Element).closest("input, textarea, [contenteditable=true]")) return;
     if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); zoom(chosen()); return; }
-    const undo = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z";
+    const undo = (e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase());
     const remove = e.key === "Delete" || e.key === "Backspace";
     const direction = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, number[]>)[e.key];
     if (direction && (e.altKey || e.ctrlKey || e.metaKey)) return;
     if (!undo && !remove && !direction && e.key !== "Escape") return;
     e.preventDefault(); e.stopPropagation();
     if (cancel) { cancel(); return; }
-    if (undo) history(e.shiftKey);
+    if (undo) history(e.shiftKey || e.key.toLowerCase() === "y");
     else if (canvasReadOnly.has(el) && e.key !== "Escape") return;
     else if (remove && selected.size) commit([], selected);
     else if (direction && selected.size) {

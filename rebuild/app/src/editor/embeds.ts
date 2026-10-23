@@ -18,6 +18,7 @@ import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { editorHost } from "./host";
+import { headingLabel, headingTarget } from "./headings";
 import { zoomImage } from "./imageZoom";
 import { DrawnWidget, editAt, editButton, isLinkEvent, onDestroy, readingMode, release, render, widgetAction } from "./render";
 
@@ -77,7 +78,7 @@ export function embedSection(text: string, sub: string): NotePart | null {
     }
     return { text: lines.slice(a, b + 1).join("\n"), line: a };
   }
-  const want = sub.split("#").pop()!.trim().toLowerCase();
+  const want = headingTarget(sub.split("#").pop()!).toLowerCase();
   let start = -1;
   let level = 0;
   let fence = false;
@@ -85,7 +86,7 @@ export function embedSection(text: string, sub: string): NotePart | null {
     if (/^\s*(```|~~~)/.test(lines[i])) fence = !fence;
     const m = fence ? null : /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(lines[i]);
     if (!m) continue;
-    if (start < 0 && m[2].toLowerCase() === want) {
+    if (start < 0 && headingTarget(headingLabel(lines[i])).toLowerCase() === want) {
       start = i;
       level = m[1].length;
     } else if (start >= 0 && m[1].length <= level) return { text: lines.slice(start, i).join("\n").trimEnd(), line: start };

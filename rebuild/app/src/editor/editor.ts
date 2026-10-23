@@ -70,6 +70,7 @@ export const VIEW_MODES: Record<ViewMode, Extension> = {
     propertiesBlock,
     readingMode.of(true),
     EditorView.editable.of(false),
+    EditorView.contentAttributes.of({ tabindex: "0" }),
     EditorState.readOnly.of(true),
     EditorView.editorAttributes.of({ class: "is-reading-mode" }),
   ],

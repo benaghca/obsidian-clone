@@ -3,12 +3,17 @@
 
 import type { Text } from "@codemirror/state";
 
+/** Heading source without ATX markers or a trailing block ID. */
+export const headingLabel = (text: string) => text.replace(/^#{1,6}[ \t]*/, "").replace(/[ \t]+\^[a-zA-Z0-9-]+[ \t]*$/, "").replace(/[ \t]+#+[ \t]*$/, "").trim();
+/** Obsidian drops pipes and collapses spaces in heading link targets. */
+export const headingTarget = (text: string) => text.replace(/\|/g, "").replace(/\s+/g, " ").trim();
+
 /**
  * Start of the first heading line whose text matches (case-insensitively);
  * "A#B" means B. For "^id", the block carrying an inline or standalone ID.
  */
 export function headingPos(doc: Text, heading: string): number | null {
-  const want = heading.split("#").pop()!.trim().toLowerCase();
+  const want = headingTarget(heading.split("#").pop()!).toLowerCase();
   if (!want || want === "^") return null;
   const block = want.startsWith("^") ? ` ${want}` : null;
   let pos = 0;
@@ -25,7 +30,7 @@ export function headingPos(doc: Text, heading: string): number | null {
       }
     } else if (text.startsWith("#")) {
       const m = /^#{1,6}\s+(.*?)(?:\s+#+)?\s*$/.exec(text);
-      if (m && m[1].toLowerCase() === want) return pos;
+      if (m && headingTarget(headingLabel(text)).toLowerCase() === want) return pos;
     }
     pos += text.length + 1;
   }

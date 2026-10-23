@@ -8,6 +8,7 @@
 // shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
+import { isolateHistory } from "@codemirror/commands";
 import { editorHost, type EditorHost, type EmbedHost } from "./editor/host";
 import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
@@ -52,7 +53,7 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
     insertBlockId(target, changes, view) {
       const doc = target.current ? view.state.doc : target.path ? ws.editors.doc(target.path) : null;
       if (!doc?.eq(target.state.doc)) return false;
-      const spec = { changes, userEvent: "input.complete" };
+      const spec = { changes, userEvent: "input.complete", annotations: isolateHistory.of("full") };
       if (target.current) view.dispatch(spec); else ws.editors.change(target.path!, spec);
       return true;
     },

@@ -12,7 +12,7 @@ import { canvasReadOnly } from "./controls";
 import type { CanvasNode } from "./model";
 
 export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode) => void) {
-  let gone = false, cancelDrag: (() => void) | undefined;
+  let gone = false, controlClick = false, cancelDrag: (() => void) | undefined;
   const point = (x?: number, y?: number) => {
     const r = el.getBoundingClientRect(), m = new DOMMatrix(getComputedStyle(world).transform);
     return { x: Math.round(((x ?? r.left + r.width / 2) - r.left - m.e) / m.a), y: Math.round(((y ?? r.top + r.height / 2) - r.top - m.f) / m.a) };
@@ -65,11 +65,14 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     toolbar.append(button);
   }
   el.append(toolbar);
+  // Remember the first target even when its action removes the toolbar.
+  const click = (e: MouseEvent) => { if (e.detail === 1) controlClick = !!(e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu"); };
   const doubleClick = (e: MouseEvent) => {
-    if (e.isTrusted && !e.defaultPrevented && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) insert("text", point(e.clientX, e.clientY));
+    if (e.isTrusted && !e.defaultPrevented && !controlClick && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) insert("text", point(e.clientX, e.clientY));
   };
+  el.addEventListener("click", click, true);
   el.addEventListener("dblclick", doubleClick);
-  return () => { gone = true; cancelDrag?.(); toolbar.remove(); el.removeEventListener("dblclick", doubleClick); };
+  return () => { gone = true; cancelDrag?.(); toolbar.remove(); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); };
 }
 
 // A temporary note editor owns only the card's Markdown, never a vault note.

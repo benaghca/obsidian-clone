@@ -1,18 +1,21 @@
 // File, heading and block completions share CodeMirror's fuzzy matcher.
 import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
-import { ChangeSet, type Text } from "@codemirror/state";
+import { isolateHistory } from "@codemirror/commands";
+import { ChangeSet, type ChangeSpec, type Text } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { parentDir } from "../paths";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
+import { headingLabel, headingTarget } from "./headings";
 import { headingsFromTree, plainText } from "./outline";
 
-function insertLink(view: EditorView, from: number, to: number, link: string) {
+function insertLink(view: EditorView, from: number, to: number, link: string, blockId: ChangeSpec = []) {
   const closed = view.state.sliceDoc(to, to + 2) === "]]";
-  view.dispatch({ changes: { from, to: closed ? to + 2 : to, insert: link },
-    selection: { anchor: from + link.length }, userEvent: "input.complete" });
+  const changes = ChangeSet.of([blockId, { from, to: closed ? to + 2 : to, insert: link }], view.state.doc.length);
+  view.dispatch({ changes, selection: { anchor: changes.mapPos(from, -1) + link.length },
+    userEvent: "input.complete", annotations: isolateHistory.of("full") });
 }
 function applyLink(view: EditorView, completion: Completion, from: number, to: number) {
   const host = view.state.facet(editorHost);
@@ -26,20 +29,26 @@ export function linkBlocks(tree: Tree, doc: Text, start = 0): Block[] {
   const blocks: Block[] = [], source = doc.toString();
   function add(node: SyntaxNode) {
     if (node.from < start) return;
-    const raw = source.slice(node.from, node.to);
+    const nested = node.name === "ListItem" ? node.getChild("BulletList") ?? node.getChild("OrderedList") : null;
+    const to = nested ? node.from + source.slice(node.from, nested.from).trimEnd().length : node.to;
+    const raw = source.slice(node.from, to);
     if (!raw.trim() || /^\^[a-zA-Z0-9-]+\s*$/.test(raw)) return;
     const inline = /(?:^|[ \t]+)\^([a-zA-Z0-9-]+)[ \t]*$/.exec(raw);
     const separate = !/^(Paragraph|ListItem|ATXHeading[1-6])$/.test(node.name);
-    const after = /^\s*\n\s*\^([a-zA-Z0-9-]+)[ \t]*(?:\n|$)/.exec(source.slice(node.to));
+    const after = /^\s*\n\s*\^([a-zA-Z0-9-]+)[ \t]*(?:\n|$)/.exec(source.slice(to));
     let label = inline ? raw.slice(0, inline.index) : raw;
     if (node.name === "FencedCode") label = label.replace(/^[^\n]*\n/, "").replace(/\n[ \t]*(`{3,}|~{3,})[ \t]*$/, "");
     else label = label.replace(/^[ \t]*>[ \t]?/gm, "").replace(/^[ \t]*(?:[-+*]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/gm, "").split("\n").map(plainText).join("\n");
-    blocks.push({ from: node.from, to: node.to, label: label.trim(), id: inline?.[1] ?? after?.[1], separate });
+    blocks.push({ from: node.from, to, label: label.trim(), id: inline?.[1] ?? after?.[1], separate });
+  }
+  function list(node: SyntaxNode) {
+    for (let item = node.firstChild; item; item = item.nextSibling) if (item.name === "ListItem") {
+      add(item);
+      for (let child = item.firstChild; child; child = child.nextSibling) if (child.name === "BulletList" || child.name === "OrderedList") list(child);
+    }
   }
   for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
-    if (node.name === "BulletList" || node.name === "OrderedList") {
-      for (let item = node.firstChild; item; item = item.nextSibling) if (item.name === "ListItem") add(item);
-    } else add(node);
+    if (node.name === "BulletList" || node.name === "OrderedList") list(node); else add(node);
   }
   return blocks;
 }
@@ -48,6 +57,8 @@ async function subpathSource(ctx: CompletionContext, from: number, target: strin
   const host = ctx.state.facet(editorHost)!;
   const view = ctx.view;
   if (!view || !host.linkDocument) return null;
+  const [path, section] = target.split("#");
+  target = path;
   const document = await host.linkDocument(target, view);
   if (!document || ctx.aborted) return null;
   const { state } = document, doc = state.doc;
@@ -55,24 +66,28 @@ async function subpathSource(ctx: CompletionContext, from: number, target: strin
   while (!ctx.aborted && !(tree = ensureSyntaxTree(state, doc.length, 4))) await new Promise(resolve => setTimeout(resolve, 0));
   if (!tree || ctx.aborted) return null;
   const start = state.field(frontmatterField, false)?.end ?? 0;
+  const headings = headingsFromTree(tree, doc).filter(h => h.from >= start);
+  const sectionIndex = section ? headings.findIndex(h => headingTarget(headingLabel(doc.lineAt(h.from).text)).toLowerCase() === headingTarget(section).toLowerCase()) : -1;
+  if (section && sectionIndex < 0) return null;
+  const begin = headings[sectionIndex], end = begin ? headings.slice(sectionIndex + 1).find(h => h.level <= begin.level)?.from ?? doc.length : doc.length;
   const options: Completion[] = [];
   if (blocks) for (const block of linkBlocks(tree, doc, start)) {
+    if (begin && (block.from < begin.from || block.from >= end)) continue;
     if (document.current && block.from <= ctx.pos && block.to >= ctx.pos) continue;
     options.push({ label: block.id ? `${block.label} ${block.id}` : block.label, displayLabel: block.label, detail: block.id, type: "block", apply(view, _option, _from, to) {
-      let at = from, id = block.id;
+      let change: ChangeSpec = [], id = block.id;
       if (!id) {
         do { id = crypto.randomUUID().replaceAll("-", "").slice(0, 6); } while (doc.toString().includes(`^${id}`));
-        const change = { from: block.to, insert: `${block.separate ? "\n\n" : " "}^${id}` };
-        if (!host.insertBlockId?.(document, change, view)) return;
-        if (document.current) { const changes = ChangeSet.of(change, doc.length); at = changes.mapPos(at, 1); to = changes.mapPos(to, 1); }
+        change = { from: block.to, insert: `${block.separate ? "\n\n" : " "}^${id}` };
+        if (document.current ? !view.state.doc.eq(doc) : !host.insertBlockId?.(document, change, view)) return;
       }
-      insertLink(view, at, to, host.formatLink(target ? document.path! : "", view, undefined, `#^${id}`));
+      insertLink(view, from, to, host.formatLink(target ? document.path! : "", view, undefined, `#^${id}`), document.current ? change : []);
     } });
   }
-  else for (const heading of headingsFromTree(tree, doc)) if (heading.from >= start) {
-    const raw = doc.lineAt(heading.from).text.replace(/^#{1,6}[ \t]*/, "").replace(/[ \t]+#+[ \t]*$/, "").trim();
+  else for (const heading of headings) {
+    const raw = headingLabel(doc.lineAt(heading.from).text);
     options.push({ label: raw, detail: `H${heading.level}`, type: "heading", apply(view, _option, _from, to) {
-      insertLink(view, from, to, host.formatLink(target ? document.path! : "", view, undefined, `#${raw}`));
+      insertLink(view, from, to, host.formatLink(target ? document.path! : "", view, undefined, `#${headingTarget(raw)}`));
     } });
   }
   options.forEach((option, i) => option.sortText = String(i).padStart(8, "0"));

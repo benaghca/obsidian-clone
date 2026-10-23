@@ -24,7 +24,7 @@ export function canvasHelp() {
     ["Zoom to fit", "Shift + 1"], ["Zoom to selection", "Shift + 2"],
     ["Add to / remove from selection", "Shift + Click", "Shift + Drag to select"],
     ["Constrain card movement to axis", "Shift + Drag"], ["Disable snapping while dragging", "Alt"],
-    ["Remove card", "Backspace", "Delete"], ["Undo", "Ctrl + Z"], ["Redo", "Ctrl + Shift + Z"],
+    ["Remove card", "Backspace", "Delete"], ["Undo", "Ctrl + Z"], ["Redo", "Ctrl + Y", "Ctrl + Shift + Z"],
   ];
   void confirmDialog({ title: "Canvas help", confirm: "Close", cancel: false,
     message: h("div", { class: "canvas-help" }, ...rows.map(([label, ...keys]) => h("div", null, label,
@@ -63,7 +63,9 @@ export function selectionMenu(world: HTMLElement, remove: () => void, zoom: () =
       if (!nodes.length) return;
       const left = Math.min(...nodes.map(n => n.x)), right = Math.max(...nodes.map(n => n.x + n.width));
       toolbar.style.left = `${(left + right) / 2}px`;
-      toolbar.style.top = `${Math.min(...nodes.map(n => n.y))}px`;
+      const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label")]
+        .filter(label => nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
+      toolbar.style.top = `${Math.min(...nodes.map(n => n.y), ...labels.map(label => label.parentElement!.offsetTop + label.offsetTop))}px`;
     },
     dispose() { disposed = true; if (toolbar.classList.contains("has-active-menu")) closeMenu(); toolbar.remove(); },
   };

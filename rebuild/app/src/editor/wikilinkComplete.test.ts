@@ -36,3 +36,17 @@ test("an orphan standalone ID cannot crash navigation or embedding", () => {
   expect(headingPos(document("^target"), "^target")).toBe(0);
   expect(embedSection("^target", "^target")).toBeNull();
 });
+
+test("nested list rows own their text, ID and insertion position at every depth", () => {
+  const text = '- Parent item ^parent\n\n  - Nested item\n    1. Deep item ^deep\n- Sibling item';
+  const blocks = linkBlocks(markdownLanguage.parser.parse(text), document(text));
+  expect(blocks.map(b => b.label)).toEqual(['Parent item', 'Nested item', 'Deep item', 'Sibling item']);
+  expect(blocks.map(b => b.id)).toEqual(['parent', undefined, 'deep', undefined]);
+  expect(blocks.map(b => text.slice(b.from, b.to))).toEqual(['- Parent item ^parent', '- Nested item', '1. Deep item ^deep', '- Sibling item']);
+});
+
+test("heading embeds use the same block-ID and pipe normalization as navigation", () => {
+  const text = '# Has id ^keep\n\nFirst.\n\n# Pipe | split\n\nSecond.';
+  expect(embedSection(text, 'Has id')?.text).toBe('# Has id ^keep\n\nFirst.');
+  expect(embedSection(text, 'Pipe split')?.text).toBe('# Pipe | split\n\nSecond.');
+});

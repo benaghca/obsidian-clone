@@ -285,3 +285,101 @@ section completes Part B; stop here.
 3. Group and note-card editing (round 27). Makes the remaining card types
    editable in place. Roughly 300–500 TS/test lines, reusing the current
    editor and toolbar callbacks.
+
+## Stage 3 fixes
+
+Worktree `grove-r25-codex`, branch `rebuild/r25-codex`. Cherry-picked hunter
+commit `3819656` as `8364964`, including its report, native-input regression
+suite and `npm test` wiring. The fixes add **28 production TS lines net**;
+no dependencies, CSS, Rust or opening animations were added.
+
+1. **Remove double-click:** capture the first click's control target before
+   its action removes the selection toolbar. The canvas retains that fact
+   through the second click and ignores its background double-click. A new
+   background double-click still creates a card normally.
+2. **Heading block IDs:** share heading-label cleanup between suggestions,
+   heading navigation and heading embeds. A trailing ` ^id` is metadata,
+   so `Has id` is offered/inserted and resolves to `# Has id ^keep`.
+3. **Heading pipes:** preserve the complete suggestion label, but remove
+   pipes and collapse spaces in its target, matching the observed native
+   Obsidian insertion `[[Land#Pipe split]]`. Navigation and embeds use the
+   same normalization to find `# Pipe | split`. The private headless
+   [observation](round25-shots/observe-stage3.mjs) and
+   [results](round25-shots/obsidian-stage3.txt) also record toolbar positions.
+   Native Obsidian retains a heading's block-ID text in its own suggestion;
+   Grove deliberately removes it as requested in this stage.
+4. **Block-reference undo:** insert the generated ID and accepted link in
+   one isolated CodeMirror transaction when both belong to the current
+   note; one Undo/Redo reverses/restores both, including mapped caret
+   positions. **Cross-note limitation:** histories remain per file. Undo in
+   the source restores the typed query; the generated ID remains in the
+   target and is removed by one Undo there. Target insertions are isolated
+   from other edits. There is no automatic cross-file rollback that could
+   delete an ID another link has since reused. The prompt explicitly allows
+   this limitation; the hunter's stronger cross-file assertion was changed
+   to check both independent undo operations and exact target restoration.
+5. **Toolbar over labels:** measure selected group/file labels and anchor
+   the existing toolbar above their top edge, retaining its fixed screen
+   size and existing gap. Every sampled pixel remains a label hit target,
+   including a long file name after zoom-to-selection.
+   [Group](round25-shots/grove-stage3-group.png),
+   [zoomed file](round25-shots/grove-stage3-file.png).
+6. **Nested list blocks:** recursively visit nested lists, emitting each
+   item in document order. A parent's label, ID and insertion position end
+   before its child list; blank lines and deeper ordered lists are covered.
+7. **Heading-scoped blocks:** separate the file and heading in
+   `[[Note#Heading^`, then limit rows using the existing heading index and
+   the next heading of equal or lesser depth. Acceptance still inserts
+   `#^id`; a missing section offers no unrelated rows.
+8. **Canvas redo:** route Ctrl+Y through the existing redo callback and list
+   it beside Ctrl+Shift+Z in Canvas help.
+
+Expanded Reading checks exposed stale DOM selection after reopening an
+already-read note: its noneditable content could not receive focus and a
+correct heading jump drifted to the final blank line. One `tabindex="0"`
+content attribute makes Reading focusable so CodeMirror can synchronize
+selection. It remains noneditable and read-only; both heading cases now
+land on their heading when revisiting the note.
+
+### Stage 3 line changes
+
+[Tracked app newline counts](round25-shots/line-counts-stage3.json), excluding
+`/gen/` and evidence outside `rebuild/app`. Fixes compare `8364964`, after
+importing the report; the full stage compares `4d04807`.
+
+- Production TS: **20,577**, fixes/stage **+28**.
+- Test TS: **3,214**, fixes/stage **+23**.
+- Total TS: **23,791**, fixes/stage **+51**.
+- CSS: **3,865**, net **0**; Rust: **3,145**, net **0**.
+- mjs: **3,179**, fixes **+58**, full stage **+267** (includes the hunter's
+  209-line browser regression).
+- All app languages above: **33,980**, fixes **+109**, full stage **+318**.
+
+### Stage 3 verification
+
+- `npm run build` and `npm run audit:offline` passed; the audit checked
+  138 source files, the output, CSP, capabilities and dependencies.
+  [Build](round25-shots/stage3-build.log),
+  [audit](round25-shots/stage3-audit.log).
+- `npm test` passed: **248 TypeScript tests in 44 files**, four browser
+  discovery tests, **979 named browser checks** and the existing paste
+  cases. This includes the expanded **36-check hunter regression**, with
+  native CDP pointer/keyboard input, stationary double-clicks, frontmatter
+  notes in Live Preview/Source/Reading, independent cross-note undo, label
+  hit-testing at two zoom levels, and canvas Ctrl+Y/help.
+  [Full run](round25-shots/stage3-npm-test.log),
+  [isolated regression](round25-shots/stage3-bugs.log).
+- The separate `npm run test:geometry` also passed: all line positions
+  within 1px, zero direct-child vertical margins and stationary fold/unfold
+  in all three modes, with and without frontmatter. All 18 popup checks
+  passed within two frames with no frame over 20ms; the full suite's
+  maximum sampled popup interval was **17.0ms**. Existing toolbar/palette
+  latency and 300-card/400-edge pan/zoom/drag checks passed; maximum drag
+  interval **16.8ms**. [Geometry](round25-shots/stage3-geometry.log).
+- `cargo build --offline` and `cargo test --offline` passed, **34 Rust
+  tests**. [Build](round25-shots/stage3-cargo-build.log),
+  [tests](round25-shots/stage3-cargo-test.log).
+- Final diff whitespace checks passed. Test-generated changes to old-round
+  evidence were restored. Everything ran headlessly in scratch/mock vaults;
+  native Obsidian used private HOME/profile and an isolated loopback-only
+  network namespace. No real vaults, real-screen windows, push or merge.
