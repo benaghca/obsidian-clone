@@ -252,7 +252,7 @@ export class NoteEmbedWidget extends DrawnWidget {
     }
     const content = h("div", { class: "markdown-embed-content" });
     const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", title: "Open link", onclick: open }, icon("maximize-2"));
-    const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub ? "" : noteName(path)), content, link);
+    const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub && !this.preview ? "" : noteName(path)), content, link);
     dom.addEventListener("mousedown", (event) => {
       if (event.button !== 0 || this.preview || chain.length || view.state.readOnly || view.state.facet(readingMode) || isLinkEvent(event)) return;
       if ((event.target as Element).closest("input, button, .markdown-embed-link") || dom.parentElement?.closest(".cm-callout, .cm-table-widget, .markdown-embed")) return;

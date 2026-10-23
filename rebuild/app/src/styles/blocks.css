@@ -60,8 +60,7 @@
 :is(.cm-callout, .cm-table-widget, .markdown-embed) .image-resize-corner,
 .cm-line > .cm-widgetBuffer:has(+ :is(.markdown-embed, .file-embed)),
 .cm-line > :is(.markdown-embed, .file-embed) + .cm-widgetBuffer,
-.markdown-embed-title:empty,
-.hover-popover .markdown-embed-title {
+.markdown-embed-title:empty {
   display: none;
 }
 
@@ -339,7 +338,7 @@
   position: fixed;
   z-index: 40;
   width: min(450px, calc(100vw - 16px));
-  height: min(400px, calc(100vh - 16px));
+  max-height: min(400px, calc(100vh - 16px));
   overflow: auto;
   overscroll-behavior: contain;
   padding: 20px 24px;
@@ -360,6 +359,14 @@
 .hover-popover > .markdown-embed > .markdown-embed-content {
   max-height: none;
   overflow: visible;
+}
+.hover-popover .markdown-embed-title {
+  height: auto;
+  padding-right: 28px;
+  margin-bottom: 16px;
+  font-size: var(--h1-size);
+  line-height: 1.2;
+  font-weight: 700;
 }
 
 .hover-popover .cm-blank {

@@ -28,6 +28,7 @@ function setup() {
   vi.stubGlobal("navigator", { platform: "Linux" });
   vi.stubGlobal("innerWidth", 1280);
   vi.stubGlobal("innerHeight", 800);
+  vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   const source = { state: { facet: (facet: unknown) => facet === readingMode ? false : ({}) }, posAtCoords: () => null };
   mocks.view = source;
   const rect = { x: 100, y: 100, left: 100, top: 100, bottom: 120 };
