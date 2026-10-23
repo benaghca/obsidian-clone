@@ -174,7 +174,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       const resolve = (href: string) => resolveLink(href, origin, ws.vault.files.filter(f => !f.is_dir));
       const cardHost = {
         ...host, contextMenu: undefined, properties: undefined,
-        formatLink: (target: string, _view: EditorView, display?: string) => ws.linkTo(target, origin, display),
+        formatLink: (target: string, _view: EditorView, display?: string, subpath?: string) => ws.linkTo(target, origin, display, subpath),
         linkExists: (href: string) => !!resolve(href),
         openLink: (href: string, where: false | "tab" | "right") => {
           const hash = href.indexOf("#"), name = hash < 0 ? href : href.slice(0, hash);

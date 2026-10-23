@@ -156,8 +156,8 @@ export class Workspace {
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
-  linkTo(target: string, from: string | null, display?: string): string {
-    return formatLink(target, from, this.vault.files.filter(f => !f.is_dir), this.linkStyle(), display);
+  linkTo(target: string, from: string | null, display?: string, subpath = ""): string {
+    return formatLink(target, from, this.vault.files.filter(f => !f.is_dir), this.linkStyle(), display, subpath);
   }
 
   // ----- tabs -----

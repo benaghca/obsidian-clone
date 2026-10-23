@@ -58,14 +58,23 @@ export function embedSection(text: string, sub: string): NotePart | null {
   const lines = text.split("\n");
   if (sub.startsWith("^")) {
     const mark = ` ^${sub.slice(1)}`;
-    const at = lines.findIndex((l) => l.trimEnd().endsWith(mark));
+    const at = lines.findIndex((l) => l.trimEnd().endsWith(mark) || l.trim() === sub);
     if (at < 0) return null;
     let a = at;
     let b = at;
     const inPara = (l: string) => !!l.trim() && !/^#{1,6}\s/.test(l);
-    while (a > 0 && inPara(lines[a - 1])) a--;
-    while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
-    lines[at] = lines[at].trimEnd().slice(0, -mark.length);
+    if (lines[at].trim() === sub) {
+      if (!at) return null;
+      b--; while (b > 0 && !lines[b].trim()) b--;
+      a = b;
+      const fence = /^\s*(`{3,}|~{3,})/.exec(lines[b]);
+      if (fence) { a--; while (a > 0 && !lines[a].trimStart().startsWith(fence[1])) a--; }
+      else while (a > 0 && inPara(lines[a - 1])) a--;
+    } else {
+      while (a > 0 && inPara(lines[a - 1])) a--;
+      while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
+      lines[at] = lines[at].trimEnd().slice(0, -mark.length);
+    }
     return { text: lines.slice(a, b + 1).join("\n"), line: a };
   }
   const want = sub.split("#").pop()!.trim().toLowerCase();

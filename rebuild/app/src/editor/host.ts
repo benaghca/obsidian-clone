@@ -1,7 +1,7 @@
 // What the editor needs from the surrounding app, supplied as a facet so the
 // editor modules never import the workspace.
 
-import { Facet } from "@codemirror/state";
+import { Facet, type ChangeSpec, type EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import type { PropertyType } from "./frontmatter";
 
@@ -13,6 +13,8 @@ export interface NoteRef {
 /** Where a followed link opens: the same tab, a new tab, or a new pane to the right. */
 type LinkTarget = false | "tab" | "right";
 
+export interface LinkDocument { path: string | null; state: EditorState; current: boolean }
+
 export interface EditorHost {
   /** Follow a [[wikilink]] target (note name, optionally with #heading), from the pane of `view`. */
   openLink(target: string, where: LinkTarget, view?: EditorView): void;
@@ -20,7 +22,11 @@ export interface EditorHost {
   /** Link candidates, recent files first, including attachments and unresolved targets. */
   linkCandidates(): NoteRef[];
   /** A new link to the note at `target` from the note in `view`, as the link settings ask ([[wikilink]] or [markdown](link)). */
-  formatLink(target: string, view: EditorView, display?: string): string;
+  formatLink(target: string, view: EditorView, display?: string, subpath?: string): string;
+  /** Read a link target's current editor state, including unsaved edits. Empty target means this editor. */
+  linkDocument?(target: string, view: EditorView): Promise<LinkDocument | null>;
+  /** Insert an ID only while the suggested document is unchanged; saves through its editor. */
+  insertBlockId?(target: LinkDocument, change: ChangeSpec, view: EditorView): boolean;
   /** Show the editor menu at `at` for document position `pos` (the caret is already there), or an image's menu. */
   contextMenu?(view: EditorView, at: { x: number; y: number }, pos: number, keyboard: boolean, image?: ImageRef): void;
   /** Whether a link target (from the note in `view`) points at a file: links to missing notes are drawn faded. */
