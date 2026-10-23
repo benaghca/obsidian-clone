@@ -1,0 +1,29 @@
+
+> grove@0.1.0 audit:offline
+> npm run build && node scripts/audit-offline.mjs
+
+
+> grove@0.1.0 build
+> tsc --noEmit && vite build
+
+vite v8.3.4 building client environment for production...
+transforming...
+✓ 2085 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.63 kB │ gzip:   0.37 kB
+dist/assets/index-CMER3jjA.css     78.68 kB │ gzip:  14.79 kB
+dist/assets/window--n_b492-.js      0.05 kB │ gzip:   0.07 kB
+dist/assets/event-0c7xq_i5.js       0.09 kB │ gzip:   0.09 kB
+dist/assets/dist-js-DhvWHGPS.js     0.13 kB │ gzip:   0.14 kB
+dist/assets/core-CSf8FaVs.js        0.24 kB │ gzip:   0.19 kB
+dist/assets/event-ZZ0Sj0S2.js       1.31 kB │ gzip:   0.62 kB
+dist/assets/core-BL3NQqEA.js        2.74 kB │ gzip:   1.09 kB
+dist/assets/webview-DW4orpCK.js     3.29 kB │ gzip:   1.12 kB
+dist/assets/internal-BsjVSNC4.js    4.31 kB │ gzip:   1.88 kB
+dist/assets/backend-B4YTtJjs.js     9.42 kB │ gzip:   4.73 kB
+dist/assets/window-D2nNDZ_X.js     13.27 kB │ gzip:   3.20 kB
+dist/assets/index-DBRXQuxy.js     984.86 kB │ gzip: 341.41 kB
+
+✓ built in 186ms
+Offline audit passed: 138 source files, dist/, CSP, capabilities and dependencies checked.

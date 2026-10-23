@@ -1,0 +1,7 @@
+import {withObsidian,sleep} from './obsidian-driver.mjs';
+await withObsidian(async({run,send,click,point,move,press,shot})=>{
+ await run(async()=>{await app.vault.create('Target.md','# Target heading\n\nTarget paragraph.');await app.vault.create('Local.canvas',JSON.stringify({nodes:[{id:'a',type:'text',x:0,y:0,width:500,height:350,text:'# Card heading\n\nCard paragraph.\n\n'}],edges:[]}));await app.workspace.openLinkText('Local.canvas','',false);});await sleep(700);
+ const p=await point('.canvas-node');await move(p);for(const clickCount of [1,2])for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount});await sleep(200);await press('End',2);await send('Input.insertText',{text:'[[#'});await sleep(400);
+ console.log('LOCAL',await run(()=>[document,...[...document.querySelectorAll('iframe')].map(f=>f.contentDocument).filter(Boolean)].map(d=>[...d.querySelectorAll('.suggestion-container')].map(e=>e.innerText))));await shot('obsidian-canvas-local-links');await press('Escape');await press('Backspace');await press('Backspace');await press('Backspace');await send('Input.insertText',{text:'[[Target#'});await sleep(350);
+ console.log('TARGET',await run(()=>[document,...[...document.querySelectorAll('iframe')].map(f=>f.contentDocument).filter(Boolean)].map(d=>[...d.querySelectorAll('.suggestion-container')].map(e=>e.innerText))));await shot('obsidian-canvas-target-links');
+});

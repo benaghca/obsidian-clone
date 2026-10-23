@@ -1,0 +1,8 @@
+
+ RUN  v5.0.5 /home/chris/workspaces/remote/grove-r25-codex/rebuild/app
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  12:29:17
+   Duration  82ms (transform 59%, import 22%, tests 10%, worker 9%)

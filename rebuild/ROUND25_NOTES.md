@@ -135,3 +135,153 @@ outside the app-source totals. [Machine-readable counts](round25-shots/line-coun
 
 The final notes/evidence commit contains this file and the verification
 artifacts. Stop after Part A and wait for the separate Part B request.
+
+# Part B — canvas controls and link subpaths
+
+Part B starts at `a5dd6d3`. The two features have separate commits and tests,
+followed by a small regression-fix commit. No dependencies, backend commands
+or Rust changes were added. Everything remains local to `rebuild/r25-codex`.
+
+## Observation
+
+Observed installed Obsidian **1.14.4-2** (application 1.14.4), with headless
+Ozone, private HOME/XDG/profile/vault directories and a loopback-only network
+namespace. Drivers use public workspace/vault/editor APIs, rendered DOM and
+computed measurements, and native CDP input. No owner's vault, real-screen
+window, application code, stylesheet or SVG asset was accessed.
+
+- Selected text-card toolbar: **137×34px**, 2px padding, 1px gaps, **32×28px**
+  buttons, about 10px above the card. Order: Remove, Set color, Zoom to
+  selection, Edit. Screen size stays constant while zooming.
+- Right stack: settings; four zoom controls; Undo/Redo; help. Groups have
+  8px gaps. Buttons are 32px wide, with 33px rows where separated. Settings
+  offers Snap to grid, Snap to objects and Read-only. Snap preferences use
+  `canvas.json`; read-only is a view state.
+- Color menu: centered 24px swatches, 5px apart; default, six presets and a
+  native color input. Presets write `"1"`–`"6"`; default removes `color`;
+  custom values use hex strings.
+- Heading choices preserve source text, including inline Markdown, show
+  `H1`–`H6`, and start in document order. Queries use fuzzy ranking. `[[#`
+  uses current-note headings; acceptance inserts `#Heading`.
+- `^` and `#^` list block text with line breaks. Existing IDs appear
+  separately and are searchable. New IDs are six lower-case hex characters.
+  Paragraph/list-item IDs append inline; quote/code IDs get a separate line
+  after the block. Existing IDs are reused without rewriting the target.
+- Canvas editors resolve vault-note subpaths. Observed `[[#` inside a canvas
+  card offers no note-local headings; Grove follows that boundary.
+
+Evidence and reproduction drivers:
+[controls/suggestions](round25-shots/obsidian-partb-observations.txt),
+[labels, ID insertion and settings](round25-shots/obsidian-details.txt),
+[canvas context](round25-shots/obsidian-canvas-links.txt),
+[native picker](round25-shots/obsidian-custom-color.txt).
+
+## Implementation and local commits
+
+1. `8bf5c7a` — Canvas toolbar and settings/history/help groups, native
+   regressions and serializer tests. Reuses `keyButton`, shared menus and
+   tooltips, text-card editing, navigation, serialization and history.
+   Snap preferences use the validated settings store. Read-only blocks
+   mutations; help lists supported shortcuts. Group/note-card editors
+   remain part of the planned later canvas work.
+2. `4a129e6` — Heading/block suggestions in `wikilinkComplete.ts`, reusing
+   the heading reader and CodeMirror fuzzy matcher. Target editor states
+   include unsaved edits; parsing advances in 4ms slices. ID insertion
+   uses `NoteEditors` and the existing save/undo/split path. A document
+   guard rejects stale block choices; same-note edits map completion
+   positions and the caret. Relative/Markdown settings apply to subpaths.
+   Navigation and embeds recognize standalone quote/code IDs.
+3. `71bcc69` — Match canvas color menus, fragment scope and history focus.
+   Uses the native color input, centers the shared palette and marks its
+   current swatch. No-op choices preserve bytes. History restores focus
+   after rebuilding cards; external reloads close stale palettes. Menus
+   handle outside pointer presses even when canvas gestures suppress mouse
+   compatibility events. Native regressions cover these cases.
+
+The native picker is tested for mouse/keyboard opening and cancellation.
+Dedicated serializer tests cover hex values, color removal, key order and
+future color values. A real preset choice supplies the native round trip.
+
+## Round trip and screenshots
+
+Grove's palette saves a green card. Obsidian opens it with identical
+geometry, Markdown and color, leaving disk bytes untouched. A native
+Obsidian palette choice then saves purple (`"6"`). Grove opens that file
+with identical geometry/color and preserves its exact bytes.
+
+- [Grove edit](round25-shots/grove-toolbar-green.png),
+  [Obsidian opening it](round25-shots/obsidian-toolbar-from-grove.png).
+- [Obsidian purple edit](round25-shots/obsidian-toolbar-purple.png),
+  [Grove return](round25-shots/grove-controls-roundtrip.png).
+- Saved [Grove](round25-shots/Grove-controls.canvas) and
+  [Obsidian](round25-shots/Obsidian-controls.canvas) JSON;
+  [round-trip assertions](round25-shots/roundtrip-controls-results.txt).
+- [Heading choices](round25-shots/grove-heading-live.png),
+  [Source](round25-shots/grove-heading-source.png),
+  [canvas links](round25-shots/grove-canvas-suggestions.png),
+  [native picker](round25-shots/grove-keyboard-color-picker.png).
+
+These compare controls and saved content, not pixel identity: sidebar
+widths, viewport framing and accents differ. Obsidian's custom zoom/snapping
+icons use bundled Lucide equivalents. The 16 identical screenshot pairs
+recorded earlier apply to Part A's cleanup checkpoint.
+
+## Verification
+
+- `npm test` passed: **245 TS tests in 44 files**, four browser-discovery
+  tests, **943 named browser checks** and the existing paste cases.
+  [Full output](round25-shots/full-tests-partb.txt). New native suites:
+  **46 controls** ([output](round25-shots/canvas-controls-results.txt)) and
+  **47 link subpaths** ([output](round25-shots/link-subpaths-results.txt)).
+- CDP input moves over controls before pressing, includes stationary
+  repeats, and covers frontmatter notes in Live Preview, Source and Reading
+  plus canvases. Cases include ID reuse, concurrent target edits, relative
+  and Markdown settings, read-only state, history, cancellation and saves.
+- Permanent geometry passed: line tops within 1px, zero direct-child
+  vertical margins, and visible arrows after stationary fold/unfold.
+- All **18** instant popup checks passed within two frames; maximum sampled
+  interval **17.1ms**. The new toolbar/palette also passed two-frame and
+  no-frame-over-20ms checks. The 300-card pan/zoom/drag maximum was **16.8ms**.
+- `npm run audit:offline`, including `npm run build`, passed: **138 source
+  files**, output, CSP, capabilities and dependencies checked.
+  [Output](round25-shots/offline-audit-partb.txt).
+- `cargo build --offline` and `cargo test --offline` passed, all **34** Rust
+  tests. Tauri was never launched. [Build](round25-shots/cargo-build-partb.txt),
+  [tests](round25-shots/cargo-test-partb.txt).
+- `git diff --check` passed. No real vault, real-screen window, push or merge.
+
+An [earlier full run](round25-shots/full-tests-partb-first-attempt.txt)
+caught keyboard redo losing focus after undo rebuilt the toolbar. Returning
+focus to the canvas fixes it; the final full suite and native focus
+regression pass. Assertions and thresholds were retained.
+
+## Final app line counts
+
+Tracked newline counts under `rebuild/app`, excluding `/gen/`. Part B
+compares `a5dd6d3`; whole round compares `c44239f`. Notes, observation
+scripts, screenshots and fixtures outside the app are excluded.
+[Machine-readable counts](round25-shots/line-counts-partb.json).
+
+- Production TS: **20,549**; Part B **+221**, whole round **+213**.
+- Test TS: **3,191**; Part B and whole round **+58**.
+- Total TS: **23,740**; Part B **+279**, whole round **+271**.
+- CSS: **3,865**; Part B **+29**, whole round **+15**.
+- Rust: **3,145**, unchanged.
+- mjs: **2,912**; Part B **+143**, whole round **+134**.
+- TS/CSS/Rust: **30,750**; Part B **+308**, whole round **+286**.
+- Including mjs: **33,662**; Part B **+451**, whole round **+420**.
+
+No source file exceeds 800 lines. The notes/evidence commit containing this
+section completes Part B; stop here.
+
+## Next improvements
+
+1. Canvas arrows: create, reconnect, label and delete edges (round 26).
+   This completes editing relationships between cards. Roughly 350–600
+   TS/test lines using the existing edge model and history.
+2. Canvas indexing for search, backlinks and graph (round 27). Board
+   content becomes discoverable alongside notes. Roughly 250–450
+   TS/Rust/test lines through the existing vault index.
+3. Group and note-card editing (round 27). Makes the remaining card types
+   editable in place. Roughly 300–500 TS/test lines, reusing the current
+   editor and toolbar callbacks.

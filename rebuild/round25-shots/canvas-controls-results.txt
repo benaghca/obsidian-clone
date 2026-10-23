@@ -1,0 +1,47 @@
+PASS Control stack has settings, zoom, history and help groups
+PASS Both history controls start disabled
+PASS Selection toolbar appears within two frames with no frame over 20ms
+PASS Palette appears within two frames with no frame over 20ms
+PASS Selection toolbar follows observed action order
+PASS Remove: native hover uses instant shared tooltip
+PASS Set color: native hover uses instant shared tooltip
+PASS Zoom to selection
+(Shift + 2): native hover uses instant shared tooltip
+PASS Edit: native hover uses instant shared tooltip
+PASS Canvas settings: native hover uses instant shared tooltip
+PASS Undo: native hover uses instant shared tooltip
+PASS Redo: native hover uses instant shared tooltip
+PASS Canvas help: native hover uses instant shared tooltip
+PASS Choosing the existing default color does not rewrite canvas bytes or add history
+PASS Preset red writes Obsidian color 1
+PASS Preset color updates rendered card immediately
+PASS Stationary Set color click reopens the shared palette
+PASS Preset purple writes Obsidian color 6
+PASS Native custom-color picker opens and cancellation preserves the selected color
+PASS Keyboard selection opens the native custom-color control
+PASS Native picker dismissal keeps immediate keyboard undo available
+PASS Immediate keyboard redo survives the canvas rebuild
+PASS Default removes the color field
+PASS Palette marks the current selected-card color
+PASS Toolbar save preserves unknown node, root and edge data
+PASS Undo button restores preceding canvas document
+PASS Repeated stationary Undo applies the next checkpoint
+PASS Redo button restores color removal
+PASS Repeated stationary Redo restores the saved toolbar edit
+PASS Zoom to selection fits the selected card
+PASS Repeated zoom-to-selection clicks do not write canvas bytes
+PASS Edit opens the existing text-card editor
+PASS Stationary Edit click reopens the text editor
+PASS Settings menu matches observed rows
+PASS Stationary settings click reopens menu
+PASS Snap to grid setting is wired
+PASS Disabling both snap settings allows exact native drag coordinates
+PASS Read-only prevents deletion and hides edit controls
+PASS External canvas reload closes the stale selection palette
+PASS Canvas help opens a local shortcut dialog
+PASS Stationary help click reopens the dialog
+PASS Remove deletes the selected card and its incident edge
+PASS Keyboard undo updates disabled history buttons
+PASS Round-trip fixture contains a real toolbar edit
+PASS Native Obsidian color edit returns with identical geometry and color
+PASS Reverse toolbar round trip preserves exact Obsidian file bytes

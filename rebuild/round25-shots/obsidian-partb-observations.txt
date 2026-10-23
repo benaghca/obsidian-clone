@@ -1,0 +1,186 @@
+CONTROLS [{"label":"Canvas settings","icon":"svg-icon lucide-settings","rect":{"x":1239,"y":87.046875,"width":32,"height":32,"top":87.046875,"right":1271,"bottom":119.046875,"left":1239},"padding":"8px"},{"label":"Zoom in","icon":"svg-icon lucide-plus","rect":{"x":1239,"y":129.046875,"width":32,"height":33,"top":129.046875,"right":1271,"bottom":162.046875,"left":1239},"padding":"8px"},{"label":"Reset zoom","icon":"svg-icon lucide-rotate-cw","rect":{"x":1239,"y":162.046875,"width":32,"height":33,"top":162.046875,"right":1271,"bottom":195.046875,"left":1239},"padding":"8px"},{"label":"Zoom to fit\n(Shift + 1)","icon":"svg-icon lucide-maximize","rect":{"x":1239,"y":195.046875,"width":32,"height":33,"top":195.046875,"right":1271,"bottom":228.046875,"left":1239},"padding":"8px"},{"label":"Zoom out","icon":"svg-icon lucide-minus","rect":{"x":1239,"y":228.046875,"width":32,"height":32,"top":228.046875,"right":1271,"bottom":260.046875,"left":1239},"padding":"8px"},{"label":"Undo","icon":"svg-icon lucide-undo-2","rect":{"x":1239,"y":270.046875,"width":32,"height":33,"top":270.046875,"right":1271,"bottom":303.046875,"left":1239},"padding":"8px"},{"label":"Redo","icon":"svg-icon lucide-redo-2","rect":{"x":1239,"y":303.046875,"width":32,"height":32,"top":303.046875,"right":1271,"bottom":335.046875,"left":1239},"padding":"8px"},{"label":"Canvas help","icon":"svg-icon lucide-help-circle","rect":{"x":1239,"y":345.046875,"width":32,"height":32,"top":345.046875,"right":1271,"bottom":377.046875,"left":1239},"padding":"8px"},{"label":"Remove","icon":"svg-icon lucide-trash-2","rect":{"x":561.5,"y":308.046875,"width":32,"height":28,"top":308.046875,"right":593.5,"bottom":336.046875,"left":561.5},"padding":"6px 8px"},{"label":"Set color","icon":"svg-icon lucide-palette","rect":{"x":594.5,"y":308.046875,"width":32,"height":28,"top":308.046875,"right":626.5,"bottom":336.046875,"left":594.5},"padding":"6px 8px"},{"label":"Zoom to selection\n(Shift + 2)","icon":"svg-icon zoom-to-selection","rect":{"x":627.5,"y":308.046875,"width":32,"height":28,"top":308.046875,"right":659.5,"bottom":336.046875,"left":627.5},"padding":"6px 8px"},{"label":"Edit","icon":"svg-icon lucide-edit","rect":{"x":660.5,"y":308.046875,"width":32,"height":28,"top":308.046875,"right":692.5,"bottom":336.046875,"left":660.5},"padding":"6px 8px"}]
+TOOLBAR [
+  {
+    class: 'canvas-controls',
+    rect: {
+      x: 1238,
+      y: 86.046875,
+      width: 34,
+      height: 292,
+      top: 86.046875,
+      right: 1272,
+      bottom: 378.046875,
+      left: 1238
+    },
+    gap: '8px',
+    children: [
+      'canvas-control-group mod-raised',
+      'canvas-control-group mod-raised',
+      'canvas-control-group mod-raised',
+      'canvas-control-group mod-raised'
+    ]
+  },
+  {
+    class: 'canvas-menu',
+    rect: {
+      x: 558.5,
+      y: 305.046875,
+      width: 137,
+      height: 34,
+      top: 305.046875,
+      right: 695.5,
+      bottom: 339.046875,
+      left: 558.5
+    },
+    gap: '1px',
+    children: [
+      'clickable-icon',
+      'clickable-icon',
+      'clickable-icon',
+      'clickable-icon'
+    ]
+  }
+]
+Set color []
+Canvas settings [
+  {
+    class: 'menu',
+    text: 'Snap to grid\nSnap to objects\nRead-only',
+    controls: []
+  }
+]
+Canvas help [
+  {
+    class: 'modal mod-canvas-help',
+    text: 'Canvas help\n' +
+      'Pan\n' +
+      'Space + Drag\n' +
+      'Scroll\n' +
+      'Pan horizontally\n' +
+      'Shift + Scroll\n' +
+      'Zoom\n' +
+      'Ctrl + Scroll\n' +
+      'Space + Scroll\n' +
+      'Zoom to fit\n' +
+      'Shift + 1\n' +
+      'Zoom to selection\n' +
+      'Shift + 2\n' +
+      'Select all\n' +
+      'Ctrl + A\n' +
+      'Add to / remove from selection\n' +
+      'Shift + Click\n' +
+      'Shift + Drag to select\n' +
+      'Create a card with specific size\n' +
+      'Ctrl + Drag to select\n' +
+      'Clone card\n' +
+      'Ctrl + Drag\n' +
+      'Constrain card movement to axis\n' +
+      'Shift + Drag\n' +
+      'Disable snapping while dragging\n' +
+      'Alt\n' +
+      'Remove card\n' +
+      'Backspace\n' +
+      'Delete\n' +
+      'Undo\n' +
+      'Ctrl + Z\n' +
+      'Redo\n' +
+      'Ctrl + Y\n' +
+      'Ctrl + Shift + Z',
+    controls: []
+  }
+]
+SUGGEST [[Target# [
+  {
+    text: 'First heading\nH1\nAnother heading\nH2\n↵to accept',
+    rows: [ [Object], [Object] ]
+  }
+]
+SUGGEST [[# [ { text: 'Local heading\nH1\n↵to accept', rows: [ [Object] ] } ]
+SUGGEST [[Target^ [
+  {
+    text: '# First heading\n' +
+      'Paragraph one spans\n' +
+      'two lines.\n' +
+      '## Another heading\n' +
+      'Existing block.\n' +
+      'known\n' +
+      'Item one\n' +
+      'Item two\n' +
+      'Quote one\n' +
+      'Quote two\n' +
+      'const x = 1\n' +
+      'Final paragraph.\n' +
+      '↵to accept',
+    rows: [
+      [Object], [Object],
+      [Object], [Object],
+      [Object], [Object],
+      [Object], [Object],
+      [Object]
+    ]
+  }
+]
+SUGGEST [[Target#^ [
+  {
+    text: '# First heading\n' +
+      'Paragraph one spans\n' +
+      'two lines.\n' +
+      '## Another heading\n' +
+      'Existing block.\n' +
+      'known\n' +
+      'Item one\n' +
+      'Item two\n' +
+      'Quote one\n' +
+      'Quote two\n' +
+      'const x = 1\n' +
+      'Final paragraph.\n' +
+      '↵to accept',
+    rows: [
+      [Object], [Object],
+      [Object], [Object],
+      [Object], [Object],
+      [Object], [Object],
+      [Object]
+    ]
+  }
+]
+SUGGEST [[Target#Another [ { text: 'Another heading\nH2\n↵to accept', rows: [ [Object] ] } ]
+SUGGEST [[Target^Paragraph [
+  {
+    text: 'Paragraph one spans\ntwo lines.\nFinal paragraph.\n↵to accept',
+    rows: [ [Object], [Object] ]
+  }
+]
+ACCEPT {
+  source: '---\n' +
+    'tags: [source]\n' +
+    '---\n' +
+    '# Local heading\n' +
+    '\n' +
+    'Local paragraph.\n' +
+    '\n' +
+    '[[Target#^020b1e]]',
+  target: '---\n' +
+    'tags: [observe]\n' +
+    '---\n' +
+    '# First heading\n' +
+    '\n' +
+    'Paragraph **one** spans\n' +
+    'two lines. ^020b1e\n' +
+    '\n' +
+    '## Another heading\n' +
+    '\n' +
+    'Existing block. ^known\n' +
+    '\n' +
+    '- Item one\n' +
+    '- Item two\n' +
+    '\n' +
+    '> Quote one\n' +
+    '> Quote two\n' +
+    '\n' +
+    '```js\n' +
+    'const x = 1\n' +
+    '```\n' +
+    '\n' +
+    'Final paragraph.'
+}

@@ -1,0 +1,6 @@
+import {withObsidian,sleep} from './obsidian-driver.mjs';
+await withObsidian(async({run,click,point,shot,press})=>{
+ await run(async()=>{await app.vault.create('Color.canvas','{"nodes":[{"id":"a","type":"text","x":0,"y":0,"width":280,"height":170,"text":"A"}],"edges":[]}');await app.workspace.openLinkText('Color.canvas','',false);});await sleep(700);await click('.canvas-node');await click('[aria-label="Set color"]');
+ console.log('COLOR_UI',JSON.stringify(await run(()=>[...document.querySelectorAll('[class*="color"],input[type="color"]')].map(e=>({tag:e.tagName,type:e.getAttribute('type'),cls:e.className,label:e.getAttribute('aria-label'),title:e.getAttribute('title'),background:getComputedStyle(e).backgroundImage,rect:e.getBoundingClientRect().toJSON()})))));
+ const p=await run(()=>{const el=[...document.querySelectorAll('*')].find(e=>getComputedStyle(e).backgroundImage.includes('conic-gradient'));if(!el)return null;const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};});console.log('CUSTOM_POINT',p);if(p){await click(p);await sleep(300);console.log('CUSTOM_UI',await run(()=>document.body.innerText));await shot('obsidian-custom-color');await press('Escape');}
+});
