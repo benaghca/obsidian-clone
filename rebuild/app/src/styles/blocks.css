@@ -27,7 +27,8 @@
 .cm-callout,
 .cm-table-widget,
 .image-embed,
-.markdown-embed {
+.markdown-embed,
+.cm-line.cm-codeblock-begin {
   position: relative;
 }
 .embed-actions,
@@ -45,13 +46,21 @@
   opacity: 0;
   transition: opacity var(--anim-duration-fast) var(--anim-ease-out);
 }
-:is(.cm-callout, .cm-table-widget, .image-embed):hover > .embed-actions {
+:is(.cm-callout, .cm-table-widget, .image-embed):hover > .embed-actions,
+.cm-codeblock-begin:hover .copy-code-button {
   opacity: 1;
 }
-/* none in Reading view, nor on an image inside a callout, table or embed (as in Obsidian) */
+/* Hidden controls in rendered blocks, collapsed bodies and empty embed titles. */
 .is-reading-mode .embed-actions,
 .markdown-embed .embed-actions,
-:is(.cm-callout, .cm-table-widget) .image-embed > .embed-actions {
+:is(.cm-callout, .cm-table-widget) .image-embed > .embed-actions,
+.callout.is-collapsed .callout-content,
+.callout-content > .cm-blank,
+.is-reading-mode .image-resize-corner,
+:is(.cm-callout, .cm-table-widget, .markdown-embed) .image-resize-corner,
+.cm-line > .cm-widgetBuffer:has(+ :is(.markdown-embed, .file-embed)),
+.cm-line > :is(.markdown-embed, .file-embed) + .cm-widgetBuffer,
+.markdown-embed-title:empty {
   display: none;
 }
 
@@ -78,10 +87,12 @@
   height: 1.3em;
   transition: transform var(--anim-duration-moderate) var(--anim-ease-out);
 }
-.callout-title-inner {
+.callout-title-inner,
+.cm-table-widget th {
   font-weight: 600;
 }
-.callout.is-collapsible .callout-title {
+.callout.is-collapsible .callout-title,
+.file-embed.is-clickable {
   cursor: pointer;
 }
 .callout.is-collapsed .callout-fold {
@@ -90,12 +101,7 @@
 .callout-content {
   padding: 16px 0 4px;
 }
-.callout.is-collapsed .callout-content {
-  display: none;
-}
-.callout-content > .cm-blank {
-  display: none;
-}
+
 .callout-content > .cm-block-start,
 .callout-content > .cm-blank + :is(.cm-callout, .cm-table-widget) {
   margin-top: 16px;
@@ -124,9 +130,7 @@
   word-break: normal;
   text-align: left;
 }
-.cm-table-widget th {
-  font-weight: 600;
-}
+
 .cm-table-widget :is(th, td):empty::after {
   content: "\200b";
 }
@@ -154,10 +158,6 @@
   height: 30px;
   cursor: nwse-resize;
   touch-action: none;
-}
-.is-reading-mode .image-resize-corner,
-:is(.cm-callout, .cm-table-widget, .markdown-embed) .image-resize-corner {
-  display: none;
 }
 
 /* an image's "Zoom in" (editor/imageZoom.ts) */
@@ -214,10 +214,6 @@
 
 /* note embeds, and the box for a missing file: blocks inside their line,
    without the empty line boxes CodeMirror's caret buffers would add around them */
-.cm-line > .cm-widgetBuffer:has(+ :is(.markdown-embed, .file-embed)),
-.cm-line > :is(.markdown-embed, .file-embed) + .cm-widgetBuffer {
-  display: none;
-}
 .markdown-embed {
   display: block;
   border-left: 2px solid var(--interactive-accent);
@@ -226,9 +222,7 @@
   font-weight: 600;
   height: 24px;
 }
-.markdown-embed-title:empty {
-  display: none;
-}
+
 .markdown-embed-content {
   max-height: 4000px;
   overflow-y: auto;
@@ -251,14 +245,8 @@
   vertical-align: -3px;
   margin-right: 6px;
 }
-.file-embed.is-clickable {
-  cursor: pointer;
-}
 
-/* code blocks: the language top right (Live Preview), a copy button on hover (Reading view) */
-.cm-line.cm-codeblock-begin {
-  position: relative;
-}
+/* Code language (Live Preview) and Copy on hover (Reading view). */
 .code-block-flair,
 .copy-code-button {
   position: absolute;
@@ -278,9 +266,7 @@
   display: flex;
   opacity: 0;
 }
-.cm-codeblock-begin:hover .copy-code-button {
-  opacity: 1;
-}
+
 .copy-code-button:hover {
   background: var(--background-modifier-hover);
 }
@@ -352,9 +338,9 @@
   position: fixed;
   z-index: 40;
   width: min(450px, calc(100vw - 16px));
-  height: min(400px, calc(100vh - 16px));
-  overflow: auto;
-  overscroll-behavior: contain;
+  max-height: min(400px, calc(100vh - 16px));
+  display: flex;
+  overflow: hidden;
   padding: 20px 24px;
   background: var(--background-primary);
   border: 1px solid var(--background-modifier-border);
@@ -365,18 +351,32 @@
   line-height: 1.5;
 }
 .hover-popover > .markdown-embed {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
   border: 0;
 }
 .hover-popover > .markdown-embed > :not(.markdown-embed-link) {
   padding-left: 0;
 }
 .hover-popover > .markdown-embed > .markdown-embed-content {
+  min-height: 0;
   max-height: none;
-  overflow: visible;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .hover-popover .markdown-embed-title {
-  display: none;
+  flex-shrink: 0;
+  height: auto;
+  overflow-wrap: anywhere;
+  padding-right: 36px;
+  margin-bottom: 16px;
+  font-size: var(--h1-size);
+  line-height: 1.2;
+  font-weight: 700;
 }
+
 .hover-popover .cm-blank {
   min-height: 16px;
 }

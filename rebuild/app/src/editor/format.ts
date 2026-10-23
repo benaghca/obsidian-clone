@@ -5,8 +5,12 @@
 // works on a bare EditorState in tests. They run only when invoked, never as
 // part of typing.
 
-import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type EditorState, type StateCommand, type Transaction, type TransactionSpec } from "@codemirror/state";
+import { indentLess, indentMore, isolateHistory } from "@codemirror/commands";
+import { deleteMarkupBackward } from "@codemirror/lang-markdown";
+import { ensureSyntaxTree, indentString, indentUnit, syntaxTree } from "@codemirror/language";
+import { ChangeSet, countColumn, EditorSelection, type EditorState, type StateCommand, Transaction, type TransactionSpec } from "@codemirror/state";
+import type { SyntaxNode } from "@lezer/common";
+import { frontmatterField, readFrontmatter } from "./frontmatter";
 
 type Target = { state: EditorState; dispatch: (tr: Transaction) => void };
 
@@ -164,6 +168,129 @@ function selectedLines(state: EditorState) {
   }
   return lines.sort((a, b) => a.from - b.from);
 }
+
+/** Keep indentation separate from the structural quote markers. */
+function lineIndent(text: string) {
+  const quote = /^[ \t]*(?:>[ \t]?)+/.exec(text)?.[0] ?? "";
+  const space = /^[ \t]*/.exec(text.slice(quote.length))![0];
+  return { quote, space };
+}
+
+/** Tab/Shift+Tab: use normal indentation, then renumber only the affected lists in the same undo step. */
+export const indentList = (outdent = false): StateCommand => ({ state, dispatch }) => {
+  if (state.readOnly) return false;
+  const roots = new Map<number, SyntaxNode>();
+  const moved = new Set<number>();
+  const items: SyntaxNode[] = [];
+  const carried = new Set<number>();
+  const lines = new Map(selectedLines(state).map(line => [line.number, line]));
+  for (const line of [...lines.values()]) {
+    const marker = /^([ \t>]*)(?:[-*+]|\d+[.)])[ \t]+/.exec(line.text);
+    if (!marker) continue;
+    const tree = ensureSyntaxTree(state, line.to, 100) ?? syntaxTree(state);
+    const mark = tree.resolveInner(line.from + marker[1].length + 1, -1);
+    if (mark.name !== "ListMark" || mark.parent?.name !== "ListItem") continue;
+    if (items.some(item => item.from <= mark.from && item.to >= mark.to)) continue;
+    items.push(mark.parent);
+    const collect = (node: SyntaxNode) => {
+      for (let child = node.firstChild; child; child = child.nextSibling) {
+        if (child.name === "OrderedList") carried.add(child.getChild("ListItem")!.getChild("ListMark")!.from);
+        collect(child);
+      }
+    };
+    collect(mark.parent);
+    // Move the whole item, including continuation paragraphs and nested lists.
+    for (let n = line.number; n <= state.doc.lineAt(mark.parent.to).number; n++) lines.set(n, state.doc.line(n));
+    if (mark.parent.parent?.name === "OrderedList") moved.add(mark.from);
+    let root: SyntaxNode | null = null;
+    for (let node: SyntaxNode | null = mark; node; node = node.parent) {
+      if (node.name === "OrderedList" || node.name === "BulletList") root = node;
+    }
+    if (root) roots.set(root.from, root);
+  }
+  const apply = (tr: Transaction) => {
+    if (!roots.size || !tr.docChanged) return dispatch(tr);
+    const changes: { from: number; to: number; insert: string }[] = [];
+    const movedTo = new Set([...moved].map((pos) => tr.changes.mapPos(pos, 1)));
+    const carriedTo = new Set([...carried].map(pos => tr.changes.mapPos(pos, 1)));
+    for (const root of roots.values()) {
+      const from = tr.changes.mapPos(root.from, -1), to = tr.changes.mapPos(root.to, 1);
+      const tree = ensureSyntaxTree(tr.state, to, 100) ?? syntaxTree(tr.state);
+      tree.iterate({ from, to, enter(ref) {
+        if (ref.name !== "OrderedList") return;
+        if (carriedTo.has(ref.node.getChild("ListItem")!.getChild("ListMark")!.from)) return false;
+        let number = 1;
+        for (const item of ref.node.getChildren("ListItem")) {
+          const mark = item.getChild("ListMark")!;
+          if (item.from === ref.node.firstChild?.from) {
+            const oldPos = tr.changes.invertedDesc.mapPos(mark.from, 1);
+            const oldFirst = syntaxTree(state).resolveInner(oldPos + 1, -1).parent?.parent?.getChild("ListItem")?.getChild("ListMark");
+            number = ref.node.parent?.name !== "ListItem"
+              ? Number(/^\d+/.exec(state.sliceDoc(root.from, root.to))?.[0] ?? 1)
+              : movedTo.has(mark.from) || !oldFirst ? 1 : Number(state.sliceDoc(oldFirst.from, oldFirst.to - 1));
+          }
+          const to = mark.to - 1, insert = String(number++);
+          if (tr.state.sliceDoc(mark.from, to) !== insert) changes.push({ from: mark.from, to, insert });
+        }
+      } });
+    }
+    const fixes = ChangeSet.of(changes, tr.newDoc.length);
+    dispatch(state.update({ changes: tr.changes.compose(fixes), selection: tr.newSelection.map(fixes), userEvent: tr.annotation(Transaction.userEvent) }));
+  };
+  // List levels are at least four spaces; indentation belongs inside quotes.
+  if (roots.size) {
+    const step = Math.max(4, countColumn(state.facet(indentUnit), state.tabSize));
+    const changes = [...lines.values()].sort((a, b) => a.from - b.from).map((line) => {
+      const { quote, space } = lineIndent(line.text);
+      const from = line.from + quote.length;
+      const columns = Math.max(0, countColumn(space, state.tabSize) + (outdent ? -step : step));
+      // Tabs after > start at the quote's column, so use spaces for a full level.
+      return { from, to: from + space.length, insert: quote ? " ".repeat(columns) : indentString(state, columns) };
+    });
+    apply(state.update({ changes, userEvent: outdent ? "delete.dedent" : "input.indent" }));
+    return true;
+  }
+  return (outdent ? indentLess : indentMore)({ state, dispatch: apply });
+};
+
+/** At an item's text start, remove its marker and keep its indent; the next press uses normal outdent/join handling. */
+export const backspaceList: StateCommand = ({ state, dispatch }) => {
+  if (state.readOnly) return false;
+  let all = true, listEdit = false;
+  const changes = state.changeByRange((range) => {
+    const line = state.doc.lineAt(range.head);
+    const { quote, space } = lineIndent(line.text);
+    const indentEnd = line.from + quote.length + space.length;
+    const atIndent = space.length > 0 && range.head === indentEnd;
+    const marker = /^([ \t]*(?:>[ \t]*)*)(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/.exec(line.text);
+    if (range.empty && (atIndent || marker && range.head === line.from + marker[0].length)) {
+      const tree = ensureSyntaxTree(state, line.to, 100) ?? syntaxTree(state);
+      const fm = state.field(frontmatterField, false) ?? readFrontmatter(state.doc);
+      let protectedText = !!fm && line.from <= fm.end;
+      for (let node: SyntaxNode | null = tree.resolveInner(range.head, -1); node; node = node.parent) {
+        if (node.name === "FencedCode" || node.name === "CodeBlock") protectedText = true;
+      }
+      // CodeMirror's default deletion also removes indent units; here it must be one character.
+      if (protectedText) return { changes: { from: range.head - 1, to: range.head }, range: EditorSelection.cursor(range.head - 1) };
+      if (atIndent) {
+        const columns = Math.max(0, countColumn(space, state.tabSize) - Math.max(4, countColumn(state.facet(indentUnit), state.tabSize)));
+        const from = line.from + quote.length, insert = quote ? " ".repeat(columns) : indentString(state, columns);
+        listEdit = true;
+        return { changes: { from, to: range.head, insert }, range: EditorSelection.cursor(from + insert.length) };
+      }
+      const from = line.from + marker![1].length;
+      if (tree.resolveInner(from + 1, -1).name === "ListMark") {
+        listEdit = true;
+        return { changes: { from, to: range.head }, range: EditorSelection.cursor(from) };
+      }
+    }
+    all = false;
+    return { range };
+  });
+  if (!all) return deleteMarkupBackward({ state, dispatch });
+  dispatch(state.update(changes, { scrollIntoView: true, userEvent: "delete.backward", annotations: listEdit ? isolateHistory.of("full") : undefined }));
+  return true;
+};
 
 /** Keep every selection endpoint attached to its text as line prefixes change. */
 function updateLines(target: Target, specs: Parameters<EditorState["changes"]>[0]) {

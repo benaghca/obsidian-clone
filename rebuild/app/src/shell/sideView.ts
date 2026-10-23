@@ -2,6 +2,8 @@
 // the parts their trees share: collapsible sections with a count, chevrons
 // that fold a group, "Show N more" rows and highlighted matches.
 
+import { noteName } from "../paths";
+import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, type IconName } from "./icons";
 import { type Span, snippetParts } from "./mentions";
@@ -137,4 +139,22 @@ export function hitColumns(event: MouseEvent, spans: Span[]): [number, number] |
   const hit = (event.target as Element).closest<HTMLElement>(".search-result-file-matched-text");
   const span = hit ? { from: Number(hit.dataset.from), to: Number(hit.dataset.to) } : spans[0];
   return span && [span.from, span.to];
+}
+
+/** A note's foldable result group, shared by Search and Backlinks. */
+export function resultGroup(path: string, matches: HTMLElement, count: string | null, collapsed: Set<string>, open: (event: MouseEvent) => void) {
+  return h("div", { class: "search-result" },
+    h("div", { class: "search-result-file-title", "data-preview-path": path, onclick: open },
+      foldToggle(matches, collapsed.has(path), foldIn(collapsed, path)),
+      h("div", { class: "search-result-file-name" }, noteName(path)),
+      count === null ? null : h("span", { class: "search-result-count" }, count)),
+    matches);
+}
+
+/** A snippet whose pressed highlight selects its original source columns. */
+export function resultMatch(ws: Workspace, path: string, hit: { text: string; line: number }, spans: Span[]) {
+  return h("div", {
+    class: "search-result-file-match", "data-preview-path": path,
+    onclick: (event: MouseEvent) => void ws.open(path, { line: hit.line, ch: hitColumns(event, spans) }),
+  }, ...highlighted(hit.text, spans));
 }

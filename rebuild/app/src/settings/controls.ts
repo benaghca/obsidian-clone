@@ -11,7 +11,7 @@ import { icon, type IconName } from "../shell/icons";
 
 type Child = Node | string | null | undefined | false;
 
-export interface RowOptions {
+interface RowOptions {
   name: string;
   desc?: Child | Child[];
   /** Extra classes (mod-toggle, mod-slider, ...). */
@@ -116,7 +116,7 @@ export function slider(o: SliderOptions): HTMLElement[] & { set(v: number): void
   return Object.assign([restore, value, input].filter(Boolean) as HTMLElement[], { set });
 }
 
-export interface TextOptions {
+interface TextOptions {
   value: string;
   placeholder?: string;
   label: string;

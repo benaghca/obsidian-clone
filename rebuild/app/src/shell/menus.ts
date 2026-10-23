@@ -21,7 +21,7 @@ import type { Workspace } from "../workspace";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 import { pickFrom } from "./prompt";
 
-export interface MenuHost {
+interface MenuHost {
   ws: Workspace;
   bookmarks: Bookmarks;
   /** Start an inline rename of a file or folder in the file explorer. */

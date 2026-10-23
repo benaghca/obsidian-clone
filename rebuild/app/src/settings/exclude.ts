@@ -4,7 +4,7 @@
 // out of the quick switcher, search, link suggestions, unlinked mentions and
 // the tags view. Free of the DOM.
 
-export type ExcludeTest = (path: string) => boolean;
+type ExcludeTest = (path: string) => boolean;
 
 export function excluder(filters: readonly string[]): ExcludeTest {
   const prefixes: string[] = [];

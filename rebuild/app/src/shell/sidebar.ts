@@ -11,7 +11,7 @@ import { listeners } from "../listeners";
 import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
-import { editInPlace, h, iconButton } from "./dom";
+import { editInPlace, fieldError, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
@@ -176,7 +176,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function startRename(path: string) {
     const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
-    if (label) editInPlace(label, (name) => renameFile(ws, path, name).catch((err) => console.warn(err)));
+    if (label) editInPlace(label, (name) => renameFile(ws, path, name));
   }
 
   async function newFolderIn(parent: string) {
@@ -260,6 +260,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       for (const row of box.querySelectorAll<HTMLElement>("[data-path]")) {
         if (rows.get(row.dataset.path!) === row) rows.delete(row.dataset.path!);
       }
+      for (const field of box.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
       box.remove();
     });
   }
@@ -274,6 +275,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   }
 
   function render() {
+    for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
     rows.clear();
     const frag = document.createDocumentFragment() as unknown as HTMLElement;
     renderNodes(buildTree(ws.vault.files, sortOrder), 0, frag);

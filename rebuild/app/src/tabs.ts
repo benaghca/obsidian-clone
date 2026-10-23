@@ -32,7 +32,7 @@ export interface Tab {
 /** The views a tab can show instead of a note. */
 export type ViewType = "graph" | "localgraph" | "image";
 
-export interface TabMemory {
+interface TabMemory {
   path: string;
   /** null: no position to restore (a split places its pane by a line instead). */
   scrollTop: number | null;

@@ -5,7 +5,7 @@
 // default hotkey, neither does Grove (the sidebar toggles keep round 3's).
 
 import { startCompletion } from "@codemirror/autocomplete";
-import { addCursorAbove, addCursorBelow, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp } from "@codemirror/commands";
+import { addCursorAbove, addCursorBelow, deleteLine, moveLineDown, moveLineUp } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
@@ -23,6 +23,7 @@ import {
   HIGHLIGHT_COLORS,
   type HighlightColor,
   insertBlock,
+  indentList,
   insertFootnote,
   insertMarkdownLink,
   insertText,
@@ -87,15 +88,14 @@ export function registerAppCommands(parts: AppParts) {
 
   // Focus is in some other text field (the inline title, a search box, a
   // field in the Properties block): editor hotkeys leave it alone.
-  const typingElsewhere = () => {
-    const el = document.activeElement as HTMLElement | null;
+  const typingElsewhere = (el: Element | null = document.activeElement) => {
     if (!el || el === document.body || el === ws.view.contentDOM || (el.closest(".cm-table-cell") && ws.view.dom.contains(el))) return false;
-    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable;
   };
-  const canEdit = () => hasNote() && ws.active.mode !== "reading" && !typingElsewhere();
+  const canEdit = (focus?: Element | null) => hasNote() && ws.active.mode !== "reading" && !typingElsewhere(focus);
   // An internal link at the caret, for the "link under cursor" commands.
-  const linkUnderCursor = () => {
-    if (!hasNote() || typingElsewhere()) return null;
+  const linkUnderCursor = (focus?: Element | null) => {
+    if (!hasNote() || typingElsewhere(focus)) return null;
     const link = linkAt(ws.view.state, ws.view.state.selection.main.head);
     return link?.kind === "internal" ? link : null;
   };
@@ -233,7 +233,7 @@ export function registerAppCommands(parts: AppParts) {
     name,
     icon: "link",
     hotkeys,
-    when: () => !!linkUnderCursor(),
+    when: (focus) => !!linkUnderCursor(focus),
     run: () => {
       const link = linkUnderCursor();
       if (link) void ws.openLink(link.target, where);
@@ -247,7 +247,7 @@ export function registerAppCommands(parts: AppParts) {
 
   const action = (id: string, name: string, icon: IconName | undefined, run: Command["run"], hotkeys?: Command["hotkeys"]): Command =>
     ({ id, name, icon, run, hotkeys });
-  const conditionalAction = (id: string, name: string, icon: IconName | undefined, run: Command["run"], when = hasNote, hotkeys?: Command["hotkeys"]): Command =>
+  const conditionalAction = (id: string, name: string, icon: IconName | undefined, run: Command["run"], when: Command["when"] = hasNote, hotkeys?: Command["hotkeys"]): Command =>
     ({ ...action(id, name, icon, run, hotkeys), when });
 
   const pluginAction = (plugin: string, id: string, name: string, icon: IconName, run: Command["run"], when?: Command["when"], hotkeys?: Command["hotkeys"]): Command =>
@@ -275,19 +275,12 @@ export function registerAppCommands(parts: AppParts) {
       () => ws.open(adjacentDaily(-1)!), () => !!adjacentDaily(-1)),
     pluginAction("daily-notes", "daily-notes:goto-next", "Daily notes: Open next daily note", "calendar-plus",
       () => ws.open(adjacentDaily(1)!), () => !!adjacentDaily(1)),
-    {
-      id: "random-note",
-      name: "Random note: Open random note",
-      plugin: "random-note",
-      icon: "dices",
-      when: () => ws.vault.includedNotes().length > 0,
-      run: () => {
+    pluginAction("random-note", "random-note", "Random note: Open random note", "dices", () => {
         const notes = ws.vault.includedNotes();
         const others = notes.filter((n) => n.path !== ws.active.path);
         const pick = others[Math.floor(Math.random() * others.length)] ?? notes[0];
         void ws.open(pick.path);
-      },
-    },
+      }, () => ws.vault.includedNotes().length > 0),
     { id: "workspace:new-tab", name: "New tab", hotkeys: mod("t"), run: () => ws.newTab() },
     { id: "workspace:close", name: "Close current tab", icon: "x", hotkeys: mod("w"), run: () => ws.closeTab(ws.active) },
     conditionalAction("workspace:close-others", "Close all other tabs", "x",
@@ -394,17 +387,10 @@ export function registerAppCommands(parts: AppParts) {
       () => bookmarks.toggle(note()), () => hasNote() && !bookmarks.has(note())),
     pluginAction("bookmarks", "bookmarks:unbookmark-current-file", "Bookmarks: Remove bookmark for current file", "bookmark-minus",
       () => bookmarks.toggle(note()), () => bookmarks.has(ws.active.path)),
-    {
-      id: "bookmarks:bookmark-all-tabs",
-      name: "Bookmarks: Bookmark all tabs",
-      plugin: "bookmarks",
-      icon: "bookmark-plus",
-      when: () => ws.groups().some((g) => g.tabs.some((t) => t.path && !bookmarks.has(t.path))),
-      run: () => {
+    pluginAction("bookmarks", "bookmarks:bookmark-all-tabs", "Bookmarks: Bookmark all tabs", "bookmark-plus", () => {
         const paths = new Set(ws.groups().flatMap((g) => g.tabs.flatMap((t) => (t.path ? [t.path] : []))));
         for (const p of paths) if (!bookmarks.has(p)) bookmarks.toggle(p);
-      },
-    },
+      }, () => ws.groups().some((g) => g.tabs.some((t) => t.path && !bookmarks.has(t.path)))),
 
     // ----- views -----
     { id: "file-explorer:open", name: "Files: Show file explorer", icon: "files", run: () => showLeft("files") },
@@ -440,7 +426,7 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:toggle-comments", "Toggle comment", "percent", toggleWrap("%%"), mod("/")),
     {
       ...editorCommand("editor:clear-formatting", "Clear formatting", "eraser", clearFormatting),
-      when: () => canEdit() && ws.view.state.selection.ranges.some((r) => !r.empty),
+      when: (focus) => canEdit(focus) && ws.view.state.selection.ranges.some((r) => !r.empty),
     },
     editorCommand("editor:insert-link", "Insert Markdown link", "link", insertMarkdownLink, mod("k")),
     {
@@ -469,33 +455,19 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:insert-horizontal-rule", "Insert horizontal rule", "separator-horizontal", insertBlock(BLOCKS.rule.text, BLOCKS.rule.caret)),
     { ...editorCommand("insert-current-date", "Templates: Insert current date", "calendar-days", insertText(() => today())), plugin: "templates" },
     { ...editorCommand("insert-current-time", "Templates: Insert current time", "clock", insertText(() => nowTime())), plugin: "templates" },
-    {
-      id: "templates:insert-template",
-      name: "Templates: Insert template",
-      plugin: "templates",
-      icon: "files",
-      when: canEdit,
-      run: () => {
+    pluginAction("templates", "templates:insert-template", "Templates: Insert template", "files", () => {
         if (!templateFolder()) return parts.openSettings("templates");
         openTemplatePrompt(templateNotes(), (path) => void insertTemplate(path));
-      },
-    },
-    {
-      id: "markdown:add-metadata-property",
-      name: "Add file property",
-      icon: "list-plus",
-      hotkeys: mod(";"),
-      // Also from Reading view and from a field in the block, as in Obsidian.
-      when: () => hasNote() && (!typingElsewhere() || ws.view.dom.contains(document.activeElement)),
-      run: () => {
+      }, canEdit),
+    // Also from Reading view and from a field in the block, as in Obsidian.
+    conditionalAction("markdown:add-metadata-property", "Add file property", "list-plus", () => {
         if (openNewProperty(ws.view) || ws.active.mode === "reading") return;
         addProperty(ws.view);
         ws.view.focus();
-      },
-    },
+      }, (focus) => hasNote() && (!typingElsewhere(focus) || ws.view.dom.contains(focus === undefined ? document.activeElement : focus)), mod(";")),
     {
       ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
-      when: () => canEdit() && (app().foldHeading || app().foldIndent),
+      when: (focus) => canEdit(focus) && (app().foldHeading || app().foldIndent),
     },
     {
       ...editorCommand("editor:fold-all", "Fold all headings and lists", "chevrons-down-up", foldAllAllowed),
@@ -507,13 +479,13 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:add-cursor-above", "Add cursor above", "mouse-pointer-click", addCursorAbove),
     editorCommand("editor:add-cursor-below", "Add cursor below", "mouse-pointer-click", addCursorBelow),
     editorCommand("editor:delete-paragraph", "Delete paragraph", "scissors", deleteLine, mod("d")),
-    editorCommand("editor:indent-list", "Indent list item", "indent-increase", indentMore),
-    editorCommand("editor:unindent-list", "Unindent list item", "indent-decrease", indentLess),
+    editorCommand("editor:indent-list", "Indent list item", "indent-increase", indentList()),
+    editorCommand("editor:unindent-list", "Unindent list item", "indent-decrease", indentList(true)),
     followLink("editor:follow-link", "Follow link under cursor", false, [{ alt: true, key: "enter" }]),
     followLink("editor:open-link-in-new-leaf", "Open link under cursor in new tab", "tab", mod("enter")),
     followLink("editor:open-link-in-new-split", "Open link under cursor to the right", "right", mod("enter", { alt: true })),
     conditionalAction("editor:context-menu", "Show context menu under cursor", "menu",
-      () => parts.editorMenuAtCaret(), () => hasNote() && !typingElsewhere()),
+      () => parts.editorMenuAtCaret(), (focus) => hasNote() && !typingElsewhere(focus)),
     conditionalAction("editor:focus", "Focus on last note", undefined,
       () => ws.view.focus(), hasNote),
     editorCommand("editor:open-search", "Search current file", "search", openSearchPanel, mod("f")),

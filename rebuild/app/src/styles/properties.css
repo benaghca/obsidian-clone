@@ -13,6 +13,13 @@
   --icon-size: 16px;
   --icon-stroke: 1.75px;
 }
+/* In a note the block is a CodeMirror widget, measured by its border box:
+   the 32px before the body is padding there, or every click, selection and
+   fold chevron below it lands 32px low. */
+.cm-content > .properties {
+  margin-bottom: 0;
+  padding-bottom: 40px;
+}
 .properties-heading {
   position: relative;
   display: inline-flex;

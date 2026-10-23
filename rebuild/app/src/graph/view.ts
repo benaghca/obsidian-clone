@@ -36,7 +36,7 @@ import { type ColorRule, createGraphSource, type Facts } from "./source";
 import type { GraphSettings } from "../settings/schema";
 import { settings } from "../settings/store";
 
-export interface GraphHost {
+interface GraphHost {
   ws: Workspace;
   /** The local graph (one note's neighbourhood) rather than the whole vault. */
   local: boolean;

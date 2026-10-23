@@ -35,7 +35,7 @@ export interface GraphModel {
   index: Map<string, number>;
 }
 
-export interface GraphSource {
+interface GraphSource {
   /** Every note path in the vault (excluded files already left out). */
   notes: readonly string[];
   /** Every other file (attachments), excluded files already left out. */
@@ -58,7 +58,7 @@ export interface LocalOptions {
   neighbors: boolean;
 }
 
-export interface GraphOptions {
+interface GraphOptions {
   showTags: boolean;
   showAttachments: boolean;
   /** "Existing files only": leave out links to notes that don't exist. */

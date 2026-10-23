@@ -72,15 +72,9 @@ function indexNames(notes: NoteRef[], selfPath: string | null): Map<string, Name
   return byFirst;
 }
 
-export function unlinkedMentions(text: string, notes: NoteRef[], selfPath: string | null): UnlinkedMention[] {
-  const out: UnlinkedMention[] = [];
-  for (const _ of scanUnlinked(text, notes, selfPath, out));
-  return out;
-}
-
 /**
- * The same, as a generator that pauses every `slice` lines, so a caller can
- * spread a long note over several short tasks. Mentions are pushed to `out`.
+ * Find mentions, pausing every `slice` lines so a caller can spread a long
+ * note over several short tasks. Mentions are pushed to `out`.
  */
 export function* scanUnlinked(text: string, notes: NoteRef[], selfPath: string | null, out: UnlinkedMention[], slice = 250): Generator<void> {
   const names = indexNames(notes, selfPath);

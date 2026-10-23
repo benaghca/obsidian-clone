@@ -133,8 +133,8 @@ try {
   await click('.markdown-embed-content .cm-h1 .cm-reading-text');
   check(await evaluate('ws.view.state.readOnly && !ws.view.contentDOM.innerText.includes("![[Embedded18]]")'), 'Reading embed text remains rendered and read-only');
   const heading = '.is-reading-mode .cm-content > .cm-line.cm-h1';
-  check(await run(selector => { const s = getComputedStyle(document.querySelector(selector)); return s.fontSize === '31px' && s.paddingTop === '0px' && s.marginTop === '0px'; }, heading), 'Reading H1 is 31px without top padding or first-line margin');
-  check(await evaluate('(()=>{const s=getComputedStyle(document.querySelector(".is-reading-mode .cm-content > .cm-line.cm-h2"));return s.paddingTop === "0px" && s.marginTop === "16px"})()'), 'Reading secondary headings use margins rather than top padding');
+  check(await run(selector => { const s = getComputedStyle(document.querySelector(selector)); return s.fontSize === '31px' && s.paddingTop === '16px' && s.marginTop === '0px'; }, heading), 'Reading H1 is 31px with measured top padding and zero margin');
+  check(await evaluate('(()=>{const s=getComputedStyle(document.querySelector(".is-reading-mode .cm-content > .cm-line.cm-h2"));return s.paddingTop === "16px" && s.marginTop === "0px"})()'), 'Reading secondary headings use measured padding rather than margins');
   await shot('reading');
   await run(() => ws.setMode('live')); await sleep(100);
   check(await evaluate('getComputedStyle(document.querySelector(".cm-content > .cm-line.cm-h1")).fontSize !== "31px"'), 'Reading heading CSS leaves Live Preview typography alone');
@@ -168,12 +168,12 @@ try {
     return p;
   };
   const headingPoint = await hover('[data-href="LongFix18#Deep"]');
-  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover"), target=popup.querySelector(".cm-h2");const top=target.getBoundingClientRect().top-popup.getBoundingClientRect().top;return top >= 8 && top <= 24})()'), 'heading preview scrolls the target near the popup top');
+  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover"), target=popup.querySelector(".cm-h2");const top=target.getBoundingClientRect().top-popup.querySelector(".markdown-embed-content").getBoundingClientRect().top;return top >= 8 && top <= 24})()'), 'heading preview scrolls the target near the scrolling body top');
   await key('Control', 0, 'keyUp');
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: headingPoint.x + 1, y: headingPoint.y }); await sleep(300);
   check(await evaluate('document.querySelectorAll(".hover-popover").length === 1'), 'releasing Ctrl on the same link keeps the preview open');
   await press('Escape'); await hover('[data-href="LongFix18#^block"]');
-  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover"), target=[...popup.querySelectorAll(".cm-line")].find(el=>el.textContent.includes("Block body"));const top=target.getBoundingClientRect().top-popup.getBoundingClientRect().top;return top >= 8 && top <= 24})()'), 'block preview scrolls the target near the popup top');
+  check(await evaluate('(()=>{const popup=document.querySelector(".hover-popover"), target=[...popup.querySelectorAll(".cm-line")].find(el=>el.textContent.includes("Block body"));const top=target.getBoundingClientRect().top-popup.querySelector(".markdown-embed-content").getBoundingClientRect().top;return top >= 8 && top <= 24})()'), 'block preview scrolls the target near the scrolling body top');
   await press('Escape'); await key('Control', 0, 'keyUp');
   await run(() => grove.run('global-search:open')); await fill('input[aria-label=Search]', 'NeedleFix'); await sleep(200);
   await hover('.search-view .search-result-file-match[data-preview-path="SearchFix18.md"]');

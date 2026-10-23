@@ -9,7 +9,7 @@
 // note's count is worked out when its row is drawn, and the total just
 // after the results are painted, so counting never holds up a key.
 
-import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
+import { compareFiles, SORT_ORDERS, type SortOrder } from "../paths";
 import { kept } from "../memo";
 import { dropdown } from "../settings/controls";
 import { readStored, store } from "../storage";
@@ -19,7 +19,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, foldIn, foldToggle, highlighted, hitColumns, pagedRows } from "./sideView";
+import { afterPaint, pagedRows, resultGroup, resultMatch } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -87,28 +87,11 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       const matches = h(
         "div",
         { class: "search-result-file-matches" },
-        ...shown.slice(0, LINES).map((hit) => {
-          const spans = spansOf(hit.text, words, matchCase);
-          return h(
-            "div",
-            { class: "search-result-file-match", "data-preview-path": path, onclick: (event: MouseEvent) => void ws.open(path, { line: hit.line, ch: hitColumns(event, spans) }) },
-            ...highlighted(hit.text, spans),
-          );
-        }),
+        ...shown.slice(0, LINES).map((hit) => resultMatch(ws, path, hit, spansOf(hit.text, words, matchCase))),
       );
-      const chevron = foldToggle(matches, collapsed.has(path), foldIn(collapsed, path));
-      return h(
-        "div",
-        { class: "search-result" },
-        h(
-          "div",
-          { class: "search-result-file-title", "data-preview-path": path, onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
-          chevron,
-          h("div", { class: "search-result-file-name" }, noteName(path)),
-          n ? h("span", { class: "search-result-count" }, n.toLocaleString()) : null,
-        ),
-        shown.length ? matches : null,
-      );
+      const result = resultGroup(path, matches, n ? n.toLocaleString() : null, collapsed, (event) => void ws.open(path, { where: whereFromEvent(event) }));
+      if (!shown.length) matches.remove();
+      return result;
     };
     info.hidden = false;
     results.replaceChildren();

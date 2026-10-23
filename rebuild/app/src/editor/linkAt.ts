@@ -6,7 +6,7 @@ import type { EditorState } from "@codemirror/state";
 import { isNotePath } from "../links/external";
 
 /** An internal link's target, with where that target text sits (for "Edit link"). */
-export type LinkAt = { kind: "internal"; target: string; from: number; to: number } | { kind: "external"; url: string };
+type LinkAt = { kind: "internal"; target: string; from: number; to: number } | { kind: "external"; url: string };
 
 export function linkAt(state: EditorState, pos: number): LinkAt | null {
   const tree = syntaxTree(state);

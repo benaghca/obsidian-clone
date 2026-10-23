@@ -56,7 +56,6 @@
   overflow: visible;
   background: transparent;
   border-color: transparent;
-  box-shadow: none;
 }
 .graph-controls.is-close > .graph-control-section,
 .graph-controls.is-close > .mod-close,
@@ -99,7 +98,6 @@
   padding: 8px 12px 8px 28px;
   border-radius: 0;
   color: var(--text-normal);
-  font-size: var(--font-ui-small);
   line-height: 24px;
 }
 .graph-control-section > .tree-item-self:hover {
@@ -120,9 +118,6 @@
   flex-wrap: wrap;
   gap: 6px 8px;
   padding: 6px 0;
-}
-.graph-controls .setting-item::before {
-  display: none;
 }
 .graph-controls .setting-item-info {
   margin-right: 0;

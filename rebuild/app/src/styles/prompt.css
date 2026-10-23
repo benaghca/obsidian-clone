@@ -8,11 +8,9 @@
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  animation: grove-fade-in var(--anim-duration-moderate) var(--anim-ease-out);
 }
 .modal-container.is-closing {
   pointer-events: none;
-  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .modal-bg {
   position: absolute;
@@ -27,12 +25,6 @@
   background: var(--background-primary);
   border-radius: var(--radius-l);
   box-shadow: var(--shadow-l);
-  animation: grove-pop-in var(--anim-duration-moderate) var(--anim-ease-out);
-}
-.is-closing .prompt,
-.is-closing .modal.mod-settings,
-.is-closing .modal.mod-confirm {
-  animation: grove-pop-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .prompt {
   margin-top: 120px;

@@ -16,7 +16,7 @@ export interface SuggestItem {
   icon?: IconName;
 }
 
-export interface SuggestOptions {
+interface SuggestOptions {
   /** The items for what is typed (ranked here). */
   items(query: string): SuggestItem[] | Promise<SuggestItem[]>;
   choose(item: SuggestItem): void;

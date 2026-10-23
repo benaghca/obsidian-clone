@@ -32,7 +32,7 @@ export interface Colors {
 }
 
 /** Everything one frame shows. */
-export interface GraphFrame {
+interface GraphFrame {
   /** Canvas size in CSS pixels, and canvas pixels per CSS pixel. */
   width: number;
   height: number;

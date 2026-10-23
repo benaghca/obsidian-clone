@@ -88,7 +88,7 @@ export const Tag: MarkdownConfig = {
  * Source mode draws markers in their text's style, as Obsidian does: the
  * ~~ of struck text is struck, the backticks of inline code are code.
  */
-export const MarkerStyles: MarkdownConfig = {
+const MarkerStyles: MarkdownConfig = {
   props: [styleTags({ "Strikethrough/...": t.strikethrough, "InlineCode/...": t.monospace })],
 };
 

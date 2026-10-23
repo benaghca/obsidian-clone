@@ -6,7 +6,7 @@
 import { animateOut } from "../motion";
 import { h } from "./dom";
 
-export interface ConfirmOptions {
+interface ConfirmOptions {
   title: string;
   message: string | Node;
   confirm: string;

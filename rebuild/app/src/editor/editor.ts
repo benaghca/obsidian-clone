@@ -2,7 +2,7 @@
 // undo history); panes swap states with view.setState, which is instant.
 
 import { completionKeymap } from "@codemirror/autocomplete";
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { getSearchQuery, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
 import { EditorView, keymap, layer, RectangleMarker, ViewPlugin } from "@codemirror/view";
@@ -12,7 +12,7 @@ import { blocks } from "./blocks";
 import { codeHighlight } from "./codeHighlight";
 import { configExtensions } from "./config";
 import { type Counts, countsField } from "./counts";
-import { markdownHome } from "./format";
+import { indentList, markdownHome } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { type EditorHost, editorHost } from "./host";
 import { livePreview } from "./livePreview";
@@ -195,7 +195,7 @@ const searchCounter = ViewPlugin.define((view) => {
   } };
 });
 
-export interface NoteStateOptions {
+interface NoteStateOptions {
   doc: string | Text;
   host: EditorHost;
   /** Extra extensions from the workspace, e.g. a mirror's undo keys. */
@@ -237,7 +237,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
         ...defaultKeymap,
         ...historyKeymap,
         ...searchKeymap,
-        indentWithTab,
+        { key: "Tab", run: indentList(), shift: indentList(true) },
       ]),
       baseTheme,
       extensions,

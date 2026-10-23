@@ -1,24 +1,13 @@
 // Tiny DOM helpers for the app chrome.
 
 type Child = Node | string | null | undefined | false;
-type Props = {
-  class?: string;
-  title?: string;
-  role?: string;
-  tabindex?: string;
-  // Fields: set as attributes before anything reads them (a value is the starting value).
-  type?: string;
-  value?: string;
-  placeholder?: string;
+// Fields are attributes; value is the starting value, before callers read it.
+type Props = Partial<Record<
+  "class" | "title" | "role" | "tabindex" | "type" | "value" | "placeholder" |
+  "id" | "list" | "min" | "max" | "step" | "alt" | "style", string
+>> & {
   spellcheck?: "false";
   contenteditable?: "plaintext-only";
-  id?: string;
-  list?: string;
-  min?: string;
-  max?: string;
-  step?: string;
-  alt?: string;
-  style?: string;
   [attr: `data-${string}`]: string | undefined;
   [attr: `aria-${string}`]: string | undefined;
   [event: `on${string}`]: ((e: any) => void) | undefined;
@@ -77,32 +66,64 @@ export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: Poin
   el.addEventListener("pointercancel", up, listening);
 }
 
-/**
- * Edit `label`'s text where it is, all of it selected (Obsidian's inline
- * rename): Enter or leaving it commits, Escape gives up. The label shows its
- * old text again; `commit` gets what was typed (the old text, given up).
- */
-export function editInPlace(label: HTMLElement, commit: (text: string) => void) {
+const errorKeys = new WeakMap<HTMLElement, AbortController>();
+
+/** A rename error beneath its field; only a failed rename listens for Escape outside it. */
+export function fieldError(field: HTMLElement, message: string, cancel?: () => void) {
+  errorKeys.get(field)?.abort();
+  errorKeys.delete(field);
+  let error = field.nextElementSibling as HTMLElement | null;
+  if (!error?.classList.contains("rename-error")) error = null;
+  if (message) field.setAttribute("aria-invalid", "true");
+  else field.removeAttribute("aria-invalid");
+  if (!message) return error?.remove();
+  if (!error) field.after(error = h("div", { class: "rename-error", role: "alert" }));
+  error.textContent = message;
+  if (cancel) {
+    const controller = new AbortController();
+    errorKeys.set(field, controller);
+    document.addEventListener("keydown", (event) => {
+      if (!field.isConnected) return fieldError(field, "");
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      fieldError(field, "");
+      cancel();
+    }, { capture: true, signal: controller.signal });
+  }
+}
+
+/** Inline rename: Enter or blur commits; an error keeps the draft editable, Escape cancels. */
+export function editInPlace(label: HTMLElement, commit: (text: string) => void | Promise<void>) {
   const shown = label.textContent ?? "";
+  let pending = false, closed = false;
   label.contentEditable = "plaintext-only";
   label.focus();
   getSelection()?.selectAllChildren(label);
-  label.addEventListener(
-    "blur",
-    () => {
-      label.contentEditable = "false";
-      const text = label.textContent ?? "";
-      label.textContent = shown;
-      commit(text);
-    },
-    { once: true },
-  );
+  const clear = () => fieldError(label, "");
+  const close = () => {
+    closed = true;
+    clear();
+    label.contentEditable = "false";
+    label.textContent = shown;
+    label.onkeydown = null;
+    label.removeEventListener("blur", finish);
+    label.removeEventListener("input", clear);
+  };
+  const finish = async () => {
+    if (pending || closed) return;
+    pending = true;
+    try { await commit(label.textContent ?? ""); close(); }
+    catch (err) { if (!closed && label.isConnected) fieldError(label, String(err instanceof Error ? err.message : err), () => { close(); label.blur(); }); }
+    finally { pending = false; }
+  };
+  label.addEventListener("blur", finish);
+  label.addEventListener("input", clear);
   label.onkeydown = (ev) => {
     if (ev.key === "Enter" || ev.key === "Escape") {
       ev.preventDefault();
-      label.onkeydown = null;
-      if (ev.key === "Escape") label.textContent = shown;
-      label.blur();
+      if (ev.key === "Escape") { close(); label.blur(); }
+      else void finish().then(() => { if (closed) label.blur(); });
     }
   };
 }

@@ -63,9 +63,11 @@ function freeName(ws: Workspace, stem: string, ext: string, numbered = false) {
 
 /** Rename a note (keeping its folder and .md) or a folder. */
 export async function renameFile(ws: Workspace, path: string, newName: string) {
-  newName = newName.trim().replace(/[\\/:]/g, "");
+  newName = newName.trim();
+  if (!newName || newName === "." || newName === "..") throw new Error("Enter a file or folder name.");
+  if (/[\\/:\x00-\x1f]/.test(newName)) throw new Error("Names cannot contain /, \\ or : or control characters.");
   const isDir = ws.vault.isFolder(path);
-  if (!newName || newName === (isDir ? fileName(path) : noteName(path))) return;
+  if (newName === (isDir ? fileName(path) : noteName(path))) return;
   const dir = parentDir(path);
   await relocate(ws, path, `${dir ? dir + "/" : ""}${newName}${isDir ? "" : ".md"}`);
 }

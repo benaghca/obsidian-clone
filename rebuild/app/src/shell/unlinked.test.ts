@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { unlinkedMentions } from "./unlinked";
+import { scanUnlinked, type UnlinkedMention } from "./unlinked";
+import type { NoteRef } from "../editor/host";
+
+function unlinkedMentions(text: string, notes: NoteRef[], selfPath: string | null): UnlinkedMention[] {
+  const out: UnlinkedMention[] = [];
+  for (const _ of scanUnlinked(text, notes, selfPath, out));
+  return out;
+}
 
 const notes = [
   { name: "Ideas", path: "Ideas.md" },

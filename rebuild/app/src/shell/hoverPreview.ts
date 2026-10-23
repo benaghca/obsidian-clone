@@ -76,16 +76,22 @@ export function installHoverPreviews(ws: Workspace) {
       if (local) context.state.facet(editorHost)!.openLink(href, event.ctrlKey || event.metaKey ? "tab" : false);
       else { host.openUrl(href); close(); }
     });
-    dispose = () => { widget.destroy(dom); context.destroy(); };
     document.body.append(popup);
     const toRight = side && innerWidth - side.right >= side.left;
     if (side) popup.style.width = `${Math.max(0, Math.min(popup.offsetWidth, (toRight ? innerWidth - side.right : side.left) - 14))}px`;
-    const width = popup.offsetWidth;
-    const height = popup.offsetHeight;
-    const left = side ? (toRight ? side.right + 6 : side.left - width - 6) : rect.left;
-    const top = side ? rect.top : rect.bottom + 6 + height <= innerHeight - 8 ? rect.bottom + 6 : rect.top - height - 6;
-    popup.style.left = `${Math.max(8, Math.min(left, innerWidth - width - 8))}px`;
-    popup.style.top = `${Math.max(8, Math.min(top, innerHeight - height - 8))}px`;
+    const place = () => {
+      if (!popup) return;
+      const width = popup.offsetWidth, height = popup.offsetHeight;
+      const left = side ? (toRight ? side.right + 6 : side.left - width - 6) : rect.left;
+      const top = side ? rect.top : rect.bottom + 6 + height <= innerHeight - 8 ? rect.bottom + 6 : rect.top - height - 6;
+      popup.style.left = `${Math.max(8, Math.min(left, innerWidth - width - 8))}px`;
+      popup.style.top = `${Math.max(8, Math.min(top, innerHeight - height - 8))}px`;
+    };
+    // The existing embed fills asynchronously; keep its growing box inside the viewport.
+    const size = new ResizeObserver(place);
+    size.observe(popup);
+    place();
+    dispose = () => { size.disconnect(); widget.destroy(dom); context.destroy(); };
   }
 
   document.addEventListener("mousemove", (event) => {
