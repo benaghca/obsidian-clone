@@ -159,3 +159,95 @@ Next improvements:
 - Convert rich-text paste to Markdown; preserve copied formatting; medium.
 
 Part A complete. Stop here and await Part B.
+
+# Part B — three small fixes
+
+Baseline: completed Part A, `2fb623b`. Same worktree and branch; local
+commits only. Each fix has its own regression coverage and commit:
+
+1. **`bac0206` — background tab dragging.** Remove activation from the
+   tab strip's pointer-down handler. The existing drag finish handler
+   activates the tab on pointer up only when no drag occurred. Reordering
+   or splitting off a background tab leaves the source pane's current note
+   visible. Net production TypeScript: **+2 lines**. Real-pointer tests use
+   two frontmatter notes in Live Preview, Source and Reading: hover, press
+   without activation, activation on release, repeated stationary clicks,
+   same-pane reorder and a split drop. No drag abstraction was added.
+2. **`cd70eb8` — global thin scrollbars.** Move Settings' existing WebKit
+   scrollbar rules into `base.css`, removing their Settings prefix and the
+   old copy. Retain the same theme tokens, hover color and transparent
+   3px thumb border. The 12px gutter paints a 6px rounded thumb; arrow
+   buttons are hidden everywhere. Net CSS: **+3 lines**, because the button
+   rule formerly shared its declaration with Settings-only selectors.
+   Browser tests inspect the editor and explorer scrollbars in all three
+   modes on a long frontmatter note, hover the actual thumb, and click the
+   track twice at identical coordinates without moving. Both clicks scroll.
+3. **`5b2d974` — portable browser discovery.** Resolve `GROVE_BROWSER`
+   first, then PATH's `chromium`, `chromium-browser`, `google-chrome`, then
+   Windows Chrome and Edge under Program Files, Program Files (x86) and
+   Local AppData. Check executable files without launching candidates;
+   Windows PATH lookup also checks `.exe`. Paths containing spaces go
+   directly to `spawn`, without a shell. If nothing is found, exit nonzero
+   before starting Vite and print exactly one actionable line explaining
+   `GROVE_BROWSER`. Four Node tests cover precedence, fallbacks,
+   non-executable files/directories, Windows install locations and that
+   failure message; they run in `npm test`. No dependency was added.
+
+## Part B verification
+
+All final required gates passed:
+
+- `npm run build`.
+- `npm test`: **4 Node browser-discovery tests**, **230 TypeScript unit
+  tests in 41 files**, and all four real-input browser suites. Named checks:
+  geometry **187**, round 19 fixes **92**, header/tabs/scrollbars **56**,
+  explorer dragging **65**, plus their direct assertions.
+- The permanent geometry suite still checks plain/frontmatter notes in all
+  three modes, zero vertical margins on direct content children, line tops
+  within **1px**, real hover and stationary fold/unfold clicks.
+- Ctrl+O, Ctrl+P and right-click menus remained visible within two frames,
+  with no opening animations and no sampled frame over 20ms. Longest
+  sampled frame: **17.1ms**. No menu or prompt styles were changed.
+- Explorer auto-expansion remained **751.0ms** (closed at 600ms); edge
+  speeds measured **239.4 / 478.8 / 1,614.4px/s** at **39 / 25 / 10px**.
+- `npm run audit:offline`: passed, including its rebuild and **129** source
+  files, release output, CSP, capabilities and dependency checks.
+- `cargo build` and `cargo test`: passed; **32 Rust tests**.
+- `git diff --check`: passed.
+
+UI interaction used native CDP mouse input, moving over controls before
+pressing. Repeated-click checks omit movement between clicks. All browser
+runs were headless, with private profiles and mock vaults. No owner's vault
+or visible app window was opened. Windows install locations were exercised
+with filesystem fixtures; native Windows/WebView2 was not run. All three
+requested fixes are implemented; no Part B work is deferred.
+
+## Final line counts after Part B
+
+Tracked app files under `rebuild/app`, excluding `/gen/`, notes and images;
+newline counts, as before. Part B compares `2fb623b`:
+
+- Production TypeScript: **19,431 → 19,433 (+2)**.
+- TypeScript tests: **3,047 → 3,047 (0)**.
+- TypeScript total: **22,478 → 22,480 (+2)**.
+- CSS: **3,726 → 3,729 (+3)**.
+- Rust: **3,104 → 3,104 (0)**.
+- TS/CSS/Rust total: **29,308 → 29,313 (+5)**.
+- JavaScript (`.mjs`, tests/tools): **1,325 → 1,472 (+147)**.
+- JSON: **2,229 → 2,229 (0)**; only the existing test command changed.
+- Part B total including mjs/JSON: **+152**. Production TS/CSS/Rust: **+5**.
+
+Across the whole round from `45f7fba`: production TS **+172**, test TS
+**+78**, CSS **+53**, Rust **0**, mjs **+416**, JSON **+2**. TS/CSS/Rust
+are **+303**; including mjs/JSON, **+721**. Largest production file remains
+`pane.ts`, **664 lines**. No typing-path work, permission, network behavior
+or backend command was added. Nothing was pushed or merged; the supplied
+`.r20-codex-task.md` remains untracked.
+
+Next improvements:
+
+- Drag explorer rows into notes to insert links; reuse this drag and reduce menu work; medium.
+- Explorer multi-selection; move groups of notes together; medium.
+- Convert rich-text paste to Markdown; preserve copied formatting; medium.
+
+Part B complete. Stop here.
