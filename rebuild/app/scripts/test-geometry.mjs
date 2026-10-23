@@ -1,7 +1,7 @@
 // Permanent real-pointer geometry/folding and prompt/menu latency regression.
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
-await withBrowser(async ({ send, run, press, chord, move, click, check }) => {
+await withBrowser(async ({ send, run, press, move, click, check }) => {
   await run(async () => {
     const { api } = await import('/src/api.ts');
     const body = 'A paragraph.\n# HeadingOne\nSection one.\n## HeadingTwo\nSection two.\n### HeadingThree\nSection three.';
@@ -78,24 +78,43 @@ await withBrowser(async ({ send, run, press, chord, move, click, check }) => {
       requestAnimationFrame(tick);
     }, { once: true, capture: true });
   }, type, selector);
-  for (const k of ['o', 'p']) {
-    await click(await coords('HeadingOne', 5));
-    // Control itself is not the opening key.
-    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', modifiers: 2, windowsVirtualKeyCode: 17 });
-    await monitor('keydown', '.prompt');
-    await press(k, 2);
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', modifiers: 0, windowsVirtualKeyCode: 17 });
-    await sleep(340);
+  for (const path of ['Geometry.md', 'GeometryFM.md']) for (const mode of ['live', 'source', 'reading']) {
+    await run(async (path, mode) => { await ws.open(path); ws.setMode(mode); }, path, mode); await sleep(200);
+    const label = `${path} ${mode}`;
+    for (const k of ['o', 'p']) {
+      await click(await coords('HeadingOne', 5));
+      // Control itself is not the opening key.
+      await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', modifiers: 2, windowsVirtualKeyCode: 17 });
+      await monitor('keydown', '.prompt');
+      await press(k, 2);
+      await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', modifiers: 0, windowsVirtualKeyCode: 17 });
+      await sleep(340);
+      const timing = await run(() => window.menuTiming);
+      assert.ok(timing.visibleFrame > 0 && timing.visibleFrame <= 2 && timing.maxFrame <= 20, `${label} Ctrl+${k}: ${JSON.stringify(timing)}`);
+      check(true, `${label} Ctrl+${k}: visible within 2 frames, no frame >20ms (${timing.maxFrame.toFixed(1)}ms)`);
+      await press('Escape');
+    }
+    await move(await coords('HeadingOne', 5));
+    await monitor('contextmenu', '.menu');
+    await click(await coords('HeadingOne', 5), 'right'); await sleep(340);
     const timing = await run(() => window.menuTiming);
-    assert.ok(timing.visibleFrame > 0 && timing.visibleFrame <= 2 && timing.maxFrame <= 20, `Ctrl+${k}: ${JSON.stringify(timing)}`);
-    check(true, `Ctrl+${k}: visible within 2 frames, no frame >20ms (${timing.maxFrame.toFixed(1)}ms)`);
+    assert.ok(timing.visibleFrame > 0 && timing.visibleFrame <= 2 && timing.maxFrame <= 20, `${label} context menu: ${JSON.stringify(timing)}`);
+    check(true, `${label} right-click menu: visible within 2 frames, no frame >20ms (${timing.maxFrame.toFixed(1)}ms)`);
     await press('Escape');
   }
-  await move(await coords('HeadingOne', 5));
-  await monitor('contextmenu', '.menu');
-  await click(await coords('HeadingOne', 5), 'right'); await sleep(340);
-  const timing = await run(() => window.menuTiming);
-  assert.ok(timing.visibleFrame > 0 && timing.visibleFrame <= 2 && timing.maxFrame <= 20, `context menu: ${JSON.stringify(timing)}`);
-  check(true, `right-click menu: visible within 2 frames, no frame >20ms (${timing.maxFrame.toFixed(1)}ms)`);
-  await press('Escape');
+  for (const origin of ['editor', 'title', 'reading']) {
+    await run(origin => ws.setMode(origin === 'reading' ? 'reading' : 'live'), origin); await sleep(100);
+    await click(origin === 'title' ? '.inline-title' : await coords('HeadingOne', 5));
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Control', modifiers: 2, windowsVirtualKeyCode: 17 });
+    await press('p', 2);
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Control', modifiers: 0, windowsVirtualKeyCode: 17 });
+    await send('Input.insertText', { text: 'Toggle bold' });
+    const titles = await run(() => [...document.querySelectorAll('.prompt .suggestion-title')].map(el => el.textContent));
+    assert.equal(titles.includes('Toggle bold'), origin === 'editor', 'lazy command checks preserve ' + origin + ' focus context');
+    if (origin === 'editor') {
+      await press('Enter');
+      check(await run(() => ws.view.state.doc.toString().includes('**HeadingOne**')), 'a command found after typing runs in the original editor');
+    } else await press('Escape');
+  }
+
 });

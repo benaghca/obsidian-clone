@@ -88,15 +88,14 @@ export function registerAppCommands(parts: AppParts) {
 
   // Focus is in some other text field (the inline title, a search box, a
   // field in the Properties block): editor hotkeys leave it alone.
-  const typingElsewhere = () => {
-    const el = document.activeElement as HTMLElement | null;
+  const typingElsewhere = (el: Element | null = document.activeElement) => {
     if (!el || el === document.body || el === ws.view.contentDOM || (el.closest(".cm-table-cell") && ws.view.dom.contains(el))) return false;
-    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable;
+    return el.tagName === "INPUT" || el.tagName === "TEXTAREA" || (el as HTMLElement).isContentEditable;
   };
-  const canEdit = () => hasNote() && ws.active.mode !== "reading" && !typingElsewhere();
+  const canEdit = (focus?: Element | null) => hasNote() && ws.active.mode !== "reading" && !typingElsewhere(focus);
   // An internal link at the caret, for the "link under cursor" commands.
-  const linkUnderCursor = () => {
-    if (!hasNote() || typingElsewhere()) return null;
+  const linkUnderCursor = (focus?: Element | null) => {
+    if (!hasNote() || typingElsewhere(focus)) return null;
     const link = linkAt(ws.view.state, ws.view.state.selection.main.head);
     return link?.kind === "internal" ? link : null;
   };
@@ -234,7 +233,7 @@ export function registerAppCommands(parts: AppParts) {
     name,
     icon: "link",
     hotkeys,
-    when: () => !!linkUnderCursor(),
+    when: (focus) => !!linkUnderCursor(focus),
     run: () => {
       const link = linkUnderCursor();
       if (link) void ws.openLink(link.target, where);
@@ -248,7 +247,7 @@ export function registerAppCommands(parts: AppParts) {
 
   const action = (id: string, name: string, icon: IconName | undefined, run: Command["run"], hotkeys?: Command["hotkeys"]): Command =>
     ({ id, name, icon, run, hotkeys });
-  const conditionalAction = (id: string, name: string, icon: IconName | undefined, run: Command["run"], when = hasNote, hotkeys?: Command["hotkeys"]): Command =>
+  const conditionalAction = (id: string, name: string, icon: IconName | undefined, run: Command["run"], when: Command["when"] = hasNote, hotkeys?: Command["hotkeys"]): Command =>
     ({ ...action(id, name, icon, run, hotkeys), when });
 
   const pluginAction = (plugin: string, id: string, name: string, icon: IconName, run: Command["run"], when?: Command["when"], hotkeys?: Command["hotkeys"]): Command =>
@@ -427,7 +426,7 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:toggle-comments", "Toggle comment", "percent", toggleWrap("%%"), mod("/")),
     {
       ...editorCommand("editor:clear-formatting", "Clear formatting", "eraser", clearFormatting),
-      when: () => canEdit() && ws.view.state.selection.ranges.some((r) => !r.empty),
+      when: (focus) => canEdit(focus) && ws.view.state.selection.ranges.some((r) => !r.empty),
     },
     editorCommand("editor:insert-link", "Insert Markdown link", "link", insertMarkdownLink, mod("k")),
     {
@@ -465,10 +464,10 @@ export function registerAppCommands(parts: AppParts) {
         if (openNewProperty(ws.view) || ws.active.mode === "reading") return;
         addProperty(ws.view);
         ws.view.focus();
-      }, () => hasNote() && (!typingElsewhere() || ws.view.dom.contains(document.activeElement)), mod(";")),
+      }, (focus) => hasNote() && (!typingElsewhere(focus) || ws.view.dom.contains(focus === undefined ? document.activeElement : focus)), mod(";")),
     {
       ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
-      when: () => canEdit() && (app().foldHeading || app().foldIndent),
+      when: (focus) => canEdit(focus) && (app().foldHeading || app().foldIndent),
     },
     {
       ...editorCommand("editor:fold-all", "Fold all headings and lists", "chevrons-down-up", foldAllAllowed),
@@ -486,7 +485,7 @@ export function registerAppCommands(parts: AppParts) {
     followLink("editor:open-link-in-new-leaf", "Open link under cursor in new tab", "tab", mod("enter")),
     followLink("editor:open-link-in-new-split", "Open link under cursor to the right", "right", mod("enter", { alt: true })),
     conditionalAction("editor:context-menu", "Show context menu under cursor", "menu",
-      () => parts.editorMenuAtCaret(), () => hasNote() && !typingElsewhere()),
+      () => parts.editorMenuAtCaret(), (focus) => hasNote() && !typingElsewhere(focus)),
     conditionalAction("editor:focus", "Focus on last note", undefined,
       () => ws.view.focus(), hasNote),
     editorCommand("editor:open-search", "Search current file", "search", openSearchPanel, mod("f")),

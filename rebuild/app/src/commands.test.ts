@@ -95,3 +95,11 @@ test("a key press becomes a hotkey (modifiers alone don't), and hotkeys.json's f
   }
   expect(fromStored({ modifiers: ["Ctrl"], key: ";" })).toEqual({ mod: true, key: ";" });
 });
+
+test("lazy availability checks can retain the palette's original focus", () => {
+  const reg = new CommandRegistry();
+  const editor = {} as Element;
+  reg.register({ id: "edit", name: "Edit", when: focus => focus === editor, run() {} });
+  expect(reg.isAvailable(reg.get("edit"), editor)).toBe(true);
+  expect(reg.isAvailable(reg.get("edit"), null)).toBe(false);
+});

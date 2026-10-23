@@ -7,7 +7,8 @@ import { paletteSource } from "./paletteItems";
 import { hints, openPrompt, suggestionText } from "./prompt";
 
 export function openCommandPalette(registry: CommandRegistry) {
-  const items = paletteSource<Command>(registry.all(), registry.recent(), (cmd) => registry.isAvailable(cmd));
+  const focus = document.activeElement;
+  const items = paletteSource<Command>(registry.all(), registry.recent(), (cmd) => registry.isAvailable(cmd, focus));
   openPrompt({
     placeholder: "Select a command...",
     emptyText: "No commands found.",

@@ -34,8 +34,8 @@ export interface Command {
   hotkeys?: Hotkey[];
   /** The core plugin this command belongs to (Settings → Core plugins can turn it off). */
   plugin?: string;
-  /** Whether the command can run right now; unavailable ones are hidden from the palette and disabled in menus. */
-  when?: () => boolean;
+  /** Whether the command can run; a lazy palette check supplies the focus it opened from. */
+  when?: (focus?: Element | null) => boolean;
   run: () => unknown;
 }
 
@@ -216,8 +216,8 @@ export class CommandRegistry {
     return [...this.commands.values()].filter((c) => this.isEnabled(c));
   }
 
-  isAvailable(cmd: Command): boolean {
-    return this.isEnabled(cmd) && (cmd.when ? cmd.when() : true);
+  isAvailable(cmd: Command, focus?: Element | null): boolean {
+    return this.isEnabled(cmd) && (cmd.when ? cmd.when(focus) : true);
   }
 
   /** Run a command if it is available; returns whether it ran. */

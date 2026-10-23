@@ -1,19 +1,29 @@
 // Shared scratch-vault CDP driver. All interaction uses native pointer/key input.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createServer } from 'node:net';
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 export async function withBrowser(test) {
   const root = fileURLToPath(new URL('../', import.meta.url));
   const scratch = await mkdtemp(root + 'node_modules/.browser-');
-  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', '1441'], { cwd: root, stdio: 'ignore' });
-  const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--no-first-run', '--remote-debugging-port=9451', `--user-data-dir=${scratch}`, 'about:blank'], { stdio: 'ignore' });
+  const port = await new Promise(resolve => {
+    const probe = createServer(); probe.listen(0, '127.0.0.1', () => { const port = probe.address().port; probe.close(() => resolve(port)); });
+  });
+  const url = `http://127.0.0.1:${port}/`;
+  const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port)], { cwd: root, stdio: 'ignore' });
+  const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--no-first-run', '--remote-debugging-port=0', `--user-data-dir=${scratch}`, 'about:blank'], { stdio: 'ignore' });
   let socket;
   try {
     let tabs;
     for (let i = 0; i < 100; i++) {
-      try { await fetch('http://127.0.0.1:1441/'); tabs = await (await fetch('http://127.0.0.1:9451/json')).json(); if (tabs.some(t => t.type === 'page')) break; } catch {}
+      try {
+        await fetch(url);
+        const debugPort = (await readFile(scratch + '/DevToolsActivePort', 'utf8')).split('\n')[0];
+        tabs = await (await fetch(`http://127.0.0.1:${debugPort}/json`)).json();
+        if (tabs.some(t => t.type === 'page')) break;
+      } catch {}
       await sleep(100);
     }
     assert.ok(tabs, 'headless Chromium and Vite started');
@@ -51,7 +61,7 @@ export async function withBrowser(test) {
     const check = (value, message) => { assert.ok(value, message); console.log('PASS', message); };
     await send('Runtime.enable');
     await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
-    await send('Page.navigate', { url: 'http://127.0.0.1:1441/' });
+    await send('Page.navigate', { url });
     for (let i = 0; i < 100 && !await evaluate('!!window.ws?.active.path'); i++) await sleep(100);
     assert.ok(await evaluate('!!window.ws?.active.path'), 'scratch mock vault loaded');
     await test({ send, evaluate, run, key, press, chord, point, move, click, fill, check });
