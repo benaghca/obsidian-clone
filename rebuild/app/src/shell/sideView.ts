@@ -130,4 +130,11 @@ export function pagedRows<T>(into: HTMLElement, items: T[], row: (item: T) => No
 
 /** A line with the columns in `spans` highlighted, as search results show them. */
 export const highlighted = (text: string, spans: Span[]) =>
-  snippetParts(text, spans).map((part) => (part.hit ? h("span", { class: "search-result-file-matched-text" }, part.text) : part.text));
+  snippetParts(text, spans).map((part) => (part.hit ? h("span", { class: "search-result-file-matched-text", "data-from": String(part.range!.from), "data-to": String(part.range!.to) }, part.text) : part.text));
+
+/** A pressed highlight's original columns; clicks elsewhere in the row use its first match. */
+export function hitColumns(event: MouseEvent, spans: Span[]): [number, number] | undefined {
+  const hit = (event.target as Element).closest<HTMLElement>(".search-result-file-matched-text");
+  const span = hit ? { from: Number(hit.dataset.from), to: Number(hit.dataset.to) } : spans[0];
+  return span && [span.from, span.to];
+}

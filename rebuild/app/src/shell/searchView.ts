@@ -19,7 +19,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, foldIn, foldToggle, highlighted, pagedRows } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, hitColumns, pagedRows } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -87,13 +87,14 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       const matches = h(
         "div",
         { class: "search-result-file-matches" },
-        ...shown.slice(0, LINES).map((hit) =>
-          h(
+        ...shown.slice(0, LINES).map((hit) => {
+          const spans = spansOf(hit.text, words, matchCase);
+          return h(
             "div",
-            { class: "search-result-file-match", onclick: () => void ws.open(path, { line: hit.line }) },
-            ...highlighted(hit.text, spansOf(hit.text, words, matchCase)),
-          ),
-        ),
+            { class: "search-result-file-match", "data-preview-path": path, onclick: (event: MouseEvent) => void ws.open(path, { line: hit.line, ch: hitColumns(event, spans) }) },
+            ...highlighted(hit.text, spans),
+          );
+        }),
       );
       const chevron = foldToggle(matches, collapsed.has(path), foldIn(collapsed, path));
       return h(
@@ -101,7 +102,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
         { class: "search-result" },
         h(
           "div",
-          { class: "search-result-file-title", onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
+          { class: "search-result-file-title", "data-preview-path": path, onclick: (e: MouseEvent) => void ws.open(path, { where: whereFromEvent(e) }) },
           chevron,
           h("div", { class: "search-result-file-name" }, noteName(path)),
           n ? h("span", { class: "search-result-count" }, n.toLocaleString()) : null,

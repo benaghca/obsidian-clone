@@ -346,3 +346,37 @@
 .cm-table-cell.cm-focused {
   outline: none;
 }
+
+/* Page preview uses the note embed renderer inside the shared popup chrome. */
+.hover-popover {
+  position: fixed;
+  z-index: 40;
+  width: min(450px, calc(100vw - 16px));
+  height: min(400px, calc(100vh - 16px));
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px;
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-l);
+  box-shadow: var(--shadow-l);
+  font-family: var(--font-text);
+  font-size: var(--font-text-size);
+  line-height: 1.5;
+}
+.hover-popover > .markdown-embed {
+  border: 0;
+}
+.hover-popover > .markdown-embed > :not(.markdown-embed-link) {
+  padding-left: 0;
+}
+.hover-popover > .markdown-embed > .markdown-embed-content {
+  max-height: none;
+  overflow: visible;
+}
+.hover-popover .markdown-embed-title {
+  display: none;
+}
+.hover-popover .cm-blank {
+  min-height: 16px;
+}

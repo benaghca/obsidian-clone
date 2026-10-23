@@ -21,9 +21,9 @@ export function linkAt(state: EditorState, pos: number): LinkAt | null {
         if (!url) continue;
         const href = state.sliceDoc(url.from, url.to);
         // A [markdown](link) to a note is an internal link.
-        return isNotePath(href) ? { kind: "internal", target: href, from: url.from, to: url.to } : { kind: "external", url: href };
+        return isNotePath(href) || href.startsWith("#") ? { kind: "internal", target: href, from: url.from, to: url.to } : { kind: "external", url: href };
       }
-      if (node.name === "URL") return { kind: "external", url: state.sliceDoc(node.from, node.to) };
+      if (node.name === "URL" && node.parent?.name !== "Link" && node.parent?.name !== "Image") return { kind: "external", url: state.sliceDoc(node.from, node.to) };
     }
   }
   return null;

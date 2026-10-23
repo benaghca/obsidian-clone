@@ -101,7 +101,7 @@ export abstract class BlockWidget extends DrawnWidget {
   protected box(view: EditorView, cls: string, content: HTMLElement, pos: (e: MouseEvent, dom: HTMLElement) => number, own?: (e: MouseEvent) => boolean) {
     const dom = h("div", { class: cls }, content, editButton());
     dom.addEventListener("mousedown", (e) => {
-      if (e.button !== 0 || isLinkEvent(e)) return;
+      if (e.defaultPrevented || e.button !== 0 || isLinkEvent(e)) return;
       if (!own?.(e)) {
         if (view.state.facet(readingMode)) return;
         editAt(view, pos(e, dom));
@@ -212,13 +212,17 @@ export function paintLines(p: Painted, parent: HTMLElement) {
   const doc = p.state.doc;
   for (let n = 1; n <= doc.lines; ) {
     const line = doc.line(n);
-    const el = h("div", { class: "cm-line" });
+    const el = h("div", { class: "cm-line", "data-line": String(n) });
     let blockEnd = -1;
     p.decos.between(line.from, line.from, (f, t, deco) => {
       if (f !== line.from) return;
       if (deco.spec.block) {
         blockEnd = t;
-        if (deco.spec.widget) parent.append(widgetDom(p, deco.spec.widget, f));
+        if (deco.spec.widget) {
+          const dom = widgetDom(p, deco.spec.widget, f);
+          dom.dataset.line = String(n);
+          parent.append(dom);
+        }
         return false;
       }
       if (f === t && !deco.spec.widget && deco.spec.class) el.classList.add(...deco.spec.class.split(" "));

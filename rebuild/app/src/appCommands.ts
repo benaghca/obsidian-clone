@@ -522,7 +522,12 @@ export function registerAppCommands(parts: AppParts) {
       run: () => {
         openSearchPanel(ws.view);
         // CodeMirror's panel has one form for both; put the caret in the replace field.
-        requestAnimationFrame(() => ws.view.dom.querySelector<HTMLInputElement>(".cm-search input[name=replace]")?.focus());
+        requestAnimationFrame(() => {
+          const panel = ws.view.dom.querySelector(".cm-search");
+          panel?.classList.add("is-replacing");
+          panel?.querySelector("[name=toggle-replace]")?.setAttribute("aria-expanded", "true");
+          panel?.querySelector<HTMLInputElement>("input[name=replace]")?.focus();
+        });
       },
     },
   );

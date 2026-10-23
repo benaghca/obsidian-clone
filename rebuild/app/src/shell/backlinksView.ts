@@ -14,7 +14,7 @@ import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, foldIn, foldToggle, highlighted, pagedRows, section, type SideView } from "./sideView";
+import { afterPaint, foldIn, foldToggle, highlighted, hitColumns, pagedRows, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -68,7 +68,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
           { class: "search-result" },
           h(
             "div",
-            { class: "search-result-file-title", onclick: () => void ws.open(path) },
+            { class: "search-result-file-title", "data-preview-path": path, onclick: () => void ws.open(path) },
             chevron,
             h("div", { class: "search-result-file-name" }, noteName(path)),
             h("span", { class: "search-result-count" }, total(all).toLocaleString()),
@@ -89,9 +89,9 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       "div",
       {
         class: "search-result-file-match",
-        onclick: () => {
-          const first = spans[0];
-          void ws.open(m.from, { line: m.line, ch: first ? [first.from, first.to] : undefined });
+        "data-preview-path": m.from,
+        onclick: (event: MouseEvent) => {
+          void ws.open(m.from, { line: m.line, ch: hitColumns(event, spans) });
         },
       },
       ...highlighted(m.text, spans),
