@@ -4,7 +4,7 @@ const blocks = /^(P|DIV|H[1-6]|BLOCKQUOTE|PRE|UL|OL|TABLE|HR)$/;
 const skip = /^(SCRIPT|STYLE|META|LINK|TITLE|IFRAME|OBJECT|NOSCRIPT)$/;
 const clean = (s: string) => s.replace(/ +\n/g, "\n").replace(/\n +/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
 // Obsidian leaves literal Markdown punctuation alone in clipboard text.
-const destination = (s: string) => s.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
+const destination = (s: string) => s.replace(/ /g, "%20").replace(/[()]/g, "\\$&");
 const wrap = (text: string, marker: string) => text.trim() ? text.replace(/^(\s*)([\s\S]*?)(\s*)$/, `$1${marker}$2${marker}$3`) : text;
 
 // Preformatted HTML keeps literal whitespace, plus DOM line boundaries.
@@ -63,7 +63,12 @@ export function htmlToMarkdown(html: string): string | null {
     if (node.nodeType === Node.TEXT_NODE) return (node.textContent ?? "").replace(/[\s\u00a0]+/g, " ");
     if (!(node instanceof Element)) return "";
     const tag = node.tagName;
-    if (skip.test(tag) || tag === "O:P" || /mso-list:\s*Ignore/i.test(node.getAttribute("style") ?? "")) return "";
+    if (skip.test(tag) || tag === "O:P") return "";
+    if (/mso-list:\s*Ignore/i.test(node.getAttribute("style") ?? "")) {
+      const number = node.closest("li")?.parentElement?.matches("ol, ul") ? null : node.textContent?.trim().match(/^\d+[.)]/)?.[0];
+      if (number) { rich = true; return number + " "; }
+      return "";
+    }
     if (tag === "INPUT") return "";
     if (tag === "PRE") {
       rich = true;

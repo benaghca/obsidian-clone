@@ -106,4 +106,51 @@ await withBrowser(async ({ send, run, click, move, point, press, chord, check })
     check(await run(() => !document.querySelector('.tooltip')), mode + ': keyboard input dismisses tooltip');
   }
 
+  await send('Page.bringToFront');
+  await send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await run(async fm => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('Paste22.md', fm + 'START\n');
+    await api.createNote('Projects/a(b).md', fm + 'Local target.');
+    await ws.vault.refreshFiles(); await ws.open('Paste22.md');
+  }, fm);
+  const word = '<p style="mso-list:l0 level1 lfo1"><span style="mso-list:Ignore">1.<span>&nbsp;&nbsp;</span></span>First</p><p style="mso-list:l0 level1 lfo1"><span style="mso-list:Ignore">2.<span>&nbsp;&nbsp;</span></span>Second</p>';
+  const links = '<p><a href="https://example.com/a(b)">docs</a> <img alt="remote" src="https://example.com/a(b).png"></p>';
+  const fixtures = [
+    ['Word numbers', word, 'First\nSecond', '1. First\n\n2. Second'],
+    ['parentheses', links, 'docs remote', String.raw`[docs](https://example.com/a\(b\)) ![remote](https://example.com/a\(b\).png)`],
+  ];
+  const write = (html, text) => run(async (html, text) => navigator.clipboard.write([new ClipboardItem({
+    'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([text], { type: 'text/plain' }),
+  })]), html, text);
+  for (const mode of ['live', 'source', 'reading']) {
+    await run(mode => ws.setMode(mode), mode);
+    for (const [name, html, text, expected] of fixtures) {
+      if (mode !== 'reading') await run(fm => ws.view.dispatch({ changes: { from: fm.length, to: ws.view.state.doc.length, insert: 'START\n' }, selection: { anchor: fm.length + 6 } }), fm);
+      await sleep(120);
+      const at = await run(() => { const r = ws.view.coordsAtPos(ws.view.state.doc.length); return { x: r.left + 1, y: (r.top + r.bottom) / 2 }; });
+      await click(at); const before = await doc(); await write(html, text); await chord('v'); await sleep(120);
+      if (mode === 'reading') {
+        check(await doc() === before, `Reading rejects native ${name} paste`);
+        continue;
+      }
+      assert.equal(await doc(), fm + 'START\n' + expected);
+      check(await run(() => ws.view.state.selection.main.empty && ws.view.state.selection.main.head === ws.view.state.doc.length), `${mode}: native ${name} paste preserves formatting and leaves the caret after it`);
+      await run(() => ws.setMode('reading')); await sleep(100);
+      if (name === 'Word numbers') check(await run(() => [...ws.view.dom.querySelectorAll('.cm-list-number')].map(el => el.textContent).join(' ') === '1. 2.'), `${mode}: preserved Word markers render as numbered items`);
+      else check(await run(() => ['https://example.com/a(b)', 'https://example.com/a(b).png'].every(href => [...ws.view.dom.querySelectorAll('[data-href]')].some(el => el.dataset.href === href))), `${mode}: rendered link/image targets have real parentheses without Markdown backslashes`);
+      await run(mode => ws.setMode(mode), mode); await chord('z');
+      check(await doc() === before, `${mode}: ${name} paste undoes in one step`);
+      if (name === 'parentheses') { await write(html, text); await chord('v'); }
+    }
+  }
+  await run(async fm => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('LocalPaste22.md', fm + String.raw`[local](Projects/a\(b\).md)`);
+    await ws.vault.refreshFiles(); await ws.open('LocalPaste22.md'); ws.setMode('reading');
+  }, fm);
+  await sleep(100);
+  await click('.cm-rendered-link[data-href="Projects/a(b).md"]');
+  check(await run(() => ws.active.path === 'Projects/a(b).md'), 'native Reading click follows the escaped local destination');
+
 });
