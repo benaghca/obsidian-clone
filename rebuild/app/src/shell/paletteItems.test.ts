@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { paletteItems } from "./paletteItems";
+import { paletteItems, paletteSource } from "./paletteItems";
 
 const cmds = ["Toggle bold", "Toggle right sidebar", "Toggle reading view", "Navigate back", "Backlinks: Show backlinks"].map(
   (name, i) => ({ id: `c${i}`, name }),
@@ -35,4 +35,17 @@ test("matching every command stays far under 2ms per keystroke", () => {
   const t0 = performance.now();
   for (const q of ["g", "gr", "gro", "group 3", "thing 12", "zq"]) paletteItems(q, many, []);
   expect((performance.now() - t0) / 6).toBeLessThan(2);
+});
+
+test("availability checks are lazy, cached per opening, and searchable beyond the first page", () => {
+  const many = Array.from({ length: 200 }, (_, i) => ({ id: `${i}`, name: `Command ${String(i).padStart(3, "0")}` }));
+  let checks = 0;
+  const source = paletteSource(many, [], (cmd) => { checks++; return cmd.id !== "0"; });
+  expect(source("")).toHaveLength(50);
+  expect(checks).toBe(51);
+  expect(source("Command 199")[0].cmd.id).toBe("199");
+  const afterSearch = checks;
+  source("");
+  source("Command 199");
+  expect(checks).toBe(afterSearch);
 });

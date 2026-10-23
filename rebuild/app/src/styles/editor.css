@@ -495,6 +495,13 @@
 .is-reading-mode .cm-line.cm-h1 {
   font-size: 31px;
 }
+/* The note's own lines keep the 16px as padding: CodeMirror measures a line's
+   border box, not its margins, so a margin here shifts every click, selection
+   and fold chevron below the heading. Embeds and previews are measured whole. */
+.is-reading-mode .cm-content > .cm-line.cm-h {
+  margin-top: 0;
+  padding-top: 16px;
+}
 /* Override CodeMirror's absolutely positioned close control inside our flex row. */
 .cm-editor .cm-panel.cm-search button[name=close] {
   position: static;

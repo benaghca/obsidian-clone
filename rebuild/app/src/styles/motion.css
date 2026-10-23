@@ -12,18 +12,6 @@
   }
 }
 
-/* modal panels: settle from slightly smaller and higher */
-@keyframes grove-pop-in {
-  from {
-    transform: translateY(calc(-1 * var(--anim-offset))) scale(var(--anim-scale-from));
-  }
-}
-@keyframes grove-pop-out {
-  to {
-    transform: scale(var(--anim-scale-from));
-  }
-}
-
 /* menus and suggesters: fade in while dropping a few pixels into place */
 @keyframes grove-popover-in {
   from {

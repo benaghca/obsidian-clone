@@ -14,15 +14,9 @@
   box-shadow: var(--menu-shadow);
   font-size: var(--font-ui-small);
   line-height: 1.4;
-  animation: grove-popover-in var(--anim-duration-fast) var(--anim-ease-out);
-}
-/* a submenu appears beside its item: a fade, no drop */
-.menu.mod-submenu {
-  animation: grove-fade-in var(--anim-duration-fast) var(--anim-ease-out);
 }
 .menu.is-closing {
   pointer-events: none;
-  animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
 .menu-item {
   display: flex;

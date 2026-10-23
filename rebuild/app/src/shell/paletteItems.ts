@@ -40,3 +40,18 @@ export function paletteItems<C extends PaletteCommand>(query: string, cmds: C[],
     .sort((a, b) => b.score - a.score || recency(a.item) - recency(b.item) || byName(a.item, b.item))
     .map(({ item, indices }) => ({ cmd: item, indices }));
 }
+
+/** Check only enough ranked commands to fill the prompt; cache for this opening.
+ * Choosing still rechecks availability after focus returns to the editor. */
+export function paletteSource<C extends PaletteCommand>(cmds: C[], recent: string[], available: (cmd: C) => boolean) {
+  const checked = new Map<C, boolean>();
+  return (query: string) => {
+    const items: PaletteItem<C>[] = [];
+    for (const item of paletteItems(query, cmds, recent)) {
+      if (!checked.has(item.cmd)) checked.set(item.cmd, available(item.cmd));
+      if (checked.get(item.cmd)) items.push(item);
+      if (items.length === 50) break;
+    }
+    return items;
+  };
+}

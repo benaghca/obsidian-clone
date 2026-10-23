@@ -3,21 +3,18 @@
 
 import { type Command, type CommandRegistry, hotkeyLabel } from "../commands";
 import { h } from "./dom";
-import { paletteItems } from "./paletteItems";
+import { paletteSource } from "./paletteItems";
 import { hints, openPrompt, suggestionText } from "./prompt";
 
 export function openCommandPalette(registry: CommandRegistry) {
-  // Availability is read before the prompt takes focus: editor commands
-  // depend on where focus is, and it goes back there before one runs.
-  const available = registry.all().filter((cmd) => registry.isAvailable(cmd));
-  const recent = registry.recent();
+  const items = paletteSource<Command>(registry.all(), registry.recent(), (cmd) => registry.isAvailable(cmd));
   openPrompt({
     placeholder: "Select a command...",
     emptyText: "No commands found.",
     className: "mod-command-palette",
     restoreFocusOnChoose: true,
     instructions: hints("to use"),
-    items: (query) => paletteItems<Command>(query, available, recent),
+    items,
     render({ cmd, indices }, row) {
       row.classList.add("mod-complex");
       suggestionText(row, cmd.name, indices);
