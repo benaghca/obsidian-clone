@@ -8,7 +8,7 @@ import { type OpenWhere, whereFromEvent } from "../tabs";
 
 const CLICK_SLOP = 4;
 
-export interface GraphGestures {
+interface GraphGestures {
   /** The node under a point, or -1. */
   nodeAt(x: number, y: number): number;
   hover(node: number): void;
@@ -26,7 +26,7 @@ export interface GraphGestures {
   menu(node: number, at: { x: number; y: number }): void;
 }
 
-export interface GraphInput {
+interface GraphInput {
   /** The node being dragged (`moved` once past the click slop), or null. */
   readonly drag: { node: number; moved: boolean } | null;
   readonly panning: boolean;

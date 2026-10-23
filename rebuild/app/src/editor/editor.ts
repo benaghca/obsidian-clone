@@ -195,7 +195,7 @@ const searchCounter = ViewPlugin.define((view) => {
   } };
 });
 
-export interface NoteStateOptions {
+interface NoteStateOptions {
   doc: string | Text;
   host: EditorHost;
   /** Extra extensions from the workspace, e.g. a mirror's undo keys. */

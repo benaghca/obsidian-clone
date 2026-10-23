@@ -8,7 +8,7 @@ export interface PaletteCommand {
   name: string;
 }
 
-export interface PaletteItem<C extends PaletteCommand = PaletteCommand> {
+interface PaletteItem<C extends PaletteCommand = PaletteCommand> {
   cmd: C;
   /** Matched characters in the name, for bolding. */
   indices: number[];

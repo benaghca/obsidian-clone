@@ -31,9 +31,9 @@ export const SEPARATOR = "separator" as const;
 export type MenuItems = (MenuEntry | typeof SEPARATOR | null | undefined | false)[];
 
 /** Where to open: at the pointer (context menu) or under an element (dropdown). */
-export type MenuAnchor = { x: number; y: number } | HTMLElement;
+type MenuAnchor = { x: number; y: number } | HTMLElement;
 
-export interface MenuOptions {
+interface MenuOptions {
   /** Dropdowns: line the menu up with the anchor's left (default) or right edge. */
   align?: "left" | "right";
   /** Opened from the keyboard: highlight the first item straight away. */

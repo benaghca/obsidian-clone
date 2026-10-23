@@ -11,7 +11,7 @@ export interface NoteRef {
 }
 
 /** Where a followed link opens: the same tab, a new tab, or a new pane to the right. */
-export type LinkTarget = false | "tab" | "right";
+type LinkTarget = false | "tab" | "right";
 
 export interface EditorHost {
   /** Follow a [[wikilink]] target (note name, optionally with #heading), from the pane of `view`. */

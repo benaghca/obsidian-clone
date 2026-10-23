@@ -94,19 +94,19 @@ export const CORE_PLUGINS = {
   "editor-status": field(true, bool),
 };
 
-export const DAILY_NOTES = {
+const DAILY_NOTES = {
   format: field("YYYY-MM-DD", text(100)),
   folder: field("", text()),
   template: field("", text()),
 };
 
-export const TEMPLATES = {
+const TEMPLATES = {
   folder: field("", text()),
   dateFormat: field("YYYY-MM-DD", text(100)),
   timeFormat: field("HH:mm", text(100)),
 };
 
-export const BACKLINK = {
+const BACKLINK = {
   backlinkInDocument: field(false, bool),
 };
 
@@ -178,7 +178,7 @@ export const GRAPH = {
 /** One graph's settings (the global graph's leave the local-only keys at their defaults). */
 export type GraphSettings = Values<typeof LOCAL_GRAPH>;
 
-export const NOTE_COMPOSER = {
+const NOTE_COMPOSER = {
   askBeforeMerging: field(true, bool),
 };
 

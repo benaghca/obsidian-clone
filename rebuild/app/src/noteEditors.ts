@@ -40,7 +40,7 @@ interface Pane {
 }
 
 /** What the editors tell the workspace. */
-export interface EditorEvents {
+interface EditorEvents {
   /** A pane now shows another tab or note (`path` null: none). */
   shown(group: Group, path: string | null): void;
   /** A note a pane was waiting for has loaded and is on screen. */

@@ -3,7 +3,7 @@
 
 import { h } from "./dom";
 
-export interface FuzzyMatch {
+interface FuzzyMatch {
   score: number;
   /** Indices of matched characters in the candidate, for bolding. */
   indices: number[];

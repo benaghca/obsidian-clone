@@ -52,7 +52,7 @@ interface GroupView {
 }
 
 /** What panes need from the rest of the app. */
-export interface PaneExtras {
+interface PaneExtras {
   /** Search the vault for a tag (a tag node was clicked). */
   searchTag(tag: string): void;
 }

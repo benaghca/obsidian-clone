@@ -41,7 +41,7 @@ export interface LinkIndex {
   unresolved?: Record<string, string[]>;
 }
 
-export interface VaultChange {
+interface VaultChange {
   kind: "create" | "modify" | "remove" | "rename";
   paths: string[];
 }

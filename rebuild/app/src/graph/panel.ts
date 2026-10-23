@@ -11,7 +11,7 @@ import type { ColorGroup, GraphSettings } from "../settings/schema";
 import { h, keyButton, pressable } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 
-export interface PanelHost {
+interface PanelHost {
   local: boolean;
   get(): GraphSettings;
   set<K extends keyof GraphSettings & string>(key: K, value: GraphSettings[K]): void;

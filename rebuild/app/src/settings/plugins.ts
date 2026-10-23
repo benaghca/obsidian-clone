@@ -6,7 +6,7 @@
 
 import type { PluginId } from "./schema";
 
-export interface CorePlugin {
+interface CorePlugin {
   id: PluginId;
   name: string;
   desc: string;
