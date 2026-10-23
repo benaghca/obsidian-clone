@@ -253,7 +253,6 @@
   color: var(--text-accent);
 }
 .setting-item-control {
-  flex: 0 1 auto;
   display: flex;
   align-items: center;
   justify-content: flex-end;

@@ -125,3 +125,20 @@ body {
     display: none !important;
   }
 }
+
+/* Shared label clipping; each view supplies its wrapping policy. */
+.tree-item-inner,
+.workspace-drawer-vault-name,
+.search-result-file-match,
+.workspace-tab-header-inner-title,
+.view-header-breadcrumb,
+.view-header-title,
+.outline-item,
+.search-result-file-name,
+.suggestion-title,
+.suggestion-note,
+.menu-item-title,
+.drag-ghost-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

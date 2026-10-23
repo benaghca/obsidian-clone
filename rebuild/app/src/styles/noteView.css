@@ -32,7 +32,6 @@
   flex: 1;
   min-width: 0;
   display: flex;
-  justify-content: flex-start;
   gap: 4px;
   overflow: hidden;
   white-space: nowrap;
@@ -42,11 +41,7 @@
 .view-header-breadcrumb-separator {
   color: var(--text-faint);
 }
-.view-header-breadcrumb,
-.view-header-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 .view-header-title {
   color: var(--text-normal);
   flex-shrink: 0;
@@ -88,7 +83,6 @@
   padding-top: 32px;
 }
 .is-readable-line-length-off .markdown-sizer {
-  width: 100%;
   max-width: none;
 }
 /* note switch: shown on the first frame at reduced opacity, eased to full */

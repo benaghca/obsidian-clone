@@ -190,10 +190,7 @@ body.is-grabbing * {
 .drag-ghost .svg-icon {
   color: inherit;
 }
-.drag-ghost-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
+
 .drag-ghost.is-closing {
   animation: grove-fade-out var(--anim-duration-fast) var(--anim-ease-in) forwards;
 }
