@@ -1,16 +1,20 @@
 import { dragPointer, h } from "../shell/dom";
 import { settings } from "../settings/store";
 import { canvasReadOnly, selectionMenu } from "./controls";
-import type { CanvasNode } from "./model";
+import { closestSide, type CanvasEdge, type CanvasNode, type Side } from "./model";
 
 const geometry = ["x", "y", "width", "height"] as const;
 const sides = ["top", "right", "bottom", "left", "topright", "bottomright", "bottomleft", "topleft"];
-export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: CanvasNode[],
+export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: CanvasNode[], edges: CanvasEdge[],
   paint: (changed: CanvasNode[]) => void,
-  commit: (changed: CanvasNode[], deleted?: Set<string>) => void,
+  commit: (changed: CanvasNode[], deleted?: Set<string>, edge?: CanvasEdge) => void,
+  preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   history: (redo: boolean) => void, zoom: (nodes: CanvasNode[]) => void, edit: (node: CanvasNode) => void, selectedId?: string) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
+  const edgeElements = () => world.querySelectorAll<HTMLElement | SVGElement>("[data-edge-id]");
+  for (const card of cards.values()) for (const side of sides.slice(0, 4))
+    card.append(h("div", { class: "canvas-node-connection-point", "data-side": side, "aria-label": `Connect ${side}` }));
   const events = new AbortController();
   let cancel: (() => void) | undefined, suppress = false;
   const chosen = () => nodes.filter(n => selected.has(n.id));
@@ -19,6 +23,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen()); };
   function selection() {
     menu.update(chosen());
+    for (const el of edgeElements()) el.classList.toggle("is-selected", selected.has(el.dataset.edgeId!));
     for (const [id, card] of cards) {
       card.classList.toggle("is-selected", selected.has(id));
       card.querySelectorAll(".canvas-node-resizer").forEach(handle => handle.remove());
@@ -47,7 +52,44 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     const card = target.closest<HTMLElement>(".canvas-node");
     const node = nodes.find(n => n.id === card?.dataset.nodeId);
     const side = target.closest<HTMLElement>("[data-resize]")?.dataset.resize;
+    const edge = edges.find(edge => edge.id === target.closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId);
+    const dot = target.closest<HTMLElement>(".canvas-node-connection-point");
+    const end = target.closest<HTMLElement>("[data-edge-end]")?.dataset.edgeEnd as "from" | "to" | undefined;
     e.preventDefault(); el.focus({ preventScroll: true });
+    if (dot || end) {
+      if (canvasReadOnly.has(el)) return;
+      selected.clear(); selected.add(edge?.id ?? node!.id); selection();
+      const next: CanvasEdge = edge ? { ...edge } : { id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), fromNode: node!.id, fromSide: dot!.dataset.side as Side, toNode: node!.id, toSide: "top" };
+      const movingEnd = end ?? "to", nodeKey = movingEnd === "from" ? "fromNode" : "toNode", sideKey = movingEnd === "from" ? "fromSide" : "toSide";
+      const matrix = new DOMMatrix(getComputedStyle(world).transform), rect = el.getBoundingClientRect();
+      let drop: CanvasNode | undefined;
+      world.classList.add("is-connecting");
+      for (const el of edgeElements()) if (el.dataset.edgeId === edge?.id) el.classList.add("is-reconnecting");
+      cancel = dragPointer(e, el, move => {
+        suppress ||= Math.hypot(move.clientX - e.clientX, move.clientY - e.clientY) >= 3;
+        const x = (move.clientX - rect.left - matrix.e) / matrix.a, y = (move.clientY - rect.top - matrix.f) / matrix.a;
+        drop = nodes.findLast(n => n.type !== "group" && x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height)
+          ?? nodes.findLast(n => x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height);
+        if (drop?.id === next[movingEnd === "from" ? "toNode" : "fromNode"]) drop = undefined;
+        for (const [id, card] of cards) card.classList.toggle("is-connection-target", id === drop?.id);
+        if (drop) { next[nodeKey] = drop.id; next[sideKey] = closestSide(drop, x, y); }
+        preview(next, drop ? undefined : { end: movingEnd, x, y });
+      }, cancelled => {
+        cancel = undefined; preview(); world.classList.remove("is-connecting");
+        for (const el of edgeElements()) el.classList.remove("is-reconnecting");
+        for (const card of cards.values()) card.classList.remove("is-connection-target");
+        if (!cancelled && suppress && drop && (!edge || next[nodeKey] !== edge[nodeKey] || next[sideKey] !== edge[sideKey])) {
+          commit([], undefined, next); selected.clear(); selected.add(next.id); selection();
+        }
+      });
+      return;
+    }
+    if (edge) {
+      const remove = e.shiftKey && selected.has(edge.id);
+      if (!e.shiftKey) selected.clear();
+      if (remove) selected.delete(edge.id); else selected.add(edge.id);
+      selection(); return;
+    }
     if (node) {
       const removeOnClick = !side && e.shiftKey && selected.has(node.id);
       if (!side && e.shiftKey) selected.add(node.id);
@@ -125,7 +167,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     if (undo) history(e.shiftKey || e.key.toLowerCase() === "y");
     else if (canvasReadOnly.has(el) && e.key !== "Escape") return;
     else if (remove && selected.size) commit([], selected);
-    else if (direction && selected.size) {
+    else if (direction && chosen().length) {
       const affected = moving(), step = e.shiftKey ? 100 : 5;
       affected.forEach(n => { n.x += direction[0] * step; n.y += direction[1] * step; }); repaint(affected); commit(affected);
     } else if (e.key === "Escape") { selected.clear(); selection(); }

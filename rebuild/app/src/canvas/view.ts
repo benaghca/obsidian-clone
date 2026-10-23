@@ -19,13 +19,18 @@ import { canvasCards, editTextCard } from "./cards";
 import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
-import { edgeCurve, readCanvas, type CanvasNode } from "./model";
+import { edgeCurve, readCanvas, type CanvasEdge, type CanvasNode } from "./model";
 
 const NS = "http://www.w3.org/2000/svg";
-function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>) {
+function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>, ...children: SVGElement[]) {
   const el = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  el.append(...children);
   return el;
+}
+function arrowMarker(id: string, fill: string) {
+  return svg("marker", { id, viewBox: "0 0 10 10", refX: "10", refY: "5", markerWidth: "10", markerHeight: "10", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" },
+    svg("path", { d: "M0,0 L10,5 L0,10 Z", fill, stroke: fill, "stroke-width": "2" }));
 }
 const presets = ["red", "orange", "yellow", "green", "cyan", "purple"];
 function color(value?: string) {
@@ -111,27 +116,50 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     world.append(drawing);
     const edits = new Map<string, () => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
-    const updateEdges: { edge: typeof edges[number]; line: SVGPathElement; label?: HTMLElement }[] = [];
-    edges.forEach((edge, i) => {
+    const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; label?: HTMLElement }[] = [];
+    function place(item: typeof updateEdges[number], curve: ReturnType<typeof edgeCurve>) {
+      item.line.setAttribute("d", curve.path); item.hit.setAttribute("d", curve.path);
+      [curve.p, curve.q].forEach((p, i) => Object.assign(item.ends[i].style, { left: `${p[0]}px`, top: `${p[1]}px` }));
+      if (item.label) { item.label.style.left = `${curve.x}px`; item.label.style.top = `${curve.y}px`; }
+    }
+    function addEdge(edge: CanvasEdge, i: number) {
       const curve = edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge);
-      const line = svg("path", { d: curve.path, fill: "none", stroke: color(edge.color), "stroke-width": "2" });
+      const line = svg("path", { class: "canvas-edge", "data-edge-id": edge.id, fill: "none", stroke: color(edge.color), "stroke-width": "2" });
+      const hit = svg("path", { class: "canvas-edge-hit", "data-edge-id": edge.id, fill: "none", stroke: color(edge.color) });
+      drawing.append(svg("g", {}, hit));
       for (const [end, enabled] of [["start", edge.fromEnd === "arrow"], ["end", edge.toEnd !== "none"]] as const) {
         if (!enabled) continue;
         const id = `canvas-arrow-${group.id}-${mine}-${i}-${end}`;
-        const marker = svg("marker", { id, viewBox: "0 0 10 10", refX: "10", refY: "5", markerWidth: "10", markerHeight: "10", markerUnits: "userSpaceOnUse", orient: "auto-start-reverse" });
-        marker.append(svg("path", { d: "M0,0 L10,5 L0,10 Z", fill: color(edge.color), stroke: color(edge.color), "stroke-width": "2" }));
-        drawing.append(marker);
+        drawing.append(arrowMarker(id, color(edge.color)));
         line.setAttribute(`marker-${end}`, `url(#${id})`);
       }
       drawing.append(line);
-      const update: typeof updateEdges[number] = { edge, line };
+      const ends = ["from", "to"].map(end => h("div", { class: "canvas-edge-end", "data-edge-id": edge.id, "data-edge-end": end, "aria-label": `Reconnect ${end} end` }));
+      world.append(...ends);
+      const update: typeof updateEdges[number] = { edge, line, hit, ends };
       updateEdges.push(update);
       if (typeof edge.label === "string" && edge.label) {
-        const label = h("div", { class: "canvas-edge-label" }, edge.label);
-        label.style.left = `${curve.x}px`; label.style.top = `${curve.y}px`;
+        const label = h("div", { class: "canvas-edge-label", "data-edge-id": edge.id }, edge.label);
         world.append(label); update.label = label;
       }
-    });
+      place(update, curve);
+    }
+    edges.forEach(addEdge);
+    const preview = svg("path", { fill: "none", "stroke-width": "2" });
+    const previewArrow = arrowMarker(`canvas-preview-${group.id}-${mine}`, color());
+    const previewGroup = svg("g", { class: "canvas-edge-preview" }, previewArrow, preview);
+    previewGroup.style.display = "none"; drawing.append(previewGroup);
+    function previewEdge(edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) {
+      previewGroup.style.display = edge ? "" : "none";
+      if (!edge) return;
+      const a = byId.get(edge.fromNode)!, b = byId.get(edge.toNode)!;
+      const point = free ? { ...a, x: free.x, y: free.y, width: 0, height: 0 } : null;
+      preview.setAttribute("d", edgeCurve(free?.end === "from" ? point! : a, free?.end === "to" ? point! : b, edge).path);
+      preview.setAttribute("stroke", color(edge.color));
+      for (const key of ["fill", "stroke"]) previewArrow.firstElementChild!.setAttribute(key, color(edge.color));
+      preview.setAttribute("marker-start", edge.fromEnd === "arrow" ? `url(#${previewArrow.id})` : "none");
+      preview.setAttribute("marker-end", edge.toEnd !== "none" ? `url(#${previewArrow.id})` : "none");
+    }
     for (const node of nodes) {
       const card = h("div", { class: `canvas-node canvas-node-${node.type}`, "data-node-id": node.id });
       Object.assign(card.style, { left: `${node.x}px`, top: `${node.y}px`, width: `${node.width}px`, height: `${node.height}px` });
@@ -217,7 +245,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         };
         edits.set(node.id, edit);
         card.addEventListener("dblclick", event => {
-          if (!event.isTrusted || (event.target as Element).closest("a, [data-href], input, .cm-editor, .canvas-node-resizer")) return;
+          if (!event.isTrusted || (event.target as Element).closest("a, [data-href], input, .cm-editor, .canvas-node-resizer, .canvas-node-connection-point")) return;
           event.stopPropagation(); edit();
         });
         if (node.id === editId) startEditor = edit;
@@ -225,25 +253,27 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       else void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
     }
     const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
-    cleanups.push(canvasEditing(el, world, nodes, changed => {
+    cleanups.push(canvasEditing(el, world, nodes, edges, changed => {
       const ids = new Set(changed.map(n => n.id));
       for (const n of changed) {
         const card = cards.get(n.id)!;
         Object.assign(card.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
         card.classList.toggle("is-colored", !!n.color); card.style.setProperty("--canvas-color", color(n.color));
       }
-      for (const { edge, line, label } of updateEdges) if (ids.has(edge.fromNode) || ids.has(edge.toNode)) {
-        const curve = edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge);
-        line.setAttribute("d", curve.path);
-        if (label) { label.style.left = `${curve.x}px`; label.style.top = `${curve.y}px`; }
-      }
+      for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
+        place(item, edgeCurve(byId.get(item.edge.fromNode)!, byId.get(item.edge.toNode)!, item.edge));
       navigation.loaded(boundsOf());
-    }, (nodes, deleted) => {
-      const next = editCanvas(source, nodes, deleted);
+    }, (nodes, deleted, edge) => {
+      const next = editCanvas(source, nodes, deleted, [], edge ? [edge] : []);
       if (next === source) return;
       undo.push(source); redo = [];
+      if (edge) {
+        const item = updateEdges.find(item => item.edge.id === edge.id);
+        if (item) { Object.assign(item.edge, edge); place(item, edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge)); }
+        else { edges.push(edge); addEdge(edge, edges.length - 1); }
+      }
       changed(next, !!deleted?.size);
-    }, history, nodes => navigation.zoomTo(nodes), node => edits.get(node.id)?.(), selectedId));
+    }, previewEdge, history, nodes => navigation.zoomTo(nodes), node => edits.get(node.id)?.(), selectedId));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);
