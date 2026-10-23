@@ -33,3 +33,17 @@ test("code has no hover target and external links remain external", () => {
     expect(found?.kind ?? null).toBe(doc.includes("https") ? "external" : null);
   }
 });
+
+test("Markdown destination escapes are removed for link commands without changing source ranges", () => {
+  for (const [doc, target] of [
+    [String.raw`[web](https://example.com/a\(b\))`, "https://example.com/a(b)"],
+    [String.raw`[note](Projects/a\(b\).md)`, "Projects/a(b).md"],
+    [String.raw`![image](Attachments/a\(b\).png)`, "Attachments/a(b).png"],
+  ]) {
+    const state = EditorState.create({ doc, extensions: markdownSyntax });
+    ensureSyntaxTree(state, doc.length, 1000);
+    const link = linkAt(state, 2);
+    expect(link?.kind === "external" ? link.url : link?.target).toBe(target);
+    if (link?.kind === "internal") expect(state.sliceDoc(link.from, link.to)).toContain(String.raw`\(`);
+  }
+});

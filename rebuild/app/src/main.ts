@@ -32,7 +32,7 @@ import type { PluginId } from "./settings/schema";
 import { settingsSections } from "./settings/sections";
 import { type SettingsFile, settings } from "./settings/store";
 import { confirmDialog, isConfirmOpen } from "./shell/confirm";
-import { h, iconButton } from "./shell/dom";
+import { installTooltips, h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
 import { installHoverPreviews } from "./shell/hoverPreview";
 import { type MenuItems, showMenu } from "./shell/menu";
@@ -172,13 +172,15 @@ const ribbon = h(
 );
 sidebar.footer.append(h("div", { class: "vault-profile-actions" }, settingsButton()));
 
+installTooltips();
+
 // ----- status bar: backlinks, word and character counts for the open note -----
 
 // Clicking the backlink count opens the Backlinks view, like Obsidian.
 const backlinkCount = h("span");
 const backlinks = h(
   "div",
-  { class: "status-bar-item mod-clickable", title: "Show backlinks", onclick: () => commands.run("backlink:open") },
+  { class: "status-bar-item mod-clickable", "aria-label": "Show backlinks", onclick: () => commands.run("backlink:open") },
   icon("link", 14),
   backlinkCount,
 );
@@ -211,7 +213,6 @@ function renderEditorStatus() {
   const m = MODES.find((x) => x.mode === mode)!;
   editorStatus.replaceChildren(icon(m.icon, 14));
   editorStatus.setAttribute("aria-label", m.title);
-  editorStatus.title = m.title;
 }
 const statusBar = h("div", { class: "status-bar" }, backlinks, propertyCount, editorStatus, words, chars);
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;

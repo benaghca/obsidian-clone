@@ -398,7 +398,6 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       modeButton.replaceChildren(icon(reading ? "pen-line" : "book-open"));
       const label = `Current view: ${reading ? "reading\nClick to edit" : "editing\nClick to read"}\nCtrl+Click to open to the right`;
       modeButton.setAttribute("aria-label", label);
-      modeButton.title = label;
     }
 
     let shownCrumb = "";

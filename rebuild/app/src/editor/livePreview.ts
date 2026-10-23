@@ -28,6 +28,7 @@ import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
+import { markdownURL } from "../links/internal";
 import { DrawnWidget, embedChain, paintWith, readingMode, tickLine } from "./render";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
@@ -332,7 +333,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     if (marks.length < 2) return;
     const textFrom = marks[0].to;
     const textTo = marks[1].from;
-    const href = url ? doc.sliceString(url.from, url.to) : undefined;
+    const href = url ? markdownURL(doc.sliceString(url.from, url.to)) : undefined;
     if (!url || touches(node.from, node.to)) {
       for (const m of marks) mark("cm-formatting cm-formatting-link", m.from, m.to);
       mark("cm-link", textFrom, textTo, href);
@@ -353,12 +354,12 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     const url = node.getChild("URL");
     const marks = node.getChildren("LinkMark");
     if (!url || marks.length < 2) return;
-    const href = doc.sliceString(url.from, url.to);
+    const raw = doc.sliceString(url.from, url.to), href = markdownURL(raw);
     const alt = doc.sliceString(marks[0].to, marks[1].from);
     if (isRemoteUrl(href)) {
       if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
-      const widget = new ImageWidget(resolve(href), href, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt, node.to - node.from);
+      const widget = new ImageWidget(resolve(href), raw, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt, node.to - node.from);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
     }
   }

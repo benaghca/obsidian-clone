@@ -13,7 +13,7 @@ import type { Edge } from "../layout";
 import { animateOut } from "../motion";
 import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
-import { h } from "./dom";
+import { dragPointer, h } from "./dom";
 import { icon, type IconName } from "./icons";
 import type { GroupView } from "./pane";
 
@@ -100,7 +100,6 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
   let target: DropTarget | null = null;
   let x = x0;
   let y = y0;
-  let frame = 0;
 
   function begin() {
     dragging = true;
@@ -124,7 +123,6 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
   }
 
   function update() {
-    frame = 0;
     if (!ghost || !overlay || !from) return;
     ghost.style.transform = `translate(${x}px, ${y}px)`;
     const next = dropTarget(x, y, tab, from, measured);
@@ -155,18 +153,16 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
       if (Math.hypot(x - x0, y - y0) < THRESHOLD) return;
       begin();
     }
-    frame ||= requestAnimationFrame(update);
+    update();
   }
 
   function finish(drop: boolean) {
     listening.abort();
-    cancelAnimationFrame(frame);
     if (!dragging) {
       if (drop) ws.activate(tab);
       return;
     }
     if (drop) {
-      update();
       const t = target;
       if (t?.kind === "tab") {
         header.classList.add("is-moving");
@@ -182,18 +178,12 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
     if (ghost) void animateOut(ghost);
   }
 
-  const onUp = () => finish(true);
-  const onCancel = () => finish(false);
-  const onKey = (e: KeyboardEvent) => {
+  const listening = new AbortController();
+  const cancel = dragPointer(down, header, move, (cancelled) => finish(!cancelled), false);
+  window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
     e.preventDefault();
     e.stopPropagation();
-    finish(false);
-  };
-
-  const listening = new AbortController();
-  window.addEventListener("pointermove", move, listening);
-  window.addEventListener("pointerup", onUp, listening);
-  window.addEventListener("pointercancel", onCancel, listening);
-  window.addEventListener("keydown", onKey, { capture: true, signal: listening.signal });
+    cancel();
+  }, { capture: true, signal: listening.signal });
 }

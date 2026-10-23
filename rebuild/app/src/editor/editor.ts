@@ -1,7 +1,7 @@
 // Builds the EditorState for a note. Each open note keeps its own state (and
 // undo history); panes swap states with view.setState, which is instant.
 
-import { completionKeymap } from "@codemirror/autocomplete";
+import { acceptCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { getSearchQuery, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
@@ -133,7 +133,7 @@ function styleSearchPanel(panel: HTMLElement, field: HTMLInputElement) {
     const el = panel.querySelector<HTMLButtonElement>(`button[name=${name}]`)!;
     el.className = "clickable-icon";
     el.setAttribute("aria-label", label);
-    el.title = label;
+    el.removeAttribute("title");
     el.replaceChildren(icon(glyph));
     return el;
   };
@@ -143,12 +143,13 @@ function styleSearchPanel(panel: HTMLElement, field: HTMLInputElement) {
     const title = ["Match case", "Regular expression", "Whole word"][i];
     input.setAttribute("aria-label", title);
     label.className = "cm-search-option clickable-icon";
-    label.title = title;
+    label.setAttribute("aria-label", title);
+    label.removeAttribute("title");
     label.replaceChildren(input, icon((["case-sensitive", "regex", "whole-word"] as const)[i]));
     return label;
   });
   const replace = panel.querySelector<HTMLInputElement>("[name=replace]");
-  const toggle = h("button", { type: "button", class: "clickable-icon", title: "Replace", "aria-label": "Replace", "aria-expanded": "false", onclick: () => {
+  const toggle = h("button", { type: "button", class: "clickable-icon", "aria-label": "Replace", "aria-expanded": "false", onclick: () => {
     toggle.setAttribute("aria-expanded", String(panel.classList.toggle("is-replacing")));
   } }, icon("chevron-right"));
   toggle.setAttribute("name", "toggle-replace");
@@ -235,6 +236,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       counts ? countsField.init(() => counts) : countsField,
       keymap.of([
         ...completionKeymap,
+        { key: "Tab", run: acceptCompletion },
         { key: "Home", run: markdownHome(), shift: markdownHome(true) },
         ...defaultKeymap,
         ...historyKeymap,

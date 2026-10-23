@@ -10,8 +10,6 @@
 }
 .outline-item {
   padding-left: calc(8px + var(--depth, 0) * 16px);
-  overflow: hidden;
-  text-overflow: ellipsis;
   cursor: var(--cursor, default);
 }
 .backlink-header {
@@ -50,8 +48,6 @@
   padding-left: 22px;
 }
 .search-result-file-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .backlink-pane .search-result-file-match {

@@ -34,8 +34,9 @@ export interface Backlink {
 export interface LinkIndex {
   /** Resolved [[wikilink]] targets per note. */
   outgoing: Record<string, string[]>;
+  /** Resolved wikilink and Markdown link mentions, with their source lines. */
   backlinks: Record<string, Backlink[]>;
-  /** Resolved [text](path) link targets per note (not in outgoing or backlinks). */
+  /** Resolved [text](path) link targets per note (not in outgoing). */
   markdown?: Record<string, string[]>;
   /** Link targets that match no file, per note, as written. */
   unresolved?: Record<string, string[]>;

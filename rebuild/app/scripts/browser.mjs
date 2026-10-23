@@ -1,7 +1,7 @@
 // Shared scratch-vault CDP driver. All interaction uses native pointer/key input.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { accessSync, constants, statSync } from 'node:fs';
 import { delimiter, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -24,7 +24,7 @@ export function findBrowser(env = process.env, platform = process.platform) {
   }
   return null;
 }
-export async function withBrowser(test) {
+export async function withBrowser(test, { height = 1000, screenshots } = {}) {
   const executable = findBrowser();
   if (!executable) {
     console.error('No browser found. Set GROVE_BROWSER to the full path to Chrome, Edge or Chromium.');
@@ -84,11 +84,16 @@ export async function withBrowser(test) {
     const fill = async (selector, text) => { await click(selector); await chord('a'); await send('Input.insertText', { text }); await press('End'); };
     const check = (value, message) => { assert.ok(value, message); console.log('PASS', message); };
     await send('Runtime.enable');
-    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+    await send('Emulation.setDeviceMetricsOverride', { width: 1280, height, deviceScaleFactor: 1, mobile: false });
     await send('Page.navigate', { url });
     for (let i = 0; i < 100 && !await evaluate('!!window.ws?.active.path'); i++) await sleep(100);
     assert.ok(await evaluate('!!window.ws?.active.path'), 'scratch mock vault loaded');
-    await test({ send, evaluate, run, key, press, chord, point, move, click, fill, check });
+    const shot = async name => {
+      assert.ok(screenshots, 'screenshot output directory configured');
+      await mkdir(screenshots, { recursive: true });
+      await writeFile(join(screenshots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
+    };
+    await test({ send, evaluate, run, key, press, chord, point, move, click, fill, check, shot });
     assert.deepEqual(errors, [], 'no browser exceptions');
   } finally {
     socket?.close(); browser.kill(); server.kill();

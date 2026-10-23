@@ -12,14 +12,6 @@
   }
 }
 
-/* menus and suggesters: fade in while dropping a few pixels into place */
-@keyframes grove-popover-in {
-  from {
-    opacity: 0;
-    transform: translateY(calc(-1 * var(--anim-offset)));
-  }
-}
-
 /* note switching: the text is there on the first frame, just not fully opaque.
    Two identical rules so the pane can restart it by swapping names, with no
    forced style flush. */

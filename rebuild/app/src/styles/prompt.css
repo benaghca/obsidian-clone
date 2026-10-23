@@ -86,8 +86,6 @@
 }
 .suggestion-title,
 .suggestion-note {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
 .suggestion-aux {

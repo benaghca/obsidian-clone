@@ -251,7 +251,7 @@ export class NoteEmbedWidget extends DrawnWidget {
       return h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path));
     }
     const content = h("div", { class: "markdown-embed-content" });
-    const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", title: "Open link", onclick: open }, icon("maximize-2"));
+    const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", onclick: open }, icon("maximize-2"));
     const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub && !this.preview ? "" : noteName(path ?? name)), content, link);
     if (!path || !embeds) {
       content.append(missingBox(`“${name}” is not created yet. Click to create.`, open));

@@ -17,7 +17,8 @@ export interface EditorHost {
   /** Follow a [[wikilink]] target (note name, optionally with #heading), from the pane of `view`. */
   openLink(target: string, where: LinkTarget, view?: EditorView): void;
   openUrl(url: string): void;
-  notes(): NoteRef[];
+  /** Link candidates, recent files first, including attachments and unresolved targets. */
+  linkCandidates(): NoteRef[];
   /** A new link to the note at `target` from the note in `view`, as the link settings ask ([[wikilink]] or [markdown](link)). */
   formatLink(target: string, view: EditorView, display?: string): string;
   /** Show the editor menu at `at` for document position `pos` (the caret is already there), or an image's menu. */
