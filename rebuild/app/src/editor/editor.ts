@@ -1,7 +1,7 @@
 // Builds the EditorState for a note. Each open note keeps its own state (and
 // undo history); panes swap states with view.setState, which is instant.
 
-import { completionKeymap } from "@codemirror/autocomplete";
+import { acceptCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { getSearchQuery, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
@@ -236,6 +236,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
       counts ? countsField.init(() => counts) : countsField,
       keymap.of([
         ...completionKeymap,
+        { key: "Tab", run: acceptCompletion },
         { key: "Home", run: markdownHome(), shift: markdownHome(true) },
         ...defaultKeymap,
         ...historyKeymap,

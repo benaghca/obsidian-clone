@@ -18,6 +18,7 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
     await api.createNote('Projects/a(b).md', fm + 'Target with parentheses.\n');
     await api.createNote('Projects/Plain.md', fm + 'Plain target.\n');
     await api.createNote('BlockNote.md', fm + 'A note to suggest.\n');
+    await api.createNote('BlockNoteOther.md', fm + 'Another suggestion.\n');
     await api.createNote('Linker.md', fm + '[[a(b)]]\n[a(b)](Projects/a\\(b\\).md)\n[pct](Projects/a%28b%29.md)\n[plain](Projects/Plain.md)\n');
     await api.createNote('LinkerHidden.md', fm + '[see](Projects/a\\(b\\).md)\n');
     await api.createNote('SearchOnly.md', fm + '[see](Projects/a\\(b\\).md)\n');
@@ -57,28 +58,36 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
   check(renamed.search.includes('[see](c\\(d\\).md)'), 'search finds a note containing only an escaped destination without index help');
   check(renamed.percent.includes('[see](c%28d%29.md)'), 'search finds a note containing only a percent-encoded destination without index help');
 
-  await run(async () => {
-    await ws.open('BlockNote.md');
-    ws.setMode('live');
-    const doc = ws.view.state.doc.toString();
-    const start = doc.indexOf('\n---\n') + 5;
-    ws.view.dispatch({ changes: { from: start, to: doc.length, insert: '\n' }, selection: { anchor: start + 1 } });
-  });
-  await sleep(80);
-  const caret = await run(() => {
-    const pos = ws.view.state.doc.length;
-    const r = ws.view.coordsAtPos(pos);
-    return { x: r.left + 2, y: (r.top + r.bottom) / 2 };
-  });
-  await click(caret);
+  for (const mode of ['live', 'source']) {
+    await run(async mode => {
+      await ws.open('BlockNote.md');
+      ws.setMode(mode);
+      const doc = ws.view.state.doc.toString();
+      const start = doc.indexOf('\n---\n') + 5;
+      ws.view.dispatch({ changes: { from: start, to: doc.length, insert: '\n' }, selection: { anchor: start + 1 } });
+    }, mode);
+    await sleep(80);
+    await click(await run(() => {
+      const r = ws.view.coordsAtPos(ws.view.state.doc.length);
+      return { x: r.left + 2, y: (r.top + r.bottom) / 2 };
+    }));
+    await send('Input.insertText', { text: '[[BlockNote' });
+    await sleep(250);
+    check(await run(() => !!document.querySelector('.cm-link-suggest')), `${mode}: link suggester is open on [[BlockNote`);
+    await press('ArrowDown');
+    const selected = await run(() => document.querySelector('.cm-link-suggest [aria-selected="true"] .cm-completionLabel')?.textContent);
+    await press('Tab');
+    await sleep(80);
+    check(selected && await run(selected => ws.view.state.doc.toString().endsWith(`[[${selected}]]`), selected), `${mode}: Tab accepts the highlighted row ${selected}`);
+    check(await run(() => ws.view.state.selection.main.head === ws.view.state.doc.length && !document.querySelector('.cm-link-suggest')), `${mode}: Tab closes completion and puts caret after the link`);
+    await press('Tab');
+    check(await run(() => ws.view.state.doc.line(ws.view.state.doc.lines).text.startsWith('\t')), `${mode}: Tab without completion still indents`);
+  }
+  await run(() => ws.setMode('reading'));
+  const readOnlyText = await run(() => ws.view.state.doc.toString());
   await send('Input.insertText', { text: '[[BlockNote' });
-  await sleep(250);
-  const open = await run(() => !!document.querySelector('.cm-link-suggest'));
-  check(open, 'link suggester is open on [[BlockNote');
   await press('Tab');
-  await sleep(80);
-  const afterTab = await run(() => ws.view.state.doc.toString());
-  check(/\[\[[^\n]*BlockNote[^\n]*\]\]/.test(afterTab), `Tab accepts the highlighted note, got ${JSON.stringify(afterTab.slice(-80))}`);
+  check(await run(text => ws.view.state.doc.toString() === text && !document.querySelector('.cm-link-suggest'), readOnlyText), 'Reading: completion and Tab do not edit the note');
 
   const pasted = fm + 'VISIBLE BODY LINE\n';
   await run(async (pasted) => {
