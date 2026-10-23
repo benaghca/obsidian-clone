@@ -9,7 +9,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 8px;
+  padding: 0 12px;
   color: var(--text-muted);
 }
 .view-header-nav-buttons,
@@ -18,11 +18,21 @@
   display: flex;
   gap: 2px;
 }
+.view-header-nav-buttons,
+.view-actions {
+  flex-shrink: 0;
+}
+.view-header .clickable-icon {
+  --icon-size: 16px;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+}
 .view-header-title-container {
   flex: 1;
   min-width: 0;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 4px;
   overflow: hidden;
   white-space: nowrap;
@@ -32,17 +42,23 @@
 .view-header-breadcrumb-separator {
   color: var(--text-faint);
 }
+.view-header-breadcrumb,
 .view-header-title {
-  color: var(--text-normal);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.view-header-title {
+  color: var(--text-normal);
+  flex-shrink: 0;
 }
 
 /* note view: readable line width, re-centered as the pane resizes */
 .view-content {
   flex: 1;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
   padding: 0 32px;
   user-select: text;
 }
@@ -66,11 +82,13 @@
   }
 }
 .markdown-sizer {
+  width: 100%;
   max-width: var(--file-line-width);
   margin: 0 auto;
-  padding-top: 24px;
+  padding-top: 32px;
 }
 .is-readable-line-length-off .markdown-sizer {
+  width: 100%;
   max-width: none;
 }
 /* note switch: shown on the first frame at reduced opacity, eased to full */
@@ -81,7 +99,8 @@
   animation: grove-note-in-b var(--anim-duration-fast) var(--anim-ease-out);
 }
 .inline-title {
-  font-size: var(--h1-size);
+  font-size: calc(var(--font-text-size) * 1.618);
+  text-align: start;
   font-weight: 700;
   line-height: 1.2;
   letter-spacing: -0.015em;

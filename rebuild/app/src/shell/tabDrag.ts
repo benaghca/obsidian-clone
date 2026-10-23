@@ -14,10 +14,15 @@ import { animateOut } from "../motion";
 import { type Group, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
-import { icon } from "./icons";
+import { icon, type IconName } from "./icons";
 import type { GroupView } from "./pane";
 
-const THRESHOLD = 5;
+export const THRESHOLD = 5;
+
+/** The pointer label shared by tab and explorer drags. */
+export function dragGhost(title: string, kind: IconName) {
+  return h("div", { class: "drag-ghost" }, icon(kind, 16), h("span", { class: "drag-ghost-title" }, title));
+}
 /** How far into a pane (as a fraction of its size) its edges take a drop. */
 const EDGE_ZONE = 1 / 3;
 /** The marker for a drop between tabs: this wide, from this far below the tab bar's top. */
@@ -112,12 +117,7 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
       }),
     }));
     overlay = h("div", { class: "workspace-drop-overlay" });
-    ghost = h(
-      "div",
-      { class: "drag-ghost" },
-      icon(viewIcon(tab) ?? "file", 16),
-      h("span", { class: "drag-ghost-title" }, tabTitle(tab)),
-    );
+    ghost = dragGhost(tabTitle(tab), viewIcon(tab) ?? "file");
     document.body.append(overlay, ghost);
     header.classList.add("is-being-dragged");
     document.body.classList.add("is-grabbing");
@@ -161,7 +161,10 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
   function finish(drop: boolean) {
     listening.abort();
     cancelAnimationFrame(frame);
-    if (!dragging) return;
+    if (!dragging) {
+      if (drop) ws.activate(tab);
+      return;
+    }
     if (drop) {
       update();
       const t = target;

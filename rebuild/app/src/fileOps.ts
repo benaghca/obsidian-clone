@@ -74,12 +74,19 @@ export async function renameFile(ws: Workspace, path: string, newName: string) {
 
 /** Move a note or folder into another folder ("" for the vault root). */
 export async function moveFile(ws: Workspace, path: string, folder: string) {
-  const to = folder ? `${folder}/${fileName(path)}` : fileName(path);
-  if (to !== path) await relocate(ws, path, to);
+  if (folder === parentDir(path)) return;
+  const isDir = ws.vault.isFolder(path);
+  if (isDir && isUnder(folder.toLowerCase(), path.toLowerCase())) return;
+  const name = fileName(path);
+  const to = folder ? `${folder}/${name}` : name;
+  const clash = ws.vault.files.some((f) => f.path.toLowerCase() === to.toLowerCase());
+  const ext = isDir ? "" : /\.[^.]+$/.exec(name)?.[0] ?? "";
+  await relocate(ws, path, clash ? freeName(ws, to.slice(0, to.length - ext.length), ext, true) : to);
 }
 
 /** Move a file or folder; the loaded notes and everything open follow. */
 async function relocate(ws: Workspace, from: string, to: string) {
+  if (ws.vault.isFolder(from) && isUnder(parentDir(to).toLowerCase(), from.toLowerCase())) throw new Error("A folder cannot move into itself.");
   const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
   const under = (p: string) => isUnder(p, from);

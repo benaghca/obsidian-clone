@@ -2,10 +2,34 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { accessSync, constants, statSync } from 'node:fs';
+import { delimiter, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'node:net';
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Resolve without launching candidates (especially Chrome/Edge on Windows).
+export function findBrowser(env = process.env, platform = process.platform) {
+  const windows = platform === 'win32';
+  const dirs = (env.PATH ?? '').split(windows ? ';' : delimiter);
+  const roots = [env.PROGRAMFILES ?? 'C:\\Program Files', env['PROGRAMFILES(X86)'] ?? 'C:\\Program Files (x86)', env.LOCALAPPDATA].filter(Boolean);
+  const candidates = [env.GROVE_BROWSER, 'chromium', 'chromium-browser', 'google-chrome', ...(windows ? [
+    ...roots.map(root => join(root, 'Google', 'Chrome', 'Application', 'chrome.exe')),
+    ...roots.map(root => join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')),
+  ] : [])].filter(Boolean);
+  for (const candidate of candidates) {
+    const paths = /[/\\]/.test(candidate) ? [candidate] : dirs.map(dir => join(dir, candidate));
+    for (const path of paths) for (const executable of windows && !extname(path) ? [path, path + '.exe'] : [path]) {
+      try { accessSync(executable, constants.X_OK); if (statSync(executable).isFile()) return executable; } catch {}
+    }
+  }
+  return null;
+}
 export async function withBrowser(test) {
+  const executable = findBrowser();
+  if (!executable) {
+    console.error('No browser found. Set GROVE_BROWSER to the full path to Chrome, Edge or Chromium.');
+    process.exit(1);
+  }
   const root = fileURLToPath(new URL('../', import.meta.url));
   const scratch = await mkdtemp(root + 'node_modules/.browser-');
   const port = await new Promise(resolve => {
@@ -13,7 +37,7 @@ export async function withBrowser(test) {
   });
   const url = `http://127.0.0.1:${port}/`;
   const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', '--host', '127.0.0.1', '--port', String(port)], { cwd: root, stdio: 'ignore' });
-  const browser = spawn('chromium', ['--headless', '--no-sandbox', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--no-first-run', '--remote-debugging-port=0', `--user-data-dir=${scratch}`, 'about:blank'], { stdio: 'ignore' });
+  const browser = spawn(executable, ['--headless', '--no-sandbox', '--disable-gpu', '--disable-extensions', '--disable-background-networking', '--no-first-run', '--remote-debugging-port=0', `--user-data-dir=${scratch}`, 'about:blank'], { stdio: 'ignore' });
   let socket;
   try {
     let tabs;

@@ -39,15 +39,16 @@ export function iconButton(icon: SVGElement, label: string, onClick?: (e: MouseE
  * once a frame with the latest pointer position, and once more at the end,
  * then `done`. Only what `apply` writes changes on each frame.
  */
-export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: PointerEvent) => void, done: () => void) {
+export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: PointerEvent) => void, done: (cancelled: boolean) => void, capture = true) {
   try {
-    el.setPointerCapture(down.pointerId);
+    if (capture) el.setPointerCapture(down.pointerId);
   } catch {
     // not a live pointer (a synthetic event): the moves still reach the element while over it
   }
   let last = down;
   let frame = 0;
   const move = (e: PointerEvent) => {
+    if (e.pointerId !== down.pointerId) return;
     last = e;
     frame ||= requestAnimationFrame(() => {
       frame = 0;
@@ -55,15 +56,18 @@ export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: Poin
     });
   };
   const listening = new AbortController();
-  const up = () => {
+  const finish = (cancelled: boolean) => {
+    if (listening.signal.aborted) return;
     cancelAnimationFrame(frame);
-    apply(last);
     listening.abort();
-    done();
+    if (!cancelled) apply(last);
+    done(cancelled);
   };
-  el.addEventListener("pointermove", move, listening);
-  el.addEventListener("pointerup", up, listening);
-  el.addEventListener("pointercancel", up, listening);
+  window.addEventListener("pointermove", move, listening);
+  window.addEventListener("pointerup", (e) => { if (e.pointerId === down.pointerId) { last = e; finish(false); } }, listening);
+  window.addEventListener("pointercancel", (e) => { if (e.pointerId === down.pointerId) finish(true); }, listening);
+  window.addEventListener("blur", () => finish(true), listening);
+  return () => finish(true);
 }
 
 const errorKeys = new WeakMap<HTMLElement, AbortController>();

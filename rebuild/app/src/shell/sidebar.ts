@@ -1,5 +1,5 @@
 // Left sidebar: icon tabs (Files / Search / Bookmarks), the file explorer
-// with Obsidian's header buttons (new note, new folder, sort order, collapse
+// with Obsidian's header buttons (new note, new folder, sort order, auto-reveal, collapse
 // all), and the vault name footer.
 
 import type { FileEntry } from "../api";
@@ -17,6 +17,7 @@ import { type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
 import { createSearchView } from "./searchView";
 import { viewTabs } from "./sideView";
+import { startTreeDrag } from "./treeDrag";
 
 export type LeftView = "files" | "search" | "bookmarks";
 
@@ -141,8 +142,11 @@ function contextMenu(e: MouseEvent, items: MenuItems) {
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
+  const openFolders = new Map<string, () => void>();
+  let cancelDrag: (() => void) | undefined;
   const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
+  let autoReveal = false;
   const list = h("div", { class: "nav-files-container" });
 
   const sortButton = iconButton(icon("arrow-up-narrow-wide"), "Change sort order", () => {
@@ -152,6 +156,13 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       sortButton,
     );
   });
+  const revealButton = iconButton(icon("gallery-vertical"), "Auto-reveal current file", () => {
+    autoReveal = !autoReveal;
+    revealButton.classList.toggle("is-active", autoReveal);
+    revealButton.setAttribute("aria-pressed", String(autoReveal));
+    if (autoReveal && ws.active.path) reveal(ws.active.path);
+  });
+  revealButton.setAttribute("aria-pressed", "false");
   const actions = h(
     "div",
     { class: "nav-header" },
@@ -161,6 +172,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       iconButton(icon("square-pen"), "New note", () => commands.run("file-explorer:new-file")),
       iconButton(icon("folder-plus"), "New folder", () => commands.run("file-explorer:new-folder")),
       sortButton,
+      revealButton,
       iconButton(icon("chevrons-down-up"), "Collapse all", () => commands.run("file-explorer:collapse-all")),
     ),
   );
@@ -212,6 +224,11 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
             if (entry.is_dir) toggleFolder(node, depth, folder!, chevron!);
             else void ws.open(entry.path, { where: whereFromEvent(e) });
           },
+          onpointerdown: (e: PointerEvent) => {
+            if (e.button !== 0 || (e.target as HTMLElement).isContentEditable) return;
+            cancelDrag?.();
+            cancelDrag = startTreeDrag(e, entry, list, ws, (path) => openFolders.get(path)?.());
+          },
           onauxclick: (e: MouseEvent) => {
             if (e.button === 1 && !entry.is_dir) void ws.open(entry.path, { where: "tab" });
           },
@@ -226,6 +243,9 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       self.style.setProperty("--depth", String(depth));
       rows.set(entry.path, self);
       const folder = entry.is_dir ? h("div", { class: "tree-item nav-folder" }, self) : null;
+      if (folder) openFolders.set(entry.path, () => {
+        if (!expanded.has(entry.path)) toggleFolder(node, depth, folder, chevron!, true);
+      });
       if (folder && expanded.has(entry.path)) folder.append(renderChildren(node, depth));
       into.append(folder ?? self);
     }
@@ -239,7 +259,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   const childrenOf = (folder: HTMLElement) => folder.querySelector<HTMLElement>(":scope > .tree-item-children");
 
-  function toggleFolder(node: TreeNode, depth: number, folder: HTMLElement, chevron: HTMLElement) {
+  function toggleFolder(node: TreeNode, depth: number, folder: HTMLElement, chevron: HTMLElement, instant = false) {
     const path = node.entry.path;
     const open = !expanded.has(path);
     if (open) expanded.add(path);
@@ -249,7 +269,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (open && !box) {
       folder.append((box = renderChildren(node, depth)));
       markActive();
-      void slideHeight(box, true, true);
+      if (!instant) void slideHeight(box, true, true);
     } else if (box) slideAndDrop(box, open);
   }
 
@@ -275,6 +295,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   }
 
   function render() {
+    cancelDrag?.();
+    openFolders.clear();
     for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
     rows.clear();
     const frag = document.createDocumentFragment() as unknown as HTMLElement;
@@ -316,9 +338,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   ws.on((change) => {
     if (change === "files") render();
     if (change === "tabs") {
-      // Reveal the active note's folder, as Obsidian does.
       const path = ws.active.path;
-      if (path && !rows.has(path)) expandTo(path);
+      if (autoReveal && path) reveal(path);
       else markActive();
     }
   });

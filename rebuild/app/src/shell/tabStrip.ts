@@ -3,8 +3,8 @@
 // tab", the tab list chevron and the right sidebar toggle (shown only in the
 // top-right pane). Headers are kept per tab id and updated in place, so a
 // switch only flips classes, and opening or closing a tab animates its own
-// header. Pressing a header activates its tab and may start dragging it
-// (tabDrag.ts); a middle click closes it.
+// header. A click activates its tab; dragging keeps the current note
+// on screen (tabDrag.ts). A middle click closes it.
 
 import { commands } from "../commands";
 import { duration, easing } from "../motion";
@@ -62,7 +62,6 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
             e.preventDefault();
             ws.closeTab(tab);
           } else if (e.button === 0) {
-            ws.activate(tab);
             startTabDrag(e, tab, ws, views);
           }
         },

@@ -121,6 +121,7 @@ const hoverChevron = ViewPlugin.fromClass(
     el = chevron();
     line = -1;
     frame = 0;
+    inside = false;
     x = 0;
     y = 0;
     constructor(readonly view: EditorView) {
@@ -137,13 +138,13 @@ const hoverChevron = ViewPlugin.fromClass(
       view.dom.addEventListener("mouseleave", this.onLeave);
     }
     onMove = (e: MouseEvent) => {
-      if (this.el.contains(e.target as Node)) return;
+      this.inside = true;
       this.x = e.clientX;
       this.y = e.clientY;
       this.frame ||= requestAnimationFrame(this.place);
     };
     // The chevron is inside the editor, so leaving the editor is leaving both.
-    onLeave = () => this.hide();
+    onLeave = () => { this.inside = false; this.hide(); };
     place = () => {
       this.frame = 0;
       const { view } = this;
@@ -166,6 +167,9 @@ const hoverChevron = ViewPlugin.fromClass(
     }
     update(u: ViewUpdate) {
       if (u.docChanged && this.line >= 0) this.hide();
+      // Folded markers replace the hover arrow; unfolding must restore it
+      // even when the pointer has not moved since the click.
+      if (this.inside && foldedRanges(u.startState) !== foldedRanges(u.state)) this.frame ||= requestAnimationFrame(this.place);
     }
     destroy() {
       cancelAnimationFrame(this.frame);

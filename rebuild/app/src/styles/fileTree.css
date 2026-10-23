@@ -11,6 +11,10 @@
   justify-content: center;
   gap: 2px;
 }
+.nav-buttons-container .clickable-icon.is-active {
+  color: var(--text-accent);
+  background: var(--background-modifier-hover);
+}
 .nav-files-container {
   flex: 1;
   overflow-y: auto;
@@ -242,3 +246,27 @@
   border-radius: 2px;
 }
 
+
+/* One destination: the whole folder subtree, or the explorer's root. */
+.nav-folder.is-being-dragged-over,
+.nav-files-container.is-being-dragged-over {
+  background: var(--background-modifier-active-hover);
+}
+.nav-folder.is-being-dragged-over > .nav-folder-title {
+  color: var(--text-accent);
+  background: transparent;
+}
+.tree-item-self.is-being-dragged {
+  color: var(--text-on-accent);
+  background: var(--interactive-accent);
+  transition: none;
+}
+.drag-ghost.mod-tree {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  animation: none;
+}
+.drag-ghost-destination {
+  grid-column: 1 / -1;
+  font-weight: 400;
+}
