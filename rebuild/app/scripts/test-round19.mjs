@@ -120,5 +120,16 @@ try {
   await shot('rename-explorer-invalid');
   await fill(field,'Explorer19');await press('Enter');await sleep(200);
   check(await evaluate('ws.active.path === "Explorer19.md" && !document.querySelector(".rename-error")'), 'correcting explorer rename commits and clears its error');
+
+  await run(async()=>{const {api}=await import('/src/api.ts');await api.createNote('Lists19.md','1. first\n2. second\n3. third');await ws.vault.refreshFiles();await ws.open('Lists19.md');});await sleep(150);
+  await click('.cm-content > .cm-line:nth-child(2)');await press('Tab');await sleep(100);
+  check(await run(() => ws.view.state.doc.toString() === "1. first\n\t1. second\n2. third"), 'native Tab renumbers the parent and new ordered sublist');
+  await shot('list-indent');await chord('z');
+  check(await run(() => ws.view.state.doc.toString() === "1. first\n2. second\n3. third"), 'one Undo restores both indentation and numbering');
+  await press('Tab');await key('Shift',8);await press('Tab',8);await key('Shift',0,'keyUp');await sleep(100);
+  check(await run(() => ws.view.state.doc.toString() === "1. first\n2. second\n3. third"), 'native Shift+Tab restores parent numbering');
+  await run(()=>ws.setMode('source'));await click('.cm-content > .cm-line:nth-child(2)');await press('Tab');
+  check(await run(() => ws.view.state.doc.toString() === "1. first\n\t1. second\n2. third"), 'ordered-list renumbering works in Source mode too');
+  await run(()=>ws.setMode('live'));
   assert.equal(errors.length,0,JSON.stringify(errors));
 } finally {socket?.close();browser.kill();server.kill();}

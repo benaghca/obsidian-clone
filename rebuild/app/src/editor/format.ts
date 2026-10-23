@@ -5,8 +5,10 @@
 // works on a bare EditorState in tests. They run only when invoked, never as
 // part of typing.
 
-import { syntaxTree } from "@codemirror/language";
-import { EditorSelection, type EditorState, type StateCommand, type Transaction, type TransactionSpec } from "@codemirror/state";
+import { indentLess, indentMore } from "@codemirror/commands";
+import { ensureSyntaxTree, indentString, indentUnit, syntaxTree } from "@codemirror/language";
+import { ChangeSet, countColumn, EditorSelection, type EditorState, type StateCommand, Transaction, type TransactionSpec } from "@codemirror/state";
+import type { SyntaxNode } from "@lezer/common";
 
 type Target = { state: EditorState; dispatch: (tr: Transaction) => void };
 
@@ -164,6 +166,64 @@ function selectedLines(state: EditorState) {
   }
   return lines.sort((a, b) => a.from - b.from);
 }
+
+/** Tab/Shift+Tab: use normal indentation, then renumber only the affected lists in the same undo step. */
+export const indentList = (outdent = false): StateCommand => ({ state, dispatch }) => {
+  const roots = new Map<number, SyntaxNode>();
+  const moved = new Set<number>();
+  for (const line of selectedLines(state)) {
+    const marker = /^([ \t>]*)\d+[.)][ \t]+/.exec(line.text);
+    if (!marker) continue;
+    const tree = ensureSyntaxTree(state, line.to, 100) ?? syntaxTree(state);
+    const mark = tree.resolveInner(line.from + marker[1].length + 1, -1);
+    if (mark.name !== "ListMark" || mark.parent?.parent?.name !== "OrderedList") continue;
+    moved.add(mark.from);
+    let root: SyntaxNode | null = null;
+    for (let node: SyntaxNode | null = mark; node; node = node.parent) {
+      if (node.name === "OrderedList" || node.name === "BulletList") root = node;
+    }
+    if (root) roots.set(root.from, root);
+  }
+  const apply = (tr: Transaction) => {
+    if (!roots.size || !tr.docChanged) return dispatch(tr);
+    const changes: { from: number; to: number; insert: string }[] = [];
+    const movedTo = new Set([...moved].map((pos) => tr.changes.mapPos(pos, 1)));
+    for (const root of roots.values()) {
+      const from = tr.changes.mapPos(root.from, -1), to = tr.changes.mapPos(root.to, 1);
+      const tree = ensureSyntaxTree(tr.state, to, 100) ?? syntaxTree(tr.state);
+      tree.iterate({ from, to, enter(ref) {
+        if (ref.name !== "OrderedList") return;
+        let number = 1;
+        for (const item of ref.node.getChildren("ListItem")) {
+          const mark = item.getChild("ListMark")!;
+          if (item.from === ref.node.firstChild?.from) {
+            const oldPos = tr.changes.invertedDesc.mapPos(mark.from, 1);
+            const oldFirst = syntaxTree(state).resolveInner(oldPos + 1, -1).parent?.parent?.getChild("ListItem")?.getChild("ListMark");
+            number = ref.node.parent?.name !== "ListItem"
+              ? Number(/^\d+/.exec(state.sliceDoc(root.from, root.to))?.[0] ?? 1)
+              : movedTo.has(mark.from) || !oldFirst ? 1 : Number(state.sliceDoc(oldFirst.from, oldFirst.to - 1));
+          }
+          const to = mark.to - 1, insert = String(number++);
+          if (tr.state.sliceDoc(mark.from, to) !== insert) changes.push({ from: mark.from, to, insert });
+        }
+      } });
+    }
+    const fixes = ChangeSet.of(changes, tr.newDoc.length);
+    dispatch(state.update({ changes: tr.changes.compose(fixes), selection: tr.newSelection.map(fixes), userEvent: tr.annotation(Transaction.userEvent) }));
+  };
+  // As in Obsidian, a list level is at least four spaces, even with a smaller text indent setting.
+  if (roots.size && /^ {1,3}$/.test(state.facet(indentUnit))) {
+    const changes = selectedLines(state).map((line) => {
+      const space = /^[ \t]*/.exec(line.text)![0];
+      return outdent
+        ? { from: line.from, to: line.from + space.length, insert: indentString(state, Math.max(0, countColumn(space, state.tabSize) - 4)) }
+        : { from: line.from, insert: "    " };
+    });
+    apply(state.update({ changes, userEvent: outdent ? "delete.dedent" : "input.indent" }));
+    return true;
+  }
+  return (outdent ? indentLess : indentMore)({ state, dispatch: apply });
+};
 
 /** Keep every selection endpoint attached to its text as line prefixes change. */
 function updateLines(target: Target, specs: Parameters<EditorState["changes"]>[0]) {

@@ -1,9 +1,12 @@
 import { insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
+import { indentUnit } from "@codemirror/language";
+import { history, undo } from "@codemirror/commands";
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
 import { describe, expect, it, test } from "vitest";
 import {
   closeCodeFence,
   insertBlock,
+  indentList,
   insertFootnote,
   insertMarkdownLink,
   insertWikilink,
@@ -18,14 +21,14 @@ import { linkAt } from "./linkAt";
 import { Tag, WikiLink } from "./syntax";
 
 /** Run a command on text where « » mark the selection (or | a caret); return the result marked the same way. */
-function run(cmd: StateCommand, marked: string): string {
+function run(cmd: StateCommand, marked: string, unit = "    "): string {
   const anchor = marked.search(/[«|]/);
   const clean = marked.replace(/[«»|]/g, "");
   const head = marked.includes("»") ? marked.indexOf("»") - 1 : anchor;
   let state = EditorState.create({
     doc: clean,
     selection: EditorSelection.single(anchor, head),
-    extensions: markdown({ base: markdownLanguage, extensions: [WikiLink, Tag] }),
+    extensions: [markdown({ base: markdownLanguage, extensions: [WikiLink, Tag] }), indentUnit.of(unit)],
   });
   cmd({ state, dispatch: (tr) => (state = tr.state) });
   const { from, to } = state.selection.main;
@@ -39,6 +42,35 @@ test("toggle bold wraps, unwraps from inside or outside, and inserts an empty pa
   expect(run(toggleWrap("**"), "a «**word**» b")).toBe("a «word» b");
   expect(run(toggleWrap("**"), "a | b")).toBe("a **|** b");
   expect(run(toggleWrap("**"), "a **|** b")).toBe("a | b");
+});
+
+test("Tab renumbers the parent and new sublist; Shift+Tab rejoins the parent numbering", () => {
+  expect(run(indentList(), "1. first\n2. |second\n3. third")).toBe("1. first\n    1. |second\n2. third");
+  expect(run(indentList(true), "1. first\n    1. |second\n2. third")).toBe("1. first\n2. |second\n3. third");
+  expect(run(indentList(), "5. first\n6. |second\n7. third")).toBe("5. first\n    1. |second\n6. third");
+  expect(run(indentList(), "1. first\n    5. nested\n2. |second\n3. third")).toBe("1. first\n    5. nested\n    6. |second\n2. third");
+  expect(run(indentList(true), "1. first\n    5. |nested\n    6. child\n2. last")).toBe("1. first\n2. |nested\n    5. child\n3. last");
+  expect(run(indentList(), "1. first\n2. |second\n3. third", "\t")).toBe("1. first\n\t1. |second\n2. third");
+  expect(run(indentList(), "1. first\n2. |second\n3. third", "  ")).toBe("1. first\n    1. |second\n2. third");
+  expect(run(indentList(true), "1. first\n    1. |second\n2. third", "  ")).toBe("1. first\n2. |second\n3. third");
+});
+
+test("list indentation keeps selections and ignores fenced code and unrelated lists", () => {
+  expect(run(indentList(), "1. first\n2. «second\n3. third»\n4. last")).toBe("1. first\n    1. «second\n    2. third»\n2. last");
+  expect(run(indentList(), "1. first\n2. |second\n\nParagraph.\n\n8. other\n11. unchanged")).toBe("1. first\n    1. |second\n\nParagraph.\n\n8. other\n11. unchanged");
+  expect(run(indentList(), "```\n2. |code\n```\n\n1. other\n4. unchanged")).toBe("```\n    2. |code\n```\n\n1. other\n4. unchanged");
+});
+
+test("renumbering maps multi-digit markers and undoes with the indentation", () => {
+  const doc = "9. first\n10. second\n11. third";
+  let state = EditorState.create({ doc, selection: { anchor: 13 }, extensions: [markdown(), indentUnit.of("\t"), history()] });
+  const dispatch = (tr: import("@codemirror/state").Transaction) => { state = tr.state; };
+  indentList()({ state, dispatch });
+  expect(state.doc.toString()).toBe("9. first\n\t1. second\n10. third");
+  expect(state.doc.lineAt(state.selection.main.head).number).toBe(2);
+  expect(undo({ state, dispatch })).toBe(true);
+  expect(state.doc.toString()).toBe(doc);
+  expect(indentList()({ state: EditorState.create({ doc, extensions: EditorState.readOnly.of(true) }), dispatch })).toBe(false);
 });
 
 test("italic inside bold wraps rather than eating half of the bold markers", () => {

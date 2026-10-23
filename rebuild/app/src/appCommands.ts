@@ -5,7 +5,7 @@
 // default hotkey, neither does Grove (the sidebar toggles keep round 3's).
 
 import { startCompletion } from "@codemirror/autocomplete";
-import { addCursorAbove, addCursorBelow, deleteLine, indentLess, indentMore, moveLineDown, moveLineUp } from "@codemirror/commands";
+import { addCursorAbove, addCursorBelow, deleteLine, moveLineDown, moveLineUp } from "@codemirror/commands";
 import { openSearchPanel } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
@@ -23,6 +23,7 @@ import {
   HIGHLIGHT_COLORS,
   type HighlightColor,
   insertBlock,
+  indentList,
   insertFootnote,
   insertMarkdownLink,
   insertText,
@@ -479,8 +480,8 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:add-cursor-above", "Add cursor above", "mouse-pointer-click", addCursorAbove),
     editorCommand("editor:add-cursor-below", "Add cursor below", "mouse-pointer-click", addCursorBelow),
     editorCommand("editor:delete-paragraph", "Delete paragraph", "scissors", deleteLine, mod("d")),
-    editorCommand("editor:indent-list", "Indent list item", "indent-increase", indentMore),
-    editorCommand("editor:unindent-list", "Unindent list item", "indent-decrease", indentLess),
+    editorCommand("editor:indent-list", "Indent list item", "indent-increase", indentList()),
+    editorCommand("editor:unindent-list", "Unindent list item", "indent-decrease", indentList(true)),
     followLink("editor:follow-link", "Follow link under cursor", false, [{ alt: true, key: "enter" }]),
     followLink("editor:open-link-in-new-leaf", "Open link under cursor in new tab", "tab", mod("enter")),
     followLink("editor:open-link-in-new-split", "Open link under cursor to the right", "right", mod("enter", { alt: true })),
