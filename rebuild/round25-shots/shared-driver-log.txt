@@ -1,0 +1,8 @@
+PASS a card crossing a selected group's edge is the hit target, got {"x":814.5,"y":318.5,"resize":null,"id":"overlap"}
+PASS dragging that card moves it and leaves the group, overlap {"id":"overlap","type":"text","x":200,"y":0,"width":140,"height":90,"text":"Crosses"} group {"id":"g","type":"group","x":0,"y":0,"width":420,"height":300,"label":"Group"}
+PASS double-click on an edge label does not create a text card, got {"nodes":2,"editing":false} from 2
+PASS Escape during a move restores the card and keeps it selected, before {"left":"80px","top":"80px","selected":true} after {"left":"80px","top":"80px","selected":true}
+PASS reverted text session leaves the new card, got "{\n\t\"nodes\":[\n\t\t{\"id\":\"5124ea5acf16470c\",\"x\":-125,\"y\":-30,\"width\":250,\"height\":60,\"type\":\"text\",\"text\":\"\"}\n\t],\n\t\"edges\":[]\n}"
+PASS one Ctrl+Z after a reverted text session undoes the added card, got "{}"
+PASS odd-dimension media is saved on whole board coordinates, got {"x":-66,"y":-200,"width":133,"height":400}
+PASS an untouched root scalar array stays on one line after a card move, x=40 tags="\"tags\":[1,2,3]\n}"

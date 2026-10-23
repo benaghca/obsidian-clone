@@ -1,0 +1,2 @@
+LOCAL [ [ 'No match found\n↵to accept' ], [] ]
+TARGET [ [ 'Target heading\nH1\n↵to accept' ], [] ]

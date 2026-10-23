@@ -18,6 +18,7 @@ import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { editorHost } from "./host";
+import { headingLabel, headingTarget } from "./headings";
 import { zoomImage } from "./imageZoom";
 import { DrawnWidget, editAt, editButton, isLinkEvent, onDestroy, readingMode, release, render, widgetAction } from "./render";
 
@@ -58,17 +59,26 @@ export function embedSection(text: string, sub: string): NotePart | null {
   const lines = text.split("\n");
   if (sub.startsWith("^")) {
     const mark = ` ^${sub.slice(1)}`;
-    const at = lines.findIndex((l) => l.trimEnd().endsWith(mark));
+    const at = lines.findIndex((l) => l.trimEnd().endsWith(mark) || l.trim() === sub);
     if (at < 0) return null;
     let a = at;
     let b = at;
     const inPara = (l: string) => !!l.trim() && !/^#{1,6}\s/.test(l);
-    while (a > 0 && inPara(lines[a - 1])) a--;
-    while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
-    lines[at] = lines[at].trimEnd().slice(0, -mark.length);
+    if (lines[at].trim() === sub) {
+      if (!at) return null;
+      b--; while (b > 0 && !lines[b].trim()) b--;
+      a = b;
+      const fence = /^\s*(`{3,}|~{3,})/.exec(lines[b]);
+      if (fence) { a--; while (a > 0 && !lines[a].trimStart().startsWith(fence[1])) a--; }
+      else while (a > 0 && inPara(lines[a - 1])) a--;
+    } else {
+      while (a > 0 && inPara(lines[a - 1])) a--;
+      while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
+      lines[at] = lines[at].trimEnd().slice(0, -mark.length);
+    }
     return { text: lines.slice(a, b + 1).join("\n"), line: a };
   }
-  const want = sub.split("#").pop()!.trim().toLowerCase();
+  const want = headingTarget(sub.split("#").pop()!).toLowerCase();
   let start = -1;
   let level = 0;
   let fence = false;
@@ -76,7 +86,7 @@ export function embedSection(text: string, sub: string): NotePart | null {
     if (/^\s*(```|~~~)/.test(lines[i])) fence = !fence;
     const m = fence ? null : /^(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/.exec(lines[i]);
     if (!m) continue;
-    if (start < 0 && m[2].toLowerCase() === want) {
+    if (start < 0 && headingTarget(headingLabel(lines[i])).toLowerCase() === want) {
       start = i;
       level = m[1].length;
     } else if (start >= 0 && m[1].length <= level) return { text: lines.slice(start, i).join("\n").trimEnd(), line: start };

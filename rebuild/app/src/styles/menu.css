@@ -15,9 +15,6 @@
   font-size: var(--font-ui-small);
   line-height: 1.4;
 }
-.menu.is-closing {
-  pointer-events: none;
-}
 .menu-item {
   display: flex;
   align-items: center;

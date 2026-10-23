@@ -11,6 +11,7 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
     const next = n && changes.get(n.id);
     if (next) {
       for (const key of ["x", "y", "width", "height"] as const) if (n[key] !== next[key]) n[key] = next[key];
+      if ("color" in next && n.color !== next.color) { if (next.color === undefined) delete n.color; else n.color = next.color; }
       if (typeof next.text === "string" && n.text !== next.text) n.text = next.text;
     }
     return n;

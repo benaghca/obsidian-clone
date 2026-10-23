@@ -51,12 +51,12 @@ export const markdownURL = (text: string) => text.replace(/\\([\\()])/g, "$1");
  * text shown, if different from the note's name.
  */
 export function formatLink(target: string, from: string | null, notes: NoteLike[], style: LinkStyle, display?: string, subpath = ""): string {
-  const path = linkPath(target, from, notes, style.format);
+  const path = target ? linkPath(target, from, notes, style.format) : "";
   if (style.wikilinks) {
     const text = stripMd(path) + subpath;
     return display && display !== text ? `[[${text}|${display}]]` : `[[${text}]]`;
   }
-  return `[${display ?? nameOf(target)}](${encodeDest(path)}${subpath.replace(/ /g, "%20")})`;
+  return `[${display ?? (target ? nameOf(target) : subpath.slice(1))}](${encodeDest(path)}${subpath.replace(/ /g, "%20")})`;
 }
 
 /** A link target without its #heading, with Markdown escapes and percent encoding decoded. */

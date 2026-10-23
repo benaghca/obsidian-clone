@@ -3,21 +3,22 @@ import { createNoteState } from "../editor/editor";
 import { IMAGE_EXT } from "../editor/embeds";
 import type { EditorHost } from "../editor/host";
 import { parentDir } from "../paths";
-import { dragPointer, h, iconButton, pressable } from "../shell/dom";
+import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { hints, openPrompt, pickFrom, suggestionText } from "../shell/prompt";
 import { switcherItems } from "../shell/switcherItems";
 import type { Workspace } from "../workspace";
+import { canvasReadOnly } from "./controls";
 import type { CanvasNode } from "./model";
 
 export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode) => void) {
-  let gone = false, cancelDrag: (() => void) | undefined;
+  let gone = false, controlClick = false, cancelDrag: (() => void) | undefined;
   const point = (x?: number, y?: number) => {
     const r = el.getBoundingClientRect(), m = new DOMMatrix(getComputedStyle(world).transform);
     return { x: Math.round(((x ?? r.left + r.width / 2) - r.left - m.e) / m.a), y: Math.round(((y ?? r.top + r.height / 2) - r.top - m.f) / m.a) };
   };
   function insert(type: "text" | "file", p: { x: number; y: number }, width = 250, height = 60, file?: string) {
-    if (gone) return;
+    if (gone || canvasReadOnly.has(el)) return;
     add({ id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), x: Math.round(p.x - width / 2), y: Math.round(p.y - height / 2), width, height, type, ...(file ? { file } : { text: "" }) });
   }
   function pickNote(p = point()) {
@@ -51,7 +52,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   ] as const) {
     let dragged = false;
     const run = (p = point()) => { el.focus({ preventScroll: true }); action(p); };
-    const button = pressable(iconButton(icon(glyph, 24), label), e => { if (!dragged || e.type === "keydown") run(); });
+    const button = keyButton(icon(glyph, 24), label, e => { if (!dragged || e.type === "keydown") run(); });
     button.addEventListener("pointerdown", e => {
       if (e.button !== 0) return;
       dragged = false; cancelDrag?.();
@@ -61,14 +62,17 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
         end = move; drop = point(move.clientX, move.clientY);
       }, cancelled => { cancelDrag = undefined; if (dragged && !cancelled && el.contains(document.elementFromPoint(end.clientX, end.clientY))) run(drop); }, false);
     });
-    button.setAttribute("role", "button"); toolbar.append(button);
+    toolbar.append(button);
   }
   el.append(toolbar);
+  // Remember the first target even when its action removes the toolbar.
+  const click = (e: MouseEvent) => { if (e.detail === 1) controlClick = !!(e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu"); };
   const doubleClick = (e: MouseEvent) => {
-    if (e.isTrusted && !e.defaultPrevented && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu")) insert("text", point(e.clientX, e.clientY));
+    if (e.isTrusted && !e.defaultPrevented && !controlClick && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) insert("text", point(e.clientX, e.clientY));
   };
+  el.addEventListener("click", click, true);
   el.addEventListener("dblclick", doubleClick);
-  return () => { gone = true; cancelDrag?.(); toolbar.remove(); el.removeEventListener("dblclick", doubleClick); };
+  return () => { gone = true; cancelDrag?.(); toolbar.remove(); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); };
 }
 
 // A temporary note editor owns only the card's Markdown, never a vault note.

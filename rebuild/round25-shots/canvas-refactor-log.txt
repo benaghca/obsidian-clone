@@ -1,0 +1,34 @@
+PASS Canvas opens outside the saving editor
+PASS Explorer and tab use the canvas icon
+PASS Canvas has the normal header
+PASS All known card types and side/end edges render; future nodes are skipped
+PASS Text uses Reading rendering and link cards have no iframe
+PASS Note cards render body without frontmatter
+PASS Image/SVG cards use local blob URLs
+PASS Link card displays only URL text without a fetching target
+PASS Canvas reuses the workspace host without leaking per-card subscriptions
+PASS Real mouse click follows text-card wikilinks and releases canvas subscriptions
+PASS Header Back returns to the canvas
+PASS Quick switcher lists canvas attachments
+PASS Quick switcher opens canvas
+PASS Opening, rendering and task clicks keep original bytes and unknown fields
+PASS Damaged/empty canvas opens without crashing:
+PASS Damaged/empty canvas opens without crashing: {}
+PASS Damaged/empty canvas opens without crashing: {
+PASS Damaged/empty canvas opens without crashing: {"nodes":[null,{"id":"bad
+PASS Canvas ribbon has the observed instant styled tooltip
+PASS Repeated stationary canvas clicks create numbered valid empty canvases and open them
+PASS Fresh ribbon order matches Obsidian; random/new-note commands remain
+PASS Palette command creates and opens a canvas
+PASS Explorer New canvas follows folder context and shows breadcrumb
+PASS live: canvas offered as attachment in wikilink suggestions
+PASS live: accepts canvas attachment
+PASS live: real hover works on frontmatter note
+PASS live: repeated stationary ribbon click opens prompt
+PASS source: canvas offered as attachment in wikilink suggestions
+PASS source: accepts canvas attachment
+PASS source: real hover works on frontmatter note
+PASS source: repeated stationary ribbon click opens prompt
+PASS reading: real hover works on frontmatter note
+PASS reading: repeated stationary ribbon click opens prompt
+PASS Reading wikilink follows canvas attachment without creating a markdown file

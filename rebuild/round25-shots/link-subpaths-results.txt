@@ -1,0 +1,47 @@
+PASS live: headings retain raw source text and document order, excluding frontmatter
+PASS live: heading rows show level labels
+PASS live: native heading choice inserts the complete heading link
+PASS live: heading acceptance leaves the target byte-identical
+PASS live: stationary repeat does not insert a second link
+PASS live: [[# lists only current-note headings
+PASS live: current-note heading uses an empty file path
+PASS live: heading query uses fuzzy matching
+PASS live: block labels show Markdown text across source lines
+PASS live: accepting a block appends a six-character ID and inserts #^id
+PASS live: #^ reuses the existing block ID without rewriting the target
+PASS live: existing IDs are searchable
+PASS live: existing block ID is inserted unchanged
+PASS live: a quote ID goes on a separate line
+PASS live: generated quote link navigates to the quoted block in Reading
+PASS live: fenced-code IDs stay outside the code
+PASS live: current-note ID insertion maps completion positions and caret correctly
+PASS live: a missing target offers no phantom headings
+PASS live: Reading remains read-only and opens no completion
+PASS source: headings retain raw source text and document order, excluding frontmatter
+PASS source: heading rows show level labels
+PASS source: native heading choice inserts the complete heading link
+PASS source: heading acceptance leaves the target byte-identical
+PASS source: stationary repeat does not insert a second link
+PASS source: [[# lists only current-note headings
+PASS source: current-note heading uses an empty file path
+PASS source: heading query uses fuzzy matching
+PASS source: block labels show Markdown text across source lines
+PASS source: accepting a block appends a six-character ID and inserts #^id
+PASS source: #^ reuses the existing block ID without rewriting the target
+PASS source: existing IDs are searchable
+PASS source: existing block ID is inserted unchanged
+PASS source: a quote ID goes on a separate line
+PASS source: generated quote link navigates to the quoted block in Reading
+PASS source: fenced-code IDs stay outside the code
+PASS source: current-note ID insertion maps completion positions and caret correctly
+PASS source: a missing target offers no phantom headings
+PASS source: Reading remains read-only and opens no completion
+PASS Heading completion honors Markdown link and relative-path settings
+PASS Markdown current-note headings omit the file destination
+PASS A stale block suggestion does not insert a link or overwrite a changed target
+PASS Concurrent target edits survive a stale block choice
+PASS Canvas-local fragment completion matches Obsidian with no note-local headings
+PASS Canvas editor resolves headings in vault notes
+PASS Canvas heading completion saves through the canvas document
+PASS Canvas editor resolves vault block choices
+PASS Canvas block choice adds the ID through the vault note editor

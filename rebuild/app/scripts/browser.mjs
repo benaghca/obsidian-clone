@@ -81,6 +81,21 @@ export async function withBrowser(test, { height = 1000, screenshots } = {}) {
       for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...p, button, clickCount: 1 });
       await sleep(50);
     };
+    const double = async target => {
+      const p = typeof target === 'string' ? await point(target) : target;
+      await move(p);
+      for (const clickCount of [1, 2]) for (const type of ['mousePressed', 'mouseReleased'])
+        await send('Input.dispatchMouseEvent', { type, ...p, button: 'left', clickCount });
+      await sleep(80);
+    };
+    const read = () => run(async () => { const { api } = await import('/src/api.ts'); return api.readNote(ws.active.viewFile); });
+    const open = async (path, source, delay = 100) => {
+      await run(async (path, content) => {
+        const { api } = await import('/src/api.ts');
+        await api.createNote(path, content); await ws.vault.refreshFiles(); await ws.open(path);
+      }, path, typeof source === 'string' ? source : JSON.stringify(source));
+      await sleep(delay);
+    };
     const fill = async (selector, text) => { await click(selector); await chord('a'); await send('Input.insertText', { text }); await press('End'); };
     const check = (value, message) => { assert.ok(value, message); console.log('PASS', message); };
     await send('Runtime.enable');
@@ -93,7 +108,7 @@ export async function withBrowser(test, { height = 1000, screenshots } = {}) {
       await mkdir(screenshots, { recursive: true });
       await writeFile(join(screenshots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
     };
-    await test({ send, evaluate, run, key, press, chord, point, move, click, fill, check, shot });
+    await test({ send, evaluate, run, key, press, chord, point, move, click, fill, double, read, open, check, shot });
     assert.deepEqual(errors, [], 'no browser exceptions');
   } finally {
     socket?.close(); browser.kill(); server.kill();

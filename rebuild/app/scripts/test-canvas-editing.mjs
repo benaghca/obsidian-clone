@@ -8,9 +8,8 @@ const fixture = { future: { untouched: [1, 2] }, nodes: [
   { id:'future',type:'unknown',x:500,opaque:['keep','order'] },
   { id:'b',type:'text',x:440,y:0,width:240,height:160,text:'Card B' },
 ], edges:[{id:'e',fromNode:'a',toNode:'b',label:'Live edge',future:true},{id:'future-edge',fromNode:'future',toNode:'a',unknown:42},null] };
-await withBrowser(async ({ send, run, click, point, move, press, chord, check, shot }) => {
-  const open = async (name, source=fixture) => { await run(async (name, source) => { const {api}=await import('/src/api.ts'); await api.createNote(name,typeof source==='string'?source:JSON.stringify(source));await ws.vault.refreshFiles();await ws.open(name); }, name, source); await sleep(100); };
-  const read = () => run(async () => { const {api}=await import('/src/api.ts');return await api.readNote(ws.active.viewFile); });
+await withBrowser(async ({ send, run, click, point, move, press, chord, check, shot, read, open: openFile }) => {
+  const open = (name, source = fixture) => openFile(name, source);
   const data = async () => JSON.parse(await read());
   const node = async id => (await data()).nodes.find(n=>n?.id===id);
   const card = id => `[data-node-id="${id}"]`;

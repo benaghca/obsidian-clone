@@ -1,0 +1,36 @@
+PASS double-click Remove deletes the card and does not create another, got [] file "{\n\t\"nodes\":[],\n\t\"edges\":[]\n}"
+PASS a subsequent background double-click still creates a card
+PASS [[Land#Has id]] opens the heading that carries a block id, got {"x":406.5,"y":166,"href":"Land#Has id","text":"Land#Has id","line":"# Has id ^keep"}
+PASS a heading row drops its trailing block id, got ["Has id"]
+PASS accepting that heading inserts [[Land#Has id]], got "See links.\n\n[[Land#Has id]]"
+PASS the pipe heading is offered whole, got ["Pipe | split"]
+PASS a heading pipe stays inside the link target, href "Land#Pipe split" doc "See links.\n\n[[Land#Has id]]\n[[Land#Pipe split]]\n\n"
+PASS following the accepted pipe heading lands on that heading, got {"x":406.5,"y":238,"href":"Land#Pipe split","text":"Land#Pipe split","line":"# Pipe | split"}
+PASS same-note block row is offered
+PASS accepting a block writes an id and a link, got "---\ntitle: S\n---\n\nTarget paragraph. ^a5a02d\n\n[[#^a5a02d]]"
+PASS one Ctrl+Z removes the inserted link and the generated id, got "---\ntitle: S\n---\n\nTarget paragraph.\n\n[[^Target"
+PASS cross-note block row is offered
+PASS cross-note undo restores the source query and retains the target ID on its own history
+PASS one undo in the target removes its generated ID without changing other text
+PASS a nested list item is its own block row, got ["Parent item","Nested item"]
+PASS [[Note#Heading^ lists only that section, got ["# Alpha","Alpha only."]
+PASS Source: heading labels omit trailing IDs with frontmatter
+PASS Source: heading acceptance omits the ID
+PASS Source: pipe-heading insertion matches Obsidian
+PASS Source: one undo removes both the ID and accepted link
+PASS Source: one redo restores both the ID and accepted link
+PASS Source: nested list item is a separate row
+PASS Source: choosing a nested item puts its ID on that item
+PASS Source: heading block choices exclude the next section
+PASS Source: scoped block completion inserts #^id and edits only the chosen section
+PASS Source: a missing heading offers no blocks from other sections
+PASS Reading: Has id fixture stays read-only
+PASS Reading: Has id links land on the heading, got {"x":406.5,"y":386.1875,"href":"Land#Has id","text":"Land#Has id","line":"# Has id ^keep"}
+PASS Reading: Pipe split fixture stays read-only
+PASS Reading: Pipe split links land on the heading, got {"x":406.5,"y":386.1875,"href":"Land#Pipe split","text":"Land#Pipe split","line":"# Pipe | split"}
+PASS the selection toolbar leaves the whole group label hit-testable, got {"covered":0,"total":95,"w":380,"h":31,"text":"Notes from the whole first chapter"}
+PASS the selection toolbar leaves the whole file name hit-testable, got {"covered":0,"total":64,"w":258,"h":19,"text":"A very long note name that should sit above the card"}
+PASS zooming the file card keeps its whole name above the toolbar
+PASS Cyan writes color 5 before the redo check, got "{\n\t\"nodes\":[\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":80,\"y\":90,\"width\":200,\"height\":80,\"text\":\"A\",\"color\":\"5\"}\n\t],\n\t\"edges\":[]\n}"
+PASS Ctrl+Y redoes the canvas color, got "{\n\t\"nodes\":[\n\t\t{\"id\":\"a\",\"type\":\"text\",\"x\":80,\"y\":90,\"width\":200,\"height\":80,\"text\":\"A\",\"color\":\"5\"}\n\t],\n\t\"edges\":[]\n}"
+PASS Canvas help lists Ctrl+Y as a redo shortcut

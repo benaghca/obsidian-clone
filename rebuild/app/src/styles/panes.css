@@ -3,18 +3,20 @@
 
 /* Splits lay their children out by flex-grow (each child's fraction), so a
    window resize scales every pane; a divider drag writes two flex-grows. */
-.mod-root {
-  flex: 1;
+.mod-root,
+.mod-root .workspace-split,
+.workspace-tabs {
   min-width: 0;
   display: flex;
   position: relative;
 }
-.mod-root .workspace-split {
+.mod-root {
+  flex: 1;
+}
+.mod-root .workspace-split,
+.workspace-tabs {
   flex: 1 1 0;
-  min-width: 0;
   min-height: 0;
-  display: flex;
-  position: relative;
 }
 .mod-root.mod-vertical,
 .mod-root .workspace-split.mod-vertical {
@@ -24,20 +26,14 @@
 .mod-root .workspace-split.mod-horizontal {
   flex-direction: column;
 }
-.workspace-tabs {
-  flex: 1 1 0;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  background: var(--background-primary);
-}
 .workspace-leaf {
   flex: 1;
   min-width: 0;
   min-height: 0;
   display: flex;
+}
+.workspace-tabs,
+.workspace-leaf {
   flex-direction: column;
   background: var(--background-primary);
 }

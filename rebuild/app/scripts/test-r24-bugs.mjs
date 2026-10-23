@@ -8,14 +8,6 @@ const check = (ok, message) => {
   else { console.log('FAIL', message); failures.push(message); }
 };
 
-const double = async (send, move, point, target) => {
-  const p = typeof target === 'string' ? await point(target) : target;
-  await move(p);
-  for (const clickCount of [1, 2]) for (const type of ['mousePressed', 'mouseReleased'])
-    await send('Input.dispatchMouseEvent', { type, ...p, button: 'left', clickCount, buttons: type === 'mousePressed' ? 1 : 0 });
-  await sleep(80);
-};
-
 const drag = async (send, move, p, dx, dy) => {
   await move(p);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...p, button: 'left', buttons: 1, clickCount: 1 });
@@ -27,17 +19,8 @@ const drag = async (send, move, p, dx, dy) => {
   await sleep(40);
 };
 
-await withBrowser(async ({ send, run, move, point, click, press, chord }) => {
-  const read = () => run(async () => { const { api } = await import('/src/api.ts'); return api.readNote(ws.active.viewFile); });
-  const open = async (path, text) => {
-    await run(async (path, text) => {
-      const { api } = await import('/src/api.ts');
-      await api.createNote(path, text);
-      await ws.vault.refreshFiles();
-      await ws.open(path);
-    }, path, text);
-    await sleep(120);
-  };
+await withBrowser(async ({ send, run, move, point, click, press, chord, double, read, open: openFile }) => {
+  const open = (path, text) => openFile(path, text, 120);
 
   await open('Cover.canvas', JSON.stringify({
     nodes: [
@@ -80,7 +63,7 @@ await withBrowser(async ({ send, run, move, point, click, press, chord }) => {
   const nodesBefore = await run(() => document.querySelectorAll('.canvas-node').length);
   if (!label) check(false, 'edge label is on screen to double-click');
   else {
-    await double(send, move, point, label);
+    await double(label);
     await sleep(200);
     const added = await run(() => ({
       nodes: document.querySelectorAll('.canvas-node').length,
@@ -119,7 +102,7 @@ await withBrowser(async ({ send, run, move, point, click, press, chord }) => {
     const r = document.querySelector('.canvas-view').getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   });
-  await double(send, move, point, spot);
+  await double(spot);
   await send('Input.insertText', { text: 'a' });
   await press('Backspace');
   await press('Escape');

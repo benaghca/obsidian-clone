@@ -8,13 +8,15 @@
 // shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
-import type { EditorHost, EmbedHost } from "./editor/host";
+import { isolateHistory } from "@codemirror/commands";
+import { editorHost, type EditorHost, type EmbedHost } from "./editor/host";
 import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { noteName } from "./paths";
 import type { Workspace } from "./workspace";
+import { recentNotes } from "./shell/switcherItems";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
 const mime = (path: string) => {
@@ -35,14 +37,26 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
         if (!ws.vault.isExcluded(path) && !ws.vault.linkExists(target, null) && !candidates.has(path.toLowerCase()))
           candidates.set(path.toLowerCase(), { name: target, path });
       }
-      const recent = ws.recent.flatMap(path => {
-        const key = path.toLowerCase(), item = candidates.get(key);
-        candidates.delete(key);
-        return item ? [item] : [];
-      });
+      const recent = recentNotes(candidates, ws.recent.map(path => path.toLowerCase()));
       return [...recent, ...candidates.values()];
     },
-    formatLink: (target, view, display) => ws.linkTo(target, ws.editors.pathOf(view), display),
+    formatLink: (target, view, display, subpath) => ws.linkTo(target, ws.editors.pathOf(view), display, subpath),
+    async linkDocument(target, view) {
+      const current = ws.editors.pathOf(view);
+      if (!target) return current ? { path: current, state: view.state, current: true } : null;
+      const path = ws.resolve(target, view.state.facet(editorHost)?.embeds?.pathOf(view) ?? current);
+      if (!path || !/\.md$/i.test(path)) return null;
+      if (path === current) return { path, state: view.state, current: true };
+      const state = await ws.editors.load(path);
+      return state ? { path, state, current: false } : null;
+    },
+    insertBlockId(target, changes, view) {
+      const doc = target.current ? view.state.doc : target.path ? ws.editors.doc(target.path) : null;
+      if (!doc?.eq(target.state.doc)) return false;
+      const spec = { changes, userEvent: "input.complete", annotations: isolateHistory.of("full") };
+      if (target.current) view.dispatch(spec); else ws.editors.change(target.path!, spec);
+      return true;
+    },
     contextMenu: (view, at, pos, keyboard, image) => {
       const group = ws.editors.groupOfView(view);
       if (group) ws.focusGroup(group);

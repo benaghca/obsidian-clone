@@ -504,3 +504,7 @@
 .cm-editor .cm-panel.cm-search button[name=close] {
   position: static;
 }
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-heading { flex-direction: row; justify-content: space-between; gap: 12px; }
+.cm-editor .cm-tooltip.cm-link-suggest .mod-link-heading .cm-completionDetail { margin-left: auto; }
+.cm-editor .cm-tooltip.cm-link-suggest .mod-link-block .cm-completionLabel { white-space: pre-line; max-height: 4.2em; overflow: hidden; }
+.cm-editor .cm-tooltip.cm-link-suggest:has(.mod-link-heading, .mod-link-block)::after { content: "↵ to accept"; }

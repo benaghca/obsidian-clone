@@ -9,9 +9,6 @@
   justify-content: center;
   align-items: flex-start;
 }
-.modal-container.is-closing {
-  pointer-events: none;
-}
 .modal-bg {
   position: absolute;
   inset: 0;

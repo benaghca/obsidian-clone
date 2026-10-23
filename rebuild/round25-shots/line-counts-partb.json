@@ -1,0 +1,56 @@
+{
+  "part_b": {
+    "production_ts": {
+      "before": 20328,
+      "after": 20549,
+      "delta": 221
+    },
+    "test_ts": {
+      "before": 3133,
+      "after": 3191,
+      "delta": 58
+    },
+    "css": {
+      "before": 3836,
+      "after": 3865,
+      "delta": 29
+    },
+    "rs": {
+      "before": 3145,
+      "after": 3145,
+      "delta": 0
+    },
+    "mjs": {
+      "before": 2769,
+      "after": 2912,
+      "delta": 143
+    }
+  },
+  "whole_round": {
+    "production_ts": {
+      "before": 20336,
+      "after": 20549,
+      "delta": 213
+    },
+    "test_ts": {
+      "before": 3133,
+      "after": 3191,
+      "delta": 58
+    },
+    "css": {
+      "before": 3850,
+      "after": 3865,
+      "delta": 15
+    },
+    "rs": {
+      "before": 3145,
+      "after": 3145,
+      "delta": 0
+    },
+    "mjs": {
+      "before": 2778,
+      "after": 2912,
+      "delta": 134
+    }
+  }
+}

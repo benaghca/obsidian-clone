@@ -1,14 +1,8 @@
 // Part B: every interaction is a native CDP pointer/key event, never DOM click().
 import { readFile, writeFile } from 'node:fs/promises';
 import { withBrowser, sleep } from './browser.mjs';
-await withBrowser(async ({send, run, move, point, click, press, chord, check, shot}) => {
-  const read=()=>run(async()=>{const {api}=await import('/src/api.ts');return api.readNote(ws.active.viewFile);});
+await withBrowser(async ({send, run, move, point, click, press, chord, check, shot, double, read}) => {
   const data=async()=>JSON.parse(await read());
-  const double=async target=>{
-    const p=typeof target==='string'?await point(target):target;await move(p);
-    for(const clickCount of [1,2])for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount});
-    await sleep(80);
-  };
   const last=async()=> (await data()).nodes.at(-1);
   const toolbar=label=>`.canvas-card-menu [aria-label="${label}"]`;
   await run(async()=>{

@@ -1,0 +1,58 @@
+{
+  "fixes_after_report": {
+    "baseline": "8364964",
+    "production_ts": {
+      "before": 20549,
+      "after": 20577,
+      "delta": 28
+    },
+    "test_ts": {
+      "before": 3191,
+      "after": 3214,
+      "delta": 23
+    },
+    "css": {
+      "before": 3865,
+      "after": 3865,
+      "delta": 0
+    },
+    "rs": {
+      "before": 3145,
+      "after": 3145,
+      "delta": 0
+    },
+    "mjs": {
+      "before": 3121,
+      "after": 3179,
+      "delta": 58
+    }
+  },
+  "stage3_including_report": {
+    "baseline": "4d04807",
+    "production_ts": {
+      "before": 20549,
+      "after": 20577,
+      "delta": 28
+    },
+    "test_ts": {
+      "before": 3191,
+      "after": 3214,
+      "delta": 23
+    },
+    "css": {
+      "before": 3865,
+      "after": 3865,
+      "delta": 0
+    },
+    "rs": {
+      "before": 3145,
+      "after": 3145,
+      "delta": 0
+    },
+    "mjs": {
+      "before": 2912,
+      "after": 3179,
+      "delta": 267
+    }
+  }
+}
