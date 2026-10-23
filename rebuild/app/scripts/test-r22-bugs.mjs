@@ -89,26 +89,41 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
   await press('Tab');
   check(await run(text => ws.view.state.doc.toString() === text && !document.querySelector('.cm-link-suggest'), readOnlyText), 'Reading: completion and Tab do not edit the note');
 
-  const pasted = fm + 'VISIBLE BODY LINE\n';
-  await run(async (pasted) => {
-    await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([pasted], { type: 'text/plain' }) })]);
-    await ws.open('PasteBody.md');
-    ws.setMode('live');
-  }, pasted);
-  await sleep(150);
-  await click(await run(() => {
-    const r = ws.view.coordsAtPos(Math.min(12, ws.view.state.doc.length));
-    return { x: r.left + 4, y: (r.top + r.bottom) / 2 };
-  }));
-  await chord('a');
-  await sleep(40);
-  await chord('v');
-  await sleep(200);
-  const shown = await run(() => ({
-    text: ws.view.contentDOM.innerText.includes('VISIBLE BODY LINE'),
-    doc: ws.view.state.doc.toString().includes('VISIBLE BODY LINE'),
-  }));
-  check(shown.doc && shown.text, `select-all paste of the same frontmatter shows the body, got ${JSON.stringify(shown)}`);
+  for (const mode of ['live', 'source']) {
+    const pasted = fm + `VISIBLE PASTED BODY ${mode}\n`;
+    await run(async (pasted, mode, fm) => {
+      await navigator.clipboard.write([new ClipboardItem({ 'text/plain': new Blob([pasted], { type: 'text/plain' }) })]);
+      await ws.open('PasteBody.md');
+      ws.setMode(mode);
+      ws.view.dispatch({ changes: { from: 0, to: ws.view.state.doc.length, insert: fm + 'old body\n' } });
+    }, pasted, mode, fm);
+    await sleep(150);
+    await click(await run(() => {
+      const r = ws.view.coordsAtPos(ws.view.state.doc.length - 2);
+      return { x: r.left + 2, y: (r.top + r.bottom) / 2 };
+    }));
+    await chord('a');
+    await chord('v');
+    await sleep(150);
+    check(await run(pasted => ws.view.state.doc.toString() === pasted && ws.view.contentDOM.innerText.includes('VISIBLE PASTED BODY'), pasted), `${mode}: select-all paste of identical frontmatter shows the new body`);
+    await chord('z');
+    await sleep(80);
+    check(await run(() => ws.view.state.doc.toString().endsWith('old body\n') && ws.view.contentDOM.innerText.includes('old body')), `${mode}: undo restores the visible old body`);
+  }
+  for (const mode of ['live', 'source', 'reading']) {
+    await run(mode => ws.setMode(mode), mode);
+    const replacement = fm + `VISIBLE REPLACEMENT ${mode}\n`;
+    await run(text => ws.view.dispatch({ changes: { from: 0, to: ws.view.state.doc.length, insert: text } }), replacement);
+    await sleep(80);
+    check(await run(text => ws.view.state.doc.toString() === text && ws.view.contentDOM.innerText.includes('VISIBLE REPLACEMENT'), replacement), `${mode}: whole-document replacement with identical frontmatter shows its body`);
+    // A body-only edit must retain the properties DOM while correcting its range.
+    await run(() => {
+      window.r22Properties = ws.view.dom.querySelector('.properties');
+      ws.view.dispatch({ changes: { from: ws.view.state.doc.length, insert: 'APPENDED BODY' } });
+    });
+    await sleep(80);
+    check(await run(() => ws.view.contentDOM.innerText.includes('APPENDED BODY') && window.r22Properties === ws.view.dom.querySelector('.properties')), `${mode}: body edits stay visible and retain the properties DOM`);
+  }
 }, { height: 1000 });
 
 assert.deepEqual(failures, []);

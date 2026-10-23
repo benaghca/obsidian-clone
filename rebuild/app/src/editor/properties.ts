@@ -6,9 +6,9 @@
 // frontmatter shown at all) or Source (the YAML as text in Live Preview;
 // Reading view still shows the block, as Obsidian's does).
 //
-// The block replaces the frontmatter's lines with one widget, built only
-// when the frontmatter changes (frontmatter.ts reads it again only when an
-// edit touches it), so typing in the body costs nothing. Edits are written
+// The block replaces the frontmatter's lines with one widget. Ranges are
+// rebuilt after document edits; equal widgets retain their DOM, so body edits
+// do not redraw the property rows. Edits are written
 // on Enter or when a field is left, as ordinary undoable changes to the
 // note, rewriting only that property's lines. A frontmatter Grove can't read
 // line by line is shown as source instead, and a value it can't edit (a
@@ -99,12 +99,13 @@ const blockField = StateField.define<{ deco: DecorationSet; empty: boolean }>({
     for (const e of tr.effects) if (e.is(showEmpty)) empty = e.value;
     if (tr.state.field(frontmatterField)) empty = false;
     const same =
+      !tr.docChanged &&
       empty === value.empty &&
       tr.state.field(frontmatterField) === tr.startState.field(frontmatterField) &&
       tr.state.facet(propertiesDisplay) === tr.startState.facet(propertiesDisplay) &&
       tr.state.facet(readingMode) === tr.startState.facet(readingMode) &&
       !tr.effects.some((e) => e.is(typesChanged));
-    return same ? { deco: value.deco.map(tr.changes), empty } : { deco: build(tr.state, empty), empty };
+    return same ? value : { deco: build(tr.state, empty), empty };
   },
   provide: (f) => EditorView.decorations.from(f, (v) => v.deco),
 });
