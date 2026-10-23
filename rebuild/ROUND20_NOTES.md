@@ -251,3 +251,34 @@ Next improvements:
 - Convert rich-text paste to Markdown; preserve copied formatting; medium.
 
 Part B complete. Stop here.
+
+# Stage 3 fixes
+
+Cherry-picked Grok's `f968221` as `f28f5bb`. Its original regression
+reproduced `Short` at zero width outside the header at 1000px.
+**`9d99b1a`** fixes this with net **four CSS lines**: ancestors share the
+existing hidden-overflow/ellipsis rules, and the note name does not shrink.
+No TypeScript, animations or `.cm-content` spacing changed.
+
+Expanded the supplied regression to **21 width/mode combinations**: 600,
+700, 860, 900, 1000, 1100 and 1280px in Live Preview, Source and Reading,
+on the reported long-path note with frontmatter. Native CDP hover and
+clicks, including repeated clicks without moving, preserve the full note
+name inside the header; ancestors shrink with ellipses first.
+
+Final `npm test` passed: **4** browser-discovery tests, **230** unit tests,
+and all browser suites (geometry **187**, fixes **92**, header **56**,
+explorer **65**, breadcrumb **21** named checks). Geometry stays within
+**1px**, direct content children retain zero vertical margins, and menus
+open within two frames without opening animations; longest sampled frame
+**17.1ms**. `npm run audit:offline` (including build), `cargo test`
+(**32** tests) and `git diff --check` passed. Headless Chromium, scratch
+profiles and mock vaults only; no visible windows or owner vaults.
+
+Net app lines versus Part B (`f390b17`), including the hunter's test:
+production TS **0**, test TS **0**, CSS **+4**, Rust **0**, mjs **+41**,
+JSON **0** (**+45** total). Beyond the cherry-pick alone: CSS **+4**,
+mjs **+8**. Final totals: production TS **19,433**, test TS **3,047**,
+CSS **3,733**, Rust **3,104**, mjs **1,513**; `/gen/` excluded as before.
+
+Committed locally only; nothing pushed. Stage 3 complete. Stop here.
