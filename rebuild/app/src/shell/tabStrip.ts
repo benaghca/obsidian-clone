@@ -43,7 +43,7 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
     // Linked with another tab ("Link with tab..."): a click unlinks it.
     const linked = h(
       "div",
-      { class: "workspace-tab-header-status-icon mod-linked", "aria-label": "Unlink tab", title: "Unlink tab", onpointerdown: (e: PointerEvent) => e.stopPropagation(), onclick: () => ws.setLink(tab, null) },
+      { class: "workspace-tab-header-status-icon mod-linked", "aria-label": "Unlink tab", onpointerdown: (e: PointerEvent) => e.stopPropagation(), onclick: () => ws.setLink(tab, null) },
       icon("link", 14),
     );
     // Close button; on a pinned tab, a pin that unpins it (as in Obsidian).

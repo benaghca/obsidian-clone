@@ -31,7 +31,7 @@ export function h<K extends keyof HTMLElementTagNameMap>(
 
 /** A clickable icon button, Obsidian's "clickable-icon". */
 export function iconButton(icon: SVGElement, label: string, onClick?: (e: MouseEvent) => void, cls = "") {
-  return h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, title: label, onclick: onClick }, icon);
+  return h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, onclick: onClick }, icon);
 }
 
 /**
@@ -147,4 +147,45 @@ export function pressable<E extends HTMLElement>(el: E, onPress: (e: MouseEvent 
 
 /** An icon button the keyboard can press too (the settings' and the graph panel's small buttons). */
 export const keyButton = (icon: SVGElement, label: string, onPress: (e: MouseEvent | KeyboardEvent) => void, cls = "") =>
-  pressable(h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, title: label, role: "button" }, icon), onPress);
+  pressable(h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, role: "button" }, icon), onPress);
+
+/** One delayed tooltip for icon controls; dismissal listeners exist only during a hover. */
+export function installTooltips() {
+  let owner: HTMLElement | null = null, tip: HTMLElement | null = null;
+  let timer = 0;
+  let listening: AbortController | null = null;
+  const close = () => {
+    clearTimeout(timer);
+    listening?.abort();
+    listening = null;
+    tip?.remove();
+    tip = owner = null;
+  };
+  document.addEventListener("pointerover", event => {
+    const next = (event.target as Element).closest<HTMLElement>(".clickable-icon[aria-label], .workspace-tab-header-inner-close-button[aria-label], .workspace-tab-header-status-icon[aria-label], .status-bar-item.mod-clickable[aria-label]");
+    if (next === owner) return;
+    close();
+    if (!next?.getAttribute("aria-label") || event.buttons) return;
+    owner = next;
+    listening = new AbortController();
+    const options = { capture: true, signal: listening.signal };
+    for (const type of ["pointerdown", "keydown", "scroll"]) document.addEventListener(type, close, options);
+    for (const type of ["blur", "resize"]) window.addEventListener(type, close, options);
+    timer = window.setTimeout(() => {
+      if (!owner?.isConnected) return close();
+      tip = h("div", { class: "tooltip", role: "tooltip" }, owner.getAttribute("aria-label"));
+      document.body.append(tip);
+      const r = owner.getBoundingClientRect(), width = tip.offsetWidth, height = tip.offsetHeight;
+      const side = !!owner.closest(".workspace-ribbon");
+      const above = !side && r.bottom + height + 8 > innerHeight - 8;
+      tip.classList.toggle("mod-right", side);
+      tip.classList.toggle("mod-top", above);
+      const left = Math.max(8, Math.min(side ? r.right + 8 : r.left + (r.width - width) / 2, innerWidth - width - 8));
+      const top = Math.max(8, Math.min(side ? r.top + (r.height - height) / 2 : above ? r.top - height - 8 : r.bottom + 8, innerHeight - height - 8));
+      tip.style.left = `${left}px`;
+      tip.style.top = `${top}px`;
+      tip.style.setProperty("--tip-arrow", `${Math.max(8, Math.min(side ? r.top + r.height / 2 - top - 5 : r.left + r.width / 2 - left - 5, (side ? height : width) - 18))}px`);
+    }, 500);
+  });
+  document.addEventListener("pointerout", event => { if (owner && !owner.contains(event.relatedTarget as Node | null)) close(); });
+}
