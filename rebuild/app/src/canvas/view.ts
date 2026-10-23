@@ -1,13 +1,15 @@
 // Plain DOM/SVG board. Detached, read-only editor contexts reuse Reading's
 // renderer and local embeds; no canvas text ever enters a saving editor.
+import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { api } from "../api";
-import { IMAGE_EXT, embedPart, embedSection } from "../editor/embeds";
+import { IMAGE_EXT, embedPart } from "../editor/embeds";
 import { editorHost } from "../editor/host";
 import { readingMode, release, render } from "../editor/render";
 import { isExternalUrl, isNotePath } from "../links/external";
 import { resolveLink } from "../links/internal";
+import { noteName } from "../paths";
 import { h } from "../shell/dom";
 import type { Group, Tab } from "../tabs";
 import { whereFromEvent } from "../tabs";
@@ -23,7 +25,18 @@ function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string,
 }
 const presets = ["red", "orange", "yellow", "green", "cyan", "purple"];
 function color(value?: string) {
-  return value && /^[1-6]$/.test(value) ? `var(--color-${presets[Number(value) - 1]})` : value && /^#[0-9a-f]{6}$/i.test(value) ? value : "var(--background-modifier-border-focus)";
+  return value && /^[1-6]$/.test(value) ? `var(--color-${presets[Number(value) - 1]})` : value && CSS.supports("color", value) ? value : "var(--background-modifier-border-focus)";
+}
+// Hide block metadata in the displayed copy, retaining literal IDs in code.
+function withoutBlockIds(text: string) {
+  if (!text.includes("^")) return text;
+  const tree = markdownLanguage.parser.parse(text);
+  return text.replace(/(?:^|[ \t]+)\^[a-zA-Z0-9-]+[ \t]*$/gm, (mark, at: number) => {
+    for (let node = tree.resolveInner(at + mark.indexOf("^"), 1); node; node = node.parent!) {
+      if (["FencedCode", "CodeBlock", "InlineCode", "HTMLBlock"].includes(node.name)) return mark;
+    }
+    return "";
+  });
 }
 export function createCanvasView(ws: Workspace, path: string, group: Group, tab: Tab) {
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
@@ -74,7 +87,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         continue;
       }
       if (node.type === "file" || node.type === "link") {
-        const label = h("div", { class: "canvas-file-label" }, node.type === "link" ? node.url ?? "" : `${node.file ?? ""}${node.subpath ? ` › ${node.subpath.replace(/^#/, "")}` : ""}`);
+        const label = h("div", { class: "canvas-file-label" }, node.type === "link" ? node.url ?? "" : `${noteName(node.file ?? "")}${node.subpath ? ` › ${node.subpath.replace(/^#/, "")}` : ""}`);
         card.append(label);
       }
       const content = h("div", { class: "canvas-node-content markdown-rendered" });
@@ -123,16 +136,11 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       });
       const paint = (source: string) => {
         if (gone || mine !== generation) return;
-        const body = embedPart(source, "")?.text ?? source;
-        const painted = render(content, body, context, [origin], () => {});
+        const shown = embedPart(source, node.type === "file" ? node.subpath?.replace(/^#/, "") ?? "" : "");
+        if (!shown) { content.textContent = `Unable to find “${node.subpath}” in “${node.file}”.`; return; }
+        const painted = render(content, node.type === "file" ? withoutBlockIds(shown.text) : shown.text, context, [origin], () => {});
         content.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(input => input.disabled = true);
         cleanups.push(() => release(painted));
-        const section = node.subpath && embedSection(body, node.subpath.replace(/^#/, ""));
-        if (section) requestAnimationFrame(() => {
-          if (gone || mine !== generation) return;
-          const target = content.querySelector<HTMLElement>(`[data-line="${section.line + 1}"]`);
-          if (target) { content.style.paddingBottom = `${node.height}px`; content.scrollTop = target.offsetTop - content.offsetTop - 16; }
-        });
       };
       if (node.type === "text") paint(node.text ?? "");
       else void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
