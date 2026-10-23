@@ -14,7 +14,7 @@ import { IMAGE_EXT, resetSize } from "../editor/embeds";
 import type { ImageRef } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
-import { copyNote, deleteFile } from "../fileOps";
+import { copyNote, deleteFile, newCanvas } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -106,6 +106,7 @@ export function createMenus(host: MenuHost) {
       return [
         { title: "New note", icon: "square-pen", action: () => host.newNoteIn(path) },
         { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn(path) },
+        { title: "New canvas", icon: "layout-dashboard", action: () => newCanvas(ws, path) },
         SEPARATOR,
         moveItem(path, true),
         { title: "Search in folder", icon: "folder-search", action: () => host.searchInFolder(path) },
@@ -137,6 +138,7 @@ export function createMenus(host: MenuHost) {
     return [
       { title: "New note", icon: "square-pen", action: () => host.newNoteIn("") },
       { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn("") },
+      { title: "New canvas", icon: "layout-dashboard", action: () => newCanvas(ws, "") },
     ];
   }
 

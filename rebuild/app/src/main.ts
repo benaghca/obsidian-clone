@@ -125,17 +125,15 @@ const rightSidebar = createRightSidebar(
 
 // Obsidian's ribbon: its actions are commands, and right-clicking it lists
 // them with a check to show or hide each one. These are Obsidian's, in its
-// order and with its glyphs, where Grove has the feature (canvas and bases
-// it doesn't), then "Create new note", which is Grove's.
+// order and with its glyphs, where Grove has the feature (Bases comes later).
 // A core plugin that is off takes its button away too.
 const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[] = [
   { id: "switcher:open", label: "Open quick switcher", icon: "file-search", plugin: "switcher" },
   { id: "graph:open", label: "Open graph view", icon: "git-fork", plugin: "graph" },
+  { id: "canvas:new-file", label: "Create new canvas", icon: "layout-dashboard" },
   { id: "daily-notes", label: "Open today's daily note", icon: "calendar", plugin: "daily-notes" },
   { id: "templates:insert-template", label: "Insert template", icon: "files", plugin: "templates" },
   { id: "command-palette:open", label: "Open command palette", icon: "terminal", plugin: "command-palette" },
-  { id: "random-note", label: "Open random note", icon: "dices", plugin: "random-note" },
-  { id: "file-explorer:new-file", label: "Create new note", icon: "square-pen" },
 ];
 const RIBBON_HIDDEN = "grove.ribbon.hidden";
 const savedHidden = readStored(RIBBON_HIDDEN, []);
@@ -282,7 +280,7 @@ fileSettings.editingMode = () => (appSettings().livePreview ? "live" : "source")
 ws.newTabBacklinks = () => commands.pluginEnabled("backlink") && settings.get("backlink.json").backlinkInDocument;
 fileSettings.newNoteFolder = () => {
   const a = appSettings();
-  if (a.newFileLocation === "current") return ws.active.path ? parentDir(ws.active.path) : "";
+  if (a.newFileLocation === "current") return parentDir(ws.active.path ?? ws.active.viewFile ?? "");
   if (a.newFileLocation === "folder") return trimSlashes(a.newFileFolderPath);
   return "";
 };

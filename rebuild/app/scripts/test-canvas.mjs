@@ -34,6 +34,21 @@ await withBrowser(async ({ send, run, click, point, move, chord, press, check, s
     await run(async source => { const { api } = await import('/src/api.ts'); await api.writeNote('Damaged.canvas', source); await ws.vault.refreshFiles(); await ws.open('Damaged.canvas'); }, source); await sleep(50);
     check(await run(() => !!document.querySelector('.canvas-view')), 'Damaged/empty canvas opens without crashing: ' + source.slice(0, 25));
   }
+  const ribbon = '.side-dock-ribbon-action[aria-label="Create new canvas"]';
+  await move({x:800,y:780}); await move(await point(ribbon)); await sleep(600);
+  check(await run(() => document.querySelector('.tooltip')?.textContent === 'Create new canvas' && document.querySelector('.tooltip').getAnimations().length === 0), 'Canvas ribbon has the observed instant styled tooltip');
+  const createAt = await point(ribbon); await click(createAt); await sleep(60);
+  for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', {type, ...createAt, button:'left', clickCount:1});
+  await sleep(100);
+  check(await run(async () => { const {api}=await import('/src/api.ts'); return ws.active.viewFile === 'Untitled 1.canvas' && await api.readNote('Untitled.canvas') === '{"nodes":[],"edges":[]}' && await api.readNote('Untitled 1.canvas') === '{"nodes":[],"edges":[]}'; }), 'Repeated stationary canvas clicks create numbered valid empty canvases and open them');
+  assert.deepEqual(await run(() => [...document.querySelectorAll('.side-dock-ribbon-action')].map(e=>e.getAttribute('aria-label'))), ['Open quick switcher','Open graph view','Create new canvas',"Open today's daily note",'Insert template','Open command palette']);
+  check(await run(async () => { const {commands}=await import('/src/commands.ts'); return commands.isEnabled('random-note') && commands.isEnabled('file-explorer:new-file'); }), 'Fresh ribbon order matches Obsidian; random/new-note commands remain');
+  await chord('p'); await send('Input.insertText', {text:'Create new canvas'}); await sleep(60); await press('Enter'); await sleep(100);
+  check(await run(() => ws.active.viewFile === 'Untitled 2.canvas'), 'Palette command creates and opens a canvas');
+  await click('.nav-files [data-path="Projects"]', 'right'); await sleep(50);
+  const newCanvasAt = await run(() => { const row=[...document.querySelectorAll('.menu-item')].find(e=>e.textContent.includes('New canvas'));const r=row.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; });
+  await click(newCanvasAt); await sleep(100);
+  check(await run(() => ws.active.viewFile === 'Projects/Untitled.canvas' && document.querySelector('.view-header-breadcrumb')?.textContent === 'Projects'), 'Explorer New canvas follows folder context and shows breadcrumb');
   for (const mode of ['live', 'source', 'reading']) {
     await run(async mode => { await ws.open('CanvasFrontmatter.md'); ws.setMode(mode); ws.view.dispatch({selection:{anchor:ws.view.state.doc.length}}); ws.view.focus(); }, mode); await sleep(80);
     if (mode !== 'reading') {

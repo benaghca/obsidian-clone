@@ -45,6 +45,19 @@ export async function newNote(ws: Workspace, folder: string = fileSettings.newNo
   return entry.path;
 }
 
+// Serialize creation so two stationary clicks cannot choose the same free name.
+let creatingCanvas = Promise.resolve();
+export function newCanvas(ws: Workspace, folder = fileSettings.newNoteFolder()): Promise<string> {
+  const next = creatingCanvas.then(async () => {
+    if (folder && !ws.vault.isFolder(folder)) await api.createFolder(folder).catch(() => {});
+    const entry = await createNote(ws, freeName(ws, `${folder ? `${folder}/` : ""}Untitled`, ".canvas"), '{"nodes":[],"edges":[]}');
+    await ws.open(entry.path, { where: ws.active.path !== null || ws.active.type ? "tab" : false });
+    return entry.path;
+  });
+  creatingCanvas = next.then(() => {}, () => {});
+  return next;
+}
+
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
   const entry = await api.createFolder(freeName(ws, `${parent ? `${parent}/` : ""}Untitled`, ""));

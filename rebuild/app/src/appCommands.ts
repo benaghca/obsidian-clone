@@ -13,7 +13,7 @@ import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
-import { copyNote, createNote, deleteFile, newNote } from "./fileOps";
+import { copyNote, createNote, deleteFile, newCanvas, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import { addLines, frontmatterField } from "./editor/frontmatter";
 import { openNewProperty } from "./editor/properties";
@@ -260,6 +260,7 @@ export function registerAppCommands(parts: AppParts) {
       () => openCommandPalette(commands), undefined, mod("p")),
     pluginAction("switcher", "switcher:open", "Quick switcher: Open quick switcher", "navigation",
       () => openQuickSwitcher(ws), undefined, mod("o")),
+    action("canvas:new-file", "Create new canvas", "layout-dashboard", () => newCanvas(ws)),
     { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => createNewNote() },
     { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => createNewNote(false) },
     action(
