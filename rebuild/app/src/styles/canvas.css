@@ -78,6 +78,7 @@
 .canvas-view { user-select: none; touch-action: none; }
 .canvas-node.is-selected { box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%), 0 0 0 2px var(--interactive-accent); }
 .canvas-node-resizer { position: absolute; z-index: 3; }
+.canvas-node-group > .canvas-node-resizer { z-index: 1; }
 .canvas-node-resizer[data-resize="top"], .canvas-node-resizer[data-resize="bottom"] { left: 0; width: 100%; height: 20px; cursor: ns-resize; }
 .canvas-node-resizer[data-resize="top"] { top: -10px; }
 .canvas-node-resizer[data-resize="bottom"] { bottom: -10px; }

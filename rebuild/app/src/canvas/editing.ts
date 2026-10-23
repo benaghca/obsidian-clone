@@ -101,7 +101,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     if (direction && (e.altKey || e.ctrlKey || e.metaKey)) return;
     if (!undo && !remove && !direction && e.key !== "Escape") return;
     e.preventDefault(); e.stopPropagation();
-    if (cancel) { cancel(); if (e.key !== "Escape") return; }
+    if (cancel) { cancel(); return; }
     if (undo) history(e.shiftKey);
     else if (remove && selected.size) commit([], selected);
     else if (direction && selected.size) {

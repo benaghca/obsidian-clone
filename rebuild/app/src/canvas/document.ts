@@ -25,10 +25,10 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
 }
 // Obsidian's tab-indented JSON: flat records on one line, nested records
 // expanded, compact scalar arrays, and no trailing newline.
-function format(value: unknown, depth = 0): string {
+function format(value: unknown, depth = 0, key = ""): string {
   if (!value || typeof value !== "object") return JSON.stringify(value);
-  const entries = Object.entries(value);
-  if (!entries.length || depth > 1 && entries.every(([, v]) => !v || typeof v !== "object")) return JSON.stringify(value);
-  const array = Array.isArray(value), indent = "\t".repeat(depth + 1);
-  return (array ? "[" : "{") + "\n" + entries.map(([k, v]) => indent + (array ? "" : JSON.stringify(k) + ":") + format(v, depth + 1)).join(",\n") + "\n" + "\t".repeat(depth) + (array ? "]" : "}");
+  const entries = Object.entries(value), array = Array.isArray(value);
+  if (!entries.length || (depth > 1 || array && key !== "nodes" && key !== "edges") && entries.every(([, v]) => !v || typeof v !== "object")) return JSON.stringify(value);
+  const indent = "\t".repeat(depth + 1);
+  return (array ? "[" : "{") + "\n" + entries.map(([k, v]) => indent + (array ? "" : JSON.stringify(k) + ":") + format(v, depth + 1, k)).join(",\n") + "\n" + "\t".repeat(depth) + (array ? "]" : "}");
 }

@@ -69,7 +69,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   }
   function history(forward: boolean) {
     const from = forward ? redo : undo, to = forward ? undo : redo;
-    const next = from.pop();
+    let next = from.pop();
+    while (next === source) next = from.pop();
     if (next === undefined) return;
     to.push(source); changed(next, true);
   }
