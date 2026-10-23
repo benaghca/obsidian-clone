@@ -45,6 +45,7 @@ export const APP = {
   foldHeading: field(true, bool),
   foldIndent: field(true, bool),
   spellcheck: field(true, bool),
+  autoConvertHTML: field(true, bool),
   autoPairBrackets: field(true, bool),
   autoPairMarkdown: field(true, bool),
   smartIndentList: field(true, bool),

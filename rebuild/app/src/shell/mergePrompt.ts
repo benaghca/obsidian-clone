@@ -16,8 +16,8 @@ export function openMergePrompt(ws: Workspace, path: string) {
     placeholder: `Merge "${noteName(path)}" into...`,
     emptyText: "No notes found.",
     instructions: hints("to merge"),
-    // The quick switcher's list (recent notes first), less its "create" row.
-    items: (query) => switcherItems(query, notes, ws.recent, path).filter((item): item is NoteItem => item.path !== null),
+    // Merge still offers every note, with recents first, even for an empty query.
+    items: (query) => switcherItems(query, notes, [...ws.recent, ...notes.map(n => n.path)], path).filter((item): item is NoteItem => item.path !== null),
     render: (item, row) => suggestionText(row, item.name, item.indices, parentDir(item.path)),
     choose(item) {
       mergeNote(ws, path, item.path).catch((err) => console.warn(`Could not merge ${path}`, err));

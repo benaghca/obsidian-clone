@@ -5,10 +5,11 @@
 import { completionStatus } from "@codemirror/autocomplete";
 import { defaultKeymap, isolateHistory } from "@codemirror/commands";
 import { syntaxTree } from "@codemirror/language";
-import { ChangeSet, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state";
+import { ChangeSet, Compartment, EditorSelection, EditorState, Prec, StateEffect, StateField, Transaction } from "@codemirror/state";
 import { EditorView, keymap, runScopeHandlers, type ViewUpdate } from "@codemirror/view";
 import type { SyntaxNode } from "@lezer/common";
 import { h } from "../shell/dom";
+import { autoConvertHTML, clipboard } from "./clipboard";
 import { pairingExtensions } from "./config";
 import { editorHost } from "./host";
 import { BlockWidget, decorate, editAt, editButton, isLinkEvent, onDestroy, type Painted, paintRange, readingMode, release } from "./render";
@@ -82,6 +83,7 @@ export class TableWidget extends BlockWidget {
     let inner: EditorView | null = null;
     let active: HTMLTableCellElement | null = null;
     let range: { from: number; to: number } | null = null;
+    const pasteConfig = new Compartment();
     let syncing = false;
     let dirty = true;
     let dismissedAt: number | null = null;
@@ -109,6 +111,11 @@ export class TableWidget extends BlockWidget {
     const sync = () => {
       if (!dom.isConnected) return;
       const { state } = view;
+      if (inner && inner.state.facet(autoConvertHTML) !== state.facet(autoConvertHTML)) {
+        syncing = true;
+        inner.dispatch({ effects: pasteConfig.reconfigure(autoConvertHTML.of(state.facet(autoConvertHTML))) });
+        syncing = false;
+      }
       const sel = state.selection.main;
       if (!dirty && range && inner?.hasFocus && sel.head !== dismissedAt && sel.anchor === range.from + inner.state.selection.main.anchor && sel.head === range.from + inner.state.selection.main.head && state.sliceDoc(range.from, range.to) === inner.state.doc.toString()) return;
       const from = start();
@@ -172,6 +179,7 @@ export class TableWidget extends BlockWidget {
           state: EditorState.create({ doc: text, selection, extensions: [
             EditorView.editorAttributes.of({ class: "cm-table-cell" }),
             EditorView.lineWrapping,
+            clipboard, pasteConfig.of(autoConvertHTML.of(state.facet(autoConvertHTML))),
             EditorState.transactionFilter.of((tr) => {
               if (!tr.docChanged || syncing) return tr;
               return cellTransaction(tr);
@@ -480,7 +488,7 @@ const inTable = (fn: (view: EditorView) => boolean) => (view: EditorView) =>
 /** The keys, ahead of list continuation and indenting, while the caret is in a table. */
 export const tableKeys = [
   tableSource,
-  EditorView.updateListener.of((u) => { if (u.docChanged || u.selectionSet || u.focusChanged) tableSync.get(u.view)?.forEach((sync) => sync(u)); }),
+  EditorView.updateListener.of((u) => { if (u.docChanged || u.selectionSet || u.focusChanged || u.startState.facet(autoConvertHTML) !== u.state.facet(autoConvertHTML)) tableSync.get(u.view)?.forEach((sync) => sync(u)); }),
   Prec.highest(keymap.of([
     { key: "Tab", run: inTable((v) => editTable(v, nextCell, true)) },
     { key: "Shift-Tab", run: inTable((v) => editTable(v, previousCell, true)) },

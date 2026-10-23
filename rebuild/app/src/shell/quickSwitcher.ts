@@ -17,6 +17,7 @@ export function openQuickSwitcher(ws: Workspace) {
     emptyText: "No notes found.",
     instructions: [
       ["↑↓", "to navigate"],
+      ["tab", "to complete"],
       ["↵", "to open"],
       [`${modKey} ↵`, "to open in new tab"],
       [`${modKey} ${altKey} ↵`, "to open to the right"],
@@ -32,7 +33,11 @@ export function openQuickSwitcher(ws: Workspace) {
       if (item.path) void ws.open(item.path, { where: whereFromEvent(e) });
       else void ws.openLink(item.name, whereFromEvent(e));
     },
-    onKey(e, _selected, query, close) {
+    onKey(e, selected, query, close, setQuery) {
+      if (e.key === "Tab" && !e.shiftKey) {
+        if (selected) setQuery(selected.name, item => item.path === selected.path);
+        return true;
+      }
       if (e.key !== "Enter" || !e.shiftKey || !query.trim()) return false;
       close(false);
       void ws.openLink(query.trim(), whereFromEvent(e));

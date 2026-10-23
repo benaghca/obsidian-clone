@@ -156,4 +156,4 @@ export const Comment: MarkdownConfig = {
 };
 
 /** Markdown with every extension above: the notes' language, in the editor and in rendered embeds. */
-export const markdownSyntax = markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, Highlight, Comment, MarkerStyles], addKeymap: false });
+export const markdownSyntax = markdown({ base: markdownLanguage, extensions: [WikiLink, Tag, Highlight, Comment, MarkerStyles], addKeymap: false, pasteURLAsLink: false });

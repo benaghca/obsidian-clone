@@ -19,7 +19,7 @@ export interface PromptOptions<T> {
   choose(item: T, e: KeyboardEvent | MouseEvent): void;
   emptyText: string;
   /** Extra keys (Shift+Enter to create, ...). Return true if handled. */
-  onKey?(e: KeyboardEvent, selected: T | undefined, query: string, close: (restoreFocus?: boolean) => void): boolean;
+  onKey?(e: KeyboardEvent, selected: T | undefined, query: string, close: (restoreFocus?: boolean) => void, setQuery: (query: string, keep?: (item: T) => boolean) => void): boolean;
   className?: string;
   /** Give focus back to where it was before running the choice (commands act on the editor). */
   restoreFocusOnChoose?: boolean;
@@ -118,16 +118,19 @@ export function openPrompt<T>(opts: PromptOptions<T>) {
     row?.scrollIntoView({ block: "nearest" });
   }
 
-  function update() {
+  function update(keep?: (item: T) => boolean) {
+    const previous = items[selected];
     items = opts.items(input.value);
-    selected = 0;
+    if (keep && previous && keep(previous) && !items.some(keep)) items = [previous, ...items.slice(0, -1)];
+    selected = keep ? Math.max(0, items.findIndex(keep)) : 0;
     render();
   }
 
-  function setQuery(q: string) {
+  function setQuery(q: string, keep?: (item: T) => boolean) {
     input.value = q;
-    update();
+    update(keep);
     input.focus();
+    if (keep) (results.children[selected] as HTMLElement | undefined)?.scrollIntoView({ block: "nearest" });
   }
 
   function choose(i: number, e: KeyboardEvent | MouseEvent) {
@@ -147,9 +150,9 @@ export function openPrompt<T>(opts: PromptOptions<T>) {
     if (restore) restoreFocus?.focus();
   }
 
-  input.addEventListener("input", update);
+  input.addEventListener("input", () => update());
   input.addEventListener("keydown", (e) => {
-    if (opts.onKey?.(e, items[selected], input.value, close)) {
+    if (opts.onKey?.(e, items[selected], input.value, close, setQuery)) {
       // handled by the caller
     } else if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
       select(items.length ? (selected + 1) % items.length : 0);

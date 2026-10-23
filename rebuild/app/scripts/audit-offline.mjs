@@ -79,8 +79,8 @@ const ALLOW = [
   {
     rule: "url",
     match: /^https:\/\/$/,
-    files: /^dist\/assets\/index-[\w-]+\.js$/,
-    why: "@codemirror/lang-markdown prefixes a pasted www. address with https:// when wrapping it in a markdown link; text only",
+    files: /^(?:src\/editor\/clipboard\.ts|dist\/assets\/index-[\w-]+\.js)$/,
+    why: "The clipboard handler prefixes a pasted www. address with https:// when wrapping it in a markdown link; text only, never requested",
   },
 ];
 

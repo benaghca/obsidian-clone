@@ -25,7 +25,14 @@ test("create row when nothing matches, or only scattered letters do", () => {
   expect(weak.map((i) => i.name)).toEqual(["Project roadmap", "prd"]); // matches first, create last
 });
 
-test("empty query lists recent notes first and skips the open one", () => {
-  const items = switcherItems("", notes, ["Ideas.md", "Welcome.md", "Gone.md"], "Welcome.md");
-  expect(items.map((i) => i.name)).toEqual(["Ideas", "Project roadmap", "Reading list"]);
+test("empty query lists only recent notes in order, skipping active, missing and duplicate paths", () => {
+  const items = switcherItems("", notes, ["Ideas.md", "Welcome.md", "Gone.md", "Ideas.md", "Reading list.md"], "Welcome.md");
+  expect(items.map((i) => i.name)).toEqual(["Ideas", "Reading list"]);
+});
+
+
+test("empty or stale recents do not expose unopened notes; typing still searches all notes", () => {
+  expect(switcherItems("", notes, [], "Welcome.md")).toEqual([]);
+  expect(switcherItems("  ", notes, ["Gone.md", "Welcome.md"], "Welcome.md")).toEqual([]);
+  expect(switcherItems("proj", notes, [], "Welcome.md")[0].path).toBe("Projects/Project roadmap.md");
 });

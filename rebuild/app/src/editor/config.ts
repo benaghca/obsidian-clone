@@ -12,6 +12,7 @@ import { Compartment, EditorSelection, EditorState, type Extension, Prec, type S
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { kept } from "../memo";
 import { APP, defaults, type SettingsOf } from "../settings/schema";
+import { autoConvertHTML } from "./clipboard";
 import { backspaceList, closeCodeFence } from "./format";
 import { folding } from "./fold";
 import { propertiesDisplay } from "./properties";
@@ -19,7 +20,7 @@ import { propertiesDisplay } from "./properties";
 /** The settings that are the editor's, under their app.json names. */
 const KEYS = [
   "showLineNumber", "foldHeading", "foldIndent", "spellcheck", "autoPairBrackets",
-  "autoPairMarkdown", "smartIndentList", "useTab", "tabSize", "propertiesInDocument",
+  "autoPairMarkdown", "autoConvertHTML", "smartIndentList", "useTab", "tabSize", "propertiesInDocument",
 ] as const;
 export type EditorConfig = Pick<SettingsOf<"app.json">, (typeof KEYS)[number]>;
 
@@ -93,6 +94,7 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
     compartment: new Compartment(),
     ext: (c) => (c.foldHeading || c.foldIndent ? cached(`fold:${c.foldHeading}:${c.foldIndent}`, () => folding(c.foldHeading, c.foldIndent)) : NONE),
   },
+  { compartment: new Compartment(), ext: (c) => cached(`html:${c.autoConvertHTML}`, () => autoConvertHTML.of(c.autoConvertHTML)) },
   { compartment: new Compartment(), ext: (c) => spellcheck[c.spellcheck ? 0 : 1] },
   {
     compartment: new Compartment(), ext: (c) => cached(`typing:${c.autoPairBrackets}:${c.autoPairMarkdown}`, () => [
