@@ -1,0 +1,897 @@
+
+> grove@0.1.0 test
+> node --test scripts/test-browser-discovery.mjs && vitest run && npm run test:geometry && npm run test:fixes && npm run test:header && npm run test:drag && node scripts/test-r20-bugs.mjs && node scripts/test-paste.mjs && node scripts/test-round21b.mjs && node scripts/test-r21-bugs.mjs && node scripts/test-round22b.mjs && node scripts/test-r22-bugs.mjs && node scripts/test-canvas.mjs && node scripts/test-canvas-navigation.mjs && node scripts/test-r23-bugs.mjs && node scripts/test-canvas-editing.mjs && node scripts/test-canvas-cards.mjs
+
+✔ GROVE_BROWSER wins, then PATH commands in the requested order (0.987616ms)
+✔ missing overrides and non-executable files/directories do not mask a usable browser (0.271253ms)
+✔ Windows checks PATH .exe names before Chrome and Edge install locations (0.854504ms)
+✔ no browser exits nonzero with one actionable line before starting any server (19.622709ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.182041
+
+ RUN  v5.0.5 /home/chris/workspaces/remote/grove-r24-codex/rebuild/app
+
+(node:3596119) ExperimentalWarning: localStorage is not available because --localstorage-file was not provided.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+ Test Files  42 passed (42)
+      Tests  238 passed (238)
+   Start at  10:04:17
+   Duration  578ms (import 46%, transform 39%, tests 12%, worker 3%)
+
+
+> grove@0.1.0 test:geometry
+> node scripts/test-geometry.mjs
+
+PASS Geometry.md live: every line within 1px; no vertical margins
+PASS Geometry.md live: click HeadingOne
+PASS Geometry.md live focused HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md live: fold arrow across HeadingOne row at 179.0
+PASS Geometry.md live: fold arrow across HeadingOne row at 201.5
+PASS Geometry.md live: fold arrow across HeadingOne row at 224.1
+PASS Geometry.md live: no arrow 4px above HeadingOne
+PASS Geometry.md live: native arrow click folds HeadingOne
+PASS Geometry.md live: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS Geometry.md live unfolded HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md live: click HeadingTwo
+PASS Geometry.md live focused HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md live: fold arrow across HeadingTwo row at 250.9
+PASS Geometry.md live: fold arrow across HeadingTwo row at 272.0
+PASS Geometry.md live: fold arrow across HeadingTwo row at 293.0
+PASS Geometry.md live: no arrow 4px above HeadingTwo
+PASS Geometry.md live: native arrow click folds HeadingTwo
+PASS Geometry.md live: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS Geometry.md live unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md live: click HeadingThree
+PASS Geometry.md live focused HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md live: fold arrow across HeadingThree row at 319.4
+PASS Geometry.md live: fold arrow across HeadingThree row at 340.1
+PASS Geometry.md live: fold arrow across HeadingThree row at 360.8
+PASS Geometry.md live: no arrow 4px above HeadingThree
+PASS Geometry.md live: native arrow click folds HeadingThree
+PASS Geometry.md live: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS Geometry.md live unfolded HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md source: every line within 1px; no vertical margins
+PASS Geometry.md source: click HeadingOne
+PASS Geometry.md source focused HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md source: fold arrow across HeadingOne row at 179.0
+PASS Geometry.md source: fold arrow across HeadingOne row at 193.5
+PASS Geometry.md source: fold arrow across HeadingOne row at 208.1
+PASS Geometry.md source: no arrow 4px above HeadingOne
+PASS Geometry.md source: native arrow click folds HeadingOne
+PASS Geometry.md source: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS Geometry.md source unfolded HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md source: click HeadingTwo
+PASS Geometry.md source focused HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md source: fold arrow across HeadingTwo row at 234.1
+PASS Geometry.md source: fold arrow across HeadingTwo row at 247.1
+PASS Geometry.md source: fold arrow across HeadingTwo row at 260.1
+PASS Geometry.md source: no arrow 4px above HeadingTwo
+PASS Geometry.md source: native arrow click folds HeadingTwo
+PASS Geometry.md source: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS Geometry.md source unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md source: click HeadingThree
+PASS Geometry.md source focused HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md source: fold arrow across HeadingThree row at 286.1
+PASS Geometry.md source: fold arrow across HeadingThree row at 298.8
+PASS Geometry.md source: fold arrow across HeadingThree row at 311.5
+PASS Geometry.md source: no arrow 4px above HeadingThree
+PASS Geometry.md source: native arrow click folds HeadingThree
+PASS Geometry.md source: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS Geometry.md source unfolded HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md reading: every line within 1px; no vertical margins
+PASS Geometry.md reading: click HeadingOne
+PASS Geometry.md reading focused HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md reading: fold arrow across HeadingOne row at 179.0
+PASS Geometry.md reading: fold arrow across HeadingOne row at 205.1
+PASS Geometry.md reading: fold arrow across HeadingOne row at 231.2
+PASS Geometry.md reading: no arrow 4px above HeadingOne
+PASS Geometry.md reading: native arrow click folds HeadingOne
+PASS Geometry.md reading: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS Geometry.md reading unfolded HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md reading: click HeadingTwo
+PASS Geometry.md reading focused HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md reading: fold arrow across HeadingTwo row at 257.2
+PASS Geometry.md reading: fold arrow across HeadingTwo row at 278.4
+PASS Geometry.md reading: fold arrow across HeadingTwo row at 299.6
+PASS Geometry.md reading: no arrow 4px above HeadingTwo
+PASS Geometry.md reading: native arrow click folds HeadingTwo
+PASS Geometry.md reading: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS Geometry.md reading unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md reading: click HeadingThree
+PASS Geometry.md reading focused HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md reading: fold arrow across HeadingThree row at 325.6
+PASS Geometry.md reading: fold arrow across HeadingThree row at 346.4
+PASS Geometry.md reading: fold arrow across HeadingThree row at 367.1
+PASS Geometry.md reading: no arrow 4px above HeadingThree
+PASS Geometry.md reading: native arrow click folds HeadingThree
+PASS Geometry.md reading: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS Geometry.md reading unfolded HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md live: every line within 1px; no vertical margins
+PASS GeometryFM.md live: click HeadingOne
+PASS GeometryFM.md live focused HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md live: fold arrow across HeadingOne row at 327.2
+PASS GeometryFM.md live: fold arrow across HeadingOne row at 349.7
+PASS GeometryFM.md live: fold arrow across HeadingOne row at 372.3
+PASS GeometryFM.md live: no arrow 4px above HeadingOne
+PASS GeometryFM.md live: native arrow click folds HeadingOne
+PASS GeometryFM.md live: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS GeometryFM.md live unfolded HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md live: click HeadingTwo
+PASS GeometryFM.md live focused HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md live: fold arrow across HeadingTwo row at 399.1
+PASS GeometryFM.md live: fold arrow across HeadingTwo row at 420.2
+PASS GeometryFM.md live: fold arrow across HeadingTwo row at 441.2
+PASS GeometryFM.md live: no arrow 4px above HeadingTwo
+PASS GeometryFM.md live: native arrow click folds HeadingTwo
+PASS GeometryFM.md live: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS GeometryFM.md live unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md live: click HeadingThree
+PASS GeometryFM.md live focused HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md live: fold arrow across HeadingThree row at 467.6
+PASS GeometryFM.md live: fold arrow across HeadingThree row at 488.3
+PASS GeometryFM.md live: fold arrow across HeadingThree row at 509.0
+PASS GeometryFM.md live: no arrow 4px above HeadingThree
+PASS GeometryFM.md live: native arrow click folds HeadingThree
+PASS GeometryFM.md live: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS GeometryFM.md live unfolded HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md source: every line within 1px; no vertical margins
+PASS GeometryFM.md source: click HeadingOne
+PASS GeometryFM.md source focused HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md source: fold arrow across HeadingOne row at 255.1
+PASS GeometryFM.md source: fold arrow across HeadingOne row at 269.6
+PASS GeometryFM.md source: fold arrow across HeadingOne row at 284.1
+PASS GeometryFM.md source: no arrow 4px above HeadingOne
+PASS GeometryFM.md source: native arrow click folds HeadingOne
+PASS GeometryFM.md source: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS GeometryFM.md source unfolded HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md source: click HeadingTwo
+PASS GeometryFM.md source focused HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md source: fold arrow across HeadingTwo row at 310.1
+PASS GeometryFM.md source: fold arrow across HeadingTwo row at 323.2
+PASS GeometryFM.md source: fold arrow across HeadingTwo row at 336.2
+PASS GeometryFM.md source: no arrow 4px above HeadingTwo
+PASS GeometryFM.md source: native arrow click folds HeadingTwo
+PASS GeometryFM.md source: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS GeometryFM.md source unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md source: click HeadingThree
+PASS GeometryFM.md source focused HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md source: fold arrow across HeadingThree row at 362.2
+PASS GeometryFM.md source: fold arrow across HeadingThree row at 374.9
+PASS GeometryFM.md source: fold arrow across HeadingThree row at 387.6
+PASS GeometryFM.md source: no arrow 4px above HeadingThree
+PASS GeometryFM.md source: native arrow click folds HeadingThree
+PASS GeometryFM.md source: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS GeometryFM.md source unfolded HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: click HeadingOne
+PASS GeometryFM.md reading focused HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: fold arrow across HeadingOne row at 327.2
+PASS GeometryFM.md reading: fold arrow across HeadingOne row at 353.3
+PASS GeometryFM.md reading: fold arrow across HeadingOne row at 379.4
+PASS GeometryFM.md reading: no arrow 4px above HeadingOne
+PASS GeometryFM.md reading: native arrow click folds HeadingOne
+PASS GeometryFM.md reading: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS GeometryFM.md reading unfolded HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: click HeadingTwo
+PASS GeometryFM.md reading focused HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: fold arrow across HeadingTwo row at 405.4
+PASS GeometryFM.md reading: fold arrow across HeadingTwo row at 426.6
+PASS GeometryFM.md reading: fold arrow across HeadingTwo row at 447.8
+PASS GeometryFM.md reading: no arrow 4px above HeadingTwo
+PASS GeometryFM.md reading: native arrow click folds HeadingTwo
+PASS GeometryFM.md reading: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS GeometryFM.md reading unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: click HeadingThree
+PASS GeometryFM.md reading focused HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: fold arrow across HeadingThree row at 473.8
+PASS GeometryFM.md reading: fold arrow across HeadingThree row at 494.5
+PASS GeometryFM.md reading: fold arrow across HeadingThree row at 515.3
+PASS GeometryFM.md reading: no arrow 4px above HeadingThree
+PASS GeometryFM.md reading: native arrow click folds HeadingThree
+PASS GeometryFM.md reading: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS GeometryFM.md reading unfolded HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md live Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md live Ctrl+p: visible within 2 frames, no frame >20ms (17.0ms)
+PASS Geometry.md live right-click menu: visible within 2 frames, no frame >20ms (17.0ms)
+PASS Geometry.md source Ctrl+o: visible within 2 frames, no frame >20ms (17.0ms)
+PASS Geometry.md source Ctrl+p: visible within 2 frames, no frame >20ms (17.0ms)
+PASS Geometry.md source right-click menu: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md reading Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md reading Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md reading right-click menu: visible within 2 frames, no frame >20ms (17.0ms)
+PASS GeometryFM.md live Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md live Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md live right-click menu: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md source Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md source Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md source right-click menu: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md reading Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md reading Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md reading right-click menu: visible within 2 frames, no frame >20ms (16.9ms)
+PASS a command found after typing runs in the original editor
+
+> grove@0.1.0 test:fixes
+> node scripts/test-round19-fixes.mjs
+
+PASS live: list item and children stay together; child keeps 5
+PASS live: rendered callout/quote click edits beta
+PASS live: quote indentation stays after >
+PASS live: rendered callout/quote click edits beta
+PASS live: callout indentation stays after >
+PASS source: list item and children stay together; child keeps 5
+PASS source: rendered callout/quote click edits beta
+PASS source: quote indentation stays after >
+PASS source: rendered callout/quote click edits beta
+PASS source: callout indentation stays after >
+PASS reading: list item and children stay together; child keeps 5
+PASS reading: quote indentation stays after >
+PASS reading: callout indentation stays after >
+PASS live: marker removal and outdent keep quotes and undo separately
+PASS live: marker removal and outdent keep quotes and undo separately
+PASS live: Backspace at fence indent deletes one character (Reading stays read-only)
+PASS source: marker removal and outdent keep quotes and undo separately
+PASS source: marker removal and outdent keep quotes and undo separately
+PASS source: Backspace at fence indent deletes one character (Reading stays read-only)
+PASS reading: marker removal and outdent keep quotes and undo separately
+PASS reading: marker removal and outdent keep quotes and undo separately
+PASS reading: Backspace at fence indent deletes one character (Reading stays read-only)
+PASS source: Backspace at frontmatter indent deletes one character
+PASS live: failed title rename survives blur
+PASS live: Escape cancels blurred title rename
+PASS live: no-op rename displays the trimmed file title
+PASS live: failed explorer rename survives blur
+PASS live: Escape cancels blurred explorer rename
+PASS source: failed title rename survives blur
+PASS source: Escape cancels blurred title rename
+PASS source: no-op rename displays the trimmed file title
+PASS source: failed explorer rename survives blur
+PASS source: Escape cancels blurred explorer rename
+PASS reading: failed title rename survives blur
+PASS reading: Escape cancels blurred title rename
+PASS reading: no-op rename displays the trimmed file title
+PASS reading: failed explorer rename survives blur
+PASS reading: Escape cancels blurred explorer rename
+PASS live: native hover opens preview
+PASS live: deep heading preview keeps title and Open visible
+PASS live: heading aligns 16px inside the scrolling body, including at note end
+PASS live: native body scrolling keeps the preview header visible
+PASS live: native hover opens preview
+PASS live: deep heading preview keeps title and Open visible
+PASS live: heading aligns 16px inside the scrolling body, including at note end
+PASS live: native body scrolling keeps the preview header visible
+PASS live: native hover opens preview
+PASS live: long preview title wraps clear of Open, without horizontal overflow
+PASS live: real Open click navigates
+PASS live: native hover opens preview
+PASS live: empty/missing preview has title and Open icon
+PASS live: empty/missing preview shrinks to content
+PASS live: native hover opens preview
+PASS live: empty/missing preview has title and Open icon
+PASS live: empty/missing preview shrinks to content
+PASS live: missing preview Open creates its note
+PASS source: native hover opens preview
+PASS source: deep heading preview keeps title and Open visible
+PASS source: heading aligns 16px inside the scrolling body, including at note end
+PASS source: native body scrolling keeps the preview header visible
+PASS source: native hover opens preview
+PASS source: deep heading preview keeps title and Open visible
+PASS source: heading aligns 16px inside the scrolling body, including at note end
+PASS source: native body scrolling keeps the preview header visible
+PASS source: native hover opens preview
+PASS source: long preview title wraps clear of Open, without horizontal overflow
+PASS source: real Open click navigates
+PASS source: native hover opens preview
+PASS source: empty/missing preview has title and Open icon
+PASS source: empty/missing preview shrinks to content
+PASS source: native hover opens preview
+PASS source: empty/missing preview has title and Open icon
+PASS source: empty/missing preview shrinks to content
+PASS source: missing preview Open creates its note
+PASS reading: native hover opens preview
+PASS reading: deep heading preview keeps title and Open visible
+PASS reading: heading aligns 16px inside the scrolling body, including at note end
+PASS reading: native body scrolling keeps the preview header visible
+PASS reading: native hover opens preview
+PASS reading: deep heading preview keeps title and Open visible
+PASS reading: heading aligns 16px inside the scrolling body, including at note end
+PASS reading: native body scrolling keeps the preview header visible
+PASS reading: native hover opens preview
+PASS reading: long preview title wraps clear of Open, without horizontal overflow
+PASS reading: real Open click navigates
+PASS reading: native hover opens preview
+PASS reading: empty/missing preview has title and Open icon
+PASS reading: empty/missing preview shrinks to content
+PASS reading: native hover opens preview
+PASS reading: empty/missing preview has title and Open icon
+PASS reading: empty/missing preview shrinks to content
+PASS reading: missing preview Open creates its note
+
+> grove@0.1.0 test:header
+> node scripts/test-header.mjs
+
+PASS Auto-reveal button reveals the active note
+PASS Auto-reveal can be turned off
+PASS 1280px live: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 1280px live: long rename wraps without horizontal clipping
+PASS 1280px source: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 1280px source: long rename wraps without horizontal clipping
+PASS 1280px reading: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 1280px reading: long rename wraps without horizontal clipping
+PASS 900px live: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 900px live: long rename wraps without horizontal clipping
+PASS 900px source: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 900px source: long rename wraps without horizontal clipping
+PASS 900px reading: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 900px reading: long rename wraps without horizontal clipping
+PASS 600px live: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 600px live: long rename wraps without horizontal clipping
+PASS 600px source: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 600px source: long rename wraps without horizontal clipping
+PASS 600px reading: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 600px reading: long rename wraps without horizontal clipping
+PASS live: hovering the background tab keeps the current note
+PASS live: pressing the background tab does not switch notes
+PASS live: pointer up without dragging activates the clicked tab
+PASS live: stationary repeated tab clicks stay active without starting a drag
+PASS live: dragging a background tab keeps the current note visible
+PASS live: reordering a background tab preserves the source pane's current note
+PASS live: the source stays on Current before a split drop
+PASS live: split drop leaves the source pane's active tab unchanged
+PASS source: hovering the background tab keeps the current note
+PASS source: pressing the background tab does not switch notes
+PASS source: pointer up without dragging activates the clicked tab
+PASS source: stationary repeated tab clicks stay active without starting a drag
+PASS source: dragging a background tab keeps the current note visible
+PASS source: reordering a background tab preserves the source pane's current note
+PASS source: the source stays on Current before a split drop
+PASS source: split drop leaves the source pane's active tab unchanged
+PASS reading: hovering the background tab keeps the current note
+PASS reading: pressing the background tab does not switch notes
+PASS reading: pointer up without dragging activates the clicked tab
+PASS reading: stationary repeated tab clicks stay active without starting a drag
+PASS reading: dragging a background tab keeps the current note visible
+PASS reading: reordering a background tab preserves the source pane's current note
+PASS reading: the source stays on Current before a split drop
+PASS reading: split drop leaves the source pane's active tab unchanged
+PASS live .workspace-leaf > .view-content:not([hidden]): hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS live .workspace-leaf > .view-content:not([hidden]): repeated stationary scrollbar clicks scroll both times
+PASS live .nav-files .nav-files-container: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS live .nav-files .nav-files-container: repeated stationary scrollbar clicks scroll both times
+PASS source .workspace-leaf > .view-content:not([hidden]): hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS source .workspace-leaf > .view-content:not([hidden]): repeated stationary scrollbar clicks scroll both times
+PASS source .nav-files .nav-files-container: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS source .nav-files .nav-files-container: repeated stationary scrollbar clicks scroll both times
+PASS reading .workspace-leaf > .view-content:not([hidden]): hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS reading .workspace-leaf > .view-content:not([hidden]): repeated stationary scrollbar clicks scroll both times
+PASS reading .nav-files .nav-files-container: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS reading .nav-files .nav-files-container: repeated stationary scrollbar clicks scroll both times
+
+> grove@0.1.0 test:drag
+> node scripts/test-explorer-drag.mjs
+
+PASS plain file click opens without a ghost
+PASS a 2px move stays a click
+PASS immediate folder highlight and two-line ghost, without open animation
+PASS collapsed folder has not expanded at 600ms
+MEASURE auto-expand 751.3ms
+PASS open note tab follows the first move
+PASS drop: no drag classes or ghost remain
+PASS DragA/A1.md → DragB/A1 1.md
+PASS dragging a closed note does not open it
+PASS colliding destination is retained; file row targets its parent
+PASS DragFolder → DragC/DragFolder
+PASS folder over its child refuses the target and hides the Move into line
+PASS refused descendant drop changes nothing
+PASS refused drop: no drag classes or ghost remain
+PASS DragC/DragFolder → DragB/DragFolder 1
+PASS folder collision numbers the directory and carries its children
+PASS empty space lights the root and names the vault
+PASS file moves to root via empty space
+PASS own parent is still highlighted
+PASS own-parent drop is a silent no-op
+PASS leaving a folder before 750ms cancels expansion
+PASS Escape: no drag classes or ghost remain
+PASS Escape leaves the source in place
+PASS auto-expanded folder stays open after Escape
+PASS Escape restores the original editor focus
+PASS window blur: no drag classes or ghost remain
+PASS window blur leaves the file in place
+PASS native touch movement starts the same pointer drag
+PASS pointercancel: no drag classes or ghost remain
+PASS pointercancel leaves the file in place
+PASS DragA/Uniq.md → DragB/Uniq.md
+PASS move asks the existing Update links question
+PASS [[DragA/Uniq]] becomes [[Uniq]] through the existing rename path
+PASS link rewrite is undoable
+PASS DragOpen/live.md → DragB/live.md
+PASS live: tab identity, mode, breadcrumb and title follow the move
+PASS live: moved note keeps zero margins and line tops within 1px
+PASS live: moved frontmatter note folds
+PASS live: moved note unfolds with arrow visible under a still pointer
+PASS live unfolded: moved note keeps zero margins and line tops within 1px
+PASS live: moved editor retains its last edit's undo history
+PASS live: no drag classes or ghost remain
+PASS DragOpen/source.md → DragB/source.md
+PASS source: tab identity, mode, breadcrumb and title follow the move
+PASS source: moved note keeps zero margins and line tops within 1px
+PASS source: moved frontmatter note folds
+PASS source: moved note unfolds with arrow visible under a still pointer
+PASS source unfolded: moved note keeps zero margins and line tops within 1px
+PASS source: moved editor retains its last edit's undo history
+PASS source: no drag classes or ghost remain
+PASS DragOpen/reading.md → DragB/reading.md
+PASS reading: tab identity, mode, breadcrumb and title follow the move
+PASS reading: moved note keeps zero margins and line tops within 1px
+PASS reading: moved frontmatter note folds
+PASS reading: moved note unfolds with arrow visible under a still pointer
+PASS reading unfolded: moved note keeps zero margins and line tops within 1px
+PASS reading: moved editor retains its last edit's undo history
+PASS reading: no drag classes or ghost remain
+MEASURE scroll at 39px: 239.4px/s
+PASS auto-scroll Escape: no drag classes or ghost remain
+PASS auto-scroll cancellation never moves the file
+MEASURE scroll at 25px: 478.8px/s
+PASS auto-scroll Escape: no drag classes or ghost remain
+PASS auto-scroll cancellation never moves the file
+MEASURE scroll at 10px: 1615.5px/s
+PASS auto-scroll Escape: no drag classes or ghost remain
+PASS auto-scroll cancellation never moves the file
+PASS top edge scrolls upwards
+PASS top-edge Escape: no drag classes or ghost remain
+PASS 600px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 600px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 600px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 700px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 700px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 700px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 860px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 860px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 860px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 900px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 900px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 900px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1000px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1000px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1000px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1100px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1100px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1100px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1280px live: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1280px source: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS 1280px reading: ancestors ellipsize first; full note name remains visible through native hover and clicks
+PASS converter: bold and italic
+PASS converter: strike
+PASS converter: nested inline
+PASS converter: inline code
+PASS converter: code backtick edges
+PASS converter: fenced code preserves whitespace
+PASS converter: pre div lines
+PASS converter: pre br lines
+PASS converter: pre mixed real and block breaks
+PASS converter: pre blank div lines
+PASS converter: pre literal raw newlines
+PASS converter: safe code fence
+PASS converter: links
+PASS converter: bare URL
+PASS converter: link spaces and parentheses
+PASS converter: nested numbered list
+PASS converter: ordered list starts at zero
+PASS converter: nested ordered list
+PASS converter: tasks
+PASS converter: nested task belongs to child
+PASS converter: heading 1
+PASS converter: heading 2
+PASS converter: heading 3
+PASS converter: heading 4
+PASS converter: heading 5
+PASS converter: heading 6
+PASS converter: nested quote
+PASS converter: code in quote
+PASS converter: paragraph div break rule
+PASS converter: plain paragraphs
+PASS converter: browser whitespace
+PASS converter: literal punctuation follows Obsidian
+PASS converter: Google Docs wrapper
+PASS converter: Docs numeric bold span
+PASS converter: Docs named bold span
+PASS converter: Docs italic span
+PASS converter: Docs combined span
+PASS converter: Office junk
+PASS converter: Word standalone numbers
+PASS converter: Word number without other formatting
+PASS converter: Word number in orphan list item
+PASS converter: Word marker inside actual ordered list
+PASS converter: nested destination parentheses
+PASS converter: encoded parentheses stay encoded
+PASS converter: image destination parentheses
+PASS converter: Office list marker junk
+PASS converter: drop active content
+PASS converter: remote image stays text
+PASS converter: table
+PASS converter: table code pipe
+PASS converter: plain fragment
+PASS converter: multiline editor wrapper
+PASS converter: editor wrapper
+PASS inert conversion never runs scripts
+PASS inert converter never requests remote resources
+PASS live: trusted native paste contains both clipboard types
+PASS live: caret ends after converted Markdown
+PASS live: one undo removes the whole paste and keeps frontmatter
+PASS live → Reading renders bold, heading, table and offline image chip
+PASS live: Ctrl+Shift+V preserves plain clipboard text exactly
+PASS live: unformatted editor HTML falls back to exact plain text
+PASS live: multiline editor wrappers preserve plain indentation and line breaks
+PASS live: disabled setting pastes plain text
+PASS live: fenced code uses plain text
+PASS source: trusted native paste contains both clipboard types
+PASS source: caret ends after converted Markdown
+PASS source: one undo removes the whole paste and keeps frontmatter
+PASS source → Reading renders bold, heading, table and offline image chip
+PASS source: Ctrl+Shift+V preserves plain clipboard text exactly
+PASS source: unformatted editor HTML falls back to exact plain text
+PASS source: multiline editor wrappers preserve plain indentation and line breaks
+PASS source: disabled setting pastes plain text
+PASS source: fenced code uses plain text
+PASS Source: pasting inside frontmatter uses plain text
+PASS URL-over-selection leaves the caret after the entire link
+PASS Ctrl+Shift+V over selected text inserts the plain URL
+PASS Context-menu Paste reuses HTML conversion
+PASS Reading remains read-only on native paste
+PASS File-bearing native clipboard bypasses HTML converter (baseline file behavior)
+PASS Settings → Editor exposes Auto convert HTML
+PASS Editor toggle switches conversion off
+PASS Repeated toggle click restores conversion
+Paste: 53 converter unit cases plus native integration checks passed
+PASS live: folding at absolute bottom clamps scrolling, matching observed Obsidian
+PASS live: stationary second bottom-fold click leaves it folded, matching Obsidian
+PASS live: moving to the clamped arrow unfolds normally
+MEASURE bottom fold live {"before":160.1875,"after":331.1875,"shift":171}
+PASS source: folding at absolute bottom clamps scrolling, matching observed Obsidian
+PASS source: stationary second bottom-fold click leaves it folded, matching Obsidian
+PASS source: moving to the clamped arrow unfolds normally
+MEASURE bottom fold source {"before":156,"after":348,"shift":192}
+PASS reading: folding at absolute bottom clamps scrolling, matching observed Obsidian
+PASS reading: stationary second bottom-fold click leaves it folded, matching Obsidian
+PASS reading: moving to the clamped arrow unfolds normally
+MEASURE bottom fold reading {"before":140,"after":332,"shift":192}
+PASS live: empty switcher lists only recents, newest first, excluding current and unopened notes
+PASS live: Tab completes the hovered selection and keeps input focus without opening
+PASS live: Enter opens the completed note
+PASS live: typed query still finds a note that was never opened
+PASS live: Tab completes a fuzzy query
+PASS live: no recents gives an empty list
+PASS live: Tab with no selected result keeps focus and opens nothing
+PASS source: empty switcher lists only recents, newest first, excluding current and unopened notes
+PASS source: Tab completes the hovered selection and keeps input focus without opening
+PASS source: Enter opens the completed note
+PASS source: typed query still finds a note that was never opened
+PASS source: Tab completes a fuzzy query
+PASS source: no recents gives an empty list
+PASS source: Tab with no selected result keeps focus and opens nothing
+PASS reading: empty switcher lists only recents, newest first, excluding current and unopened notes
+PASS reading: Tab completes the hovered selection and keeps input focus without opening
+PASS reading: Enter opens the completed note
+PASS reading: typed query still finds a note that was never opened
+PASS reading: Tab completes a fuzzy query
+PASS reading: no recents gives an empty list
+PASS reading: Tab with no selected result keeps focus and opens nothing
+PASS live: URL-over-selection caret follows the whole link, before trailing text
+PASS live: typing after URL paste inserts outside the link
+PASS live: typing and URL paste undo separately
+PASS live: www URL normalization remains intact
+PASS source: URL-over-selection caret follows the whole link, before trailing text
+PASS source: typing after URL paste inserts outside the link
+PASS source: typing and URL paste undo separately
+PASS source: www URL normalization remains intact
+PASS Reading: native URL paste remains read-only
+PASS Google Docs bold span converts to **Docs bold**, got "**Docs bold**"
+PASS pre with a div per line keeps both lines, got "```py\nline1\nline2\n```"
+PASS pasted Google Docs bold span stays bold, got "---\ntitle: Hello\ntags: [paste]\n---\n\n\n**Docs bold**"
+PASS pasted pre keeps a line break between div lines, got "---\ntitle: Hello\ntags: [paste]\n---\n\n\n```py\nline1\nline2\n```"
+PASS Live Preview draws the table cell, saw "one"
+PASS Live Preview table cell converts bold HTML, got "---\ntitle: Hello\ntags: [paste]\n---\n\n| **bold**one | two |\n| --- | --- |\n| a | b |\n"
+PASS table-cell rich paste is one undo step in the note history
+PASS multiline HTML stays in one cell without adding table rows
+PASS active cell inherits Auto convert HTML being switched off
+PASS active cell inherits Auto convert HTML being switched back on
+PASS Reading renders a single table with the converted cell formatting
+PASS live: quick switcher lists FolderB/Same on an empty query
+PASS live: Tab completes the name and retains the highlighted path
+PASS live: repeated Tab retains the same path without moving the pointer
+PASS live: Tab then Enter opens the hovered Same note
+PASS source: quick switcher lists FolderB/Same on an empty query
+PASS source: Tab completes the name and retains the highlighted path
+PASS source: repeated Tab retains the same path without moving the pointer
+PASS source: Tab then Enter opens the hovered Same note
+PASS reading: quick switcher lists FolderB/Same on an empty query
+PASS reading: Tab completes the name and retains the highlighted path
+PASS reading: repeated Tab retains the same path without moving the pointer
+PASS reading: Tab then Enter opens the hovered Same note
+PASS Tab retains the selected path even beyond the fuzzy result limit
+PASS Enter opens the retained path beyond the fuzzy result limit
+PASS live: link suggestions reuse the actual recently opened file order
+PASS live: attachments included, excluded files omitted
+PASS live: unresolved targets included and deduplicated
+PASS live: folder details end in a slash
+PASS live: the complete heading/block/display-text hint fits on one line
+PASS live: native attachment choice inserts a valid link
+PASS live: stationary repeated clicks do not insert the completion again
+PASS live: native unresolved choice keeps its target
+PASS live: SVG completion also works from the keyboard
+PASS source: link suggestions reuse the actual recently opened file order
+PASS source: attachments included, excluded files omitted
+PASS source: unresolved targets included and deduplicated
+PASS source: folder details end in a slash
+PASS source: the complete heading/block/display-text hint fits on one line
+PASS source: native attachment choice inserts a valid link
+PASS source: stationary repeated clicks do not insert the completion again
+PASS source: native unresolved choice keeps its target
+PASS source: SVG completion also works from the keyboard
+PASS Reading rejects link insertion and does not open suggestions
+PASS live ribbon: tooltip waits before appearing
+PASS live ribbon: styled tooltip and arrow, inside viewport, without motion
+PASS live: ribbon click dismisses tooltip and opens switcher
+PASS live: stationary repeated ribbon click opens switcher again
+PASS live toolbar: tooltip waits before appearing
+PASS live toolbar: styled tooltip and arrow, inside viewport, without motion
+PASS live: stationary toolbar clicks toggle twice without a stale tooltip
+PASS live header: tooltip waits before appearing
+PASS live header: styled tooltip and arrow, inside viewport, without motion
+PASS live: stationary header clicks change views twice and dismiss tooltip
+PASS live find option: tooltip waits before appearing
+PASS live find option: styled tooltip and arrow, inside viewport, without motion
+PASS live: keyboard input dismisses tooltip
+PASS source ribbon: tooltip waits before appearing
+PASS source ribbon: styled tooltip and arrow, inside viewport, without motion
+PASS source: ribbon click dismisses tooltip and opens switcher
+PASS source: stationary repeated ribbon click opens switcher again
+PASS source toolbar: tooltip waits before appearing
+PASS source toolbar: styled tooltip and arrow, inside viewport, without motion
+PASS source: stationary toolbar clicks toggle twice without a stale tooltip
+PASS source header: tooltip waits before appearing
+PASS source header: styled tooltip and arrow, inside viewport, without motion
+PASS source: stationary header clicks change views twice and dismiss tooltip
+PASS source find option: tooltip waits before appearing
+PASS source find option: styled tooltip and arrow, inside viewport, without motion
+PASS source: keyboard input dismisses tooltip
+PASS reading ribbon: tooltip waits before appearing
+PASS reading ribbon: styled tooltip and arrow, inside viewport, without motion
+PASS reading: ribbon click dismisses tooltip and opens switcher
+PASS reading: stationary repeated ribbon click opens switcher again
+PASS reading toolbar: tooltip waits before appearing
+PASS reading toolbar: styled tooltip and arrow, inside viewport, without motion
+PASS reading: stationary toolbar clicks toggle twice without a stale tooltip
+PASS reading header: tooltip waits before appearing
+PASS reading header: styled tooltip and arrow, inside viewport, without motion
+PASS reading: stationary header clicks change views twice and dismiss tooltip
+PASS reading repeated header hover: tooltip waits before appearing
+PASS reading repeated header hover: styled tooltip and arrow, inside viewport, without motion
+PASS reading: keyboard input dismisses tooltip
+PASS live: native Word numbers paste preserves formatting and leaves the caret after it
+PASS live: preserved Word markers render as numbered items
+PASS live: Word numbers paste undoes in one step
+PASS live: native parentheses paste preserves formatting and leaves the caret after it
+PASS live: rendered link/image targets have real parentheses without Markdown backslashes
+PASS live: parentheses paste undoes in one step
+PASS source: native Word numbers paste preserves formatting and leaves the caret after it
+PASS source: preserved Word markers render as numbered items
+PASS source: Word numbers paste undoes in one step
+PASS source: native parentheses paste preserves formatting and leaves the caret after it
+PASS source: rendered link/image targets have real parentheses without Markdown backslashes
+PASS source: parentheses paste undoes in one step
+PASS Reading rejects native Word numbers paste
+PASS Reading rejects native parentheses paste
+PASS native Reading click follows the escaped local destination
+PASS escaped destination is a backlink of Projects/a(b).md, got {"back":["Linker.md","Linker.md","Linker.md","LinkerHidden.md","SearchOnly.md","PercentOnly.md"],"unresolved":[]}
+PASS escaped destination is not stored with a backslash, got []
+PASS escaped markdown destination is renamed with the wikilink, got "---\ntags: [r22hunt]\n---\n\n[[c(d)]]\n[a(b)](c\\(d\\).md)\n[pct](c%28d%29.md)\n[plain](Projects/Plain.md)\n"
+PASS a note whose only link is escaped is renamed, got "---\ntags: [r22hunt]\n---\n\n[see](c\\(d\\).md)\n"
+PASS rename retains the backslash-escaped destination style
+PASS search finds a note containing only an escaped destination without index help
+PASS search finds a note containing only a percent-encoded destination without index help
+PASS live: link suggester is open on [[BlockNote
+PASS live: Tab accepts the highlighted row BlockNoteOther
+PASS live: Tab closes completion and puts caret after the link
+PASS live: Tab without completion still indents
+PASS source: link suggester is open on [[BlockNote
+PASS source: Tab accepts the highlighted row BlockNoteOther
+PASS source: Tab closes completion and puts caret after the link
+PASS source: Tab without completion still indents
+PASS Reading: completion and Tab do not edit the note
+PASS live: select-all paste of identical frontmatter shows the new body
+PASS live: undo restores the visible old body
+PASS source: select-all paste of identical frontmatter shows the new body
+PASS source: undo restores the visible old body
+PASS live: whole-document replacement with identical frontmatter shows its body
+PASS live: body edits stay visible and retain the properties DOM
+PASS source: whole-document replacement with identical frontmatter shows its body
+PASS source: body edits stay visible and retain the properties DOM
+PASS reading: whole-document replacement with identical frontmatter shows its body
+PASS reading: body edits stay visible and retain the properties DOM
+PASS Canvas opens outside the saving editor
+PASS Explorer and tab use the canvas icon
+PASS Canvas has the normal header
+PASS All known card types and side/end edges render; future nodes are skipped
+PASS Text uses Reading rendering and link cards have no iframe
+PASS Note cards render body without frontmatter
+PASS Image/SVG cards use local blob URLs
+PASS Link card displays only URL text without a fetching target
+PASS Canvas reuses the workspace host without leaking per-card subscriptions
+PASS Real mouse click follows text-card wikilinks and releases canvas subscriptions
+PASS Header Back returns to the canvas
+PASS Quick switcher lists canvas attachments
+PASS Quick switcher opens canvas
+PASS Opening, rendering and task clicks keep original bytes and unknown fields
+PASS Damaged/empty canvas opens without crashing:
+PASS Damaged/empty canvas opens without crashing: {}
+PASS Damaged/empty canvas opens without crashing: {
+PASS Damaged/empty canvas opens without crashing: {"nodes":[null,{"id":"bad
+PASS Canvas ribbon has the observed instant styled tooltip
+PASS Repeated stationary canvas clicks create numbered valid empty canvases and open them
+PASS Fresh ribbon order matches Obsidian; random/new-note commands remain
+PASS Palette command creates and opens a canvas
+PASS Explorer New canvas follows folder context and shows breadcrumb
+PASS live: canvas offered as attachment in wikilink suggestions
+PASS live: accepts canvas attachment
+PASS live: real hover works on frontmatter note
+PASS live: repeated stationary ribbon click opens prompt
+PASS source: canvas offered as attachment in wikilink suggestions
+PASS source: accepts canvas attachment
+PASS source: real hover works on frontmatter note
+PASS source: repeated stationary ribbon click opens prompt
+PASS reading: real hover works on frontmatter note
+PASS reading: repeated stationary ribbon click opens prompt
+PASS Reading wikilink follows canvas attachment without creating a markdown file
+PASS Opening fit uses observed 10% extent padding and actual bounds
+PASS Zoom controls match observed order and Lucide icons
+PASS Zoom in: native hover has styled tooltip without animation
+PASS Zoom in: repeated stationary click keeps board active and dismisses tooltip
+PASS Reset zoom: native hover has styled tooltip without animation
+PASS Reset zoom: repeated stationary click keeps board active and dismisses tooltip
+PASS Zoom to fit
+(Shift + 1): native hover has styled tooltip without animation
+PASS Zoom to fit
+(Shift + 1): repeated stationary click keeps board active and dismisses tooltip
+PASS Zoom out: native hover has styled tooltip without animation
+PASS Zoom out: repeated stationary click keeps board active and dismisses tooltip
+PASS Repeated stationary Zoom in clicks each apply sqrt(2)
+PASS Reset zoom is 100%
+PASS Wheel/trackpad pans both axes at observed rate
+PASS Ctrl+wheel zooms around pointer at observed rate
+PASS Maximum zoom is 2x
+PASS Minimum zoom is 1/16x and grid coarsens to 10px
+PASS Fit button returns to initial framing
+PASS space drag follows native pointer without selecting or navigating cards
+PASS middle drag follows native pointer without selecting or navigating cards
+PASS Space-held stationary click on wikilink never follows it
+PASS Refreshing canvas contents preserves its live viewport
+PASS Switching tabs preserves live canvas viewport
+PASS Same canvas in a new tab has independent initial fit
+PASS Closing second canvas tab restores first tab viewport
+PASS Reopening in a reused tab resets to fit, matching Obsidian
+PASS Shift+1 fits the focused canvas
+PASS Resizing preserves world center and zoom
+PASS Small, offset canvas centers on its nodes without zooming past 100%
+PASS Generated fixture renders 300 cards and 400 edges
+FRAMES pan {"samples":70,"p95":16.700000000000728,"max":16.799999999999272}
+PASS 300-card/400-edge pan presentation frames stay under 20ms
+FRAMES zoom {"samples":70,"p95":16.700000000000728,"max":16.80000000000109}
+PASS 300-card/400-edge zoom presentation frames stay under 20ms
+PASS Pan/zoom transforms one world without changing card DOM or geometry
+PASS Pan, zoom and tab changes leave canvas bytes unchanged
+PASS omitted sides on a vertical stack leave the bottom center, got M200,620 L200,627 M200,627 C200,707 200,693 200,773 M200,773 L200,780
+PASS omitted sides on a horizontal pair still leave the right center, got M1580,80 L1587,80 M1587,80 C1647,80 1633,80 1693,80 M1693,80 L1700,80
+PASS a group with no label has no pill, got {"w":0,"h":0,"display":"none","text":"","color":"rgb(255, 255, 255)","bg":"rgb(236, 117, 0)"}
+PASS a group with an empty label has no pill, got {"w":0,"h":0,"display":"none","text":"","color":"rgb(255, 255, 255)","bg":"rgb(236, 117, 0)"}
+PASS an uncolored group label uses dark text, got rgb(92, 92, 92) on color(srgb 0.741176 0.741176 0.741176 / 0.1)
+PASS the inner group label stays above the later outer group, hit {"cls":"canvas-group-label","text":"Inner"}
+PASS real hover and repeated stationary clicks keep the earlier label above later groups
+PASS abc keeps a custom color, got #abc
+PASS hex8 keeps a custom color, got #11223380
+PASS named keeps a custom color, got red
+PASS rgb keeps a custom color, got rgb(10 20 30 / .5)
+PASS #FF0000 still colors the card, got #FF0000
+PASS the subpath card shows the destination section, got "Long › Destination\nDestination\nArrived at destination.\nBlock line one.\nBlock line two.\nCode literal ^code\nEscaped \\^literal"
+PASS a heading subpath omits the lines above that heading, got "Long › Destination\nDestination\nArrived at destination.\nBlock line one.\nBlock line two.\nCode literal ^code\nEscaped \\^literal"
+PASS a heading subpath stops before the next heading, got "Long › Destination\nDestination\nArrived at destination.\nBlock line one.\nBlock line two.\nCode literal ^code\nEscaped \\^literal"
+PASS the block id is not visible in the file card, got "Long › Destination\nDestination\nArrived at destination.\nBlock line one.\nBlock line two.\nCode literal ^code\nEscaped \\^literal"
+PASS code and escaped caret literals stay visible
+PASS block subpath reuses the selected paragraph without its metadata
+PASS grid dots sit on the cell corner, image=radial-gradient(circle at 0.7px 0.7px, rgb(224, 224, 224) 0.7px, rgba(0, 0, 0, 0) 0.7px)
+PASS canvas file menu can rename, got ["Open in new tab","Open to the right","Open in new window","Make a copy","Move file to...","Bookmark","Copy path","Rename...","Delete"]
+PASS canvas file menu can open in a new tab, got ["Open in new tab","Open to the right","Open in new window","Make a copy","Move file to...","Bookmark","Copy path","Rename...","Delete"]
+PASS canvas context menu has no opening animation
+PASS native menu click opens another canvas tab
+PASS native Rename menu action starts explorer editing
+PASS menu rename keeps .canvas and updates both open tabs
+PASS native F2 starts canvas rename
+PASS F2 commit retains the canvas extension
+PASS native Make a copy 1 numbers .canvas and preserves original bytes outside the saving editor
+PASS native Make a copy 2 numbers .canvas and preserves original bytes outside the saving editor
+PASS rename/copy leave source JSON unchanged
+PASS live: native hover on frontmatter note shows tooltip without motion
+PASS live: repeated stationary click opens switcher without animation
+PASS source: native hover on frontmatter note shows tooltip without motion
+PASS source: repeated stationary click opens switcher without animation
+PASS reading: native hover on frontmatter note shows tooltip without motion
+PASS reading: repeated stationary click opens switcher without animation
+PASS Click selects a card and exposes eight resize handles
+PASS Selected card has four side and four corner targets
+PASS Repeated stationary card click retains selection
+PASS Shift-click adds to selection
+PASS Stationary Shift-click removes from selection
+PASS Empty background clears selection
+PASS Selection and no-op clicks leave original bytes intact
+PASS Attached edge follows during the drag before saving
+PASS No intermediate drag writes
+PASS Move snaps to a 20-unit grid
+PASS Save preserves root/key/node order, opaque nodes, edges and nested fields
+PASS Undo move restores original bytes
+PASS Ctrl+Shift+Z redoes a move
+PASS Alt bypasses grid snapping
+PASS Shift drag locks the dominant axis
+PASS Arrow keys nudge by five units
+PASS Shift-arrow nudges by one hundred units
+PASS Resize respects 50×50 minimum
+PASS Undo restores size
+PASS Redo restores resized card
+PASS Top-left resize keeps the opposite corner anchored
+PASS Backspace removes the selected card and its incident edges
+PASS Undo deletion restores the card and all edge fields
+PASS Redo deletion removes it again
+PASS Moving a group translates contained cards once
+PASS Deleting a group leaves its contained cards
+PASS Empty-background box selects fully enclosed cards
+PASS Selection box also selects partially intersecting cards
+PASS Box selection is read only
+PASS Escape cancels a live drag without saving
+PASS External file change reloads board geometry
+PASS External reload clears stale undo history
+PASS Leaving the canvas flushes its pending save
+PASS Obsidian-edited scratch canvas renders in Grove with identical geometry
+PASS Reverse round trip opens without rewriting Obsidian bytes
+PASS 300-card drag frames under 20ms (max 16.8ms, 49 intervals)
+PASS Toolbar uses observed Lucide icons and order
+PASS Drag to add card: native hover shows the shared tooltip without animation
+PASS Drag to add note from vault: native hover shows the shared tooltip without animation
+PASS Drag to add media from vault: native hover shows the shared tooltip without animation
+PASS Double-click adds exactly one 250×60 card
+PASS Double-click centers card on world-space pointer position
+PASS New card ids use sixteen lower-case hex digits
+PASS New card starts in a focused CodeMirror editor
+PASS Text editing saves Markdown through the canvas document
+PASS Typing Space, arrows and Backspace stays inside the card editor
+PASS Nested card editor keeps zero direct-child vertical margins
+PASS Wheel scrolls long text while editing without panning the board
+PASS Escape ends editing and renders Markdown
+PASS Double-click reopens text; click away ends and saves
+PASS Board undo restores the preceding text-edit session
+PASS Board redo restores edited text
+PASS Entering/leaving unchanged text does not rewrite canvas bytes
+PASS Repeated stationary toolbar clicks each add exactly one text card
+PASS Note button opens the existing instant prompt
+PASS Native note picker adds a 400×400 file card
+PASS Note cards remain read only on double-click
+PASS Media picker lists images/SVG only
+PASS Native media picker fits image aspect ratio inside 400×400
+PASS Added media uses the local blob path
+PASS Adding and editing preserve unknown root fields
+PASS Dismissing a picker does not edit the canvas
+PASS Stationary repeated note button click reopens the picker
+PASS Stationary repeated media button click reopens the picker
+PASS Flush scenario begins in a visible card editor
+PASS Leaving with a text editor open flushes its pending Markdown
+PASS Undo text edit leaves the newly added empty card
+PASS Undo addition restores the original empty canvas bytes
+PASS Redo addition and text restores the saved card and id
+PASS Real toolbar drag adds exactly one card at release
+PASS Toolbar drag released outside the canvas does not add a card
+PASS Obsidian-edited cards open with identical geometry
+PASS Opening the Part B Obsidian fixture preserves exact bytes

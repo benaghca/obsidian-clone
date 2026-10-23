@@ -1,0 +1,8 @@
+{
+	"nodes":[
+		{"id":"8a79fd99a878d11b","x":-187,"y":-69,"width":250,"height":60,"type":"text","text":"# Part B\n\n**Edited** card\n\n[[BNotePartB1792774086518.canvas]]"},
+		{"id":"0c3d998df8bd460a","x":0,"y":0,"width":400,"height":400,"type":"file","file":"BNotePartB1792774086518.canvas.md"},
+		{"id":"98b1ca58c8b00bd3","x":-200,"y":-200,"width":400,"height":200,"type":"file","file":"BMediaPartB1792774086518.canvas.svg"}
+	],
+	"edges":[]
+}

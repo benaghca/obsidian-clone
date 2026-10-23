@@ -1,0 +1,10 @@
+OPENED {"nodes":[{"id":"5ffdb032a088416a","x":-259,"y":-139,"width":250,"height":60,"type":"text","text":"# Part B\n\n**Edited** card"}],"edges":[]}
+EDIT_MODE { nodeClass: 'canvas-node is-focused is-editing', focusTag: 'IFRAME' }
+EDITED {
+	"nodes":[
+		{"id":"5ffdb032a088416a","type":"text","text":"# From Obsidian\n\n**Changed** card","x":-259,"y":-139,"width":250,"height":60}
+	],
+	"edges":[]
+}
+SAVED "{\n\t\"nodes\":[\n\t\t{\"id\":\"5ffdb032a088416a\",\"type\":\"text\",\"text\":\"# From Obsidian\\n\\n**Changed** card\",\"x\":-259,\"y\":-139,\"width\":250,\"height\":60}\n\t],\n\t\"edges\":[]\n}"
+PASS Grove-added/edited text opens identically in Obsidian; native Obsidian text edit saved for reverse Grove check

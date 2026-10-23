@@ -1,0 +1,19 @@
+{
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"extra":{"retain":42},
+			"x":80,
+			"y":40,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","future":true,"fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}

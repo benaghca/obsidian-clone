@@ -1,0 +1,37 @@
+PASS Toolbar uses observed Lucide icons and order
+PASS Drag to add card: native hover shows the shared tooltip without animation
+PASS Drag to add note from vault: native hover shows the shared tooltip without animation
+PASS Drag to add media from vault: native hover shows the shared tooltip without animation
+PASS Double-click adds exactly one 250×60 card
+PASS Double-click centers card on world-space pointer position
+PASS New card ids use sixteen lower-case hex digits
+PASS New card starts in a focused CodeMirror editor
+PASS Text editing saves Markdown through the canvas document
+PASS Typing Space, arrows and Backspace stays inside the card editor
+PASS Nested card editor keeps zero direct-child vertical margins
+PASS Wheel scrolls long text while editing without panning the board
+PASS Escape ends editing and renders Markdown
+PASS Double-click reopens text; click away ends and saves
+PASS Board undo restores the preceding text-edit session
+PASS Board redo restores edited text
+PASS Entering/leaving unchanged text does not rewrite canvas bytes
+PASS Repeated stationary toolbar clicks each add exactly one text card
+PASS Note button opens the existing instant prompt
+PASS Native note picker adds a 400×400 file card
+PASS Note cards remain read only on double-click
+PASS Media picker lists images/SVG only
+PASS Native media picker fits image aspect ratio inside 400×400
+PASS Added media uses the local blob path
+PASS Adding and editing preserve unknown root fields
+PASS Dismissing a picker does not edit the canvas
+PASS Stationary repeated note button click reopens the picker
+PASS Stationary repeated media button click reopens the picker
+PASS Flush scenario begins in a visible card editor
+PASS Leaving with a text editor open flushes its pending Markdown
+PASS Undo text edit leaves the newly added empty card
+PASS Undo addition restores the original empty canvas bytes
+PASS Redo addition and text restores the saved card and id
+PASS Real toolbar drag adds exactly one card at release
+PASS Toolbar drag released outside the canvas does not add a card
+PASS Obsidian-edited cards open with identical geometry
+PASS Opening the Part B Obsidian fixture preserves exact bytes

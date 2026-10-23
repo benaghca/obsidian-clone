@@ -1,4 +1,4 @@
-// Read-only projection: the original JSON is never serialized or saved.
+// Tolerant display projection; document.ts patches the original records on edit.
 export interface CanvasNode {
   id: string;
   type: "text" | "file" | "link" | "group";

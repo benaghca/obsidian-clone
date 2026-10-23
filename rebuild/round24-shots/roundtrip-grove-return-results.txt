@@ -1,0 +1,3 @@
+PASS Native file click opens Obsidian-edited Markdown with heading and bold text
+PASS Reverse round trip preserves every card geometry field
+PASS Reverse round trip preserves exact Obsidian file bytes

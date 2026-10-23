@@ -1,0 +1,478 @@
+SELECT [
+  {
+    cls: 'canvas-node canvas-node-group',
+    text: 'Group',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'Card A',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px, rgb(138, 92, 245) 0px 0px 0px 2px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Card B',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  }
+]
+HANDLES [
+  {
+    cls: 'canvas-node-resizer',
+    side: 'top',
+    r: {
+      x: 409.2525329589844,
+      y: 343.4316711425781,
+      width: 206.06057739257812,
+      height: 18.52667236328125,
+      top: 343.4316711425781,
+      right: 615.3131103515625,
+      bottom: 361.9583435058594,
+      left: 409.2525329589844
+    },
+    cursor: 'ns-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'right',
+    r: {
+      x: 606.0430908203125,
+      y: 352.68829345703125,
+      width: 18.52667236328125,
+      height: 137.37371826171875,
+      top: 352.68829345703125,
+      right: 624.5697631835938,
+      bottom: 490.06201171875,
+      left: 606.0430908203125
+    },
+    cursor: 'ew-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'bottom',
+    r: {
+      x: 409.2525329589844,
+      y: 480.7919921875,
+      width: 206.06057739257812,
+      height: 18.52667236328125,
+      top: 480.7919921875,
+      right: 615.3131103515625,
+      bottom: 499.31866455078125,
+      left: 409.2525329589844
+    },
+    cursor: 'ns-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'left',
+    r: {
+      x: 399.99591064453125,
+      y: 352.68829345703125,
+      width: 18.52667236328125,
+      height: 137.37371826171875,
+      top: 352.68829345703125,
+      right: 418.5225830078125,
+      bottom: 490.06201171875,
+      left: 399.99591064453125
+    },
+    cursor: 'ew-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'topright',
+    r: {
+      x: 606.0430908203125,
+      y: 343.4316711425781,
+      width: 18.52667236328125,
+      height: 18.52667236328125,
+      top: 343.4316711425781,
+      right: 624.5697631835938,
+      bottom: 361.9583435058594,
+      left: 606.0430908203125
+    },
+    cursor: 'nesw-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'bottomright',
+    r: {
+      x: 606.0430908203125,
+      y: 480.7919921875,
+      width: 18.52667236328125,
+      height: 18.52667236328125,
+      top: 480.7919921875,
+      right: 624.5697631835938,
+      bottom: 499.31866455078125,
+      left: 606.0430908203125
+    },
+    cursor: 'nwse-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'bottomleft',
+    r: {
+      x: 399.99591064453125,
+      y: 480.7919921875,
+      width: 18.52667236328125,
+      height: 18.52667236328125,
+      top: 480.7919921875,
+      right: 418.5225830078125,
+      bottom: 499.31866455078125,
+      left: 399.99591064453125
+    },
+    cursor: 'nesw-resize'
+  },
+  {
+    cls: 'canvas-node-resizer',
+    side: 'topleft',
+    r: {
+      x: 399.99591064453125,
+      y: 343.4316711425781,
+      width: 18.52667236328125,
+      height: 18.52667236328125,
+      top: 343.4316711425781,
+      right: 418.5225830078125,
+      bottom: 361.9583435058594,
+      left: 399.99591064453125
+    },
+    cursor: 'nwse-resize'
+  }
+]
+SHIFT_ADD [
+  {
+    cls: 'canvas-node canvas-node-group',
+    text: 'Group',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node is-selected',
+    text: 'Card A',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px, rgb(138, 92, 245) 0px 0px 0px 2px'
+  },
+  {
+    cls: 'canvas-node is-selected',
+    text: 'Card B',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px, rgb(138, 92, 245) 0px 0px 0px 2px'
+  }
+]
+SHIFT_REMOVE [
+  {
+    cls: 'canvas-node canvas-node-group',
+    text: 'Group',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'Card A',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px, rgb(138, 92, 245) 0px 0px 0px 2px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Card B',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  }
+]
+MOVE {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":40,
+			"y":40,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+SHIFT_MOVE {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":80,
+			"y":40,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+ALT_MOVE {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":95,
+			"y":60,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+ARROW {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":100,
+			"y":60,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+SHIFT_ARROW {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":200,
+			"y":60,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+ALT_ARROW {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":200,
+			"y":60,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+MINIMUM {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":0,
+			"y":0,
+			"width":50,
+			"height":50
+		},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+GROUP_MOVE {
+	"nodes":[
+		{"id":"g","type":"group","x":0,"y":-20,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":40,
+			"y":20,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+GROUP_DELETE {
+	"nodes":[
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":40,
+			"y":20,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+UNDO {
+	"nodes":[
+		{"id":"g","type":"group","x":0,"y":-20,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":40,
+			"y":20,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+REDO {
+	"nodes":[
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160},
+		{
+			"id":"a",
+			"type":"text",
+			"text":"Card A",
+			"future":{"retain":42},
+			"x":40,
+			"y":20,
+			"width":240,
+			"height":160
+		}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Live edge"}
+	]
+}
+BOX_FULL [
+  {
+    cls: 'canvas-node canvas-node-group',
+    text: 'Group',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Card A',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'Card B',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px, rgb(138, 92, 245) 0px 0px 0px 2px'
+  }
+]
+BOX_PARTIAL [
+  {
+    cls: 'canvas-node canvas-node-group',
+    text: 'Group',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Card A',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'Card B',
+    outline: 'rgb(34, 34, 34) none 3px',
+    shadow: 'rgba(0, 0, 0, 0.1) 0px 0.5px 1px 0.5px, rgb(138, 92, 245) 0px 0px 0px 2px'
+  }
+]
+BACKSPACE {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{"id":"b","type":"text","text":"Card B","x":440,"y":0,"width":240,"height":160}
+	],
+	"edges":[]
+}
+UNDO_DELETE {
+	"nodes":[
+		{"id":"g","type":"group","x":-40,"y":-40,"width":360,"height":280,"label":"Group"},
+		{
+			"id":"a",
+			"type":"text",
+			"x":0,
+			"y":0,
+			"width":240,
+			"height":160,
+			"text":"Card A",
+			"future":{"retain":42}
+		},
+		{"id":"b","type":"text","x":440,"y":0,"width":240,"height":160,"text":"Card B"}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","toNode":"b","label":"Live edge","fromSide":"right","toSide":"left"}
+	]
+}
+SAVED "{\n\t\"nodes\":[\n\t\t{\"id\":\"g\",\"type\":\"group\",\"x\":-40,\"y\":-40,\"width\":360,\"height\":280,\"label\":\"Group\"},\n\t\t{\n\t\t\t\"id\":\"a\",\n\t\t\t\"type\":\"text\",\n\t\t\t\"x\":0,\n\t\t\t\"y\":0,\n\t\t\t\"width\":240,\n\t\t\t\"height\":160,\n\t\t\t\"text\":\"Card A\",\n\t\t\t\"future\":{\"retain\":42}\n\t\t},\n\t\t{\"id\":\"b\",\"type\":\"text\",\"x\":440,\"y\":0,\"width\":240,\"height\":160,\"text\":\"Card B\"}\n\t],\n\t\"edges\":[\n\t\t{\"id\":\"e\",\"fromNode\":\"a\",\"toNode\":\"b\",\"label\":\"Live edge\",\"fromSide\":\"right\",\"toSide\":\"left\"}\n\t]\n}"
+TOOLBAR [
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    label: 'Drag to add card'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    label: 'Drag to add note from vault'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    label: 'Drag to add media from vault'
+  },
+  { cls: 'canvas-control-item', label: 'Canvas settings' },
+  { cls: 'canvas-control-item', label: 'Zoom in' },
+  { cls: 'canvas-control-item', label: 'Reset zoom' },
+  { cls: 'canvas-control-item', label: 'Zoom to fit\n(Shift + 1)' },
+  { cls: 'canvas-control-item', label: 'Zoom out' },
+  { cls: 'canvas-control-item', label: 'Undo' },
+  { cls: 'canvas-control-item is-disabled', label: 'Redo' },
+  { cls: 'canvas-control-item', label: 'Canvas help' }
+]
