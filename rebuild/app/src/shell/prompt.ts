@@ -3,7 +3,6 @@
 // hints. The quick switcher, the command palette and "Move file to..." are
 // all this one component with different items.
 
-import { animateOut } from "../motion";
 import { h } from "./dom";
 import { fuzzyRank, highlight } from "./fuzzy";
 import { icon } from "./icons";
@@ -140,13 +139,11 @@ export function openPrompt<T>(opts: PromptOptions<T>) {
     opts.choose(item, e);
   }
 
-  // The overlay plays its exit and removes itself; whatever was chosen never
-  // waits on it.
   function close(restore = true) {
     if (closed) return;
     closed = true;
     openCount--;
-    void animateOut(overlay);
+    overlay.remove();
     if (restore) restoreFocus?.focus();
   }
 

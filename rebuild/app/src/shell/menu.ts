@@ -7,7 +7,6 @@
 //
 // Only the top level is built on open; a submenu is built when it opens.
 
-import { animateOut } from "../motion";
 import { h } from "./dom";
 import { icon, type IconName } from "./icons";
 
@@ -198,7 +197,7 @@ class Menu {
   closeChild() {
     if (!this.child) return;
     this.child.closeChild();
-    void animateOut(this.child.el);
+    this.child.el.remove();
     this.child = null;
     this.childIndex = -1;
   }
@@ -215,7 +214,7 @@ class Menu {
   close() {
     clearTimeout(this.timer);
     this.closeChild();
-    void animateOut(this.el);
+    this.el.remove();
   }
 }
 
@@ -224,7 +223,7 @@ function place(el: HTMLElement, x: number, y: number) {
   el.style.top = `${Math.round(Math.max(EDGE, y))}px`;
 }
 
-/** Close the open menu; it fades out on its own while the chosen action runs. */
+/** Close the open menu and release its input listeners. */
 function closeMenu() {
   if (!root) return;
   root.close();
