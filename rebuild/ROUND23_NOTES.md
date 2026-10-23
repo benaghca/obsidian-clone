@@ -322,3 +322,60 @@ lines, the renderer 145 and the existing pane 678; all stay below 800.
    the current measured navigation target.
 
 Part B complete. Commit locally and stop.
+
+## Stage 3 fixes
+
+Baseline `7b612a5`. Cherry-picked Grok's `8953851` as `3a6e40e`, bringing in
+`ROUND23_BUGS.md` and its regression in `npm test`. The original regression
+reproduced 14 failing assertions across all seven confirmed bugs.
+
+1. **Auto edge sides (`941a7fb`):** missing/invalid sides now face the other
+   card; explicit sides stay unchanged. Added four-direction/override tests.
+   Corrected the hunter fixture to the report's y=520/y=780 coordinates:
+   it used y=560 while asserting a bottom at y=620. Kept that assertion.
+2. **File-card subpaths (`737dd97`):** reuse `embedPart` for only the heading
+   section or block paragraph; delete the whole-note scroll/padding workaround.
+   Hide block metadata in the display copy, preserving code and escaped
+   literals with the existing Markdown parser. Original bytes stay unchanged.
+3. **Group labels (`737dd97`):** hide empty labels; use muted text and a
+   faint 10% wash for uncolored labels. Colored pills retain white text.
+4. **Group stacking (`737dd97`):** group boxes no longer trap labels in
+   stacking contexts. Earlier labels remain above later group fills, with
+   edges and cards above the fills too.
+5. **File actions (`b921628`):** enable canvas explorer open/new-tab/right/
+   window, rename and copy actions. F2 reuses the explorer rename field.
+   Rename/copies retain `.canvas`, including case; numbered copies read
+   exact file bytes without loading a saving editor. Editor-only commands
+   stay restricted to notes.
+6. **CSS colors (`737dd97`):** preserve presets and accept custom values
+   through `CSS.supports("color", value)`, including short/alpha hex, names
+   and RGB functions.
+7. **Dot lattice (`737dd97`):** place the .7px-radius dot at (.7px,.7px),
+   matching the corner of the existing pan/zoom lattice.
+
+All required checks passed: `npm run build`, `npm test`,
+`npm run audit:offline`, `cargo build`, `cargo test`, and `git diff --check`.
+The full run passed **238** TypeScript tests in **42** files, **769** named
+browser checks (including **36** expanded Grok checks), the existing paste
+cases, 4 browser-discovery tests, and **34** Rust tests. Offline audit checked
+134 source files plus output, CSP, capabilities and dependencies.
+
+All tests were headless. Native CDP hover and clicks, including repeated
+stationary clicks, passed on frontmatter notes in Live Preview, Source and
+Reading. Geometry retained line tops within 1px, zero direct-child vertical
+margins and visible arrows after stationary unfold. All 18 instant menu/
+prompt checks passed within two frames; maximum interval **17.0ms**.
+Canvas navigation/performance and byte-preserving rename/copy checks passed.
+
+Net tracked app newline changes from `7b612a5`, excluding `/gen/`:
+
+- TypeScript **+36** (production **+20**, tests **+16**); final **23,128**.
+- CSS **+5**; final **3,822**. Rust **0**; final **3,145**.
+- mjs **+149** (hunter **+107**, added coverage **+42**); final **2,441**.
+- JSON **0**; final **2,229**.
+- TS/CSS/Rust/mjs total **+190**, final **32,536**. Excluding the hunter
+  cherry-pick, fixes and coverage total **+83** lines.
+
+No dependencies, backend commands, CSP changes or editor typing-path work
+were added. No real-screen window or owner's vault was used. Commits remain
+local; nothing pushed. Grok's suggested improvements were not implemented.
