@@ -69,3 +69,6 @@ All three (move list items with their children inside quotes/callouts; keep the 
 - In `rebuild/app`: `npm run build`, `npm test` (unit tests, the geometry suite and your new drag suite), `npm run audit:offline` pass; in `rebuild/app/src-tauri`: `cargo build` and `cargo test` pass.
 - Part A's twelve points work with real pointer input, and `rebuild/ROUND20_NOTES.md` has its notes, measurements and line counts.
 - At the end of the notes, suggest up to 3 next improvements (one line each: what, why it matters, size).
+
+## Chris-reported bug (Oct 22, 8:39 PM PT) - fix FIRST, before drag and drop, in its own commit
+Heading fold arrow disappears after unfold without mouse movement: click a heading's fold arrow to collapse, keep the pointer still, click again to expand. The section expands, but the arrow vanishes until the pointer moves again (the heading line is re-rendered and hover state is lost). Obsidian keeps the arrow visible. Fix so the arrow stays visible under a stationary pointer after both fold and unfold, in Live Preview and Reading, with and without frontmatter. Add a real-pointer regression test (click, click, no mousemove, assert arrow visible).
