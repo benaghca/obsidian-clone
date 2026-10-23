@@ -235,3 +235,26 @@ padding change was made**. `scripts/test-round21b.mjs`, wired into
 `npm test`, verifies these three cases in every mode with real CDP mouse
 input; nine named checks pass. Existing stationary fold/unfold behavior
 away from the clamping boundary remains covered by the geometry suite.
+
+## 2. Quick switcher: recent-only empty list and Tab completion
+
+Restrict the existing empty-query loop to the recent paths (deduplicated,
+missing/excluded paths skipped, active note excluded); fuzzy queries still
+search every included note. The shared prompt passes its existing
+`setQuery` function to the optional key callback. Quick switcher Tab fills
+the selected name and keeps input focus, without opening; Tab with no
+result stays in the input. Shift+Tab retains ordinary focus traversal.
+The footer includes the Tab hint. Merge's shared helper is supplied all
+note paths after recents so its pre-existing full note list stays intact.
+
+Four switcher unit tests pass. The browser suite adds seven checks in each
+of Live Preview, Source and Reading on frontmatter notes: native explorer
+clicks establish recency, mouse hover chooses a non-first result, native
+Tab/Enter complete and open, a fuzzy query finds an unopened note, and an
+empty history stays empty. Nine bottom-fold checks still pass.
+
+Additional Obsidian observation: native Tab completed the selected `Test`
+row into the input and kept focus there without changing the active file.
+Its public recent-file list in this scratch profile also contained newly
+created files; Grove follows the brief's explicit recently-*opened* rule
+and retains its existing exclusion of the active note.

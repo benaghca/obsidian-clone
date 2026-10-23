@@ -1,7 +1,7 @@
 // Round 21 Part B: native input on scratch notes with frontmatter.
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
-await withBrowser(async ({ send, run, move, click, check }) => {
+await withBrowser(async ({ send, run, move, click, point, chord, press, fill, check }) => {
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   await run(async () => {
     const { api } = await import('/src/api.ts');
@@ -30,4 +30,34 @@ await withBrowser(async ({ send, run, move, click, check }) => {
     check(await run(() => !ws.view.dom.querySelector('.cm-foldPlaceholder')), `${mode}: moving to the clamped arrow unfolds normally`);
     console.log('MEASURE bottom fold', mode, JSON.stringify({before,after,shift:after-before}));
   }
+  await run(async () => {
+    const {api} = await import('/src/api.ts');
+    for (const name of ['RecentA', 'RecentB', 'RecentCurrent', 'NeverOpened']) await api.createNote(name+'.md', '---\ntags: [switcher]\n---\n\nA paragraph.');
+    await ws.vault.refreshFiles();
+  });
+  for (const mode of ['live', 'source', 'reading']) {
+    await run(async () => {await ws.open('FoldEnd.md'); ws.recent=[];});
+    for (const name of ['RecentA','RecentB','RecentCurrent']) await click(`.nav-files [data-path="${name}.md"]`);
+    await run(mode => ws.setMode(mode), mode); await sleep(100);
+    await chord('o'); await sleep(60);
+    assert.deepEqual(await run(() => [...document.querySelectorAll('.prompt .suggestion-title')].map(el=>el.textContent)), ['RecentB','RecentA']);
+    check(true, `${mode}: empty switcher lists only recents, newest first, excluding current and unopened notes`);
+    await move(await point('.prompt .suggestion-item:nth-child(2)'));
+    await press('Tab');
+    check(await run(() => document.querySelector('.prompt-input').value === 'RecentA' && document.activeElement === document.querySelector('.prompt-input') && ws.active.path === 'RecentCurrent.md'), `${mode}: Tab completes the hovered selection and keeps input focus without opening`);
+    await press('Enter'); await sleep(100);
+    check(await run(() => ws.active.path === 'RecentA.md'), `${mode}: Enter opens the completed note`);
+    await chord('o'); await fill('.prompt-input', 'NeverOp');
+    check(await run(() => document.querySelector('.prompt .suggestion-title')?.textContent === 'NeverOpened'), `${mode}: typed query still finds a note that was never opened`);
+    await press('Tab');
+    check(await run(() => document.querySelector('.prompt-input').value === 'NeverOpened'), `${mode}: Tab completes a fuzzy query`);
+    await press('Escape');
+    await run(() => {ws.recent=[];});
+    await chord('o');
+    check(await run(() => !document.querySelector('.prompt .suggestion-item') && !!document.querySelector('.prompt .suggestion-empty')), `${mode}: no recents gives an empty list`);
+    await press('Tab');
+    check(await run(() => ws.active.path === 'RecentA.md' && document.activeElement === document.querySelector('.prompt-input')), `${mode}: Tab with no selected result keeps focus and opens nothing`);
+    await press('Escape');
+  }
+
 });

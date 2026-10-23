@@ -19,7 +19,7 @@ export interface PromptOptions<T> {
   choose(item: T, e: KeyboardEvent | MouseEvent): void;
   emptyText: string;
   /** Extra keys (Shift+Enter to create, ...). Return true if handled. */
-  onKey?(e: KeyboardEvent, selected: T | undefined, query: string, close: (restoreFocus?: boolean) => void): boolean;
+  onKey?(e: KeyboardEvent, selected: T | undefined, query: string, close: (restoreFocus?: boolean) => void, setQuery: (query: string) => void): boolean;
   className?: string;
   /** Give focus back to where it was before running the choice (commands act on the editor). */
   restoreFocusOnChoose?: boolean;
@@ -149,7 +149,7 @@ export function openPrompt<T>(opts: PromptOptions<T>) {
 
   input.addEventListener("input", update);
   input.addEventListener("keydown", (e) => {
-    if (opts.onKey?.(e, items[selected], input.value, close)) {
+    if (opts.onKey?.(e, items[selected], input.value, close, setQuery)) {
       // handled by the caller
     } else if (e.key === "ArrowDown" || (e.ctrlKey && e.key === "n")) {
       select(items.length ? (selected + 1) % items.length : 0);

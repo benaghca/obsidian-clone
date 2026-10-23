@@ -14,7 +14,7 @@ export interface SwitcherItem {
 const MAX_RESULTS = 50;
 
 /**
- * Empty query: recent notes, then the rest, never the open note. Otherwise
+ * Empty query: only recent notes, never the open note. Otherwise
  * fuzzy matches, best first. Like Obsidian, a row offering to create the
  * note appears only when nothing matches well (Shift+Enter creates anyway).
  */
@@ -24,7 +24,7 @@ export function switcherItems(query: string, notes: NoteRef[], recent: string[],
     const byPath = new Map(notes.map((n) => [n.path, n]));
     const seen = new Set<string>();
     const out: SwitcherItem[] = [];
-    for (const path of [...recent, ...byPath.keys()]) {
+    for (const path of recent) {
       const note = byPath.get(path);
       if (!note || path === activePath || seen.has(path)) continue;
       seen.add(path);
