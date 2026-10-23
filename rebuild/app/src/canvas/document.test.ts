@@ -38,8 +38,14 @@ test("reconnecting patches only endpoints, preserving metadata and key order", (
 
 test("deleting selected edges and cards retains unrelated and unknown records", () => {
   const source = '{"nodes":[{"id":"a"},{"id":"b"},null],"edges":[{"id":"e","fromNode":"a","toNode":"b"},{"id":"keep","fromNode":"a","toNode":"b","future":true},null]}';
-  expect(JSON.parse(editCanvas(source, [], new Set(["e"]))).edges).toEqual([{ id: "keep", fromNode: "a", toNode: "b", future: true }, null]);
-  const mixed = JSON.parse(editCanvas(source, [], new Set(["e", "b"])));
+  expect(JSON.parse(editCanvas(source, [], undefined, [], [], new Set(["e"]))).edges).toEqual([{ id: "keep", fromNode: "a", toNode: "b", future: true }, null]);
+  const mixed = JSON.parse(editCanvas(source, [], new Set(["b"]), [], [], new Set(["e"])));
   expect(mixed.nodes).toEqual([{ id: "a" }, null]);
   expect(mixed.edges).toEqual([null]);
+});
+
+test("card and edge IDs have independent deletion namespaces", () => {
+  const source = '{"nodes":[{"id":"same"},{"id":"b"},{"id":"c"}],"edges":[{"id":"same","fromNode":"b","toNode":"c"}]}';
+  expect(JSON.parse(editCanvas(source, [], new Set(["same"]))).edges).toHaveLength(1);
+  expect(JSON.parse(editCanvas(source, [], undefined, [], [], new Set(["same"]))).nodes).toHaveLength(3);
 });

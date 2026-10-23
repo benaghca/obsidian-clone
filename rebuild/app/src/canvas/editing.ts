@@ -7,10 +7,11 @@ const geometry = ["x", "y", "width", "height"] as const;
 const sides = ["top", "right", "bottom", "left", "topright", "bottomright", "bottomleft", "topleft"];
 export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: CanvasNode[], edges: CanvasEdge[],
   paint: (changed: CanvasNode[]) => void,
-  commit: (changed: CanvasNode[], deleted?: Set<string>, edge?: CanvasEdge) => void,
+  commit: (changed: CanvasNode[], deleted?: Set<string>, edge?: CanvasEdge, deletedEdges?: Set<string>) => void,
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   history: (redo: boolean) => void, zoom: (nodes: CanvasNode[]) => void, edit: (node: CanvasNode) => void, selectedId?: string) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
+  const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
   const edgeElements = () => world.querySelectorAll<HTMLElement | SVGElement>("[data-edge-id]");
   for (const card of cards.values()) for (const side of sides.slice(0, 4))
@@ -18,12 +19,12 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const events = new AbortController();
   let cancel: (() => void) | undefined, suppress = false;
   const chosen = () => nodes.filter(n => selected.has(n.id));
-  const removeSelected = () => { if (selected.size && !canvasReadOnly.has(el)) commit([], selected); };
+  const removeSelected = () => { if ((selected.size || selectedEdges.size) && !canvasReadOnly.has(el)) commit([], selected, undefined, selectedEdges); };
   const menu = selectionMenu(world, removeSelected, () => zoom(chosen()), edit, changed => { paint(changed); commit(changed); });
   const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen()); };
   function selection() {
     menu.update(chosen());
-    for (const el of edgeElements()) el.classList.toggle("is-selected", selected.has(el.dataset.edgeId!));
+    for (const el of edgeElements()) el.classList.toggle("is-selected", selectedEdges.has(el.dataset.edgeId!));
     for (const [id, card] of cards) {
       card.classList.toggle("is-selected", selected.has(id));
       card.querySelectorAll(".canvas-node-resizer").forEach(handle => handle.remove());
@@ -54,11 +55,20 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     const side = target.closest<HTMLElement>("[data-resize]")?.dataset.resize;
     const edge = edges.find(edge => edge.id === target.closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId);
     const dot = target.closest<HTMLElement>(".canvas-node-connection-point");
-    const end = target.closest<HTMLElement>("[data-edge-end]")?.dataset.edgeEnd as "from" | "to" | undefined;
+    let end = target.closest<HTMLElement>("[data-edge-end]")?.dataset.edgeEnd as "from" | "to" | undefined;
+    if (!end && edge && selectedEdges.has(edge.id) && !e.shiftKey) {
+      let distance = 24;
+      for (const point of edgeElements()) if (point.dataset.edgeId === edge.id && point.dataset.edgeEnd) {
+        const r = point.getBoundingClientRect(), gap = Math.hypot(e.clientX - r.x - r.width / 2, e.clientY - r.y - r.height / 2);
+        if (gap < distance) { distance = gap; end = point.dataset.edgeEnd as "from" | "to"; }
+      }
+    }
     e.preventDefault(); el.focus({ preventScroll: true });
     if (dot || end) {
       if (canvasReadOnly.has(el)) return;
-      selected.clear(); selected.add(edge?.id ?? node!.id); selection();
+      selected.clear(); selectedEdges.clear();
+      if (edge) selectedEdges.add(edge.id); else selected.add(node!.id);
+      selection();
       const next: CanvasEdge = edge ? { ...edge } : { id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), fromNode: node!.id, fromSide: dot!.dataset.side as Side, toNode: node!.id, toSide: "top" };
       const movingEnd = end ?? "to", nodeKey = movingEnd === "from" ? "fromNode" : "toNode", sideKey = movingEnd === "from" ? "fromSide" : "toSide";
       const matrix = new DOMMatrix(getComputedStyle(world).transform), rect = el.getBoundingClientRect();
@@ -79,21 +89,21 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         for (const el of edgeElements()) el.classList.remove("is-reconnecting");
         for (const card of cards.values()) card.classList.remove("is-connection-target");
         if (!cancelled && suppress && drop && (!edge || next[nodeKey] !== edge[nodeKey] || next[sideKey] !== edge[sideKey])) {
-          commit([], undefined, next); selected.clear(); selected.add(next.id); selection();
+          commit([], undefined, next); selected.clear(); selectedEdges.clear(); selectedEdges.add(next.id); selection();
         }
       });
       return;
     }
     if (edge) {
-      const remove = e.shiftKey && selected.has(edge.id);
-      if (!e.shiftKey) selected.clear();
-      if (remove) selected.delete(edge.id); else selected.add(edge.id);
+      const remove = e.shiftKey && selectedEdges.has(edge.id);
+      if (!e.shiftKey) { selected.clear(); selectedEdges.clear(); }
+      if (remove) selectedEdges.delete(edge.id); else selectedEdges.add(edge.id);
       selection(); return;
     }
     if (node) {
       const removeOnClick = !side && e.shiftKey && selected.has(node.id);
       if (!side && e.shiftKey) selected.add(node.id);
-      else if (!selected.has(node.id)) { selected.clear(); selected.add(node.id); }
+      else if (!selected.has(node.id)) { selected.clear(); selectedEdges.clear(); selected.add(node.id); }
       selection();
       if (canvasReadOnly.has(el)) return;
       const affected = side ? [node] : moving();
@@ -138,6 +148,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       }, false);
     } else {
       const initial = e.shiftKey ? new Set(selected) : new Set<string>();
+      if (!e.shiftKey) selectedEdges.clear();
       selected.clear(); initial.forEach(id => selected.add(id)); selection();
       const box = h("div", { class: "canvas-selection" });
       el.append(box);
@@ -166,11 +177,11 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     if (cancel) { cancel(); return; }
     if (undo) history(e.shiftKey || e.key.toLowerCase() === "y");
     else if (canvasReadOnly.has(el) && e.key !== "Escape") return;
-    else if (remove && selected.size) commit([], selected);
+    else if (remove) removeSelected();
     else if (direction && chosen().length) {
       const affected = moving(), step = e.shiftKey ? 100 : 5;
       affected.forEach(n => { n.x += direction[0] * step; n.y += direction[1] * step; }); repaint(affected); commit(affected);
-    } else if (e.key === "Escape") { selected.clear(); selection(); }
+    } else if (e.key === "Escape") { selected.clear(); selectedEdges.clear(); selection(); }
   }, { signal: events.signal });
   selection();
   return () => { cancel?.(); events.abort(); menu.dispose(); };

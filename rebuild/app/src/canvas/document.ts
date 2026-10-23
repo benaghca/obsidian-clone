@@ -2,7 +2,7 @@ import type { CanvasEdge, CanvasNode } from "./model";
 
 // Keep raw records separate from the tolerant rendering projection. Only the
 // fields actually edited are patched; unknown records/keys retain their order.
-export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = [], edges: CanvasEdge[] = []) {
+export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = [], edges: CanvasEdge[] = [], deletedEdges = new Set<string>()) {
   let data;
   try { data = JSON.parse(source); } catch { data = {}; }
   if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
@@ -16,7 +16,7 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
     }
     return n;
   });
-  if (deleted.size && Array.isArray(data.edges)) data.edges = data.edges.filter((e: CanvasEdge | null) => !e || !deleted.has(e.id) && !deleted.has(e.fromNode) && !deleted.has(e.toNode));
+  if ((deleted.size || deletedEdges.size) && Array.isArray(data.edges)) data.edges = data.edges.filter((e: CanvasEdge | null) => !e || !deletedEdges.has(e.id) && !deleted.has(e.fromNode) && !deleted.has(e.toNode));
   if (added.length) {
     if (!Array.isArray(data.nodes)) data.nodes = [];
     data.nodes.push(...added);

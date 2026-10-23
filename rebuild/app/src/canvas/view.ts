@@ -263,8 +263,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
         place(item, edgeCurve(byId.get(item.edge.fromNode)!, byId.get(item.edge.toNode)!, item.edge));
       navigation.loaded(boundsOf());
-    }, (nodes, deleted, edge) => {
-      const next = editCanvas(source, nodes, deleted, [], edge ? [edge] : []);
+    }, (nodes, deleted, edge, deletedEdges) => {
+      const next = editCanvas(source, nodes, deleted, [], edge ? [edge] : [], deletedEdges);
       if (next === source) return;
       undo.push(source); redo = [];
       if (edge) {
@@ -272,7 +272,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         if (item) { Object.assign(item.edge, edge); place(item, edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge)); }
         else { edges.push(edge); addEdge(edge, edges.length - 1); }
       }
-      changed(next, !!deleted?.size);
+      changed(next, !!deleted?.size || !!deletedEdges?.size);
     }, previewEdge, history, nodes => navigation.zoomTo(nodes), node => edits.get(node.id)?.(), selectedId));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }

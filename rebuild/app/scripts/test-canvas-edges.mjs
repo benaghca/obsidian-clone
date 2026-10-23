@@ -48,8 +48,8 @@ await withBrowser(async ({run,send,click,move,point,press,chord,open,read,check,
  await chord('z');await sleep(380);check(await read()===created,'Target reconnection is one undo step');await press('Z',10);await sleep(380);check(await read()===toChanged,'Ctrl+Shift+Z redoes target reconnection');
  await click(await edgePoint(id));await drag(await point(endpoint(id,'from')),await sidePoint('b','bottom'));
  const fromChanged=await read();check((await data()).edges.find(e=>e?.id===id).fromNode==='b'&&(await data()).edges.find(e=>e?.id===id).fromSide==='bottom','Dragging the source end reconnects without reversing direction or creating an edge');await save('source-reconnected');
- await drag(await point(endpoint(id,'from')),await sidePoint('b','left'));
- const sideChanged=await read();check((await data()).edges.find(e=>e?.id===id).fromSide==='left','A selected end can reconnect to another side of the same card');await save('side-reconnected');
+ const exposed=await point(endpoint(id,'from'));exposed.y+=18;await drag(exposed,await sidePoint('b','left'));
+ const sideChanged=await read();check((await data()).edges.find(e=>e?.id===id).fromSide==='left','Dragging the exposed line end reconnects to another side of the same card');await save('side-reconnected');
  await drag(await point(endpoint(id,'from')),await sidePoint('b','left'));check(await read()===sideChanged,'Reconnecting to the same endpoint is a byte-preserving no-op');
  await chord('z');await sleep(380);check(await read()===fromChanged,'No-op reconnection adds no extra undo checkpoint');
  await click('[aria-label="Redo"]');await sleep(380);check(await read()===sideChanged,'Redo button restores the side change');
@@ -79,6 +79,10 @@ await withBrowser(async ({run,send,click,move,point,press,chord,open,read,check,
  await click('[aria-label="Canvas settings"]');await click('.menu-item:nth-child(3)');
  await click(await point(card('a')));const removeAt=await point('[aria-label="Remove"]');await double(removeAt);await sleep(380);
  check(!(await data()).nodes.some(n=>n.id==='a')&&!(await data()).nodes.some(n=>n.type==='text'&&n.text===''),'Double-clicking Remove after mixed edge work never adds a card');
+ await open('CollidingIds.canvas',{nodes:fixture.nodes.slice(0,3),edges:[{id:'a',fromNode:'b',fromSide:'left',toNode:'c',toSide:'right'}]});
+ await click(card('a'));await press('Delete');await sleep(380);check((await data()).edges.length===1&&!(await data()).nodes.some(n=>n.id==='a'),'Deleting a card preserves an unrelated edge with the same ID');await chord('z');await sleep(380);
+ await click(await edgePoint('a'));await press('Delete');await sleep(380);check((await data()).nodes.length===3&&(await data()).edges.length===0,'Deleting an edge preserves a card with the same ID');await chord('z');await sleep(380);
+ await click(card('a'));const collisionAt=await edgePoint('a');await move(collisionAt);await stationary(collisionAt,8);await press('Delete');await sleep(380);check((await data()).nodes.length===2&&(await data()).edges.length===0,'Mixed selection independently deletes both items when their IDs match');
  // Zoomed coordinates and center snapping on a small canvas.
  await open('Zoom.canvas',{nodes:[{id:'z1',type:'text',x:0,y:0,width:100,height:100,text:'Z1'},{id:'z2',type:'text',x:260,y:0,width:100,height:100,text:'Z2'}],edges:[]});
  await click('[aria-label="Zoom in"]');await click('[aria-label="Zoom in"]');await sleep(80);
