@@ -91,5 +91,34 @@ try {
   check(await evaluate('(()=>{const r=document.querySelector(".hover-popover").getBoundingClientRect();return r.left>=8 && r.top>=8 && r.right<=innerWidth-8 && r.bottom<=innerHeight-8})()'), 'asynchronously loaded long preview remains within a constrained viewport');
   await press('Escape');
   await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});
+
+  // Rename failures keep the draft, show an error beneath it, and can be corrected or canceled.
+  await run(async()=>{const {api}=await import('/src/api.ts');await api.createNote('Rename19.md','A note.');await api.createNote('Taken19.md','Taken.');await ws.vault.refreshFiles();await ws.open('Rename19.md');});
+  await fill('.inline-title','Bad/name');await press('Enter');await sleep(100);
+  check(await evaluate('document.querySelector(".inline-title").textContent === "Bad/name" && document.querySelector(".inline-title + .rename-error").textContent.includes("cannot contain") && ws.active.path === "Rename19.md"'), 'invalid inline title retains the exact draft and reports the error');
+  check(await evaluate('(()=>{const f=document.querySelector(".inline-title"),e=f.nextElementSibling;return f.getAttribute("aria-invalid")==="true" && e.getBoundingClientRect().top>=f.getBoundingClientRect().bottom})()'), 'inline title error is beneath the field');
+  await shot('rename-title-invalid');
+  await fill('.inline-title','taken19');await press('Enter');await sleep(100);
+  check(await evaluate('document.querySelector(".inline-title + .rename-error").textContent.includes("already exists") && ws.active.path === "Rename19.md"'), 'inline title reports a case-insensitive name clash');
+  await fill('.inline-title','Corrected19');await press('Enter');await sleep(200);
+  check(await evaluate('ws.active.path === "Corrected19.md" && !document.querySelector(".inline-title + .rename-error")'), 'correcting inline title commits and clears its error');
+  await fill('.inline-title','');await press('Enter');await sleep(100);
+  check(await evaluate('!!document.querySelector(".inline-title + .rename-error") && ws.active.path === "Corrected19.md"'), 'empty inline title reports an error');
+  await press('Escape');
+  check(await evaluate('document.querySelector(".inline-title").textContent === "Corrected19" && !document.querySelector(".inline-title + .rename-error")'), 'Escape restores the title and clears its error');
+  const row='[data-path="Corrected19.md"]';
+  const rp=await point(row);await send('Input.dispatchMouseEvent',{type:'mouseMoved',...rp});await sleep(50);
+  for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...rp,button:'right',clickCount:1});await sleep(100);
+  const menu=await run(()=>{const el=[...document.querySelectorAll('.menu-item')].find(el=>el.textContent.includes('Rename'));const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};});
+  await send('Input.dispatchMouseEvent',{type:'mouseMoved',...menu});await sleep(50);
+  for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...menu,button:'left',clickCount:1});await sleep(100);
+  const field=row+' .tree-item-inner';
+  await fill(field,'Taken19');await press('Enter');await sleep(100);
+  check(await evaluate('(()=>{const f=document.querySelector(`[data-path="Corrected19.md"] .tree-item-inner`);return f.isContentEditable && f.textContent==="Taken19" && f.nextElementSibling.textContent.includes("already exists")})()'), 'explorer clash keeps the draft editable with an error');
+  await fill(field,'Bad:name');await click('.view-header');await sleep(100);
+  check(await evaluate('(()=>{const f=document.querySelector(`[data-path="Corrected19.md"] .tree-item-inner`),e=f.nextElementSibling;return f.textContent==="Bad:name" && e.className==="rename-error" && e.getBoundingClientRect().top>=f.getBoundingClientRect().bottom})()'), 'invalid explorer rename reports below the field on blur without dropping characters');
+  await shot('rename-explorer-invalid');
+  await fill(field,'Explorer19');await press('Enter');await sleep(200);
+  check(await evaluate('ws.active.path === "Explorer19.md" && !document.querySelector(".rename-error")'), 'correcting explorer rename commits and clears its error');
   assert.equal(errors.length,0,JSON.stringify(errors));
 } finally {socket?.close();browser.kill();server.kill();}

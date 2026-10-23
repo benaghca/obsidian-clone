@@ -18,7 +18,7 @@ import { editAt, readingMode } from "../editor/render";
 import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
-import { dragPointer, h, iconButton } from "./dom";
+import { dragPointer, fieldError, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { showMenu } from "./menu";
 import type { Menus } from "./menus";
@@ -431,6 +431,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
 
     // ----- note view -----
     const title = h("div", { class: "inline-title", contenteditable: "plaintext-only", spellcheck: "false", "aria-label": "Note title" });
+    let titlePath: string | null = null;
     const sizer = h("div", { class: "markdown-sizer" }, title, ws.editors.viewOf(group).dom);
     const scroller = h("div", { class: "view-content" }, sizer);
 
@@ -484,7 +485,8 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       renderImage(image);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
       if (graph && graph.el.parentElement !== leaf) leaf.append(graph.el);
-      if (path && document.activeElement !== title) title.textContent = noteName(path);
+      if (path !== titlePath) { titlePath = path; fieldError(title, ""); }
+      if (path && document.activeElement !== title && !title.hasAttribute("aria-invalid")) title.textContent = noteName(path);
       // The editor may have moved here from another group (a tab dragged out).
       const dom = ws.editors.viewOf(group).dom;
       if (dom.parentElement !== sizer) sizer.insertBefore(dom, backlinksBox);
@@ -580,34 +582,41 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       getSelection()?.addRange(range);
     }
 
+    let renaming = false;
     async function commitTitle() {
       const path = group.active.path;
-      if (!path) return;
-      const name = (title.textContent ?? "").replace(/\n/g, "");
+      if (!path || renaming) return false;
+      renaming = true;
       try {
-        await renameFile(ws, path, name);
+        await renameFile(ws, path, title.textContent ?? "");
+        fieldError(title, "");
+        return true;
       } catch (err) {
-        console.warn(err);
-        title.textContent = noteName(path);
-      }
+        if (group.active.path === path) fieldError(title, String(err instanceof Error ? err.message : err));
+        return false;
+      } finally { renaming = false; }
     }
 
     title.addEventListener("keydown", (e) => {
       const view = ws.editors.viewOf(group);
       if (e.key === "Enter" || e.key === "ArrowDown") {
         e.preventDefault();
-        title.blur();
-        view.focus();
-        view.dispatch({ selection: { anchor: 0 } });
+        void commitTitle().then((ok) => {
+          if (!ok) return;
+          title.blur();
+          view.focus();
+          view.dispatch({ selection: { anchor: 0 } });
+        });
       } else if (e.key === "Escape") {
         title.textContent = group.active.path ? noteName(group.active.path) : "";
+        fieldError(title, "");
         view.focus();
       }
     });
     title.addEventListener("blur", () => {
-      title.classList.remove("is-renaming");
-      void commitTitle();
+      void commitTitle().then((ok) => { if (ok) title.classList.remove("is-renaming"); });
     });
+    title.addEventListener("input", () => fieldError(title, ""));
     // Margins place the caret beside the line; only space below the text goes to the end.
     scroller.addEventListener("mousedown", (e) => {
       const view = ws.editors.viewOf(group);

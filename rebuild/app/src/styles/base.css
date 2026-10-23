@@ -22,6 +22,20 @@ body {
 [hidden] {
   display: none !important;
 }
+.rename-error {
+  flex-basis: 100%;
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.inline-title + .rename-error {
+  margin: -4px 0 12px;
+}
+.tree-item-self:has(> .rename-error) {
+  flex-wrap: wrap;
+}
 
 .app-container {
   display: flex;

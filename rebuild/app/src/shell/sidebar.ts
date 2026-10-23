@@ -176,7 +176,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function startRename(path: string) {
     const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
-    if (label) editInPlace(label, (name) => renameFile(ws, path, name).catch((err) => console.warn(err)));
+    if (label) editInPlace(label, (name) => renameFile(ws, path, name));
   }
 
   async function newFolderIn(parent: string) {
