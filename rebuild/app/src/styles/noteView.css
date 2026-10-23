@@ -42,10 +42,14 @@
 .view-header-breadcrumb-separator {
   color: var(--text-faint);
 }
+.view-header-breadcrumb,
 .view-header-title {
-  color: var(--text-normal);
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.view-header-title {
+  color: var(--text-normal);
+  flex-shrink: 0;
 }
 
 /* note view: readable line width, re-centered as the pane resizes */
