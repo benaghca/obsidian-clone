@@ -87,4 +87,32 @@ await withBrowser(async ({ send, run, click, press, chord, point, move, check })
     await run(() => { ws.moveTab(backgroundTab, ws.groupOf(currentTab), ws.groupOf(currentTab).tabs.length); ws.activate(currentTab); }); await sleep(250);
   }
 
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('Scrollbar.md', '---\ntags: [geometry]\n---\n' + 'A long scrollable paragraph.\n'.repeat(300));
+    for (let i = 0; i < 200; i++) await api.createNote(`Scrollbar${i}.md`, 'Scroll fixture');
+    await ws.vault.refreshFiles(); await ws.open('Scrollbar.md');
+  });
+  for (const mode of ['live', 'source', 'reading']) {
+    await run(mode => ws.setMode(mode), mode); await sleep(150);
+    for (const selector of ['.workspace-leaf > .view-content:not([hidden])', '.nav-files .nav-files-container']) {
+      const track = await run(selector => {
+        const el = document.querySelector(selector); el.scrollTop = 0;
+        const r = el.getBoundingClientRect(), bar = getComputedStyle(el, '::-webkit-scrollbar'), thumb = getComputedStyle(el, '::-webkit-scrollbar-thumb');
+        return { x: r.right - 6, y: r.top + r.height * .75, top: r.top, width: bar.width, height: bar.height, border: thumb.borderTopWidth, radius: thumb.borderRadius, clip: thumb.backgroundClip, buttons: getComputedStyle(el, '::-webkit-scrollbar-button').display, gutter: el.offsetWidth - el.clientWidth };
+      }, selector);
+      assert.equal(track.width, '12px'); assert.equal(track.height, '12px');
+      assert.equal(track.border, '3px'); assert.equal(track.radius, '12px'); assert.equal(track.clip, 'padding-box');
+      assert.equal(track.buttons, 'none'); assert.equal(track.gutter, 12);
+      await move({ x: track.x, y: track.top + 10 });
+      check(true, `${mode} ${selector}: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons`);
+      await move({ x: track.x, y: track.y });
+      await mouse('mousePressed', { x: track.x, y: track.y }); await mouse('mouseReleased', { x: track.x, y: track.y }); await sleep(250);
+      const first = await run(selector => document.querySelector(selector).scrollTop, selector);
+      // No move before the second native track click.
+      await mouse('mousePressed', { x: track.x, y: track.y }); await mouse('mouseReleased', { x: track.x, y: track.y }); await sleep(250);
+      check(first > 0 && await run((selector, first) => document.querySelector(selector).scrollTop > first, selector, first), `${mode} ${selector}: repeated stationary scrollbar clicks scroll both times`);
+    }
+  }
+
 });

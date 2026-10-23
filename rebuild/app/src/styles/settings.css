@@ -42,22 +42,6 @@
   min-width: 0;
 }
 
-/* thin scrollbars, like Obsidian's styled ones */
-.modal.mod-settings ::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
-  background: transparent;
-}
-.modal.mod-settings ::-webkit-scrollbar-thumb {
-  border: 3px solid transparent;
-  border-radius: 12px;
-  background-clip: padding-box;
-  background-color: var(--scrollbar-thumb);
-}
-.modal.mod-settings ::-webkit-scrollbar-thumb:hover {
-  background-color: var(--scrollbar-thumb-hover);
-}
-.modal.mod-settings ::-webkit-scrollbar-button,
 .search-input-container input::-webkit-search-cancel-button,
 .setting-items > .setting-item.is-filtered-out {
   display: none;
