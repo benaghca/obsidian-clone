@@ -17,6 +17,7 @@ import { type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
 import { createSearchView } from "./searchView";
 import { viewTabs } from "./sideView";
+import { startTreeDrag } from "./treeDrag";
 
 export type LeftView = "files" | "search" | "bookmarks";
 
@@ -141,6 +142,8 @@ function contextMenu(e: MouseEvent, items: MenuItems) {
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
+  const openFolders = new Map<string, () => void>();
+  let cancelDrag: (() => void) | undefined;
   const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
   let autoReveal = false;
@@ -221,6 +224,11 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
             if (entry.is_dir) toggleFolder(node, depth, folder!, chevron!);
             else void ws.open(entry.path, { where: whereFromEvent(e) });
           },
+          onpointerdown: (e: PointerEvent) => {
+            if (e.button !== 0 || (e.target as HTMLElement).isContentEditable) return;
+            cancelDrag?.();
+            cancelDrag = startTreeDrag(e, entry, list, ws, (path) => openFolders.get(path)?.());
+          },
           onauxclick: (e: MouseEvent) => {
             if (e.button === 1 && !entry.is_dir) void ws.open(entry.path, { where: "tab" });
           },
@@ -235,6 +243,9 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       self.style.setProperty("--depth", String(depth));
       rows.set(entry.path, self);
       const folder = entry.is_dir ? h("div", { class: "tree-item nav-folder" }, self) : null;
+      if (folder) openFolders.set(entry.path, () => {
+        if (!expanded.has(entry.path)) toggleFolder(node, depth, folder, chevron!, true);
+      });
       if (folder && expanded.has(entry.path)) folder.append(renderChildren(node, depth));
       into.append(folder ?? self);
     }
@@ -248,7 +259,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   const childrenOf = (folder: HTMLElement) => folder.querySelector<HTMLElement>(":scope > .tree-item-children");
 
-  function toggleFolder(node: TreeNode, depth: number, folder: HTMLElement, chevron: HTMLElement) {
+  function toggleFolder(node: TreeNode, depth: number, folder: HTMLElement, chevron: HTMLElement, instant = false) {
     const path = node.entry.path;
     const open = !expanded.has(path);
     if (open) expanded.add(path);
@@ -258,7 +269,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (open && !box) {
       folder.append((box = renderChildren(node, depth)));
       markActive();
-      void slideHeight(box, true, true);
+      if (!instant) void slideHeight(box, true, true);
     } else if (box) slideAndDrop(box, open);
   }
 
@@ -284,6 +295,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   }
 
   function render() {
+    cancelDrag?.();
+    openFolders.clear();
     for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
     rows.clear();
     const frag = document.createDocumentFragment() as unknown as HTMLElement;
