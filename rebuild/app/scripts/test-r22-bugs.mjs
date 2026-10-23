@@ -1,5 +1,5 @@
 // Round 22 bugs. These checks assert the behavior the round 22 brief asks for.
-// They fail on this commit.
+// Each assertion failed on the hunter baseline.
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
 
@@ -20,6 +20,8 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
     await api.createNote('BlockNote.md', fm + 'A note to suggest.\n');
     await api.createNote('Linker.md', fm + '[[a(b)]]\n[a(b)](Projects/a\\(b\\).md)\n[pct](Projects/a%28b%29.md)\n[plain](Projects/Plain.md)\n');
     await api.createNote('LinkerHidden.md', fm + '[see](Projects/a\\(b\\).md)\n');
+    await api.createNote('SearchOnly.md', fm + '[see](Projects/a\\(b\\).md)\n');
+    await api.createNote('PercentOnly.md', fm + '[see](Projects/a%28b%29.md)\n');
     await api.createNote('PasteBody.md', fm + 'old body\n');
     await ws.vault.refreshFiles();
     await ws.vault.refreshLinks();
@@ -34,6 +36,8 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
   check(!indexed.unresolved.some((name) => name.includes('\\')), `escaped destination is not stored with a backslash, got ${JSON.stringify(indexed.unresolved)}`);
 
   await run(async () => {
+    // Exercise the search fallback too: these notes are absent from a stale index.
+    ws.vault.links.backlinks['Projects/a(b).md'] = ws.vault.links.backlinks['Projects/a(b).md']?.filter(b => !['SearchOnly.md', 'PercentOnly.md'].includes(b.from));
     const { renameFile } = await import('/src/fileOps.ts');
     await renameFile(ws, 'Projects/a(b).md', 'c(d)');
   });
@@ -41,13 +45,17 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
   for (let i = 0; i < 20; i++) {
     renamed = await run(async () => {
       const { api } = await import('/src/api.ts');
-      return { linker: await api.readNote('Linker.md'), hidden: await api.readNote('LinkerHidden.md') };
+      return { linker: await api.readNote('Linker.md'), hidden: await api.readNote('LinkerHidden.md'), search: await api.readNote('SearchOnly.md'), percent: await api.readNote('PercentOnly.md') };
     });
     if (renamed.linker.includes('[[c(d)]]')) break;
     await sleep(50);
   }
   check(renamed.linker.includes('[[c(d)]]') && !renamed.linker.includes('a\\(b\\)'), `escaped markdown destination is renamed with the wikilink, got ${JSON.stringify(renamed.linker)}`);
   check(!renamed.hidden.includes('a\\(b\\)'), `a note whose only link is escaped is renamed, got ${JSON.stringify(renamed.hidden)}`);
+
+  check(renamed.hidden.includes('[see](c\\(d\\).md)'), 'rename retains the backslash-escaped destination style');
+  check(renamed.search.includes('[see](c\\(d\\).md)'), 'search finds a note containing only an escaped destination without index help');
+  check(renamed.percent.includes('[see](c%28d%29.md)'), 'search finds a note containing only a percent-encoded destination without index help');
 
   await run(async () => {
     await ws.open('BlockNote.md');

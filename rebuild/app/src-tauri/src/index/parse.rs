@@ -214,8 +214,14 @@ pub(super) fn markdown_targets(line: &str) -> Vec<String> {
             // destination ends at the first space (a title may follow).
             let mut depth = 0i32;
             let mut end = None;
+            let mut escaped = false;
             for (k, c) in rest.char_indices() {
+                if escaped {
+                    escaped = false;
+                    continue;
+                }
                 match c {
+                    '\\' => escaped = true,
                     '(' => depth += 1,
                     ')' if depth == 0 => {
                         end = Some(k);
@@ -232,7 +238,16 @@ pub(super) fn markdown_targets(line: &str) -> Vec<String> {
         if raw.is_empty() || has_scheme(raw) {
             continue;
         }
-        let target = percent_decode(raw.strip_prefix("./").unwrap_or(raw));
+        let mut chars = raw.strip_prefix("./").unwrap_or(raw).chars().peekable();
+        let mut target = String::new();
+        while let Some(c) = chars.next() {
+            if c == '\\' && matches!(chars.peek(), Some('\\' | '(' | ')')) {
+                target.push(chars.next().unwrap());
+            } else {
+                target.push(c);
+            }
+        }
+        let target = percent_decode(&target);
         if !target.trim().is_empty() {
             out.push(target);
         }

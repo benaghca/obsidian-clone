@@ -26,7 +26,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
   - `.grove/` is hidden like `.obsidian/`: never listed, searched, indexed or reported by the watcher, and the note commands refuse paths inside it.
 - `search(query: String, limit: u32) -> Vec<SearchHit { path, line, text }>` — case-insensitive; every word must be on the same line. File-name matches use `line: 0` and come first. Other hits are round-robin across files so one note cannot fill `limit`.
 - `link_index() -> LinkIndex { outgoing: { [path]: string[] }, backlinks: { [path]: { from, line, text }[] }, markdown: { [path]: string[] }, unresolved: { [path]: string[] } }` — `[[wikilinks]]` resolved by note name, case-insensitive.
-  - `outgoing` and `backlinks` hold wikilinks (and `![[embeds]]`) only, as before.
+  - `outgoing` holds wikilinks (and `![[embeds]]`) only. `backlinks` holds both wikilink and Markdown link mentions, with source lines (round 22 stage 3).
   - `markdown` (added in round 7, for the graph view): per note, the resolved targets of its `[text](path)` and `![alt](path)` links to files in the vault. URLs (anything with a scheme) and `#heading` anchors are not links here; the path is percent-decoded and resolved like a wikilink path (from the note's folder, then the vault). Notes with none are omitted.
   - `unresolved` (added in round 7): per note, the link targets (wikilinks and markdown links) that match no file, as written without heading, alias or a markdown link's `.md`, deduplicated case-insensitively. Notes with none are omitted.
   - Links in fenced or inline code are skipped in all four.

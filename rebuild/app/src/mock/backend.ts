@@ -2,13 +2,13 @@
 // Implements the commands in rebuild/CONTRACT.md against sampleVault().
 
 import type { Backlink, FileEntry, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
-import { resolveLink } from "../links/internal";
+import { markdownURL, resolveLink } from "../links/internal";
 import { fileName, noteName } from "../paths";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 /** [text](target) and ![alt](target); the target as written (without a title). */
-const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|([^)\s]*))[^)\n]*\)/g;
+const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|((?:\\.|[^\\)\s])*))[^)\n]*\)/g;
 
 /** A mock image's bytes: SVG text as it is, "png WxH #colour" painted into a PNG. */
 async function imageBytes(content: string): Promise<ArrayBuffer> {
@@ -129,8 +129,11 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
           const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
           if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
           const hit = resolveLink(raw, path, notes);
-          if (hit) md.add(hit);
-          else unknown(raw.replace(/^\.\//, "").replace(/\.md$/i, ""));
+          if (hit) {
+            md.add(hit);
+            (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
+          }
+          else unknown(markdownURL(raw).replace(/^\.\//, "").replace(/\.md$/i, ""));
         }
       });
       if (out.size) outgoing[path] = [...out];

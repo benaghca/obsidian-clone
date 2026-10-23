@@ -65,3 +65,17 @@ test("a link's target is known to exist or not without a scan (links to missing 
   expect(found.filter((t) => !exists(t, "Projects/Other.md"))).toEqual([]);
   expect(["Missing", "Projects", "Nowhere/Plan", "pic"].filter((t) => exists(t, "Projects/Other.md"))).toEqual([]);
 });
+
+test("escaped Markdown destinations resolve and retain their escaping on rename", () => {
+  const old = { name: "a(b)", path: "Projects/a(b).md" };
+  const next = { name: "c(d) 100%", path: "Projects/c(d) 100%.md" };
+  expect(resolveLink("Projects/a\\(b\\).md#Top", "Linker.md", [old])).toBe(old.path);
+  const exists = linkTargets([{ path: old.path, is_dir: false }], [old]);
+  expect(exists("Projects/a\\(b\\).md", "Linker.md")).toBe(true);
+  const r = rewriteLinks(
+    "[x](Projects/a\\(b\\).md#Top) ![alt](Projects/a\\(b\\).md) [pct](Projects/a%28b%29.md) `[](Projects/a\\(b\\).md)`",
+    "Linker.md", old.path, next.path, [old], [next], { format: "shortest", wikilinks: false },
+  );
+  expect(r.count).toBe(3);
+  expect(r.text).toBe("[x](c\\(d\\)%20100%25.md#Top) ![alt](c\\(d\\)%20100%25.md) [pct](c%28d%29%20100%25.md) `[](Projects/a\\(b\\).md)`");
+});

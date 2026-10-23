@@ -28,7 +28,7 @@ import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
-import { markdownURL } from "./linkAt";
+import { markdownURL } from "../links/internal";
 import { DrawnWidget, embedChain, paintWith, readingMode, tickLine } from "./render";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */

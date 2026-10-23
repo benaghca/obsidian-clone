@@ -88,9 +88,9 @@ fn markdown_links_and_unresolved_targets_for_the_graph() {
     assert_eq!(links.markdown["a.md"], ["Design.md"]);
     assert_eq!(links.markdown["b/c.md"], ["a.md", "My Note.md", "img.png"]);
     assert_eq!(links.markdown["My Note.md"], ["a.md"]);
-    // Markdown links stay out of the wikilink maps the Backlinks and Outgoing views use.
+    // Outgoing keeps its wikilink map; backlinks include Markdown mentions too.
     assert!(links.outgoing.get("a.md").is_none());
-    assert!(links.backlinks.get("Design.md").is_none());
+    assert_eq!(links.backlinks["Design.md"].len(), 2);
     assert_eq!(links.outgoing["Design.md"], ["a.md"]);
     // Inline code and `[[x]](a.md)` are not markdown links.
     assert!(links.markdown.get("Design.md").is_none());
@@ -116,6 +116,23 @@ fn markdown_target_parsing() {
     .is_empty());
     assert_eq!(percent_decode("a%2"), "a%2");
     assert_eq!(percent_decode("100%"), "100%");
+}
+
+#[test]
+fn escaped_markdown_parentheses_are_syntax_and_index_as_backlinks() {
+    assert_eq!(
+        markdown_targets(r"[x](Projects/a\(b\).md) [one](a\).md) [two](é\(x(y)\).md#Top)"),
+        vec!["Projects/a(b).md", "a).md", "é(x(y)).md"]
+    );
+    let idx = Index::from_notes(&[
+        ("Source.md", "---\ntags: [r22]\n---\n[x](Projects/a\\(b\\).md)\n"),
+        ("Projects/a(b).md", "target"),
+    ]);
+    let links = idx.link_index();
+    assert_eq!(links.markdown["Source.md"], ["Projects/a(b).md"]);
+    assert_eq!(links.backlinks["Projects/a(b).md"][0].from, "Source.md");
+    assert_eq!(links.backlinks["Projects/a(b).md"][0].line, 4);
+    assert!(links.unresolved.get("Source.md").is_none());
 }
 
 #[test]

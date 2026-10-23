@@ -7,7 +7,7 @@ import type { NoteRef } from "../editor/host";
 import { updateNoteText } from "../fileOps";
 import { isUnder, movedPath } from "../paths";
 import type { Workspace } from "../workspace";
-import { type LinkStyle, rewriteLinks } from "./internal";
+import { encodeDest, type LinkStyle, rewriteLinks } from "./internal";
 
 const SEARCH_LIMIT = 500;
 
@@ -28,12 +28,12 @@ export async function updateLinks(
   const pairs = before.filter((n) => isUnder(n.path, from)).map((n) => ({ old: n.path, now: swap(n.path), name: n.name }));
   if (!pairs.length) return 0;
 
-  // Which notes may link there: the link index's backlinks (wikilinks; read
-  // now, before it refreshes) and a search for the names (markdown links).
+  // Which notes may link there: the link index's backlinks (read now,
+  // before it refreshes) and a search for names in each destination style.
   const sources = new Set<string>();
   for (const p of pairs) for (const b of ws.vault.links.backlinks[p.old] ?? []) sources.add(b.from);
   for (const p of pairs.slice(0, 20)) {
-    for (const q of new Set([p.name, p.name.replace(/ /g, "%20")])) {
+    for (const q of new Set([p.name, p.name.replace(/ /g, "%20"), p.name.replace(/[()]/g, "\\$&"), encodeDest(p.name), encodeDest(p.name, true)])) {
       const hits = await api.search(q, SEARCH_LIMIT).catch(() => []);
       // Search already sees the new paths: map them back to where they were.
       for (const h of hits) if (h.line > 0) sources.add(movedPath(h.path, to, from));

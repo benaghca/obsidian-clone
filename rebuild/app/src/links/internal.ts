@@ -39,8 +39,11 @@ function linkPath(target: string, from: string | null, notes: NoteLike[], format
   return clash ? target : fileName(target);
 }
 
-/** Markdown link destinations: spaces and brackets percent-encoded, as Obsidian writes them. */
-const encodeDest = (path: string) => path.replace(/%/g, "%25").replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
+/** Markdown destinations; renames can retain backslash-escaped parentheses. */
+export const encodeDest = (path: string, escaped = false) => path.replace(/%/g, "%25").replace(/ /g, "%20").replace(/\(/g, escaped ? "\\(" : "%28").replace(/\)/g, escaped ? "\\)" : "%29");
+
+/** Backslash escapes in a Markdown destination are syntax, not part of the URL. */
+export const markdownURL = (text: string) => text.replace(/\\([\\()])/g, "$1");
 
 /**
  * A new link to the note at `target` from the note at `from`, in the style
@@ -56,9 +59,9 @@ export function formatLink(target: string, from: string | null, notes: NoteLike[
   return `[${display ?? nameOf(target)}](${encodeDest(path)}${subpath.replace(/ /g, "%20")})`;
 }
 
-/** A link target without its #heading, percent-decoded when it is encoded (markdown link destinations). */
+/** A link target without its #heading, with Markdown escapes and percent encoding decoded. */
 function bareTarget(target: string): string {
-  const t = target.split("#")[0].trim();
+  const t = markdownURL(target.split("#")[0].trim());
   try {
     return /%[0-9a-f]{2}/i.test(t) ? decodeURIComponent(t) : t;
   } catch {
@@ -136,7 +139,7 @@ export function linkTargets(files: readonly { path: string; is_dir: boolean }[],
 }
 
 const WIKILINK = /(!?)\[\[([^\]|#\n]*)(#[^\]|\n]*)?(\|[^\]\n]*)?\]\]/g;
-const MDLINK = /(!?)\[([^\]\n]*)\]\(([^)\s]+)\)/g;
+const MDLINK = /(!?)\[([^\]\n]*)\]\(((?:\\.|[^\\)\s])+)\)/g;
 
 /**
  * Rewrite the links in `text` (the note at `from`) that point at `oldPath`
@@ -186,7 +189,7 @@ export function rewriteLinks(
       const sub = hash < 0 ? "" : dest.slice(hash);
       if (resolveLink(hash < 0 ? dest : dest.slice(0, hash), from, before) !== oldPath) continue;
       const head = line.slice(m.index!, m.index! + m[0].length - m[3].length - 1);
-      edits.push({ at: m.index!, end: m.index! + m[0].length, text: `${head}${encodeDest(linkPath(newPath, fromAfter, after, style.format))}${sub})` });
+      edits.push({ at: m.index!, end: m.index! + m[0].length, text: `${head}${encodeDest(linkPath(newPath, fromAfter, after, style.format), /\\[()]/.test(dest))}${sub})` });
     }
     if (!edits.length) continue;
     edits.sort((a, b) => a.at - b.at);

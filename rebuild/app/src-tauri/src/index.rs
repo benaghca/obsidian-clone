@@ -146,11 +146,9 @@ impl Index {
                 };
                 if link.markdown {
                     if !md_outs.contains(&dest) {
-                        md_outs.push(dest);
+                        md_outs.push(dest.clone());
                     }
-                    continue;
-                }
-                if !outs.contains(&dest) {
+                } else if !outs.contains(&dest) {
                     outs.push(dest.clone());
                 }
                 backlinks.entry(dest).or_default().push(Backlink {

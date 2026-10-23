@@ -4,12 +4,10 @@
 import { syntaxTree } from "@codemirror/language";
 import type { EditorState } from "@codemirror/state";
 import { isNotePath } from "../links/external";
+import { markdownURL } from "../links/internal";
 
 /** An internal link's target, with where that target text sits (for "Edit link"). */
 type LinkAt = { kind: "internal"; target: string; from: number; to: number } | { kind: "external"; url: string };
-
-/** Backslash escapes in a Markdown destination are syntax, not part of the URL. */
-export const markdownURL = (text: string) => text.replace(/\\([\\()])/g, "$1");
 
 export function linkAt(state: EditorState, pos: number): LinkAt | null {
   const tree = syntaxTree(state);
