@@ -119,17 +119,18 @@ export function createMenus(host: MenuHost) {
       ];
     }
     const isNote = path.endsWith(".md");
+    const isCanvas = /\.canvas$/i.test(path);
     return [
-      ...(isNote ? [...openFile(path), openInNewWindow(path)] : []),
+      ...(isNote || isCanvas ? [...openFile(path), openInNewWindow(path)] : []),
       SEPARATOR,
-      isNote && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
+      (isNote || isCanvas) && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
       moveItem(path),
       bookmarkItem(path),
       isNote && mergeItem(path),
       SEPARATOR,
       copyPath(path),
       SEPARATOR,
-      isNote && renameItem(() => host.renameInTree(path)),
+      (isNote || isCanvas) && renameItem(() => host.renameInTree(path)),
       deleteItem(path),
     ];
   }

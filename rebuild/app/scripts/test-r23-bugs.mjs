@@ -1,5 +1,5 @@
-// Round 23 bugs. These checks assert behavior observed in Obsidian 1.14.4.
-// Each failing check failed on the hunter baseline. App code is unchanged.
+// Round 23 confirmed-bug regressions, based on the Obsidian observations.
+// All hover, click and key interactions use native CDP input.
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
 
@@ -39,7 +39,8 @@ await withBrowser(async ({ run, click, press, move, point, send }) => {
   await run(async (board, long) => {
     const { api } = await import('/src/api.ts');
     await api.createNote('Long.md', long);
-    await api.createNote('Bugs.canvas', JSON.stringify(board));
+    window.originalBugsCanvas = JSON.stringify({ ...board, future: { keep: [1, 2, 3] } }, null, 2) + "\n";
+    await api.createNote('Bugs.canvas', originalBugsCanvas);
     await ws.vault.refreshFiles();
     await ws.open('Bugs.canvas');
   }, board, long);
@@ -112,7 +113,37 @@ await withBrowser(async ({ run, click, press, move, point, send }) => {
   const menu = await run(() => [...document.querySelectorAll('.menu-item')].map(e => e.textContent.trim()));
   check(menu.includes('Rename...'), `canvas file menu can rename, got ${JSON.stringify(menu)}`);
   check(menu.includes('Open in new tab'), `canvas file menu can open in a new tab, got ${JSON.stringify(menu)}`);
-  await press('Escape');
+  const choose = async title => {
+    const p = await run(title => { const el=[...document.querySelectorAll('.menu-item')].find(e=>e.textContent.trim()===title); if(!el)return null;const r=el.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}; },title);
+    assert.ok(p, 'Menu item exists: '+title);await click(p);await sleep(100);
+  };
+  check(await run(()=>getComputedStyle(document.querySelector('.menu')).animationName==='none'), 'canvas context menu has no opening animation');
+  const tabCount = await run(()=>ws.layout.tabs().length);
+  await choose('Open in new tab');
+  check(await run(n=>ws.active.type==='canvas'&&ws.active.viewFile==='Bugs.canvas'&&ws.layout.tabs().length===n+1,tabCount), 'native menu click opens another canvas tab');
+  await click('.nav-files [data-path="Bugs.canvas"]','right');await choose('Rename...');
+  check(await run(()=>document.activeElement?.isContentEditable), 'native Rename menu action starts explorer editing');
+  await send('Input.insertText',{text:'Renamed23'});await press('Enter');await sleep(100);
+  check(await run(()=>ws.active.viewFile==='Renamed23.canvas'&&ws.layout.tabs().filter(t=>t.viewFile==='Renamed23.canvas').length===2&&!ws.vault.files.some(f=>f.path==='Renamed23.md')), 'menu rename keeps .canvas and updates both open tabs');
+  for(const type of ['keyDown','keyUp'])await send('Input.dispatchKeyEvent',{type,key:'F2',code:'F2',windowsVirtualKeyCode:113});
+  check(await run(()=>document.activeElement?.isContentEditable), 'native F2 starts canvas rename');
+  await send('Input.insertText',{text:'F2Canvas23'});await press('Enter');await sleep(100);
+  check(await run(()=>ws.active.viewFile==='F2Canvas23.canvas'), 'F2 commit retains the canvas extension');
+  for(let i=1;i<=2;i++){
+    await click('.nav-files [data-path="F2Canvas23.canvas"]','right');await choose('Make a copy');
+    check(await run(async i=>{const{api}=await import('/src/api.ts');const path=`F2Canvas23 ${i}.canvas`;return ws.active.viewFile===path&&await api.readNote(path)===originalBugsCanvas&&!ws.editors.isLoaded(path);},i), 'native Make a copy '+i+' numbers .canvas and preserves original bytes outside the saving editor');
+  }
+  check(await run(async()=>{const{api}=await import('/src/api.ts');return await api.readNote('F2Canvas23.canvas')===originalBugsCanvas}), 'rename/copy leave source JSON unchanged');
+  await run(async()=>{const{api}=await import('/src/api.ts');await api.createNote('Stage23FM.md','---\ntags: [stage23]\n---\n# Heading\n\nBody.');await ws.vault.refreshFiles()});
+  for(const mode of ['live','source','reading']){
+    await run(async mode=>{await ws.open('Stage23FM.md');ws.setMode(mode)},mode);await sleep(70);
+    const selector='.side-dock-ribbon-action[aria-label="Open quick switcher"]';
+    await move({x:800,y:780});const p=await point(selector);await move(p);await sleep(600);
+    check(await run(()=>document.querySelector('.tooltip')?.textContent==='Open quick switcher'&&document.querySelector('.tooltip').getAnimations().length===0),mode+': native hover on frontmatter note shows tooltip without motion');
+    await click(p);await press('Escape');
+    for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount:1});
+    check(await run(()=>!!document.querySelector('.prompt')&&document.querySelector('.prompt').getAnimations().length===0),mode+': repeated stationary click opens switcher without animation');await press('Escape');
+  }
 });
 
 assert.deepEqual(failures, []);

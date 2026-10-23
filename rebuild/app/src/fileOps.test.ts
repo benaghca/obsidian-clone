@@ -31,6 +31,8 @@ test("valid unicode names and case-only renames keep their existing relocation b
   expect(api.renamePath).toHaveBeenLastCalledWith("Note.md", "Café.md");
   await renameFile(ws, "Note.md", "note");
   expect(api.renamePath).toHaveBeenLastCalledWith("Note.md", "note.md");
+  await renameFile(ws, "Boards/Map.CANVAS", "Plan");
+  expect(api.renamePath).toHaveBeenLastCalledWith("Boards/Map.CANVAS", "Boards/Plan.CANVAS");
   await renameFile(ws, "Folder", "Renamed");
   expect(api.renamePath).toHaveBeenLastCalledWith("Folder", "Renamed");
 });
