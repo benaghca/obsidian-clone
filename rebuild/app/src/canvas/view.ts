@@ -102,7 +102,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     selectAfterDraw = editAfterDraw = undefined;
     let startEditor: (() => void) | undefined;
     const { nodes, edges } = readCanvas(source);
-    const bounds = nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 };
+    const bounds = boundsOf();
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
     const byId = new Map(nodes.map(n => [n.id, n]));
@@ -184,10 +184,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         if (!event.isTrusted || !link || card.classList.contains("is-editing")) return;
         event.preventDefault();
         const href = link.dataset.href!;
-        if (isNotePath(href) || href.startsWith("#")) {
-          const hash = href.indexOf("#"), name = hash < 0 ? href : href.slice(0, hash);
-          void ws.openLink(`${name ? resolve(name) ?? name : origin}${hash < 0 ? "" : href.slice(hash)}`, whereFromEvent(event), group);
-        } else if (isExternalUrl(href)) void api.openExternal(href).catch(console.warn);
+        if (isNotePath(href) || href.startsWith("#")) cardHost.openLink(href, whereFromEvent(event));
+        else if (isExternalUrl(href)) void api.openExternal(href).catch(console.warn);
       });
       let painted: ReturnType<typeof render> | undefined;
       cleanups.push(() => { if (painted) release(painted); });
@@ -237,7 +235,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       changed(next, !!deleted?.size);
     }, history, selectedId));
     startEditor?.();
-    function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : bounds; }
+    function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);
   }
   const flush = () => { if (timer) save(); };

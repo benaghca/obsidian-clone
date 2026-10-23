@@ -127,7 +127,7 @@ export function tabTitle(tab: Tab): string {
 export type OpenWhere = false | "tab" | "right" | "down";
 
 /** Ctrl/Cmd+Alt+click opens to the right, Ctrl/Cmd+click in a new tab, as in Obsidian. */
-export function whereFromEvent(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): OpenWhere {
+export function whereFromEvent(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): Exclude<OpenWhere, "down"> {
   const mod = e.ctrlKey || e.metaKey;
   return mod && e.altKey ? "right" : mod ? "tab" : false;
 }

@@ -1,4 +1,4 @@
-import { dragPointer, h, iconButton } from "../shell/dom";
+import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
 
@@ -51,9 +51,10 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     ["Zoom to fit\n(Shift + 1)", "maximize", fit],
     ["Zoom out", "minus", () => zoom((state?.scale ?? 1) / Math.SQRT2)],
   ] as const) {
-    const button = iconButton(icon(glyph), label, () => { action(); el.focus({ preventScroll: true }); });
-    button.setAttribute("role", "button"); button.tabIndex = 0;
-    button.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); action(); } });
+    const button = keyButton(icon(glyph), label, e => {
+      if (e.type === "keydown") { e.stopPropagation(); action(); }
+      else { action(); el.focus({ preventScroll: true }); }
+    });
     controls.append(button);
   }
   el.append(controls);

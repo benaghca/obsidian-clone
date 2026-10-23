@@ -3,7 +3,7 @@ import { createNoteState } from "../editor/editor";
 import { IMAGE_EXT } from "../editor/embeds";
 import type { EditorHost } from "../editor/host";
 import { parentDir } from "../paths";
-import { dragPointer, h, iconButton, pressable } from "../shell/dom";
+import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { hints, openPrompt, pickFrom, suggestionText } from "../shell/prompt";
 import { switcherItems } from "../shell/switcherItems";
@@ -51,7 +51,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   ] as const) {
     let dragged = false;
     const run = (p = point()) => { el.focus({ preventScroll: true }); action(p); };
-    const button = pressable(iconButton(icon(glyph, 24), label), e => { if (!dragged || e.type === "keydown") run(); });
+    const button = keyButton(icon(glyph, 24), label, e => { if (!dragged || e.type === "keydown") run(); });
     button.addEventListener("pointerdown", e => {
       if (e.button !== 0) return;
       dragged = false; cancelDrag?.();
@@ -61,7 +61,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
         end = move; drop = point(move.clientX, move.clientY);
       }, cancelled => { cancelDrag = undefined; if (dragged && !cancelled && el.contains(document.elementFromPoint(end.clientX, end.clientY))) run(drop); }, false);
     });
-    button.setAttribute("role", "button"); toolbar.append(button);
+    toolbar.append(button);
   }
   el.append(toolbar);
   const doubleClick = (e: MouseEvent) => {
