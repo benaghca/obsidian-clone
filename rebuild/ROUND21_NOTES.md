@@ -289,3 +289,63 @@ confirmed by the DOM selection), rather than collapsing the caret. Grove
 implements the brief's explicit requested collapsed caret after the whole
 link. This difference is recorded instead of claiming that observation
 showed a caret.
+
+## Part B final verification and commits
+
+Each requested item has a separate local commit containing its tests:
+
+- `a4e6d93`: bottom-fold reference observation and all-mode regression;
+  no production change, as required by the observation gate.
+- `18593f7`: quick switcher Tab completion and recent-only empty results.
+- `bc06ce7`: URL paste caret after the entire link, disabling the duplicate
+  language handler and preserving its URL-prefix behavior.
+
+Required gates passed:
+
+- `npm run build`.
+- `npm test`: **4** browser-discovery tests; **231** TypeScript unit tests in
+  **41** files; **526** named browser checks across geometry, round 19 fixes,
+  header/tabs/scrollbars, explorer dragging, breadcrumb, rich paste and
+  Part B, plus their direct assertions. Part B contributes **39** checks.
+- Geometry keeps every rendered line within **1px** of CodeMirror's top and
+  zero vertical margins on direct content children. Existing stationary
+  fold/unfold clicks pass; absolute-bottom clamping is separately covered.
+- Ctrl+O, Ctrl+P and right-click menus remain visible within two frames,
+  with no sampled opening frame over 20ms; longest sampled frame **17.0ms**.
+- `npm run audit:offline`: passed, including build, **130** source files,
+  release output, CSP, capabilities and dependency checks. After adjusting
+  the literal-prefix exception, the complete **39-check** Part B browser
+  suite was rerun and passed too.
+- `cargo build` and `cargo test`: passed; **32** Rust tests.
+- `git diff --check`: passed.
+
+All app interaction used headless Chromium and native CDP input on mock or
+scratch data. The Obsidian reference had private HOME/XDG/profile/vault
+folders and no external connectivity. No app window appeared on the owner's
+screen, no real vault was opened, and Tauri/WebKitGTK was not launched.
+No dependency, backend command, permission, geometry rule, animation, or
+ordinary note-typing transaction handler was added. No typing performance
+improvement is claimed. Observational differences are documented above;
+no requested Part B item remains pending.
+
+## Final tracked app line counts after Part B
+
+Same newline convention, excluding `/gen/`; compare Part A `ad0480b`:
+
+- Production TypeScript: **19,611 → 19,616 (+5)**.
+- TypeScript tests: **3,047 → 3,054 (+7)**.
+- TypeScript total: **22,658 → 22,670 (+12)**.
+- CSS: **3,733 → 3,733 (0)**.
+- Rust: **3,104 → 3,104 (0)**.
+- TS/CSS/Rust total: **29,495 → 29,507 (+12)**.
+- JavaScript mjs tests/tools: **1,676 → 1,771 (+95)**.
+- JSON: **2,229 → 2,229 (0)**; only the existing test command changed.
+- Part B total including mjs/JSON: **+107** lines. Production TS/CSS/Rust:
+  **+5**. The new Part B browser suite is **95 lines**.
+
+Across the whole round from `1543bd7`: production TS **+183**, test TS
+**+7**, CSS **0**, Rust **0**, mjs **+258**, JSON **0**: **+448** lines
+including mjs/JSON, of which **+190** are TS/CSS/Rust.
+
+Committed locally only; nothing pushed or merged. The supplied
+`.r21-codex-task.md` remains untracked. Part B complete. Stop here.
