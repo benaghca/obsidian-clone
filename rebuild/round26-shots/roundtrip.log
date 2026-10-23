@@ -1,0 +1,8 @@
+PASS Grove-created.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-deleted.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-metadata-reconnected.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-mixed-deleted.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-side-reconnected.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-source-reconnected.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-target-reconnected.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Native Obsidian reconnect saves the same edge ID for the reverse Grove check

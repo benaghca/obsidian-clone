@@ -1,0 +1,28 @@
+{
+  "baseline": "0fe6a72",
+  "production_ts": {
+    "before": 20577,
+    "after": 20679,
+    "delta": 102
+  },
+  "test_ts": {
+    "before": 3214,
+    "after": 3252,
+    "delta": 38
+  },
+  "css": {
+    "before": 3865,
+    "after": 3887,
+    "delta": 22
+  },
+  "rs": {
+    "before": 3145,
+    "after": 3145,
+    "delta": 0
+  },
+  "mjs": {
+    "before": 3179,
+    "after": 3287,
+    "delta": 108
+  }
+}

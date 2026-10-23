@@ -1,0 +1,55 @@
+PASS top: connection dot is a visible native 20px pointer target
+PASS right: connection dot is a visible native 20px pointer target
+PASS bottom: connection dot is a visible native 20px pointer target
+PASS left: connection dot is a visible native 20px pointer target
+PASS Hovering dots leaves original bytes unchanged
+PASS Connection preview follows the native drag
+PASS Dragging never saves an intermediate edge
+PASS Created edge has native ID/key order and implicit default arrowheads
+PASS Drag snaps to the target left side
+PASS Creation preserves unknown root, node and edge records
+PASS New edge stays selected with two reconnect targets
+PASS One undo removes the whole new edge and restores exact original bytes
+PASS Ctrl+Y restores the edge in one step
+PASS An 8px offset from the path selects the edge through the forgiving hit area
+PASS Repeated stationary edge click changes no bytes
+PASS Double-clicking an edge never adds a background text card
+PASS Dragging the target end reconnects the same edge to another card
+PASS Target reconnection is one undo step
+PASS Ctrl+Shift+Z redoes target reconnection
+PASS Dragging the source end reconnects without reversing direction or creating an edge
+PASS Dragging the exposed line end reconnects to another side of the same card
+PASS Reconnecting to the same endpoint is a byte-preserving no-op
+PASS No-op reconnection adds no extra undo checkpoint
+PASS Redo button restores the side change
+PASS Stationary repeated Undo reverses exactly two reconnections
+PASS Stationary repeated Redo restores exactly two reconnections
+PASS A dangling reconnect preview does not save
+PASS Escape cancels reconnection and removes preview state
+PASS Dropping a reconnect on empty space keeps the original edge
+PASS Dropping a new connection on empty space cancels without rewriting the file
+PASS Dropping onto the source card rejects a self-connection like Obsidian
+PASS Reconnecting onto the opposite endpoint card also rejects a self-connection
+PASS Reconnection preserves the label, color, arrowheads and unknown edge fields
+PASS Reconnection preserves original edge key order
+PASS Backspace deletes only the selected edge and keeps every card
+PASS One undo restores a deleted edge
+PASS Ctrl+Y redoes edge deletion
+PASS Shift-click adds a card to an edge selection
+PASS Shift-click toggles an edge out of mixed selection
+PASS Delete removes mixed selection and incident edges, preserving unrelated unknown edges
+PASS Read-only canvas allows edge selection but blocks deletion and reconnect handles
+PASS Double-clicking Remove after mixed edge work never adds a card
+PASS Deleting a card preserves an unrelated edge with the same ID
+PASS Deleting an edge preserves a card with the same ID
+PASS Mixed selection independently deletes both items when their IDs match
+PASS Connection targets stay 20 screen pixels at 2× zoom
+PASS Zoomed connection uses world coordinates and the observed center tie chooses top
+PASS 300-card/400-edge create drag and commit stay under 20ms (max 16.8ms)
+PASS Large-board edge creation changes one edge and keeps every card
+PASS 300-card/401-edge reconnect drag and commit stay under 20ms (max 16.8ms)
+PASS Reconnection updates only the edge and retains every existing card DOM node
+PASS Native Obsidian reconnection returns to Grove with identical card and edge geometry
+PASS Reverse round trip preserves exact native file bytes
+PASS Leaving the canvas releases its control-sizing stylesheet
+PASS Reopening installs exactly one control-sizing stylesheet

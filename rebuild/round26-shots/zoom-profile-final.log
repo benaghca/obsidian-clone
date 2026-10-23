@@ -1,0 +1,6 @@
+all 0 {"max":16.800000000000182,"samples":71,"slow":0,"TaskDuration":0.31373599999999996,"ScriptDuration":0.002555,"LayoutDuration":0,"RecalcStyleDuration":0.19031099999999998,"LayoutCount":0,"RecalcStyleCount":24}
+all 1 {"max":16.800000000000182,"samples":71,"slow":0,"TaskDuration":0.341437,"ScriptDuration":0.002479,"LayoutDuration":0,"RecalcStyleDuration":0.18773399999999996,"LayoutCount":0,"RecalcStyleCount":24}
+without-hit-paths 0 {"max":16.800000000000182,"samples":71,"slow":0,"TaskDuration":0.2714540000000001,"ScriptDuration":0.002053000000000001,"LayoutDuration":0,"RecalcStyleDuration":0.15502200000000005,"LayoutCount":0,"RecalcStyleCount":24}
+without-hit-paths 1 {"max":16.800000000000182,"samples":71,"slow":0,"TaskDuration":0.274529,"ScriptDuration":0.002046000000000001,"LayoutDuration":0,"RecalcStyleDuration":0.15655399999999997,"LayoutCount":0,"RecalcStyleCount":24}
+without-connectors 0 {"max":16.799999999999272,"samples":71,"slow":0,"TaskDuration":0.16915400000000003,"ScriptDuration":0.0022460000000000015,"LayoutDuration":0,"RecalcStyleDuration":0.05283099999999996,"LayoutCount":0,"RecalcStyleCount":24}
+without-connectors 1 {"max":16.80000000000109,"samples":71,"slow":0,"TaskDuration":0.17805099999999996,"ScriptDuration":0.002694,"LayoutDuration":0,"RecalcStyleDuration":0.053609999999999935,"LayoutCount":0,"RecalcStyleCount":24}
