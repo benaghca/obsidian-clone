@@ -15,6 +15,8 @@ import type { Group, Tab } from "../tabs";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { canvasNavigation } from "./navigation";
+import { editCanvas } from "./document";
+import { canvasEditing } from "./editing";
 import { edgeCurve, readCanvas } from "./model";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -41,22 +43,55 @@ function withoutBlockIds(text: string) {
 export function createCanvasView(ws: Workspace, path: string, group: Group, tab: Tab) {
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
   const world = h("div", { class: "canvas-world" });
-  const el = h("div", { class: "view-content canvas-view is-reading-mode", "aria-label": "Canvas (read only)", tabindex: "0" }, world);
-  let gone = false, generation = 0;
+  const el = h("div", { class: "view-content canvas-view is-reading-mode", "aria-label": "Canvas", tabindex: "0" }, world);
+  let gone = false, generation = 0, loading = 0, source = "", timer = 0, notifying = false;
+  let undo: string[] = [], redo: string[] = [];
+  let writing = Promise.resolve();
+  function save() {
+    clearTimeout(timer); timer = 0;
+    const text = source;
+    writing = writing.then(async () => {
+      try {
+        await api.writeNote(path, text);
+        notifying = true;
+        try { ws.vault.written(path); } finally { notifying = false; }
+      } catch (err) { console.error(`Could not save ${path}`, err); }
+    });
+  }
+  function changed(next: string, redraw = false) {
+    if (next === source) return;
+    source = next;
+    clearTimeout(timer); timer = window.setTimeout(save, 300);
+    if (redraw) draw();
+  }
+  function history(forward: boolean) {
+    const from = forward ? redo : undo, to = forward ? undo : redo;
+    const next = from.pop();
+    if (next === undefined) return;
+    to.push(source); changed(next, true);
+  }
   let cleanups: (() => void)[] = [];
   const clear = () => { cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
   const navigation = canvasNavigation(el, world, tab, path);
   async function load() {
-    const mine = ++generation;
+    const mine = ++loading;
     let text: string;
     try { text = await api.readNote(path); } catch { text = ""; }
-    if (gone || mine !== generation) return;
+    if (gone || mine !== loading) return;
+    if (text === source && world.childElementCount) return;
+    clearTimeout(timer); timer = 0;
+    source = text; undo = []; redo = [];
+    draw();
+  }
+  function draw() {
     clear();
-    const { nodes, edges } = readCanvas(text);
+    const mine = ++generation;
+    const { nodes, edges } = readCanvas(source);
     const bounds = nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 };
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
     const byId = new Map(nodes.map(n => [n.id, n]));
+    const updateEdges: { edge: typeof edges[number]; line: SVGPathElement; label?: HTMLElement }[] = [];
     edges.forEach((edge, i) => {
       const curve = edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge);
       const line = svg("path", { d: curve.path, fill: "none", stroke: color(edge.color), "stroke-width": "2" });
@@ -69,10 +104,12 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         line.setAttribute(`marker-${end}`, `url(#${id})`);
       }
       drawing.append(line);
+      const update: typeof updateEdges[number] = { edge, line };
+      updateEdges.push(update);
       if (typeof edge.label === "string" && edge.label) {
         const label = h("div", { class: "canvas-edge-label" }, edge.label);
         label.style.left = `${curve.x}px`; label.style.top = `${curve.y}px`;
-        world.append(label);
+        world.append(label); update.label = label;
       }
     });
     for (const node of nodes) {
@@ -81,7 +118,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (node.color) card.classList.add("is-colored");
       card.style.setProperty("--canvas-color", color(node.color));
       world.append(card);
-      if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => void load()));
+      if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => draw()));
       if (node.type === "group") {
         card.append(h("div", { class: "canvas-group-label" }, node.label ?? ""));
         continue;
@@ -145,9 +182,28 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (node.type === "text") paint(node.text ?? "");
       else void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
     }
+    const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
+    cleanups.push(canvasEditing(el, world, nodes, changed => {
+      const ids = new Set(changed.map(n => n.id));
+      for (const n of changed) Object.assign(cards.get(n.id)!.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
+      for (const { edge, line, label } of updateEdges) if (ids.has(edge.fromNode) || ids.has(edge.toNode)) {
+        const curve = edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge);
+        line.setAttribute("d", curve.path);
+        if (label) { label.style.left = `${curve.x}px`; label.style.top = `${curve.y}px`; }
+      }
+      navigation.loaded(boundsOf());
+    }, (nodes, deleted) => {
+      const next = editCanvas(source, nodes, deleted);
+      if (next === source) return;
+      undo.push(source); redo = [];
+      changed(next, !!deleted?.size);
+    }, history));
+    function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : bounds; }
     navigation.loaded(bounds);
   }
-  const unwatch = ws.vault.onModified(changed => { if (changed === path) void load(); });
+  const flush = () => { if (timer) save(); };
+  window.addEventListener("beforeunload", flush);
+  const unwatch = ws.vault.onModified(changed => { if (changed === path && !notifying) { clearTimeout(timer); timer = 0; void load(); } });
   void load();
-  return { el, dispose() { gone = true; navigation.dispose(); unwatch(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); unwatch(); clear(); el.remove(); } };
 }
