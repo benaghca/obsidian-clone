@@ -64,13 +64,16 @@
 }
 
 /* inline formatting */
-.cm-strong {
+.cm-strong,
+.is-source-mode .cm-s-strong {
   font-weight: 700;
 }
-.cm-em {
+.cm-em,
+.is-source-mode .cm-s-em {
   font-style: italic;
 }
-.cm-strikethrough {
+.cm-strikethrough,
+.is-source-mode .cm-s-strike {
   text-decoration: line-through;
 }
 .cm-inline-code {
@@ -79,9 +82,6 @@
   background: var(--code-background);
   padding: 0.1em 0.25em;
   border-radius: var(--radius-s);
-}
-.cm-inline-code .cm-formatting {
-  font-family: var(--font-monospace);
 }
 
 /* links (and Source mode's URLs) */
@@ -149,7 +149,6 @@
   display: inline-block;
   position: relative;
   width: 0.5em;
-  margin-right: 0;
   vertical-align: middle;
 }
 .cm-list-bullet::after {
@@ -220,6 +219,11 @@
   font-size: 0.875em;
   background: var(--code-background);
   padding: 0 1em;
+  /* Indent guides stop at the source indentation (codeHighlight.ts). */
+  background-image: repeating-linear-gradient(to right, var(--indent-guide-color) 0 1px, transparent 1px var(--tab));
+  background-size: var(--indent, 0) 100%;
+  background-position: 1em 0;
+  background-repeat: no-repeat;
 }
 .cm-line.cm-codeblock-begin {
   border-radius: var(--radius-s) var(--radius-s) 0 0;
@@ -228,14 +232,6 @@
 .cm-line.cm-codeblock-end {
   border-radius: 0 0 var(--radius-s) var(--radius-s);
   padding-bottom: 0.4em;
-}
-/* Obsidian's indent guides, in Live Preview and Source mode: a faint line
-   at the start of each tab stop of a code line's indent (codeHighlight.ts) */
-.cm-line.cm-codeblock {
-  background-image: repeating-linear-gradient(to right, var(--indent-guide-color) 0 1px, transparent 1px var(--tab));
-  background-size: var(--indent, 0) 100%;
-  background-position: 1em 0;
-  background-repeat: no-repeat;
 }
 .is-reading-mode .cm-line.cm-codeblock {
   background-image: none;
@@ -300,15 +296,7 @@
 .is-source-mode .cm-s-heading {
   font-weight: inherit;
 }
-.is-source-mode .cm-s-strong {
-  font-weight: 700;
-}
-.is-source-mode .cm-s-em {
-  font-style: italic;
-}
-.is-source-mode .cm-s-strike {
-  text-decoration: line-through;
-}
+
 .is-source-mode .cm-s-code {
   font-family: var(--font-monospace);
   font-size: 0.875em;
