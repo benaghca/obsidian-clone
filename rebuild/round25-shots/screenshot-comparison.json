@@ -1,0 +1,82 @@
+[
+  {
+    "name": "dark-blocks-live.png",
+    "identical": true,
+    "sha256": "e713e9bcaad5514b16d9c9db3cc4081e780132b0c0b9f1f53319262a4846da0d"
+  },
+  {
+    "name": "dark-blocks-reading.png",
+    "identical": true,
+    "sha256": "b247fdf188bb61826a9a8ac9101241481fed9907948b2342b5a449b22ae80b98"
+  },
+  {
+    "name": "dark-blocks-source.png",
+    "identical": true,
+    "sha256": "d2527b35e699bfa22b15ec8a883955fe11129379b81e221620ef1242ea572b99"
+  },
+  {
+    "name": "dark-canvas.png",
+    "identical": true,
+    "sha256": "fd1c5a7f9a38005abcfdb6919b6c352bbfc197f5d208e03063f45569861050df"
+  },
+  {
+    "name": "dark-settings.png",
+    "identical": true,
+    "sha256": "6d62cc6f1cd0d17a87b375059c382865339a647d4d9f77c51da5d6f407f90dde"
+  },
+  {
+    "name": "dark-switcher.png",
+    "identical": true,
+    "sha256": "c84c7dda0731f9251f5822044d5d89a9e289f41b5e76ea89587369d65d4ca569"
+  },
+  {
+    "name": "dark-tooltip.png",
+    "identical": true,
+    "sha256": "2f5d42769c491489a76552a982a1a1873dc5625b04424d021f5984194070788b"
+  },
+  {
+    "name": "dark-welcome-explorer.png",
+    "identical": true,
+    "sha256": "aa2e2c3dc036f48933c5fba85f1521ff8fd0c939b2c665f01766e943dc38ada9"
+  },
+  {
+    "name": "light-blocks-live.png",
+    "identical": true,
+    "sha256": "0f8e9c86e68ef22abdcc3966c3e7944f5faf1fe5405ba30dbe75b2cf7738be51"
+  },
+  {
+    "name": "light-blocks-reading.png",
+    "identical": true,
+    "sha256": "cfbd164f41d743d0de0665c30100b3a470b066ddf439d31b7f9df263689ab9f7"
+  },
+  {
+    "name": "light-blocks-source.png",
+    "identical": true,
+    "sha256": "4c167a7955ac278a20569e153c11f77e9e68719c6b64c4c64c9947f5811fe500"
+  },
+  {
+    "name": "light-canvas.png",
+    "identical": true,
+    "sha256": "363c55360a9fb4287041057d5385004508c574acc382c2c7a8cd4633ffd1d36b"
+  },
+  {
+    "name": "light-settings.png",
+    "identical": true,
+    "sha256": "58ab76c2d7438b9771581b622e7f8293d460100854bebe189829fc976f86e3cd"
+  },
+  {
+    "name": "light-switcher.png",
+    "identical": true,
+    "sha256": "7c9675797ed6207c53e68df11018397d03edf5b6e0ea655b65878826469cceb5"
+  },
+  {
+    "name": "light-tooltip.png",
+    "identical": true,
+    "sha256": "4b140e15e76356ef26b3a7744dcced95e9538eb8add4cccb5aae77c9317fcc19"
+  },
+  {
+    "name": "light-welcome-explorer.png",
+    "identical": true,
+    "sha256": "ce18b8df87c6d126e68a89d468ae7b18469aaa70e4de5639189e34bea74c9812"
+  }
+]

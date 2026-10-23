@@ -1,0 +1,56 @@
+PASS Auto-reveal button reveals the active note
+PASS Auto-reveal can be turned off
+PASS 1280px live: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 1280px live: long rename wraps without horizontal clipping
+PASS 1280px source: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 1280px source: long rename wraps without horizontal clipping
+PASS 1280px reading: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 1280px reading: long rename wraps without horizontal clipping
+PASS 900px live: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 900px live: long rename wraps without horizontal clipping
+PASS 900px source: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 900px source: long rename wraps without horizontal clipping
+PASS 900px reading: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 900px reading: long rename wraps without horizontal clipping
+PASS 600px live: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 600px live: long rename wraps without horizontal clipping
+PASS 600px source: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 600px source: long rename wraps without horizontal clipping
+PASS 600px reading: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane
+PASS 600px reading: long rename wraps without horizontal clipping
+PASS live: hovering the background tab keeps the current note
+PASS live: pressing the background tab does not switch notes
+PASS live: pointer up without dragging activates the clicked tab
+PASS live: stationary repeated tab clicks stay active without starting a drag
+PASS live: dragging a background tab keeps the current note visible
+PASS live: reordering a background tab preserves the source pane's current note
+PASS live: the source stays on Current before a split drop
+PASS live: split drop leaves the source pane's active tab unchanged
+PASS source: hovering the background tab keeps the current note
+PASS source: pressing the background tab does not switch notes
+PASS source: pointer up without dragging activates the clicked tab
+PASS source: stationary repeated tab clicks stay active without starting a drag
+PASS source: dragging a background tab keeps the current note visible
+PASS source: reordering a background tab preserves the source pane's current note
+PASS source: the source stays on Current before a split drop
+PASS source: split drop leaves the source pane's active tab unchanged
+PASS reading: hovering the background tab keeps the current note
+PASS reading: pressing the background tab does not switch notes
+PASS reading: pointer up without dragging activates the clicked tab
+PASS reading: stationary repeated tab clicks stay active without starting a drag
+PASS reading: dragging a background tab keeps the current note visible
+PASS reading: reordering a background tab preserves the source pane's current note
+PASS reading: the source stays on Current before a split drop
+PASS reading: split drop leaves the source pane's active tab unchanged
+PASS live .workspace-leaf > .view-content:not([hidden]): hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS live .workspace-leaf > .view-content:not([hidden]): repeated stationary scrollbar clicks scroll both times
+PASS live .nav-files .nav-files-container: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS live .nav-files .nav-files-container: repeated stationary scrollbar clicks scroll both times
+PASS source .workspace-leaf > .view-content:not([hidden]): hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS source .workspace-leaf > .view-content:not([hidden]): repeated stationary scrollbar clicks scroll both times
+PASS source .nav-files .nav-files-container: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS source .nav-files .nav-files-container: repeated stationary scrollbar clicks scroll both times
+PASS reading .workspace-leaf > .view-content:not([hidden]): hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS reading .workspace-leaf > .view-content:not([hidden]): repeated stationary scrollbar clicks scroll both times
+PASS reading .nav-files .nav-files-container: hover on a 6px painted thumb inside a 12px gutter, with no arrow buttons
+PASS reading .nav-files .nav-files-container: repeated stationary scrollbar clicks scroll both times
