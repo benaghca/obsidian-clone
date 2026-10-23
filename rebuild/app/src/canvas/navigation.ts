@@ -17,13 +17,20 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   let space = false, dragging = false, suppressClick = false;
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
+  // Size only controls; inheriting a zoom variable through every card's Markdown
+  // makes zoom recalculate the whole board's styles on each frame.
+  world.id = `canvas-world-${crypto.randomUUID()}`;
+  const sizing = new CSSStyleSheet();
+  sizing.replaceSync(`#${world.id} :is(.canvas-selection-menu, .canvas-node-connection-point, .canvas-edge-end) { --canvas-inverse-scale: 1; }`);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sizing];
+  const controlSize = (sizing.cssRules[0] as CSSStyleRule).style;
   function draw() {
     cancelAnimationFrame(frame);
     frame = 0;
     if (!state || !width || !height) return;
     const { cx, cy, scale } = state;
     const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
-    world.style.setProperty("--canvas-inverse-scale", String(1 / scale));
+    controlSize.setProperty("--canvas-inverse-scale", String(1 / scale));
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
@@ -121,6 +128,6 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       }
     },
     loaded(next: Bounds) { bounds = next; if (!state) fit(); else draw(); },
-    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); size.disconnect(); events.abort(); },
+    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); size.disconnect(); events.abort(); document.adoptedStyleSheets = document.adoptedStyleSheets.filter(sheet => sheet !== sizing); },
   };
 }

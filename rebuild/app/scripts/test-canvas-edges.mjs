@@ -102,4 +102,7 @@ await withBrowser(async ({run,send,click,move,point,press,chord,open,read,check,
  const reverse=await readFile(new URL('../../round26-shots/Obsidian-arrows.canvas',import.meta.url),'utf8');await open('ReverseArrows.canvas',reverse);
  check(await run(async expected=>{const {readCanvas,edgeCurve}=await import('/src/canvas/model.ts');const {nodes,edges}=readCanvas(expected),byId=new Map(nodes.map(n=>[n.id,n]));return edges.every(e=>document.querySelector(`path.canvas-edge[data-edge-id="${e.id}"]`)?.getAttribute('d')===edgeCurve(byId.get(e.fromNode),byId.get(e.toNode),e).path)&&nodes.every(n=>{const card=document.querySelector(`[data-node-id="${n.id}"]`);return card&&parseFloat(card.style.left)===n.x&&parseFloat(card.style.top)===n.y;});},reverse),'Native Obsidian reconnection returns to Grove with identical card and edge geometry');
  check(await read()===reverse,'Reverse round trip preserves exact native file bytes');await shot('grove-edges-return');
+ const sheets=()=>run(()=>document.adoptedStyleSheets.filter(s=>s.cssRules[0]?.selectorText?.startsWith('#canvas-world-')).length);
+ await run(()=>ws.open('Welcome.md'));await sleep(80);check(await sheets()===0,'Leaving the canvas releases its control-sizing stylesheet');
+ await run(()=>ws.open('ReverseArrows.canvas'));await sleep(100);check(await sheets()===1,'Reopening installs exactly one control-sizing stylesheet');
 }, {height:800,screenshots:new URL('../../round26-shots/',import.meta.url).pathname});
