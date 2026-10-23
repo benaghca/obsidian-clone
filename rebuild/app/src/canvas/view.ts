@@ -9,9 +9,10 @@ import { readingMode, release, render } from "../editor/render";
 import { isExternalUrl, isNotePath } from "../links/external";
 import { resolveLink } from "../links/internal";
 import { h } from "../shell/dom";
-import type { Group } from "../tabs";
+import type { Group, Tab } from "../tabs";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
+import { canvasNavigation } from "./navigation";
 import { edgeCurve, readCanvas } from "./model";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -24,25 +25,14 @@ const presets = ["red", "orange", "yellow", "green", "cyan", "purple"];
 function color(value?: string) {
   return value && /^[1-6]$/.test(value) ? `var(--color-${presets[Number(value) - 1]})` : value && /^#[0-9a-f]{6}$/i.test(value) ? value : "var(--background-modifier-border-focus)";
 }
-export function createCanvasView(ws: Workspace, path: string, group: Group) {
+export function createCanvasView(ws: Workspace, path: string, group: Group, tab: Tab) {
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
   const world = h("div", { class: "canvas-world" });
-  const el = h("div", { class: "view-content canvas-view is-reading-mode", "aria-label": "Canvas (read only)" }, world);
+  const el = h("div", { class: "view-content canvas-view is-reading-mode", "aria-label": "Canvas (read only)", tabindex: "0" }, world);
   let gone = false, generation = 0;
   let cleanups: (() => void)[] = [];
-  let bounds = { left: 0, top: 0, right: 0, bottom: 0 };
   const clear = () => { cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
-  // Initial framing only. Interactive navigation is the next part of Canvas.
-  function frame() {
-    const w = el.clientWidth, h = el.clientHeight;
-    if (!w || !h) return;
-    const scale = Math.min(1, (w - 80) / Math.max(1, bounds.right - bounds.left), (h - 80) / Math.max(1, bounds.bottom - bounds.top));
-    const x = w / 2 - (bounds.left + bounds.right) / 2 * scale, y = h / 2 - (bounds.top + bounds.bottom) / 2 * scale;
-    world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
-    el.style.setProperty("--canvas-dot-size", `${.7 * scale}px`);
-    el.style.backgroundSize = `${20 * scale}px ${20 * scale}px`;
-    el.style.backgroundPosition = `${x}px ${y}px`;
-  }
+  const navigation = canvasNavigation(el, world, tab, path);
   async function load() {
     const mine = ++generation;
     let text: string;
@@ -50,7 +40,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group) {
     if (gone || mine !== generation) return;
     clear();
     const { nodes, edges } = readCanvas(text);
-    bounds = { left: Math.min(0, ...nodes.map(n => n.x)), top: Math.min(0, ...nodes.map(n => n.y - (n.type === "group" ? 40 : 0))), right: Math.max(0, ...nodes.map(n => n.x + n.width)), bottom: Math.max(0, ...nodes.map(n => n.y + n.height)) };
+    const bounds = nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 };
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
     const byId = new Map(nodes.map(n => [n.id, n]));
@@ -147,11 +137,9 @@ export function createCanvasView(ws: Workspace, path: string, group: Group) {
       if (node.type === "text") paint(node.text ?? "");
       else void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
     }
-    frame();
+    navigation.loaded(bounds);
   }
-  const size = new ResizeObserver(frame);
-  size.observe(el);
   const unwatch = ws.vault.onModified(changed => { if (changed === path) void load(); });
   void load();
-  return { el, dispose() { gone = true; size.disconnect(); unwatch(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; navigation.dispose(); unwatch(); clear(); el.remove(); } };
 }

@@ -8,6 +8,7 @@
 // DOM is kept per group and per split and only moved when the tree changes,
 // so a split, a close or a tab move never rebuilds an editor.
 
+import { canvasViewports } from "../canvas/navigation";
 import { createCanvasView } from "../canvas/view";
 import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
@@ -476,16 +477,19 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
 
     let canvas: ReturnType<typeof createCanvasView> | null = null;
     let canvasPath: string | null = null;
+    let canvasTab: Tab | null = null;
     function renderView() {
       const tab = group.active;
       const path = tab.path;
       const image = tab.type === "image" ? (tab.viewFile ?? null) : null;
       const board = tab.type === "canvas" ? tab.viewFile ?? null : null;
-      if (board !== canvasPath) {
+      if (!board) canvasViewports.delete(tab);
+      if (board !== canvasPath || tab !== canvasTab) {
         canvas?.dispose();
         canvasPath = board;
-        canvas = board ? createCanvasView(ws, board, group) : null;
-        if (canvas) leaf.append(canvas.el);
+        canvasTab = tab;
+        canvas = board ? createCanvasView(ws, board, group, tab) : null;
+        if (canvas) { leaf.append(canvas.el); canvas.el.focus({ preventScroll: true }); }
       }
       const graph = tab.type === "graph" || tab.type === "localgraph" ? graphFor(tab) : null;
       scroller.hidden = !path || !!graph;

@@ -1,11 +1,12 @@
 .canvas-view {
   position: relative;
   overflow: hidden;
+  scrollbar-gutter: auto;
   background-color: var(--background-primary);
-  background-image: radial-gradient(circle, var(--background-modifier-border) var(--canvas-dot-size, .5px), transparent var(--canvas-dot-size, .5px));
+  background-image: radial-gradient(circle, var(--background-modifier-border) .7px, transparent .7px);
   padding: 0;
 }
-.canvas-world { position: absolute; transform-origin: 0 0; }
+.canvas-world { position: absolute; transform-origin: 0 0; will-change: transform; }
 .canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; }
 .canvas-node {
   position: absolute;
@@ -59,3 +60,12 @@
 .canvas-node-content .cm-line.cm-h1 { font-size: 25.888px;
   line-height: 1.2; }
 .canvas-node-file .canvas-node-content > img { display: block; width: 100%; height: 100%; }
+
+.canvas-controls { position: absolute; top: 10px; right: 10px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+.canvas-controls .clickable-icon { width: 32px; height: 32px; border-radius: 0; }
+.canvas-controls .clickable-icon + .clickable-icon { border-top: 1px solid var(--background-modifier-border); }
+.canvas-controls .clickable-icon:first-child { border-radius: 4px 4px 0 0; }
+.canvas-controls .clickable-icon:last-child { border-radius: 0 0 4px 4px; }
+.canvas-view:focus { outline: none; }
+.canvas-view.is-grabbable, .canvas-view.is-grabbable * { cursor: grab; }
+.canvas-view.is-panning, .canvas-view.is-panning * { cursor: grabbing; user-select: none; }

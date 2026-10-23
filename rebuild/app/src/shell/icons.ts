@@ -102,6 +102,8 @@ const ICONS = {
   "list-ordered": lucide.ListOrdered,
   "list-plus": lucide.ListPlus,
   loader: lucide.Loader,
+  maximize: lucide.Maximize,
+  "rotate-cw": lucide.RotateCw,
   "maximize-2": lucide.Maximize2,
   menu: lucide.Menu,
   "message-square-quote": lucide.MessageSquareQuote,
