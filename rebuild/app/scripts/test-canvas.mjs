@@ -46,7 +46,7 @@ await withBrowser(async ({ send, run, click, point, move, chord, press, check, s
   const createAt = await point(ribbon); await click(createAt); await sleep(60);
   for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', {type, ...createAt, button:'left', clickCount:1});
   await sleep(100);
-  check(await run(async () => { const {api}=await import('/src/api.ts'); return ws.active.viewFile === 'Untitled 1.canvas' && await api.readNote('Untitled.canvas') === '{"nodes":[],"edges":[]}' && await api.readNote('Untitled 1.canvas') === '{"nodes":[],"edges":[]}'; }), 'Repeated stationary canvas clicks create numbered valid empty canvases and open them');
+  check(await run(async () => { const {api}=await import('/src/api.ts'); return ws.active.viewFile === 'Untitled 1.canvas' && await api.readNote('Untitled.canvas') === '{}' && await api.readNote('Untitled 1.canvas') === '{}'; }), 'Repeated stationary canvas clicks create numbered valid empty canvases and open them');
   assert.deepEqual(await run(() => [...document.querySelectorAll('.side-dock-ribbon-action')].map(e=>e.getAttribute('aria-label'))), ['Open quick switcher','Open graph view','Create new canvas',"Open today's daily note",'Insert template','Open command palette']);
   check(await run(async () => { const {commands}=await import('/src/commands.ts'); return commands.isEnabled('random-note') && commands.isEnabled('file-explorer:new-file'); }), 'Fresh ribbon order matches Obsidian; random/new-note commands remain');
   await chord('p'); await send('Input.insertText', {text:'Create new canvas'}); await sleep(60); await press('Enter'); await sleep(100);

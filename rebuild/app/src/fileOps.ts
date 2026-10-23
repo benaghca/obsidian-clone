@@ -50,7 +50,7 @@ let creatingCanvas = Promise.resolve();
 export function newCanvas(ws: Workspace, folder = fileSettings.newNoteFolder()): Promise<string> {
   const next = creatingCanvas.then(async () => {
     if (folder && !ws.vault.isFolder(folder)) await api.createFolder(folder).catch(() => {});
-    const entry = await createNote(ws, freeName(ws, `${folder ? `${folder}/` : ""}Untitled`, ".canvas"), '{"nodes":[],"edges":[]}');
+    const entry = await createNote(ws, freeName(ws, `${folder ? `${folder}/` : ""}Untitled`, ".canvas"), '{}');
     await ws.open(entry.path, { where: ws.active.path !== null || ws.active.type ? "tab" : false });
     return entry.path;
   });
