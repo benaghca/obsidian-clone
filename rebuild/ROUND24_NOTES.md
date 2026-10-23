@@ -286,3 +286,35 @@ largest canvas implementation file is 247 lines.
 3. Render Markdown only near the viewport if larger boards show a measured
    opening/memory problem. This would help beyond the tested 300 cards;
    roughly 100–150 TS/test lines. Current measurements do not require it.
+
+## Stage 3 fixes
+
+Baseline `a2e8526`. Cherry-picked Grok's report/regression `4162e72` as
+`d2e2fda`; its original test reproduced seven failing assertions across all
+six confirmed bugs. Fixes are committed locally as `81c8a8d`:
+
+1. Put group resize targets below cards, retaining independent group-label stacking.
+2. Exclude edge labels from empty-background double-click creation.
+3. Skip history checkpoints identical to the current document, so the first undo after a reverted text session undoes the add.
+4. Return immediately after cancelling a live gesture, preserving its selection on Escape.
+5. Round new card coordinates after subtracting half the dimensions, including odd-sized media.
+6. Compact scalar arrays at the root while preserving `nodes`/`edges` record-array formatting.
+
+All required checks passed: `npm test` (238 TS tests in 42 files, 850 named
+browser checks including all eight hunter assertions, 4 browser-discovery
+tests and the existing paste cases), `npm run build`, standalone
+`npm run test:geometry`, `npm run audit:offline` (137 source files), and
+`cargo build --offline` / `cargo test --offline` (34 Rust tests). All 18
+instant-menu checks passed; maximum opening interval across both geometry
+runs was **17.1ms**. The 300-card drag stayed below 20ms (maximum **16.8ms**).
+Native CDP hover, drags and repeated stationary clicks passed on frontmatter
+notes in Live Preview, Source and Reading. A direct serializer check also
+confirmed mixed scalar arrays stay compact without changing record arrays,
+unknown values or key order. No app window or owner's vault was used.
+
+Net app newline changes from `a2e8526`, excluding `/gen/`: TypeScript **+1**
+(final **23,469**), CSS **+1** (**3,850**), Rust **0** (**3,145**), mjs **+163**
+(**2,778**, entirely the hunter regression), JSON **0** (**2,229**).
+Excluding the hunter cherry-pick, the fixes total **+2** lines; TS/CSS/Rust/mjs
+combined is **+165**, final **33,242**. No dependencies, backend commands,
+animations or ordinary note keystroke work were added. Nothing pushed or merged.
