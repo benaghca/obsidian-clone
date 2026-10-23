@@ -11,6 +11,9 @@ await withBrowser(async ({ send, run, click, point, move, chord, press, check, s
     for (const [path, text] of Object.entries({ 'Reference.canvas': canvasOriginal, 'Note.md': '---\ntags: [canvas]\n---\n# Note card\nA **rendered** note with [[Target]].\n\n## Section\nHeading destination.\n', 'Target.md': '# Target\nLocal link destination.', 'CanvasFrontmatter.md': '---\ntags: [canvas]\n---\n\n# Frontmatter\n\nBody.\n' })) await api.createNote(path, text);
     await ((await api.listFiles()).some(f=>f.path === 'diagram.svg') ? api.writeNote : api.createNote)('diagram.svg', '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="120"><rect width="220" height="120" fill="#8b6cef"/><circle cx="110" cy="60" r="40" fill="#fff"/></svg>');
     await ws.vault.refreshFiles();
+    const onModified = ws.vault.onModified;
+    window.canvasWatchCount = 0;
+    ws.vault.onModified = fn => { canvasWatchCount++; const off = onModified(fn); return () => { canvasWatchCount--; off(); }; };
   }, fixture);
   await click('.nav-files [data-path="Reference.canvas"]'); await sleep(200);
   check(await run(() => ws.active.type === 'canvas' && ws.active.path === null && !ws.editors.isLoaded('Reference.canvas')), 'Canvas opens outside the saving editor');
@@ -21,9 +24,12 @@ await withBrowser(async ({ send, run, click, point, move, chord, press, check, s
   check(await run(() => document.querySelector('[data-node-id="note"]').textContent.includes('Heading destination.') && !document.querySelector('[data-node-id="note"]').textContent.includes('tags:')), 'Note cards render body without frontmatter');
   check(await run(() => !!document.querySelector('[data-node-id="image"] img[src^="blob:"]')), 'Image/SVG cards use local blob URLs');
   check(await run(() => document.querySelector('[data-node-id="link"] a').textContent === 'https://example.invalid/no-fetch' && !document.querySelector('[data-node-id="link"] a').hasAttribute('href')), 'Link card displays only URL text without a fetching target');
+  check(await run(() => canvasWatchCount === 1), 'Canvas reuses the workspace host without leaking per-card subscriptions');
   await shot('grove-canvas');
   const p = await point('[data-node-id="text0"] [data-href="Target"]'); await click(p); await sleep(80);
-  check(await run(() => ws.active.path === 'Target.md'), 'Real mouse click follows text-card wikilinks');
+  check(await run(() => ws.active.path === 'Target.md' && canvasWatchCount === 0), 'Real mouse click follows text-card wikilinks and releases canvas subscriptions');
+  await click('.view-header-nav-buttons [aria-label="Navigate back"]'); await sleep(60);
+  check(await run(() => ws.active.type === 'canvas'), 'Header Back returns to the canvas');
   await chord('o'); await send('Input.insertText', {text:'Reference.canvas'}); await sleep(80);
   check(await run(() => document.querySelector('.suggestion-content')?.textContent.includes('Reference.canvas')), 'Quick switcher lists canvas attachments');
   await press('Enter'); await sleep(100);
@@ -64,4 +70,9 @@ await withBrowser(async ({ send, run, click, point, move, chord, press, check, s
     for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', {type, ...at, button:'left', clickCount:1});
     check(await run(() => !!document.querySelector('.prompt')), mode + ': repeated stationary ribbon click opens prompt'); await press('Escape');
   }
+  await run(async () => {
+    const {api}=await import('/src/api.ts'); await api.createNote('CanvasLink23.md','---\ntags: [r23]\n---\n[[Reference.canvas]]'); await ws.vault.refreshFiles(); await ws.open('CanvasLink23.md'); ws.setMode('reading');
+  }); await sleep(80);
+  await click('.cm-editor [data-href="Reference.canvas"]'); await sleep(80);
+  check(await run(() => ws.active.type === 'canvas' && ws.active.viewFile === 'Reference.canvas' && !ws.vault.files.some(f=>f.path==='Reference.canvas.md')), 'Reading wikilink follows canvas attachment without creating a markdown file');
 }, { height: 800, screenshots: new URL('../../round23-shots/', import.meta.url).pathname });

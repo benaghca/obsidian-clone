@@ -6,7 +6,6 @@ import { api } from "../api";
 import { IMAGE_EXT, embedPart, embedSection } from "../editor/embeds";
 import { editorHost } from "../editor/host";
 import { readingMode, release, render } from "../editor/render";
-import { createEditorHost } from "../editorHost";
 import { isExternalUrl, isNotePath } from "../links/external";
 import { resolveLink } from "../links/internal";
 import { h } from "../shell/dom";
@@ -26,6 +25,7 @@ function color(value?: string) {
   return value && /^[1-6]$/.test(value) ? `var(--color-${presets[Number(value) - 1]})` : value && /^#[0-9a-f]{6}$/i.test(value) ? value : "var(--background-modifier-border-focus)";
 }
 export function createCanvasView(ws: Workspace, path: string, group: Group) {
+  const host = ws.editors.viewOf(group).state.facet(editorHost)!;
   const world = h("div", { class: "canvas-world" });
   const el = h("div", { class: "view-content canvas-view is-reading-mode", "aria-label": "Canvas (read only)" }, world);
   let gone = false, generation = 0;
@@ -112,7 +112,6 @@ export function createCanvasView(ws: Workspace, path: string, group: Group) {
       }
       const origin = node.type === "file" ? node.file! : path;
       const resolve = (href: string) => resolveLink(href, origin, ws.vault.files.filter(f => !f.is_dir));
-      const host = createEditorHost(ws);
       const context = new EditorView({ state: EditorState.create({ extensions: [EditorState.readOnly.of(true), readingMode.of(true), editorHost.of({
         ...host, contextMenu: undefined, linkExists: href => !!resolve(href),
         openLink: (href, where) => {

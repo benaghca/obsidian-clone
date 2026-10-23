@@ -152,7 +152,7 @@ export class Workspace {
    * folder or from the linking note's folder, or a note name, any case.
    */
   resolve(target: string, from: string | null = this.active.path): string | null {
-    return resolveLink(target, from, this.vault.notes);
+    return resolveLink(target, from, this.vault.notes) ?? resolveLink(target, from, this.vault.files.filter(f => !f.is_dir));
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */

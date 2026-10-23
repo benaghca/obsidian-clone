@@ -30,7 +30,7 @@
 }
 .canvas-node.is-colored > .canvas-node-content { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); }
 .canvas-node-content img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.canvas-node-file:has(img) > .canvas-node-content { padding: 0; display: grid; place-items: center; }
+.canvas-node-file:has(> .canvas-node-content > img) > .canvas-node-content { padding: 0; overflow: hidden; }
 .canvas-node-group { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); z-index: -1; }
 .canvas-group-label {
   position: absolute;
@@ -56,6 +56,6 @@
 .canvas-node .embed-actions, .canvas-node .markdown-embed-link, .canvas-node .image-resize-corner { display: none; }
 
 .canvas-file-label { position: absolute; bottom: calc(100% + 4px); color: var(--text-faint); font-size: 14px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
-.canvas-node-content .cm-h1 { font-size: 25.888px;
+.canvas-node-content .cm-line.cm-h1 { font-size: 25.888px;
   line-height: 1.2; }
-.canvas-node-file .canvas-node-content > img { width: 100%; height: 100%; }
+.canvas-node-file .canvas-node-content > img { display: block; width: 100%; height: 100%; }
