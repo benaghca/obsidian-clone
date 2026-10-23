@@ -275,19 +275,12 @@ export function registerAppCommands(parts: AppParts) {
       () => ws.open(adjacentDaily(-1)!), () => !!adjacentDaily(-1)),
     pluginAction("daily-notes", "daily-notes:goto-next", "Daily notes: Open next daily note", "calendar-plus",
       () => ws.open(adjacentDaily(1)!), () => !!adjacentDaily(1)),
-    {
-      id: "random-note",
-      name: "Random note: Open random note",
-      plugin: "random-note",
-      icon: "dices",
-      when: () => ws.vault.includedNotes().length > 0,
-      run: () => {
+    pluginAction("random-note", "random-note", "Random note: Open random note", "dices", () => {
         const notes = ws.vault.includedNotes();
         const others = notes.filter((n) => n.path !== ws.active.path);
         const pick = others[Math.floor(Math.random() * others.length)] ?? notes[0];
         void ws.open(pick.path);
-      },
-    },
+      }, () => ws.vault.includedNotes().length > 0),
     { id: "workspace:new-tab", name: "New tab", hotkeys: mod("t"), run: () => ws.newTab() },
     { id: "workspace:close", name: "Close current tab", icon: "x", hotkeys: mod("w"), run: () => ws.closeTab(ws.active) },
     conditionalAction("workspace:close-others", "Close all other tabs", "x",
@@ -394,17 +387,10 @@ export function registerAppCommands(parts: AppParts) {
       () => bookmarks.toggle(note()), () => hasNote() && !bookmarks.has(note())),
     pluginAction("bookmarks", "bookmarks:unbookmark-current-file", "Bookmarks: Remove bookmark for current file", "bookmark-minus",
       () => bookmarks.toggle(note()), () => bookmarks.has(ws.active.path)),
-    {
-      id: "bookmarks:bookmark-all-tabs",
-      name: "Bookmarks: Bookmark all tabs",
-      plugin: "bookmarks",
-      icon: "bookmark-plus",
-      when: () => ws.groups().some((g) => g.tabs.some((t) => t.path && !bookmarks.has(t.path))),
-      run: () => {
+    pluginAction("bookmarks", "bookmarks:bookmark-all-tabs", "Bookmarks: Bookmark all tabs", "bookmark-plus", () => {
         const paths = new Set(ws.groups().flatMap((g) => g.tabs.flatMap((t) => (t.path ? [t.path] : []))));
         for (const p of paths) if (!bookmarks.has(p)) bookmarks.toggle(p);
-      },
-    },
+      }, () => ws.groups().some((g) => g.tabs.some((t) => t.path && !bookmarks.has(t.path)))),
 
     // ----- views -----
     { id: "file-explorer:open", name: "Files: Show file explorer", icon: "files", run: () => showLeft("files") },
@@ -469,30 +455,16 @@ export function registerAppCommands(parts: AppParts) {
     editorCommand("editor:insert-horizontal-rule", "Insert horizontal rule", "separator-horizontal", insertBlock(BLOCKS.rule.text, BLOCKS.rule.caret)),
     { ...editorCommand("insert-current-date", "Templates: Insert current date", "calendar-days", insertText(() => today())), plugin: "templates" },
     { ...editorCommand("insert-current-time", "Templates: Insert current time", "clock", insertText(() => nowTime())), plugin: "templates" },
-    {
-      id: "templates:insert-template",
-      name: "Templates: Insert template",
-      plugin: "templates",
-      icon: "files",
-      when: canEdit,
-      run: () => {
+    pluginAction("templates", "templates:insert-template", "Templates: Insert template", "files", () => {
         if (!templateFolder()) return parts.openSettings("templates");
         openTemplatePrompt(templateNotes(), (path) => void insertTemplate(path));
-      },
-    },
-    {
-      id: "markdown:add-metadata-property",
-      name: "Add file property",
-      icon: "list-plus",
-      hotkeys: mod(";"),
-      // Also from Reading view and from a field in the block, as in Obsidian.
-      when: () => hasNote() && (!typingElsewhere() || ws.view.dom.contains(document.activeElement)),
-      run: () => {
+      }, canEdit),
+    // Also from Reading view and from a field in the block, as in Obsidian.
+    conditionalAction("markdown:add-metadata-property", "Add file property", "list-plus", () => {
         if (openNewProperty(ws.view) || ws.active.mode === "reading") return;
         addProperty(ws.view);
         ws.view.focus();
-      },
-    },
+      }, () => hasNote() && (!typingElsewhere() || ws.view.dom.contains(document.activeElement)), mod(";")),
     {
       ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
       when: () => canEdit() && (app().foldHeading || app().foldIndent),
