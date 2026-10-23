@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "node --test scripts/test-browser-discovery.mjs && vitest run && npm run test:geometry && npm run test:fixes && npm run test:header && npm run test:drag && node scripts/test-r20-bugs.mjs",
+    "test": "node --test scripts/test-browser-discovery.mjs && vitest run && npm run test:geometry && npm run test:fixes && npm run test:header && npm run test:drag && node scripts/test-r20-bugs.mjs && node scripts/test-paste.mjs",
     "audit:offline": "npm run build && node scripts/audit-offline.mjs",
     "tauri": "tauri",
     "test:geometry": "node scripts/test-geometry.mjs",
