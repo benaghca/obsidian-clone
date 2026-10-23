@@ -4,12 +4,12 @@ import { withBrowser, sleep } from './browser.mjs';
 await withBrowser(async ({ send, run, key, press, chord, move, click, fill, point, check }) => {
   const fm = '---\ntags: [r19]\n---\n';
   let sequence = 0;
-  const fixture = async (body, mode) => {
+  const fixture = async (body, mode, metadata = fm) => {
     await run(async (doc, mode, path) => {
       const { api } = await import('/src/api.ts');
       await api.createNote(path, doc); await ws.vault.refreshFiles(); await ws.open(path); ws.setMode(mode);
       ws.view.dispatch({ selection: { anchor: 0 } });
-    }, fm + body, mode, `Fixes${++sequence}.md`);
+    }, metadata + body, mode, `Fixes${++sequence}.md`);
     await sleep(150);
   };
   const textPoint = (text, offset = 0) => run((text, offset) => {
@@ -51,6 +51,34 @@ await withBrowser(async ({ send, run, key, press, chord, move, click, fill, poin
       check(true, `${mode}: ${callout ? 'callout' : 'quote'} indentation stays after >`);
     }
   }
+
+  for (const mode of ['live', 'source', 'reading']) {
+    for (const [before, once, twice, word] of [
+      ['- a\n    - nested', '- a\n    nested', '- a\nnested', 'nested'],
+      ['> - parent\n>     - child', '> - parent\n>     child', '> - parent\n> child', 'child'],
+    ]) {
+      await fixture(before, mode);
+      await click(await textPoint(word, 2)); await press('Home'); await press('Backspace');
+      assert.equal(await doc(), fm + (mode === 'reading' ? before : once));
+      await sleep(80); await press('Backspace');
+      assert.equal(await doc(), fm + (mode === 'reading' ? before : twice));
+      if (mode !== 'reading') {
+        await chord('z'); assert.equal(await doc(), fm + once, 'one undo restores only indentation');
+        await chord('z'); assert.equal(await doc(), fm + before, 'second undo restores the marker');
+        await chord('y'); await chord('y'); assert.equal(await doc(), fm + twice);
+      }
+      check(true, `${mode}: marker removal and outdent keep quotes and undo separately`);
+    }
+    const before = '```\n    code\n```';
+    await fixture(before, mode);
+    await click(await textPoint('code')); await press('Backspace');
+    assert.equal(await doc(), fm + (mode === 'reading' ? before : '```\n   code\n```'));
+    check(true, mode + ': Backspace at fence indent deletes one character (Reading stays read-only)');
+  }
+  await fixture('Body', 'source', '---\nnested:\n    value\n---\n');
+  await click(await textPoint('value')); await press('Backspace');
+  assert.equal(await doc(), '---\nnested:\n   value\n---\nBody');
+  check(true, 'source: Backspace at frontmatter indent deletes one character');
   const longName = 'VeryLongTitleNoteForPreviewWrappingAndIconOverlapCheck';
   await run(async (fm, longName) => {
     const { api } = await import('/src/api.ts');

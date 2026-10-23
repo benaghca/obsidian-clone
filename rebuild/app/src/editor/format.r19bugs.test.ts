@@ -1,5 +1,5 @@
 // Permanent regressions from the round 19 hunter pass.
-import { deleteCharBackward, history, undo } from "@codemirror/commands";
+import { deleteCharBackward, history, redo, undo } from "@codemirror/commands";
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { indentUnit } from "@codemirror/language";
 import { EditorSelection, EditorState, type StateCommand, type Transaction } from "@codemirror/state";
@@ -77,6 +77,11 @@ test("two list Backspaces are two undo steps", () => {
   expect(state.doc.toString()).toBe("- a\nnested");
   expect(undo({ state, dispatch })).toBe(true);
   expect(state.doc.toString()).toBe("- a\n    nested");
+  expect(undo({ state, dispatch })).toBe(true);
+  expect(state.doc.toString()).toBe("- a\n    - nested");
+  expect(redo({ state, dispatch })).toBe(true);
+  expect(redo({ state, dispatch })).toBe(true);
+  expect(state.doc.toString()).toBe("- a\nnested");
 });
 
 test("moving a parent preserves a non-default child number", () => {
@@ -90,4 +95,9 @@ test("a selection including children carries their numbering unchanged", () => {
 
 test("default tabs inside quotes still make a full list level", () => {
   expect(run(indentList(), "> 1. first\n> 2. |second\n> 3. third", "\t")).toBe("> 1. first\n>     1. |second\n> 2. third");
+});
+
+test("a YAML list marker is text, and quoted tab indentation keeps the quote", () => {
+  expect(run(backspace, "---\nitems:\n  - |value\n---")).toBe("---\nitems:\n  -|value\n---");
+  expect(run(backspace, "> - parent\n> \t|child", "\t")).toBe("> - parent\n> |child");
 });

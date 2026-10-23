@@ -5,11 +5,12 @@
 // works on a bare EditorState in tests. They run only when invoked, never as
 // part of typing.
 
-import { indentLess, indentMore } from "@codemirror/commands";
+import { indentLess, indentMore, isolateHistory } from "@codemirror/commands";
 import { deleteMarkupBackward } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree, indentString, indentUnit, syntaxTree } from "@codemirror/language";
 import { ChangeSet, countColumn, EditorSelection, type EditorState, type StateCommand, Transaction, type TransactionSpec } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
+import { frontmatterField, readFrontmatter } from "./frontmatter";
 
 type Target = { state: EditorState; dispatch: (tr: Transaction) => void };
 
@@ -168,6 +169,13 @@ function selectedLines(state: EditorState) {
   return lines.sort((a, b) => a.from - b.from);
 }
 
+/** Keep indentation separate from the structural quote markers. */
+function lineIndent(text: string) {
+  const quote = /^[ \t]*(?:>[ \t]?)+/.exec(text)?.[0] ?? "";
+  const space = /^[ \t]*/.exec(text.slice(quote.length))![0];
+  return { quote, space };
+}
+
 /** Tab/Shift+Tab: use normal indentation, then renumber only the affected lists in the same undo step. */
 export const indentList = (outdent = false): StateCommand => ({ state, dispatch }) => {
   if (state.readOnly) return false;
@@ -233,8 +241,7 @@ export const indentList = (outdent = false): StateCommand => ({ state, dispatch 
   if (roots.size) {
     const step = Math.max(4, countColumn(state.facet(indentUnit), state.tabSize));
     const changes = [...lines.values()].sort((a, b) => a.from - b.from).map((line) => {
-      const quote = /^[ \t]*(?:>[ \t]?)+/.exec(line.text)?.[0] ?? "";
-      const space = /^[ \t]*/.exec(line.text.slice(quote.length))![0];
+      const { quote, space } = lineIndent(line.text);
       const from = line.from + quote.length;
       const columns = Math.max(0, countColumn(space, state.tabSize) + (outdent ? -step : step));
       // Tabs after > start at the quote's column, so use spaces for a full level.
@@ -249,19 +256,31 @@ export const indentList = (outdent = false): StateCommand => ({ state, dispatch 
 /** At an item's text start, remove its marker and keep its indent; the next press uses normal outdent/join handling. */
 export const backspaceList: StateCommand = ({ state, dispatch }) => {
   if (state.readOnly) return false;
-  if (state.selection.ranges.every((range) => {
-    const line = state.doc.lineAt(range.head), indent = /^[ \t]+/.exec(line.text);
-    return range.empty && indent && range.head === line.from + indent[0].length;
-  })) return indentLess({ state, dispatch });
-  let all = true;
+  let all = true, listEdit = false;
   const changes = state.changeByRange((range) => {
     const line = state.doc.lineAt(range.head);
+    const { quote, space } = lineIndent(line.text);
+    const indentEnd = line.from + quote.length + space.length;
+    const atIndent = space.length > 0 && range.head === indentEnd;
     const marker = /^([ \t]*(?:>[ \t]*)*)(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/.exec(line.text);
-    if (range.empty && marker && range.head === line.from + marker[0].length) {
+    if (range.empty && (atIndent || marker && range.head === line.from + marker[0].length)) {
       const tree = ensureSyntaxTree(state, line.to, 100) ?? syntaxTree(state);
-      const mark = tree.resolveInner(line.from + marker[1].length + 1, -1);
-      if (mark.name === "ListMark") {
-        const from = line.from + marker[1].length;
+      const fm = state.field(frontmatterField, false) ?? readFrontmatter(state.doc);
+      let protectedText = !!fm && line.from <= fm.end;
+      for (let node: SyntaxNode | null = tree.resolveInner(range.head, -1); node; node = node.parent) {
+        if (node.name === "FencedCode" || node.name === "CodeBlock") protectedText = true;
+      }
+      // CodeMirror's default deletion also removes indent units; here it must be one character.
+      if (protectedText) return { changes: { from: range.head - 1, to: range.head }, range: EditorSelection.cursor(range.head - 1) };
+      if (atIndent) {
+        const columns = Math.max(0, countColumn(space, state.tabSize) - Math.max(4, countColumn(state.facet(indentUnit), state.tabSize)));
+        const from = line.from + quote.length, insert = quote ? " ".repeat(columns) : indentString(state, columns);
+        listEdit = true;
+        return { changes: { from, to: range.head, insert }, range: EditorSelection.cursor(from + insert.length) };
+      }
+      const from = line.from + marker![1].length;
+      if (tree.resolveInner(from + 1, -1).name === "ListMark") {
+        listEdit = true;
         return { changes: { from, to: range.head }, range: EditorSelection.cursor(from) };
       }
     }
@@ -269,7 +288,7 @@ export const backspaceList: StateCommand = ({ state, dispatch }) => {
     return { range };
   });
   if (!all) return deleteMarkupBackward({ state, dispatch });
-  dispatch(state.update(changes, { scrollIntoView: true, userEvent: "delete.backward" }));
+  dispatch(state.update(changes, { scrollIntoView: true, userEvent: "delete.backward", annotations: listEdit ? isolateHistory.of("full") : undefined }));
   return true;
 };
 
