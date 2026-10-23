@@ -45,7 +45,10 @@ export function readCanvas(text: string): { nodes: CanvasNode[]; edges: CanvasEd
 const vectors: Record<Side, [number, number]> = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
 const sideOf = (s: unknown, fallback: Side): Side => typeof s === "string" && Object.hasOwn(vectors, s) ? s as Side : fallback;
 export function edgeCurve(a: CanvasNode, b: CanvasNode, edge: CanvasEdge) {
-  const from = sideOf(edge.fromSide, "right"), to = sideOf(edge.toSide, "left");
+  const dx = b.x + b.width / 2 - a.x - a.width / 2, dy = b.y + b.height / 2 - a.y - a.height / 2;
+  const horizontal = Math.abs(dx) > Math.abs(dy);
+  const from = sideOf(edge.fromSide, horizontal ? dx >= 0 ? "right" : "left" : dy >= 0 ? "bottom" : "top");
+  const to = sideOf(edge.toSide, horizontal ? dx >= 0 ? "left" : "right" : dy >= 0 ? "top" : "bottom");
   const anchor = (n: CanvasNode, side: Side) => [n.x + (side === "left" ? 0 : side === "right" ? n.width : n.width / 2), n.y + (side === "top" ? 0 : side === "bottom" ? n.height : n.height / 2)];
   const p = anchor(a, from), q = anchor(b, to), u = vectors[from], v = vectors[to];
   const start = [p[0] + u[0] * 7, p[1] + u[1] * 7], end = [q[0] + v[0] * 7, q[1] + v[1] * 7];

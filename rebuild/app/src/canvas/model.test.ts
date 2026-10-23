@@ -19,3 +19,17 @@ test("edges accept every side combination and tolerate invalid sides", () => {
     expect(Number.isFinite(curve.x) && Number.isFinite(curve.y)).toBe(true);
   }
 });
+
+
+test("omitted edge sides face the other card in every direction; explicit sides win", () => {
+  const a = { id: "a", type: "text", x: 100, y: 520, width: 200, height: 100 } as const;
+  const edge = { id: "e", fromNode: "a", toNode: "b" };
+  for (const [x, y, start, end] of [
+    [100, 780, "M200,620 ", "L200,780"], [100, 260, "M200,520 ", "L200,360"],
+    [500, 520, "M300,570 ", "L500,570"], [-300, 520, "M100,570 ", "L-100,570"],
+  ] as const) {
+    const curve = edgeCurve(a, { ...a, id: "b", x, y }, edge).path;
+    expect(curve.startsWith(start) && curve.endsWith(end)).toBe(true);
+  }
+  expect(edgeCurve(a, { ...a, y: 780 }, { ...edge, fromSide: "left", toSide: "right" }).path).toMatch(/^M100,570 .*L300,830$/);
+});
