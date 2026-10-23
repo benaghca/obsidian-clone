@@ -6,6 +6,7 @@
 // part of typing.
 
 import { indentLess, indentMore } from "@codemirror/commands";
+import { deleteMarkupBackward } from "@codemirror/lang-markdown";
 import { ensureSyntaxTree, indentString, indentUnit, syntaxTree } from "@codemirror/language";
 import { ChangeSet, countColumn, EditorSelection, type EditorState, type StateCommand, Transaction, type TransactionSpec } from "@codemirror/state";
 import type { SyntaxNode } from "@lezer/common";
@@ -223,6 +224,33 @@ export const indentList = (outdent = false): StateCommand => ({ state, dispatch 
     return true;
   }
   return (outdent ? indentLess : indentMore)({ state, dispatch: apply });
+};
+
+/** At an item's text start, remove its marker and keep its indent; the next press uses normal outdent/join handling. */
+export const backspaceList: StateCommand = ({ state, dispatch }) => {
+  if (state.readOnly) return false;
+  if (state.selection.ranges.every((range) => {
+    const line = state.doc.lineAt(range.head), indent = /^[ \t]+/.exec(line.text);
+    return range.empty && indent && range.head === line.from + indent[0].length;
+  })) return indentLess({ state, dispatch });
+  let all = true;
+  const changes = state.changeByRange((range) => {
+    const line = state.doc.lineAt(range.head);
+    const marker = /^([ \t]*(?:>[ \t]*)*)(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?/.exec(line.text);
+    if (range.empty && marker && range.head === line.from + marker[0].length) {
+      const tree = ensureSyntaxTree(state, line.to, 100) ?? syntaxTree(state);
+      const mark = tree.resolveInner(line.from + marker[1].length + 1, -1);
+      if (mark.name === "ListMark") {
+        const from = line.from + marker[1].length;
+        return { changes: { from, to: range.head }, range: EditorSelection.cursor(from) };
+      }
+    }
+    all = false;
+    return { range };
+  });
+  if (!all) return deleteMarkupBackward({ state, dispatch });
+  dispatch(state.update(changes, { scrollIntoView: true, userEvent: "delete.backward" }));
+  return true;
 };
 
 /** Keep every selection endpoint attached to its text as line prefixes change. */

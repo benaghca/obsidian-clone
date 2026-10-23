@@ -1,10 +1,12 @@
 import { insertNewlineContinueMarkupCommand, markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { indentUnit } from "@codemirror/language";
-import { history, undo } from "@codemirror/commands";
+import { deleteCharBackward, history, undo } from "@codemirror/commands";
 import { EditorSelection, EditorState, type StateCommand } from "@codemirror/state";
+import type { EditorView } from "@codemirror/view";
 import { describe, expect, it, test } from "vitest";
 import {
   closeCodeFence,
+  backspaceList,
   insertBlock,
   indentList,
   insertFootnote,
@@ -71,6 +73,31 @@ test("renumbering maps multi-digit markers and undoes with the indentation", () 
   expect(undo({ state, dispatch })).toBe(true);
   expect(state.doc.toString()).toBe(doc);
   expect(indentList()({ state: EditorState.create({ doc, extensions: EditorState.readOnly.of(true) }), dispatch })).toBe(false);
+});
+
+const backspace: StateCommand = (target) => backspaceList(target) || deleteCharBackward(target as EditorView);
+
+test("Backspace removes bullet, number or task markers while preserving indentation", () => {
+  for (const marker of ["- ", "* ", "+ ", "12. ", "3) ", "- [ ] ", "1. [x] "]) {
+    const text = "- first\n\n    " + marker + "|body";
+    expect(run(backspace, text)).toBe("- first\n\n    |body");
+  }
+  expect(run(backspace, "1. first\n    1. |nested\n2. last")).toBe("1. first\n    |nested\n2. last");
+  expect(run(backspace, "> - |quoted")).toBe("> |quoted");
+});
+
+test("the second Backspace outdents, then joins the preceding line", () => {
+  expect(run(backspace, "first\n    |body")).toBe("first\n|body");
+  expect(run(backspace, "first\n|body")).toBe("first|body");
+  expect(run(backspace, "1. first\n    |nested\n2. last")).toBe("1. first\n|nested\n2. last");
+});
+
+test("list Backspace leaves fenced code, selections and interior text to normal deletion", () => {
+  expect(run(backspace, "```\n- |code\n```")).toBe("```\n-|code\n```");
+  expect(run(backspace, "first\n    - |code")).toBe("first\n    -|code");
+  expect(run(backspace, "- bo|dy")).toBe("- b|dy");
+  expect(run(backspace, "- «body»")).toBe("- |");
+  expect(run(backspace, "first\n- |second")).toBe("first\n|second");
 });
 
 test("italic inside bold wraps rather than eating half of the bold markers", () => {

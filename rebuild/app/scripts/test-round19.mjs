@@ -34,7 +34,7 @@ try {
   };
   const run = (fn, ...args) => evaluate(`(${fn})(...${JSON.stringify(args)})`);
   const key = async (key, modifiers = 0, type = 'keyDown') => {
-    const virtual = { Enter: 13, Escape: 27, Control: 17, End: 35, Tab: 9, Backspace: 8, Shift: 16, ArrowDown: 40 }[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+    const virtual = { Enter: 13, Escape: 27, Control: 17, End: 35, Tab: 9, Backspace: 8, Shift: 16, ArrowDown: 40, Home: 36, ArrowLeft: 37 }[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
     await send('Input.dispatchKeyEvent', { type, key, modifiers, windowsVirtualKeyCode: virtual });
   };
   const press = async (k, modifiers = 0) => { await key(k, modifiers); await key(k, modifiers, 'keyUp'); };
@@ -131,5 +131,23 @@ try {
   await run(()=>ws.setMode('source'));await click('.cm-content > .cm-line:nth-child(2)');await press('Tab');
   check(await run(() => ws.view.state.doc.toString() === "1. first\n\t1. second\n2. third"), 'ordered-list renumbering works in Source mode too');
   await run(()=>ws.setMode('live'));
+
+  const backspaceCases=[
+    ['- first\n    - nested\n- last','- first\n    nested\n- last','- first\nnested\n- last'],
+    ['1. first\n    1. nested\n2. last','1. first\n    nested\n2. last','1. first\nnested\n2. last'],
+    ['- first\n    - [x] task','- first\n    task','- first\ntask'],
+    ['first\n1. second','first\nsecond','firstsecond'],
+  ];
+  for(const [doc,once,twice] of backspaceCases) {
+    await run(doc=>{ws.view.dispatch({changes:{from:0,to:ws.view.state.doc.length,insert:doc},selection:{anchor:0}});ws.view.focus();},doc);await sleep(100);
+    await click('.cm-content > .cm-line:nth-child(2)');await press('End');await press('Home');await press('Backspace');await sleep(50);
+    check(await evaluate('ws.view.state.doc.toString()')===once,'first native Backspace removes only the marker: '+JSON.stringify(doc.split('\n')[1]));
+    if(doc.startsWith('1.'))await shot('backspace-marker');
+    await press('Backspace');await sleep(50);
+    check(await evaluate('ws.view.state.doc.toString()')===twice,'second native Backspace outdents or joins: '+JSON.stringify(doc.split('\n')[1]));
+  }
+  await run(()=>{ws.view.dispatch({changes:{from:0,to:ws.view.state.doc.length,insert:'```\n- code\n```'},selection:{anchor:0}});ws.view.focus();});await sleep(100);
+  await click('.cm-content > .cm-line:nth-child(2)');await press('End');for(let i=0;i<4;i++)await press('ArrowLeft');await press('Backspace');
+  check(await evaluate('ws.view.state.doc.toString()')==='```\n-code\n```','list-looking fenced code keeps normal character deletion');
   assert.equal(errors.length,0,JSON.stringify(errors));
 } finally {socket?.close();browser.kill();server.kill();}

@@ -7,12 +7,12 @@
 
 import { closeBrackets, closeBracketsKeymap } from "@codemirror/autocomplete";
 import { indentUnit } from "@codemirror/language";
-import { deleteMarkupBackward, insertNewlineContinueMarkupCommand } from "@codemirror/lang-markdown";
+import { insertNewlineContinueMarkupCommand } from "@codemirror/lang-markdown";
 import { Compartment, EditorSelection, EditorState, type Extension, Prec, type StateEffect } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers } from "@codemirror/view";
 import { kept } from "../memo";
 import { APP, defaults, type SettingsOf } from "../settings/schema";
-import { closeCodeFence } from "./format";
+import { backspaceList, closeCodeFence } from "./format";
 import { folding } from "./fold";
 import { propertiesDisplay } from "./properties";
 
@@ -31,7 +31,7 @@ const NONE: Extension = [];
 const smartLists = Prec.high(
   keymap.of([
     { key: "Enter", run: insertNewlineContinueMarkupCommand({ nonTightLists: false }) },
-    { key: "Backspace", run: deleteMarkupBackward },
+    { key: "Backspace", run: backspaceList },
   ]),
 );
 
