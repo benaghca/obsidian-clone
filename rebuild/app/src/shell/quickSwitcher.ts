@@ -35,7 +35,7 @@ export function openQuickSwitcher(ws: Workspace) {
     },
     onKey(e, selected, query, close, setQuery) {
       if (e.key === "Tab" && !e.shiftKey) {
-        if (selected) setQuery(selected.name);
+        if (selected) setQuery(selected.name, item => item.path === selected.path);
         return true;
       }
       if (e.key !== "Enter" || !e.shiftKey || !query.trim()) return false;

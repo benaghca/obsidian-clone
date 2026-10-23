@@ -96,38 +96,53 @@ await withBrowser(async ({ send, run, click, chord, press, move }) => {
     check(await run(() => document.querySelectorAll('.cm-content table').length === 1 && !!document.querySelector('.cm-content table .cm-strong')), 'Reading renders a single table with the converted cell formatting');
   }
 
-  await run(async () => {
+  await run(async fm => {
     const { api } = await import('/src/api.ts');
     await api.createFolder('FolderA');
     await api.createFolder('FolderB');
-    await api.createNote('FolderA/Same.md', 'A\n');
-    await api.createNote('FolderB/Same.md', 'B\n');
-    await api.createNote('SwitcherCurrent.md', 'current\n');
+    await api.createNote('FolderA/Same.md', fm + 'A\n');
+    await api.createNote('FolderB/Same.md', fm + 'B\n');
+    await api.createNote('SwitcherCurrent.md', fm + 'current\n');
     await ws.vault.refreshFiles();
-    await ws.open('FolderB/Same.md');
-    await ws.open('FolderA/Same.md');
-    await ws.open('SwitcherCurrent.md');
-  });
-  await sleep(100);
-  await chord('o');
-  await sleep(150);
-  const row = await run(() => {
-    const el = [...document.querySelectorAll('.suggestion-item')].find((e) => e.textContent.includes('Same') && e.textContent.includes('FolderB'));
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { x: r.x + 24, y: r.y + r.height / 2 };
-  });
-  check(!!row, 'quick switcher lists FolderB/Same on an empty query');
-  if (row) {
-    await move(row);
-    await sleep(60);
-    await press('Tab');
-    await sleep(80);
-    await press('Enter');
-    await sleep(150);
-    const active = await run(() => ws.active.path);
-    check(active === 'FolderB/Same.md', `Tab then Enter opens the hovered Same note, opened ${active}`);
+  }, fm);
+  for (const mode of ['live', 'source', 'reading']) {
+    await run(async mode => {
+      await ws.open('SwitcherCurrent.md'); ws.recent=[];
+      await ws.open('FolderB/Same.md'); await ws.open('FolderA/Same.md'); await ws.open('SwitcherCurrent.md');
+      ws.setMode(mode);
+    }, mode);
+    await sleep(100);
+    await chord('o'); await sleep(80);
+    const row = await run(() => {
+      const el = [...document.querySelectorAll('.suggestion-item')].find(e => e.textContent.includes('Same') && e.textContent.includes('FolderB'));
+      if (!el) return null;
+      const r = el.getBoundingClientRect(); return { x: r.x + 24, y: r.y + r.height / 2 };
+    });
+    check(!!row, `${mode}: quick switcher lists FolderB/Same on an empty query`);
+    if (row) {
+      await move(row); await press('Tab'); await sleep(80);
+      check(await run(() => document.querySelector('.suggestion-item.is-selected')?.textContent.includes('FolderB') && document.querySelector('.prompt-input').value === 'Same'), `${mode}: Tab completes the name and retains the highlighted path`);
+      await press('Tab');
+      check(await run(() => document.querySelector('.suggestion-item.is-selected')?.textContent.includes('FolderB')), `${mode}: repeated Tab retains the same path without moving the pointer`);
+      await press('Enter'); await sleep(100);
+      check(await run(() => ws.active.path === 'FolderB/Same.md'), `${mode}: Tab then Enter opens the hovered Same note`);
+    } else await press('Escape');
   }
+  await run(async fm => {
+    const {api} = await import('/src/api.ts');
+    for (let i=0;i<51;i++) { await api.createFolder('Tie'+i); await api.createNote('Tie'+i+'/Same.md',fm+'tie'); }
+    await api.createFolder('ZZZ'); await api.createNote('ZZZ/Same.md',fm+'last'); await ws.vault.refreshFiles();
+    await ws.open('ZZZ/Same.md'); await ws.open('SwitcherCurrent.md');
+  },fm);
+  await chord('o'); await sleep(80);
+  const cappedRow = await run(() => {
+    const el=[...document.querySelectorAll('.suggestion-item')].find(e=>e.textContent.includes('ZZZ'));
+    const r=el.getBoundingClientRect(); return {x:r.x+24,y:r.y+r.height/2};
+  });
+  await move(cappedRow); await press('Tab'); await sleep(80);
+  check(await run(()=>document.querySelector('.suggestion-item.is-selected')?.textContent.includes('ZZZ') && document.querySelectorAll('.suggestion-item').length===50), 'Tab retains the selected path even beyond the fuzzy result limit');
+  await press('Enter'); await sleep(100);
+  check(await run(()=>ws.active.path==='ZZZ/Same.md'), 'Enter opens the retained path beyond the fuzzy result limit');
 });
 
 assert.deepEqual(failures, [], failures.join('\n'));
