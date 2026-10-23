@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { edgeCurve, readCanvas } from "./model";
+import { closestSide, edgeCurve, readCanvas } from "./model";
 
 test("projects damaged and future canvases without modifying the input", () => {
   for (const source of ["", "{", "{}", "null", "[]", '{"nodes":[null,{}, {"id":"future","type":"future"}],"edges":[null]}']) expect(readCanvas(source)).toEqual({ nodes: [], edges: [] });
@@ -32,4 +32,11 @@ test("omitted edge sides face the other card in every direction; explicit sides 
     expect(curve.startsWith(start) && curve.endsWith(end)).toBe(true);
   }
   expect(edgeCurve(a, { ...a, y: 780 }, { ...edge, fromSide: "left", toSide: "right" }).path).toMatch(/^M100,570 .*L300,830$/);
+});
+
+test("connection sides snap to the nearest border, including the center tie", () => {
+  const n = { id: "a", type: "text", x: 100, y: 50, width: 220, height: 140 } as const;
+  expect(closestSide(n, 210, 120)).toBe("top");
+  for (const [x, y, side] of [[102, 100, "left"], [318, 100, "right"], [180, 52, "top"], [180, 188, "bottom"]] as const)
+    expect(closestSide(n, x, y)).toBe(side);
 });

@@ -1,8 +1,8 @@
-import type { CanvasNode } from "./model";
+import type { CanvasEdge, CanvasNode } from "./model";
 
 // Keep raw records separate from the tolerant rendering projection. Only the
-// card fields actually edited are patched; unknown records/keys retain their order.
-export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = []) {
+// fields actually edited are patched; unknown records/keys retain their order.
+export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = [], edges: CanvasEdge[] = []) {
   let data;
   try { data = JSON.parse(source); } catch { data = {}; }
   if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
@@ -16,11 +16,19 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
     }
     return n;
   });
-  if (deleted.size && Array.isArray(data.edges)) data.edges = data.edges.filter((e: { fromNode?: string; toNode?: string } | null) => !e || !deleted.has(e.fromNode!) && !deleted.has(e.toNode!));
+  if (deleted.size && Array.isArray(data.edges)) data.edges = data.edges.filter((e: CanvasEdge | null) => !e || !deleted.has(e.id) && !deleted.has(e.fromNode) && !deleted.has(e.toNode));
   if (added.length) {
     if (!Array.isArray(data.nodes)) data.nodes = [];
     data.nodes.push(...added);
     if (!("edges" in data)) data.edges = [];
+  }
+  if (edges.length) {
+    if (!Array.isArray(data.edges)) data.edges = [];
+    for (const edge of edges) {
+      const old = data.edges.find((e: CanvasEdge | null) => e?.id === edge.id);
+      if (old) for (const key of ["fromNode", "fromSide", "toNode", "toSide"] as const) { if (key in edge) old[key] = edge[key]; }
+      else data.edges.push(edge);
+    }
   }
   return format(data);
 }

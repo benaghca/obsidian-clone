@@ -44,6 +44,10 @@ export function readCanvas(text: string): { nodes: CanvasNode[]; edges: CanvasEd
 }
 const vectors: Record<Side, [number, number]> = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
 const sideOf = (s: unknown, fallback: Side): Side => typeof s === "string" && Object.hasOwn(vectors, s) ? s as Side : fallback;
+export function closestSide(n: CanvasNode, x: number, y: number): Side {
+  const distances = { top: Math.abs(y - n.y), right: Math.abs(x - n.x - n.width), bottom: Math.abs(y - n.y - n.height), left: Math.abs(x - n.x) };
+  return (Object.keys(distances) as Side[]).reduce((a, b) => distances[a] <= distances[b] ? a : b);
+}
 export function edgeCurve(a: CanvasNode, b: CanvasNode, edge: CanvasEdge) {
   const dx = b.x + b.width / 2 - a.x - a.width / 2, dy = b.y + b.height / 2 - a.y - a.height / 2;
   const horizontal = Math.abs(dx) > Math.abs(dy);
@@ -54,5 +58,5 @@ export function edgeCurve(a: CanvasNode, b: CanvasNode, edge: CanvasEdge) {
   const start = [p[0] + u[0] * 7, p[1] + u[1] * 7], end = [q[0] + v[0] * 7, q[1] + v[1] * 7];
   const bend = Math.max(50, Math.max(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) / 2);
   const c = [start[0] + u[0] * bend, start[1] + u[1] * bend], d = [end[0] + v[0] * bend, end[1] + v[1] * bend];
-  return { path: `M${p} L${start} M${start} C${c} ${d} ${end} M${end} L${q}`, x: (start[0] + 3 * c[0] + 3 * d[0] + end[0]) / 8, y: (start[1] + 3 * c[1] + 3 * d[1] + end[1]) / 8 };
+  return { path: `M${p} L${start} M${start} C${c} ${d} ${end} M${end} L${q}`, x: (start[0] + 3 * c[0] + 3 * d[0] + end[0]) / 8, y: (start[1] + 3 * c[1] + 3 * d[1] + end[1]) / 8, p, q, from, to };
 }
