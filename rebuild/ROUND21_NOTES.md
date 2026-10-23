@@ -201,3 +201,37 @@ excluding `/gen/`; JSON and mjs counted separately. Versus `1543bd7`:
 
 Part A complete with the attachment baseline limitation documented above.
 Stop here; Part B requires a separate message.
+
+# Part B — three small fixes
+
+Baseline: completed Part A, `ad0480b`; same worktree and branch. Local
+commits only. The later explicit Part B request supersedes the initial
+Part-A-only stop instruction.
+
+## 1. Folding at the absolute bottom: observation, no production change
+
+Observed Obsidian 1.14.4 again with headless Ozone, a new private HOME/XDG/
+profile and scratch vault under ignored `node_modules/.round21b`, inside
+`unshare -Urn` with only loopback. The frontmatter note contains 160 lines
+before a final H2 and eight body lines. At 1280×800, scroll all the way to
+the bottom, move onto the fold arrow, click, then click again at exactly
+the same coordinates with no intervening mouse movement.
+
+Obsidian clamps its scroll position and the heading moves down:
+
+- Source: **163.05 → 379.05px (+216px)**; scrollTop **3883 → 3667**.
+- Live Preview: **147.23 → 363.23px (+216px)**; scrollTop **3910 → 3694**.
+- Reading: **155.14 → 363.14px (+208px)**; scrollTop **3918 → 3710**.
+
+The stationary second click misses and leaves the section folded in every
+mode. Obsidian already reserves half a viewport below editing content;
+that does not prevent clamping at the absolute bottom. Grove reproduces
+the same behavior: **+171px Live Preview**, **+192px Source/Reading** in
+this fixture (its font/line geometry differs). Moving to the relocated
+arrow unfolds normally.
+
+Per the brief's explicit observation gate, **no production folding or
+padding change was made**. `scripts/test-round21b.mjs`, wired into
+`npm test`, verifies these three cases in every mode with real CDP mouse
+input; nine named checks pass. Existing stationary fold/unfold behavior
+away from the clamping boundary remains covered by the geometry suite.
