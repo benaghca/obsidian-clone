@@ -1,0 +1,94 @@
+import { EditorView } from "@codemirror/view";
+import { createNoteState } from "../editor/editor";
+import { IMAGE_EXT } from "../editor/embeds";
+import type { EditorHost } from "../editor/host";
+import { parentDir } from "../paths";
+import { dragPointer, h, iconButton, pressable } from "../shell/dom";
+import { icon } from "../shell/icons";
+import { hints, openPrompt, pickFrom, suggestionText } from "../shell/prompt";
+import { switcherItems } from "../shell/switcherItems";
+import type { Workspace } from "../workspace";
+import type { CanvasNode } from "./model";
+
+export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode) => void) {
+  let gone = false, cancelDrag: (() => void) | undefined;
+  const point = (x?: number, y?: number) => {
+    const r = el.getBoundingClientRect(), m = new DOMMatrix(getComputedStyle(world).transform);
+    return { x: Math.round(((x ?? r.left + r.width / 2) - r.left - m.e) / m.a), y: Math.round(((y ?? r.top + r.height / 2) - r.top - m.f) / m.a) };
+  };
+  function insert(type: "text" | "file", p: { x: number; y: number }, width = 250, height = 60, file?: string) {
+    if (gone) return;
+    add({ id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), x: p.x - width / 2, y: p.y - height / 2, width, height, type, ...(file ? { file } : { text: "" }) });
+  }
+  function pickNote(p = point()) {
+    const notes = ws.vault.includedNotes();
+    openPrompt({
+      placeholder: "Find a note...", emptyText: "No notes found.", instructions: hints("to add"),
+      items: query => switcherItems(query, notes, [...ws.recent, ...notes.map(n => n.path)], null).filter(item => item.path !== null),
+      render: (item, row) => suggestionText(row, item.name, item.indices, parentDir(item.path!)),
+      choose: item => insert("file", p, 400, 400, item.path!),
+    });
+  }
+  function pickMedia(p = point()) {
+    pickFrom(ws.vault.files.filter(f => !f.is_dir && IMAGE_EXT.test(f.path) && !ws.vault.isExcluded(f.path)), f => f.path, {
+      placeholder: "Find media...", emptyText: "No media found.", enter: "to add",
+      async choose(file) {
+        const held = ws.embeds.image(file.path);
+        try {
+          const img = new Image(); img.src = await held.url; await img.decode();
+          const ratio = 400 / Math.max(img.naturalWidth, img.naturalHeight);
+          insert("file", p, Math.round(img.naturalWidth * ratio), Math.round(img.naturalHeight * ratio), file.path);
+        } catch (err) { console.warn(`Could not add ${file.path}`, err); }
+        finally { held.release(); }
+      },
+    });
+  }
+  const toolbar = h("div", { class: "canvas-card-menu", role: "toolbar", "aria-label": "Add cards" });
+  for (const [label, glyph, action] of [
+    ["Drag to add card", "sticky-note", (p: { x: number; y: number }) => insert("text", p)],
+    ["Drag to add note from vault", "file-text", pickNote],
+    ["Drag to add media from vault", "file-image", pickMedia],
+  ] as const) {
+    let dragged = false;
+    const run = (p = point()) => { el.focus({ preventScroll: true }); action(p); };
+    const button = pressable(iconButton(icon(glyph, 24), label), e => { if (!dragged || e.type === "keydown") run(); });
+    button.addEventListener("pointerdown", e => {
+      if (e.button !== 0) return;
+      dragged = false; cancelDrag?.();
+      let drop = point(e.clientX, e.clientY), end = e;
+      cancelDrag = dragPointer(e, button, move => {
+        dragged ||= Math.hypot(move.clientX - e.clientX, move.clientY - e.clientY) >= 3;
+        end = move; drop = point(move.clientX, move.clientY);
+      }, cancelled => { cancelDrag = undefined; if (dragged && !cancelled && el.contains(document.elementFromPoint(end.clientX, end.clientY))) run(drop); }, false);
+    });
+    button.setAttribute("role", "button"); toolbar.append(button);
+  }
+  el.append(toolbar);
+  const doubleClick = (e: MouseEvent) => {
+    if (e.isTrusted && !e.defaultPrevented && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-controls, .canvas-card-menu")) insert("text", point(e.clientX, e.clientY));
+  };
+  el.addEventListener("dblclick", doubleClick);
+  return () => { gone = true; cancelDrag?.(); toolbar.remove(); el.removeEventListener("dblclick", doubleClick); };
+}
+
+// A temporary note editor owns only the card's Markdown, never a vault note.
+export function editTextCard(card: HTMLElement, content: HTMLElement, text: string, host: EditorHost,
+  changed: (text: string) => void, finished: (paint: boolean) => void) {
+  const events = new AbortController();
+  let stopped = false;
+  const stop = (paint = true) => {
+    if (stopped) return;
+    stopped = true; events.abort(); view.destroy(); card.classList.remove("is-editing"); finished(paint);
+  };
+  content.replaceChildren(); content.classList.remove("is-reading-mode"); card.classList.add("is-editing");
+  const view = new EditorView({ parent: content, state: createNoteState({ doc: text, host, extensions: [
+    EditorView.updateListener.of(update => { if (update.docChanged) changed(update.state.doc.toString()); }),
+  ] }) });
+  view.dom.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    e.preventDefault(); e.stopPropagation(); stop(); card.closest<HTMLElement>(".canvas-view")?.focus();
+  }, { capture: true, signal: events.signal });
+  document.addEventListener("pointerdown", e => { if (!card.contains(e.target as Node)) stop(); }, { capture: true, signal: events.signal });
+  view.focus();
+  return stop;
+}

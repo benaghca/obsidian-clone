@@ -92,3 +92,12 @@
 .canvas-node-resizer[data-resize="topleft"], .canvas-node-resizer[data-resize="bottomright"] { cursor: nwse-resize; }
 .canvas-node-resizer[data-resize="topright"], .canvas-node-resizer[data-resize="bottomleft"] { cursor: nesw-resize; }
 .canvas-selection { position: absolute; pointer-events: none; border: 1px solid var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
+
+.canvas-card-menu { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; z-index: 4; padding: 0 4px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
+.canvas-card-menu .clickable-icon { width: 48px; height: 48px; --icon-size: 24px; }
+.canvas-node.is-editing { user-select: text; }
+.canvas-node.is-editing > .canvas-node-resizer { display: none; }
+.canvas-node.is-editing > .canvas-node-content { padding: 0; }
+.canvas-node.is-editing > .canvas-node-content > .cm-editor { min-height: 100%; }
+.canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller > .cm-content { padding: 16px; min-height: 100%; }
+.canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller { overflow: auto; }

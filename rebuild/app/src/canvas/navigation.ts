@@ -58,8 +58,9 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   }
   el.append(controls);
   el.addEventListener("wheel", e => {
+    if (!e.ctrlKey && (e.target as Element).closest(".canvas-node.is-editing")) return;
     e.preventDefault();
-    if (!state || (e.target as Element).closest(".canvas-controls")) return;
+    if (!state || (e.target as Element).closest(".canvas-controls, .canvas-card-menu")) return;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1;
     if (e.ctrlKey) {
       const rect = el.getBoundingClientRect();
@@ -71,7 +72,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     }
   }, { passive: false });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true], .canvas-controls")) return;
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], .cm-editor, .canvas-controls, .canvas-card-menu")) return;
     if (e.code === "Space" || e.key === " ") { e.preventDefault(); space = true; el.classList.add("is-grabbable"); }
     if (e.shiftKey && e.code === "Digit1") { e.preventDefault(); fit(); }
   });
@@ -81,8 +82,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   window.addEventListener("blur", releaseSpace, { signal: events.signal });
   el.addEventListener("pointerdown", e => {
     suppressClick = false;
-    if ((e.target as Element).closest(".canvas-controls")) return;
-    el.focus({ preventScroll: true });
+    if ((e.target as Element).closest(".canvas-controls, .canvas-card-menu")) return;
+    if (!(e.target as Element).closest(".cm-editor")) el.focus({ preventScroll: true });
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();
@@ -97,6 +98,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   const blockClick = (e: MouseEvent) => { if (dragging || suppressClick || space || e.button === 1) { e.preventDefault(); e.stopImmediatePropagation(); } };
   el.addEventListener("click", blockClick, true);
   el.addEventListener("auxclick", blockClick, true);
+  el.addEventListener("dblclick", blockClick, true);
   const size = new ResizeObserver(([entry]) => {
     width = entry.contentRect.width; height = entry.contentRect.height;
     if (!state) fit(); else draw();

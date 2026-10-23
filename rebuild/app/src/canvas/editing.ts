@@ -6,8 +6,8 @@ const sides = ["top", "right", "bottom", "left", "topright", "bottomright", "bot
 export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: CanvasNode[],
   paint: (changed: CanvasNode[]) => void,
   commit: (changed: CanvasNode[], deleted?: Set<string>) => void,
-  history: (redo: boolean) => void) {
-  const selected = new Set<string>();
+  history: (redo: boolean) => void, selectedId?: string) {
+  const selected = new Set<string>(selectedId ? [selectedId] : []);
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
   const events = new AbortController();
   let cancel: (() => void) | undefined, suppress = false;
@@ -36,7 +36,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     suppress = false;
     if (e.defaultPrevented || e.button !== 0 || el.classList.contains("is-grabbable")) return;
     const target = e.target as Element;
-    if (target.closest(".canvas-controls, a, [data-href], input, button")) return;
+    if (target.closest(".canvas-controls, .canvas-card-menu, .is-editing, a, [data-href], input, button")) return;
     const card = target.closest<HTMLElement>(".canvas-node");
     const node = nodes.find(n => n.id === card?.dataset.nodeId);
     const side = target.closest<HTMLElement>("[data-resize]")?.dataset.resize;
@@ -74,7 +74,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       }, cancelled => {
         if (!cancelled && !suppress && removeOnClick) { selected.delete(node.id); selection(); }
         finish(before, cancelled);
-      });
+      }, false);
     } else {
       const initial = e.shiftKey ? new Set(selected) : new Set<string>();
       selected.clear(); initial.forEach(id => selected.add(id)); selection();
@@ -89,7 +89,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         selected.clear(); initial.forEach(id => selected.add(id));
         if (suppress) for (const [id, card] of cards) { const r = card.getBoundingClientRect(); if (r.left < right && r.right > left && r.top < bottom && r.bottom > top) selected.add(id); }
         selection();
-      }, () => { box.remove(); cancel = undefined; });
+      }, () => { box.remove(); cancel = undefined; }, false);
     }
   }, { signal: events.signal });
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
@@ -109,5 +109,6 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       affected.forEach(n => { n.x += direction[0] * step; n.y += direction[1] * step; }); paint(affected); commit(affected);
     } else if (e.key === "Escape") { selected.clear(); selection(); }
   }, { signal: events.signal });
+  selection();
   return () => { cancel?.(); events.abort(); };
 }

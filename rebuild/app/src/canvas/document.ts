@@ -1,16 +1,26 @@
 import type { CanvasNode } from "./model";
 
 // Keep raw records separate from the tolerant rendering projection. Only the
-// geometry actually edited is patched; unknown records/keys retain their order.
-export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>()) {
-  const data = JSON.parse(source);
+// card fields actually edited are patched; unknown records/keys retain their order.
+export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = []) {
+  let data;
+  try { data = JSON.parse(source); } catch { data = {}; }
+  if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
   const changes = new Map(changed.map(n => [n.id, n]));
   if (Array.isArray(data.nodes)) data.nodes = data.nodes.filter((n: CanvasNode | null) => !n || !deleted.has(n.id)).map((n: CanvasNode | null) => {
     const next = n && changes.get(n.id);
-    if (next) for (const key of ["x", "y", "width", "height"] as const) if (n[key] !== next[key]) n[key] = next[key];
+    if (next) {
+      for (const key of ["x", "y", "width", "height"] as const) if (n[key] !== next[key]) n[key] = next[key];
+      if (typeof next.text === "string" && n.text !== next.text) n.text = next.text;
+    }
     return n;
   });
   if (deleted.size && Array.isArray(data.edges)) data.edges = data.edges.filter((e: { fromNode?: string; toNode?: string } | null) => !e || !deleted.has(e.fromNode!) && !deleted.has(e.toNode!));
+  if (added.length) {
+    if (!Array.isArray(data.nodes)) data.nodes = [];
+    data.nodes.push(...added);
+    if (!("edges" in data)) data.edges = [];
+  }
   return format(data);
 }
 // Obsidian's tab-indented JSON: flat records on one line, nested records
