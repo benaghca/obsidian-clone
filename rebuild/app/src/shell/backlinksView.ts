@@ -14,7 +14,7 @@ import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, foldIn, foldToggle, highlighted, hitColumns, pagedRows, section, type SideView } from "./sideView";
+import { afterPaint, pagedRows, resultGroup, resultMatch, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -62,19 +62,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
         const all = byFile.get(path)!;
         const matches = h("div", { class: "search-result-file-matches" });
         pagedRows(matches, all, matchRow, PAGE);
-        const chevron = foldToggle(matches, collapsedFiles.has(path), foldIn(collapsedFiles, path));
-        return h(
-          "div",
-          { class: "search-result" },
-          h(
-            "div",
-            { class: "search-result-file-title", "data-preview-path": path, onclick: () => void ws.open(path) },
-            chevron,
-            h("div", { class: "search-result-file-name" }, noteName(path)),
-            h("span", { class: "search-result-count" }, total(all).toLocaleString()),
-          ),
-          matches,
-        );
+        return resultGroup(path, matches, total(all).toLocaleString(), collapsedFiles, () => void ws.open(path));
       }),
     );
     if (!files.length) into.append(h("div", { class: "search-empty-state" }, emptyText));
@@ -83,20 +71,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
 
   const total = (mentions: Mention[]) => mentions.reduce((n, m) => n + m.count, 0);
 
-  function matchRow(m: Mention) {
-    const spans = m.spans();
-    return h(
-      "div",
-      {
-        class: "search-result-file-match",
-        "data-preview-path": m.from,
-        onclick: (event: MouseEvent) => {
-          void ws.open(m.from, { line: m.line, ch: hitColumns(event, spans) });
-        },
-      },
-      ...highlighted(m.text, spans),
-    );
-  }
+  const matchRow = (m: Mention) => resultMatch(ws, m.from, m, m.spans());
 
   function renderLinked() {
     const path = pathOf();
