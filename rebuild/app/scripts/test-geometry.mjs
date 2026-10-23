@@ -56,10 +56,17 @@ await withBrowser(async ({ send, run, press, move, click, check }) => {
       await move({ x: row.x, y: row.top - 4 });
       check(await run(() => ws.view.dom.querySelector('.cm-fold-indicator.mod-hover').hidden), `${label}: no arrow 4px above ${name}`);
       await move({ x: row.x, y: (row.top + row.bottom) / 2 });
-      await click('.cm-fold-indicator.mod-hover:not([hidden])');
+      const arrow = await run(() => {
+        const r = ws.view.dom.querySelector('.cm-fold-indicator.mod-hover').getBoundingClientRect();
+        return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+      });
+      await click(arrow);
       check(await run(() => !!ws.view.dom.querySelector('.cm-foldPlaceholder')), `${label}: native arrow click folds ${name}`);
-      await click('.cm-foldPlaceholder');
-      await sleep(50);
+      // Second click at exactly the same point, without any mouse move.
+      for (const type of ['mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, ...arrow, button: 'left', clickCount: 1 });
+      await sleep(80);
+      check(await run(() => !ws.view.dom.querySelector('.cm-foldPlaceholder') && !ws.view.dom.querySelector('.cm-fold-indicator.mod-hover').hidden), `${label}: arrow remains visible after unfold without pointer movement (${name})`);
+      await geometry(label + ' unfolded ' + name);
     }
   }
   // Start sampling at the actual trusted input event, not at a CDP round trip.
