@@ -192,7 +192,6 @@
   --anim-ease-in: cubic-bezier(0.3, 0, 1, 1);
   --anim-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
   --anim-offset: 4px;
-  --anim-scale-from: 0.98;
   --anim-note-opacity-from: 0.6;
 }
 

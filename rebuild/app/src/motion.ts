@@ -2,7 +2,7 @@
 // styles/theme.css, which collapse to 0ms under prefers-reduced-motion, so
 // nothing here hard-codes timing. None of this runs on a keystroke.
 
-type Speed = "fast" | "moderate" | "slow" | "sidebar";
+type Speed = "fast" | "moderate" | "sidebar";
 type Curve = "out" | "in" | "in-out";
 
 const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -90,64 +90,3 @@ export function slideHeight(el: HTMLElement, open: boolean, fromZero = false): P
     () => false,
   );
 }
-
-/** A CSS cubic-bezier() timing function as a JS function of progress 0..1. */
-function bezier(css: string): (t: number) => number {
-  const m = /cubic-bezier\(([^)]+)\)/.exec(css);
-  const [x1, y1, x2, y2] = m ? m[1].split(",").map(Number) : [0.25, 0.1, 0.25, 1];
-  const curve = (a1: number, a2: number, t: number) => 3 * (1 - t) * (1 - t) * t * a1 + 3 * (1 - t) * t * t * a2 + t * t * t;
-  return (x) => {
-    // Bisection on x(t); 20 rounds is far below a pixel.
-    let lo = 0;
-    let hi = 1;
-    for (let i = 0; i < 20; i++) {
-      const mid = (lo + hi) / 2;
-      if (curve(x1, x2, mid) < x) lo = mid;
-      else hi = mid;
-    }
-    return curve(y1, y2, (lo + hi) / 2);
-  };
-}
-
-const running = new WeakMap<HTMLElement, (arrived: boolean) => void>();
-const INTERRUPTS = ["wheel", "pointerdown", "keydown", "touchstart"];
-
-/**
- * Smoothly scroll `el` to `target` with the slow duration and ease-out curve.
- * A function target is re-read every frame, so it can follow content whose
- * position settles while scrolling. Any wheel, pointer or key input from the
- * user stops it where it is. Resolves true if it arrived, false if stopped.
- */
-export function smoothScrollTo(el: HTMLElement, target: number | (() => number)): Promise<boolean> {
-  running.get(el)?.(false);
-  const top = typeof target === "number" ? () => target : target;
-  const ms = duration("slow");
-  const start = el.scrollTop;
-  if (ms <= 0 || Math.abs(top() - start) < 1) {
-    el.scrollTop = top();
-    return Promise.resolve(true);
-  }
-  const ease = bezier(easing("out"));
-  return new Promise((resolve) => {
-    let frame = 0;
-    const t0 = performance.now();
-    const stop = (arrived = false) => {
-      cancelAnimationFrame(frame);
-      running.delete(el);
-      for (const type of INTERRUPTS) el.removeEventListener(type, interrupt);
-      resolve(arrived);
-    };
-    const interrupt = () => stop(false);
-    const step = (now: number) => {
-      const p = Math.min(1, (now - t0) / ms);
-      el.scrollTop = start + (top() - start) * ease(p);
-      if (p < 1) frame = requestAnimationFrame(step);
-      else stop(true);
-    };
-    for (const type of INTERRUPTS) el.addEventListener(type, interrupt, { passive: true });
-    running.set(el, stop);
-    frame = requestAnimationFrame(step);
-  });
-}
-
-export const nextFrame = () => new Promise<number>((r) => requestAnimationFrame(r));
