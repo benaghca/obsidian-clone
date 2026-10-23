@@ -589,14 +589,21 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       renaming = true;
       try {
         await renameFile(ws, path, title.textContent ?? "");
+        title.textContent = group.active.path ? noteName(group.active.path) : "";
         fieldError(title, "");
         return true;
       } catch (err) {
-        if (group.active.path === path) fieldError(title, String(err instanceof Error ? err.message : err));
+        if (group.active.path === path) fieldError(title, String(err instanceof Error ? err.message : err), cancelTitle);
         return false;
       } finally { renaming = false; }
     }
 
+    function cancelTitle() {
+      title.textContent = group.active.path ? noteName(group.active.path) : "";
+      title.classList.remove("is-renaming");
+      fieldError(title, "");
+      ws.editors.viewOf(group).focus();
+    }
     title.addEventListener("keydown", (e) => {
       const view = ws.editors.viewOf(group);
       if (e.key === "Enter" || e.key === "ArrowDown") {
@@ -608,9 +615,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
           view.dispatch({ selection: { anchor: 0 } });
         });
       } else if (e.key === "Escape") {
-        title.textContent = group.active.path ? noteName(group.active.path) : "";
-        fieldError(title, "");
-        view.focus();
+        cancelTitle();
       }
     });
     title.addEventListener("blur", () => {
@@ -646,6 +651,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       holdColumn,
       focusTitle,
       dispose() {
+        fieldError(title, "");
         hold?.cancel();
         backlinks?.setActive(false);
         renderImage(null);

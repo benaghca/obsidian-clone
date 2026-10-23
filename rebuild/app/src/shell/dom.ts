@@ -66,8 +66,12 @@ export function dragPointer(down: PointerEvent, el: HTMLElement, apply: (e: Poin
   el.addEventListener("pointercancel", up, listening);
 }
 
-/** A rename error beneath its field; an empty message clears it. */
-export function fieldError(field: HTMLElement, message: string) {
+const errorKeys = new WeakMap<HTMLElement, AbortController>();
+
+/** A rename error beneath its field; only a failed rename listens for Escape outside it. */
+export function fieldError(field: HTMLElement, message: string, cancel?: () => void) {
+  errorKeys.get(field)?.abort();
+  errorKeys.delete(field);
   let error = field.nextElementSibling as HTMLElement | null;
   if (!error?.classList.contains("rename-error")) error = null;
   if (message) field.setAttribute("aria-invalid", "true");
@@ -75,6 +79,18 @@ export function fieldError(field: HTMLElement, message: string) {
   if (!message) return error?.remove();
   if (!error) field.after(error = h("div", { class: "rename-error", role: "alert" }));
   error.textContent = message;
+  if (cancel) {
+    const controller = new AbortController();
+    errorKeys.set(field, controller);
+    document.addEventListener("keydown", (event) => {
+      if (!field.isConnected) return fieldError(field, "");
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      fieldError(field, "");
+      cancel();
+    }, { capture: true, signal: controller.signal });
+  }
 }
 
 /** Inline rename: Enter or blur commits; an error keeps the draft editable, Escape cancels. */
@@ -98,7 +114,7 @@ export function editInPlace(label: HTMLElement, commit: (text: string) => void |
     if (pending || closed) return;
     pending = true;
     try { await commit(label.textContent ?? ""); close(); }
-    catch (err) { if (!closed && label.isConnected) fieldError(label, String(err instanceof Error ? err.message : err)); }
+    catch (err) { if (!closed && label.isConnected) fieldError(label, String(err instanceof Error ? err.message : err), () => { close(); label.blur(); }); }
     finally { pending = false; }
   };
   label.addEventListener("blur", finish);

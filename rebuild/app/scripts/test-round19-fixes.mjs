@@ -79,6 +79,35 @@ await withBrowser(async ({ send, run, key, press, chord, move, click, fill, poin
   await click(await textPoint('value')); await press('Backspace');
   assert.equal(await doc(), '---\nnested:\n   value\n---\nBody');
   check(true, 'source: Backspace at frontmatter indent deletes one character');
+
+  for (const mode of ['live', 'source', 'reading']) {
+    await fixture('Rename body.', mode);
+    const path = await run(() => ws.active.path), name = path.slice(0, -3);
+    await fill('.inline-title', 'Bad/name');
+    await click(await textPoint('Rename body.', 3));
+    check(await run(() => document.querySelector('.inline-title').getAttribute('aria-invalid') === 'true'), mode + ': failed title rename survives blur');
+    await press('Escape');
+    check(await run(name => document.querySelector('.inline-title').textContent === name && !document.querySelector('.rename-error'), name), mode + ': Escape cancels blurred title rename');
+    assert.equal(await run(() => ws.active.path), path);
+    await fill('.inline-title', name + ' '); await press('Enter'); await sleep(80);
+    check(await run(name => document.querySelector('.inline-title').textContent === name && !document.querySelector('.rename-error'), name), mode + ': no-op rename displays the trimmed file title');
+    const row = `[data-path="${path}"]`, field = row + ' .tree-item-inner';
+    await run(row => document.querySelector(row).scrollIntoView({ block: 'nearest' }), row);
+    await click(row, 'right');
+    const item = await run(() => {
+      const r = [...document.querySelectorAll('.menu-item')].find(el => el.textContent.includes('Rename')).getBoundingClientRect();
+      return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+    });
+    await click(item); await fill(field, 'Bad:name');
+    await click(await textPoint('Rename body.', 3));
+    check(await run(field => document.querySelector(field).getAttribute('aria-invalid') === 'true', field), mode + ': failed explorer rename survives blur');
+    await press('Escape');
+    check(await run((field, name) => {
+      const f = document.querySelector(field);
+      return !f.isContentEditable && f.textContent === name && !document.querySelector('.rename-error');
+    }, field, name), mode + ': Escape cancels blurred explorer rename');
+    assert.equal(await run(() => ws.active.path), path);
+  }
   const longName = 'VeryLongTitleNoteForPreviewWrappingAndIconOverlapCheck';
   await run(async (fm, longName) => {
     const { api } = await import('/src/api.ts');
