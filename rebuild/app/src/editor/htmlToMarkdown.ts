@@ -87,10 +87,7 @@ export function htmlToMarkdown(html: string): string | null {
       rich = true;
       return wrap(text, /^(B|STRONG)$/.test(tag) ? "**" : /^(I|EM)$/.test(tag) ? "_" : "~~");
     }
-    if (blocks.test(tag)) {
-      if (node.nextElementSibling) rich = true;
-      return block(text);
-    }
+    if (blocks.test(tag)) return block(text);
     return text;
   }
   const result = children(doc.body);

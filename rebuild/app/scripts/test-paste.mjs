@@ -22,7 +22,7 @@ const cases = [
   ['nested quote', '<blockquote><p>quote</p><blockquote>inner</blockquote></blockquote>', '> quote\n> \n> > inner'],
   ['code in quote', '<blockquote><pre>  x\n\n y</pre></blockquote>', '> ```\n>   x\n> \n>  y\n> ```'],
   ['paragraph div break rule', '<p>one<br>two</p><div>three</div><hr>', 'one  \ntwo\n\nthree\n\n---'],
-  ['plain paragraphs', '<p>one</p><p>two</p>', 'one\n\ntwo'],
+  ['plain paragraphs', '<p>one</p><p>two</p>', null],
   ['browser whitespace', '<p>  one\n  <b> two </b>   three &amp; four&nbsp;five</p>', 'one **two** three & four five'],
   ['literal punctuation follows Obsidian', '<p>*star* _under_ [square] \\path | pipe <b>bold</b></p>', '*star* _under_ [square] \\path | pipe **bold**'],
   ['Google Docs wrapper', '<b style="font-weight:normal" id="docs-internal-guid-123"><p>normal <strong>bold</strong></p></b>', 'normal **bold**'],
@@ -33,6 +33,7 @@ const cases = [
   ['table', '<table><tr><th>A</th><th>B</th></tr><tr><td>a|b</td><td><b>bold</b><br>end</td></tr></table>', '|A|B|\n|---|---|\n|a\\|b|**bold**<br>end|'],
   ['table code pipe', '<table><tr><th>A</th></tr><tr><td><code>a|b</code></td></tr></table>', '|A|\n|---|\n|`a\\|b`|'],
   ['plain fragment', '<span>  literal *text*</span>', null],
+  ['multiline editor wrapper', '<div style="font-family:monospace"><div><span style="color:red">line one</span></div><div>line two</div></div>', null],
   ['editor wrapper', '<div style="font-family:monospace">const value = 1;</div>', null],
 ];
 await withBrowser(async ({ send, run, click, chord, key, press, check }) => {
@@ -92,6 +93,9 @@ await withBrowser(async ({ send, run, click, chord, key, press, check }) => {
     await reset(); await paste('<div style="font-family:monospace">literal</div>', '  *literal*\n\n');
     assert.equal(await text(), prefix + 'START\n  *literal*\n\n');
     check(true, `${mode}: unformatted editor HTML falls back to exact plain text`);
+    await reset(); await paste('<div style="font-family:monospace"><div>one</div><div>two</div></div>', '  one\n  two\n');
+    assert.equal(await text(), prefix + 'START\n  one\n  two\n');
+    check(true, `${mode}: multiline editor wrappers preserve plain indentation and line breaks`);
     await reset();
     await run(async () => { const {settings} = await import('/src/settings/store.ts'); await settings.set('app.json', 'autoConvertHTML', false); });
     await paste('<b>bold</b>', 'PLAIN'); assert.equal(await text(), prefix + 'START\nPLAIN');

@@ -45,7 +45,8 @@ export async function paste(view: EditorView, plain: boolean) {
   try {
     if (!plain && navigator.clipboard.read) {
       const items = await navigator.clipboard.read().catch(() => []);
-      const item = items.find(item => item.types.includes("text/html"));
+      const item = items.some(item => item.types.some(type => type.startsWith("image/")))
+        ? undefined : items.find(item => item.types.includes("text/html"));
       if (item) {
         const html = await (await item.getType("text/html")).text();
         const text = item.types.includes("text/plain") ? await (await item.getType("text/plain")).text() : "";
@@ -53,7 +54,7 @@ export async function paste(view: EditorView, plain: boolean) {
       }
     }
     const text = await navigator.clipboard.readText();
-    insertText(view, text);
+    if (plain || !insertUrl(view, text)) insertText(view, text);
   } catch (err) {
     console.warn("Grove could not read the clipboard", err);
   }
@@ -89,6 +90,18 @@ function insertRich(view: EditorView, html: string, plain: string): boolean {
   return true;
 }
 
+function insertUrl(view: EditorView, text: string): boolean {
+  // URL paste keeps the word selected; the caret change belongs to Part B.
+  if (/^(?:https?:\/\/|mailto:|www\.)\S+$/i.test(text) && view.state.selection.ranges.some(r => !r.empty) && !protectedSelection(view)) {
+    view.dispatch(view.state.changeByRange(r => ({
+      changes: { from: r.from, to: r.to, insert: r.empty ? text : `[${view.state.sliceDoc(r.from, r.to)}](${text})` },
+      range: r.empty ? EditorSelection.cursor(r.from + text.length) : EditorSelection.range(r.from + 1, r.to + 1),
+    })), { userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full") });
+    return true;
+  }
+  return false;
+}
+
 /** One paste handler, shared by native keyboard and context-menu paste. */
 export const clipboard = [
   keymap.of([{ key: "Mod-Shift-v", run: view => { void paste(view, true); return true; } }]),
@@ -98,14 +111,7 @@ export const clipboard = [
     if (!data || data.files.length) return false;
     const text = data.getData("text/plain");
     if (insertRich(view, data.getData("text/html"), text)) return true;
-    // URL paste keeps the word selected; the caret change belongs to Part B.
-    if (/^(?:https?:\/\/|mailto:|www\.)\S+$/i.test(text) && view.state.selection.ranges.some(r => !r.empty) && !protectedSelection(view)) {
-      view.dispatch(view.state.changeByRange(r => ({
-        changes: { from: r.from, to: r.to, insert: r.empty ? text : `[${view.state.sliceDoc(r.from, r.to)}](${text})` },
-        range: r.empty ? EditorSelection.cursor(r.from + text.length) : EditorSelection.range(r.from + 1, r.to + 1),
-      })), { userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full") });
-      return true;
-    }
+    if (insertUrl(view, text)) return true;
     return false; // CodeMirror retains its ordinary, linewise and multi-cursor paste.
   } }),
 ];
