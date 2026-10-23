@@ -7,6 +7,23 @@ const clean = (s: string) => s.replace(/ +\n/g, "\n").replace(/\n +/g, "\n").rep
 const destination = (s: string) => s.replace(/ /g, "%20").replace(/\(/g, "%28").replace(/\)/g, "%29");
 const wrap = (text: string, marker: string) => text.trim() ? text.replace(/^(\s*)([\s\S]*?)(\s*)$/, `$1${marker}$2${marker}$3`) : text;
 
+// Preformatted HTML keeps literal whitespace, plus DOM line boundaries.
+function preText(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) return node.textContent ?? "";
+  if (!(node instanceof Element) || skip.test(node.tagName)) return "";
+  if (node.tagName === "BR") return "\n";
+  let text = "", previousBlock = false;
+  for (const child of node.childNodes) {
+    const block = child instanceof Element && blocks.test(child.tagName);
+    const part = preText(child) || (block ? "\n" : "");
+    if (!part) continue;
+    if (text && (block || previousBlock) && !text.endsWith("\n") && (block || !part.startsWith("\n"))) text += "\n";
+    text += part;
+    previousBlock = block;
+  }
+  return text;
+}
+
 /** null means the clipboard has no Markdown formatting: keep text/plain exactly. */
 export function htmlToMarkdown(html: string): string | null {
   const doc = new DOMParser().parseFromString(html, "text/html");
@@ -52,7 +69,7 @@ export function htmlToMarkdown(html: string): string | null {
       rich = true;
       const code = node.querySelector("code") ?? node;
       const language = (code.className + " " + node.className).match(/\blanguage-([\w+-]+)/)?.[1] ?? "";
-      const text = (code.textContent ?? "").replace(/\r\n?/g, "\n").replace(/\n$/, "");
+      const text = preText(code).replace(/\r\n?/g, "\n").replace(/\n$/, "");
       const fence = "`".repeat(Math.max(3, ...Array.from(text.matchAll(/`+/g), m => m[0].length + 1)));
       // Do not run block whitespace cleanup over literal code.
       return block(literal(`${fence}${language}\n${text}\n${fence}`));
