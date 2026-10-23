@@ -14,6 +14,7 @@ import "./styles/properties.css";
 import "./styles/motion.css";
 import "./styles/settings.css";
 import "./styles/graph.css";
+import "./styles/canvas.css";
 import { isTauri } from "./api";
 import { type AppParts, registerAppCommands } from "./appCommands";
 import { Bookmarks } from "./bookmarks";

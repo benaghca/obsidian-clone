@@ -1,0 +1,61 @@
+.canvas-view {
+  position: relative;
+  overflow: hidden;
+  background-color: var(--background-primary);
+  background-image: radial-gradient(circle, var(--background-modifier-border) var(--canvas-dot-size, .5px), transparent var(--canvas-dot-size, .5px));
+  padding: 0;
+}
+.canvas-world { position: absolute; transform-origin: 0 0; }
+.canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; }
+.canvas-node {
+  position: absolute;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%);
+}
+.canvas-node.is-colored {
+  border-color: color-mix(in srgb, var(--canvas-color) 70%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--canvas-color) 70%, transparent), 0 .5px 1px .5px rgb(0 0 0 / 10%);
+}
+.canvas-node-content {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 16px;
+  border-radius: inherit;
+  font-size: 16px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.canvas-node.is-colored > .canvas-node-content { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); }
+.canvas-node-content img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.canvas-node-file:has(img) > .canvas-node-content { padding: 0; display: grid; place-items: center; }
+.canvas-node-group { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); z-index: -1; }
+.canvas-group-label {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: -1px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: var(--canvas-color);
+  color: white;
+  font-size: 22.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.canvas-edge-label {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--background-primary);
+  font-size: 20px;
+  white-space: nowrap;
+}
+.canvas-node .embed-actions, .canvas-node .markdown-embed-link, .canvas-node .image-resize-corner { display: none; }
+
+.canvas-file-label { position: absolute; bottom: calc(100% + 4px); color: var(--text-faint); font-size: 14px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.canvas-node-content .cm-h1 { font-size: 25.888px;
+  line-height: 1.2; }
+.canvas-node-file .canvas-node-content > img { width: 100%; height: 100%; }

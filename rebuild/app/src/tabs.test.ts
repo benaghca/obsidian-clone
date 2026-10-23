@@ -56,6 +56,7 @@ describe("tabs", () => {
     expect(back.memory?.selection?.main.head).toBe(5);
     expect(loadTab({ ...saved, path: "Gone.md" }, blank, isNote)).toBeNull();
     expect(loadTab(saveTab({ ...blank(), type: "localgraph", viewFile: "Gone.md" }), blank, isNote)).toMatchObject({ type: "localgraph", viewFile: null });
+    expect(loadTab(saveTab({ ...blank(), type: "canvas", viewFile: "Board.canvas" }), blank, isNote)).toMatchObject({ type: "canvas", path: null, viewFile: "Board.canvas" });
   });
 
   it("links tabs (Link with tab...): linked tabs follow the note one opens, views stay, a lone link goes", () => {

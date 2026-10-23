@@ -94,6 +94,7 @@ const ICONS = {
   info: lucide.Info,
   italic: lucide.Italic,
   keyboard: lucide.Keyboard,
+  "layout-dashboard": lucide.LayoutDashboard,
   link: lucide.Link,
   "link-2": lucide.Link2,
   list: lucide.List,

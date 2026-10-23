@@ -329,6 +329,17 @@ mod tests {
     }
 
     #[test]
+    fn canvas_is_listed_and_read_without_rewriting_unknown_fields() {
+        let dir = tmp_dir("canvas");
+        let source = "{\"future\":42,\"nodes\":[],\"edges\":[] }\n";
+        fs::write(dir.path.join("Board.canvas"), source).unwrap();
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        assert!(vault.list_files().iter().any(|f| f.path == "Board.canvas"));
+        assert_eq!(vault.read_note("Board.canvas").unwrap(), source);
+        assert_eq!(fs::read_to_string(dir.path.join("Board.canvas")).unwrap(), source);
+    }
+
+    #[test]
     fn write_create_rename_and_trash_round_trip() {
         let dir = tmp_dir("vault");
         fs::write(dir.path.join("Old.md"), "see [[Target]]\n").unwrap();
