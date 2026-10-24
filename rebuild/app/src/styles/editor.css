@@ -253,7 +253,7 @@
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul {
   max-height: 300px;
-  padding: 4px;
+  padding: 6.5px 4px;
   margin: 0;
   font-family: var(--font-interface);
 }
@@ -314,9 +314,10 @@
   color: var(--text-muted);
 }
 .cm-link-suggest-footer {
-  padding: 6px 12px;
+  padding: 8px 12px;
   border-top: 1px solid var(--background-modifier-border);
   font-size: var(--font-ui-smaller);
+  line-height: 15.6px;
   color: var(--text-muted);
   white-space: nowrap;
 }
@@ -547,4 +548,24 @@
 .cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-heading { flex-direction: row; justify-content: space-between; gap: 12px; }
 .cm-editor .cm-tooltip.cm-link-suggest .mod-link-heading .cm-completionDetail { margin-left: auto; }
 .cm-editor .cm-tooltip.cm-link-suggest .mod-link-block .cm-completionLabel { white-space: pre-line; max-height: 4.2em; overflow: hidden; }
-.cm-editor .cm-tooltip.cm-link-suggest:has(.mod-link-heading, .mod-link-block)::after { content: "↵ to accept"; }
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.is-empty,
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.is-empty .cm-completionLabel {
+  color: var(--text-faint);
+  font-size: 15px;
+}
+/* CodeMirror's autocomplete list is at least 250px. The empty heading row is not. */
+.cm-editor .cm-tooltip.cm-link-suggest:has(> ul > li.is-empty) > ul {
+  min-width: 0;
+  width: max-content;
+}
+.cm-editor .cm-tooltip.cm-link-suggest:has(.mod-link-heading, .mod-link-block)::after {
+  content: "↵ to accept";
+  display: block;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  font-size: var(--font-ui-smaller);
+  line-height: 15.6px;
+  color: var(--text-muted);
+  text-align: center;
+}
