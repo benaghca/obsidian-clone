@@ -43,6 +43,7 @@ const ICONS = {
   "chevron-up": lucide.ChevronUp,
   "chevron-down": lucide.ChevronDown,
   "chevron-right": lucide.ChevronRight,
+  "chevron-left": lucide.ChevronLeft,
   "chevrons-down-up": lucide.ChevronsDownUp,
   "chevrons-up-down": lucide.ChevronsUpDown,
   "circle-check": lucide.CircleCheck,

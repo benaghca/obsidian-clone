@@ -1,0 +1,43 @@
+import assert from 'node:assert/strict';
+import {withBrowser,sleep} from './browser.mjs';
+import {notes,bases} from '../../round31-shots/fixtures.mjs';
+import {writeFile} from 'node:fs/promises';
+const shots=new URL('../../round33-shots/',import.meta.url),original=bases['By due.base'];
+await withBrowser(async({run,send,click,point,move,press,fill,shot,check})=>{
+ const wait=async(test,label)=>{for(let i=0;i<150;i++){if(await test())return;await sleep(20);}assert.fail(label);};
+ const source=()=>run(async()=>{const{api}=await import('/src/api.ts');return api.readNote('Later.base');});
+ const choose=async title=>click(await run(title=>{const e=[...document.querySelectorAll('.menu-item')].find(e=>e.querySelector('.menu-item-title')?.textContent===title);const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},title));
+ await run(()=>ws.open('Later.base'));await wait(()=>run(()=>document.querySelector('.bases-notice')?.textContent.includes('No such file')),'missing file state');
+ await run(async(notes,source)=>{const{api}=await import('/src/api.ts');for(const[p,s]of Object.entries({...notes,'Later.base':source}))await api.createNote(p,s);await ws.vault.refreshFiles();},notes,original);
+ await wait(()=>run(()=>document.querySelector('.bases-count')?.textContent==='3 results'),'stale tab loads created base');assert.equal(await run(()=>document.querySelector('.bases-notice').hidden),true);
+ await click('.bases-toolbar [aria-label="Filter"]');await click('[data-scope="view"] [aria-label="Add filter"]');
+ assert.ok(await run(()=>document.querySelector('.bases-filter-picker .is-checked .lucide-file')));assert.ok(await run(()=>getComputedStyle(document.querySelector('.bases-filter-picker .is-checked')).backgroundColor!=='rgba(0, 0, 0, 0)'));
+ assert.equal(await run(()=>document.querySelector('[data-draft]').nextElementSibling.textContent),'links to');assert.equal(await source(),original);await shot('grove-picker');
+ const p=await point('[data-draft]');await move(p);for(const visible of [false,true,false]){for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount:1});assert.equal(await run(()=>!!document.querySelector('.bases-filter-picker')),visible);assert.ok(await run(()=>!!document.querySelector('.bases-filter-menu')));}await press('Escape');
+ await click('.bases-view-name');assert.equal(await run(()=>getComputedStyle(document.querySelector('.bases-view-options')).opacity),'0');await move(await point('.bases-view-option'));assert.equal(await run(()=>getComputedStyle(document.querySelector('.bases-view-options')).opacity),'1');
+ const menuPoint=await run(()=>{const r=document.querySelector('.bases-view-menu').getBoundingClientRect();return{x:r.x,y:r.y};});
+ await run(()=>document.addEventListener('click',()=>{window.ct={visible:0,max:0};let last=performance.now(),frame=0;requestAnimationFrame(function tick(now){frame++;ct.max=Math.max(ct.max,now-last);last=now;if(!ct.visible&&document.querySelector('.bases-config-menu'))ct.visible=frame;if(frame<19)requestAnimationFrame(tick);});},{once:true,capture:true}));
+ await click('.bases-view-options');await sleep(340);const timing=await run(()=>ct);check(timing.visible===1&&timing.max<20,`Configure view: frame 1, max ${timing.max.toFixed(1)}ms`);
+ assert.equal(await run(()=>document.querySelectorAll('.menu').length),1);assert.deepEqual(await run(()=>{const r=document.querySelector('.bases-config-menu').getBoundingClientRect();return{x:r.x,y:r.y};}),menuPoint);
+ assert.equal(await run(()=>document.querySelector('.bases-config-menu').getBoundingClientRect().width),221);assert.deepEqual(await run(()=>{const e=document.activeElement;return{label:e.getAttribute('aria-label'),selected:e.value.slice(e.selectionStart,e.selectionEnd)};}),{label:'View name',selected:'By due'});await shot('grove-configure');
+ await fill('[aria-label="View name"]','Renamed: view');await press('Tab');await wait(async()=>(await source()).includes('name: "Renamed: view"'),'rename saved');
+ assert.equal(await source(),original.replace('name: "By due"','name: "Renamed: view"'));assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Renamed: view');
+ // Tab reaches the real native select without opening its platform popup.
+ for(let i=0;i<5&&!await run(()=>document.activeElement?.getAttribute('aria-label')==='Row height');i++)await press('Tab');
+ let changed=original.replace('name: "By due"','name: "Renamed: view"');
+ for(const[value,height]of [['medium',60],['tall',120],['extra',240]]){
+  await press('ArrowDown');await wait(async()=>(await source()).includes(`rowHeight: ${value}`),value+' saved');
+  assert.equal(await run(()=>document.querySelector('.bases-table tbody tr[data-path]').getBoundingClientRect().height),height);assert.equal(await source(),changed.replace('# Keep this too',`    rowHeight: ${value}\n# Keep this too`));
+ }
+ for(let i=0;i<3;i++)await press('ArrowUp');await wait(async()=>await source()===changed,'Short removes rowHeight');assert.equal(await run(()=>document.querySelector('.bases-table tbody tr[data-path]').getBoundingClientRect().height),30);
+ await click('[aria-label="Back"]');assert.ok(await run(()=>!!document.querySelector('.bases-view-menu')));assert.equal(await run(()=>document.querySelector('.bases-view-option .menu-item-title').textContent),'Renamed: view');
+ await click('.bases-view-options');await press('Escape');assert.equal(await run(()=>!!document.querySelector('.menu')),false);
+ await click('.bases-view-name');await choose('Add view');await wait(()=>run(()=>!!document.querySelector('.bases-config-menu')&&document.querySelector('[aria-label="View name"]')?.value==='View'),'Add view opens Configure');assert.equal(await run(()=>{const e=document.activeElement;return e.value.slice(e.selectionStart,e.selectionEnd); }),'View');await press('Escape');
+ await click('.bases-view-name');await choose('Renamed: view');await wait(()=>run(()=>document.querySelector('.bases-count')?.textContent==='3 results'),'original view');await click('.bases-view-name');await click('.bases-view-options');
+ for(let i=0;i<5&&!await run(()=>document.activeElement?.getAttribute('aria-label')==='Row height');i++)await press('Tab');await press('ArrowDown');await wait(async()=>(await source()).includes('rowHeight: medium'),'final medium');await shot('grove-written');await press('Escape');
+ await writeFile(new URL('Grove-written.base',shots),await source());await writeFile(new URL('notes.json',shots),JSON.stringify(notes,null,2));await writeFile(new URL('written.json',shots),JSON.stringify(await run(()=>({name:document.querySelector('.bases-view-name span').textContent,rows:[...document.querySelectorAll('.bases-table tbody tr[data-path]')].map(e=>({path:e.dataset.path,height:e.getBoundingClientRect().height}))})),null,2));
+ // Virtual row offsets and spacers follow the chosen height, including at the end.
+ await run(async()=>{const{api}=await import('/src/api.ts');for(let i=0;i<220;i++)await api.createNote(`Virtual/Row ${i}.md`,'');await api.createNote('Virtual.base','filters: \'file.inFolder("Virtual")\'\nviews:\n  - type: table\n    rowHeight: extra\n');await ws.vault.refreshFiles();await ws.open('Virtual.base');});
+ await wait(()=>run(()=>document.querySelector('.bases-count')?.textContent==='220 results'),'virtual rows');await run(()=>{const e=document.querySelector('.bases-scroll');e.scrollTop=e.scrollHeight;});await sleep(120);assert.ok(await run(()=>{const rows=[...document.querySelectorAll('tr[data-path]')],e=document.querySelector('.bases-scroll'),r=rows.at(-1).getBoundingClientRect();return rows.length<50&&r.height===240&&r.bottom<=e.getBoundingClientRect().bottom+1;}));
+ check(true,'stale Base recovery and highlighted/toggling file picker');
+},{height:800,screenshots:shots.pathname});

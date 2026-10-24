@@ -97,7 +97,7 @@ class Menu {
       clearTimeout(this.timer);
     });
     // The menu never takes focus, so a press inside it must not move focus either.
-    this.el.addEventListener("mousedown", e => { if (!(e.target as Element).closest("input")) e.preventDefault(); });
+    this.el.addEventListener("mousedown", e => { if (!(e.target as Element).closest("input,select")) e.preventDefault(); });
   }
 
   private row(item: MenuEntry, i: number, withIcons: boolean) {
@@ -313,7 +313,7 @@ function onPress(e: MouseEvent) {
 
 function onKey(e: KeyboardEvent) {
   if (!root) return;
-  if (e.target instanceof HTMLInputElement && e.key !== "Escape") return;
+  if ((e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) && e.key !== "Escape") return;
   if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
   e.preventDefault();
   e.stopPropagation();

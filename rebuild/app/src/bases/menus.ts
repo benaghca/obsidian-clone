@@ -13,6 +13,7 @@ import { resultsMenu } from "./results";
 import { newRow, rowSeed } from "./newRow";
 import type { Value } from "./expression";
 import { mapping } from "./yaml";
+import { configureView } from "./config";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
@@ -83,6 +84,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
     showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",disabled:true},{title:"Group by this property",icon:"group",disabled:true},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",disabled:true},SEPARATOR,{title:"Property type",icon:"type",disabled:true}],{x:e.clientX,y:e.clientY});
   }
   function views(at: HTMLElement) {
+    const configure=()=>configureView(at,current(),(key,value)=>save((source,b)=>writeView(source,key,value,b.viewIndex)),()=>draw(true));
     const search=h("input",{type:"search",placeholder:"Search...","aria-label":"Search views"});
     const content=h("div",{class:"bases-search",onclick:(e:MouseEvent)=>e.stopPropagation()},icon("search",14),search);
     const draw=(refresh=false)=>{
@@ -91,12 +93,12 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       showMenu([{title:"Search views",content},...base.views.flatMap((v,i)=>{
         const title=typeof mapping(v).name==="string"?String(mapping(v).name):"View";
         if(!title.toLowerCase().includes(search.value.toLowerCase()))return [];
-        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon("table",14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"View options","aria-disabled":"true",onclick:(e:MouseEvent)=>e.stopPropagation()},icon("chevron-right",14))),disabled:mapping(v).type!=null&&mapping(v).type!=="table",action:()=>void changed(i)}];
+        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon("table",14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"Configure view",onclick:(e:MouseEvent)=>{e.stopPropagation();if(i===current().viewIndex)configure();else void changed(i).then(configure);}},icon("chevron-right",14))),disabled:mapping(v).type!=null&&mapping(v).type!=="table",action:()=>void changed(i)}];
       }),SEPARATOR,{title:"Add view",icon:"plus",action:()=>{
         save((source,b)=>{
           const names=new Set(b.views.map(v=>mapping(v).name));let n=0;while(names.has(n?`View ${n}`:"View"))n++;
           return addView(source,n?`View ${n}`:"View");
-        },undefined,b=>b.views.length);
+        },configure,b=>b.views.length);
       }}],at,{className:"bases-view-menu"});search.focus();
     };
     search.addEventListener("input",()=>draw(true));draw();

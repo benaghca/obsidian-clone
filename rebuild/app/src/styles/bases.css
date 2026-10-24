@@ -21,7 +21,7 @@
 .bases-table td[data-type="number"], .bases-table td[data-type="number"] input { text-align: right; }
 .bases-table .internal-link { color: var(--text-accent); text-decoration: underline; cursor: pointer; }
 .bases-table td.property { display: table-cell; min-height: 0; border-radius: 0; padding: 0; }
-.bases-table .property-value { height: 30px; flex-wrap: nowrap; overflow: hidden; font-size: 13.125px; line-height: 20.6px; }
+.bases-table .property-value { height: var(--bases-row-height, 30px); flex-wrap: nowrap; overflow: hidden; font-size: 13.125px; line-height: 20.6px; }
 .bases-table .property-input, .bases-table .property-text { font-size: inherit; font-family: inherit; line-height: 21px; white-space: nowrap; }
 .bases-table .property-input { width: 100%; }
 .bases-table .property-text:empty::before { content: none; }
@@ -104,3 +104,15 @@
 .bases-filter-picker { width: 247px; max-height: 300px; }
 .bases-filter-picker .menu-item-hotkey { margin-left: 4px; color: var(--text-muted); font-size: 11px; }
 .bases-filter-picker .is-checked { background: var(--background-modifier-hover); }
+
+.bases-table td { height: var(--bases-row-height, 30px); }
+.bases-view-options { opacity: 0; cursor: pointer; }
+.bases-view-option:hover .bases-view-options, .bases-view-options:focus { opacity: 1; }
+.bases-config-menu { width: 221px; }
+.bases-config-menu > .menu-item { display: block; padding: 0; background: transparent; }
+.bases-config { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.bases-config-header { display: flex; align-items: center; gap: 4px; height: 25px; }
+.bases-config-header > span { flex: 1; }
+.bases-config-header button { display: flex; border: 0; padding: 2px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.bases-config label { display: flex; flex-direction: column; gap: 6px; }
+.bases-config input, .bases-config select { width: 100%; height: 28px; padding: 4px 6px; font: inherit; color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); }
