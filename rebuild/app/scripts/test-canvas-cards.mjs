@@ -46,7 +46,7 @@ await withBrowser(async ({send, run, move, point, click, press, chord, check, sh
   await click(toolbar('Drag to add note from vault'));check(await run(()=>!!document.querySelector('.prompt')&&document.querySelector('.prompt').getAnimations().length===0),'Note button opens the existing instant prompt');
   await send('Input.insertText',{text:'CardNote'});await click('.suggestion-item');await sleep(350);
   check((await last()).type==='file'&&(await last()).file==='CardNote.md'&&(await last()).width===400&&(await last()).height===400,'Native note picker adds a 400×400 file card');
-  await double(`[data-node-id="${(await last()).id}"]`);check(!await run(()=>!!document.querySelector('.canvas-node.is-editing')),'Note cards remain read only on double-click');
+  await double(`[data-node-id="${(await last()).id}"]`);check(await run(()=>!!document.querySelector('.canvas-note-editor')),'Note cards edit in place on double-click');await press('Escape');await sleep(80);
   await click(toolbar('Drag to add media from vault'));
   check(await run(()=>[...document.querySelectorAll('.suggestion-item')].every(n=>/\.(svg|png|jpe?g|gif|webp|bmp|avif)$/i.test(n.textContent))),'Media picker lists images/SVG only');
   await send('Input.insertText',{text:'CardImage.svg'});await click('.suggestion-item');await sleep(400);

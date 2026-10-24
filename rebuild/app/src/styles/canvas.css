@@ -105,6 +105,8 @@
 .canvas-node.is-editing > .canvas-node-content > .cm-editor { min-height: 100%; }
 .canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller > .cm-content { padding: 16px; min-height: 100%; }
 .canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller { overflow: auto; }
+.canvas-node-file.is-editing > .canvas-node-content { padding: 16px; }
+.canvas-note-editor .cm-content { padding: 0 0 16px; min-height: 100%; }
 
 .canvas-control-group, .canvas-selection-menu { border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
 .canvas-selection-menu { position: absolute; z-index: 4; display: flex; padding: 2px; gap: 1px; left: var(--canvas-menu-x); top: var(--canvas-menu-y);

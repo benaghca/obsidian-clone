@@ -1,5 +1,5 @@
 // Plain DOM/SVG board. Detached, read-only editor contexts reuse Reading's
-// renderer and local embeds; card editors save only through the canvas document.
+// renderer and local embeds; embedded note editors use the shared note save path.
 import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
@@ -19,6 +19,7 @@ import { canvasCards, editTextCard } from "./cards";
 import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
+import { editNoteCard } from "./note";
 import { edgeCurve, readCanvas, type CanvasEdge } from "./model";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -114,7 +115,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const bounds = boundsOf();
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
-    const edits = new Map<string, () => void>();
+    const edits = new Map<string, (line?: number) => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
     const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; marker: SVGMarkerElement; label?: HTMLElement }[] = [];
     function place(item: typeof updateEdges[number], curve: ReturnType<typeof edgeCurve>) {
@@ -170,7 +171,10 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (node.color) card.classList.add("is-colored");
       card.style.setProperty("--canvas-color", color(node.color));
       world.append(card);
-      if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => draw()));
+      if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => {
+        if (!world.querySelector(".canvas-node-file.is-editing") || !ws.vault.files.some(f => f.path === node.file))
+          queueMicrotask(() => { if (!gone && mine === generation) draw(); });
+      }));
       if (node.type === "group") {
         card.append(h("div", { class: "canvas-group-label" }, node.label ?? ""));
         continue;
@@ -227,7 +231,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       let painted: ReturnType<typeof render> | undefined;
       cleanups.push(() => { if (painted) release(painted); });
       const paint = (source: string) => {
-        if (gone || mine !== generation) return;
+        if (gone || mine !== generation || card.classList.contains("is-editing")) return;
         const shown = embedPart(source, node.type === "file" ? node.subpath?.replace(/^#/, "") ?? "" : "");
         if (!shown) { content.textContent = `Unable to find “${node.subpath}” in “${node.file}”.`; return; }
         if (painted) release(painted);
@@ -255,7 +259,23 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         });
         if (node.id === editId) startEditor = edit;
       }
-      else void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
+      else {
+        const edit = (line = 1) => {
+          if (canvasReadOnly.has(el) || card.classList.contains("is-editing")) return;
+          stopText?.();
+          if (painted) { release(painted); painted = undefined; }
+          stopText = editNoteCard(card, content, ws, group, origin, node.subpath, line, repaint => {
+            stopText = undefined; if (repaint) draw();
+          });
+        };
+        edits.set(node.id, edit);
+        card.addEventListener("dblclick", event => {
+          if (!event.isTrusted || (event.target as Element).closest("a, [data-href], input, .cm-editor, .canvas-note-title, .canvas-node-resizer, .canvas-node-connection-point")) return;
+          const line = Number((event.target as Element).closest<HTMLElement>("[data-line]")?.dataset.line) || 1;
+          event.stopPropagation(); edit(line);
+        });
+        void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
+      }
     }
     const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
     cleanups.push(canvasEditing(el, world, nodes, edges, changed => {
