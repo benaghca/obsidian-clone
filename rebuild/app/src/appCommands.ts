@@ -13,7 +13,8 @@ import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
-import { copyNote, createNote, deleteFile, newCanvas, newNote } from "./fileOps";
+import { openDailyNote } from "./editorHost";
+import { copyNote, deleteFile, newCanvas, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import { addLines, aliasEdit, frontmatterField } from "./editor/frontmatter";
 import { openAlias, openNewProperty } from "./editor/properties";
@@ -120,7 +121,6 @@ export function registerAppCommands(parts: AppParts) {
 
   // ----- daily notes (Settings → Daily notes: date format, folder, template) -----
   const daily = () => settings.get("daily-notes.json");
-  const dailyPath = (d: Date) => `${folderPrefix(daily().folder)}${formatDate(d, daily().format || "YYYY-MM-DD")}.md`;
   /** Daily notes, oldest first: notes in the daily notes folder whose names fit the date format. */
   const dailyNotes = () => {
     const prefix = folderPrefix(daily().folder);
@@ -146,14 +146,6 @@ export function registerAppCommands(parts: AppParts) {
     const text = await ws.editors.text(templatePath).catch(() => "");
     return fillTemplate(text, title, new Date(), templates().dateFormat || "YYYY-MM-DD", templates().timeFormat || "HH:mm");
   };
-  async function openDailyNote() {
-    const path = dailyPath(new Date());
-    const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
-    if (existing) return ws.open(existing.path);
-    const template = daily().template.trim() ? ws.resolve(daily().template.trim(), null) : null;
-    const entry = await createNote(ws, path, await templateText(template, noteName(path)));
-    await ws.open(entry.path);
-  }
 
   // ----- templates -----
   const templateFolder = () => trimSlashes(templates().folder);
@@ -275,7 +267,7 @@ export function registerAppCommands(parts: AppParts) {
       mod("n", { shift: true }),
     ),
     { id: "file-explorer:new-folder", name: "Files: Create new folder", icon: "folder-plus", run: () => parts.left.newFolderIn("") },
-    { id: "daily-notes", name: "Daily notes: Open today's daily note", plugin: "daily-notes", icon: "calendar-days", run: () => openDailyNote() },
+    { id: "daily-notes", name: "Daily notes: Open today's daily note", plugin: "daily-notes", icon: "calendar-days", run: () => void openDailyNote(ws, new Date()) },
     pluginAction("daily-notes", "daily-notes:goto-prev", "Daily notes: Open previous daily note", "calendar-minus",
       () => ws.open(adjacentDaily(-1)!), () => !!adjacentDaily(-1)),
     pluginAction("daily-notes", "daily-notes:goto-next", "Daily notes: Open next daily note", "calendar-plus",

@@ -33,6 +33,8 @@ export interface EditorHost {
   linkExists?(target: string, view: EditorView): boolean;
   /** What the Properties block knows of the vault's properties (null until the app has the index). */
   properties?(): PropertyHost | null;
+  /** Open or create the daily note for an ISO date (`YYYY-MM-DD`). Empty and invalid dates do nothing. */
+  openDaily?(isoDate: string): void;
   /** The files `![[embeds]]` show. */
   embeds?: EmbedHost;
   /**
