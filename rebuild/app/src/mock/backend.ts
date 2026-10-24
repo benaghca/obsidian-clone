@@ -10,6 +10,35 @@ const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 /** [text](target) and ![alt](target); the target as written (without a title). */
 const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|((?:\\.|[^\\)\s])*))[^)\n]*\)/g;
 
+/** Binary files written by `write_file_bytes`, so a later read returns the same bytes. */
+const BYTE_MARK = "\u0000grove-bytes:";
+const BYTE_MAX = 20 * 1024 * 1024;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+function base64ToBytes(b64: string): ArrayBuffer {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+
+function isBinary(content: string) {
+  return content.startsWith(BYTE_MARK);
+}
+
+/** The same refusals as the Rust path check: nothing outside the vault or in a hidden folder. */
+function badPath(path: string): string | null {
+  if (!path || path.startsWith("/") || path.includes("\\") || path.includes("\0") || path.includes(":")) return "invalid path";
+  const hidden = new Set([".grove", ".obsidian", ".git", ".trash"]);
+  if (path.split("/").some((p) => !p || p === "." || p === ".." || hidden.has(p) || p.includes(".grove-tmp"))) return "invalid path";
+  return null;
+}
+
 /** A mock image's bytes: SVG text as it is, "png WxH #colour" painted into a PNG. */
 async function imageBytes(content: string): Promise<ArrayBuffer> {
   const png = /^png (\d+)x(\d+) (#\w+)/.exec(content);
@@ -86,7 +115,8 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
 
   function entry(path: string): FileEntry {
     const f = files.get(path)!;
-    return { path, name: noteName(path), is_dir: false, mtime_ms: f.mtime, ctime_ms: f.ctime, size: f.content.length };
+    const binary = isBinary(f.content) ? base64ToBytes(f.content.slice(BYTE_MARK.length)) : null;
+    return { path, name: noteName(path), is_dir: false, mtime_ms: f.mtime, ctime_ms: f.ctime, size: binary ? binary.byteLength : f.content.length };
   }
 
   function need(path: string) {
@@ -120,6 +150,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     if (!q || limit <= 0) return [];
     const buckets: SearchHit[][] = [];
     for (const [path, f] of files) {
+      if (isBinary(f.content)) continue;
       const bucket: SearchHit[] = [];
       const lines = f.content.split("\n");
       for (let i = 0; i < lines.length; i++) {
@@ -150,6 +181,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     const markdown: Record<string, string[]> = {};
     const unresolved: Record<string, string[]> = {};
     for (const [path, f] of files) {
+      if (isBinary(f.content)) continue;
       const out = new Set<string>();
       const md = new Set<string>();
       const missing = new Map<string, string>();
@@ -208,7 +240,19 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     read_note: ({ path }) => need(path).content,
     read_file_bytes: ({ path }) => {
       if (!/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(path) || path.split("/").includes("..")) throw new Error(`not an image: ${path}`);
-      return imageBytes(need(path).content);
+      const content = need(path).content;
+      const binary = isBinary(content) ? base64ToBytes(content.slice(BYTE_MARK.length)) : null;
+      return binary ?? imageBytes(content);
+    },
+    write_file_bytes: ({ path, bytes }) => {
+      const why = badPath(String(path ?? ""));
+      if (why) throw new Error(`${why}: ${path}`);
+      if (files.has(path) || listFiles().some((e) => e.path === path)) throw new Error(`already exists: ${path}`);
+      const raw = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes as number[]);
+      if (raw.length > BYTE_MAX) throw new Error(`too large to save: ${path}`);
+      put(path, BYTE_MARK + bytesToBase64(raw));
+      for (const dir of [...emptyDirs]) if (path.startsWith(dir + "/")) emptyDirs.delete(dir);
+      return entry(path);
     },
     write_note: ({ path, content }) => {
       put(path, content);

@@ -98,6 +98,27 @@ impl Vault {
         Ok(())
     }
 
+    /// A new attachment's bytes. The same path checks as `write_note` (inside the vault, no `..`,
+    /// no symlink out, nothing in a hidden folder). Fails if anything is already at `path` or the
+    /// bytes are over [`IMAGE_MAX_BYTES`]. Any extension is allowed, including none; empty is fine.
+    /// Parents are created. The watcher echo is suppressed, as for `write_note`.
+    pub fn write_file_bytes(&mut self, path: &str, bytes: &[u8]) -> Result<FileEntry, String> {
+        if bytes.len() as u64 > IMAGE_MAX_BYTES {
+            return Err(format!("too large to save: {path}"));
+        }
+        let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
+        if full.exists() {
+            return Err(format!("already exists: {rel}"));
+        }
+        self.mark_own(&rel);
+        if let Err(e) = atomic_write(&full, bytes) {
+            self.own_writes.remove(&rel);
+            return Err(e.to_string());
+        }
+        self.index.refresh_path(&self.root, &rel);
+        Ok(self.entry_for(&rel))
+    }
+
     pub fn create_note(&mut self, path: &str, content: &str) -> Result<FileEntry, String> {
         let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
         if full.exists() {
@@ -510,6 +531,64 @@ mod tests {
             vault.read_file_bytes("link.png").is_err(),
             "a symlink out of the vault"
         );
+    }
+
+    #[test]
+    fn write_file_bytes_stays_inside_the_vault() {
+        let dir = tmp_dir("attach");
+        let outside = tmp_dir("attach-out");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside.path, dir.path.join("out")).unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let png = vec![137, 80, 78, 71];
+        let made = vault
+            .write_file_bytes("Pasted image 20261023201500.png", &png)
+            .unwrap();
+        assert_eq!(made.path, "Pasted image 20261023201500.png");
+        assert!(!made.is_dir);
+        assert_eq!(
+            fs::read(dir.path.join("Pasted image 20261023201500.png")).unwrap(),
+            png
+        );
+        assert_eq!(
+            vault.read_file_bytes("Pasted image 20261023201500.png").unwrap(),
+            png
+        );
+        assert!(listed(&vault, "Pasted image 20261023201500.png").size >= 4);
+        // Does not overwrite.
+        assert!(vault
+            .write_file_bytes("Pasted image 20261023201500.png", &[1])
+            .is_err());
+        assert_eq!(
+            fs::read(dir.path.join("Pasted image 20261023201500.png")).unwrap(),
+            png
+        );
+        // Parents are created and listed. Empty bytes and a non-image are allowed.
+        let nested = vault.write_file_bytes("pics/shot.png", &[]).unwrap();
+        assert_eq!(nested.path, "pics/shot.png");
+        assert!(dir.path.join("pics").join("shot.png").is_file());
+        assert!(listed(&vault, "pics").is_dir);
+        assert_eq!(vault.read_file_bytes("pics/shot.png").unwrap(), Vec::<u8>::new());
+        vault.write_file_bytes("notes/file.pdf", b"%PDF").unwrap();
+        assert!(dir.path.join("notes").join("file.pdf").is_file());
+        assert!(vault.read_file_bytes("notes/file.pdf").is_err(), "not an image");
+        assert!(vault.write_file_bytes("../x.png", &[1]).is_err());
+        assert!(vault.write_file_bytes("/etc/x.png", &[1]).is_err());
+        assert!(vault.write_file_bytes(".grove/x.png", &[1]).is_err());
+        assert!(vault.write_file_bytes(".obsidian/x.png", &[1]).is_err());
+        assert!(vault.write_file_bytes(".git/x.png", &[1]).is_err());
+        assert!(vault.write_file_bytes(".trash/x.png", &[1]).is_err());
+        assert!(vault
+            .write_file_bytes("huge.png", &vec![0; IMAGE_MAX_BYTES as usize + 1])
+            .is_err());
+        assert!(!dir.path.join("huge.png").exists());
+        #[cfg(unix)]
+        assert!(
+            vault.write_file_bytes("out/secret.png", &[1]).is_err(),
+            "a symlink out of the vault"
+        );
+        #[cfg(unix)]
+        assert!(!outside.path.join("secret.png").exists());
     }
 
     #[test]

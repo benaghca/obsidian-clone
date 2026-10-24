@@ -90,6 +90,7 @@ pub fn run() {
             read_note,
             read_file_bytes,
             write_note,
+            write_file_bytes,
             create_note,
             create_folder,
             rename_path,
@@ -199,6 +200,28 @@ fn write_note(
         _ => false,
     });
     Ok(())
+}
+
+/// A new file's bytes (a pasted image or a dropped file). JSON array of numbers, at most 20 MB.
+/// Other windows get a `vault-changed` `create`; the window that saved does not (it refreshes itself).
+#[tauri::command]
+fn write_file_bytes(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    path: String,
+    bytes: Vec<u8>,
+) -> Result<FileEntry, String> {
+    let entry = with_vault(&state, |v| v.write_file_bytes(&path, &bytes))?;
+    let change = model::VaultChanged {
+        kind: model::ChangeKind::Create,
+        paths: vec![entry.path.clone()],
+    };
+    let me = window.label().to_owned();
+    let _ = window.emit_filter("vault-changed", change, |target| match target {
+        tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => *label != me,
+        _ => false,
+    });
+    Ok(entry)
 }
 
 /// "Open in new window": the note (a percent-encoded vault path) in a window of its own.
