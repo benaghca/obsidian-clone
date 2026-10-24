@@ -1,0 +1,36 @@
+PASS Click selects a card and exposes eight resize handles
+PASS Selected card has four side and four corner targets
+PASS Repeated stationary card click retains selection
+PASS Shift-click adds to selection
+PASS Stationary Shift-click removes from selection
+PASS Empty background clears selection
+PASS Selection and no-op clicks leave original bytes intact
+PASS Attached edge follows during the drag before saving
+PASS No intermediate drag writes
+PASS Move snaps to a 20-unit grid
+PASS Save preserves root/key/node order, opaque nodes, edges and nested fields
+PASS Undo move restores original bytes
+PASS Ctrl+Shift+Z redoes a move
+PASS Alt bypasses grid snapping
+PASS Shift drag locks the dominant axis
+PASS Arrow keys nudge by five units
+PASS Shift-arrow nudges by one hundred units
+PASS Resize respects 50×50 minimum
+PASS Undo restores size
+PASS Redo restores resized card
+PASS Top-left resize keeps the opposite corner anchored
+PASS Backspace removes the selected card and its incident edges
+PASS Undo deletion restores the card and all edge fields
+PASS Redo deletion removes it again
+PASS Moving a group translates contained cards once
+PASS Deleting a group leaves its contained cards
+PASS Empty-background box selects fully enclosed cards
+PASS Selection box also selects partially intersecting cards
+PASS Box selection is read only
+PASS Escape cancels a live drag without saving
+PASS External file change reloads board geometry
+PASS External reload clears stale undo history
+PASS Leaving the canvas flushes its pending save
+PASS Obsidian-edited scratch canvas renders in Grove with identical geometry
+PASS Reverse round trip opens without rewriting Obsidian bytes
+PASS 300-card drag frames under 20ms (max 16.8ms, 47 intervals)

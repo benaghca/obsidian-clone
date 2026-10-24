@@ -1,0 +1,8 @@
+npm-test-first.log (excerpts):
+FRAMES pan {"samples":60,"p95":16.700000000000728,"max":16.799999999999272}
+FRAMES zoom {"samples":58,"p95":16.80000000000109,"max":49.899999999999636}
+AssertionError [ERR_ASSERTION]: 300-card/400-edge zoom presentation frames stay under 20ms
+npm-test-second.log (excerpts):
+FRAMES pan {"samples":57,"p95":16.700000000000728,"max":16.799999999999272}
+FRAMES zoom {"samples":48,"p95":16.700000000000728,"max":16.80000000000109}
+AssertionError [ERR_ASSERTION]: 300-card drag frames under 20ms (max 33.3ms, 44 intervals)

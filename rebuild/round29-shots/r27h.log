@@ -1,0 +1,22 @@
+PASS alt-click selects the folder and three files (H/Skip|H/A.md|H/B.md|H/Shot.svg)
+PASS alt-click leaves the canvas open
+PASS a multi-selection drag reaches the canvas
+PASS tree order drops the files and skips the folder (H/A.md|H/B.md|H/Shot.svg)
+PASS one 400×400 row, stride 445, top-left at the pointer (-325,-281,400,400 | 120,-281,400,400 | 565,-281,400,400)
+PASS title-to-heading gap is the title's half-em (12.9375px), and a later heading has the round 29 40px margin
+PASS the card shows the heading and not the frontmatter fence
+PASS one undo removes the whole row
+PASS redo restores the same row
+PASS Escape mid-drag adds nothing
+PASS a drop outside the canvas adds nothing
+PASS a read-only canvas refuses the multi-file drop
+PASS one remaining image is 400×200 at the pointer
+PASS live preview shows the datetime seconds (2026-10-23T20:15:30)
+PASS source mode shows the frontmatter fence
+PASS reading view shows the datetime seconds (2026-10-23T20:15:30)
+PASS Add alias in reading view focuses the aliases field
+PASS a dropped image.png keeps its name
+PASS Add embed works in live preview
+PASS Add tag works in live preview
+PASS backlinks opens a tab for that note
+PASS the backlinks tab stays on the note it was opened for (Backlinks for A)

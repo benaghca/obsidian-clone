@@ -1,0 +1,191 @@
+
+> grove@0.1.0 test:geometry
+> node scripts/test-geometry.mjs
+
+PASS Geometry.md live: every line within 1px; no vertical margins
+PASS Geometry.md live: click HeadingOne
+PASS Geometry.md live focused HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md live: fold arrow across HeadingOne row at 179.0
+PASS Geometry.md live: fold arrow across HeadingOne row at 201.5
+PASS Geometry.md live: fold arrow across HeadingOne row at 224.1
+PASS Geometry.md live: no arrow 4px above HeadingOne
+PASS Geometry.md live: native arrow click folds HeadingOne
+PASS Geometry.md live: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS Geometry.md live unfolded HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md live: click HeadingTwo
+PASS Geometry.md live focused HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md live: fold arrow across HeadingTwo row at 250.9
+PASS Geometry.md live: fold arrow across HeadingTwo row at 272.0
+PASS Geometry.md live: fold arrow across HeadingTwo row at 293.0
+PASS Geometry.md live: no arrow 4px above HeadingTwo
+PASS Geometry.md live: native arrow click folds HeadingTwo
+PASS Geometry.md live: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS Geometry.md live unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md live: click HeadingThree
+PASS Geometry.md live focused HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md live: fold arrow across HeadingThree row at 319.4
+PASS Geometry.md live: fold arrow across HeadingThree row at 340.1
+PASS Geometry.md live: fold arrow across HeadingThree row at 360.8
+PASS Geometry.md live: no arrow 4px above HeadingThree
+PASS Geometry.md live: native arrow click folds HeadingThree
+PASS Geometry.md live: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS Geometry.md live unfolded HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md source: every line within 1px; no vertical margins
+PASS Geometry.md source: click HeadingOne
+PASS Geometry.md source focused HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md source: fold arrow across HeadingOne row at 179.0
+PASS Geometry.md source: fold arrow across HeadingOne row at 193.5
+PASS Geometry.md source: fold arrow across HeadingOne row at 208.1
+PASS Geometry.md source: no arrow 4px above HeadingOne
+PASS Geometry.md source: native arrow click folds HeadingOne
+PASS Geometry.md source: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS Geometry.md source unfolded HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md source: click HeadingTwo
+PASS Geometry.md source focused HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md source: fold arrow across HeadingTwo row at 234.1
+PASS Geometry.md source: fold arrow across HeadingTwo row at 247.1
+PASS Geometry.md source: fold arrow across HeadingTwo row at 260.1
+PASS Geometry.md source: no arrow 4px above HeadingTwo
+PASS Geometry.md source: native arrow click folds HeadingTwo
+PASS Geometry.md source: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS Geometry.md source unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md source: click HeadingThree
+PASS Geometry.md source focused HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md source: fold arrow across HeadingThree row at 286.1
+PASS Geometry.md source: fold arrow across HeadingThree row at 298.8
+PASS Geometry.md source: fold arrow across HeadingThree row at 311.5
+PASS Geometry.md source: no arrow 4px above HeadingThree
+PASS Geometry.md source: native arrow click folds HeadingThree
+PASS Geometry.md source: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS Geometry.md source unfolded HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md reading: every line within 1px; no vertical margins
+PASS Geometry.md reading: click HeadingOne
+PASS Geometry.md reading focused HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md reading: fold arrow across HeadingOne row at 179.0
+PASS Geometry.md reading: fold arrow across HeadingOne row at 205.1
+PASS Geometry.md reading: fold arrow across HeadingOne row at 231.2
+PASS Geometry.md reading: no arrow 4px above HeadingOne
+PASS Geometry.md reading: native arrow click folds HeadingOne
+PASS Geometry.md reading: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS Geometry.md reading unfolded HeadingOne: every line within 1px; no vertical margins
+PASS Geometry.md reading: click HeadingTwo
+PASS Geometry.md reading focused HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md reading: fold arrow across HeadingTwo row at 257.2
+PASS Geometry.md reading: fold arrow across HeadingTwo row at 278.4
+PASS Geometry.md reading: fold arrow across HeadingTwo row at 299.6
+PASS Geometry.md reading: no arrow 4px above HeadingTwo
+PASS Geometry.md reading: native arrow click folds HeadingTwo
+PASS Geometry.md reading: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS Geometry.md reading unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS Geometry.md reading: click HeadingThree
+PASS Geometry.md reading focused HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md reading: fold arrow across HeadingThree row at 325.6
+PASS Geometry.md reading: fold arrow across HeadingThree row at 346.4
+PASS Geometry.md reading: fold arrow across HeadingThree row at 367.1
+PASS Geometry.md reading: no arrow 4px above HeadingThree
+PASS Geometry.md reading: native arrow click folds HeadingThree
+PASS Geometry.md reading: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS Geometry.md reading unfolded HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md live: every line within 1px; no vertical margins
+PASS GeometryFM.md live: click HeadingOne
+PASS GeometryFM.md live focused HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md live: fold arrow across HeadingOne row at 327.2
+PASS GeometryFM.md live: fold arrow across HeadingOne row at 349.7
+PASS GeometryFM.md live: fold arrow across HeadingOne row at 372.3
+PASS GeometryFM.md live: no arrow 4px above HeadingOne
+PASS GeometryFM.md live: native arrow click folds HeadingOne
+PASS GeometryFM.md live: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS GeometryFM.md live unfolded HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md live: click HeadingTwo
+PASS GeometryFM.md live focused HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md live: fold arrow across HeadingTwo row at 399.1
+PASS GeometryFM.md live: fold arrow across HeadingTwo row at 420.2
+PASS GeometryFM.md live: fold arrow across HeadingTwo row at 441.2
+PASS GeometryFM.md live: no arrow 4px above HeadingTwo
+PASS GeometryFM.md live: native arrow click folds HeadingTwo
+PASS GeometryFM.md live: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS GeometryFM.md live unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md live: click HeadingThree
+PASS GeometryFM.md live focused HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md live: fold arrow across HeadingThree row at 467.6
+PASS GeometryFM.md live: fold arrow across HeadingThree row at 488.3
+PASS GeometryFM.md live: fold arrow across HeadingThree row at 509.0
+PASS GeometryFM.md live: no arrow 4px above HeadingThree
+PASS GeometryFM.md live: native arrow click folds HeadingThree
+PASS GeometryFM.md live: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS GeometryFM.md live unfolded HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md source: every line within 1px; no vertical margins
+PASS GeometryFM.md source: click HeadingOne
+PASS GeometryFM.md source focused HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md source: fold arrow across HeadingOne row at 255.1
+PASS GeometryFM.md source: fold arrow across HeadingOne row at 269.6
+PASS GeometryFM.md source: fold arrow across HeadingOne row at 284.1
+PASS GeometryFM.md source: no arrow 4px above HeadingOne
+PASS GeometryFM.md source: native arrow click folds HeadingOne
+PASS GeometryFM.md source: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS GeometryFM.md source unfolded HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md source: click HeadingTwo
+PASS GeometryFM.md source focused HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md source: fold arrow across HeadingTwo row at 310.1
+PASS GeometryFM.md source: fold arrow across HeadingTwo row at 323.2
+PASS GeometryFM.md source: fold arrow across HeadingTwo row at 336.2
+PASS GeometryFM.md source: no arrow 4px above HeadingTwo
+PASS GeometryFM.md source: native arrow click folds HeadingTwo
+PASS GeometryFM.md source: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS GeometryFM.md source unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md source: click HeadingThree
+PASS GeometryFM.md source focused HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md source: fold arrow across HeadingThree row at 362.2
+PASS GeometryFM.md source: fold arrow across HeadingThree row at 374.9
+PASS GeometryFM.md source: fold arrow across HeadingThree row at 387.6
+PASS GeometryFM.md source: no arrow 4px above HeadingThree
+PASS GeometryFM.md source: native arrow click folds HeadingThree
+PASS GeometryFM.md source: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS GeometryFM.md source unfolded HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: click HeadingOne
+PASS GeometryFM.md reading focused HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: fold arrow across HeadingOne row at 327.2
+PASS GeometryFM.md reading: fold arrow across HeadingOne row at 353.3
+PASS GeometryFM.md reading: fold arrow across HeadingOne row at 379.4
+PASS GeometryFM.md reading: no arrow 4px above HeadingOne
+PASS GeometryFM.md reading: native arrow click folds HeadingOne
+PASS GeometryFM.md reading: arrow remains visible after unfold without pointer movement (HeadingOne)
+PASS GeometryFM.md reading unfolded HeadingOne: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: click HeadingTwo
+PASS GeometryFM.md reading focused HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: fold arrow across HeadingTwo row at 405.4
+PASS GeometryFM.md reading: fold arrow across HeadingTwo row at 426.6
+PASS GeometryFM.md reading: fold arrow across HeadingTwo row at 447.8
+PASS GeometryFM.md reading: no arrow 4px above HeadingTwo
+PASS GeometryFM.md reading: native arrow click folds HeadingTwo
+PASS GeometryFM.md reading: arrow remains visible after unfold without pointer movement (HeadingTwo)
+PASS GeometryFM.md reading unfolded HeadingTwo: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: click HeadingThree
+PASS GeometryFM.md reading focused HeadingThree: every line within 1px; no vertical margins
+PASS GeometryFM.md reading: fold arrow across HeadingThree row at 473.8
+PASS GeometryFM.md reading: fold arrow across HeadingThree row at 494.5
+PASS GeometryFM.md reading: fold arrow across HeadingThree row at 515.3
+PASS GeometryFM.md reading: no arrow 4px above HeadingThree
+PASS GeometryFM.md reading: native arrow click folds HeadingThree
+PASS GeometryFM.md reading: arrow remains visible after unfold without pointer movement (HeadingThree)
+PASS GeometryFM.md reading unfolded HeadingThree: every line within 1px; no vertical margins
+PASS Geometry.md live Ctrl+o: visible within 2 frames, no frame >20ms (17.1ms)
+PASS Geometry.md live Ctrl+p: visible within 2 frames, no frame >20ms (17.0ms)
+PASS Geometry.md live right-click menu: visible within 2 frames, no frame >20ms (17.0ms)
+PASS Geometry.md source Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md source Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md source right-click menu: visible within 2 frames, no frame >20ms (17.2ms)
+PASS Geometry.md reading Ctrl+o: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md reading Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS Geometry.md reading right-click menu: visible within 2 frames, no frame >20ms (17.0ms)
+PASS GeometryFM.md live Ctrl+o: visible within 2 frames, no frame >20ms (17.1ms)
+PASS GeometryFM.md live Ctrl+p: visible within 2 frames, no frame >20ms (17.0ms)
+PASS GeometryFM.md live right-click menu: visible within 2 frames, no frame >20ms (16.8ms)
+PASS GeometryFM.md source Ctrl+o: visible within 2 frames, no frame >20ms (17.0ms)
+PASS GeometryFM.md source Ctrl+p: visible within 2 frames, no frame >20ms (16.9ms)
+PASS GeometryFM.md source right-click menu: visible within 2 frames, no frame >20ms (17.0ms)
+PASS GeometryFM.md reading Ctrl+o: visible within 2 frames, no frame >20ms (16.8ms)
+PASS GeometryFM.md reading Ctrl+p: visible within 2 frames, no frame >20ms (17.0ms)
+PASS GeometryFM.md reading right-click menu: visible within 2 frames, no frame >20ms (17.0ms)
+PASS a command found after typing runs in the original editor
