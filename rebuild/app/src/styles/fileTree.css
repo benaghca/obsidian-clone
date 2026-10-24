@@ -20,6 +20,16 @@
   overflow-y: auto;
   padding: 4px 8px 16px;
 }
+/* File rows only. Obsidian's list is 4px 12px 24px, and a root label starts
+   36px from the list's left edge (24px of row padding). Bookmarks keep the
+   tighter padding above. The 17px step per depth is unchanged. */
+.nav-files > .nav-files-container:not(.bookmarks-list) {
+  padding: 4px 12px 24px;
+}
+.nav-files > .nav-files-container:not(.bookmarks-list) .nav-file-title,
+.nav-files > .nav-files-container:not(.bookmarks-list) .nav-folder-title {
+  padding-left: calc(8px + var(--depth, 0) * 17px + 16px);
+}
 .tree-item-self {
   display: flex;
   align-items: center;
