@@ -1,0 +1,84 @@
+{
+  "results": [
+    {
+      "text": "Limit number of results\nShow all (6)\nCopy to clipboard\nExport CSV...",
+      "width": 220,
+      "icons": [
+        "svg-icon lucide-rotate-ccw",
+        "svg-icon lucide-copy",
+        "svg-icon lucide-file-down"
+      ],
+      "inputs": [
+        {
+          "value": "3",
+          "placeholder": "e.g. 10",
+          "type": "number"
+        }
+      ]
+    }
+  ],
+  "copied": "Task\tstatus\tDue date\tpriority\nTask F\topen\t2000-01-01\t3\nTask A\topen\t2000-01-01\t3\nTask D\topen\t2099-01-01\t5",
+  "limitEnter": {
+    "menu": false,
+    "count": [
+      "By due",
+      "2 results",
+      "Sort2",
+      "Group",
+      "Filter2",
+      "Properties",
+      "Search",
+      "New"
+    ]
+  },
+  "sort": [
+    {
+      "text": "Due dateOld to new",
+      "height": 28,
+      "controls": [
+        {
+          "text": "",
+          "width": 16,
+          "height": 16
+        },
+        {
+          "text": "Due dateOld to new",
+          "width": 197.921875,
+          "height": 28
+        },
+        {
+          "text": "",
+          "width": 28,
+          "height": 24
+        }
+      ]
+    },
+    {
+      "text": "TaskZ → A",
+      "height": 28,
+      "controls": [
+        {
+          "text": "",
+          "width": 16,
+          "height": 16
+        },
+        {
+          "text": "TaskZ → A",
+          "width": 197.921875,
+          "height": 28
+        },
+        {
+          "text": "",
+          "width": 28,
+          "height": 24
+        }
+      ]
+    }
+  ],
+  "new": {
+    "path": "Untitled.md",
+    "text": "---\ntags:\n  - work\nstatus:\ndue:\npriority:\n---\n",
+    "selection": "Untitled",
+    "focused": "inline-title"
+  }
+}
