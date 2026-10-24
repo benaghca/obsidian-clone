@@ -14,7 +14,7 @@ import { IMAGE_EXT, resetSize } from "../editor/embeds";
 import type { ImageRef } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
-import { copyNote, deleteFile, fileSettings, newCanvas } from "../fileOps";
+import { copyNote, deleteFile, fileSettings, moveFile, newCanvas, newFolder } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -22,7 +22,7 @@ import { confirmDialog } from "./confirm";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
 import { openMovePrompt } from "./movePrompt";
 import { pickFrom } from "./prompt";
-import { topLevelPaths } from "./treeSelect";
+import { selectionFolderParent, topLevelPaths } from "./treeSelect";
 
 interface MenuHost {
   ws: Workspace;
@@ -142,8 +142,33 @@ export function createMenus(host: MenuHost) {
   function selection(paths: string[]): MenuItems {
     const items = topLevelPaths(paths, (path) => ws.vault.isFolder(path));
     const n = paths.length;
+    // Grove bookmarks at once. The ellipsis is the multi-selection label.
+    const bookmark = on("bookmarks") && {
+      title: "Bookmark...",
+      icon: "bookmark" as const,
+      action: () => {
+        for (const path of items) if (!bookmarks.has(path)) bookmarks.toggle(path);
+      },
+    };
     return [
+      {
+        title: "New folder with selection",
+        icon: "folder-plus",
+        action: () => {
+          void (async () => {
+            try {
+              const folder = await newFolder(ws, selectionFolderParent(items));
+              for (const path of items) await moveFile(ws, path, folder).catch(warn(`move ${path}`));
+              host.renameInTree(folder);
+            } catch (err) {
+              console.warn("Could not create a folder for the selection", err);
+            }
+          })();
+        },
+      },
       { title: `Move ${n} items to...`, icon: "folder-tree", action: () => openMovePrompt(ws, items) },
+      bookmark,
+      SEPARATOR,
       {
         title: "Delete",
         icon: "trash-2",
