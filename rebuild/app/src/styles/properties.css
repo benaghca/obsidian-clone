@@ -1,6 +1,6 @@
 /* Properties in document: the frontmatter as Obsidian's Properties block
    (observed in Obsidian 1.14.4 at 16px text: a 16px/500 "Properties"
-   heading, rows 28px high and 3px apart, a 144px key column (a 20px icon,
+   heading, rows 29px high and 3px apart, a 144px key column (a 20px icon,
    then the key at 14px), values at 14px, tags as accent pills, "Add
    property" 7px below the rows, 32px of space before the body). */
 
@@ -127,7 +127,10 @@
   font-size: inherit;
 }
 /* Date and time: a calendar on the left. The native glyph is invisible and its click target covers that icon.
-   A date field is as wide as its value. A datetime field fills the value column, so seconds stay visible. */
+   In a note the date field is 116px. Chromium's content minimum is wider, and that extra
+   width is what pushed the daily-note link right. File properties stays content-sized, so
+   the narrow column keeps it near 101px. A datetime field fills the value column, so seconds
+   stay visible. The control is 29px tall, the same as the key, so a date row is not 31px. */
 .property-date {
   position: relative;
   display: flex;
@@ -154,9 +157,17 @@
   max-width: 100%;
   padding-left: 24px;
 }
+.property-value[data-type="date"] .property-date .property-input,
+.property-value[data-type="datetime"] .property-date .property-input {
+  height: 29px;
+}
 .property-value[data-type="date"] .property-date .property-input {
   padding-right: 0;
   field-sizing: content;
+}
+.cm-content .property-value[data-type="date"] .property-date .property-input {
+  width: 116px;
+  field-sizing: fixed;
 }
 .property-value[data-type="datetime"] .property-date .property-input {
   width: 100%;
