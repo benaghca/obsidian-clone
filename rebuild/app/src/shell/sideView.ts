@@ -187,6 +187,9 @@ export function bindResultKeys(root: HTMLElement) {
   root.addEventListener("keydown", (event) => {
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
     if (event.altKey || event.metaKey || event.ctrlKey || document.querySelector(".menu")) return;
+    // The search field keeps these keys (they move the result highlight). A sort menu or a filter does not.
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("select, input:not(.search-input), textarea")) return;
     const rows = [...root.querySelectorAll<HTMLElement>(".search-result-file-match")].filter((row) => row.offsetParent);
     if (!rows.length) return;
     const current = rows.findIndex((row) => row.classList.contains("is-selected"));
@@ -201,6 +204,30 @@ export function bindResultKeys(root: HTMLElement) {
     rows.forEach((row, i) => row.classList.toggle("is-selected", i === next));
     reveal(rows[next]);
   });
+}
+
+/** The note's text: the open editor when it is loaded, otherwise a read. */
+export async function noteText(ws: Workspace, path: string): Promise<string> {
+  const doc = ws.editors.doc(path);
+  if (doc) return doc.toString();
+  try {
+    // Loaded only when a closed note is read, so importing this file does not touch `window`.
+    const { api } = await import("../api");
+    return await api.readNote(path);
+  } catch {
+    return "";
+  }
+}
+
+/** Up to `radius` lines on each side of a 1-based line, not including it. */
+export function linesAround(text: string, line: number, radius = 2): { before: string; after: string } {
+  const lines = text.split("\n");
+  const i = line - 1;
+  if (i < 0 || i >= lines.length) return { before: "", after: "" };
+  return {
+    before: lines.slice(Math.max(0, i - radius), i).join("\n"),
+    after: lines.slice(i + 1, Math.min(lines.length, i + 1 + radius)).join("\n"),
+  };
 }
 
 /** A snippet whose pressed highlight selects its original source columns. */

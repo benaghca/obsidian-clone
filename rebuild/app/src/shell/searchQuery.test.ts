@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Facts, highlightsOf, matchCount, matches, matchingNotes, parseQuery, pathQuery, propertyLine, shownLines, spansOf, termsOf } from "./searchQuery";
+import { explainQuery, type Facts, highlightsOf, matchCount, matches, matchingNotes, parseQuery, pathQuery, propertyLine, shownLines, spansOf, termsOf } from "./searchQuery";
 
 // The throwaway vault the cases were observed on in Obsidian 1.14.4.
 const VAULT: Record<string, string> = {
@@ -67,6 +67,15 @@ describe("search query", () => {
     expect(search("alpha (beta OR gamma)")).toEqual(["A", "B", "Props", "Roadmap"]);
     expect(search("content:gamma")).toEqual(["A", "Roadmap"]);
     expect(search('path:"Projects" alpha')).toEqual(["Roadmap"]);
+  });
+
+  it("explains a query in one sentence", () => {
+    expect(explainQuery(null)).toBe("");
+    expect(explainQuery(parseQuery("alpha beta"))).toBe('Matches notes that contain "alpha" and contain "beta".');
+    expect(explainQuery(parseQuery("file:road"))).toBe('Matches notes that have a file name containing "road".');
+    expect(explainQuery(parseQuery("tag:#idea"))).toBe('Matches notes that have the tag "#idea".');
+    expect(explainQuery(parseQuery("-alpha"))).toBe('Matches notes that do not contain "alpha".');
+    expect(explainQuery(parseQuery("[status:draft]"))).toBe('Matches notes that have property "status" that contain "draft".');
   });
 
   it("parses once into a tree, asks the backend for each term once, and survives stray brackets", () => {

@@ -24,10 +24,33 @@ const SLICE_MS = 4;
 
 export function createOutlineView(ws: Workspace): SideView {
   const query = h("input", { class: "outline-filter", type: "search", placeholder: "Filter...", "aria-label": "Filter outline" });
+  query.hidden = true;
+  let followOn = true;
+  const filterBtn = iconButton(icon("list-filter", 16), "Show search filter", () => {
+    const on = query.hidden !== false;
+    filterBtn.classList.toggle("is-active", on);
+    query.hidden = !on;
+    if (!on) {
+      query.value = "";
+      paint();
+    } else query.focus();
+  });
+  const followBtn = iconButton(icon("arrow-down-to-line", 16), "Auto-scroll to current section", () => {
+    followOn = !followOn;
+    followBtn.classList.toggle("is-active", followOn);
+    if (followOn) follow();
+  });
+  followBtn.classList.add("is-active");
   const toggle = iconButton(icon("chevrons-down-up", 16), "Collapse all", () => foldAll());
   const list = h("div", { class: "outline-list" });
   const empty = h("div", { class: "pane-empty" });
-  const el = h("div", { class: "outline-view" }, h("div", { class: "outline-toolbar" }, query, toggle), list, empty);
+  const el = h(
+    "div",
+    { class: "outline-view" },
+    h("div", { class: "nav-header" }, h("div", { class: "nav-buttons-container outline-toolbar" }, filterBtn, followBtn, toggle), query),
+    list,
+    empty,
+  );
 
   let active = false;
   let headings: Heading[] = [];
@@ -145,7 +168,7 @@ export function createOutlineView(ws: Workspace): SideView {
 
   /** The last heading at or above the line at the top of the note. */
   function follow() {
-    if (!active || !headings.length) return;
+    if (!active || !headings.length || !followOn) return;
     const view = ws.view;
     // The note scrolls in .view-content. .cm-scroller is overflow: visible, so its scrollTop stays 0.
     const scroller = view.dom.closest<HTMLElement>(".view-content") ?? view.scrollDOM;

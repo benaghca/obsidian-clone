@@ -15,11 +15,11 @@ import { dropdown } from "../settings/controls";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
-import { h } from "./dom";
+import { h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
-import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, bindResultKeys, collapseResultsButton, pagedRows, resultGroup, resultMatch } from "./sideView";
+import { explainQuery, highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
+import { afterPaint, bindResultKeys, collapseResultsButton, noteText, pagedRows, resultGroup, resultMatch } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -51,20 +51,56 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   );
   const count = h("div", { class: "search-results-result-count" });
   const results = h("div", { class: "search-results" });
+  const explainEl = h("div", { class: "search-explain" });
+  explainEl.hidden = true;
+  let settingsOpen = false;
+  let moreContext = false;
+  let explain = false;
+  const texts = new Map<string, string>();
   const collapseBtn = collapseResultsButton(results);
+  const contextBtn = iconButton(icon("wrap-text", 16), "Show more context", () => {
+    moreContext = !moreContext;
+    contextBtn.classList.toggle("is-active", moreContext);
+    void run();
+  });
+  const explainBtn = iconButton(icon("circle-help", 16), "Explain search terms", () => {
+    explain = !explain;
+    explainBtn.classList.toggle("is-active", explain);
+    explainEl.hidden = !explain;
+    void run();
+  });
   const order = dropdown(SORT_ORDERS, sort, (o) => {
     sort = o;
     remember();
     void run();
   }, "Sort order");
-  const info = h("div", { class: "search-results-info" }, count, h("div", { class: "search-results-tools" }, collapseBtn, order));
+  const panel = h("div", { class: "search-settings" }, h("div", { class: "search-settings-actions" }, collapseBtn, contextBtn, explainBtn), order);
+  panel.hidden = true;
+  const settingsBtn = iconButton(icon("sliders-horizontal", 16), "Search settings", () => {
+    settingsOpen = !settingsOpen;
+    settingsBtn.classList.toggle("is-active", settingsOpen);
+    panel.hidden = !settingsOpen;
+  });
+  const info = h("div", { class: "search-results-info" }, count);
   const collapsed = new Set<string>();
   let seq = 0;
+
+  function expand(path: string, hits: { line: number; text: string }[]) {
+    const text = texts.get(path);
+    if (!moreContext || !text) return hits;
+    const lines = text.split("\n");
+    const out = new Map<number, { line: number; text: string }>();
+    for (const hit of hits) {
+      for (let n = Math.max(1, hit.line - 2); n <= Math.min(lines.length, hit.line + 2); n++) out.set(n, { line: n, text: lines[n - 1] ?? "" });
+    }
+    return [...out.values()].sort((a, b) => a.line - b.line);
+  }
 
   async function run() {
     const mine = ++seq;
     const q = parseQuery(input.value, matchCase);
     clear.hidden = !input.value;
+    if (explain) explainEl.textContent = q ? explainQuery(q) : "Enter a search to explain it.";
     if (!q) {
       info.hidden = true;
       results.replaceChildren();
@@ -78,6 +114,11 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       const inOrder = compareFiles(sort);
       found = found.map((n) => entries.get(n.path)!).filter(Boolean).sort(inOrder);
     }
+    if (moreContext) {
+      texts.clear();
+      await Promise.all(found.map(async (n) => texts.set(n.path, await noteText(ws, n.path))));
+      if (mine !== seq) return;
+    }
     const words = highlightsOf(q);
     const lines = (path: string) => shownLines(path, q, facts, (key) => propertyLine(facts.notes?.get(path), key));
     const counts = new Map<string, number>();
@@ -88,7 +129,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       const matches = h(
         "div",
         { class: "search-result-file-matches" },
-        ...shown.slice(0, LINES).map((hit) => resultMatch(ws, path, hit, spansOf(hit.text, words, matchCase))),
+        ...expand(path, shown.slice(0, LINES)).map((hit) => resultMatch(ws, path, hit, spansOf(hit.text, words, matchCase))),
       );
       const result = resultGroup(path, matches, n ? n.toLocaleString() : null, collapsed, (event) => void ws.open(path, { where: whereFromEvent(event) }));
       if (!shown.length) matches.remove();
@@ -118,8 +159,10 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   const el = h(
     "div",
     { class: "search-view" },
-    h("div", { class: "search-input-container global-search-input-container" }, icon("search", 16), input, caseToggle, clear),
+    h("div", { class: "search-input-container global-search-input-container" }, h("div", { class: "search-input-field" }, icon("search", 16), input, caseToggle, clear), settingsBtn),
+    panel,
     info,
+    explainEl,
     results,
   );
   bindResultKeys(el);

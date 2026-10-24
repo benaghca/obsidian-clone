@@ -4,7 +4,18 @@
   display: flex;
   flex-direction: column;
 }
-.outline-view,
+.backlink-view,
+.outline-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.backlink-view > .nav-header,
+.outline-view > .nav-header {
+  padding: 8px;
+}
 .backlink-pane {
   flex: 1;
   min-height: 0;
@@ -12,23 +23,19 @@
   /* room to scroll the last rows above the floating status bar */
   padding: 4px 8px 32px;
 }
-.outline-view {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 0;
+/* 28×24, the same size as the file explorer's nav buttons. */
+.backlink-toolbar .clickable-icon,
+.outline-toolbar .clickable-icon {
+  width: 28px;
+  height: 24px;
+  padding: 4px 6px;
+  --icon-size: var(--icon-s);
 }
-.outline-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px 8px 2px;
-  flex: none;
-}
-.outline-filter {
-  flex: 1;
-  min-width: 0;
+.outline-filter,
+.backlink-filter {
+  width: 100%;
   height: 26px;
+  margin-top: 6px;
   padding: 2px 8px;
   border: 0;
   border-radius: var(--radius-s);
@@ -44,37 +51,32 @@
   overflow-y: auto;
   padding: 2px 8px 32px;
 }
+/* Same level, same text x. 24px, then 17px per nested level. */
 .outline-item {
-  padding-left: calc(8px + var(--depth, 0) * 16px);
+  padding-left: calc(24px + var(--depth, 0) * 17px);
+  margin-bottom: 2px;
   cursor: var(--cursor, default);
 }
-.outline-item:has(.collapse-icon) {
-  padding-left: calc(22px + var(--depth, 0) * 16px);
-}
 .outline-item .collapse-icon {
-  left: calc(2px + var(--depth, 0) * 16px);
+  left: calc(4px + var(--depth, 0) * 17px);
+}
+/* Faint guide at each ancestor's chevron. Width 0 at the root. */
+.outline-item::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: -2px;
+  left: 12px;
+  width: calc(var(--depth, 0) * 17px);
+  background-image: repeating-linear-gradient(to right, var(--background-modifier-border) 0 1px, transparent 1px 17px);
+  pointer-events: none;
 }
 .outline-item.is-active {
   background: var(--background-modifier-active-hover);
   color: var(--text-normal);
 }
-.backlink-toolbar {
-  display: flex;
-  justify-content: flex-end;
-  flex: none;
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: var(--background-secondary);
-}
-.backlink-toolbar .clickable-icon {
-  --icon-size: 14px;
-  height: 22px;
-  padding: 2px 4px;
-}
 .backlink-header {
   padding-left: 8px;
-  font-size: var(--font-ui-smaller);
   font-weight: 500;
   color: var(--text-muted);
 }
@@ -113,26 +115,28 @@
 }
 .backlink-pane .search-result-file-match {
   position: relative;
-  margin-left: 12px;
+  /* 13px from each side of a 300px pane: the pane's 8px padding plus 5px here. */
+  margin: 0 5px;
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
   line-clamp: 3;
   overflow-wrap: anywhere;
-  line-height: 1.45;
-  /* One line of 12px text lands on the measured 48px row. */
-  padding-top: 14px;
-  padding-bottom: 14px;
-  min-height: 48px;
+  line-height: 1.3;
+  /* 8 + 15.6 + 8 = 31.6, one line of 12px text. The shared match border would add 2px. */
+  padding: 8px 20px 8px 12px;
+  border: 0;
+  background: transparent;
+  min-height: 0;
 }
-/* The Link button sits on the row, so the clamp stays on the text. */
-.backlink-pane .search-result-file-match:has(.search-result-file-match-replace-button) {
+/* The Link button and the context lines sit on the row, so the clamp stays on the text. */
+.backlink-pane .search-result-file-match:has(.search-result-file-match-replace-button),
+.backlink-pane .search-result-file-match:has(.search-result-context) {
   display: block;
   overflow: visible;
   -webkit-line-clamp: unset;
   line-clamp: unset;
-  padding-right: 20px;
 }
 .backlink-pane .search-result-file-match-text {
   display: -webkit-box;
@@ -142,10 +146,31 @@
   overflow: hidden;
   overflow-wrap: anywhere;
 }
+.search-result-context {
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.backlink-context-toggle {
+  display: none;
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  z-index: 1;
+  width: 20px;
+  height: 20px;
+  padding: 2px;
+  transform: translateY(-50%);
+  --icon-size: 14px;
+}
+.backlink-pane .search-result-file-match:hover .backlink-context-toggle {
+  display: flex;
+}
 .search-result-file-match-replace-button {
   display: none;
   position: absolute;
-  right: 4px;
+  /* Room on the right for the hover chevron. */
+  right: 24px;
   top: 50%;
   z-index: 1;
   transform: translateY(-50%);
@@ -165,8 +190,7 @@
   display: block;
 }
 .backlink-pane .search-result-file-match:hover,
-.backlink-pane .search-result-file-match.is-selected,
-.search-view .search-result-file-match.is-selected {
+.backlink-pane .search-result-file-match.is-selected {
   background: var(--background-modifier-active-hover);
 }
 /* Outgoing links, unlinked mentions: a card per mention, its line (up to
