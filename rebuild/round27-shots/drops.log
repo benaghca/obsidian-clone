@@ -1,0 +1,63 @@
+PASS Explorer drag reaches the canvas with the shared ghost and no Move into destination
+PASS Note drop places a 400×400 card with its top-left at the world-space pointer
+PASS Note retains a bold internal title above the rendered Markdown
+PASS One undo restores exact bytes before explorer drop
+PASS Redo restores the same dropped card and metadata
+PASS Title clicks and double-clicks are display only and keep the canvas unchanged
+PASS Dropping on an existing card adds a separate overlapping card
+PASS Image drop preserves aspect ratio within 400×400 at the pointer
+PASS Images use local blobs and have no note title
+PASS Folder drop leaves the canvas and folder unchanged
+PASS Drop outside the canvas adds nothing
+PASS Escape mid-drag removes temporary state and writes nothing
+PASS Read-only canvas refuses explorer drops
+PASS Explorer actions preserve unknown fields and original key order
+PASS Empty top drop opens the observed two-row menu without changing bytes
+PASS Add card menu opens within two frames; max 16.8ms
+PASS Pending menu has no animation and keeps the connection preview
+PASS Double-click Add card creates exactly one card and edge, aligned to the bottom side
+PASS Connected edge uses native key order, defaults and id
+PASS One undo removes the connected card and edge together
+PASS Redo restores both connected records with unchanged ids
+PASS Empty right drop opens the observed two-row menu without changing bytes
+PASS Add card menu opens within two frames; max 16.7ms
+PASS Pending menu has no animation and keeps the connection preview
+PASS Double-click Add card creates exactly one card and edge, aligned to the left side
+PASS Connected edge uses native key order, defaults and id
+PASS One undo removes the connected card and edge together
+PASS Redo restores both connected records with unchanged ids
+PASS Empty bottom drop opens the observed two-row menu without changing bytes
+PASS Add card menu opens within two frames; max 16.7ms
+PASS Pending menu has no animation and keeps the connection preview
+PASS Double-click Add card creates exactly one card and edge, aligned to the top side
+PASS Connected edge uses native key order, defaults and id
+PASS One undo removes the connected card and edge together
+PASS Redo restores both connected records with unchanged ids
+PASS Empty left drop opens the observed two-row menu without changing bytes
+PASS Add card menu opens within two frames; max 16.8ms
+PASS Pending menu has no animation and keeps the connection preview
+PASS Double-click Add card creates exactly one card and edge, aligned to the right side
+PASS Connected edge uses native key order, defaults and id
+PASS One undo removes the connected card and edge together
+PASS Redo restores both connected records with unchanged ids
+PASS Double-click Add note never creates a background card
+PASS Add note reuses the existing instant picker
+PASS Connection vault picker adds A DropNote.md with the observed dimensions and one edge
+PASS Connected file and edge share one undo checkpoint
+PASS Double-click Add note never creates a background card
+PASS Add note reuses the existing instant picker
+PASS Connection vault picker adds A DropImage.svg with the observed dimensions and one edge
+PASS Connected file and edge share one undo checkpoint
+PASS Escape dismisses Add card and its preview without a file change
+PASS Click away cancels the pending connection
+PASS Cancelling the vault picker leaves no dangling card or edge
+PASS External canvas reload disposes a pending Add card menu
+PASS A stale vault picker cannot overwrite a reloaded canvas
+PASS Repeating the same empty drop reopens the menu
+PASS Double-clicking a selection toolbar after Add card never adds a background card
+PASS Long note titles wrap at the card inset without truncation
+PASS Selecting and zooming a note scales its header with the card and never changes JSON
+PASS 300-card/400-edge explorer drag stays under 20ms; max 16.8ms
+PASS Large-board explorer cancellation preserves all bytes and removes drag state
+PASS An explorer drop into an inactive canvas pane activates and focuses that canvas
+PASS Immediate Undo after an inactive-pane drop restores that canvas alone

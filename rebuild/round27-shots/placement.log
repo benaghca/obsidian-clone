@@ -1,0 +1,30 @@
+top {"nodes":[{"id":"a","type":"text","text":"Source","x":0,"y":0,"width":250,"height":160},{"id":"1152cdec34c869b6","x":70,"y":-179,"width":250,"height":60,"type":"text","text":""}],"edges":[{"id":"a86552700b72c3c9","fromNode":"a","fromSide":"top","toNode":"1152cdec34c869b6","toSide":"bottom"}]}
+right {"nodes":[{"id":"a","type":"text","text":"Source","x":0,"y":0,"width":250,"height":160},{"id":"b3b80dab5610f439","x":349,"y":120,"width":250,"height":60,"type":"text","text":""}],"edges":[{"id":"b959381c016ae534","fromNode":"a","fromSide":"right","toNode":"b3b80dab5610f439","toSide":"left"}]}
+bottom {"nodes":[{"id":"a","type":"text","text":"Source","x":0,"y":0,"width":250,"height":160},{"id":"09c43ea30cacc76f","x":70,"y":279,"width":250,"height":60,"type":"text","text":""}],"edges":[{"id":"635994ab63762a24","fromNode":"a","fromSide":"bottom","toNode":"09c43ea30cacc76f","toSide":"top"}]}
+left {"nodes":[{"id":"a","type":"text","text":"Source","x":0,"y":0,"width":250,"height":160},{"id":"14a7dfd3de082cf9","x":-349,"y":120,"width":250,"height":60,"type":"text","text":""}],"edges":[{"id":"98815a010d206288","fromNode":"a","fromSide":"left","toNode":"14a7dfd3de082cf9","toSide":"right"}]}
+HEADER [
+  {
+    box: {
+      x: 629,
+      y: 256.140625,
+      width: 354,
+      height: 31.0625,
+      top: 256.140625,
+      right: 983,
+      bottom: 287.203125,
+      left: 629
+    },
+    font: '700 25.888px / 31.0656px "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+    margin: '0px 0px 12.944px',
+    whiteSpace: 'pre-wrap',
+    edit: 'true',
+    tab: -1,
+    html: '<div class="inline-title" contenteditable="true" spellcheck="true" autocapitalize="on" tabindex="-1" enterkeyhint="done">Title</div>'
+  }
+]
+ENTER { active: 'Header', editing: 'canvas-wrapper node-insert-event' }
+DOUBLE {
+  active: 'Header',
+  editing: 'inline-title',
+  text: 'Title\n\nBody\n\nTitle'
+}

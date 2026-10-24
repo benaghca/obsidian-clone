@@ -1,0 +1,7 @@
+PASS 5,000-line Big note: 26 native text insertions reach the next animation frame within 20ms each
+MEASURE 5,000-line Big note {"frameMax":16.5,"frameMean":6.061538462455456}
+PASS Big note retains all 5,000 lines and typed characters
+PASS Real pointer enters the 40-row table cell editor
+PASS 40-row table: 26 native text insertions reach the next animation frame within 20ms each
+MEASURE 40-row table {"frameMax":16.900000035762787,"frameMean":6.430769230310734}
+PASS Table retains all 40 rows and typed characters
