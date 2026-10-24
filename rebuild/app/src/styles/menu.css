@@ -13,7 +13,8 @@
   border-radius: var(--radius-m);
   box-shadow: var(--menu-shadow);
   font-size: var(--font-ui-small);
-  line-height: 1.4;
+  /* 13px × 1.3 + 8px of padding is a 24.9px row, the measured item pitch. */
+  line-height: 1.3;
 }
 .menu-item {
   display: flex;
@@ -77,6 +78,7 @@
 }
 .menu-separator {
   height: 1px;
-  margin: 4px calc(-1 * var(--menu-padding));
+  /* 3px + the 1px line + 3px puts 7px between the items around a separator. */
+  margin: 3px calc(-1 * var(--menu-padding));
   background: var(--background-modifier-border);
 }

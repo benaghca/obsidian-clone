@@ -214,3 +214,26 @@ export function icon(name: IconName, size = 18): SVGElement {
   copy.setAttribute("height", String(size));
   return copy;
 }
+
+/**
+ * The calendar drawn in a date value. Lucide's outline disappears at 11×12
+ * (a few anti-aliased pixels). This one keeps that box and adds a solid top
+ * bar, which is what stays visible there.
+ */
+export function dateGlyph(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 11 12");
+  svg.setAttribute("class", "svg-icon lucide-calendar");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("width", "11");
+  svg.setAttribute("height", "12");
+  const add = (tag: string, attrs: Record<string, string>) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    svg.append(el);
+  };
+  add("rect", { x: "0.75", y: "2.5", width: "9.5", height: "8.7", rx: "1.1", fill: "none", stroke: "currentColor", "stroke-width": "1.4" });
+  add("path", { d: "M1.2 3.4h8.6v2.5H1.2z", fill: "currentColor", stroke: "none" });
+  add("path", { d: "M3.2 1.1v2.2M7.8 1.1v2.2", fill: "none", stroke: "currentColor", "stroke-width": "1.4", "stroke-linecap": "round" });
+  return svg;
+}

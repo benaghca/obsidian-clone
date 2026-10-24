@@ -126,14 +126,14 @@ await withBrowser(async ({ send, run, move, click, check }) => {
   });
   const rgb = (c) => c.replace(/\s/g, '');
   check(chrome.date.glyph.w === 11 && chrome.date.glyph.h === 12 && Math.abs(chrome.date.glyph.x - 7.5) < 0.6, `the date glyph is 11×12 at x+7.5 (${chrome.date.glyph.w}×${chrome.date.glyph.h} at +${chrome.date.glyph.x})`);
-  check(rgb(chrome.date.glyph.color) === 'rgb(171,171,171)', `the date glyph is light grey (${chrome.date.glyph.color})`);
+  check(rgb(chrome.date.glyph.color) === 'rgb(126,126,126)', `the date glyph is a readable grey (${chrome.date.glyph.color})`);
   check(chrome.time.glyph.w === 11 && Math.abs(chrome.time.glyph.x - 7.5) < 0.6 && chrome.time.pad === '4px 8px 4px 24px', `datetime has the same glyph and 24px left padding (${chrome.time.pad}, glyph +${chrome.time.glyph.x})`);
   for (const kind of ['date', 'time']) {
     const shot = await send('Page.captureScreenshot', { format: 'png', clip: chrome[kind].clip });
     const ink = separatorColumns(Buffer.from(shot.data, 'base64'));
     check(ink.faint >= 4 && ink.dark >= 8, `${kind} separators are faint and the numbers stay dark (${ink.faint} faint columns, ${ink.dark} dark)`);
   }
-  check(chrome.headerBorder === '1px' && rgb(chrome.headerColor) === 'rgb(224,224,224)', `the sidebar tab row has a 1px bottom line (${chrome.headerBorder} ${chrome.headerColor})`);
+  check(chrome.headerBorder === '1px' && rgb(chrome.headerColor) === 'rgb(228,228,228)', `the sidebar tab row has a 1px bottom line (${chrome.headerBorder} ${chrome.headerColor})`);
   check(Math.abs(chrome.ribbon.y - 40) < 0.6 && Math.abs(chrome.ribbon.w - 44) < 0.6 && Math.abs(chrome.ribbon.h - 760) < 1, `the ribbon starts under the tab row (${chrome.ribbon.x},${chrome.ribbon.y} ${chrome.ribbon.w}×${chrome.ribbon.h})`);
   check(Math.abs(chrome.toggle.w - 44) < 0.6 && chrome.toggle.h === 39 && Math.abs(chrome.toggle.y) < 0.6 && Math.abs(chrome.actionY - 48) < 1, `the sidebar toggle is 44×39 in the row above, and an action stays at y=48 (${chrome.toggle.w}×${chrome.toggle.h} at ${chrome.toggle.y}, action ${chrome.actionY})`);
 

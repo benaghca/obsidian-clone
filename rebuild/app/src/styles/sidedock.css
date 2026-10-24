@@ -89,7 +89,7 @@
   box-shadow: inset -1px 0 0 var(--background-modifier-border);
 }
 .mod-right-split {
-  --dock-width: var(--right-sidebar-width, 260px);
+  --dock-width: var(--right-sidebar-width, 300px);
   align-items: flex-end;
   box-shadow: inset 1px 0 0 var(--background-modifier-border);
 }
@@ -145,6 +145,10 @@
   padding: 0 8px;
   flex: none;
   border-bottom: 1px solid var(--background-modifier-border);
+}
+/* Measured on the light theme's sidebar tab row. The shared border token stays 224. */
+.theme-light .mod-sidedock > .workspace-tab-header-container {
+  border-bottom-color: #e4e4e4;
 }
 .mod-sidedock > .workspace-tab-header-container .workspace-tab-header {
   width: 28px;

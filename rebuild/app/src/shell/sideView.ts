@@ -151,6 +151,58 @@ export function resultGroup(path: string, matches: HTMLElement, count: string | 
     matches);
 }
 
+/** Fold or open every result group under `root`. */
+export function setGroupsCollapsed(root: ParentNode, collapsed: boolean) {
+  for (const icon of root.querySelectorAll<HTMLElement>(".search-result-file-title .collapse-icon")) {
+    if (icon.classList.contains("is-collapsed") !== collapsed) icon.click();
+  }
+}
+
+/** Folds every result group under `root`, then opens them on the next press. */
+export function collapseResultsButton(root: ParentNode): HTMLElement {
+  const button = iconButton(icon("chevrons-down-up", 16), "Collapse results", () => {
+    const icons = [...root.querySelectorAll(".search-result-file-title .collapse-icon")];
+    const collapse = icons.some((node) => !node.classList.contains("is-collapsed"));
+    setGroupsCollapsed(root, collapse);
+    button.setAttribute("aria-label", collapse ? "Expand results" : "Collapse results");
+    button.replaceChildren(icon(collapse ? "chevrons-up-down" : "chevrons-down-up", 16));
+  });
+  return button;
+}
+
+const reveal = (row: HTMLElement) => {
+  const scroller = row.closest<HTMLElement>(".search-results, .backlink-pane, .outline-list");
+  if (!scroller) return;
+  const box = scroller.getBoundingClientRect();
+  const r = row.getBoundingClientRect();
+  if (r.top < box.top) scroller.scrollTop -= box.top - r.top;
+  else if (r.bottom > box.bottom) scroller.scrollTop += r.bottom - box.bottom;
+};
+
+/**
+ * ArrowDown and ArrowUp move a highlight through the visible matches.
+ * Enter opens the highlighted one. A menu that is already open keeps the keys.
+ */
+export function bindResultKeys(root: HTMLElement) {
+  root.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
+    if (event.altKey || event.metaKey || event.ctrlKey || document.querySelector(".menu")) return;
+    const rows = [...root.querySelectorAll<HTMLElement>(".search-result-file-match")].filter((row) => row.offsetParent);
+    if (!rows.length) return;
+    const current = rows.findIndex((row) => row.classList.contains("is-selected"));
+    if (event.key === "Enter") {
+      if (current < 0) return;
+      event.preventDefault();
+      rows[current].click();
+      return;
+    }
+    event.preventDefault();
+    const next = event.key === "ArrowDown" ? Math.min(rows.length - 1, current + 1) : Math.max(0, current < 0 ? rows.length - 1 : current - 1);
+    rows.forEach((row, i) => row.classList.toggle("is-selected", i === next));
+    reveal(rows[next]);
+  });
+}
+
 /** A snippet whose pressed highlight selects its original source columns. */
 export function resultMatch(ws: Workspace, path: string, hit: { text: string; line: number }, spans: Span[]) {
   return h("div", {

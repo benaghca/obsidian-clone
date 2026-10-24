@@ -159,11 +159,15 @@
   color: var(--text-faint);
   transform: translateY(-50%);
   --icon-size: 12px;
-  --icon-stroke: 1.25px;
+  --icon-stroke: 1.6px;
 }
 .property-date-icon .svg-icon {
   width: 11px;
   height: 12px;
+}
+/* The light theme's 11×12 calendar needs ink darker than --text-faint. Dark stays on the token. */
+.theme-light .property-date-icon {
+  color: #7e7e7e;
 }
 .property-date .property-input {
   position: relative;
@@ -352,4 +356,15 @@
 }
 .file-properties .property-key {
   width: 135px;
+}
+/* The daily-note link stays on the date's row. The field stays the measured 103px. */
+.file-properties .property-value[data-type="date"] {
+  flex-wrap: nowrap;
+}
+.file-properties .property-value[data-type="date"] .property-date {
+  flex: 0 0 auto;
+}
+.file-properties .property-value[data-type="date"] .property-date .property-input {
+  field-sizing: fixed;
+  width: 103px;
 }

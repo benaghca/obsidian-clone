@@ -25,7 +25,7 @@ import { Facet, Prec, StateEffect, StateField, type EditorState, type Range } fr
 import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, WidgetType } from "@codemirror/view";
 import { confirmDialog } from "../shell/confirm";
 import { h, keyButton } from "../shell/dom";
-import { icon } from "../shell/icons";
+import { dateGlyph, icon } from "../shell/icons";
 import { type MenuItems, SEPARATOR, showMenu } from "../shell/menu";
 import type { SuggestItem } from "../shell/suggest";
 import {
@@ -505,7 +505,7 @@ class Block {
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
         // Both values keep a calendar on the left. The native picker glyph is hidden and its click target covers that icon, so a datetime still opens the clock.
-        const field = h("label", { class: "property-date" }, input, h("span", { class: "property-date-icon", "aria-hidden": "true" }, icon("calendar")));
+        const field = h("label", { class: "property-date" }, input, h("span", { class: "property-date-icon", "aria-hidden": "true" }, dateGlyph()));
         box.append(field);
         if (type === "date") {
           const host = this.view.state.facet(editorHost);

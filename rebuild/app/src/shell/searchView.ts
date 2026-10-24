@@ -19,7 +19,7 @@ import { h } from "./dom";
 import { icon } from "./icons";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, pagedRows, resultGroup, resultMatch } from "./sideView";
+import { afterPaint, bindResultKeys, collapseResultsButton, pagedRows, resultGroup, resultMatch } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -50,13 +50,14 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     icon("case-sensitive", 16),
   );
   const count = h("div", { class: "search-results-result-count" });
+  const results = h("div", { class: "search-results" });
+  const collapseBtn = collapseResultsButton(results);
   const order = dropdown(SORT_ORDERS, sort, (o) => {
     sort = o;
     remember();
     void run();
   }, "Sort order");
-  const info = h("div", { class: "search-results-info" }, count, order);
-  const results = h("div", { class: "search-results" });
+  const info = h("div", { class: "search-results-info" }, count, h("div", { class: "search-results-tools" }, collapseBtn, order));
   const collapsed = new Set<string>();
   let seq = 0;
 
@@ -114,14 +115,13 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   }
   input.addEventListener("input", () => void run());
 
-  return {
-    el: h(
-      "div",
-      { class: "search-view" },
-      h("div", { class: "search-input-container global-search-input-container" }, icon("search", 16), input, caseToggle, clear),
-      info,
-      results,
-    ),
-    search,
-  };
+  const el = h(
+    "div",
+    { class: "search-view" },
+    h("div", { class: "search-input-container global-search-input-container" }, icon("search", 16), input, caseToggle, clear),
+    info,
+    results,
+  );
+  bindResultKeys(el);
+  return { el, search };
 }
