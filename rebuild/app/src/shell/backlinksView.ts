@@ -67,7 +67,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     renderLinked();
     scheduleUnlinked(0);
   });
-  const sortBtn = iconButton(icon("arrow-down-narrow-wide", 16), "Change sort order", () => {
+  const sortBtn = iconButton(icon("arrow-up-narrow-wide", 16), "Change sort order", () => {
     showMenu(SORT_ORDERS.map(([order, title]) => ({
       title,
       checked: order === sort,

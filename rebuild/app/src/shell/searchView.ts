@@ -17,7 +17,7 @@ import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
-import { icon } from "./icons";
+import { icon, moreOptionsGlyph } from "./icons";
 import { showMenu } from "./menu";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { explainQuery, highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
@@ -51,7 +51,21 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     },
     icon("case-sensitive", 16),
   );
-  const count = h("div", { class: "search-results-result-count" });
+  const countLabel = h("span", { class: "search-results-count-label" });
+  const count = h(
+    "div",
+    {
+      class: "search-results-result-count",
+      role: "button",
+      "aria-label": "More options",
+      onclick: () => {
+        const text = copied.map((n) => `${n.name}\n${n.lines.map((line) => `\t${line}`).join("\n")}`).join("\n\n");
+        showMenu([{ title: "Copy search results", icon: "copy", disabled: !copied.length, action: () => writeClipboard(text) }], count);
+      },
+    },
+    countLabel,
+    moreOptionsGlyph(),
+  );
   const results = h("div", { class: "search-results" });
   const explainEl = h("div", { class: "search-explain" });
   explainEl.hidden = true;
@@ -92,17 +106,12 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     settingsBtn.classList.toggle("is-active", settingsOpen);
     panel.hidden = !settingsOpen;
   });
-  const menuBtn = iconButton(icon("ellipsis", 16), "More options", () => {
-    const text = copied.map((n) => `${n.name}\n${n.lines.map((line) => `\t${line}`).join("\n")}`).join("\n\n");
-    showMenu([{ title: "Copy search results", icon: "copy", disabled: !copied.length, action: () => writeClipboard(text) }], menuBtn);
-  });
-  menuBtn.classList.add("search-results-menu");
   const order = dropdown(SORT_ORDERS, sort, (o) => {
     sort = o;
     remember();
     void run();
   }, "Sort order");
-  const info = h("div", { class: "search-results-info" }, h("div", { class: "search-results-leading" }, menuBtn, count), order);
+  const info = h("div", { class: "search-results-info" }, count, order);
   const collapsed = new Set<string>();
   let seq = 0;
 
@@ -125,7 +134,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     clear.hidden = !input.value;
     if (explain) explainEl.textContent = q ? explainQuery(q) : "Enter a search to explain it.";
     if (!q) {
-      count.textContent = "";
+      countLabel.textContent = "";
       copied = [];
       results.replaceChildren();
       return;
@@ -190,7 +199,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     copied = found.map((n) => ({ name: noteName(n.path), lines: lines(n.path).slice(0, LINES).map((hit) => hit.text) }));
     results.replaceChildren();
     if (!found.length) {
-      count.textContent = "0 results";
+      countLabel.textContent = "0 results";
       results.append(h("div", { class: "pane-empty" }, "No matches found."));
       return;
     }
@@ -198,7 +207,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     afterPaint(() => {
       if (mine !== seq) return;
       const total = found.reduce((sum, n) => sum + countOf(n.path), 0);
-      count.textContent = `${total.toLocaleString()} result${total === 1 ? "" : "s"}`;
+      countLabel.textContent = `${total.toLocaleString()} result${total === 1 ? "" : "s"}`;
     });
   }
 

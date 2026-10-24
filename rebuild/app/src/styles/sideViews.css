@@ -27,9 +27,9 @@
   /* room to scroll the last rows above the floating status bar */
   padding: 4px 8px 32px;
 }
-/* Backlink rows sit 12px in, so a 300px pane holds a 276px row. */
+/* Backlink rows sit 13px in, so a 300px pane holds a 274px row. */
 .backlink-view .backlink-pane {
-  padding: 4px 12px 32px;
+  padding: 4px 13px 32px;
 }
 /* 28×24, the same size as the file explorer's nav buttons. */
 .backlink-toolbar .clickable-icon,
@@ -87,7 +87,7 @@
 .backlink-header {
   padding-left: 8px;
   font-weight: 500;
-  color: var(--text-muted);
+  color: var(--text-normal);
 }
 .outgoing-link-item.is-unresolved .tree-item-inner {
   color: var(--text-faint);
@@ -147,8 +147,8 @@
 }
 .backlink-pane .search-result-file-match {
   position: relative;
-  /* 13px from each side of a 300px pane: the pane's 12px padding plus 1px here. */
-  margin: 0 1px;
+  /* The pane's 13px padding is the inset. The card is the same width as the file row. */
+  margin: 0;
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;

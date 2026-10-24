@@ -125,6 +125,18 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     return f;
   }
 
+  // A folder that loses its last file stays listed. On disk the directory remains.
+  function keepEmptyParents(path: string) {
+    let parent = path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "";
+    while (parent) {
+      const prefix = `${parent}/`;
+      const still = [...files.keys()].some((p) => p.startsWith(prefix)) || [...emptyDirs].some((d) => d === parent || d.startsWith(prefix));
+      if (!still) emptyDirs.add(parent);
+      const slash = parent.lastIndexOf("/");
+      parent = slash < 0 ? "" : parent.slice(0, slash);
+    }
+  }
+
   function listFiles(): FileEntry[] {
     const dirs = new Set<string>(emptyDirs);
     for (const path of [...files.keys(), ...emptyDirs]) {
@@ -283,12 +295,14 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
           emptyDirs.add(to + dir.slice(from.length));
         }
       }
+      keepEmptyParents(from);
     },
     // `permanent` makes no difference here: the mock has no .trash.
     delete_path: ({ path }) => {
       const under = (p: string) => p === path || p.startsWith(path + "/");
       for (const p of [...files.keys()]) if (under(p)) files.delete(p);
       for (const d of [...emptyDirs]) if (under(d)) emptyDirs.delete(d);
+      keepEmptyParents(path);
     },
     search: ({ query, limit }) => search(query, limit),
     link_index: () => linkIndex(),

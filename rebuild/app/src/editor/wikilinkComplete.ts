@@ -109,8 +109,28 @@ function wikilinkSource(ctx: CompletionContext): CompletionResult | Promise<Comp
   }));
   return { from: before.from + 2, options, validFor: /^[^[\]|#^\n]*$/ };
 }
+/** Frontmatter aliases. A separate source so note names stay synchronous. */
+function aliasSource(ctx: CompletionContext): Promise<CompletionResult | null> | null {
+  const before = ctx.matchBefore(/\[\[[^[\]|\n]*$/);
+  if (!before || ctx.state.readOnly || /[#^]/.test(before.text)) return null;
+  const host = ctx.state.facet(editorHost);
+  if (!host?.linkAliases) return null;
+  return host.linkAliases().then((aliases) => {
+    if (ctx.aborted || !aliases.length) return null;
+    const options: Completion[] = aliases.map((item, index) => ({
+      label: item.alias,
+      detail: item.name,
+      type: "alias",
+      sortText: `1${String(index).padStart(8, "0")}`,
+      apply(view, _option, from, to) {
+        insertLink(view, from - 2, to, host.formatLink(item.path, view, item.alias));
+      },
+    }));
+    return { from: before.from + 2, options, validFor: /^[^[\]|#^\n]*$/ };
+  }).catch(() => null);
+}
 export const wikilinkCompletion = autocompletion({
-  override: [wikilinkSource], icons: false, activateOnTypingDelay: 0, maxRenderedOptions: 50,
+  override: [wikilinkSource, aliasSource], icons: false, activateOnTypingDelay: 0, maxRenderedOptions: 50,
   optionClass: completion => `mod-link-${completion.type}`,
   tooltipClass: () => "cm-link-suggest",
 });

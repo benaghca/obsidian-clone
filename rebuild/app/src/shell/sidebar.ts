@@ -6,9 +6,9 @@ import type { FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
-import { newFolder, renameFile } from "../fileOps";
+import { deleteFile, fileSettings, newFolder, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
-import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } from "../paths";
+import { compareFiles, compareNames, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -21,7 +21,7 @@ import { isPromptOpen } from "./prompt";
 import { createSearchView } from "./searchView";
 import { viewTabs } from "./sideView";
 import { startTreeDrag } from "./treeDrag";
-import { selectGesture, selectionRange } from "./treeSelect";
+import { selectGesture, selectionRange, topLevelPaths, treeKeyAction } from "./treeSelect";
 import { mountVaultSwitcher } from "./vaultSwitcher";
 
 export type LeftView = "files" | "search" | "bookmarks";
@@ -164,11 +164,15 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const openFolders = new Map<string, () => void>();
   const selected = new Set<string>();
   let anchor: string | null = null;
+  /** Keyboard cursor. Independent of the open file (`is-active`) and the selection. */
+  let cursor: string | null = null;
+  const placed = new Map<string, { node: TreeNode; depth: number }>();
   let cancelDrag: (() => void) | undefined;
   const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
   let autoReveal = false;
   const list = h("div", { class: "nav-files-container" });
+  list.tabIndex = 0;
 
   const sortButton = iconButton(icon("arrow-up-narrow-wide"), "Change sort order", () => {
     showMenu(
@@ -227,7 +231,11 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   }
 
   function paintSelection() {
-    for (const [path, row] of rows) row.classList.toggle("is-selected", selected.has(path));
+    const focused = document.activeElement === list;
+    for (const [path, row] of rows) {
+      row.classList.toggle("is-selected", selected.has(path));
+      row.classList.toggle("is-focused", focused && path === cursor);
+    }
   }
 
   /** The pressed row's drag: every selected path when that row is part of a multi-selection. */
@@ -272,6 +280,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
           "data-path": entry.path,
           onclick: (e: MouseEvent) => {
             if ((e.target as HTMLElement).isContentEditable) return;
+            cursor = entry.path;
             const gesture = selectGesture(e);
             if (gesture === "toggle") {
               if (selected.has(entry.path)) selected.delete(entry.path);
@@ -312,6 +321,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       );
       self.style.setProperty("--depth", String(depth));
       rows.set(entry.path, self);
+      placed.set(entry.path, { node, depth });
       const folder = entry.is_dir ? h("div", { class: "tree-item nav-folder" }, self) : null;
       if (folder) openFolders.set(entry.path, () => {
         if (!expanded.has(entry.path)) toggleFolder(node, depth, folder, chevron!, true);
@@ -352,7 +362,11 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     void slideHeight(box, open).then((finished) => {
       if (!finished || open) return;
       for (const row of box.querySelectorAll<HTMLElement>("[data-path]")) {
-        if (rows.get(row.dataset.path!) === row) rows.delete(row.dataset.path!);
+        const path = row.dataset.path!;
+        if (rows.get(path) === row) {
+          rows.delete(path);
+          placed.delete(path);
+        }
       }
       for (const field of box.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
       box.remove();
@@ -414,18 +428,29 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function render() {
     cancelDrag?.();
     const live = new Set(ws.vault.files.map((file) => file.path));
+    const previous = visiblePaths();
+    const oldIndex = cursor == null ? -1 : previous.indexOf(cursor);
     for (const path of selected) if (!live.has(path)) selected.delete(path);
     if (anchor && !live.has(anchor)) anchor = null;
+    if (cursor && !live.has(cursor)) {
+      // The focus ring follows the nearest row that is still there. Selection
+      // stays whatever survived the prune, so a move does not select a neighbour.
+      cursor = previous.slice(Math.max(oldIndex, 0) + 1).find((path) => live.has(path))
+        ?? [...previous.slice(0, Math.max(oldIndex, 0))].reverse().find((path) => live.has(path))
+        ?? null;
+    }
     const loaded = loadFolds();
     pruneExpanded();
     if (loaded) allCollapsed = expanded.size === 0;
     openFolders.clear();
     for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
     rows.clear();
+    placed.clear();
     const frag = document.createDocumentFragment() as unknown as HTMLElement;
     renderNodes(buildTree(ws.vault.files, sortOrder), 0, frag);
     list.replaceChildren(frag);
     markActive();
+    paintSelection();
     syncCollapseButton();
     rememberFolds();
   }
@@ -479,6 +504,136 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       if (autoReveal && path) reveal(path);
       else markActive();
     }
+  });
+
+  function parentPath(path: string): string | null {
+    const parent = parentDir(path);
+    return parent && rows.has(parent) ? parent : null;
+  }
+
+  function childPath(path: string): string | null {
+    const visible = visiblePaths();
+    const next = visible[visible.indexOf(path) + 1];
+    return next && parentDir(next) === path ? next : null;
+  }
+
+  function focusPath(path: string) {
+    cursor = path;
+    selected.clear();
+    selected.add(path);
+    anchor = path;
+    paintSelection();
+    rows.get(path)?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** With no cursor yet, the first arrow lands on the row it points at. */
+  function moveCursor(delta: -1 | 1, extend: boolean) {
+    const visible = visiblePaths();
+    if (!visible.length) return;
+    const index = cursor == null ? -1 : visible.indexOf(cursor);
+    const from = index >= 0 ? index : delta > 0 ? -1 : visible.length;
+    const next = from + delta;
+    if (next < 0 || next >= visible.length) {
+      if (!extend && cursor && !selected.has(cursor)) focusPath(cursor);
+      return;
+    }
+    const path = visible[next]!;
+    cursor = path;
+    if (extend) {
+      if (anchor == null || !visible.includes(anchor)) anchor = visible[from] ?? path;
+      selected.clear();
+      for (const item of selectionRange(visible, anchor, path)) selected.add(item);
+    } else {
+      selected.clear();
+      selected.add(path);
+      anchor = path;
+    }
+    paintSelection();
+    rows.get(path)?.scrollIntoView({ block: "nearest" });
+  }
+
+  function toggleCursor() {
+    if (!cursor) return;
+    const info = placed.get(cursor);
+    const row = rows.get(cursor);
+    if (!info?.node.entry.is_dir || !row) return;
+    const chevron = row.querySelector<HTMLElement>(".collapse-icon");
+    const folder = row.parentElement;
+    if (chevron && folder) toggleFolder(info.node, info.depth, folder, chevron);
+  }
+
+  function openCursor() {
+    if (!cursor) return;
+    if (placed.get(cursor)?.node.entry.is_dir) toggleCursor();
+    else void ws.open(cursor);
+  }
+
+  function landCursor() {
+    if (cursor && rows.has(cursor)) return;
+    const visible = visiblePaths();
+    const active = ws.active.path ?? ws.active.viewFile;
+    cursor =
+      (anchor && selected.has(anchor) && rows.has(anchor) ? anchor : null) ??
+      visible.find((path) => selected.has(path)) ??
+      (active && rows.has(active) ? active : null) ??
+      visible[0] ??
+      null;
+  }
+
+  async function deleteSelection() {
+    const visible = visiblePaths();
+    const picked = selected.size ? visible.filter((path) => selected.has(path)) : cursor ? [cursor] : [];
+    const items = topLevelPaths(picked, (path) => ws.vault.isFolder(path));
+    if (!items.length) return;
+    if (picked.length === 1) {
+      await deleteFile(ws, items[0]!);
+      return;
+    }
+    const where = fileSettings.permanentDelete() ? "They will be permanently deleted." : "They will be moved to the vault's .trash folder.";
+    const answer = await confirmDialog({
+      title: "Delete",
+      message: `Are you sure you want to delete ${picked.length} items? ${where}`,
+      confirm: "Delete",
+      warning: true,
+    });
+    if (!answer.ok) return;
+    for (const path of items) await deleteFile(ws, path, { confirmed: true });
+  }
+
+  const typingTarget = (target: EventTarget | null) => (target as HTMLElement | null)?.closest?.("[contenteditable], input, textarea");
+  list.addEventListener("pointerdown", (event) => {
+    if (typingTarget(event.target)) return;
+    if (document.activeElement !== list) list.focus({ preventScroll: true });
+  });
+  list.addEventListener("focus", () => {
+    landCursor();
+    paintSelection();
+  });
+  list.addEventListener("blur", () => {
+    for (const row of rows.values()) row.classList.remove("is-focused");
+  });
+  list.addEventListener("keydown", (event) => {
+    if (typingTarget(event.target) || isMenuOpen() || isPromptOpen() || isConfirmOpen()) return;
+    const info = cursor ? placed.get(cursor) : undefined;
+    const entry = info?.node.entry;
+    const action = treeKeyAction(event.key, event, info && entry ? {
+      isFolder: entry.is_dir,
+      expanded: expanded.has(entry.path),
+      hasParent: parentPath(entry.path) != null,
+      hasChild: entry.is_dir && info.node.children.length > 0,
+    } : null);
+    if (!action) return;
+    event.preventDefault();
+    if (action.type === "move") moveCursor(action.delta, action.extend);
+    else if (action.type === "expand" || action.type === "collapse") toggleCursor();
+    else if (action.type === "child") {
+      const next = cursor ? childPath(cursor) : null;
+      if (next) focusPath(next);
+    } else if (action.type === "parent") {
+      const next = cursor ? parentPath(cursor) : null;
+      if (next) focusPath(next);
+    } else if (action.type === "open") openCursor();
+    else void deleteSelection();
   });
 
   return {

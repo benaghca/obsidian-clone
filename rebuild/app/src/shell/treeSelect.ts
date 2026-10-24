@@ -59,3 +59,48 @@ export function dropLinkText(
     .map((path) => (path.toLowerCase().endsWith(".md") ? "" : "!") + linkTo(path, from))
     .join("\n");
 }
+
+/** The row the file explorer's keyboard cursor is on, as far as the keys care. */
+export interface TreeCursor {
+  isFolder: boolean;
+  expanded: boolean;
+  hasParent: boolean;
+  hasChild: boolean;
+}
+
+/** What one explorer key should do. The view applies it to the visible rows. */
+export type TreeKeyAction =
+  | { type: "move"; delta: -1 | 1; extend: boolean }
+  | { type: "expand" }
+  | { type: "collapse" }
+  | { type: "parent" }
+  | { type: "child" }
+  | { type: "open" }
+  | { type: "delete" };
+
+/**
+ * Arrow keys move, or expand and collapse folders. Left on a child goes to
+ * its parent. Enter opens. Delete and Backspace delete. Ctrl, Cmd and Alt
+ * are left to the rest of the app.
+ */
+export function treeKeyAction(
+  key: string,
+  mods: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean },
+  cursor: TreeCursor | null,
+): TreeKeyAction | null {
+  if (mods.ctrlKey || mods.metaKey || mods.altKey) return null;
+  if (key === "ArrowDown" || key === "ArrowUp") return { type: "move", delta: key === "ArrowDown" ? 1 : -1, extend: mods.shiftKey };
+  if (key === "ArrowRight") {
+    if (!cursor?.isFolder) return null;
+    if (!cursor.expanded) return { type: "expand" };
+    return cursor.hasChild ? { type: "child" } : null;
+  }
+  if (key === "ArrowLeft") {
+    if (!cursor) return null;
+    if (cursor.isFolder && cursor.expanded) return { type: "collapse" };
+    return cursor.hasParent ? { type: "parent" } : null;
+  }
+  if (key === "Enter" && !mods.shiftKey) return { type: "open" };
+  if ((key === "Delete" || key === "Backspace") && !mods.shiftKey) return { type: "delete" };
+  return null;
+}

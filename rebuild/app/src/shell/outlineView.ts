@@ -1,7 +1,7 @@
 // Outline view for the right sidebar: the open note's headings as an
-// indented tree. Click one to glide to it. Auto-scroll starts off. While it
-// is on, the heading at the top of the editor stays highlighted and the list
-// scrolls to keep it in view.
+// indented tree. Click one to glide to it. The heading at the top of the
+// editor stays highlighted whether or not Auto-scroll is on. Auto-scroll
+// only scrolls the list to keep that heading in view, and it starts off.
 // A heading with children folds them; Collapse all folds every such heading.
 // The filter hides rows whose text does not contain it.
 //
@@ -17,7 +17,7 @@ import { frontmatterField } from "../editor/frontmatter";
 import { type Heading, headingsFromTree, outlineDepths } from "../editor/outline";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
-import { icon } from "./icons";
+import { autoScrollGlyph, icon } from "./icons";
 import { afterPaint, type SideView } from "./sideView";
 
 const IDLE_MS = 300;
@@ -36,7 +36,7 @@ export function createOutlineView(ws: Workspace): SideView {
       paint();
     } else query.focus();
   });
-  const followBtn = iconButton(icon("square", 16), "Auto-scroll to current section", () => {
+  const followBtn = iconButton(autoScrollGlyph(), "Auto-scroll to current section", () => {
     followOn = !followOn;
     followBtn.classList.toggle("is-active", followOn);
     if (followOn) follow();
@@ -166,9 +166,9 @@ export function createOutlineView(ws: Workspace): SideView {
     if (hd) ws.jumpTo({ anchor: Math.min(hd.from, ws.view.state.doc.length) });
   }
 
-  /** The last heading at or above the line at the top of the note. */
+  /** The last heading at or above the line at the top of the note. Highlight always; scroll only while auto-scroll is on. */
   function follow() {
-    if (!active || !headings.length || !followOn) return;
+    if (!active || !headings.length) return;
     const view = ws.view;
     // The note scrolls in .view-content. .cm-scroller is overflow: visible, so its scrollTop stays 0.
     const scroller = view.dom.closest<HTMLElement>(".view-content") ?? view.scrollDOM;
@@ -182,7 +182,7 @@ export function createOutlineView(ws: Workspace): SideView {
       row.classList.toggle("is-active", on);
       if (on) marked = row;
     }
-    if (!marked) return;
+    if (!followOn || !marked) return;
     const box = list.getBoundingClientRect();
     const r = marked.getBoundingClientRect();
     if (r.top < box.top) list.scrollTop -= box.top - r.top;

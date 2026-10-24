@@ -19,9 +19,16 @@
   justify-content: center;
   gap: 2px;
 }
-.nav-buttons-container .clickable-icon.is-active {
-  color: var(--text-accent);
+.nav-buttons-container .clickable-icon.is-active,
+.search-view .search-input-container > .clickable-icon.is-active {
+  color: var(--text-normal);
   background: var(--background-modifier-hover);
+}
+.nav-files-container:focus {
+  outline: none;
+}
+.nav-files-container:focus .tree-item-self.is-focused {
+  box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
 }
 .nav-files-container {
   flex: 1;
@@ -268,7 +275,10 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 0 12px 8px;
+  /* The field's padding leaves the switches 3px low, and this block's own
+     padding leaves the count another 2px low. */
+  margin-top: -3px;
+  padding: 0 12px 6px;
 }
 .search-settings-row {
   display: flex;
@@ -295,27 +305,46 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
-.search-results-leading {
-  display: flex;
+.search-results-result-count {
+  display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-width: 0;
-}
-.search-results-menu {
-  width: 22px;
-  height: 22px;
-  flex: none;
-  padding: 0;
-  border-radius: 50%;
-}
-.search-results-info .dropdown {
-  height: 26px;
-  max-width: 168px;
+  height: 24px;
+  padding: 0 2px;
+  border-radius: var(--radius-s);
+  color: var(--text-muted);
   font-size: var(--font-ui-smaller);
-}
-.search-results-result-count {
-  padding: 4px 2px;
   white-space: nowrap;
+  cursor: var(--cursor, default);
+}
+.search-results-result-count:hover,
+.search-results-result-count.has-active-menu {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.search-results-result-count .search-more-options {
+  --icon-size: 14px;
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+.search-results-info .dropdown-container {
+  margin-left: auto;
+  flex: none;
+}
+.search-results-info .dropdown-container .dropdown,
+.search-results-info .dropdown-container .dropdown:hover,
+.search-results-info .dropdown-container .dropdown:focus-visible {
+  height: 24px;
+  width: 166px;
+  max-width: 166px;
+  padding: 0 22px 0 8px;
+  color: var(--text-muted);
+  background: transparent;
+  box-shadow: none;
+  border: 0;
+  font-size: var(--font-ui-smaller);
+  text-align: right;
 }
 .search-results {
   overflow-y: auto;

@@ -21,6 +21,7 @@ import { noteName, trimSlashes } from "./paths";
 import { fillTemplate, formatDate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
+import { propertyIndex } from "./shell/propertyIndex";
 import { recentNotes } from "./shell/switcherItems";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
@@ -76,6 +77,21 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
       }
       const recent = recentNotes(candidates, ws.recent.map(path => path.toLowerCase()));
       return [...recent, ...candidates.values()];
+    },
+    async linkAliases() {
+      const found = await propertyIndex(ws).notes();
+      const out: { path: string; name: string; alias: string }[] = [];
+      for (const [path, note] of found) {
+        for (const prop of note.props) {
+          if (prop.type !== "aliases" && prop.key !== "aliases") continue;
+          const values = Array.isArray(prop.value) ? prop.value : typeof prop.value === "string" ? [prop.value] : [];
+          for (const alias of values) {
+            const text = alias.trim();
+            if (text && !/[\n|\]]/.test(text)) out.push({ path, name: noteName(path), alias: text });
+          }
+        }
+      }
+      return out;
     },
     formatLink: (target, view, display, subpath) => ws.linkTo(target, ws.editors.pathOf(view), display, subpath),
     async linkDocument(target, view) {

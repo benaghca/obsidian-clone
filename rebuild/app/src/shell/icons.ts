@@ -247,3 +247,40 @@ export function dateGlyph(): SVGElement {
   add("path", { d: "M3.2 1.1v2.2M7.8 1.1v2.2", fill: "none", stroke: "currentColor", "stroke-width": "1.4", "stroke-linecap": "round" });
   return svg;
 }
+
+/** Outline auto-scroll: a panel with a bar near the top and another near the bottom. */
+export function autoScrollGlyph(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "svg-icon grove-auto-scroll");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  const add = (tag: string, attrs: Record<string, string>) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    svg.append(el);
+  };
+  add("rect", { x: "4.5", y: "3.5", width: "15", height: "17", rx: "1.5", fill: "none", stroke: "currentColor", "stroke-width": "2" });
+  add("path", { d: "M7.5 7.5h9M7.5 16.5h9", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" });
+  return svg;
+}
+
+/** Search "more options": a filled circle with three holes, drawn beside the result count. */
+export function moreOptionsGlyph(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("class", "svg-icon search-more-options");
+  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("fill", "currentColor");
+  path.setAttribute("fill-rule", "evenodd");
+  path.setAttribute(
+    "d",
+    "M8 1.25a6.75 6.75 0 1 0 .01 0zM4.55 8a1 1 0 1 1 2 0 1 1 0 0 1-2 0zm3.45 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0zm3.45 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0z",
+  );
+  svg.append(path);
+  return svg;
+}

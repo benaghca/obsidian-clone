@@ -16,6 +16,8 @@ ${gap}
 ### Gamma
 
 ## Delta
+
+${gap}
 `;
 
 await withBrowser(async ({ send, run, move, click, press, chord, check }) => {
@@ -184,11 +186,21 @@ await withBrowser(async ({ send, run, move, click, press, chord, check }) => {
   }
   check(followed === 'Beta', `auto-scroll follows the heading (${followed})`);
   await click(await center('.outline-toolbar [aria-label="Auto-scroll to current section"]'));
-  for (let i = 0; i < 10; i++) {
-    await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: editor.x, y: editor.y, deltaX: 0, deltaY: 400 });
-    await sleep(30);
-  }
-  check(await run(() => document.querySelector('.outline-item.is-active .tree-item-inner')?.textContent) === 'Beta', 'turning auto-scroll off leaves the highlight where it was');
+  await run(() => {
+    const view = ws.view;
+    const index = view.state.doc.toString().search(/^### Gamma$/m);
+    const scroller = view.dom.closest('.view-content') ?? view.scrollDOM;
+    view.dispatch({ selection: { anchor: index }, scrollIntoView: true });
+    const coords = view.coordsAtPos(index);
+    if (coords) scroller.scrollTop += coords.top - scroller.getBoundingClientRect().top;
+  });
+  await sleep(60);
+  const parked = await run(() => ({
+    heading: document.querySelector('.outline-item.is-active .tree-item-inner')?.textContent ?? '',
+    armed: document.querySelector('.outline-toolbar [aria-label="Auto-scroll to current section"]').classList.contains('is-active'),
+    scroll: document.querySelector('.outline-list').scrollTop,
+  }));
+  check(!parked.armed && parked.heading === 'Gamma' && parked.scroll === 0, `auto-scroll off keeps highlighting the section in view without scrolling the outline (${parked.heading}, scroll ${parked.scroll})`);
 
   await run(() => grove.run('global-search:open'));
   const searchBox = await run(() => {
@@ -199,10 +211,15 @@ await withBrowser(async ({ send, run, move, click, press, chord, check }) => {
     return { x: ir.x + 40, y: ir.y + ir.height / 2, inputRight: ir.right, buttonX: br.x, buttonW: br.width, buttonH: br.height };
   });
   await click({ x: searchBox.x, y: searchBox.y });
-  const ring = await run(() => {
-    const style = getComputedStyle(document.querySelector('.search-view .search-input'));
-    return { shadow: style.boxShadow, border: style.borderColor };
-  });
+  // Border and shadow fade onto the focus ring. Read them after that settles.
+  let ring = { shadow: '', border: '' };
+  await wait(async () => {
+    ring = await run(() => {
+      const style = getComputedStyle(document.querySelector('.search-view .search-input'));
+      return { shadow: style.boxShadow, border: style.borderColor };
+    });
+    return ring.shadow.includes('0px 0px 0px 2px') && ring.border === 'rgb(189, 189, 189)';
+  }, 'the search field did not settle on the grey ring');
   check(ring.shadow.includes('0px 0px 0px 2px') && ring.border === 'rgb(189, 189, 189)', `a focused search field uses the grey ring (${ring.shadow}; ${ring.border})`);
   check(searchBox.buttonX >= searchBox.inputRight - 1 && Math.abs(searchBox.buttonW - 28) < 1 && Math.abs(searchBox.buttonH - 24) < 1, `Search settings is a 28×24 button to the right of the field (${searchBox.buttonX} vs ${searchBox.inputRight}, ${searchBox.buttonW}×${searchBox.buttonH})`);
   check(await run(() => {
