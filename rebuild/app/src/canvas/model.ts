@@ -12,6 +12,8 @@ export interface CanvasNode {
   url?: string;
   label?: string;
   color?: string;
+  background?: string;
+  backgroundStyle?: string;
 }
 export type Side = "top" | "right" | "bottom" | "left";
 export interface CanvasEdge {
@@ -35,7 +37,7 @@ export function readCanvas(text: string): { nodes: CanvasNode[]; edges: CanvasEd
   for (const n of Array.isArray(data.nodes) ? data.nodes : []) {
     if (!record(n) || typeof n.id !== "string" || !["text", "file", "link", "group"].includes(String(n.type))) continue;
     const node: CanvasNode = { id: n.id, type: n.type as CanvasNode["type"], x: finite(n.x, 0), y: finite(n.y, 0), width: Math.max(1, finite(n.width, 250)), height: Math.max(1, finite(n.height, 200)) };
-    for (const key of ["text", "file", "subpath", "url", "label", "color"] as const) if (typeof n[key] === "string") node[key] = n[key];
+    for (const key of ["text", "file", "subpath", "url", "label", "color", "background", "backgroundStyle"] as const) if (typeof n[key] === "string") node[key] = n[key];
     nodes.push(node);
   }
   const ids = new Set(nodes.map(n => n.id));

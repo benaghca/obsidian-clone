@@ -19,6 +19,22 @@ test("moving a card preserves a future color value the rendering projection cann
   expect(JSON.parse(editCanvas(source, [node])).nodes[0].color).toEqual({ future: true });
 });
 
+test("group backgrounds patch native keys while retaining unknown values and old order", () => {
+  const source = '{"nodes":[{"future":29,"id":"g","type":"group","background":{"future":true},"x":0,"y":0,"width":100,"height":80,"tail":true}],"edges":[]}';
+  const node = readCanvas(source).nodes[0]; node.x = 10;
+  expect(JSON.parse(editCanvas(source, [node])).nodes[0].background).toEqual({ future: true });
+  node.background = "Backdrop.svg"; node.backgroundStyle = "repeat";
+  const changed = JSON.parse(editCanvas(source, [node])).nodes[0];
+  expect(changed.background).toBe("Backdrop.svg");
+  expect(changed.backgroundStyle).toBe("repeat");
+  expect(Object.keys(changed).slice(0, -1)).toEqual(Object.keys(JSON.parse(source).nodes[0]));
+  node.background = node.backgroundStyle = undefined;
+  const removed = JSON.parse(editCanvas(JSON.stringify({ nodes: [changed] }), [node])).nodes[0];
+  expect(removed).not.toHaveProperty("background");
+  expect(removed).not.toHaveProperty("backgroundStyle");
+  expect(removed.future).toBe(29);
+});
+
 test("new edges use native key order and implicit default arrowheads", () => {
   const edge = { id: "0123456789abcdef", fromNode: "a", fromSide: "right", toNode: "b", toSide: "top" } as const;
   const text = editCanvas('{"nodes":[],"edges":[],"future":[1,2]}', [], undefined, [], [edge]);

@@ -13,6 +13,7 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
       for (const key of ["x", "y", "width", "height"] as const) if (n[key] !== next[key]) n[key] = next[key];
       if ("color" in next && n.color !== next.color) { if (next.color === undefined) delete n.color; else n.color = next.color; }
       if (typeof next.text === "string" && n.text !== next.text) n.text = next.text;
+      if (n.type === "group") for (const key of ["background", "backgroundStyle"] as const) if (key in next) { if (next[key]) n[key] = next[key]; else delete n[key]; }
       if (n.type === "group" && "label" in next) { if (next.label) n.label = next.label; else delete n.label; }
     }
     return n;
