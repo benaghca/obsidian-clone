@@ -111,11 +111,11 @@ await withBrowser(async ({ send, run, press, move, click, check }) => {
     });
     return { chipBg, actions, search: actions.some((action) => action.label === 'Search') };
   });
-  check(!empty.search && empty.actions.map((action) => action.label).join('|') === 'New note|New canvas|Go to file', `order is New note, New canvas, Go to file (${empty.actions.map((action) => action.label).join(' | ')})`);
+  check(!empty.search && empty.actions.map((action) => action.label).join('|') === 'New note|New canvas|New base|Go to file', `order is New note, New canvas, New base, Go to file (${empty.actions.map((action) => action.label).join(' | ')})`);
   const noteChip = empty.actions[0];
   check(noteChip.hotkey === 'Ctrl + N' && noteChip.chipBg === empty.chipBg && noteChip.radius === '999px' && noteChip.pad === '2px 6px 2px 4px' && noteChip.marginLeft === '0px' && noteChip.gap > 4 && noteChip.gap < 12 && noteChip.slack > 8, `the shortcut is a chip just after the label (${noteChip.gap}px gap, ${noteChip.slack}px before the edge)`);
   check(empty.actions.every((action) => Math.abs(action.width - 168) < 2 && !action.labelClip), `pills are 168px and the labels fit (${empty.actions.map((action) => action.width).join(', ')})`);
-  check(empty.actions[2].hotkey === 'Ctrl + O' && empty.actions[1].hotkey === '', 'New canvas has no chip and Go to file keeps Ctrl + O');
+  check(empty.actions[3].hotkey === 'Ctrl + O' && empty.actions[1].hotkey === '', 'New canvas has no chip and Go to file keeps Ctrl + O');
 
   const vault = await run(() => {
     const name = document.querySelector('.workspace-drawer-vault-name');

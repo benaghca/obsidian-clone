@@ -1,0 +1,623 @@
+{
+  "Tasks.base": {
+    "text": "Open tasks\n5 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\nStatus\npriority\ndue\ntags\nLate\nTask D\nopen\nwork/project\nTask A\nopen\nwork/project\nlate\nTask F\nopen\nwork/project\nlate\nTask C\nopen\nwork/project\nTask E\nopen\nwork/project",
+    "view": {
+      "x": 344,
+      "y": 78.046875,
+      "w": 936,
+      "h": 721.953125,
+      "font": "15px",
+      "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+      "color": "rgb(34, 34, 34)",
+      "weight": "400"
+    },
+    "toolbar": {
+      "x": 352,
+      "y": 83.09375,
+      "w": 920,
+      "h": 28.890625,
+      "font": "15px",
+      "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+      "color": "rgb(34, 34, 34)",
+      "weight": "400"
+    },
+    "headers": [
+      {
+        "name": "file name",
+        "x": 344,
+        "y": 118.046875,
+        "w": 88,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 352,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 370,
+          "y": 124.515625,
+          "w": 53.203125,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "Status",
+        "x": 432,
+        "y": 118.046875,
+        "w": 72,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 440,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 458,
+          "y": 124.515625,
+          "w": 37.171875,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "priority",
+        "x": 504,
+        "y": 118.046875,
+        "w": 90,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 512,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 530,
+          "y": 124.515625,
+          "w": 55.34375,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "due",
+        "x": 594,
+        "y": 118.046875,
+        "w": 128,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 602,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 620,
+          "y": 124.515625,
+          "w": 21.875,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "tags",
+        "x": 722,
+        "y": 118.046875,
+        "w": 131,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 730,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 748,
+          "y": 124.515625,
+          "w": 24.78125,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "Late",
+        "x": 853,
+        "y": 118.046875,
+        "w": 414,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 861,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 879,
+          "y": 124.515625,
+          "w": 25.515625,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D",
+          "open",
+          "5",
+          "2099-01-01",
+          "work/project",
+          ""
+        ]
+      },
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "open",
+          "3",
+          "2000-01-01",
+          "work/project",
+          "late"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "open",
+          "3",
+          "2000-01-01",
+          "work/project",
+          "late"
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C",
+          "open",
+          "2",
+          "2099-01-01",
+          "work/project",
+          ""
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E",
+          "open",
+          "",
+          "",
+          "work/project",
+          ""
+        ]
+      }
+    ]
+  },
+  "By due.base": {
+    "text": "By due\n3 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nTask\nDue date\npriority\nstatus\nTask F\nopen\nTask A\nopen\nTask D\nopen",
+    "view": {
+      "x": 344,
+      "y": 78.046875,
+      "w": 936,
+      "h": 721.953125,
+      "font": "15px",
+      "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+      "color": "rgb(34, 34, 34)",
+      "weight": "400"
+    },
+    "toolbar": {
+      "x": 352,
+      "y": 83.09375,
+      "w": 920,
+      "h": 28.890625,
+      "font": "15px",
+      "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+      "color": "rgb(34, 34, 34)",
+      "weight": "400"
+    },
+    "headers": [
+      {
+        "name": "Task",
+        "x": 344,
+        "y": 118.046875,
+        "w": 78,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 352,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 370,
+          "y": 124.515625,
+          "w": 42.96875,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "Due date",
+        "x": 422,
+        "y": 118.046875,
+        "w": 128,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 430,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 448,
+          "y": 124.515625,
+          "w": 69.21875,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "priority",
+        "x": 550,
+        "y": 118.046875,
+        "w": 74,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 558,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 576,
+          "y": 124.515625,
+          "w": 39.34375,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      },
+      {
+        "name": "status",
+        "x": 624,
+        "y": 118.046875,
+        "w": 643,
+        "h": 30,
+        "font": "15px",
+        "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+        "color": "rgb(34, 34, 34)",
+        "weight": "400",
+        "icon": {
+          "x": 632,
+          "y": 126.046875,
+          "w": 14,
+          "h": 14,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        },
+        "label": {
+          "x": 650,
+          "y": 124.515625,
+          "w": 34.984375,
+          "h": 17.0625,
+          "font": "13.125px",
+          "family": "\"??\", \"??\", \"??\", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, \"Segoe UI\", \"Google Sans Flex\", Roboto, \"Inter Variable\", Inter, \"Apple Color Emoji\", \"Segoe UI Emoji\", \"Segoe UI Symbol\", sans-serif",
+          "color": "rgb(92, 92, 92)",
+          "weight": "400"
+        }
+      }
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "2000-01-01",
+          "3",
+          "open"
+        ]
+      },
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "2000-01-01",
+          "3",
+          "open"
+        ]
+      },
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D",
+          "2099-01-01",
+          "5",
+          "open"
+        ]
+      }
+    ]
+  },
+  "typing": {
+    "rows": [
+      "BaseTest/Task D.md",
+      "BaseTest/Task A.md",
+      "BaseTest/Task F.md",
+      "BaseTest/Task C.md",
+      "BaseTest/Task E.md"
+    ],
+    "values": [
+      "Task D | Xopen | 5 | 2099-01-01 | work/project | ",
+      "Task A | open | 3 | 2000-01-01 | work/project | late",
+      "Task F | open | 3 | 2000-01-01 | work/project | late",
+      "Task C | open | 2 | 2099-01-01 | work/project | ",
+      "Task E | open |  |  | work/project | "
+    ],
+    "note": "---\nstatus: open\npriority: 5\ndue: 2099-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task D\n## Details\n### More\n[[Task A]] #inline\n"
+  },
+  "enter": {
+    "rows": [
+      "BaseTest/Task D.md",
+      "BaseTest/Task A.md",
+      "BaseTest/Task F.md",
+      "BaseTest/Task C.md",
+      "BaseTest/Task E.md"
+    ],
+    "values": [
+      "Task D | Xopen | 5 | 2099-01-01 | work/project | ",
+      "Task A | open | 3 | 2000-01-01 | work/project | late",
+      "Task F | open | 3 | 2000-01-01 | work/project | late",
+      "Task C | open | 2 | 2099-01-01 | work/project | ",
+      "Task E | open |  |  | work/project | "
+    ],
+    "note": "---\nstatus: Xopen\npriority: 5\ndue: 2099-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task D\n## Details\n### More\n[[Task A]] #inline\n"
+  },
+  "numberFocused": {
+    "rows": [
+      "BaseTest/Task D.md",
+      "BaseTest/Task A.md",
+      "BaseTest/Task F.md",
+      "BaseTest/Task C.md",
+      "BaseTest/Task E.md"
+    ],
+    "values": [
+      "Task D | Xopen | 0 | 2099-01-01 | work/project | ",
+      "Task A | open | 3 | 2000-01-01 | work/project | late",
+      "Task F | open | 3 | 2000-01-01 | work/project | late",
+      "Task C | open | 2 | 2099-01-01 | work/project | ",
+      "Task E | open |  |  | work/project | "
+    ]
+  },
+  "numberEnter": {
+    "rows": [
+      "BaseTest/Task A.md",
+      "BaseTest/Task F.md",
+      "BaseTest/Task C.md",
+      "BaseTest/Task D.md",
+      "BaseTest/Task E.md"
+    ],
+    "values": [
+      "Task A | open | 3 | 2000-01-01 | work/project | late",
+      "Task F | open | 3 | 2000-01-01 | work/project | late",
+      "Task C | open | 2 | 2099-01-01 | work/project | ",
+      "Task D | Xopen | 0 | 2099-01-01 | work/project | ",
+      "Task E | open |  |  | work/project | "
+    ]
+  },
+  "numberBlur": {
+    "rows": [
+      "BaseTest/Task A.md",
+      "BaseTest/Task F.md",
+      "BaseTest/Task C.md",
+      "BaseTest/Task D.md",
+      "BaseTest/Task E.md"
+    ],
+    "values": [
+      "Task A | open | 3 | 2000-01-01 | work/project | late",
+      "Task F | open | 3 | 2000-01-01 | work/project | late",
+      "Task C | open | 2 | 2099-01-01 | work/project | ",
+      "Task D | Xopen | 0 | 2099-01-01 | work/project | ",
+      "Task E | open |  |  | work/project | "
+    ]
+  },
+  "Sort": {
+    "text": [
+      "Sort by\npriority\n1 \u2192 0\nAdd sort"
+    ],
+    "inputs": []
+  },
+  "Properties": {
+    "text": [
+      "file name\nStatus\npriority\ndue\ntags\nLate\nfile backlinks\nfile base name\ncreated time\nfile embeds\nfile extension\nfolder\nfile full name\nfile links\nmodified time\nfile path\nfile size\nfile tags\nactive\nAdd formula\nHide all"
+    ],
+    "inputs": [
+      {
+        "placeholder": "Find or create...",
+        "type": "search"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      },
+      {
+        "placeholder": "",
+        "type": "checkbox"
+      }
+    ]
+  }
+}

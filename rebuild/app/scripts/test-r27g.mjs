@@ -183,6 +183,7 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
   const wanted = [
     ['New note', 'Ctrl + N', 'lucide-square-pen'],
     ['New canvas', '', 'lucide-layout-dashboard'],
+    ['New base', '', 'lucide-table'],
     ['Go to file', 'Ctrl + O', 'lucide-search'],
   ];
   const got = empty.actions.map((action) => [action.label, action.hotkey, action.icon.includes('lucide-') ? action.icon.split(' ').find((name) => name.startsWith('lucide-')) : action.icon]);
