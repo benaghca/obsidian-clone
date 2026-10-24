@@ -87,10 +87,10 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
       if (!selected.length) return;
       positions = [...nodes, ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
       const left = Math.min(...positions.map(n => n.x)), right = Math.max(...positions.map(n => n.x + n.width));
-      toolbar.style.left = `${(left + right) / 2}px`;
+      toolbar.style.setProperty("--canvas-menu-x", `${(left + right) / 2}px`);
       const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label, .canvas-edge-label")]
         .filter(label => label.dataset.edgeId ? edges.some(e => e.id === label.dataset.edgeId) : nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
-      toolbar.style.top = `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.dataset.edgeId ? label.offsetTop - label.offsetHeight / 2 : label.parentElement!.offsetTop + label.offsetTop))}px`;
+      toolbar.style.setProperty("--canvas-menu-y", `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.dataset.edgeId ? label.offsetTop - label.offsetHeight / 2 : label.parentElement!.offsetTop + label.offsetTop))}px`);
     },
     dispose() { disposed = true; if (toolbar.matches(".has-active-menu") || toolbar.querySelector(".has-active-menu")) closeMenu(); toolbar.remove(); },
   };

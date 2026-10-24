@@ -21,9 +21,11 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   // makes zoom recalculate the whole board's styles on each frame.
   world.id = `canvas-world-${crypto.randomUUID()}`;
   const sizing = new CSSStyleSheet();
-  sizing.replaceSync(`#${world.id} :is(.canvas-selection-menu, .canvas-node-connection-point, .canvas-edge-end) { --canvas-inverse-scale: 1; }`);
+  sizing.replaceSync(`#${world.id} :is(.canvas-selection-menu, .canvas-node-connection-point, .canvas-edge-end) { --canvas-inverse-scale: 1; }
+    #${world.id} > .canvas-selection-menu {}`);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sizing];
   const controlSize = (sizing.cssRules[0] as CSSStyleRule).style;
+  const menuBounds = (sizing.cssRules[1] as CSSStyleRule).style;
   function draw() {
     cancelAnimationFrame(frame);
     frame = 0;
@@ -31,6 +33,9 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     const { cx, cy, scale } = state;
     const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
     controlSize.setProperty("--canvas-inverse-scale", String(1 / scale));
+    // Only the toolbar needs viewport bounds; keep pan/zoom out of child DOM.
+    for (const [side, value] of [["left", (10 - x) / scale], ["right", (width - 10 - x) / scale], ["top", (10 - y) / scale], ["bottom", (height - 10 - y) / scale]] as const)
+      menuBounds.setProperty(`--canvas-view-${side}`, `${value}px`);
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
