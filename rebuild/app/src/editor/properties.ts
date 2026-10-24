@@ -24,7 +24,7 @@
 import { Facet, Prec, StateEffect, StateField, type EditorState, type Range } from "@codemirror/state";
 import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, WidgetType } from "@codemirror/view";
 import { confirmDialog } from "../shell/confirm";
-import { h } from "../shell/dom";
+import { h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { type MenuItems, SEPARATOR, showMenu } from "../shell/menu";
 import type { SuggestItem } from "../shell/suggest";
@@ -504,8 +504,12 @@ class Block {
         input.value = typeof value === "string" ? value : "";
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
-        // The icon sits on the left. The native picker glyph is hidden in CSS and its click target moved over this icon.
-        box.append(h("label", { class: "property-date" }, input, h("span", { class: "property-date-icon", "aria-hidden": "true" }, icon(type === "date" ? "calendar" : "clock"))));
+        // The calendar sits on the left. The native picker glyph is hidden in CSS and its click target moved over this icon.
+        box.append(h("label", { class: "property-date" }, input, h("span", { class: "property-date-icon", "aria-hidden": "true" }, icon("calendar"))));
+        if (type === "date") {
+          const host = this.view.state.facet(editorHost);
+          box.append(keyButton(icon("link"), "Open daily note", () => host?.openDaily?.(input.value), "property-daily"));
+        }
         break;
       }
       case "list":

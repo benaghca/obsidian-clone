@@ -16,7 +16,9 @@ import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
-import { noteName } from "./paths";
+import { createNote } from "./fileOps";
+import { noteName, trimSlashes } from "./paths";
+import { fillTemplate, formatDate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
 import { recentNotes } from "./shell/switcherItems";
@@ -27,6 +29,38 @@ const mime = (path: string) => {
   return MIME[ext] ?? `image/${ext}`;
 };
 const MAX_NOTES = 100;
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** Open the daily note for `date`, creating it from the daily-notes template when it is missing. */
+export async function openDailyNote(ws: Workspace, date: Date): Promise<void> {
+  const daily = settings.get("daily-notes.json");
+  const folder = trimSlashes(daily.folder);
+  const path = `${folder ? `${folder}/` : ""}${formatDate(date, daily.format || "YYYY-MM-DD")}.md`;
+  const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
+  if (existing) {
+    await ws.open(existing.path);
+    return;
+  }
+  const templates = settings.get("templates.json");
+  const template = daily.template.trim() ? ws.resolve(daily.template.trim(), null) : null;
+  const raw = template ? await ws.editors.text(template).catch(() => "") : "";
+  const text = fillTemplate(raw, noteName(path), date, templates.dateFormat || "YYYY-MM-DD", templates.timeFormat || "HH:mm");
+  const entry = await createNote(ws, path, text);
+  await ws.open(entry.path);
+}
+
+/** The property date, at the current time of day so a template's {{time}} is not midnight. */
+function dailyDate(iso: string): Date | null {
+  const match = ISO_DATE.exec(iso);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const now = new Date();
+  const date = new Date(year, month - 1, day, now.getHours(), now.getMinutes(), now.getSeconds());
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) return null;
+  return date;
+}
 
 export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHost } {
   return {
@@ -66,6 +100,10 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
       ws.editorMenu?.(view, at, pos, keyboard, image);
     },
     properties: () => ws.propertyHost,
+    openDaily: (iso) => {
+      const date = dailyDate(iso);
+      if (date) void openDailyNote(ws, date);
+    },
     linkExists: (target, view) => ws.vault.linkExists(target, ws.editors.pathOf(view)),
     embeds: createEmbedHost(ws),
     saveAttachments: (view, files, at, keepNames) => saveAttachments(ws, view, files, at, keepNames),

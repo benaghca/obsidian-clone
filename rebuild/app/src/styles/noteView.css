@@ -140,8 +140,13 @@
 .empty-state-action-label {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  /* Clip, not ellipsis: a label that rounds a fraction over its flex slot
+     would otherwise become "New no...". A genuinely long label gets the class. */
+  text-overflow: clip;
   white-space: nowrap;
+}
+.empty-state-action-label.is-ellipsized {
+  text-overflow: ellipsis;
 }
 .empty-state-hotkey {
   flex: none;

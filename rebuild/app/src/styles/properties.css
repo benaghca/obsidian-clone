@@ -126,13 +126,19 @@
 .property-value .property-input {
   font-size: inherit;
 }
-/* Date and time: a calendar or clock on the left. The native glyph is invisible and its hit target covers that icon. */
+/* Date and time: a calendar on the left. The native glyph is invisible and its click target covers that icon.
+   A date field is as wide as its value. A datetime field fills the value column, so seconds stay visible. */
 .property-date {
   position: relative;
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   align-items: center;
+  max-width: 100%;
   min-width: 0;
+}
+.property-value[data-type="datetime"] .property-date {
+  flex: 1 1 auto;
+  width: 100%;
 }
 .property-date-icon {
   position: absolute;
@@ -144,8 +150,23 @@
 }
 .property-date .property-input {
   position: relative;
+  width: auto;
+  max-width: 100%;
+  padding-left: 24px;
+}
+.property-value[data-type="date"] .property-date .property-input {
+  padding-right: 0;
+  field-sizing: content;
+}
+.property-value[data-type="datetime"] .property-date .property-input {
   width: 100%;
-  padding-left: 26px;
+}
+.property-daily {
+  --icon-size: var(--icon-xs);
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: -4px;
 }
 .property-date .property-input::-webkit-calendar-picker-indicator {
   position: absolute;
