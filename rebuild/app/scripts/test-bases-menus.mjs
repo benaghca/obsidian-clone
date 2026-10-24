@@ -48,15 +48,14 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  assert.equal(await source(),original.replace('        - status != "done"','        - status != "waiting"'));
  await click(local+' .bases-filter-conjunction');await choose('None of the following are true');await count(0);await ready();
  await click(local+' .bases-filter-conjunction');await choose('Any of the following are true');await count(6);await ready();
- await click(local+' [aria-label="Add filter"]');await ready();
+ await click(local+' [aria-label="Add filter"]');await choose('priority');await ready();
  await wait(()=>run(()=>document.querySelectorAll('[data-scope="view"] .bases-filter-row').length===2),'second filter');
- await click(local+' .bases-filter-row:nth-of-type(2) button');await choose('priority');await ready();
  await click(local+' .bases-filter-row:nth-of-type(2) button:nth-of-type(2)');await choose('>');await ready();
  await fill(local+' .bases-filter-row:nth-of-type(2) input','3');await press('Enter');await ready();
  await click(local+' .bases-filter-conjunction');await choose('All the following are true');await count(2);await ready();
  await click(local+' [aria-label="Add filter group"]');await ready();
  await wait(()=>run(()=>!!document.querySelector('[data-scope="view"] [data-depth="1"]')),'nested group');
- await click(local+' [data-depth="1"] [aria-label="Add filter"]');await ready();await count(0);
+ await click(local+' [data-depth="1"] [aria-label="Add filter"]');await choose('file name');await ready();await count(2);
  await click(local+' [data-depth="1"] [aria-label="Advanced filter"]');
  await fill(local+' [data-depth="1"] [aria-label="Filter expression"]','active == true && priority >= 4');await press('Enter');await count(2);await ready();
  await click(local+' [data-depth="1"] .bases-filter-conjunction');await choose('None of the following are true');await count(0);await ready();
@@ -75,8 +74,8 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  await run(async()=>{await ws.open('BaseTest/Task A.md');await ws.open('PartB.base');});await count(1);assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Done');
  await run(async()=>{await ws.open('PartB.base',{where:'tab'});window.secondBaseTab=ws.active;});await count(6);assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Open');
  await run(()=>ws.activate(firstBaseTab));await count(1);
- await click('.bases-view-name');await choose('Add view');await wait(()=>run(()=>document.querySelector('.bases-view-name span')?.textContent==='View 1'),'new view selected');
- assert.equal(await source(),written.replace('# preserve footer','  - type: table\n    name: View 1\n# preserve footer'));
+ await click('.bases-view-name');await choose('Add view');await wait(()=>run(()=>document.querySelector('.bases-view-name span')?.textContent==='View'),'new view selected');
+ assert.equal(await source(),written.replace('# preserve footer','  - type: table\n    name: View\n# preserve footer'));
  await click('.bases-view-name');await shot('grove-views');await choose('Open');await count(6);
  await run(()=>ws.activate(secondBaseTab));await count(6);assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Open');
  // Sorted columns alone offer Clear sort; every header action has an icon.
@@ -94,7 +93,7 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  }
  // Save all selected-view results for the native return check.
  const results={};
- for(const [name,n] of [['Open',6],['Done',1],['View 1',6]]){
+ for(const [name,n] of [['Open',6],['Done',1],['View',6]]){
   await click('.bases-view-name');await choose(name);await count(n);
   results[name]=await run(()=>({columns:[...document.querySelectorAll('.bases-table th span')].map(el=>el.textContent),rows:[...document.querySelectorAll('.bases-table tbody tr[data-path]')].map(tr=>({path:tr.dataset.path,values:[...tr.cells].map(td=>td.dataset.value)}))}));
  }

@@ -47,7 +47,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
         const clear=()=>rows().forEach(row=>row.classList.remove("drop-before","drop-after"));
         drag(e,event=>{moved ||= Math.abs(event.clientY-e.clientY)>4;clear();slot=dropSlot(rows(),event.clientX,event.clientY,true);if(moved&&slot!==null){const list=rows();list[Math.min(slot,list.length-1)].classList.add(slot===list.length?"drop-after":"drop-before");}},(cancelled,event)=>{
           clear();if(event)slot=dropSlot(rows(),event.clientX,event.clientY,true);
-          if(!cancelled&&moved&&slot!==null){const before=slot;write("sort",b=>reordered(sortsOf(b),i,before),()=>sortMenu(at,true));}
+          if(!cancelled&&moved&&slot!==null){const before=slot;write("sort",b=>reordered(sortsOf(b),b.sorts.findIndex(s=>same(s.property,sort.property)),before),()=>sortMenu(at,true));}
         });
       });
       items.push({title:`Sort ${sort.property}`,content:row});

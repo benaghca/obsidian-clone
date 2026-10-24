@@ -25,6 +25,7 @@ export function comparison(source: string): Comparison | null {
   if (!result) return null;
   // Only literal RHS values (or today()) can safely be edited as one value.
   if (!/^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|true|false|null|today\(\))$/.test(result.value)) return null;
+  if(result.value==="null" && ["==","!="].includes(result.operator)) result.operator=result.operator==="=="?"isEmpty":"notEmpty";
   try { expression(source); return result; } catch { return null; }
 }
 export function filterExpression(row: Comparison): string {

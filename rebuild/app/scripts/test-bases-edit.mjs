@@ -44,15 +44,15 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  await click(td(d,'tags')+' .property-pill-remove');await click('.bases-toolbar');await wait(async()=>!(await source(d)).includes('work/project'),'tag removed');
  assert.equal(await source('Tasks.base'),bases['Tasks.base']);
  // Sort menu and header menu only change the sort block.
- await timedOpen('.bases-toolbar [aria-label="Sort"]','Sort');await wait(()=>run(()=>!!document.querySelector('.bases-sort-menu')),'sort menu');await click('.bases-sort-row button:nth-child(2)');await wait(async()=>(await source('Tasks.base')).includes('direction: ASC'),'direction changed');
+ await timedOpen('.bases-toolbar [aria-label="Sort"]','Sort');await wait(()=>run(()=>!!document.querySelector('.bases-sort-menu')),'sort menu');await click('.bases-sort-row button:nth-of-type(2)');await wait(async()=>(await source('Tasks.base')).includes('direction: ASC'),'direction changed');
  assert.equal(await source('Tasks.base'),bases['Tasks.base'].replace('direction: DESC','direction: ASC'));
- await press('Escape');await click('th[data-property="status"]','right');await click('.menu-item:nth-child(3)');await wait(async()=>(await source('Tasks.base')).includes('property: status'),'header sorts');
+ await press('Escape');await click('th[data-property="status"]','right');await menu('Sort A → Z');await wait(async()=>(await source('Tasks.base')).includes('property: status'),'header sorts');
  await timedOpen('.bases-toolbar [aria-label="Properties"]','Properties');await fill('.bases-properties-menu input[type="search"]','due');await click('.bases-property-option input');await wait(()=>run(()=>!document.querySelector('th[data-property="due"]')),'column hidden');await press('Escape');
  const written=await source('Tasks.base');assert.ok(written.startsWith(bases['Tasks.base'].split('    order:')[0]));
  await writeFile(new URL('Grove-written.base',shots),written);await writeFile(new URL('written-notes.json',shots),JSON.stringify(await run(async()=>{const{api}=await import('/src/api.ts');return Object.fromEntries(await Promise.all(ws.vault.notes.filter(n=>n.path.startsWith('BaseTest/')).map(async n=>[n.path,await api.readNote(n.path)])));}),null,2));
  await writeFile(new URL('written-view.json',shots),JSON.stringify(await snapshot(),null,2));await shot('grove-written');
  await click('.bases-toolbar [aria-label="Sort"]');await menu('Add sort');await menu('due');await wait(async()=>(await source('Tasks.base')).includes('property: due'),'Add sort');
- await click('.bases-sort-row button:first-child');await menu('file name');await wait(async()=>(await source('Tasks.base')).includes('property: file.name'),'change sort property');
+ await click('.bases-sort-row button:first-of-type');await menu('file name');await wait(async()=>(await source('Tasks.base')).includes('property: file.name'),'change sort property');
  await click(await run(()=>{const el=[...document.querySelectorAll('.bases-sort-row')].at(-1).querySelector('button:last-child');const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};}));await wait(async()=>!(await source('Tasks.base')).includes('property: due'),'remove sort');await press('Escape');
  await click('th[data-property="file.name"]','right');await menu('Clear sort');await wait(async()=>!(await source('Tasks.base')).includes('property: file.name'),'clear header sort');
  await click('.bases-toolbar [aria-label="Properties"]');await menu('Hide all');await wait(()=>run(()=>document.querySelectorAll('.bases-table th').length===0),'Hide all');

@@ -11,6 +11,7 @@ export function drag(e: PointerEvent, move: (e: PointerEvent) => void, end: (can
   return ()=>finish(true);
 }
 export function reordered<T>(items: T[], from: number, before: number): T[] {
+  if(from<0||from>=items.length)return [...items];
   const next=[...items], [item]=next.splice(from,1);
   next.splice(before-(before>from?1:0),0,item);return next;
 }
