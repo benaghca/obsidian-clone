@@ -1,5 +1,6 @@
 import { dragPointer, h } from "../shell/dom";
 import { settings } from "../settings/store";
+import { closeMenu, showMenu, SEPARATOR } from "../shell/menu";
 import { canvasReadOnly, selectionMenu } from "./controls";
 import { closestSide, type CanvasEdge, type CanvasNode, type Side } from "./model";
 
@@ -7,7 +8,7 @@ const geometry = ["x", "y", "width", "height"] as const;
 const sides = ["top", "right", "bottom", "left", "topright", "bottomright", "bottomleft", "topleft"];
 export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: CanvasNode[], edges: CanvasEdge[],
   paint: (changed: CanvasNode[]) => void,
-  commit: (changed: CanvasNode[], deleted?: Set<string>, changedEdges?: CanvasEdge[], deletedEdges?: Set<string>) => void,
+  commit: (changed: CanvasNode[], deleted?: Set<string>, changedEdges?: CanvasEdge[], deletedEdges?: Set<string>, added?: CanvasNode[]) => void,
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
   history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId?: string) {
@@ -20,12 +21,20 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const events = new AbortController();
   let cancel: (() => void) | undefined, suppress = false, pressedLabel: string | undefined;
   const chosen = () => nodes.filter(n => selected.has(n.id));
+  let context: Element | null = null;
+  const createGroup = () => {
+    const items = chosen();
+    if (!items.length || canvasReadOnly.has(el)) return;
+    const x = Math.min(...items.map(n => n.x)) - 20, y = Math.min(...items.map(n => n.y)) - 20;
+    commit([], undefined, undefined, undefined, [{ id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), x, y,
+      width: Math.max(...items.map(n => n.x + n.width)) + 20 - x, height: Math.max(...items.map(n => n.y + n.height)) + 20 - y, type: "group", label: "Untitled group" }]);
+  };
   const removeSelected = () => { if ((selected.size || selectedEdges.size) && !canvasReadOnly.has(el)) { commit([], selected, undefined, selectedEdges); el.focus({ preventScroll: true }); } };
   const menu = selectionMenu(world, nodes, removeSelected, zoom, item => edit(item, selection), changed => {
     const cards = changed.filter((item): item is CanvasNode => !("fromNode" in item));
     paint(cards); commit(cards, undefined, changed.filter((item): item is CanvasEdge => "fromNode" in item));
     menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); el.focus({ preventScroll: true });
-  });
+  }, createGroup);
   const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); };
   function selection() {
     menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
@@ -186,7 +195,26 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     if (!e.isTrusted || canvasReadOnly.has(el) || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
     const edge = edges.find(edge => edge.id === (pressedLabel ?? (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId));
     if (edge) { e.preventDefault(); e.stopPropagation(); edit(edge, selection); }
+    const label = (e.target as Element).closest<HTMLElement>(".canvas-group-label");
+    const group = nodes.find(n => n.type === "group" && n.id === label?.parentElement?.dataset.nodeId);
+    if (group) { e.preventDefault(); e.stopPropagation(); edit(group, selection); }
   }, { capture: true, signal: events.signal });
+  el.addEventListener("contextmenu", e => {
+    if ((e.target as Element).closest(".is-editing, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    const node = nodes.find(n => n.id === (e.target as Element).closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    if (node && !selected.has(node.id)) { selected.clear(); selectedEdges.clear(); selected.add(node.id); selection(); }
+    if (!selected.size && !selectedEdges.size) return;
+    e.preventDefault(); e.stopPropagation();
+    const editable = node && (node.type === "group" || node.type === "text" || node.type === "file" && /\.md$/i.test(node.file ?? ""));
+    const writable = !canvasReadOnly.has(el);
+    showMenu([
+      { title: "Zoom to selection", icon: "scan-search", action: menu.zoom },
+      !node && writable && selected.size > 0 && { title: "Create group", icon: "group", action: createGroup },
+      editable && writable && { title: node.type === "group" ? "Edit label" : "Edit", icon: "square-pen", action: () => edit(node, selection) },
+      SEPARATOR, writable && { title: node ? "Remove" : "Delete", icon: "trash-2", action: removeSelected },
+    ], { x: e.clientX, y: e.clientY }, { className: "canvas-context-menu" });
+    context = document.querySelector(".canvas-context-menu");
+  }, { signal: events.signal });
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
   el.addEventListener("keydown", e => {
     if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only]")) return;
@@ -207,5 +235,5 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     } else if (e.key === "Escape") { selected.clear(); selectedEdges.clear(); selection(); }
   }, { signal: events.signal });
   selection();
-  return () => { cancel?.(); events.abort(); menu.dispose(); };
+  return () => { cancel?.(); events.abort(); if (context?.isConnected) closeMenu(); menu.dispose(); };
 }

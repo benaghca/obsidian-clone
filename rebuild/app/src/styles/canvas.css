@@ -39,6 +39,7 @@
 .canvas-node-file:has(> .canvas-node-content > img) > .canvas-node-content { padding: 0; overflow: hidden; }
 .canvas-node-group { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); z-index: auto; }
 .canvas-group-label:empty { display: none; }
+.canvas-group-label.is-editing { display: block; min-width: 12px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }
 .canvas-node-group:not(.is-colored) > .canvas-group-label { background: color-mix(in srgb, var(--canvas-color) 10%, transparent); color: var(--text-muted); }
 .canvas-group-label {
   z-index: 2;
@@ -107,6 +108,8 @@
 .canvas-node.is-editing > .canvas-node-content > .cm-editor { min-height: 100%; }
 .canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller > .cm-content { padding: 16px; min-height: 100%; }
 .canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller { overflow: auto; }
+.canvas-node-file.is-editing > .canvas-node-content { padding: 16px; }
+.canvas-note-editor .cm-content { padding: 0 0 16px; min-height: 100%; }
 
 .canvas-control-group, .canvas-selection-menu { border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
 .canvas-selection-menu { position: absolute; z-index: 4; display: flex; padding: 2px; gap: 1px; left: var(--canvas-menu-x); top: var(--canvas-menu-y);
@@ -146,7 +149,7 @@
 .canvas-node-connection-point[data-side="left"] { left: 0; top: 50%; }
 .canvas-node-connection-point::after, .canvas-edge-end::after { content: ""; position: absolute; inset: 0; border: 3px solid var(--background-modifier-border); border-radius: 50%; background: var(--interactive-accent); opacity: 0; }
 .canvas-node-connection-point:hover::after, .canvas-edge-end:hover::after { opacity: 1; }
-.canvas-edge-hit { pointer-events: stroke; stroke-width: 24; stroke-opacity: 0; cursor: pointer; }
+.canvas-edge-hit { pointer-events: stroke; stroke-width: calc(24px * var(--canvas-inverse-scale, 1)); stroke-opacity: 0; cursor: pointer; }
 .canvas-edge-hit.is-selected { stroke-opacity: .12; }
 .canvas-edge.is-selected { stroke-width: 5.5; }
 .canvas-edge-end { display: none; cursor: grab; z-index: 3; }

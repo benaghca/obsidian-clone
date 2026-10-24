@@ -1,0 +1,75 @@
+FOCUS {
+  active: '<div class="canvas-group-label" spellcheck="false" contenteditable="true">Group</div>',
+  selection: 'Group'
+}
+TYPED { text: 'Renamed', active: 'canvas-group-label' }
+ENTER {
+	"nodes":[
+		{"id":"g","type":"group","x":-20,"y":-20,"width":440,"height":440,"label":"Group"},
+		{"id":"n","type":"file","file":"Note.md","x":0,"y":0,"width":400,"height":400},
+		{"id":"b","type":"text","x":600,"y":0,"width":200,"height":140,"text":"Beta"}
+	],
+	"edges":[
+		{"id":"e","fromNode":"n","fromSide":"right","toNode":"b","toSide":"left"}
+	]
+}
+BLUR {
+	"nodes":[
+		{"id":"g","type":"group","x":-20,"y":-20,"width":440,"height":440,"label":"Renamed"},
+		{"id":"n","type":"file","file":"Note.md","x":0,"y":0,"width":400,"height":400},
+		{"id":"b","type":"text","text":"Beta","x":600,"y":0,"width":200,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"n","fromSide":"right","toNode":"b","toSide":"left"}
+	]
+}
+FOCUS {
+  active: '<div class="canvas-group-label" spellcheck="false" contenteditable="true">Renamed</div>',
+  selection: 'Renamed'
+}
+ESCAPE {
+	"nodes":[
+		{"id":"g","type":"group","x":-20,"y":-20,"width":440,"height":440,"label":"Renamed"},
+		{"id":"n","type":"file","file":"Note.md","x":0,"y":0,"width":400,"height":400},
+		{"id":"b","type":"text","text":"Beta","x":600,"y":0,"width":200,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"n","fromSide":"right","toNode":"b","toSide":"left"}
+	]
+}
+FOCUS {
+  active: '<div class="canvas-group-label" spellcheck="false" contenteditable="true">Escape label</div>',
+  selection: 'Escape label'
+}
+EMPTY {
+	"nodes":[
+		{"id":"g","type":"group","x":-20,"y":-20,"width":440,"height":440},
+		{"id":"n","type":"file","file":"Note.md","x":0,"y":0,"width":400,"height":400},
+		{"id":"b","type":"text","text":"Beta","x":600,"y":0,"width":200,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"n","fromSide":"right","toNode":"b","toSide":"left"}
+	]
+}
+NOTE_TOOLBAR_EDIT [{"cls":"embed-iframe is-controlled","body":"mod-linux is-hidden-frameless obsidian-app styled-scrollbars theme-light show-inline-title is-floating-nav auto-full-screen show-ribbon show-view-header is-focused","editors":[{"cls":"cm-editor cm-focused ͼ1 ͼ2 ","text":"Note\nProperties\ncanvas\nAdd property\n# Heading\nBold text\n\n\nLine 0\n\n\nLine 1\n\n\nLine 2\n\n\nLine 3\n\n\nLine 4\n\n\nLine 5\n\n\nLine 6\n\n\nLine 7\n\n\nLine 8\n\n\nLine 9\n\n\nLine 10\n\n\nLine 11\n\n\nLine 12\n\n\nLine 13\n\n\nLine 14"}],"title":["Note"],"active":"cm-content cm-lineWrapping","scroll":[{"scroll":0,"h":398,"full":2692}]}]
+SCROLLED [{"cls":"embed-iframe is-controlled","body":"mod-linux is-hidden-frameless obsidian-app styled-scrollbars theme-light show-inline-title is-floating-nav auto-full-screen show-ribbon show-view-header is-focused","editors":[{"cls":"cm-editor cm-focused ͼ1 ͼ2 ","text":"Note\nProperties\ncanvas\nAdd property\n# Heading\nBold text\n\n\nLine 0\n\n\nLine 1\n\n\nLine 2\n\n\nLine 3\n\n\nLine 4\n\n\nLine 5\n\n\nLine 6\n\n\nLine 7\n\n\nLine 8\n\n\nLine 9\n\n\nLine 10\n\n\nLine 11\n\n\nLine 12\n\n\nLine 13\n\n\nLine 14"}],"title":["Note"],"active":"cm-content cm-lineWrapping","scroll":[{"scroll":200,"h":398,"full":2692}]}]
+ESC_NOTE {"frames":0,"active":"mod-linux is-frameless is-hidden-frameless obsidian-app styled-scrollbars is-focused theme-light show-inline-title is-floating-nav auto-full-screen show-ribbon show-view-header"}
+AWAY_NOTE {"frames":0,"active":"canvas-wrapper node-insert-event"}
+HIT_STYLE [{"cls":"canvas-interaction-path","stroke":"24px","vector":"none"},{"cls":"canvas-display-path","stroke":"2px","vector":"none"}]
+GROUP_TOOLBAR [
+  'Remove',
+  'Set color',
+  'Zoom to selection\n(Shift + 2)',
+  'Align',
+  'Edit label',
+  'Set background'
+]
+REMOVED {
+	"nodes":[
+		{"id":"n","type":"file","file":"Note.md","x":0,"y":0,"width":400,"height":400},
+		{"id":"b","type":"text","text":"Beta","x":600,"y":0,"width":200,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"n","fromSide":"right","toNode":"b","toSide":"left"}
+	]
+}

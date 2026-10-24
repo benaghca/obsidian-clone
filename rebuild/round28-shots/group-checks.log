@@ -1,0 +1,25 @@
+PASS Box selection offers Create group with the bundled icon
+PASS Double-click Create group adds one group with native 20px padding and field order
+PASS New group has native key order and sixteen-hex id
+PASS Group creation is one exact-byte undo step
+PASS Redo restores the same group id and metadata
+PASS Double-click edits a group label in place
+PASS Real key input and Enter rename the group
+PASS Label rename is one undo step
+PASS Label redo restores exact bytes
+PASS Repeated stationary label double-clicks leave unchanged bytes and no extra cards
+PASS Empty group label removes the key
+PASS Toolbar can edit an empty label and Escape keeps the draft
+PASS Resizing changes the group without resizing its cards
+PASS Group resize is one undo step
+PASS Moving the group label carries contained cards
+PASS Group and contained-card movement undo together
+PASS Group color reuses the six-color menu
+PASS Group context menu opens within two frames; max 16.7ms
+PASS Group context menu has no animation
+PASS Group context menu has native action order
+PASS Double-click Remove ungroups while retaining cards and their edge
+PASS Undo restores the removed group alone with its metadata
+PASS Background context menu creates one group from selection
+PASS All group actions preserve unknown fields and old key order
+PASS Read-only blocks group renaming

@@ -21,7 +21,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   // makes zoom recalculate the whole board's styles on each frame.
   world.id = `canvas-world-${crypto.randomUUID()}`;
   const sizing = new CSSStyleSheet();
-  sizing.replaceSync(`#${world.id} :is(.canvas-selection-menu, .canvas-node-connection-point, .canvas-edge-end) { --canvas-inverse-scale: 1; }
+  sizing.replaceSync(`#${world.id} :is(.canvas-selection-menu, .canvas-node-connection-point, .canvas-edge-end, .canvas-edge-hit) { --canvas-inverse-scale: 1; }
     #${world.id} > .canvas-selection-menu {}`);
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, sizing];
   const controlSize = (sizing.cssRules[0] as CSSStyleRule).style;

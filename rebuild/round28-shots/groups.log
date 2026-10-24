@@ -1,0 +1,34 @@
+SELECTED [{"text":"Alpha","cls":"canvas-node is-selected"},{"text":"Beta","cls":"canvas-node is-selected"}]
+BACKGROUND_MENU [{"text":"Zoom to selection","icons":["svg-icon zoom-to-selection"]},{"text":"Create group","icons":["svg-icon create-group"]},{"text":"Cut","icons":["svg-icon lucide-scissors"]},{"text":"Copy","icons":["svg-icon lucide-copy"]},{"text":"Paste","icons":["svg-icon lucide-clipboard-check"]},{"text":"Delete","icons":["svg-icon lucide-trash-2"]}]
+CREATED {
+	"nodes":[
+		{"id":"7593e70c26b352ad","x":-20,"y":-20,"width":540,"height":320,"type":"group","label":"Untitled group"},
+		{"id":"a","type":"text","text":"Alpha","x":0,"y":0,"width":200,"height":120},
+		{"id":"b","type":"text","text":"Beta","x":300,"y":160,"width":200,"height":120}
+	],
+	"edges":[]
+}
+DOM [{"cls":"canvas-node","text":"Alpha","children":[{"cls":"canvas-node-container","text":"Alpha","box":{"x":562,"y":299.046875,"width":200,"height":120,"top":299.046875,"right":762,"bottom":419.046875,"left":562}}]},{"cls":"canvas-node","text":"Beta","children":[{"cls":"canvas-node-container","text":"Beta","box":{"x":862,"y":459.046875,"width":200,"height":120,"top":459.046875,"right":1062,"bottom":579.046875,"left":862}}]},{"cls":"canvas-node canvas-node-group is-focused","text":"Untitled group","children":[{"cls":"canvas-node-container","text":"","box":{"x":542,"y":279.046875,"width":540,"height":320,"top":279.046875,"right":1082,"bottom":599.046875,"left":542}},{"cls":"canvas-group-label","text":"Untitled group","box":{"x":542,"y":244.546875,"width":156.09375,"height":30.5,"top":244.546875,"right":698.09375,"bottom":275.046875,"left":542}}]}]
+LABEL {
+  html: '<div class="canvas-group-label" spellcheck="false" contenteditable="true">Untitled group</div>',
+  box: {
+    x: 542,
+    y: 244.546875,
+    width: 156.09375,
+    height: 30.5,
+    top: 244.546875,
+    right: 698.09375,
+    bottom: 275.046875,
+    left: 542
+  }
+}
+LABEL_EDIT {"active":"<div class=\"canvas-group-label\" spellcheck=\"false\" contenteditable=\"true\">Untitled group</div>","editables":[{"cls":"","text":"","value":""},{"cls":"","text":"","value":""},{"cls":"","text":"","value":"on"},{"cls":"","text":"","value":"on"},{"cls":"","text":"","value":"on"},{"cls":"","text":"","value":""},{"cls":"view-header-title","text":"Groups"},{"cls":"canvas-group-label","text":"Untitled group"},{"cls":"","text":"","value":""},{"cls":"","text":"","value":""},{"cls":"","text":"","value":""},{"cls":"","text":"","value":""}]}
+RENAMED {
+	"nodes":[
+		{"id":"7593e70c26b352ad","x":-20,"y":-20,"width":540,"height":320,"type":"group","label":"Untitled group"},
+		{"id":"a","type":"text","text":"Alpha","x":0,"y":0,"width":200,"height":120},
+		{"id":"b","type":"text","text":"Beta","x":300,"y":160,"width":200,"height":120}
+	],
+	"edges":[]
+}
+GROUP_MENU [{"text":"Zoom to selection","icons":["svg-icon zoom-to-selection"]},{"text":"Edit label","icons":["svg-icon lucide-edit"]},{"text":"Remove","icons":["svg-icon lucide-trash-2"]}]

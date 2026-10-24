@@ -96,6 +96,16 @@ export class NoteEditors {
     return this.pane(group).view;
   }
 
+  /** A temporary embedded view uses the same document, history, mirrors and save path. Load first. */
+  embed(group: Group, path: string, parent: HTMLElement, scroller: HTMLElement) {
+    const key = { ...group, active: { ...group.active, path, type: undefined, mode: "live" as const, memory: null } };
+    const view = this.viewOf(key);
+    this.present(key);
+    this.panes.get(key)!.group = group; // Links and editor menus belong to the real pane.
+    parent.append(view.dom); this.setScroller(key, scroller);
+    return { view, dispose: () => this.drop(key) };
+  }
+
   groupOfView(view: EditorView): Group | undefined {
     return this.paneOfView.get(view)?.group;
   }
@@ -330,7 +340,11 @@ export class NoteEditors {
     const path = this.paneOfView.get(view)?.path;
     const owner = path ? this.owners.get(path) : undefined;
     if (!owner || owner === view) return false;
-    return (isRedo ? redo : undo)(owner);
+    const mode = viewModeOf(owner.state);
+    // An editable mirror may share its history with a Reading tab.
+    if (owner.state.readOnly) this.applyMode(owner, "live");
+    try { return (isRedo ? redo : undo)(owner); }
+    finally { this.applyMode(owner, mode); }
   }
 
   // ----- notes -----

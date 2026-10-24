@@ -125,9 +125,11 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   };
   el.addEventListener("click", click, true);
   el.addEventListener("dblclick", doubleClick);
-  const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu")) controlClick = true; };
+  const controlDouble = (e: MouseEvent) => { if (controlClick) { e.preventDefault(); e.stopImmediatePropagation(); } };
+  el.addEventListener("dblclick", controlDouble, true);
+  const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu, .canvas-context-menu")) controlClick = true; };
   document.addEventListener("click", menuClick, true);
-  return { connect, reset, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); } };
+  return { connect, reset, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); el.removeEventListener("dblclick", controlDouble, true); } };
 }
 
 // A temporary note editor owns only the card's Markdown, never a vault note.

@@ -1,0 +1,10 @@
+PASS Grove-group-colored.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-context-created.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-created.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-empty-label.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-moved.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-removed.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-renamed.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-resized.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-group-restored-label.canvas: every displayed group/card/edge property and original disk byte is unchanged in Obsidian
+PASS Native label/color edits save a reverse fixture for Grove
