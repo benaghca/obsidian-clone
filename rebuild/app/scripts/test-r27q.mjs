@@ -118,6 +118,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     return {
       color: getComputedStyle(header).color,
       fileX: file.x - pane.x, fileW: file.width, fileY: file.y,
+      headerX: hr.x - pane.x, headerW: hr.width,
       cardX: card.x - pane.x, cardW: card.width,
       unlinkedY: unlinked.y,
       sort: [...sort.classList].find((c) => c.startsWith('lucide-')),
@@ -125,6 +126,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   });
   check(back.color === 'rgb(34, 34, 34)', `backlink headers use text-normal (${back.color})`);
   check(Math.abs(back.fileX - 13) < 2 && Math.abs(back.fileW - 274) < 2 && Math.abs(back.cardX - back.fileX) < 1 && Math.abs(back.cardW - back.fileW) < 1, `backlink file row and card share x=${back.fileX.toFixed(1)} w=${back.fileW.toFixed(1)}`);
+  check(back.headerW > back.fileW - 0.5 && back.headerX < back.fileX + 0.5 && Math.abs(back.headerX - 12) < 2 && Math.abs(back.headerW - 276) < 3, `backlink headers sit wider than the file rows (x=${back.headerX.toFixed(1)} w=${back.headerW.toFixed(1)})`);
   check(Math.abs(back.fileY - 115) < 3 && Math.abs(back.unlinkedY - 199.6) < 3, `backlink rhythm stays (file ${back.fileY}, unlinked ${back.unlinkedY})`);
   check(back.sort === 'lucide-arrow-up-narrow-wide', `backlink sort glyph is ascending (${back.sort})`);
   await click(await run(() => {
@@ -184,7 +186,12 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     const r = document.querySelector('.search-view [aria-label="Search settings"]').getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }));
-  await neutral('.search-view [aria-label="Search settings"]', 'search settings');
+  let searchTone = await tone('.search-view [aria-label="Search settings"]');
+  for (let i = 0; i < 20 && !(searchTone.active && searchTone.color === searchTone.accent && searchTone.bg !== searchTone.hover); i++) {
+    await sleep(25);
+    searchTone = await tone('.search-view [aria-label="Search settings"]');
+  }
+  check(searchTone.active && searchTone.color === searchTone.accent && searchTone.color !== searchTone.normal && searchTone.bg !== searchTone.hover, `search settings uses the accent (${searchTone.color} on ${searchTone.bg})`);
   const search = await run(() => {
     const view = document.querySelector('.search-view').getBoundingClientRect();
     const row = document.querySelector('.search-settings-row').getBoundingClientRect();
@@ -221,9 +228,9 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     };
   });
   console.log(`MEASURE search row centre ${search.rowCentre.toFixed(1)} (view+${search.rowInView.toFixed(1)}) count top ${search.infoTop.toFixed(1)} (view+${search.infoInView.toFixed(1)})`);
-  check(search.menus === 1 && !search.stray && search.dotAfter && Math.abs(search.dot[0] - 14) < 1, `the result count is one control with the dot on its right (${search.menus}, dot ${search.dot.join('x')})`);
+  check(search.menus === 1 && !search.stray && search.dotAfter && Math.abs(search.dot[0] - 11) < 1 && Math.abs(search.dot[1] - 11) < 1, `the result count is one control with the 11px dot on its right (${search.menus}, dot ${search.dot.join('x')})`);
   check(Math.abs(search.dropH - 24) < 1 && Math.abs(search.dropW - 166) < 2 && Math.abs(search.dropRight - (search.infoRight - 12)) < 2, `sort dropdown is a 24px borderless field, right aligned (${search.dropW.toFixed(1)}x${search.dropH.toFixed(1)} ending ${search.dropRight.toFixed(1)})`);
-  check(search.dropBg === 'rgba(0, 0, 0, 0)' && search.dropColor === 'rgb(92, 92, 92)' && search.dropBorder === '0px' && search.dropShadow === 'none' && search.dropAlign === 'right', `sort dropdown is transparent muted text (${search.dropBg}, ${search.dropColor}, ${search.dropBorder}, ${search.dropShadow})`);
+  check(search.dropBg === 'rgba(0, 0, 0, 0)' && search.dropColor === 'rgb(92, 92, 92)' && search.dropBorder === '0px' && search.dropShadow === 'none' && (search.dropAlign === 'start' || search.dropAlign === 'left'), `sort dropdown is transparent muted text, aligned to the start (${search.dropBg}, ${search.dropColor}, ${search.dropAlign})`);
   check(!search.clear || (Math.abs(search.clear[0] - 28) < 1 && Math.abs(search.clear[1] - 30) < 1), `clear button stays 28x30 (${search.clear})`);
   check(Math.abs(search.inputH - 30) < 2, `the search field stays 30px (${search.inputH})`);
 
@@ -235,27 +242,28 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   check(await run(() => document.activeElement?.classList.contains('nav-files-container')), 'clicking a folder leaves the explorer focused');
   check(await focused() === 'KeyFolder' && (await selected()) === '', 'a plain click focuses the folder without starting a multi-selection');
   await press('ArrowDown');
-  check(await selected() === 'KeyFolder/A.md' && await focused() === 'KeyFolder/A.md', 'ArrowDown moves onto the first child');
+  check(await selected() === '' && await focused() === 'KeyFolder/A.md', 'ArrowDown moves the ring onto the first child and selects nothing');
   await press('ArrowDown');
-  check(await selected() === 'KeyFolder/B.md', 'ArrowDown moves to the next file');
+  check(await selected() === '' && await focused() === 'KeyFolder/B.md', 'ArrowDown moves the ring to the next file');
   await press('ArrowUp');
-  check(await selected() === 'KeyFolder/A.md', 'ArrowUp moves back');
+  check(await selected() === '' && await focused() === 'KeyFolder/A.md', 'ArrowUp moves the ring back');
   await tap('ArrowDown', 'ArrowDown', 40, 8);
   check(await selected() === 'KeyFolder/A.md|KeyFolder/B.md' && await focused() === 'KeyFolder/B.md', 'Shift+ArrowDown extends the selection');
+  await press('ArrowUp');
+  check(await selected() === 'KeyFolder/A.md|KeyFolder/B.md' && await focused() === 'KeyFolder/A.md', 'a plain ArrowUp keeps the selection');
   await press('ArrowRight');
   check(await selected() === 'KeyFolder/A.md|KeyFolder/B.md', 'ArrowRight on a file does not change the selection');
-  await press('ArrowLeft');
-  check(await selected() === 'KeyFolder' && await focused() === 'KeyFolder', 'ArrowLeft on a child selects its parent');
   await press('ArrowLeft');
   await sleep(250);
   const folderRow = row('KeyFolder');
   const childRow = row('KeyFolder/A.md');
-  check(await run((folder, child) => !!document.querySelector(folder + ' .collapse-icon.is-collapsed') && !document.querySelector(child), folderRow, childRow), 'ArrowLeft collapses an expanded folder');
+  check(await focused() === 'KeyFolder', 'ArrowLeft on a file moves to the parent');
+  check(await run((folder, child) => !!document.querySelector(folder + ' .collapse-icon.is-collapsed') && !document.querySelector(child), folderRow, childRow), 'ArrowLeft on a file collapses the parent in the same press');
   await press('ArrowRight');
   await sleep(40);
   check(await run((folder, child) => !document.querySelector(folder + ' .collapse-icon.is-collapsed') && !!document.querySelector(child), folderRow, childRow), 'ArrowRight expands a collapsed folder');
   await press('ArrowRight');
-  check(await selected() === 'KeyFolder/A.md', 'ArrowRight on an expanded folder moves to its first child');
+  check(await focused() === 'KeyFolder/A.md', 'ArrowRight on an expanded folder moves to its first child');
 
   const drag = async (source, destination) => {
     const start = await run((sel) => { const r = document.querySelector(sel).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; }, row(source));
@@ -284,7 +292,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     await sleep(40);
   }
   await press('ArrowDown');
-  check(await selected() === 'KeyFolder/C.md', 'ArrowDown lands on the file left in the folder');
+  check(await focused() === 'KeyFolder/C.md' && await selected() === '', 'ArrowDown lands on the file left in the folder without selecting it');
   await tap('Delete', 'Delete', 46);
   await wait(async () => (await run(() => document.querySelector('.modal.mod-confirm')?.innerText ?? '')).includes('Delete file'), 'Delete did not ask');
   await press('Escape');
@@ -300,7 +308,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   await click(row('KeyBin'));
   await sleep(200);
   await press('ArrowDown');
-  check(await selected() === 'KeyBin/One.md', 'ArrowDown lands on the first file in KeyBin');
+  check(await focused() === 'KeyBin/One.md' && await selected() === '', 'ArrowDown lands on the first file in KeyBin without selecting it');
   await tap('ArrowDown', 'ArrowDown', 40, 8);
   check(await selected() === 'KeyBin/One.md|KeyBin/Two.md', 'Shift+ArrowDown selects both files in the folder');
   await tap('Delete', 'Delete', 46);

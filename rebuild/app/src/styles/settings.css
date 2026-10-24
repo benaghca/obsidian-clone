@@ -128,7 +128,7 @@
 .vertical-tab-header-group-items {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 2px;
 }
 .vertical-tab-nav-item {
   --icon-size: var(--icon-s);
@@ -568,19 +568,45 @@
   color: var(--text-normal);
   overflow-wrap: anywhere;
 }
+.modal.mod-confirm .modal-close-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  --icon-size: var(--icon-s);
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  color: var(--text-muted);
+}
+.modal.mod-confirm .modal-content p {
+  margin: 0 0 1em;
+}
+.modal.mod-confirm .modal-content p:last-child {
+  margin-bottom: 0;
+}
 .modal.mod-confirm .modal-checkbox {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 16px;
+  margin: 0;
   font-size: var(--font-ui-small);
   color: var(--text-muted);
+}
+.modal-button-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
 }
 .modal-button-container {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
   margin-top: 20px;
+}
+.modal.mod-confirm .modal-button-row .modal-button-container {
+  margin-top: 0;
+  margin-left: auto;
 }
 .modal.mod-confirm button {
   padding: 4px 14px;

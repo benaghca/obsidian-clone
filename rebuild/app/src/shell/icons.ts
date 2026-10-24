@@ -251,10 +251,10 @@ export function dateGlyph(): SVGElement {
   return svg;
 }
 
-/** Outline auto-scroll: a panel with a bar near the top and another near the bottom. */
+/** Outline auto-scroll: a bar, a rounded card, and a bar, the bars outside the card and as wide as it. */
 export function autoScrollGlyph(): SVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("viewBox", "0 0 16 16");
   svg.setAttribute("class", "svg-icon grove-auto-scroll");
   svg.setAttribute("aria-hidden", "true");
   svg.setAttribute("width", "16");
@@ -264,26 +264,29 @@ export function autoScrollGlyph(): SVGElement {
     for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
     svg.append(el);
   };
-  add("rect", { x: "4.5", y: "3.5", width: "15", height: "17", rx: "1.5", fill: "none", stroke: "currentColor", "stroke-width": "2" });
-  add("path", { d: "M7.5 7.5h9M7.5 16.5h9", fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linecap": "round" });
+  add("rect", { x: "2", y: "1", width: "12", height: "1.6", rx: "0.4", fill: "currentColor" });
+  add("rect", { x: "2", y: "4.2", width: "12", height: "7.6", rx: "1.5", fill: "none", stroke: "currentColor", "stroke-width": "1.4" });
+  add("rect", { x: "2", y: "13.4", width: "12", height: "1.6", rx: "0.4", fill: "currentColor" });
   return svg;
 }
 
-/** Search "more options": a filled circle with three holes, drawn beside the result count. */
+/** Search "more options": an 11px filled circle with three light dots. */
 export function moreOptionsGlyph(): SVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
-  svg.setAttribute("viewBox", "0 0 16 16");
+  svg.setAttribute("viewBox", "0 0 11 11");
   svg.setAttribute("class", "svg-icon search-more-options");
   svg.setAttribute("aria-hidden", "true");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
-  const path = document.createElementNS(SVG_NS, "path");
-  path.setAttribute("fill", "currentColor");
-  path.setAttribute("fill-rule", "evenodd");
-  path.setAttribute(
-    "d",
-    "M8 1.25a6.75 6.75 0 1 0 .01 0zM4.55 8a1 1 0 1 1 2 0 1 1 0 0 1-2 0zm3.45 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0zm3.45 0a1 1 0 1 1 2 0 1 1 0 0 1-2 0z",
-  );
-  svg.append(path);
+  svg.setAttribute("width", "11");
+  svg.setAttribute("height", "11");
+  const add = (tag: string, attrs: Record<string, string>) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    svg.append(el);
+  };
+  add("circle", { cx: "5.5", cy: "5.5", r: "5.5", fill: "currentColor" });
+  const dot = "var(--background-secondary)";
+  add("circle", { cx: "3.15", cy: "5.5", r: "0.7", fill: dot });
+  add("circle", { cx: "5.5", cy: "5.5", r: "0.7", fill: dot });
+  add("circle", { cx: "7.85", cy: "5.5", r: "0.7", fill: dot });
   return svg;
 }

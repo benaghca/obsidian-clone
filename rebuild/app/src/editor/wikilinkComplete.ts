@@ -1,9 +1,9 @@
 // File, heading and block completions share CodeMirror's fuzzy matcher.
-import { autocompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
+import { autocompletion, currentCompletions, selectedCompletionIndex, setSelectedCompletion, type Completion, type CompletionContext, type CompletionResult } from "@codemirror/autocomplete";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { isolateHistory } from "@codemirror/commands";
-import { ChangeSet, type ChangeSpec, type Text } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { ChangeSet, type ChangeSpec, type EditorState, type Text } from "@codemirror/state";
+import { ViewPlugin, type EditorView, type ViewUpdate } from "@codemirror/view";
 import type { SyntaxNode, Tree } from "@lezer/common";
 import { parentDir } from "../paths";
 import { frontmatterField } from "./frontmatter";
@@ -129,8 +129,104 @@ function aliasSource(ctx: CompletionContext): Promise<CompletionResult | null> |
     return { from: before.from + 2, options, validFor: /^[^[\]|#^\n]*$/ };
   }).catch(() => null);
 }
-export const wikilinkCompletion = autocompletion({
-  override: [wikilinkSource, aliasSource], icons: false, activateOnTypingDelay: 0, maxRenderedOptions: 50,
-  optionClass: completion => `mod-link-${completion.type}`,
-  tooltipClass: () => "cm-link-suggest",
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** Corner arrow at the right of an alias row. */
+function aliasArrow(): SVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 12 12");
+  svg.setAttribute("class", "svg-icon alias-arrow");
+  svg.setAttribute("width", "12");
+  svg.setAttribute("height", "12");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", "M2.5 10V4.2H8M6.2 2.4 8.4 4.2 6.2 6");
+  path.setAttribute("fill", "none");
+  path.setAttribute("stroke", "currentColor");
+  path.setAttribute("stroke-width", "1.2");
+  path.setAttribute("stroke-linecap", "round");
+  path.setAttribute("stroke-linejoin", "round");
+  svg.append(path);
+  return svg;
+}
+
+function linkFooter(): HTMLElement {
+  const footer = document.createElement("div");
+  footer.className = "cm-link-suggest-footer";
+  const parts: [string, string][] = [["#", "to link heading"], ["^", "to link blocks"], ["|", "to change display text"]];
+  parts.forEach(([key, rest], i) => {
+    if (i) footer.append(document.createTextNode("   "));
+    footer.append(document.createTextNode("Type "));
+    const mark = document.createElement("b");
+    mark.textContent = key;
+    footer.append(mark, document.createTextNode(`  ${rest}`));
+  });
+  return footer;
+}
+
+/** The open `[[` query, or null when the caret is not inside one. */
+function bracketQuery(state: EditorState): string | null {
+  const head = state.selection.main.head;
+  const before = state.sliceDoc(Math.max(0, head - 500), head);
+  const at = before.lastIndexOf("[[");
+  if (at < 0) return null;
+  const query = before.slice(at + 2);
+  return /[\]|\n]/.test(query) ? null : query;
+}
+
+/** `[[#` headings of this note. `[[#^` is a block list and keeps the first row picked. */
+function currentNoteHeadings(state: EditorState): boolean {
+  const query = bracketQuery(state);
+  return !!query && query.startsWith("#") && !query.startsWith("#^");
+}
+
+/** Anchor the popup 7px left of `[[`, add the footer, and leave `[[#` with nothing picked. */
+const linkSuggestLayout = ViewPlugin.fromClass(class {
+  private primed = "";
+  update(update: ViewUpdate) {
+    const view = update.view;
+    const query = bracketQuery(update.state);
+    const options = query ? currentCompletions(update.state) : [];
+    const signature = options.map((option) => `${option.type ?? ""}:${option.label}`).join("\n");
+    if (!query || !options.length) this.primed = "";
+    else if (!currentNoteHeadings(update.state) && selectedCompletionIndex(update.state) == null && this.primed !== signature) {
+      this.primed = signature;
+      queueMicrotask(() => {
+        const same = bracketQuery(view.state) === query && currentCompletions(view.state).map((option) => `${option.type ?? ""}:${option.label}`).join("\n") === signature;
+        if (same && selectedCompletionIndex(view.state) == null) view.dispatch({ effects: setSelectedCompletion(0) });
+      });
+    }
+    view.requestMeasure({
+      read() {
+        const tip = view.dom.querySelector(".cm-tooltip.cm-link-suggest") as HTMLElement | null;
+        const open = bracketQuery(view.state);
+        if (!tip || open == null) return null;
+        const head = view.state.selection.main.head;
+        const pos = head - open.length - 2;
+        const coords = view.coordsAtPos(pos);
+        if (!coords) return null;
+        const rect = tip.getBoundingClientRect();
+        const shift = new DOMMatrix(getComputedStyle(tip).transform).m41;
+        return { tip, dx: coords.left - 7 - (rect.left - shift), subpath: /[#^]/.test(open) };
+      },
+      write(data) {
+        if (!data) return;
+        data.tip.style.transform = `translateX(${data.dx}px)`;
+        data.tip.classList.toggle("cm-link-subpath", data.subpath);
+        const footer = data.tip.querySelector(".cm-link-suggest-footer");
+        if (data.subpath) footer?.remove();
+        else if (!footer) data.tip.append(linkFooter());
+      },
+    });
+  }
 });
+
+export const wikilinkCompletion = [
+  autocompletion({
+    override: [wikilinkSource, aliasSource], icons: false, activateOnTypingDelay: 0, selectOnOpen: false, maxRenderedOptions: 50,
+    optionClass: completion => `mod-link-${completion.type}`,
+    tooltipClass: () => "cm-link-suggest",
+    addToOptions: [{ render: (completion) => completion.type === "alias" ? aliasArrow() : null, position: 90 }],
+  }),
+  linkSuggestLayout,
+];

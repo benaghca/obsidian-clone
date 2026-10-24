@@ -178,13 +178,13 @@ await withBrowser(async ({ send, run, click, move, point, press, check }) => {
     )), mode + ': a folder is shown as Projects/');
     check(await run(() => {
       const popup = document.querySelector('.cm-link-suggest');
-      const style = getComputedStyle(popup, '::after');
-      const ctx = document.createElement('canvas').getContext('2d');
-      ctx.font = style.font;
-      const text = style.content.slice(1, -1);
+      const footer = popup?.querySelector('.cm-link-suggest-footer');
+      if (!footer) return false;
+      const style = getComputedStyle(footer);
+      const text = footer.textContent ?? '';
       const wide = popup.offsetWidth >= 420;
-      const oneLine = style.whiteSpace === 'nowrap' && ctx.measureText(text).width + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) <= popup.clientWidth;
-      return wide && oneLine && text.includes('Type # to link heading') && text.includes('Type ^ to link blocks') && text.includes('Type | to change display text');
+      const oneLine = style.whiteSpace === 'nowrap' && footer.scrollWidth <= popup.clientWidth + 1;
+      return wide && oneLine && text.includes('to link heading') && text.includes('to link blocks') && text.includes('to change display text');
     }), mode + ': the widened suggester keeps the hint on one line');
     await press('Escape');
   }

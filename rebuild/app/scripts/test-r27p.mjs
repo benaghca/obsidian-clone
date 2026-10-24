@@ -79,7 +79,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
       glyphs,
     };
   });
-  check(Math.abs(back.fileX - 13) < 2 && Math.abs(back.fileW - 274) < 2 && Math.abs(back.headerX - 13) < 2 && Math.abs(back.headerW - 274) < 2, `backlink header and file row are inset 13px and 274px wide (file ${back.fileX.toFixed(1)}×${back.fileW.toFixed(1)}, header ${back.headerX.toFixed(1)}×${back.headerW.toFixed(1)})`);
+  check(Math.abs(back.fileX - 13) < 2 && Math.abs(back.fileW - 274) < 2 && Math.abs(back.headerX - 12) < 2 && Math.abs(back.headerW - 276) < 3 && back.headerW > back.fileW - 0.5 && back.headerX < back.fileX + 0.5, `backlink headers are inset 12px and wider than the 13px file rows (file ${back.fileX.toFixed(1)}×${back.fileW.toFixed(1)}, header ${back.headerX.toFixed(1)}×${back.headerW.toFixed(1)})`);
   check(Math.abs(back.fileH - 24.9) < 1 && Math.abs(back.fileY - 115) < 3, `the file row is 24.9px at y=115 (${back.fileH} at ${back.fileY})`);
   check(Math.abs(back.matchY - 144) < 3, `the first match starts at y=144 (${back.matchY})`);
   check(back.cardBg === 'rgb(255, 255, 255)' && back.cardRadius === '4px' && back.cardShadow.includes('rgb(228, 228, 228)'), `matches sit in a white card (${back.cardBg}, ${back.cardRadius}, ${back.cardShadow})`);

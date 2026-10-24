@@ -42,9 +42,13 @@ await withBrowser(async ({ send, run, click, move, point, press, chord, check })
     check(all.filter(name => name.toLowerCase() === 'uncreated22').length === 1 && all.includes('Projects/Uncreated22'), `${mode}: unresolved targets included and deduplicated`);
     check(await run(() => [...document.querySelectorAll('.cm-link-suggest li')].some(el => el.querySelector('.cm-completionLabel')?.textContent === 'Plan22' && el.querySelector('.cm-completionDetail')?.textContent === 'Projects/')), `${mode}: folder details end in a slash`);
     check(await run(() => {
-      const popup = document.querySelector('.cm-link-suggest'), s = getComputedStyle(popup, '::after');
-      const ctx = document.createElement('canvas').getContext('2d'); ctx.font = s.font;
-      return s.whiteSpace === 'nowrap' && ctx.measureText(s.content.slice(1, -1)).width + parseFloat(s.paddingLeft) + parseFloat(s.paddingRight) <= popup.clientWidth;
+      const popup = document.querySelector('.cm-link-suggest');
+      const footer = popup?.querySelector('.cm-link-suggest-footer');
+      if (!footer) return false;
+      const s = getComputedStyle(footer);
+      const text = footer.textContent ?? '';
+      return s.whiteSpace === 'nowrap' && footer.scrollWidth <= popup.clientWidth + 1
+        && text.includes('to link heading') && text.includes('to link blocks') && text.includes('to change display text');
     }), `${mode}: the complete heading/block/display-text hint fits on one line`);
     await send('Input.insertText', { text: 'photo.png' }); await sleep(150);
     assert.deepEqual(await options(), ['photo.png']);

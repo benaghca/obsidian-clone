@@ -27,9 +27,15 @@
   /* room to scroll the last rows above the floating status bar */
   padding: 4px 8px 32px;
 }
-/* Backlink rows sit 13px in, so a 300px pane holds a 274px row. */
+/* Section headers use the pane's 12px inset (276px in a 300px dock).
+   File rows and cards take one more pixel, to 13px / 274px. */
 .backlink-view .backlink-pane {
-  padding: 4px 13px 32px;
+  padding: 4px 12px 32px;
+}
+.backlink-view .search-result-file-title,
+.backlink-view .search-result-file-matches {
+  margin-left: 1px;
+  margin-right: 1px;
 }
 /* 28×24, the same size as the file explorer's nav buttons. */
 .backlink-toolbar .clickable-icon,
@@ -136,7 +142,7 @@
   white-space: nowrap;
 }
 .backlink-view .search-result-file-matches {
-  margin: 4px 0 8px;
+  margin: 4px 1px 8px;
   background: var(--background-primary);
   border-radius: 4px;
   box-shadow: 0 0 0 1px rgb(228, 228, 228);
