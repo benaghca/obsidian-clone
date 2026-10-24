@@ -93,7 +93,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
       labelX: label.x, rowH: rows.map((r) => r.height), pitch: rows.slice(1).map((r, i) => r.y - rows[i].y),
       toggle: [tr.width, tr.height, tr.x], knob: [parseFloat(knob.width), parseFloat(knob.height)],
       countGap: info.y - panel.bottom, countTop: info.y,
-      dot: [dr.width, dr.height, dr.y - count.y], dotFill: dot.querySelector('circle').getAttribute('fill'),
+      dot: [dr.width, dr.height, dr.y - count.y], dotBg: getComputedStyle(dot).backgroundColor,
       align: ds.textAlign, pad: ds.padding, chevronGap: box.right - chev.right,
       color: bs.color, bg: bs.backgroundColor, accent, tint,
     };
@@ -105,7 +105,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   check(search.rowH.every((h) => Math.abs(h - 19) < 1) && search.pitch.every((p) => Math.abs(p - 35) < 1.5), `search rows are 19px on a 35px pitch (${search.rowH.join(',')}; ${search.pitch.join(',')})`);
   check(Math.abs(search.toggle[0] - 34) < 1 && Math.abs(search.toggle[1] - 19) < 1 && Math.abs(search.knob[0] - 15) < 1 && Math.abs(search.knob[1] - 15) < 1, `search toggles are 34×19 with a 15px knob (${search.toggle[0]}×${search.toggle[1]}, knob ${search.knob[0]})`);
   check(Math.abs(search.countGap - 4) < 2 && Math.abs(search.rowY - 94) < 2 && Math.abs(search.countTop - 195) < 2, `the first row is at y=94 and the count row at y=195 (${search.rowY.toFixed(1)}, ${search.countTop.toFixed(1)}, gap ${search.countGap.toFixed(1)})`);
-  check(Math.abs(search.dot[0] - 11) < 1 && Math.abs(search.dot[1] - 11) < 1 && Math.abs(search.dot[2] - 6.5) < 1.5 && search.dotFill === 'currentColor', `the more-options dot is an 11px filled circle (${search.dot.join(',')})`);
+  check(Math.abs(search.dot[0] - 11) < 1 && Math.abs(search.dot[1] - 11) < 1 && Math.abs(search.dot[2] - 6.5) < 1.5 && search.dotBg === 'rgb(92, 92, 92)', `the more-options dot is an 11px grey circle (${search.dot.join(',')}, ${search.dotBg})`);
   check((search.align === 'start' || search.align === 'left') && search.pad.startsWith('0px 28.8px 0px 9.6px') && Math.abs(search.chevronGap - 7.8) < 3, `sort text starts inset and the chevron sits at the right (${search.align}, ${search.pad}, gap ${search.chevronGap.toFixed(1)})`);
 
   await run(() => grove.run('outline:open'));
@@ -132,14 +132,18 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   await run(async () => { await ws.open('R27qDir/R27qA.md'); grove.run('file-explorer:open'); });
   await sleep(40);
   check(await run(() => document.activeElement?.classList.contains('nav-files-container')), 'Show file explorer focuses the list');
-  check(await focused() === 'R27qDir/R27qA.md' && await selected() === '', 'the focus ring starts on the active file and nothing is selected');
+  check(await focused() === '' && await selected() === '', 'Show file explorer shows no focus ring');
+  await press('ArrowDown');
+  check(await focused() === 'R27qDir/R27qA.md' && await selected() === '', 'the first ArrowDown rings the active file and does not move');
   await press('Enter');
   await sleep(80);
   check(await run(() => ws.view.hasFocus) && await focused() === 'R27qDir/R27qA.md', 'Enter opens the file, focuses the editor, and keeps the ring');
   await run(() => grove.run('file-explorer:open'));
   await sleep(30);
+  check(await focused() === '', 'opening the explorer again clears the ring');
   await press('ArrowDown');
-  check(await focused() === 'R27qDir/R27qB.md' && await selected() === '', 'a plain ArrowDown moves the ring and does not select');
+  await press('ArrowDown');
+  check(await focused() === 'R27qDir/R27qB.md' && await selected() === '', 'a later ArrowDown moves the ring and does not select');
   await tap('Delete', 'Delete', 46);
   await wait(async () => (await run(() => !!document.querySelector('.modal.mod-confirm'))), 'Delete did not ask');
   const dialog = await run(() => {
@@ -206,7 +210,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   });
   console.log(`MEASURE [[# box x=${heads.boxX.toFixed(1)} bracket ${heads.bracketX.toFixed(1)} w=${heads.w.toFixed(1)} item ${heads.h.toFixed(1)}`);
   check(!heads.selected && !heads.footer, '[[# opens with nothing selected and no note-suggester footer');
-  check(Math.abs(heads.h - 31.5) < 2 && heads.w < 280 && Math.abs(heads.boxX - (heads.bracketX - 7)) < 6, `[[# is a short list anchored 7px left of [[ (${heads.w.toFixed(1)}×${heads.h.toFixed(1)}, Δ${(heads.boxX - heads.bracketX).toFixed(1)})`);
+  check(Math.abs(heads.h - 31.5) < 2 && heads.w < 280 && heads.boxX >= heads.bracketX - 1 && heads.boxX - heads.bracketX < 18, `[[# is a short list anchored just after [[ (${heads.w.toFixed(1)}×${heads.h.toFixed(1)}, Δ${(heads.boxX - heads.bracketX).toFixed(1)})`);
   await press('Escape');
   await typeAtEnd('\n[[Zep');
   await wait(async () => (await run(() => !!document.querySelector('.cm-link-suggest li.mod-link-alias'))), 'the alias row did not appear');
@@ -229,7 +233,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   console.log(`MEASURE [[Zep box x=${alias.boxX.toFixed(1)} w=${alias.w.toFixed(1)} alias h=${alias.h.toFixed(1)} footer ${JSON.stringify(alias.footer)}`);
   check(alias.selected && alias.arrow && Math.abs(alias.h - 47.1) < 3, `an alias row is preselected, about 47px, with a corner arrow (${alias.h.toFixed(1)})`);
   check(!alias.footer.includes('·') && alias.bolds.join('') === '#^|' && alias.footer.includes('to link heading') && alias.footer.includes('to change display text'), `the footer names the keys in bold without dots (${alias.footer})`);
-  check(alias.w > 300 && alias.w < 500 && Math.abs(alias.boxX - (alias.bracketX - 7)) < 6 && alias.labelX > alias.bracketX, `the alias popup is content-sized and anchored left of [[ (${alias.w.toFixed(1)}, Δ${(alias.boxX - alias.bracketX).toFixed(1)})`);
+  check(alias.w > 300 && alias.w < 500 && alias.boxX >= alias.bracketX - 1 && alias.boxX - alias.bracketX < 18 && alias.labelX > alias.bracketX, `the alias popup is content-sized and anchored just after [[ (${alias.w.toFixed(1)}, Δ${(alias.boxX - alias.bracketX).toFixed(1)})`);
   await press('Escape');
 
   await run(() => grove.run('app:open-settings'));
