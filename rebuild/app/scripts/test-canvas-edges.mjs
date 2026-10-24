@@ -58,7 +58,7 @@ await withBrowser(async ({run,send,click,move,point,press,chord,open,read,check,
  await click(await edgePoint(id));await drag(await point(endpoint(id,'to')),{x:1100,y:680},async()=>check(await read()===sideChanged,'A dangling reconnect preview does not save'),true);
  check(await read()===sideChanged&&await run(()=>!document.querySelector('.is-connecting, .is-reconnecting')),'Escape cancels reconnection and removes preview state');
  await drag(await point(endpoint(id,'to')),{x:1100,y:680});check(await read()===sideChanged,'Dropping a reconnect on empty space keeps the original edge');
- await drag(await dot('a','top'),{x:1000,y:680});check(await read()===sideChanged,'Dropping a new connection on empty space cancels without rewriting the file');
+ await drag(await dot('a','top'),{x:1000,y:680});check(await read()===sideChanged&&await run(()=>!!document.querySelector('.canvas-add-menu')),'Dropping a new connection on empty space offers Add card without rewriting the file');await press('Escape');
  await drag(await dot('a','right'),await sidePoint('a','left'));check(await read()===sideChanged,'Dropping onto the source card rejects a self-connection like Obsidian');
  await click(await edgePoint(id));await drag(await point(endpoint(id,'to')),await sidePoint('b','top'));check(await read()===sideChanged,'Reconnecting onto the opposite endpoint card also rejects a self-connection');
  await click(await edgePoint('old'));await drag(await point(endpoint('old','to')),await sidePoint('b','top'));

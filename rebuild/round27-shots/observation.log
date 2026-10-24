@@ -1,0 +1,1446 @@
+ROWS [
+  {
+    cls: 'tree-item-self nav-folder-title is-clickable mod-collapsible',
+    path: 'Folder',
+    text: 'Folder'
+  },
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable',
+    path: 'A very long note title that should truncate inside the canvas card.md',
+    text: 'A very long note title that should truncate inside the canvas card'
+  },
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable is-active',
+    path: 'Board.canvas',
+    text: 'Board\nCANVAS'
+  },
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable',
+    path: 'Picture.svg',
+    text: 'Picture\nSVG'
+  },
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable',
+    path: 'Short.md',
+    text: 'Short'
+  }
+]
+DRAG_note [
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable is-being-dragged',
+    text: 'Short',
+    box: {
+      x: 56,
+      y: 191.65625,
+      width: 276,
+      height: 24.890625,
+      top: 191.65625,
+      right: 332,
+      bottom: 216.546875,
+      left: 56
+    },
+    bg: 'rgb(152, 115, 247)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'canvas-wrapper node-insert-event',
+    text: 'Source',
+    box: {
+      x: 344,
+      y: 78.046875,
+      width: 936,
+      height: 721.953125,
+      top: 78.046875,
+      right: 1280,
+      bottom: 800,
+      left: 344
+    },
+    bg: 'rgb(255, 255, 255)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'drag-ghost',
+    text: 'Short',
+    box: {
+      x: 882,
+      y: 299,
+      width: 65.078125,
+      height: 28.890625,
+      top: 299,
+      right: 947.078125,
+      bottom: 327.890625,
+      left: 882
+    },
+    bg: 'rgba(0, 0, 0, 0.85)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'drag-ghost-self',
+    text: 'Short',
+    box: {
+      x: 890,
+      y: 305,
+      width: 49.078125,
+      height: 16.890625,
+      top: 305,
+      right: 939.078125,
+      bottom: 321.890625,
+      left: 890
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  }
+]
+DROP_note {
+  leaves: [
+    {
+      name: 'Board',
+      data: {
+        nodes: [
+          {
+            id: '5148bf35c6ba9cc8',
+            x: 190,
+            y: -65,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'Short.md'
+          },
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Board'
+}
+NOTE_DOM [
+  {
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    children: []
+  },
+  {
+    text: 'Short\n\nFirst paragraph\n\nSecond paragraph\n\nShort',
+    box: {
+      x: 877,
+      y: 294.046875,
+      width: 400,
+      height: 400,
+      top: 294.046875,
+      right: 1277,
+      bottom: 694.046875,
+      left: 877
+    },
+    children: [
+      {
+        cls: 'mod-header mod-ui',
+        text: 'Short',
+        box: {
+          x: 894,
+          y: 311.140625,
+          width: 354,
+          height: 31.0625,
+          top: 311.140625,
+          right: 1248,
+          bottom: 342.203125,
+          left: 894
+        },
+        font: '16px / 24px "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+        padding: '0px',
+        whiteSpace: 'normal',
+        weight: '400',
+        display: 'block',
+        color: 'rgb(34, 34, 34)',
+        overflow: 'visible',
+        ellipsis: 'clip',
+        cursor: 'grab'
+      },
+      {
+        cls: 'inline-title',
+        text: 'Short',
+        box: {
+          x: 894,
+          y: 311.140625,
+          width: 354,
+          height: 31.0625,
+          top: 311.140625,
+          right: 1248,
+          bottom: 342.203125,
+          left: 894
+        },
+        font: '700 25.888px / 31.0656px "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+        padding: '0px',
+        whiteSpace: 'pre-wrap',
+        weight: '700',
+        display: 'block',
+        color: 'rgb(34, 34, 34)',
+        overflow: 'visible',
+        ellipsis: 'clip',
+        cursor: 'text'
+      },
+      {
+        cls: 'metadata-properties-title',
+        text: 'Properties',
+        box: {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0
+        },
+        font: '500 16px / 19.2px "??", "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+        padding: '0px',
+        whiteSpace: 'normal',
+        weight: '500',
+        display: 'block',
+        color: 'rgb(34, 34, 34)',
+        overflow: 'visible',
+        ellipsis: 'clip',
+        cursor: 'grab'
+      },
+      {
+        cls: 'text-button-label',
+        text: 'Add property',
+        box: {
+          x: 0,
+          y: 0,
+          width: 0,
+          height: 0,
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0
+        },
+        font: '14px / 21px "??", "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+        padding: '0px 2px 0px 0px',
+        whiteSpace: 'nowrap',
+        weight: '400',
+        display: 'block',
+        color: 'rgb(92, 92, 92)',
+        overflow: 'hidden',
+        ellipsis: 'ellipsis',
+        cursor: 'default'
+      },
+      {
+        cls: 'canvas-node-label',
+        text: 'Short',
+        box: {
+          x: 877,
+          y: 270.546875,
+          width: 35.859375,
+          height: 19.5,
+          top: 270.546875,
+          right: 912.859375,
+          bottom: 290.046875,
+          left: 877
+        },
+        font: '15px / 19.5px "??", "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+        padding: '0px',
+        whiteSpace: 'nowrap',
+        weight: '400',
+        display: 'block',
+        color: 'rgb(92, 92, 92)',
+        overflow: 'hidden',
+        ellipsis: 'ellipsis',
+        cursor: 'auto'
+      }
+    ]
+  }
+]
+DRAG_on-card [
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable is-being-dragged',
+    text: 'A very long note title that should truncate inside the canvas card',
+    box: {
+      x: 56,
+      y: 110.984375,
+      width: 276,
+      height: 24.890625,
+      top: 110.984375,
+      right: 332,
+      bottom: 135.875,
+      left: 56
+    },
+    bg: 'rgb(152, 115, 247)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'canvas-wrapper node-insert-event',
+    text: 'Source\n\nShort\n\nFirst paragraph\n\nSecond paragraph\n\nShort',
+    box: {
+      x: 344,
+      y: 78.046875,
+      width: 936,
+      height: 721.953125,
+      top: 78.046875,
+      right: 1280,
+      bottom: 800,
+      left: 344
+    },
+    bg: 'rgb(255, 255, 255)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'Short\n\nFirst paragraph\n\nSecond paragraph\n\nShort',
+    box: {
+      x: 877,
+      y: 294.046875,
+      width: 400,
+      height: 400,
+      top: 294.046875,
+      right: 1277,
+      bottom: 694.046875,
+      left: 877
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'drag-ghost',
+    text: 'A very long note title that should truncate inside the canvas card',
+    box: {
+      x: 882,
+      y: 229,
+      width: 300,
+      height: 28.890625,
+      top: 229,
+      right: 1182,
+      bottom: 257.890625,
+      left: 882
+    },
+    bg: 'rgba(0, 0, 0, 0.85)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'drag-ghost-self',
+    text: 'A very long note title that should truncate inside the canvas card',
+    box: {
+      x: 890,
+      y: 235,
+      width: 284,
+      height: 16.890625,
+      top: 235,
+      right: 1174,
+      bottom: 251.890625,
+      left: 890
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  }
+]
+DROP_on-card {
+  leaves: [
+    {
+      name: 'Board',
+      data: {
+        nodes: [
+          {
+            id: 'e0637db251b8b4e2',
+            x: 190,
+            y: -135,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'A very long note title that should truncate inside the canvas card.md'
+          },
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '5148bf35c6ba9cc8',
+            x: 190,
+            y: -65,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'Short.md'
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Board'
+}
+DRAG_image [
+  {
+    cls: 'tree-item-self nav-file-title tappable is-clickable is-being-dragged',
+    text: 'Picture\nSVG',
+    box: {
+      x: 56,
+      y: 164.765625,
+      width: 276,
+      height: 24.890625,
+      top: 164.765625,
+      right: 332,
+      bottom: 189.65625,
+      left: 56
+    },
+    bg: 'rgb(152, 115, 247)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'canvas-wrapper node-insert-event',
+    text: 'Source\n' +
+      '\n' +
+      'Short\n' +
+      '\n' +
+      'First paragraph\n' +
+      '\n' +
+      'Second paragraph\n' +
+      '\n' +
+      'Short\n' +
+      'A very long note title that should truncate inside the canvas card\n' +
+      'Properties\n' +
+      'Short\n' +
+      'Add property\n' +
+      'Heading',
+    box: {
+      x: 344,
+      y: 78.046875,
+      width: 936,
+      height: 721.953125,
+      top: 78.046875,
+      right: 1280,
+      bottom: 800,
+      left: 344
+    },
+    bg: 'rgb(255, 255, 255)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Short\n\nFirst paragraph\n\nSecond paragraph\n\nShort',
+    box: {
+      x: 877,
+      y: 294.046875,
+      width: 400,
+      height: 400,
+      top: 294.046875,
+      right: 1277,
+      bottom: 694.046875,
+      left: 877
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'A very long note title that should truncate inside the canvas card\n' +
+      'Properties\n' +
+      'Short\n' +
+      'Add property\n' +
+      'Heading\n' +
+      '\n' +
+      'Body text\n' +
+      '\n' +
+      'A very long note title that should truncate',
+    box: {
+      x: 877,
+      y: 224.046875,
+      width: 400,
+      height: 400,
+      top: 224.046875,
+      right: 1277,
+      bottom: 624.046875,
+      left: 877
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'drag-ghost',
+    text: 'Picture.svg',
+    box: {
+      x: 629,
+      y: 660,
+      width: 98.3125,
+      height: 28.890625,
+      top: 660,
+      right: 727.3125,
+      bottom: 688.890625,
+      left: 629
+    },
+    bg: 'rgba(0, 0, 0, 0.85)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'drag-ghost-self',
+    text: 'Picture.svg',
+    box: {
+      x: 637,
+      y: 666,
+      width: 82.3125,
+      height: 16.890625,
+      top: 666,
+      right: 719.3125,
+      bottom: 682.890625,
+      left: 637
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  }
+]
+DROP_image {
+  leaves: [
+    {
+      name: 'Board',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '5148bf35c6ba9cc8',
+            x: 190,
+            y: -65,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'Short.md'
+          },
+          {
+            id: 'e0637db251b8b4e2',
+            x: 190,
+            y: -135,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'A very long note title that should truncate inside the canvas card.md'
+          },
+          {
+            id: '1ee6c7c6f4a6ccf5',
+            x: -63,
+            y: 296,
+            width: 400,
+            height: 200,
+            type: 'file',
+            file: 'Picture.svg'
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Board'
+}
+DRAG_folder [
+  {
+    cls: 'tree-item-self nav-folder-title is-clickable mod-collapsible is-being-dragged',
+    text: 'Folder',
+    box: {
+      x: 56,
+      y: 84.09375,
+      width: 276,
+      height: 24.890625,
+      top: 84.09375,
+      right: 332,
+      bottom: 108.984375,
+      left: 56
+    },
+    bg: 'rgb(152, 115, 247)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'canvas-wrapper node-insert-event',
+    text: 'Source\n' +
+      '\n' +
+      'Short\n' +
+      '\n' +
+      'First paragraph\n' +
+      '\n' +
+      'Second paragraph\n' +
+      '\n' +
+      'Short\n' +
+      'A very long note title that should truncate inside the canvas card\n' +
+      'Properties\n' +
+      'Short\n' +
+      'Add property\n' +
+      'Heading',
+    box: {
+      x: 344,
+      y: 78.046875,
+      width: 936,
+      height: 721.953125,
+      top: 78.046875,
+      right: 1280,
+      bottom: 800,
+      left: 344
+    },
+    bg: 'rgb(255, 255, 255)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Short\n\nFirst paragraph\n\nSecond paragraph\n\nShort',
+    box: {
+      x: 877,
+      y: 294.046875,
+      width: 400,
+      height: 400,
+      top: 294.046875,
+      right: 1277,
+      bottom: 694.046875,
+      left: 877
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'A very long note title that should truncate inside the canvas card\n' +
+      'Properties\n' +
+      'Short\n' +
+      'Add property\n' +
+      'Heading\n' +
+      '\n' +
+      'Body text\n' +
+      '\n' +
+      'A very long note title that should truncate',
+    box: {
+      x: 877,
+      y: 224.046875,
+      width: 400,
+      height: 400,
+      top: 224.046875,
+      right: 1277,
+      bottom: 624.046875,
+      left: 877
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node is-focused',
+    text: 'Picture.svg',
+    box: {
+      x: 624,
+      y: 655.046875,
+      width: 400,
+      height: 200,
+      top: 655.046875,
+      right: 1024,
+      bottom: 855.046875,
+      left: 624
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'drag-ghost',
+    text: 'Folder',
+    box: {
+      x: 629,
+      y: 227,
+      width: 70.859375,
+      height: 28.890625,
+      top: 227,
+      right: 699.859375,
+      bottom: 255.890625,
+      left: 629
+    },
+    bg: 'rgba(0, 0, 0, 0.85)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  },
+  {
+    cls: 'drag-ghost-self',
+    text: 'Folder',
+    box: {
+      x: 637,
+      y: 233,
+      width: 54.859375,
+      height: 16.890625,
+      top: 233,
+      right: 691.859375,
+      bottom: 249.890625,
+      left: 637
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(255, 255, 255) none 3px'
+  }
+]
+DROP_folder {
+  leaves: [
+    {
+      name: 'Board',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '5148bf35c6ba9cc8',
+            x: 190,
+            y: -65,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'Short.md'
+          },
+          {
+            id: 'e0637db251b8b4e2',
+            x: 190,
+            y: -135,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'A very long note title that should truncate inside the canvas card.md'
+          },
+          {
+            id: '1ee6c7c6f4a6ccf5',
+            x: -63,
+            y: 296,
+            width: 400,
+            height: 200,
+            type: 'file',
+            file: 'Picture.svg'
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Board'
+}
+DRAG_connection [
+  {
+    cls: 'canvas-wrapper node-insert-event is-dragging',
+    text: 'Source',
+    box: {
+      x: 344,
+      y: 78.046875,
+      width: 936,
+      height: 721.953125,
+      top: 78.046875,
+      right: 1280,
+      bottom: 800,
+      left: 344
+    },
+    bg: 'rgb(255, 255, 255)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  }
+]
+DROP_connection {
+  leaves: [
+    {
+      name: 'Connect',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160,
+            text: 'Source'
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Connect'
+}
+MENU [
+  {
+    cls: 'menu',
+    text: 'Add card\nAdd note from vault',
+    box: {
+      x: 1099,
+      y: 511.046875,
+      width: 150.734375,
+      height: 63.78125,
+      top: 511.046875,
+      right: 1249.734375,
+      bottom: 574.828125,
+      left: 1099
+    },
+    font: '15px / 19.5px "??", "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+    icons: []
+  },
+  {
+    cls: 'menu-item tappable',
+    text: 'Add card',
+    box: {
+      x: 1106,
+      y: 518.046875,
+      width: 136.734375,
+      height: 24.890625,
+      top: 518.046875,
+      right: 1242.734375,
+      bottom: 542.9375,
+      left: 1106
+    },
+    font: '13px / 16.9px "??", "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+    icons: []
+  },
+  {
+    cls: 'menu-item tappable',
+    text: 'Add note from vault',
+    box: {
+      x: 1106,
+      y: 542.9375,
+      width: 136.734375,
+      height: 24.890625,
+      top: 542.9375,
+      right: 1242.734375,
+      bottom: 567.828125,
+      left: 1106
+    },
+    font: '13px / 16.9px "??", "??", "??", ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", "Google Sans Flex", Roboto, "Inter Variable", Inter, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", sans-serif',
+    icons: []
+  }
+]
+CONNECTED {
+  leaves: [
+    {
+      name: 'Connect',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '6c698902cfdb5949',
+            x: 410,
+            y: 120,
+            width: 250,
+            height: 60,
+            type: 'text',
+            text: ''
+          }
+        ],
+        edges: [
+          {
+            id: '4913d5f95a4b9619',
+            fromNode: 'a',
+            fromSide: 'right',
+            toNode: '6c698902cfdb5949',
+            toSide: 'left'
+          }
+        ]
+      }
+    }
+  ],
+  active: 'Connect'
+}
+DRAG_connection-note [
+  {
+    cls: 'canvas-wrapper node-insert-event is-dragging',
+    text: 'Source',
+    box: {
+      x: 344,
+      y: 78.046875,
+      width: 936,
+      height: 721.953125,
+      top: 78.046875,
+      right: 1280,
+      bottom: 800,
+      left: 344
+    },
+    bg: 'rgb(255, 255, 255)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 740,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 788,
+      bottom: 784,
+      left: 740
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 788,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 836,
+      bottom: 784,
+      left: 788
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-card-menu-button mod-draggable',
+    text: '',
+    box: {
+      x: 836,
+      y: 736,
+      width: 48,
+      height: 48,
+      top: 736,
+      right: 884,
+      bottom: 784,
+      left: 836
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(92, 92, 92) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: 'Source',
+    box: {
+      x: 687,
+      y: 359.046875,
+      width: 250,
+      height: 160,
+      top: 359.046875,
+      right: 937,
+      bottom: 519.046875,
+      left: 687
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  },
+  {
+    cls: 'canvas-node',
+    text: '',
+    box: {
+      x: 1097,
+      y: 479.046875,
+      width: 250,
+      height: 60,
+      top: 479.046875,
+      right: 1347,
+      bottom: 539.046875,
+      left: 1097
+    },
+    bg: 'rgba(0, 0, 0, 0)',
+    outline: 'rgb(34, 34, 34) none 3px'
+  }
+]
+DROP_connection-note {
+  leaves: [
+    {
+      name: 'Connect',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '6c698902cfdb5949',
+            x: 410,
+            y: 120,
+            width: 250,
+            height: 60,
+            type: 'text',
+            text: ''
+          }
+        ],
+        edges: [
+          {
+            id: '4913d5f95a4b9619',
+            fromNode: 'a',
+            fromSide: 'right',
+            toNode: '6c698902cfdb5949',
+            toSide: 'left'
+          }
+        ]
+      }
+    }
+  ],
+  active: 'Connect'
+}
+NOTE_PICKER {
+  text: 'Board.canvas\n' +
+    'Connect.canvas\n' +
+    'Short\n' +
+    'Picture.svg\n' +
+    'A very long note title that should truncate inside the canvas card\n' +
+    '↑↓to navigate\n' +
+    '↵to open\n' +
+    'shift ↵to create\n' +
+    'escto dismiss',
+  rows: [
+    'Board.canvas',
+    'Connect.canvas',
+    'Short',
+    'Picture.svg',
+    'A very long note title that should truncate inside the canvas card'
+  ]
+}
+HEADER_CLICK {
+  leaves: [
+    {
+      name: 'Board',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '5148bf35c6ba9cc8',
+            x: 190,
+            y: -65,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'Short.md'
+          },
+          {
+            id: 'e0637db251b8b4e2',
+            x: 190,
+            y: -135,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'A very long note title that should truncate inside the canvas card.md'
+          },
+          {
+            id: '1ee6c7c6f4a6ccf5',
+            x: -63,
+            y: 296,
+            width: 400,
+            height: 200,
+            type: 'file',
+            file: 'Picture.svg'
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Board'
+}
+HEADER_DOUBLE {
+  leaves: [
+    {
+      name: 'Board',
+      data: {
+        nodes: [
+          {
+            id: 'a',
+            type: 'text',
+            text: 'Source',
+            x: 0,
+            y: 0,
+            width: 250,
+            height: 160
+          },
+          {
+            id: '5148bf35c6ba9cc8',
+            x: 190,
+            y: -65,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'Short.md'
+          },
+          {
+            id: 'e0637db251b8b4e2',
+            x: 190,
+            y: -135,
+            width: 400,
+            height: 400,
+            type: 'file',
+            file: 'A very long note title that should truncate inside the canvas card.md'
+          },
+          {
+            id: '1ee6c7c6f4a6ccf5',
+            x: -63,
+            y: 296,
+            width: 400,
+            height: 200,
+            type: 'file',
+            file: 'Picture.svg'
+          }
+        ],
+        edges: []
+      }
+    }
+  ],
+  active: 'Board'
+}

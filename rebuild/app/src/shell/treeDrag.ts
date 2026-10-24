@@ -89,6 +89,7 @@ export function startTreeDrag(
     }
     destination.hidden = target === null;
     destination.textContent = target === null ? "" : `Move into “${target ? fileName(target) : ws.vault.name}”`;
+    window.dispatchEvent(new CustomEvent("grove:explorer-drag", { detail: { entry, x, y } }));
     const view = linking ? editorUnder(ws, x, y) : null;
     if (view) {
       // Over an editable note: the caret follows, and the file is not also moved.
@@ -155,7 +156,7 @@ export function startTreeDrag(
       ghost.append(destination);
       document.body.append(ghost);
       row.classList.add("is-being-dragged");
-      document.body.classList.add("is-grabbing");
+      if (!document.querySelector(".canvas-view")) document.body.classList.add("is-grabbing");
       // Capture only after the threshold. A drag's eventual click belongs
       // to the list, so it cannot open/toggle the pressed or destination row.
       list.setPointerCapture(down.pointerId);
@@ -170,6 +171,7 @@ export function startTreeDrag(
     row.classList.remove("is-being-dragged");
     document.body.classList.remove("is-grabbing");
     const dragged = !!ghost;
+    if (dragged) window.dispatchEvent(new CustomEvent("grove:explorer-drag", { detail: { entry, x, y, done: true, cancelled } }));
     const view = dropView;
     const at = dropAt;
     const text = dragged && !cancelled && view && at >= 0

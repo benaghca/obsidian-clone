@@ -9,6 +9,8 @@
   touch-action: none;
 }
 .canvas-world { position: absolute; transform-origin: 0 0; will-change: transform; }
+/* A drag cursor surface avoids restyling every Markdown child on large boards. */
+.canvas-view.is-explorer-dragging::after { content: ""; position: absolute; inset: 0; z-index: 3; cursor: grabbing; }
 .canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; z-index: 1; }
 .canvas-node {
   position: absolute;
@@ -66,10 +68,13 @@
 .canvas-node .embed-actions, .canvas-node .markdown-embed-link, .canvas-node .image-resize-corner { display: none; }
 
 .canvas-file-label { position: absolute; bottom: calc(100% + 4px); color: var(--text-faint); font-size: 14px; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.canvas-note-title { font-size: 25.888px; font-weight: 700; line-height: 1.2; white-space: pre-wrap; overflow-wrap: break-word; margin-bottom: .5em; }
+.canvas-node-content:has(> .canvas-note-title) { scrollbar-gutter: stable; }
+.canvas-add-menu { min-width: 0; }
 .canvas-node-content .cm-line.cm-h1 { font-size: 25.888px; }
 .canvas-node-file .canvas-node-content > img { display: block; width: 100%; height: 100%; }
 
-.canvas-controls { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; --icon-size: 16px; --icon-stroke: 2px; }
+.canvas-controls { position: absolute; z-index: 4; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; --icon-size: 16px; --icon-stroke: 2px; }
 .canvas-controls .clickable-icon { width: 32px; height: 32px; padding: 8px; border-radius: 0; }
 .canvas-controls .clickable-icon + .clickable-icon { border-top: 1px solid var(--background-modifier-border); }
 .canvas-controls .clickable-icon:first-child { border-radius: 4px 4px 0 0; }

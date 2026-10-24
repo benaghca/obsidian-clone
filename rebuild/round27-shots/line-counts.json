@@ -1,0 +1,33 @@
+{
+  "baseline": "d63633d",
+  "before": {
+    "productionTS": 20788,
+    "testTS": 3262,
+    "css": 3895,
+    "rust": 3145,
+    "mjs": 3518,
+    "totalTS": 24050,
+    "tsCssRust": 31090,
+    "withMjs": 34608
+  },
+  "after": {
+    "productionTS": 20836,
+    "testTS": 3262,
+    "css": 3900,
+    "rust": 3145,
+    "mjs": 3622,
+    "totalTS": 24098,
+    "tsCssRust": 31143,
+    "withMjs": 34765
+  },
+  "net": {
+    "productionTS": 48,
+    "testTS": 0,
+    "css": 5,
+    "rust": 0,
+    "mjs": 104,
+    "totalTS": 48,
+    "tsCssRust": 53,
+    "withMjs": 157
+  }
+}

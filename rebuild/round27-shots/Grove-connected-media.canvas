@@ -1,0 +1,12 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"opaque":"keep","id":"a","type":"text","x":0,"y":0,"width":250,"height":160,"text":"Source"},
+		{"id":"3dff4077e9da46d6","x":399,"y":40,"width":400,"height":200,"type":"file","file":"A DropImage.svg"}
+	],
+	"edges":[
+		{"id":"227a433afbb24a73","fromNode":"a","fromSide":"right","toNode":"3dff4077e9da46d6","toSide":"left"}
+	]
+}

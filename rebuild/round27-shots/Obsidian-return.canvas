@@ -1,0 +1,15 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"id":"54ec90a9c5e65709","x":-83,"y":-206,"width":400,"height":400,"type":"file","file":"A DropNote.md"},
+		{"opaque":"keep","id":"a","type":"text","text":"Source","x":0,"y":0,"width":250,"height":160},
+		{"id":"6f169e8434444e3e","type":"text","text":"","x":399,"y":110,"width":250,"height":60},
+		{"id":"1e04ae37f763bb8a","x":-15,"y":280,"width":400,"height":200,"type":"file","file":"A DropImage.svg"}
+	],
+	"edges":[
+		{"id":"88e71699b67f4bd7","fromNode":"a","fromSide":"right","toNode":"6f169e8434444e3e","toSide":"left"},
+		{"id":"70d1793a657096bd","fromNode":"a","fromSide":"bottom","toNode":"1e04ae37f763bb8a","toSide":"top"}
+	]
+}
