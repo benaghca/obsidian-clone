@@ -132,8 +132,7 @@
 .property-value .property-input {
   font-size: inherit;
 }
-/* A date has a calendar on the left. The native glyph is invisible and its click target covers that icon.
-   A datetime value has no icon. The native glyph stays hidden, and its click target still opens the picker.
+/* A date and a datetime both have a calendar on the left. The native glyph is invisible and its click target covers that icon.
    In a note the date field is 116px. Chromium's content minimum is wider, and that extra
    width is what pushed the daily-note link right. File properties stays content-sized, so
    the narrow column keeps it near 101px. A datetime field fills the value column, so seconds
@@ -152,11 +151,19 @@
 }
 .property-date-icon {
   position: absolute;
-  left: 4px;
+  left: 7.5px;
+  top: 50%;
   z-index: 1;
   display: flex;
   pointer-events: none;
-  color: var(--text-muted);
+  color: var(--text-faint);
+  transform: translateY(-50%);
+  --icon-size: 12px;
+  --icon-stroke: 1.25px;
+}
+.property-date-icon .svg-icon {
+  width: 11px;
+  height: 12px;
 }
 .property-date .property-input {
   position: relative;
@@ -167,11 +174,18 @@
 .property-value[data-type="datetime"] .property-date .property-input {
   height: 29px;
 }
-/* The date glyph sits in the left padding. A datetime value has no icon. */
-.property-value[data-type="date"] .property-date .property-input {
+/* The glyph sits in the 24px left padding. A datetime keeps 8px on the right. */
+.property-value[data-type="date"] .property-date .property-input,
+.property-value[data-type="datetime"] .property-date .property-input {
   padding-left: 24px;
+}
+.property-value[data-type="date"] .property-date .property-input {
   padding-right: 0;
   field-sizing: content;
+}
+/* "/", "," and ":" inside the value are faint. The numbers stay the normal text colour. */
+.property-date .property-input::-webkit-datetime-edit-text {
+  color: var(--text-faint);
 }
 .cm-content .property-value[data-type="date"] .property-date .property-input {
   width: 116px;
