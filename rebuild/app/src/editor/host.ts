@@ -21,6 +21,8 @@ export interface EditorHost {
   openUrl(url: string): void;
   /** Link candidates, recent files first, including attachments and unresolved targets. */
   linkCandidates(): NoteRef[];
+  /** A note's frontmatter aliases, for [[ suggestions. Absent when the host has no property index. */
+  linkAliases?(): Promise<{ path: string; name: string; alias: string }[]>;
   /** A new link to the note at `target` from the note in `view`, as the link settings ask ([[wikilink]] or [markdown](link)). */
   formatLink(target: string, view: EditorView, display?: string, subpath?: string): string;
   /** Read a link target's current editor state, including unsaved edits. Empty target means this editor. */
