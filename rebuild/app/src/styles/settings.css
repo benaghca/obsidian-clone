@@ -624,6 +624,13 @@
   font-size: 15px;
   line-height: 19.5px;
 }
+.modal.mod-confirm:not(:has(.canvas-help)) .modal-button-row {
+  margin-top: 38px;
+}
+.modal.mod-confirm:not(:has(.canvas-help)) .modal-checkbox {
+  font-size: 15px;
+  line-height: 19.5px;
+}
 .modal.mod-confirm:not(:has(.canvas-help)) .modal-checkbox input {
   width: 15px;
   height: 15px;
