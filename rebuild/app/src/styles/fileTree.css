@@ -124,8 +124,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  /* One pixel less on the end, so "Sample Vault" fits a 200px sidebar. */
-  padding: 4px 7px 4px 8px;
+  padding: 4px 8px;
   border-radius: var(--radius-s);
   color: var(--text-normal);
   cursor: var(--cursor, default);
@@ -156,6 +155,10 @@
   display: flex;
   align-items: center;
   flex: none;
+  /* 16px, matching the footer icons beside a vault name. 18px leaves
+     "Sample Vault" a fraction of a pixel too wide for a 200px sidebar. */
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
 }
 .pane-empty {
   padding: 16px;

@@ -150,9 +150,10 @@ export function createMenus(host: MenuHost) {
         for (const path of items) if (!bookmarks.has(path)) bookmarks.toggle(path);
       },
     };
+    const count = `${n} ${n === 1 ? "item" : "items"}`;
     return [
       {
-        title: "New folder with selection",
+        title: `New folder with selection (${count})`,
         icon: "folder-plus",
         action: () => {
           void (async () => {
@@ -166,6 +167,7 @@ export function createMenus(host: MenuHost) {
           })();
         },
       },
+      SEPARATOR,
       { title: `Move ${n} items to...`, icon: "folder-tree", action: () => openMovePrompt(ws, items) },
       bookmark,
       SEPARATOR,

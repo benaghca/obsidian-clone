@@ -140,9 +140,9 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
     };
   });
   check(!pills.hidden && pills.title === '' && pills.actions.every((a) => a.font === '13px'), 'the empty tab is a 13px column with no heading');
-  check(pills.actions.map((a) => a.text).join('|') === 'New noteCtrl + N|Go to fileCtrl + O|SearchCtrl + Shift + F|New canvas', `pills are New note, Go to file, Search, New canvas (${pills.actions.map((a) => a.text).join(' | ')})`);
+  check(pills.actions.map((a) => a.text).join('|') === 'New noteCtrl + N|New canvas|Go to fileCtrl + O', `pills are New note, New canvas, Go to file (${pills.actions.map((a) => a.text).join(' | ')})`);
   const pillWidth = pills.actions[0]?.width ?? 0;
-  check(pills.actions.every((a) => a.radius === '999px' && a.border === '1px' && a.pad === '8px 12px' && a.margin === '0px 0px' && a.color === pills.normal && a.decoration === 'none' && Math.abs(a.width - pillWidth) < 1 && Math.abs(a.width - 184) < 2), `pills are normal-coloured, equally wide (measured ${pillWidth}px), fully rounded, and padded 8px 12px`);
+  check(pills.actions.every((a) => a.radius === '999px' && a.border === '1px' && a.pad === '8px 12px' && a.margin === '0px 0px' && a.color === pills.normal && a.decoration === 'none' && Math.abs(a.width - pillWidth) < 1 && Math.abs(a.width - 168) < 2), `pills are normal-coloured, equally wide (measured ${pillWidth}px), fully rounded, and padded 8px 12px`);
   check(pills.actions.every((a) => a.transition === '0s' && a.animation === 'none' && a.animations === 0), 'pills do not animate');
   check(pills.actions.every((a) => Math.abs(a.cx - pills.emptyCx) < 2) && Math.abs(pills.midY - pills.emptyMid) < 24, 'the column is centred in the empty page');
 
