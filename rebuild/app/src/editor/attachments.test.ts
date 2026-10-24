@@ -21,6 +21,8 @@ test("clipboard images are stamped, named files keep their names, and clashes ga
   expect(attachmentName({ name: "image.png", type: "image/png" }, at)).toBe("Pasted image 20261023201500.png");
   expect(attachmentName({ name: "", type: "image/jpeg" }, at)).toBe("Pasted image 20261023201500.jpg");
   expect(attachmentName({ name: "diagram.png", type: "image/png" }, at)).toBe("diagram.png");
+  expect(attachmentName({ name: "image.png", type: "image/png" }, at, false)).toBe("image.png");
+  expect(attachmentPaths("Notes/A.md", "/", [{ name: "image.png", type: "image/png" }], [], at, false)).toEqual(["image.png"]);
   expect(attachmentName({ name: "C:\\Users\\a\\report.pdf", type: "application/pdf" }, at)).toBe("report.pdf");
   expect(uniquePath("", "Pasted image 20261023201500.png", ["Pasted image 20261023201500.png"])).toBe("Pasted image 20261023201500 1.png");
   expect(uniquePath("Attachments", "photo.png", ["attachments/photo.png"])).toBe("Attachments/photo 1.png");

@@ -89,10 +89,12 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   const cardActions = canvasCards(el, world, ws, (node, edge) => {
     if (gone || canvasReadOnly.has(el)) return;
     stopText?.();
+    const nodes = Array.isArray(node) ? node : [node];
+    if (!nodes.length) return;
     undo.push(source); redo = [];
-    selectAfterDraw = node.id; editAfterDraw = node.type === "text" ? node.id : undefined;
-    changed(editCanvas(source, [], undefined, [node], edge ? [edge] : []), true);
-    if (node.type !== "text") el.focus({ preventScroll: true });
+    selectAfterDraw = nodes[0].id; editAfterDraw = nodes.length === 1 && nodes[0].type === "text" ? nodes[0].id : undefined;
+    changed(editCanvas(source, [], undefined, nodes, edge ? [edge] : []), true);
+    if (!(nodes.length === 1 && nodes[0].type === "text")) el.focus({ preventScroll: true });
   });
   async function load() {
     const mine = ++loading;

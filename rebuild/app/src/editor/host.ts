@@ -37,9 +37,10 @@ export interface EditorHost {
   embeds?: EmbedHost;
   /**
    * Save clipboard images or dropped files into the vault and insert one embed per file.
-   * `at` is a drop position; a paste uses the selection. True when the event is consumed.
+   * `at` is a drop position; a paste uses the selection. `keepNames` retains a dropped file's name, including "image.png".
+   * True when the event is consumed.
    */
-  saveAttachments?(view: EditorView, files: File[], at?: number | null): Promise<boolean>;
+  saveAttachments?(view: EditorView, files: File[], at?: number | null, keepNames?: boolean): Promise<boolean>;
 }
 
 /** An image right-clicked in a note: its file and element, where its embed is, and its alt text or alias (from the embed's start). */

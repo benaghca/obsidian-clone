@@ -68,14 +68,14 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
     properties: () => ws.propertyHost,
     linkExists: (target, view) => ws.vault.linkExists(target, ws.editors.pathOf(view)),
     embeds: createEmbedHost(ws),
-    saveAttachments: (view, files, at) => saveAttachments(ws, view, files, at),
+    saveAttachments: (view, files, at, keepNames) => saveAttachments(ws, view, files, at, keepNames),
   };
 }
 
 const ATTACHMENT_MAX = 20 * 1024 * 1024;
 
 /** Write each file, refresh the file list, then insert the embeds as one paste. */
-async function saveAttachments(ws: Workspace, view: EditorView, files: File[], at?: number | null): Promise<boolean> {
+async function saveAttachments(ws: Workspace, view: EditorView, files: File[], at?: number | null, keepNames = false): Promise<boolean> {
   if (view.state.readOnly) return true;
   const from = ws.editors.pathOf(view);
   if (!from || !files.length) return true;
@@ -92,7 +92,7 @@ async function saveAttachments(ws: Workspace, view: EditorView, files: File[], a
     incoming.push({ name: file.name, type: file.type, bytes });
   }
   if (!incoming.length) return true;
-  const paths = attachmentPaths(from, settings.get("app.json").attachmentFolderPath, incoming, ws.vault.files.map((f) => f.path));
+  const paths = attachmentPaths(from, settings.get("app.json").attachmentFolderPath, incoming, ws.vault.files.map((f) => f.path), new Date(), !keepNames);
   const saved: string[] = [];
   for (let i = 0; i < incoming.length; i++) {
     try {

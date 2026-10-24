@@ -12,7 +12,7 @@ import type { Workspace } from "../workspace";
 import { canvasReadOnly } from "./controls";
 import type { CanvasEdge, CanvasNode } from "./model";
 
-export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode, edge?: CanvasEdge) => void) {
+export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode | CanvasNode[], edge?: CanvasEdge) => void) {
   let gone = false, controlClick = false, cancelDrag: (() => void) | undefined;
   let revision = 0, stopMenu: (() => void) | undefined;
   const point = (x?: number, y?: number) => {
@@ -58,14 +58,30 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
       choose: file => { if (mine === revision) void insertFile(file.path, p); },
     });
   }
+  // Tree order, folders removed. One file keeps image aspect; several share one 400px row.
+  const CARD = 400, GAP = 45;
+  function droppedFiles(paths: readonly string[] | undefined, entry: { path: string; is_dir: boolean }): string[] {
+    const dragged = paths?.length ? paths : [entry.path];
+    const known = new Map(ws.vault.files.map(f => [f.path, f.is_dir]));
+    return dragged.filter(path => known.has(path) ? !known.get(path) : path === entry.path && !entry.is_dir);
+  }
+  function dropFiles(files: string[], p: { x: number; y: number }) {
+    if (gone || canvasReadOnly.has(el) || !files.length) return;
+    if (files.length === 1) { void insertFile(files[0], p, true); return; }
+    add(files.map((file, i) => ({
+      id: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+      x: Math.round(p.x + i * (CARD + GAP)), y: Math.round(p.y), width: CARD, height: CARD, type: "file" as const, file,
+    })));
+  }
   const explorerDrag = (event: Event) => {
-    const { entry, x, y, done, cancelled } = (event as CustomEvent<{ entry: { path: string; is_dir: boolean }; x: number; y: number; done?: boolean; cancelled?: boolean }>).detail;
+    const { entry, paths, x, y, done, cancelled } = (event as CustomEvent<{ entry: { path: string; is_dir: boolean }; paths?: string[]; x: number; y: number; done?: boolean; cancelled?: boolean }>).detail;
+    const files = droppedFiles(paths, entry);
     el.classList.toggle("is-explorer-dragging", !done);
     const over = document.elementFromPoint(x, y);
-    const inside = !gone && !entry.is_dir && !canvasReadOnly.has(el) && el.contains(over) && !over?.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu");
+    const inside = !gone && files.length > 0 && !canvasReadOnly.has(el) && !!over && el.contains(over) && !over.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu");
     el.classList.toggle("is-file-drop", !done && inside);
     // Run after the explorer restores the pre-drag focus, so Undo follows the drop.
-    if (done && !cancelled && inside) queueMicrotask(() => { void insertFile(entry.path, point(x, y), true); });
+    if (done && !cancelled && inside) queueMicrotask(() => dropFiles(files, point(x, y)));
   };
   window.addEventListener("grove:explorer-drag", explorerDrag);
   function connect(edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) {

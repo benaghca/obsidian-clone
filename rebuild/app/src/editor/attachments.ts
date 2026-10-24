@@ -1,9 +1,9 @@
 // Where a pasted image or a dropped file is saved, and the embed written for it.
 // Obsidian's attachmentFolderPath: "/" is the vault folder (the default),
 // "./" is the current note's folder, "./sub" is a subfolder of that, and any
-// other value is a folder from the vault root. Names of real files are kept.
-// A clipboard image (no name, or the browser's "image.png") is
-// "Pasted image YYYYMMDDHHmmss.png". A name that is taken gains " 1", " 2", …
+// other value is a folder from the vault root. A drop keeps the file's name.
+// A paste of a nameless clipboard image (no name, or the browser's "image.png")
+// is "Pasted image YYYYMMDDHHmmss.png". A name that is taken gains " 1", " 2", …
 // before the extension. Free of the DOM apart from the File list helpers.
 
 import { formatLink, type LinkStyle, type NoteLike } from "../links/internal";
@@ -53,10 +53,10 @@ export function safeName(name: string): string | null {
 /** A clipboard screenshot, as opposed to a file the user actually named. */
 export const genericClipboardName = (name: string) => !name.trim() || GENERIC.test(name.trim());
 
-/** The file name to save: the original, or a pasted-image stamp for a nameless clipboard image. */
-export function attachmentName(file: { name: string; type: string }, date: Date): string {
+/** The file name to save. A paste of a nameless clipboard image is stamped; a drop keeps the name, including "image.png". */
+export function attachmentName(file: { name: string; type: string }, date: Date, pasted = true): string {
   const given = safeName(file.name);
-  if (given && !genericClipboardName(given)) return given;
+  if (given && (!pasted || !genericClipboardName(given))) return given;
   const ext = IMAGE_MIME[file.type] ?? (given?.includes(".") ? given.slice(given.lastIndexOf(".") + 1) : "") ?? "png";
   return pastedImageName(date, ext || "png");
 }
@@ -83,11 +83,12 @@ export function attachmentPaths(
   files: { name: string; type: string }[],
   taken: Iterable<string>,
   now = new Date(),
+  pasted = true,
 ): string[] {
   const dir = attachmentDir(notePath, setting);
   const have = new Set(taken);
   return files.map((file) => {
-    const path = uniquePath(dir, attachmentName(file, now), have);
+    const path = uniquePath(dir, attachmentName(file, now, pasted), have);
     have.add(path);
     return path;
   });
