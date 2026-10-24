@@ -296,3 +296,30 @@ export function matchCount(lines: readonly Line[], words: string[], matchCase = 
 
 /** `path:"folder"` for a folder, quoted when it has spaces, as Obsidian writes it. */
 export const pathQuery = (folder: string) => `path:"${folder}" `;
+
+/** One sentence for Search settings → Explain search terms. */
+export function explainQuery(q: Query | null): string {
+  const phrase = (part: Query): string => {
+    switch (part.op) {
+      case "and":
+        return part.parts.map(phrase).join(" and ");
+      case "or":
+        return part.parts.map(phrase).join(" or ");
+      case "not":
+        return `do not ${phrase(part.part)}`;
+      case "term": {
+        const word = part.field === "tag" ? `#${part.text}` : part.text;
+        if (part.field === "file") return `have a file name containing "${word}"`;
+        if (part.field === "path") return `have a path containing "${word}"`;
+        if (part.field === "tag") return `have the tag "${word}"`;
+        if (part.field === "content") return `contain "${word}" in the content`;
+        return `contain "${word}"`;
+      }
+      case "line":
+        return `have one line that ${phrase(part.part)}`;
+      case "prop":
+        return part.value ? `have property "${part.key}" that ${phrase(part.value)}` : `have property "${part.key}"`;
+    }
+  };
+  return q ? `Matches notes that ${phrase(q)}.` : "";
+}

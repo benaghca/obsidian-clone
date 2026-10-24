@@ -201,20 +201,69 @@
    toggle and clear button, "N results" and the sort order, then each note's
    title row (a fold chevron, its count) over one card of its lines */
 .search-view .search-input-container {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   padding: 12px 12px 8px;
 }
-.search-view .search-input-container > .svg-icon {
-  left: 20px;
+.search-input-field {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.search-view .search-input-field > .svg-icon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-faint);
+  pointer-events: none;
 }
 .search-view .search-input-container input {
-  padding-right: 62px;
+  padding-right: 56px;
 }
-.search-view .search-input-container .input-right-decorator {
-  right: 44px;
+.search-view .search-input-field .input-right-decorator {
+  right: 32px;
   padding: 2px 4px;
 }
 .search-view .search-input-clear-button {
-  right: 20px;
+  right: 8px;
+}
+/* The search field keeps its resting border. No thick focus ring. */
+.search-view .search-input-container input,
+.search-view .search-input-container input:focus {
+  border-color: var(--background-modifier-border);
+  box-shadow: var(--input-shadow);
+}
+.search-view .search-input-container > .clickable-icon {
+  width: 28px;
+  height: 24px;
+  padding: 4px 6px;
+  --icon-size: var(--icon-s);
+}
+.search-settings:not([hidden]) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 0 12px 8px;
+}
+.search-settings-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.search-settings-actions .clickable-icon {
+  width: 28px;
+  height: 24px;
+  padding: 4px 6px;
+  --icon-size: var(--icon-s);
+}
+.search-explain:not([hidden]) {
+  padding: 0 12px 8px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.3;
+  color: var(--text-muted);
 }
 .search-results-info {
   display: flex;
@@ -225,31 +274,9 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
-.search-results-tools {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-.search-results-tools .clickable-icon {
-  --icon-size: 14px;
-  height: 24px;
-  padding: 2px 4px;
-}
 .search-results-result-count {
   padding: 4px 6px;
   white-space: nowrap;
-}
-.search-results-info .dropdown {
-  min-width: 0;
-  height: 24px;
-  padding: 0 26px 0 8px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-  background: transparent;
-  box-shadow: none;
-}
-.search-results-info .dropdown-chevron {
-  right: 6px;
 }
 .search-results {
   overflow-y: auto;
@@ -287,6 +314,11 @@
 }
 .search-view .search-result-file-match:last-child {
   border-bottom: 0;
+}
+/* Arrow keys draw a border around the row, not an accent fill. */
+.search-view .search-result-file-match.is-selected {
+  background: transparent;
+  box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
 }
 .search-result-file-title {
   display: flex;
