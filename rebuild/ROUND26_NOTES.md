@@ -356,3 +356,86 @@ lines from the round-25 baseline.
 
 The final local documentation commit records these appended notes, counts,
 checked logs and screenshots. Part B is complete; stop after committing.
+
+# Stage 3 fixes
+
+Baseline `741d236`, after Grok's confirmed report. Work remains in
+`grove-r26-codex` on `rebuild/r26-codex`; all commits are local. The
+[unchanged hunter regression](app/scripts/test-r26-bugs.mjs) reproduced all
+three bugs before changes. [Baseline output](round26-shots/stage3-baseline.log).
+
+1. **Short edge labels — `bb02726`.** Verify the visible label beneath an
+   overlapping reconnect handle, keeping covering cards ahead of labels.
+   Label presses bypass endpoint-grab inference. Retain the label target
+   across the two presses and handle its double-click during capture,
+   before the background add-card handler can see a retargeted event.
+   Repeated stationary double-clicks now edit the same label with unchanged
+   file bytes. Controls/background clicks clear that remembered target;
+   covering-card editing and deliberate background insertion still work.
+2. **Outer connection dots — `4385e36`.** Reuse the existing drop predicate
+   and nearest-side snapping, including the actual 20-screen-pixel square
+   targets at the four side midpoints. Account for zoom and the card's 1px
+   border; extend only the dot areas, leaving other outside drops invalid.
+   Native pointer tests cover all four outer halves at 1× and 2×, exact
+   one-step undo, and cancellation beyond the dots. The same gesture path
+   handles both creation and reconnection.
+3. **Clipped toolbar — `b829f12`.** Clamp the existing toolbar transform to
+   a 10px viewport inset. Its own percentage width/height keep every button
+   inside the view. The existing navigation draw publishes bounds through
+   a toolbar-only stylesheet rule, so pan/zoom/resize update placement
+   without child DOM mutations, per-frame element measurements or variables
+   inherited through card Markdown. The reported bar now starts at **88px**
+   with the canvas at **78px**, matching the native observation, and Set
+   color is the actual hit target. Added checks cover stationary reopening,
+   continuous pan without reselecting, left-edge clamping, zoom, resize and
+   exact unchanged file bytes.
+
+The added [boundary suite](app/scripts/test-r26-fixes.mjs) is wired into
+`npm test` after the original regression. No existing assertions, timing
+thresholds, geometry rules or test waits were weakened. No dependencies,
+backend commands, file format changes, animations or `.cm-content` margins
+were added. All affected source files remain below 320 lines.
+[Fixed regression output](round26-shots/stage3-bugs.log),
+[boundary output](round26-shots/stage3-boundaries.log),
+[headless clamped-toolbar screenshot](round26-shots/grove-stage3-clamped.png).
+
+## Stage 3 line counts
+
+Tracked app files, excluding `/gen/`, relative to `741d236`; the baseline
+already includes Grok's regression script.
+[Machine-readable counts](round26-shots/line-counts-stage3.json).
+
+- Production TS: **20,775 → 20,788 (+13)**.
+- Test TS: **3,262 → 3,262 (0)**.
+- Total TS: **24,037 → 24,050 (+13)**.
+- CSS: **3,891 → 3,895 (+4)**.
+- Rust: **3,145 → 3,145 (0)**.
+- mjs: **3,481 → 3,518 (+37)**.
+- TS/CSS/Rust: **31,073 → 31,090 (+17)**.
+- Including mjs: **34,554 → 34,608 (+54)**.
+
+## Stage 3 checks
+
+- `npm run build` passed. [Build](round26-shots/stage3-build.log).
+- `npm test` passed: **254 TS tests in 44 files**, four browser-discovery
+  tests and **1,150 named browser checks**, including all six original
+  hunter checks and **35** added boundary checks. The hunter script is
+  unchanged from `741d236`. [Full run](round26-shots/stage3-npm-test.log).
+- The included geometry suite passed **187 checks**: frontmatter notes in
+  Live Preview, Source and Reading, zero direct-child vertical margins,
+  line tops within 1px and stationary fold/unfold arrows. All **18** popup
+  checks opened within two frames, maximum **17.1ms**, without animations.
+- The 300-card/400-edge pan, zoom, card drag and edge creation/commit checks
+  passed, maximum **16.8ms**; 401-edge reconnect/commit also stayed at
+  **16.8ms**. The unchanged navigation assertion confirms no child DOM or
+  geometry mutations during pan/zoom. [Focused navigation run](round26-shots/stage3-navigation.log).
+- `npm run audit:offline` passed: 138 source files, built output, CSP,
+  capabilities and dependencies. [Audit](round26-shots/stage3-audit.log).
+- `cargo build --offline` and `cargo test --offline` passed, all **34** Rust
+  tests. [Rust build](round26-shots/stage3-cargo-build.log),
+  [Rust tests](round26-shots/stage3-cargo-test.log).
+- Whitespace checks passed. Older generated snapshots were restored to
+  avoid unrelated churn. All UI checks used private headless Chromium and
+  the mock vault; no owner-screen windows, real vaults, pushes or merges.
+
+The local notes/evidence commit completes Stage 3. Stop after committing.

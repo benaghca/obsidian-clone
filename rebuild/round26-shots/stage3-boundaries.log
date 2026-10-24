@@ -1,0 +1,35 @@
+PASS Short label double-click 1 opens its editor without moving the pointer or adding a card
+PASS Unchanged short label leaves exact canvas bytes intact
+PASS Short label double-click 2 opens its editor without moving the pointer or adding a card
+PASS Unchanged short label leaves exact canvas bytes intact
+PASS Short label double-click 3 opens its editor without moving the pointer or adding a card
+PASS Unchanged short label leaves exact canvas bytes intact
+PASS Double-clicking controls after a label does not reuse the last label target
+PASS A subsequent background double-click still adds a card
+PASS Undo removes only the background card
+PASS A card covering a label keeps pointer priority over that label
+PASS 1×: outer half of top target connects
+PASS Outer-dot creation is one undo step
+PASS 1×: outer half of right target connects
+PASS Outer-dot creation is one undo step
+PASS 1×: outer half of bottom target connects
+PASS Outer-dot creation is one undo step
+PASS 1×: outer half of left target connects
+PASS Outer-dot creation is one undo step
+PASS 1×: a drop beyond the dot still cancels
+PASS 2×: outer half of top target connects
+PASS Outer-dot creation is one undo step
+PASS 2×: outer half of right target connects
+PASS Outer-dot creation is one undo step
+PASS 2×: outer half of bottom target connects
+PASS Outer-dot creation is one undo step
+PASS 2×: outer half of left target connects
+PASS Outer-dot creation is one undo step
+PASS 2×: a drop beyond the dot still cancels
+PASS Selected edge toolbar stays in the viewport during pan without reselecting
+PASS Clamped Set color opens with real pointer input
+PASS Stationary repeated Set color works at the viewport edge
+PASS Toolbar also clamps at the left viewport edge
+PASS Viewport clamping follows zoom without reselecting
+PASS Viewport clamping follows a pane resize
+PASS Toolbar clamping, menus, pan, zoom and resize preserve exact canvas bytes
