@@ -19,6 +19,8 @@ import { canvasCards, editTextCard } from "./cards";
 import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
+import { spaceCardBody } from "./spacing";
+import { groupBackground } from "./groups";
 import { editNoteCard } from "./note";
 import { editCanvasLabel } from "./labels";
 import { edgeCurve, readCanvas, type CanvasEdge } from "./model";
@@ -119,6 +121,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
     const edits = new Map<string, (line?: number, refresh?: () => void) => void>();
+    const backgrounds = new Map<string, () => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
     const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; marker: SVGMarkerElement; label?: HTMLElement }[] = [];
     function place(item: typeof updateEdges[number], curve: ReturnType<typeof edgeCurve>) {
@@ -174,16 +177,26 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (node.color) card.classList.add("is-colored");
       card.style.setProperty("--canvas-color", color(node.color));
       world.append(card);
+      let refreshFile = () => {};
       if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => {
-        if (!world.querySelector(".canvas-node-file.is-editing") || !ws.vault.files.some(f => f.path === node.file))
-          queueMicrotask(() => {
-            if (gone || mine !== generation) return;
-            const chosen = world.querySelectorAll<HTMLElement>(".canvas-node.is-selected");
-            if (chosen.length === 1 && !world.querySelector(".canvas-edge.is-selected")) selectAfterDraw = chosen[0].dataset.nodeId;
-            draw();
-          });
+        queueMicrotask(() => { if (!gone && mine === generation) refreshFile(); });
       }));
       if (node.type === "group") {
+        const backdrop = h("div", { class: "canvas-group-background" }); card.append(backdrop);
+        let held: ReturnType<typeof ws.embeds.image> | undefined, heldPath: string | undefined;
+        let unwatchBackground = () => {};
+        const background = () => {
+          backdrop.style.backgroundSize = node.backgroundStyle === "repeat" ? "auto" : "cover";
+          backdrop.style.backgroundRepeat = node.backgroundStyle === "repeat" ? "repeat" : "no-repeat";
+          const file = ws.vault.files.find(f => f.path === node.background && !f.is_dir && IMAGE_EXT.test(f.path));
+          if (heldPath === file?.path) return;
+          unwatchBackground(); held?.release(); held = undefined; heldPath = file?.path; backdrop.style.backgroundImage = "";
+          if (!file) return;
+          unwatchBackground = ws.embeds.watch(file.path, () => queueMicrotask(() => { if (!gone && mine === generation) { heldPath = undefined; background(); } }));
+          const current = held = ws.embeds.image(file.path);
+          void current.url.then(url => { if (!gone && mine === generation && held === current) backdrop.style.backgroundImage = `url(${JSON.stringify(url)})`; }, () => {});
+        };
+        backgrounds.set(node.id, background); background(); cleanups.push(() => { unwatchBackground(); held?.release(); });
         const label = h("div", { class: "canvas-group-label", "aria-label": "Group label" }, node.label ?? ""); card.append(label);
         const edit = (_line?: number, refresh?: () => void) => {
           if (canvasReadOnly.has(el) || card.classList.contains("is-editing")) return;
@@ -215,9 +228,12 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       if (node.type === "file" && IMAGE_EXT.test(node.file ?? "")) {
         const img = h("img", { alt: node.file ?? "" });
         content.append(img);
-        const held = ws.embeds.image(node.file!);
-        cleanups.push(() => held.release());
-        void held.url.then(url => { if (!gone && mine === generation) img.src = url; }, () => { if (!gone && mine === generation) content.textContent = `File not found: ${node.file}`; });
+        let held: ReturnType<typeof ws.embeds.image> | undefined;
+        refreshFile = () => {
+          held?.release(); const current = held = ws.embeds.image(node.file!);
+          void current.url.then(url => { if (!gone && mine === generation && held === current) img.src = url; }, () => { if (!gone && mine === generation && held === current) img.removeAttribute("src"); });
+        };
+        cleanups.push(() => held?.release()); refreshFile();
         continue;
       }
       if (node.type === "file" && !/\.md$/i.test(node.file ?? "")) {
@@ -253,8 +269,9 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         const shown = embedPart(source, node.type === "file" ? node.subpath?.replace(/^#/, "") ?? "" : "");
         if (!shown) { content.textContent = `Unable to find “${node.subpath}” in “${node.file}”.`; return; }
         if (painted) release(painted);
-        content.classList.add("is-reading-mode");
+        content.replaceChildren(); content.classList.add("is-reading-mode");
         painted = render(content, node.type === "file" ? withoutBlockIds(shown.text) : shown.text, context, [origin], () => {});
+        spaceCardBody(content, painted.state);
         if (node.type === "file") content.prepend(h("div", { class: "canvas-note-title" }, noteName(node.file!)));
         content.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(input => input.disabled = true);
       };
@@ -283,7 +300,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           stopText?.();
           if (painted) { release(painted); painted = undefined; }
           stopText = editNoteCard(card, content, ws, group, origin, node.subpath, line, repaint => {
-            stopText = undefined; if (repaint) { selectAfterDraw = node.id; draw(); }
+            stopText = undefined; if (repaint) refreshFile();
           });
         };
         edits.set(node.id, edit);
@@ -292,7 +309,11 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           const line = Number((event.target as Element).closest<HTMLElement>("[data-line]")?.dataset.line) || 1;
           event.stopPropagation(); edit(line);
         });
-        void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation) content.textContent = `File not found: ${origin}`; });
+        refreshFile = () => {
+          if (card.classList.contains("is-editing")) return;
+          void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation && !card.classList.contains("is-editing")) content.textContent = `File not found: ${origin}`; });
+        };
+        refreshFile();
       }
     }
     const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -301,7 +322,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       for (const n of changed) {
         const card = cards.get(n.id)!;
         Object.assign(card.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
-        card.classList.toggle("is-colored", !!n.color); card.style.setProperty("--canvas-color", color(n.color));
+        card.classList.toggle("is-colored", !!n.color); card.style.setProperty("--canvas-color", color(n.color)); backgrounds.get(n.id)?.();
       }
       for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
         place(item, edgeCurve(byId.get(item.edge.fromNode)!, byId.get(item.edge.toNode)!, item.edge));
@@ -337,7 +358,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           updateEdge(record); refresh();
         }
       });
-    }, selectedId));
+    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el))));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);

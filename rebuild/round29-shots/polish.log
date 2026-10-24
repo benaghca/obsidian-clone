@@ -1,0 +1,54 @@
+PASS t: toolbar remains above the card and typing keeps focus
+PASS t: choosing color preserves the editor, toolbar and focus
+PASS t: stationary and double toolbar clicks do not add cards or end editing
+PASS t: passive file refresh updates only its preview while the editor stays mounted
+PASS External refresh reloads a cached note without remounting the editing card
+PASS n: toolbar remains above the card and typing keeps focus
+PASS n: choosing color preserves the editor, toolbar and focus
+PASS n: stationary and double toolbar clicks do not add cards or end editing
+PASS n: passive file refresh updates only its preview while the editor stays mounted
+PASS External refresh reloads a cached note without remounting the editing card
+PASS t: reading H1, paragraph, list and H2 match native block margins
+PASS t: list text is indented 27.5px with the bullet in the indent (27.50)
+PASS n: reading H1, paragraph, list and H2 match native block margins
+PASS n: list text is indented 27.5px with the bullet in the indent (27.50)
+PASS Group toolbar has six buttons in native order
+PASS Selected group has an accent border/ring and a padded label box
+PASS Align menu opens within two frames; max 16.7ms
+PASS Align menu has no animation
+PASS Align menu includes all observed choices; seven arrangement actions are explicitly disabled
+PASS Alignment 0 moves contained cards, preserves group geometry and unknown fields
+PASS Alignment 0 is one exact-byte undo step
+PASS Alignment 0 redo restores exact bytes
+PASS Alignment 1 moves contained cards, preserves group geometry and unknown fields
+PASS Alignment 1 is one exact-byte undo step
+PASS Alignment 1 redo restores exact bytes
+PASS Alignment 2 moves contained cards, preserves group geometry and unknown fields
+PASS Alignment 2 is one exact-byte undo step
+PASS Alignment 2 redo restores exact bytes
+PASS Alignment 3 moves contained cards, preserves group geometry and unknown fields
+PASS Alignment 3 is one exact-byte undo step
+PASS Alignment 3 redo restores exact bytes
+PASS Alignment 4 moves contained cards, preserves group geometry and unknown fields
+PASS Alignment 4 is one exact-byte undo step
+PASS Alignment 4 redo restores exact bytes
+PASS Alignment 5 moves contained cards, preserves group geometry and unknown fields
+PASS Alignment 5 is one exact-byte undo step
+PASS Alignment 5 redo restores exact bytes
+PASS Selected colored label uses native filled background and white text
+PASS Double background button click never adds a card or chooses an unintended image
+PASS Background picker opens within two frames; max 16.7ms
+PASS Background picker has no animation
+PASS Background picker saves a vault path and renders a local blob
+PASS Keep aspect ratio background menu opens within two frames; max 16.7ms
+PASS Keep aspect ratio background menu has no animation
+PASS Keep aspect ratio writes native fields and ratio geometry
+PASS Repeat background menu opens within two frames; max 16.8ms
+PASS Repeat background menu has no animation
+PASS Repeat writes native fields and ratio geometry
+PASS Cover background menu opens within two frames; max 16.7ms
+PASS Cover background menu has no animation
+PASS Cover writes native fields and ratio geometry
+PASS Removing background removes both keys and keeps group cards
+PASS Remote backgrounds never load
+PASS Native background style, image, geometry and exact bytes return to Grove unchanged

@@ -1,0 +1,14 @@
+PASS Grove-align-0.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-align-1.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-align-2.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-align-3.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-align-4.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-align-5.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-background-cover.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-background-ratio.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-background-removed.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-background-repeat.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-background.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-color.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Grove-label.canvas: native geometry, label, color, background/style and original bytes unchanged
+PASS Native Keep aspect ratio action writes an explicit ratio return fixture
