@@ -225,6 +225,16 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+.search-results-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.search-results-tools .clickable-icon {
+  --icon-size: 14px;
+  height: 24px;
+  padding: 2px 4px;
+}
 .search-results-result-count {
   padding: 4px 6px;
   white-space: nowrap;

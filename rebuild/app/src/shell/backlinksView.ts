@@ -16,7 +16,7 @@ import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, hitColumns, highlighted, pagedRows, resultGroup, resultMatch, section, type SideView } from "./sideView";
+import { afterPaint, bindResultKeys, collapseResultsButton, hitColumns, highlighted, pagedRows, resultGroup, resultMatch, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -47,7 +47,9 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     unlinkedOpen = open;
     if (open) scheduleUnlinked(0);
   });
-  const el = h("div", { class: "backlink-pane" }, linked.el, unlinked.el);
+  const el = h("div", { class: "backlink-pane", tabindex: "0" });
+  el.append(h("div", { class: "backlink-toolbar" }, collapseResultsButton(el)), linked.el, unlinked.el);
+  bindResultKeys(el);
 
   let active = false;
   let shownLinked = "";
