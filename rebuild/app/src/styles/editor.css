@@ -247,22 +247,57 @@
   font-family: var(--font-interface);
 }
 .cm-editor .cm-tooltip.cm-link-suggest {
-  width: min(520px, calc(100vw - 16px));
+  width: max-content;
+  max-width: min(480px, calc(100vw - 16px));
   overflow: hidden;
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul {
   max-height: 300px;
   padding: 4px;
+  margin: 0;
   font-family: var(--font-interface);
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul > li {
-  padding: 4px 10px;
+  padding: 0 8px;
   border-radius: var(--radius-s);
-  font-size: 14px;
+  font-size: 13px;
   color: var(--text-normal);
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
+  box-sizing: border-box;
+  min-height: 28px;
   line-height: 1.4;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-heading {
+  height: 31.5px;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-heading .cm-completionDetail {
+  margin-left: auto;
+  padding-left: 12px;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-alias {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  align-items: center;
+  height: 47.1px;
+  column-gap: 8px;
+  padding: 4px 8px;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-alias .cm-completionLabel {
+  grid-column: 1;
+  grid-row: 1;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-alias .cm-completionDetail {
+  grid-column: 1;
+  grid-row: 2;
+  margin-left: 0;
+}
+.cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-alias .alias-arrow {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  color: var(--text-faint);
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul > li[aria-selected] {
   background: var(--background-modifier-hover);
@@ -278,14 +313,19 @@
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
-.cm-editor .cm-tooltip.cm-link-suggest::after {
-  content: "Type # to link heading · Type ^ to link blocks · Type | to change display text";
-  white-space: nowrap;
-  display: block;
+.cm-link-suggest-footer {
   padding: 6px 12px;
   border-top: 1px solid var(--background-modifier-border);
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
+  white-space: nowrap;
+}
+.cm-link-suggest-footer b {
+  font-weight: 700;
+  color: var(--text-normal);
+}
+.cm-link-suggest.cm-link-subpath .cm-link-suggest-footer {
+  display: none;
 }
 
 /* Source mode (src/editor/sourceMode.ts): Obsidian's raw markdown view. The
