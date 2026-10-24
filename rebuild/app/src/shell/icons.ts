@@ -156,6 +156,7 @@ const ICONS = {
   "rotate-ccw": lucide.RotateCcw,
   ruler: lucide.Ruler,
   scissors: lucide.Scissors,
+  "grip-vertical": lucide.GripVertical,
   search: lucide.Search,
   "separator-horizontal": lucide.SeparatorHorizontal,
   "separator-vertical": lucide.SeparatorVertical,
