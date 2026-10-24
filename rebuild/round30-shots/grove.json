@@ -1,0 +1,67 @@
+{
+  "columns": [
+    "file name",
+    "Status",
+    "priority",
+    "due",
+    "tags",
+    "Late"
+  ],
+  "rows": [
+    {
+      "path": "BaseTest/Task D.md",
+      "values": [
+        "Task D",
+        "open",
+        "5",
+        "2099-01-01",
+        "work/project",
+        ""
+      ]
+    },
+    {
+      "path": "BaseTest/Task A.md",
+      "values": [
+        "Task A",
+        "open",
+        "3",
+        "2000-01-01",
+        "work/project",
+        "late"
+      ]
+    },
+    {
+      "path": "BaseTest/Task F.md",
+      "values": [
+        "Task F",
+        "open",
+        "3",
+        "",
+        "work/project",
+        ""
+      ]
+    },
+    {
+      "path": "BaseTest/Task C.md",
+      "values": [
+        "Task C",
+        "open",
+        "2",
+        "2099-01-01",
+        "work/project",
+        ""
+      ]
+    },
+    {
+      "path": "BaseTest/Task E.md",
+      "values": [
+        "Task E",
+        "open",
+        "",
+        "",
+        "work/project",
+        ""
+      ]
+    }
+  ]
+}
