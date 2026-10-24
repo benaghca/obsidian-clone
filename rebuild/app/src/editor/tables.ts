@@ -212,7 +212,7 @@ export class TableWidget extends BlockWidget {
               return true;
             } }),
             pairingExtensions(),
-            keymap.of(defaultKeymap),
+            keymap.of(defaultKeymap.filter((binding) => binding.key !== "Alt-ArrowUp" && binding.key !== "Alt-ArrowDown" && binding.key !== "Mod-Enter")),
           ] }),
           dispatchTransactions(trs, cellView) {
             cellView.update(trs);
