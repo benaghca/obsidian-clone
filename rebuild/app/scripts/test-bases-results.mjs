@@ -20,12 +20,13 @@ await withBrowser(async({run,send,click,point,move,press,fill,shot,check})=>{
  await choose('Copy to clipboard');assert.equal(await run(()=>!!document.querySelector('.menu')),false);
  const native='Task\tstatus\tDue date\tpriority\nTask F\topen\t2000-01-01\t3\nTask A\topen\t2000-01-01\t3\nTask D\topen\t2099-01-01\t5';
  assert.equal(await run(()=>navigator.clipboard.readText()),native);assert.equal(await run(()=>document.querySelector('.bases-copy-notice')?.textContent),'Copied to your clipboard');assert.equal(await run(()=>document.querySelector('.bases-copy-notice').getAnimations().length),0);
- await click('.bases-count');await fill('[aria-label="Limit number of results"]','2');assert.equal(await source(),original);await press('Enter');await count(2);await press('Escape');assert.equal(await source(),original.replace('limit: 3','limit: 2'));
+ await click('.bases-count');await fill('[aria-label="Limit number of results"]','2');assert.equal(await source(),original);await press('Enter');await count(2);assert.equal(await run(()=>!!document.querySelector('.menu')),false);assert.equal(await source(),original.replace('limit: 3','limit: 2'));
  await click('.bases-count');assert.ok(await run(()=>document.querySelector('.menu').textContent.includes('Show all (6)')));await choose('Show all (6)');await count(6);
  const unlimited=original.replace('    limit: 3\n','');assert.equal(await source(),unlimited);
  await click('.bases-count');await fill('[aria-label="Limit number of results"]','0');await press('Enter');await count(0);await press('Escape');
  await click('.bases-count');await fill('[aria-label="Limit number of results"]','');await press('Enter');await count(6);await press('Escape');assert.equal(await source(),unlimited);
  await click('.bases-count');await fill('[aria-label="Limit number of results"]','1');await press('Escape');assert.equal(await source(),unlimited);await count(6);
+ await click('.bases-count');await fill('[aria-label="Limit number of results"]','-1');await press('Enter');assert.ok(await run(()=>!!document.querySelector('.bases-results-menu')));assert.equal(await source(),unlimited);await press('Escape');
  // Exactly three matching notes, plus a second view whose limit must be untouched.
  const three='filters: \'priority >= 3 && status == "open"\'\nviews:\n  - type: table\n    name: Three\n    order: [file.name, status]\n  - type: table\n    name: Other\n    limit: 7\n# end\n';
  await run(async text=>{const{api}=await import('/src/api.ts');await api.createNote('Three.base',text);await ws.vault.refreshFiles();await ws.open('Three.base',{where:'tab'});},three);await count(3);
@@ -41,6 +42,9 @@ await withBrowser(async({run,send,click,point,move,press,fill,shot,check})=>{
  assert.equal(placement.parent,true);assert.equal(placement.left,Math.round(placement.anchorLeft));assert.equal(placement.top,Math.round(placement.anchorBottom+4));assert.equal(placement.width,247);assert.ok(placement.height<=300);assert.equal(placement.checked,'file');assert.equal(await source(),before);await shot('grove-picker');
  assert.equal(await run(()=>document.querySelector('.bases-filter-picker .menu-item-hotkey')?.textContent),'file.name');await fill('[aria-label="Filter property search"]','priority');assert.ok(await run(()=>document.querySelector('.bases-filter-menu')&&document.querySelector('.bases-filter-picker').textContent.includes('priority')));await press('Escape');
  assert.ok(await run(()=>document.querySelector('.bases-filter-menu')&&!document.querySelector('.bases-filter-picker')));await move(await point(local+' .bases-filter-heading'));await sleep(200);assert.equal(await run(()=>!!document.querySelector('.bases-filter-picker')),false);assert.equal(await source(),before);await press('Escape');
+ // A freshly opened parent has a pending hover timer when an existing row is pressed.
+ await click('.bases-toolbar [aria-label="Filter"]');await click(local+' .bases-filter-row > button');await sleep(250);assert.ok(await run(()=>!!document.querySelector('.bases-filter-picker')),'existing row picker stays open past hover delay');
+ const propertyPoint=await point(local+' .bases-filter-row > button');await move(propertyPoint);for(let i=0;i<2;i++){for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...propertyPoint,button:'left',clickCount:1});await sleep(180);assert.ok(await run(()=>!!document.querySelector('.bases-filter-picker')));}await press('Escape');await press('Escape');
  // New row opens a new tab; the existing note/title/property paths do all writes.
  await click('.bases-toolbar [aria-label="New"]');await wait(()=>run(()=>ws.active.path==='Untitled.md'&&getSelection()?.toString()==='Untitled'&&document.activeElement?.matches('.inline-title')),'New selected title');
  const seeded='---\ntags:\n  - work\nstatus:\ndue:\npriority:\n---\n';assert.equal(await read('Untitled.md'),seeded);await shot('grove-new');

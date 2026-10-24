@@ -183,6 +183,7 @@ class Menu {
   }
 
   openChild(i: number, keyboard: boolean) {
+    clearTimeout(this.timer);
     const item = this.items[i] as MenuEntry;
     if (this.childIndex === i && this.child) {
       if (keyboard) this.child.first();
