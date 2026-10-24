@@ -70,9 +70,9 @@ await withBrowser(async ({ send, run, press, point, move, click, chord, check })
   }, base);
   await sleep(150);
   await click('.nav-files [aria-label="Expand all"]');
-  for (const path of ['H/Skip', 'H/A.md', 'H/B.md', 'H/Shot.svg']) await clickAt(await at(path), 2);
-  check((await selected()).join('|') === 'H/A.md|H/B.md|H/Shot.svg|H/Skip' || (await selected()).sort().join('|') === 'H/A.md|H/B.md|H/Shot.svg|H/Skip', `ctrl-click selects the folder and three files (${(await selected()).join('|')})`);
-  check(await run(() => ws.active.viewFile === 'H/Board.canvas'), 'ctrl-click leaves the canvas open');
+  for (const path of ['H/Skip', 'H/A.md', 'H/B.md', 'H/Shot.svg']) await clickAt(await at(path), 1);
+  check((await selected()).join('|') === 'H/A.md|H/B.md|H/Shot.svg|H/Skip' || (await selected()).sort().join('|') === 'H/A.md|H/B.md|H/Shot.svg|H/Skip', `alt-click selects the folder and three files (${(await selected()).join('|')})`);
+  check(await run(() => ws.active.viewFile === 'H/Board.canvas'), 'alt-click leaves the canvas open');
 
   const dropAt = await run(() => {
     const r = document.querySelector('.canvas-view').getBoundingClientRect();
@@ -129,9 +129,9 @@ await withBrowser(async ({ send, run, press, point, move, click, chord, check })
   await click('.menu-item:nth-child(3)');
 
   const have = new Set(await selected());
-  for (const path of have) if (path !== 'H/Skip' && path !== 'H/Shot.svg') await clickAt(await at(path), 2);
-  if (!have.has('H/Skip')) await clickAt(await at('H/Skip'), 2);
-  if (!have.has('H/Shot.svg')) await clickAt(await at('H/Shot.svg'), 2);
+  for (const path of have) if (path !== 'H/Skip' && path !== 'H/Shot.svg') await clickAt(await at(path), 1);
+  if (!have.has('H/Skip')) await clickAt(await at('H/Skip'), 1);
+  if (!have.has('H/Shot.svg')) await clickAt(await at('H/Shot.svg'), 1);
   const only = await begin('H/Shot.svg', dropAt);
   await release(only);
   await wait(async () => {
