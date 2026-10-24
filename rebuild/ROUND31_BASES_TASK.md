@@ -96,3 +96,11 @@ Re-check anything you rely on in Obsidian yourself (private HOME/profile, scratc
 ## Done when
 - In `rebuild/app`: `npm run build`, `npm test`, `npm run test:geometry`, `npm run audit:offline` pass; in `rebuild/app/src-tauri`: `cargo build` and `cargo test` pass. `npm test` rewrites screenshot/canvas fixtures: restore the ones you did not mean to change with `git checkout` before committing.
 - Part A works as above, Obsidian opens Grove-written `.base` files with the same rows and columns, and `rebuild/ROUND31_NOTES.md` has its notes, line counts, held items and up to 3 next improvements.
+
+## Part B notes (measured at the round 31 Part A merge, Obsidian 1.14.4, 1280x800, same fixtures)
+Part A matched: cell text/number edits (note saved only on Enter, `.base` untouched, row re-sorts), Sort menu content, header Sort A → Z writing `sort` with that key first, Hide column writing `order`, Properties menu content, New base naming, menu item height 24.9px / 13px, menus on frame 1 with no animation. Obsidian also re-serializes the whole `.base` about 2 s after a change. Grove's byte-preserving write is intended: keep it.
+Small Bases-only gaps for Part B, after the Filter menu and the view menu:
+1. Header right-click: Obsidian shows `Clear sort` only when that column is sorted, and every item has an icon (Hide column, Clear sort too). Grove always shows Clear sort, and Hide column and Clear sort have no icons.
+2. Properties menu: Obsidian greys out the unchecked property rows (muted text and icon) and the menu is narrower (225px wide vs Grove 310px). Grove draws every row in normal text.
+3. New base: Obsidian opens the new base with its title selected for rename (like a new note). Grove does not select it. Obsidian 1.14.4 writes an empty `Untitled.base` (0 bytes) and shows a default `View` table. Keep Grove's 3-line content; both apps open both forms.
+Still held: header Summarize / Group by / Edit property / Property type, drag handles and reordering in Sort and Properties, and the extra file facts (backlinks, base name, embeds, full name, links) until they are supported.
