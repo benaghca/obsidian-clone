@@ -1,0 +1,31 @@
+# Keep this comment
+filters:
+  not:
+    - status == "waiting"
+properties:
+  file.name:
+    displayName: Task
+  note.due:
+    displayName: Due date
+views:
+  - type: table
+    name: "Renamed: view"
+    filters:
+      or:
+        - file.hasTag("work")
+        - priority > 1
+    order:
+      - file.name
+      - due
+      - priority
+      - status
+    sort:
+      - property: due
+        direction: ASC
+      - property: file.name
+        direction: DESC
+    limit: 3
+    rowHeight: medium
+  - type: table
+    name: View
+# Keep this too

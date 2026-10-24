@@ -1,0 +1,17 @@
+{
+  "name": "Renamed: view",
+  "rows": [
+    {
+      "path": "BaseTest/Task F.md",
+      "height": 60
+    },
+    {
+      "path": "BaseTest/Task A.md",
+      "height": 60
+    },
+    {
+      "path": "BaseTest/Task D.md",
+      "height": 60
+    }
+  ]
+}
