@@ -101,7 +101,7 @@ await withBrowser(async ({ send, run, press, point, move, click, chord, check })
       heading: card.includes('Heading'),
     };
   });
-  check(Math.abs(gap.gap - 12.944) < 1.5 && gap.first === 0 && gap.later === 16, `title-to-heading gap is the title's half-em (${gap.gap}px), and a later heading keeps 16px`);
+  check(Math.abs(gap.gap - 12.944) < 1.5 && gap.first === 0 && gap.later === 40, `title-to-heading gap is the title's half-em (${gap.gap}px), and a later heading has the round 29 40px margin`);
   check(!gap.raw && gap.heading, 'the card shows the heading and not the frontmatter fence');
   const dropped = await run(async () => { const { api } = await import('/src/api.ts'); return api.readNote('H/Board.canvas'); });
   await chord('z');
