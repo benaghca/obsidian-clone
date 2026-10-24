@@ -461,6 +461,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         hotkey.hidden = !text;
         el.hidden = !commands.isEnabled(id);
       }
+      fitEmptyLabels();
     }
     const empty = h(
       "div",
@@ -473,6 +474,21 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         emptyAction("Go to file", "switcher:open", "search"),
       ),
     );
+    // A short label that is a fraction of a pixel over its slot is widened to
+    // its text. Only a label that is more than a pixel over ellipsizes.
+    function fitEmptyLabels() {
+      if (empty.hidden) return;
+      for (const label of empty.querySelectorAll<HTMLElement>(".empty-state-action-label")) {
+        label.classList.remove("is-ellipsized");
+        const over = label.scrollWidth - label.clientWidth;
+        if (over > 1) {
+          label.style.minWidth = "";
+          label.classList.add("is-ellipsized");
+        } else if (over > 0) label.style.minWidth = `${label.scrollWidth}px`;
+      }
+    }
+    new ResizeObserver(() => fitEmptyLabels()).observe(empty);
+    new MutationObserver(() => fitEmptyLabels()).observe(empty, { subtree: true, characterData: true, childList: true });
 
     // An image tab: the picture at its own size, centred, through the same blob: URLs as embeds.
     const picture = h("img", { alt: "" });
