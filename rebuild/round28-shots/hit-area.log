@@ -1,0 +1,13 @@
+PASS 1×: native click -11px from edge selects it
+PASS 1×: native click 11px from edge selects it
+PASS 1×: 14px outside the edge stroke stays background
+PASS 0.25×: native click -11px from edge selects it
+PASS 0.25×: native click 11px from edge selects it
+PASS 0.25×: 14px outside the edge stroke stays background
+PASS 0.0625×: native click -11px from edge selects it
+PASS 0.0625×: native click 11px from edge selects it
+PASS 0.0625×: 14px outside the edge stroke stays background
+PASS 2×: native click -11px from edge selects it
+PASS 2×: native click 11px from edge selects it
+PASS 2×: 14px outside the edge stroke stays background
+PASS Hit selection at every zoom leaves exact canvas bytes unchanged

@@ -1,0 +1,49 @@
+PASS live: body double-click opens Live Preview with the title retained
+PASS live: native key input updates the .md file and the open note tab
+PASS live: autosave retains the editor and never changes canvas bytes
+PASS live: embedded editor has zero margins and line tops within 1px
+PASS live: card heading folds with native pointer input
+PASS live: stationary unfold retains the card fold arrow
+PASS live unfolded: embedded editor has zero margins and line tops within 1px
+PASS live: note undo works in the card and the tab
+PASS live: wheel scrolls the note instead of panning
+PASS live: Escape finishes editing and focuses the board
+PASS source: body double-click opens Live Preview with the title retained
+PASS source: native key input updates the .md file and the open note tab
+PASS source: autosave retains the editor and never changes canvas bytes
+PASS source: embedded editor has zero margins and line tops within 1px
+PASS source: card heading folds with native pointer input
+PASS source: stationary unfold retains the card fold arrow
+PASS source unfolded: embedded editor has zero margins and line tops within 1px
+PASS source: note undo works in the card and the tab
+PASS source: wheel scrolls the note instead of panning
+PASS source: Escape finishes editing and focuses the board
+PASS reading: body double-click opens Live Preview with the title retained
+PASS reading: native key input updates the .md file and the open note tab
+PASS reading: autosave retains the editor and never changes canvas bytes
+PASS reading: embedded editor has zero margins and line tops within 1px
+PASS reading: card heading folds with native pointer input
+PASS reading: stationary unfold retains the card fold arrow
+PASS reading unfolded: embedded editor has zero margins and line tops within 1px
+PASS reading: note undo works in the card and the tab
+PASS reading: wheel scrolls the note instead of panning
+PASS reading: Escape finishes editing and focuses the board
+PASS Toolbar double-click never adds a card
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Escape and its note save retain the selected card and Edit toolbar
+    at check (file:///home/chris/workspaces/remote/grove-r28-codex/rebuild/app/scripts/browser.mjs:100:48)
+    at withBrowser.screenshots (file:///home/chris/workspaces/remote/grove-r28-codex/rebuild/app/scripts/test-canvas-notes.mjs:26:83)
+    at async withBrowser (file:///home/chris/workspaces/remote/grove-r28-codex/rebuild/app/scripts/browser.mjs:111:5)
+    at async file:///home/chris/workspaces/remote/grove-r28-codex/rebuild/app/scripts/test-canvas-notes.mjs:3:1 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}
+
+Node.js v26.8.2

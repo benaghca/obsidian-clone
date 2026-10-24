@@ -1,0 +1,12 @@
+PASS 5,000-line tab: 26 native key insertions reach the next animation frame within 20ms
+MEASURE 5,000-line tab {"frameMax":17.100000023841858,"frameMean":6.869230777025223}
+PASS Big tab retains all lines and characters
+PASS 5,000-line canvas note: 26 native key insertions reach the next animation frame within 20ms
+MEASURE 5,000-line canvas note {"frameMax":15.5,"frameMean":6.696153844778355}
+PASS Big card retains all lines and characters
+PASS 40-row table tab: 26 native key insertions reach the next animation frame within 20ms
+MEASURE 40-row table tab {"frameMax":14.5,"frameMean":6.088461536627549}
+PASS Real pointer enters a canvas note table cell
+PASS 40-row canvas note table: 26 native key insertions reach the next animation frame within 20ms
+MEASURE 40-row canvas note table {"frameMax":16.299999952316284,"frameMean":5.676923080132558}
+PASS Canvas note table retains all 40 rows
