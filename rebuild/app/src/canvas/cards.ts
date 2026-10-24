@@ -60,10 +60,12 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   }
   const explorerDrag = (event: Event) => {
     const { entry, x, y, done, cancelled } = (event as CustomEvent<{ entry: { path: string; is_dir: boolean }; x: number; y: number; done?: boolean; cancelled?: boolean }>).detail;
+    el.classList.toggle("is-explorer-dragging", !done);
     const over = document.elementFromPoint(x, y);
     const inside = !gone && !entry.is_dir && !canvasReadOnly.has(el) && el.contains(over) && !over?.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu");
     el.classList.toggle("is-file-drop", !done && inside);
-    if (done && !cancelled && inside) void insertFile(entry.path, point(x, y), true);
+    // Run after the explorer restores the pre-drag focus, so Undo follows the drop.
+    if (done && !cancelled && inside) queueMicrotask(() => { void insertFile(entry.path, point(x, y), true); });
   };
   window.addEventListener("grove:explorer-drag", explorerDrag);
   function connect(edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) {

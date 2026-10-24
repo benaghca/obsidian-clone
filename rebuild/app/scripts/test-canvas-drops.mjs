@@ -1,6 +1,6 @@
 // Native pointer drags only; the in-memory vault never touches an owner's files.
 import assert from 'node:assert/strict';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { withBrowser, sleep } from './browser.mjs';
 await withBrowser(async({run,send,point,move,click,press,chord,open,read,check,shot,double})=>{
  const row=path=>`.nav-files .tree-item-self[data-path=${JSON.stringify(path)}]`;
@@ -41,4 +41,61 @@ await withBrowser(async({run,send,point,move,click,press,chord,open,read,check,s
  await click('.canvas-controls [aria-label="Canvas settings"]');await click('.menu-item:nth-child(3)');
  check((await data()).future.keep.join(',')==='1,2'&&Object.keys((await data()).nodes[0])[0]==='opaque','Explorer actions preserve unknown fields and original key order');
  await shot('grove-explorer-cards');
+ const dot=async side=>{await move(await point('[data-node-id="a"]'));return point(`[data-node-id="a"] [data-side="${side}"]`);};
+ const empty=async(side='right',timed=false)=>{
+  const a=await dot(side),b={x:a.x+(side==='left'?-150:side==='right'?150:60),y:a.y+(side==='top'?-150:side==='bottom'?150:60)};
+  await begin(a,b);
+  if(timed)await run(()=>document.addEventListener('pointerup',()=>{window.addTiming={visible:0,max:0};let last=performance.now(),frame=0;function tick(t){frame++;addTiming.max=Math.max(addTiming.max,t-last);last=t;if(!addTiming.visible&&document.querySelector('.canvas-add-menu'))addTiming.visible=frame;if(frame<19)requestAnimationFrame(tick);}requestAnimationFrame(tick);},{once:true,capture:true}));
+  await release(b);return b;
+ };
+ for(const side of ['top','right','bottom','left']){
+  await open('Connect-'+side+'.canvas',base);const b=await empty(side,true),p=await world(b);
+  check(await read()===base&&await run(()=>[...document.querySelectorAll('.canvas-add-menu .menu-item-title')].map(e=>e.textContent).join('|')==='Add card|Add note from vault'&&!document.querySelector('.canvas-add-menu svg')),'Empty '+side+' drop opens the observed two-row menu without changing bytes');
+  const t=await run(()=>addTiming);check(t.visible>0&&t.visible<=2&&t.max<20,`Add card menu opens within two frames; max ${t.max.toFixed(1)}ms`);
+  check(await run(()=>document.querySelector('.canvas-add-menu').getAnimations().length===0&&document.querySelector('.canvas-edge-preview').style.display!=='none'),'Pending menu has no animation and keeps the connection preview');
+  if(side==='right')await shot('grove-add-menu');
+  await double('.canvas-add-menu .menu-item:first-child');await press('Escape');await sleep(350);const d=await data(),n=d.nodes.at(-1),e=d.edges[0];
+  const toSide=({top:'bottom',right:'left',bottom:'top',left:'right'})[side];
+  assert.deepEqual([n.x,n.y],[p.x-(side==='left'?250:side==='right'?0:125),p.y-(side==='top'?60:side==='bottom'?0:30)]);
+  check(d.nodes.length===2&&d.edges.length===1&&n.type==='text'&&e.fromNode==='a'&&e.toNode===n.id&&e.fromSide===side&&e.toSide===toSide,'Double-click Add card creates exactly one card and edge, aligned to the '+toSide+' side');
+  check(Object.keys(e).join(',')==='id,fromNode,fromSide,toNode,toSide'&&/^[0-9a-f]{16}$/.test(e.id),'Connected edge uses native key order, defaults and id');await save('connected-'+side);
+  const created=await read();await chord('z');await sleep(350);check(await read()===base,'One undo removes the connected card and edge together');await chord('y');await sleep(350);check(await read()===created,'Redo restores both connected records with unchanged ids');
+ }
+ await open('ConnectedFiles.canvas',base);
+ for(const [file,width,height] of [['A DropNote.md',400,400],['A DropImage.svg',400,200]]){
+  await empty();await double('.canvas-add-menu .menu-item:nth-child(2)');
+  check(await read()===base,'Double-click Add note never creates a background card');
+  if(!await run(()=>!!document.querySelector('.prompt'))){await empty();await click('.canvas-add-menu .menu-item:nth-child(2)');}
+  check(await run(()=>!!document.querySelector('.prompt')&&document.querySelector('.prompt').getAnimations().length===0),'Add note reuses the existing instant picker');
+  await send('Input.insertText',{text:file.replace(/\.md$/,'')});await click('.suggestion-item');await sleep(400);const d=await data(),n=d.nodes.at(-1);
+  check(d.nodes.length===2&&d.edges.length===1&&n.file===file&&n.width===width&&n.height===height&&d.edges[0].toNode===n.id,'Connection vault picker adds '+file+' with the observed dimensions and one edge');await save(file.endsWith('.md')?'connected-note':'connected-media');
+  await chord('z');await sleep(350);check(await read()===base,'Connected file and edge share one undo checkpoint');
+ }
+ await empty();await press('Escape');check(await read()===base&&await run(()=>!document.querySelector('.canvas-add-menu')&&document.querySelector('.canvas-edge-preview').style.display==='none'),'Escape dismisses Add card and its preview without a file change');
+ await empty();await click({x:1100,y:820});check(await read()===base&&await run(()=>!document.querySelector('.canvas-add-menu')),'Click away cancels the pending connection');
+ await empty();await click('.canvas-add-menu .menu-item:nth-child(2)');await press('Escape');check(await read()===base,'Cancelling the vault picker leaves no dangling card or edge');
+ const reload=async source=>{await run(async source=>{const{api}=await import('/src/api.ts');await api.writeNote(ws.active.viewFile,source);ws.vault.written(ws.active.viewFile);},source);await sleep(100);};
+ const external=base.replace('Source','External');
+ await empty();await reload(external);check(await read()===external&&await run(()=>!document.querySelector('.canvas-add-menu')),'External canvas reload disposes a pending Add card menu');await reload(base);
+ await empty();await click('.canvas-add-menu .menu-item:nth-child(2)');await reload(external);await send('Input.insertText',{text:'A DropNote'});await click('.suggestion-item');await sleep(350);check(await read()===external,'A stale vault picker cannot overwrite a reloaded canvas');await reload(base);
+ await empty();await press('Escape');await empty();check(await run(()=>!!document.querySelector('.canvas-add-menu')),'Repeating the same empty drop reopens the menu');await press('Escape');
+ await click('[data-node-id="a"]');await double('.canvas-selection-menu [aria-label="Set color"]');check((await data()).nodes.length===1,'Double-clicking a selection toolbar after Add card never adds a background card');await press('Escape');
+ const long='A very long note title that should wrap within the canvas card';
+ await run(async title=>{const{api}=await import('/src/api.ts');await api.createNote(title+'.md','Body paragraph');await ws.vault.refreshFiles();},long);
+ await open('Title.canvas',{nodes:[{id:'title',type:'file',file:long+'.md',x:0,y:0,width:250,height:400}],edges:[]});const titleBytes=await read();
+ const titleState=()=>run(()=>{const e=document.querySelector('.canvas-note-title'),r=e.getBoundingClientRect(),card=e.closest('.canvas-node').getBoundingClientRect(),s=getComputedStyle(e);return{text:e.textContent,h:r.height,left:r.left-card.left,w:r.width,cardWidth:card.width,size:parseFloat(s.fontSize),height:parseFloat(s.lineHeight),space:s.whiteSpace,overflow:s.textOverflow};});
+ const title=await titleState();check(title.text===long&&title.h>title.height*2&&title.space==='pre-wrap'&&title.overflow==='clip'&&Math.abs(title.left-17)<1,'Long note titles wrap at the card inset without truncation');
+ await click('.canvas-note-title');await click('[aria-label="Zoom in"]');await click('[aria-label="Zoom in"]');const zoomed=await titleState();
+ check(Math.abs(zoomed.h/title.h-2)<.01&&zoomed.size===25.888&&await read()===titleBytes,'Selecting and zooming a note scales its header with the card and never changes JSON');await shot('grove-note-header');
+ const large=await readFile(new URL('../../round23-shots/Large.canvas',import.meta.url),'utf8');await open('DropLarge.canvas',large,500);await click('[aria-label="Reset zoom"]');await sleep(400);
+ await run(()=>{window.dropFrames=[];window.dropRecording=true;let last=performance.now();function tick(t){if(!dropRecording)return;dropFrames.push(t-last);last=t;requestAnimationFrame(tick);}requestAnimationFrame(tick);});
+ await begin(row('A DropNote.md'),{x:650,y:350});
+ for(let i=0;i<24;i++){await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:650+i*8,y:350+i%2*10,button:'left',buttons:1});await sleep(18);}
+ await press('Escape');await release({x:834,y:360});const frames=await run(()=>{dropRecording=false;return dropFrames.slice(2);});
+ check(frames.length>30&&Math.max(...frames)<20,`300-card/400-edge explorer drag stays under 20ms; max ${Math.max(...frames).toFixed(1)}ms`);
+ check(await read()===large&&await run(()=>!document.querySelector('.is-file-drop,.is-explorer-dragging,.drag-ghost')),'Large-board explorer cancellation preserves all bytes and removes drag state');
+ await open('SplitDrop.canvas',base);await run(()=>ws.open('Welcome.md',{where:'right'}));await sleep(150);await click('.workspace-tabs.mod-active .cm-content');
+ const splitAt=await run(()=>{const r=document.querySelector('.canvas-view').getBoundingClientRect();return{x:r.x+50,y:r.y+100};});await drag(row('A DropNote.md'),splitAt);
+ check(await run(()=>ws.active.viewFile==='SplitDrop.canvas'&&document.activeElement.matches('.canvas-view')),'An explorer drop into an inactive canvas pane activates and focuses that canvas');
+ await chord('z');await sleep(350);check(await read()===base,'Immediate Undo after an inactive-pane drop restores that canvas alone');
 }, {screenshots:new URL('../../round27-shots/',import.meta.url).pathname});

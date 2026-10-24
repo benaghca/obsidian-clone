@@ -104,7 +104,7 @@ export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLEl
       ghost.append(destination);
       document.body.append(ghost);
       row.classList.add("is-being-dragged");
-      document.body.classList.add("is-grabbing");
+      if (!document.querySelector(".canvas-view")) document.body.classList.add("is-grabbing");
       // Capture only after the threshold. A drag's eventual click belongs
       // to the list, so it cannot open/toggle the pressed or destination row.
       list.setPointerCapture(down.pointerId);

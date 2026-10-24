@@ -9,6 +9,8 @@
   touch-action: none;
 }
 .canvas-world { position: absolute; transform-origin: 0 0; will-change: transform; }
+/* A drag cursor surface avoids restyling every Markdown child on large boards. */
+.canvas-view.is-explorer-dragging::after { content: ""; position: absolute; inset: 0; z-index: 3; cursor: grabbing; }
 .canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; z-index: 1; }
 .canvas-node {
   position: absolute;
@@ -72,7 +74,7 @@
 .canvas-node-content .cm-line.cm-h1 { font-size: 25.888px; }
 .canvas-node-file .canvas-node-content > img { display: block; width: 100%; height: 100%; }
 
-.canvas-controls { position: absolute; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; --icon-size: 16px; --icon-stroke: 2px; }
+.canvas-controls { position: absolute; z-index: 4; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; --icon-size: 16px; --icon-stroke: 2px; }
 .canvas-controls .clickable-icon { width: 32px; height: 32px; padding: 8px; border-radius: 0; }
 .canvas-controls .clickable-icon + .clickable-icon { border-top: 1px solid var(--background-modifier-border); }
 .canvas-controls .clickable-icon:first-child { border-radius: 4px 4px 0 0; }
