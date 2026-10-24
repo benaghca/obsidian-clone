@@ -8,7 +8,7 @@
 import { version } from "../../package.json";
 import { commands } from "../commands";
 import { writeClipboard } from "../editor/clipboard";
-import { systemPath } from "../paths";
+import { systemPath, trimSlashes } from "../paths";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import type { Workspace } from "../workspace";
@@ -52,6 +52,33 @@ function dropdownRow<F extends FileName, K extends Key<F>>(file: F, key: K, name
 
 /** A slider, labelled with the row's name. */
 const sliderRow = (name: string, desc: string, o: Omit<SliderOptions, "label">) => row({ name, desc, cls: "mod-slider" }, ...slider({ ...o, label: name }));
+
+/** Obsidian's "Default location for new attachments": the stored value is the folder path, not the menu choice. */
+function attachmentLocation(): HTMLElement[] {
+  type Kind = "root" | "folder" | "current" | "sub";
+  const current = () => settings.get("app.json").attachmentFolderPath;
+  const kindOf = (value: string): Kind => (value === "/" || value === "" ? "root" : value === "./" ? "current" : value.startsWith("./") ? "sub" : "folder");
+  const folderText = (value: string) => trimSlashes(value.startsWith("./") ? value.slice(2) : value === "/" ? "" : value);
+  let kind = kindOf(current());
+  const write = (folder: string) => {
+    const path = kind === "root" ? "/" : kind === "current" ? "./" : kind === "sub" ? (trimSlashes(folder) ? `./${trimSlashes(folder)}` : "./") : trimSlashes(folder) || "/";
+    void settings.set("app.json", "attachmentFolderPath", path);
+  };
+  const input = textInput({ value: folderText(current()), placeholder: "Example: folder 1/folder 2", label: "Attachment folder path", list: "grove-folder-list", onInput: write });
+  const folderRow = row({ name: "Attachment folder path", desc: "Newly pasted and dropped files will appear in this folder.", cls: "mod-text" }, input);
+  const showFolder = () => { folderRow.hidden = kind !== "folder" && kind !== "sub"; };
+  showFolder();
+  const menu = dropdown<Kind>([
+    ["root", "Vault folder"],
+    ["folder", "In the folder specified below"],
+    ["current", "Same folder as current file"],
+    ["sub", "In subfolder under current folder"],
+  ], kind, (v) => { kind = v; showFolder(); write(input.value); }, "Default location for new attachments");
+  return [
+    row({ name: "Default location for new attachments", desc: "Where newly pasted and dropped files are placed.", cls: "mod-dropdown" }, menu),
+    folderRow,
+  ];
+}
 
 function textRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: string, desc: string, placeholder: string, list?: string) {
   const input = textInput({ value: get(file, key) as string, placeholder, label: name, list, onInput: (v) => void settings.set(file, key, v.trim() as SettingsOf<F>[K]) });
@@ -294,6 +321,7 @@ function filesAndLinks(ctx: SettingsContext): HTMLElement[] {
         (v) => (folderRow.hidden = v !== "folder"),
       ),
       folderRow,
+      ...attachmentLocation(),
     ),
     group(
       "Links",

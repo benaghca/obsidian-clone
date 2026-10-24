@@ -8,7 +8,9 @@ import { isolateHistory } from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorSelection, Facet } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
+import { clipboardFiles } from "./attachments";
 import { frontmatterField } from "./frontmatter";
+import { editorHost } from "./host";
 import { htmlToMarkdown } from "./htmlToMarkdown";
 
 export const autoConvertHTML = Facet.define<boolean, boolean>({ combine: values => values[0] ?? true });
@@ -38,15 +40,31 @@ export async function copySelection(view: EditorView, cut: boolean) {
   if (cut) view.dispatch(view.state.replaceSelection(""), { userEvent: "delete.cut" });
 }
 
+/** Clipboard images the paste event didn't carry, saved as attachments. */
+async function pasteImages(view: EditorView): Promise<boolean> {
+  if (!navigator.clipboard?.read) return false;
+  const items = await navigator.clipboard.read().catch(() => []);
+  const files: File[] = [];
+  for (const item of items) {
+    // Text alongside an image stays a text paste (the file-bearing clipboard case).
+    if (item.types.includes("text/plain") || item.types.includes("text/html")) continue;
+    const type = item.types.find((t) => t.startsWith("image/"));
+    if (!type) continue;
+    files.push(new File([await item.getType(type)], "image.png", { type }));
+  }
+  if (!files.length) return false;
+  return (await view.state.facet(editorHost)?.saveAttachments?.(view, files)) ?? false;
+}
+
 export async function paste(view: EditorView, plain: boolean) {
   if (view.state.readOnly) return;
   view.focus();
   if (!plain && document.execCommand("paste")) return;
   try {
+    if (!plain && await pasteImages(view)) return;
     if (!plain && navigator.clipboard.read) {
       const items = await navigator.clipboard.read().catch(() => []);
-      const item = items.some(item => item.types.some(type => type.startsWith("image/")))
-        ? undefined : items.find(item => item.types.includes("text/html"));
+      const item = items.find(item => item.types.includes("text/html"));
       if (item) {
         const html = await (await item.getType("text/html")).text();
         const text = item.types.includes("text/plain") ? await (await item.getType("text/plain")).text() : "";
@@ -105,13 +123,43 @@ function insertUrl(view: EditorView, text: string): boolean {
 /** One paste handler, shared by native keyboard and context-menu paste. */
 export const clipboard = [
   keymap.of([{ key: "Mod-Shift-v", run: view => { void paste(view, true); return true; } }]),
-  EditorView.domEventHandlers({ paste(event, view) {
-    if (view.state.readOnly) return true;
-    const data = event.clipboardData;
-    if (!data || data.files.length) return false;
-    const text = data.getData("text/plain");
-    if (insertRich(view, data.getData("text/html"), text)) return true;
-    if (insertUrl(view, text)) return true;
-    return false; // CodeMirror retains its ordinary, linewise and multi-cursor paste.
-  } }),
+  EditorView.domEventHandlers({
+    paste(event, view) {
+      if (view.state.readOnly) return true;
+      const data = event.clipboardData;
+      if (!data) return false;
+      const text = data.getData("text/plain");
+      const html = data.getData("text/html");
+      const files = clipboardFiles(data);
+      // A file that arrives with text stays a plain paste, as before: CodeMirror
+      // inserts the text and the HTML converter does not run. A file or image
+      // with no text is saved as an attachment.
+      if (files.length && (text || html)) return false;
+      if (files.length) {
+        void view.state.facet(editorHost)?.saveAttachments?.(view, files);
+        return true;
+      }
+      if (!text && !html && [...data.types].some((t) => t.startsWith("image/"))) {
+        void pasteImages(view);
+        return true;
+      }
+      if (insertRich(view, html, text)) return true;
+      if (insertUrl(view, text)) return true;
+      return false; // CodeMirror retains its ordinary, linewise and multi-cursor paste.
+    },
+    dragover(event, view) {
+      const types = event.dataTransfer?.types;
+      if (!types || ![...types].includes("Files")) return false;
+      event.dataTransfer!.dropEffect = view.state.readOnly ? "none" : "copy";
+      return true;
+    },
+    drop(event, view) {
+      const files = event.dataTransfer ? [...event.dataTransfer.files] : [];
+      if (!files.length) return false;
+      if (view.state.readOnly) return true;
+      const at = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      void view.state.facet(editorHost)?.saveAttachments?.(view, files, at);
+      return true;
+    },
+  }),
 ];

@@ -54,6 +54,8 @@ export const APP = {
   // Files and links
   newFileLocation: field<"root" | "current" | "folder">("root", oneOf("root", "current", "folder")),
   newFileFolderPath: field("", text()),
+  /** Obsidian's attachmentFolderPath. "/" is the vault folder, the same default. */
+  attachmentFolderPath: field("/", text()),
   newLinkFormat: field<"shortest" | "relative" | "absolute">("shortest", oneOf("shortest", "relative", "absolute")),
   useMarkdownLinks: field(false, bool),
   alwaysUpdateLinks: field(false, bool),

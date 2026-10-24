@@ -29,6 +29,7 @@ test("files keep only what differs from the defaults, plus unknown keys", () => 
   expect(JSON.parse(text)).toEqual({ futureSetting: 1, useTab: false, userIgnoreFilters: ["Archive/"] });
   expect(text).toContain('\n  "useTab": false');
   expect(serialize(APP, defaults(APP))).toBe("{}\n");
+  expect(defaults(APP).attachmentFolderPath).toBe("/");
 });
 
 test("hotkeys.json: Obsidian's shape, invalid entries dropped, sorted on write", () => {
