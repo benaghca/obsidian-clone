@@ -1,0 +1,12 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"opaque":"keep","id":"a","type":"text","x":0,"y":0,"width":250,"height":160,"text":"Source"},
+		{"id":"6f169e8434444e3e","x":399,"y":110,"width":250,"height":60,"type":"text","text":""}
+	],
+	"edges":[
+		{"id":"88e71699b67f4bd7","fromNode":"a","fromSide":"right","toNode":"6f169e8434444e3e","toSide":"left"}
+	]
+}

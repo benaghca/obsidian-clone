@@ -1,0 +1,12 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"opaque":"keep","id":"a","type":"text","x":0,"y":0,"width":250,"height":160,"text":"Source"},
+		{"id":"1a4da68f69a54b41","x":399,"y":-60,"width":400,"height":400,"type":"file","file":"A DropNote.md"}
+	],
+	"edges":[
+		{"id":"7dc7857b95fa43c5","fromNode":"a","fromSide":"right","toNode":"1a4da68f69a54b41","toSide":"left"}
+	]
+}
