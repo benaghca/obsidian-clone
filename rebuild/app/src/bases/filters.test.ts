@@ -53,7 +53,7 @@ it("appends a view before trailing comments and leaves every existing view byte 
 it("edits nested groups without losing sibling expressions and handles empty groups",()=>{
  const filter={or:['priority > 1',{not:['status == "done"']}]};
  expect(changeFilter(filter,[1,0],()=> 'status == "waiting"')).toEqual({or:['priority > 1',{not:['status == "waiting"']}]});
- expect(countFilters(filter)).toBe(2);expect(group(undefined)).toEqual({op:'and',children:[]});
+ expect(countFilters(filter)).toBe(2);expect(countFilters({unsupported:[]})).toBe(1);expect(group(undefined)).toEqual({op:'and',children:[]});
 });
 it("recognizes editable comparisons without interpreting compound expressions as literals",()=>{
  for(const text of ['priority >= 3','status != "done"','file.inFolder("BaseTest")','file.hasTag("work")','tags.contains("tag")','due < today()','active == false'])expect(filterExpression(comparison(text)!)).toBe(text);
