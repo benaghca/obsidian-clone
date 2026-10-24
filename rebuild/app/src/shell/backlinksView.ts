@@ -3,18 +3,20 @@
 // grouped per note with the line around each link and the link
 // highlighted. "Unlinked mentions" are plain-text uses of the note's title,
 // found with the backend's search; that section starts collapsed and is only
-// searched while it is open. Clicking a result opens the note at it.
+// searched while it is open. Each mention is its own row. Clicking a result
+// opens the note at it. Link, on the row, wraps that one mention as a link.
 //
 // None of this runs on a keystroke: it follows note switches, and the link
 // index, which the workspace refreshes a second after a save.
 
 import { api, type SearchHit } from "../api";
+import { updateNoteText } from "../fileOps";
 import { kept } from "../memo";
 import { compareNames, noteName } from "../paths";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, pagedRows, resultGroup, resultMatch, section, type SideView } from "./sideView";
+import { afterPaint, hitColumns, highlighted, pagedRows, resultGroup, resultMatch, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -53,7 +55,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   let unlinkedSeq = 0;
 
   /** Rows grouped per note; returns the number of mentions shown (Obsidian's count). */
-  function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string) {
+  function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string, row: (m: Mention) => HTMLElement = matchRow) {
     const byFile = new Map<string, Mention[]>();
     for (const m of mentions) kept(byFile, m.from, () => []).push(m);
     const files = [...byFile.keys()].sort((a, b) => compareNames(noteName(a), noteName(b)));
@@ -61,7 +63,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       ...files.map((path) => {
         const all = byFile.get(path)!;
         const matches = h("div", { class: "search-result-file-matches" });
-        pagedRows(matches, all, matchRow, PAGE);
+        pagedRows(matches, all, row, PAGE);
         return resultGroup(path, matches, total(all).toLocaleString(), collapsedFiles, () => void ws.open(path));
       }),
     );
@@ -118,11 +120,55 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     const mentions: Mention[] = [];
     for (const hit of hits) {
       if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md") || ws.vault.isExcluded(hit.path)) continue;
-      const spans = mentionSpans(hit.text, title);
-      if (spans.length) mentions.push({ from: hit.path, line: hit.line, text: hit.text, count: spans.length, spans: () => spans });
+      // One row per mention, so Link wraps that occurrence and leaves the others.
+      for (const span of mentionSpans(hit.text, title)) {
+        mentions.push({ from: hit.path, line: hit.line, text: hit.text, count: 1, spans: () => [span] });
+      }
     }
-    const n = renderGroups(unlinked.body, mentions, "No unlinked mentions found.");
+    const n = renderGroups(unlinked.body, mentions, "No unlinked mentions found.", unlinkedRow);
     unlinked.count.textContent = n ? n.toLocaleString() : "";
+  }
+
+  /** The line, with this mention highlighted, and a Link button that wraps it. */
+  function unlinkedRow(m: Mention) {
+    const spans = m.spans();
+    const button = h("button", {
+      class: "search-result-file-match-replace-button",
+      type: "button",
+      onclick: (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        void linkMention(m);
+      },
+    }, "Link");
+    return h("div", {
+      class: "search-result-file-match",
+      "data-preview-path": m.from,
+      onclick: (event: MouseEvent) => void ws.open(m.from, { line: m.line, ch: hitColumns(event, spans) }),
+    }, h("div", { class: "search-result-file-match-text" }, ...highlighted(m.text, spans)), button);
+  }
+
+  /** Turn this one mention into a link in the other note, if that text is still there. */
+  async function linkMention(m: Mention) {
+    const target = pathOf();
+    const span = m.spans()[0];
+    if (!target || !span) return;
+    const doc = ws.editors.doc(m.from);
+    let note: string;
+    try {
+      note = doc ? doc.toString() : await api.readNote(m.from);
+    } catch (err) {
+      console.error("Could not link mention", err);
+      return;
+    }
+    const lines = note.split("\n");
+    const line = lines[m.line - 1];
+    if (line === undefined) return;
+    const still = mentionSpans(line, noteName(target)).some((s) => s.from === span.from && s.to === span.to);
+    if (!still) return;
+    const word = line.slice(span.from, span.to);
+    lines[m.line - 1] = line.slice(0, span.from) + ws.linkTo(target, m.from, word) + line.slice(span.to);
+    await updateNoteText(ws, m.from, lines.join("\n"));
   }
 
   function refresh() {
