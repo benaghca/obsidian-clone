@@ -4,7 +4,8 @@
 // answer (and whether the checkbox was ticked).
 
 import { animateOut } from "../motion";
-import { h } from "./dom";
+import { h, keyButton } from "./dom";
+import { icon } from "./icons";
 
 interface ConfirmOptions {
   title: string;
@@ -28,13 +29,19 @@ export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAsk
     const box = h("input", { type: "checkbox" });
     const yes = h("button", { class: o.warning ? "mod-warning" : "mod-cta" }, o.confirm);
     const no = h("button", null, o.cancel ?? "Cancel");
+    const close = keyButton(icon("x", 16), "Close", () => done(false), "modal-close-button");
     const modal = h(
       "div",
       { class: "modal mod-confirm", role: "alertdialog", "aria-modal": "true", "aria-label": o.title },
       h("div", { class: "modal-title" }, o.title),
+      close,
       h("div", { class: "modal-content" }, o.message),
-      o.dontAskAgain ? h("label", { class: "modal-checkbox" }, box, "Don't ask again") : null,
-      h("div", { class: "modal-button-container" }, yes, o.cancel === false ? null : no),
+      h(
+        "div",
+        { class: "modal-button-row" },
+        o.dontAskAgain ? h("label", { class: "modal-checkbox" }, box, "Don't ask again") : null,
+        h("div", { class: "modal-button-container" }, o.cancel === false ? null : no, yes),
+      ),
     );
     const overlay = h("div", { class: "modal-container mod-dim mod-settings-container" }, h("div", { class: "modal-bg", onclick: () => done(false) }), modal);
     let finished = false;

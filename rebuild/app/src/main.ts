@@ -304,11 +304,16 @@ ws.linkStyle = () => ({ format: appSettings().newLinkFormat, wikilinks: !appSett
 fileSettings.confirmDelete = async (path) => {
   if (!appSettings().promptDelete) return true;
   const folder = ws.vault.isFolder(path);
-  const name = folder ? fileName(path) : noteName(path);
+  const name = fileName(path);
   const where = fileSettings.permanentDelete() ? "It will be permanently deleted." : "It will be moved to the vault's .trash folder.";
   const r = await confirmDialog({
     title: folder ? "Delete folder" : "Delete file",
-    message: `Are you sure you want to delete “${name}”${folder ? " and everything in it" : ""}? ${where}`,
+    message: h(
+      "div",
+      null,
+      h("p", null, `Are you sure you want to delete “${name}”${folder ? " and everything in it" : ""}?`),
+      h("p", null, where),
+    ),
     confirm: "Delete",
     warning: true,
     dontAskAgain: true,
