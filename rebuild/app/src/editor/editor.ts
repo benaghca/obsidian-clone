@@ -5,7 +5,7 @@ import { acceptCompletion, completionKeymap } from "@codemirror/autocomplete";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { getSearchQuery, search, searchKeymap, searchPanelOpen } from "@codemirror/search";
 import { Compartment, EditorSelection, EditorState, type Extension, type SelectionRange, type Text } from "@codemirror/state";
-import { EditorView, keymap, layer, RectangleMarker, ViewPlugin } from "@codemirror/view";
+import { EditorView, type KeyBinding, keymap, layer, RectangleMarker, ViewPlugin } from "@codemirror/view";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { blocks } from "./blocks";
@@ -213,6 +213,15 @@ interface NoteStateOptions {
   counts?: Counts;
 }
 
+/** CodeMirror's defaults, minus the chords Obsidian leaves alone: Alt+Up/Down does not move a line, and Ctrl+Enter does nothing off a link. */
+const quiet = new Set(["Alt-ArrowUp", "Alt-ArrowDown", "Mod-Enter"]);
+export const noteKeymap: readonly KeyBinding[] = [
+  { key: "Mod-Enter", run: () => true },
+  { key: "Alt-ArrowUp", run: () => true },
+  { key: "Alt-ArrowDown", run: () => true },
+  ...defaultKeymap.filter((binding) => !quiet.has(binding.key ?? "")),
+];
+
 export function createNoteState({ doc, host, extensions = [], history: withHistory = true, selection, counts }: NoteStateOptions): EditorState {
   return EditorState.create({
     doc,
@@ -239,7 +248,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
         ...completionKeymap,
         { key: "Tab", run: acceptCompletion },
         { key: "Home", run: markdownHome(), shift: markdownHome(true) },
-        ...defaultKeymap,
+        ...noteKeymap,
         ...historyKeymap,
         ...searchKeymap,
         { key: "Tab", run: indentList(), shift: indentList(true) },

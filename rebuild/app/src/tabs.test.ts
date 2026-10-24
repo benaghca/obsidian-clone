@@ -1,7 +1,7 @@
 import { EditorSelection } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
 import { loadTab, saveTab } from "./savedLayout";
-import { behindLink, linkedWith, linkTabs, parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, tabTitle, unlinkTab, viewEntry, whereFromEvent } from "./tabs";
+import { behindLink, linkedWith, linkTabs, parseViewEntry, pushBack, stepHistory, type Tab, tabFollowsMove, tabForgets, tabTitle, unlinkTab, viewEntry, whereFromEvent } from "./tabs";
 
 const blank = (): Tab => ({ id: 1, path: null, back: [], forward: [], mode: "live", pinned: false, backlinks: false, memory: null });
 const notes = new Set(["A.md", "Folder/B.md"]);
@@ -31,6 +31,26 @@ describe("tabs", () => {
     const empty = blank();
     pushBack(empty);
     expect(empty.back).toEqual([]);
+  });
+
+  it("Back returns the caret that was left, and a deleted file takes its caret with it", () => {
+    const tab = { ...blank(), path: "A.md" };
+    pushBack(tab, { anchor: 4, head: 7 });
+    tab.path = "Folder/B.md";
+    expect(stepHistory(tab, -1, { anchor: 1, head: 1 })).toEqual({ entry: "A.md", place: { anchor: 4, head: 7 } });
+    expect(tab.forward).toEqual(["Folder/B.md"]);
+    expect(stepHistory(tab, 1, { anchor: 8, head: 8 })?.place).toEqual({ anchor: 1, head: 1 });
+
+    const gone = { ...blank(), path: "A.md" };
+    pushBack(gone, { anchor: 2, head: 2 });
+    gone.path = "Folder/B.md";
+    pushBack(gone, { anchor: 4, head: 4 });
+    gone.path = "A.md";
+    pushBack(gone, { anchor: 6, head: 6 });
+    tabForgets(gone, (p) => p === "A.md");
+    expect(gone.back).toEqual(["Folder/B.md"]);
+    expect(gone.path).toBeNull();
+    expect(stepHistory(gone, -1)?.place).toEqual({ anchor: 4, head: 4 });
   });
 
   it("modifier clicks open in a new tab or to the right", () => {

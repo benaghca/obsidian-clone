@@ -40,7 +40,7 @@ export function refreshSettingsNav() {
 }
 
 /** Open settings at a section (the last one shown, by default), or switch to it if open. */
-export function openSettings(sections: SettingsSection[], id?: string) {
+export function openSettings(sections: SettingsSection[], id?: string, onClose?: () => void) {
   if (current) {
     if (id) current.show(id);
     return;
@@ -198,8 +198,13 @@ export function openSettings(sections: SettingsSection[], id?: string) {
   function close() {
     if (current?.close !== close) return;
     current = null;
-    void animateOut(overlay);
-    restoreFocus?.focus();
+    // Esc (and the other closes) return to the note. The overlay's removal
+    // can drop focus on the way out, so the note is focused again if that happens.
+    const refocus = () => (onClose ? onClose() : restoreFocus?.focus());
+    void animateOut(overlay).then(() => {
+      if (document.activeElement === document.body) refocus();
+    });
+    refocus();
   }
 
   current = {

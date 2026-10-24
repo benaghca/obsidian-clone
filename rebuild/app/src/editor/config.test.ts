@@ -4,6 +4,7 @@ import { EditorView } from "@codemirror/view";
 import { afterEach, expect, test } from "vitest";
 import { APP, defaults } from "../settings/schema";
 import { configExtensions, pairingExtensions, setEditorConfig } from "./config";
+import { noteKeymap } from "./editor";
 import { cellTransaction } from "./tables";
 import { markdownSyntax } from "./syntax";
 
@@ -72,4 +73,14 @@ test("cell pairing retains closer effects through escaping and respects both set
   expect(editor("", 0, 0, true).type('"').doc).toBe('"');
   expect(editor("", 0, 0, true).type("(").doc).toBe("(");
   expect(editor("", 0, 0, true).type("*").doc).toBe("**");
+});
+
+test("Alt+Up/Down and Ctrl+Enter are not CodeMirror's line move or blank line", () => {
+  const bound = (key: string) => noteKeymap.filter((binding) => binding.key === key);
+  expect(bound("Alt-ArrowUp")).toHaveLength(1);
+  expect(bound("Alt-ArrowDown")).toHaveLength(1);
+  expect(bound("Mod-Enter")).toHaveLength(1);
+  expect(bound("Alt-ArrowUp")[0].run?.({} as EditorView)).toBe(true);
+  expect(bound("Mod-Enter")[0].run?.({} as EditorView)).toBe(true);
+  expect(bound("Shift-Alt-ArrowUp")).toHaveLength(1);
 });

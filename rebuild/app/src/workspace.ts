@@ -18,7 +18,7 @@ import { listeners } from "./listeners";
 import { createNote, fileSettings } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
 import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
-import { type Group, linkTabs, type OpenWhere, parseViewEntry, pushBack, type Tab, tabFollowsMove, tabForgets, unlinkTab, type ViewType, viewEntry } from "./tabs";
+import { type CaretPlace, type Group, linkTabs, type OpenWhere, parseViewEntry, pushBack, stepHistory, type Tab, tabFollowsMove, tabForgets, unlinkTab, type ViewType } from "./tabs";
 import { Vault } from "./vault";
 
 /**
@@ -168,7 +168,9 @@ export class Workspace {
 
   newTab(group: Group = this.activeGroup) {
     const tab = this.blankTab();
-    this.layout.addTab(group, tab);
+    // Ctrl+T and the + button land at the end. Opening a file in a new tab
+    // still sits just after the current one (layout.addTab's default).
+    this.layout.addTab(group, tab, group.tabs.length);
     this.select(group, tab);
   }
 
@@ -457,7 +459,7 @@ export class Workspace {
     const alreadyShown = !where && current.path === path && from === this.activeGroup;
     const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
     // A graph tab becomes the note (Obsidian's click on a node); Back returns to the graph.
-    if (!where && (tab.type || tab.path !== path)) pushBack(tab);
+    if (!where && (tab.type || tab.path !== path)) pushBack(tab, this.caretIn(from));
     tab.type = tab.viewFile = undefined;
     tab.path = path;
     this.show(group, tab, layoutChanged);
@@ -484,7 +486,7 @@ export class Workspace {
   private openAttachment(path: string, where: OpenWhere, from = this.activeGroup) {
     if (!where && from.active.pinned && from.active.viewFile !== path) where = "tab";
     const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
-    pushBack(tab);
+    pushBack(tab, this.caretIn(from));
     tab.path = null;
     tab.type = /\.canvas$/i.test(path) ? "canvas" : "image";
     this.recent = [path, ...this.recent.filter(p => p !== path)].slice(0, 50);
@@ -518,25 +520,39 @@ export class Workspace {
     await this.open(path, { where, heading, group });
   }
 
+  /** The caret in a pane's note, saved on the history step that leaves it. */
+  private caretIn(group: Group): CaretPlace | undefined {
+    if (!group.active.path || !this.editors.shows(group, group.active)) return undefined;
+    const main = this.editors.viewOf(group).state.selection.main;
+    return { anchor: main.anchor, head: main.head };
+  }
+
   /** Back (-1) and forward (1) walk the active pane's own history. */
   async travel(dir: 1 | -1) {
     const group = this.activeGroup;
     const tab = group.active;
-    const from = dir < 0 ? tab.back : tab.forward;
-    const to = dir < 0 ? tab.forward : tab.back;
-    const entry = from[from.length - 1];
+    const entry = (dir < 0 ? tab.back : tab.forward).at(-1);
     if (!entry) return;
-    const view = parseViewEntry(entry);
-    if (!view && !(await this.editors.load(entry))) return;
-    from.pop();
-    if (tab.type) to.push(viewEntry(tab));
-    else if (tab.path) to.push(tab.path);
-    tab.type = view?.type;
-    tab.viewFile = view ? view.file : undefined;
-    tab.path = view ? null : entry;
+    const parsed = parseViewEntry(entry);
+    if (!parsed && !(await this.editors.load(entry))) return;
+    const step = stepHistory(tab, dir, this.caretIn(group));
+    if (!step) return;
+    tab.type = parsed?.type;
+    tab.viewFile = parsed ? parsed.file : undefined;
+    tab.path = parsed ? null : step.entry;
     if (group.active === tab) this.editors.present(group);
     this.settle();
-    if (group === this.activeGroup && tab.path) this.editors.viewOf(group).focus();
+    if (group !== this.activeGroup || !tab.path) return;
+    const view = this.editors.viewOf(group);
+    const place = step.place;
+    if (place) {
+      const len = view.state.doc.length;
+      view.dispatch({
+        selection: { anchor: Math.min(place.anchor, len), head: Math.min(place.head, len) },
+        scrollIntoView: true,
+      });
+    }
+    view.focus();
   }
 
   /**

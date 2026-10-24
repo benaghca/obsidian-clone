@@ -58,12 +58,60 @@ export function parseViewEntry(entry: string): { type: ViewType; file: string | 
   return { type: type as ViewType, file: file || null };
 }
 
+/** A caret left behind with a history step. Absent means the step has no saved caret. */
+export interface CaretPlace {
+  anchor: number;
+  head: number;
+}
+
+/** Carets parallel to `back` and `forward`. Not saved: a restored session keeps the note, not the old caret. */
+const carets = new WeakMap<Tab, { back: (CaretPlace | undefined)[]; forward: (CaretPlace | undefined)[] }>();
+
+function caretLists(tab: Tab) {
+  let lists = carets.get(tab);
+  if (!lists) {
+    lists = { back: tab.back.map(() => undefined), forward: tab.forward.map(() => undefined) };
+    carets.set(tab, lists);
+  }
+  return lists;
+}
+
 /** The tab is about to show something else: what it shows now (if anything) goes on its back history. */
-export function pushBack(tab: Tab) {
+export function pushBack(tab: Tab, place?: CaretPlace) {
   const entry = tab.type ? viewEntry(tab) : tab.path;
   if (!entry) return;
+  const lists = caretLists(tab);
+  while (lists.back.length < tab.back.length) lists.back.push(undefined);
   tab.back.push(entry);
+  lists.back.push(place);
   tab.forward = [];
+  lists.forward = [];
+}
+
+/**
+ * One step of Back (`dir` -1) or Forward (1). The step's caret is the one
+ * saved when that note was left; `leaving` is the caret being left now.
+ */
+export function stepHistory(tab: Tab, dir: -1 | 1, leaving?: CaretPlace): { entry: string; place?: CaretPlace } | null {
+  const back = dir < 0;
+  const from = back ? tab.back : tab.forward;
+  const to = back ? tab.forward : tab.back;
+  const entry = from.at(-1);
+  if (!entry) return null;
+  const lists = caretLists(tab);
+  const fromPlaces = back ? lists.back : lists.forward;
+  const toPlaces = back ? lists.forward : lists.back;
+  // Carets line up with the end of the stack: a restored session has none on its older steps.
+  if (fromPlaces.length > from.length) fromPlaces.splice(0, fromPlaces.length - from.length);
+  while (fromPlaces.length < from.length) fromPlaces.unshift(undefined);
+  from.pop();
+  const place = fromPlaces.pop();
+  const current = tab.type ? viewEntry(tab) : tab.path;
+  if (current) {
+    to.push(current);
+    toPlaces.push(leaving);
+  }
+  return { entry, place };
 }
 
 let links = 0;
@@ -103,8 +151,25 @@ export function tabFollowsMove(tab: Tab, swap: (path: string) => string) {
 
 /** Files were deleted (`under` picks them): a tab showing one goes empty, and they leave its history. */
 export function tabForgets(tab: Tab, under: (path: string) => boolean) {
-  tab.back = tab.back.filter((p) => !under(p));
-  tab.forward = tab.forward.filter((p) => !under(p));
+  const lists = carets.get(tab);
+  const keep = (entries: string[], places?: (CaretPlace | undefined)[]) => {
+    const next: string[] = [];
+    const nextPlaces: (CaretPlace | undefined)[] = [];
+    entries.forEach((entry, i) => {
+      if (under(entry)) return;
+      next.push(entry);
+      nextPlaces.push(places?.[i]);
+    });
+    return { next, nextPlaces };
+  };
+  const back = keep(tab.back, lists?.back);
+  const forward = keep(tab.forward, lists?.forward);
+  tab.back = back.next;
+  tab.forward = forward.next;
+  if (lists) {
+    lists.back = back.nextPlaces;
+    lists.forward = forward.nextPlaces;
+  }
   if (tab.path && under(tab.path)) tab.path = null;
   if (tab.viewFile && under(tab.viewFile)) tab.viewFile = null;
 }

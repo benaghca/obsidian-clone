@@ -51,6 +51,7 @@ import { rememberVault } from "./shell/recentVaults";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
 import { fileName, noteName, parentDir, trimSlashes } from "./paths";
+import { tabTitle } from "./tabs";
 import { readStored, store } from "./storage";
 import { Workspace } from "./workspace";
 
@@ -64,7 +65,9 @@ ws.propertyHost = propertyIndex(ws).host;
 const parts = {
   ws,
   bookmarks,
-  openSettings: (section?: string) => openSettings(sections(), section),
+  openSettings: (section?: string) => openSettings(sections(), section, () => {
+    if (ws.active.path) ws.view.focus();
+  }),
   toggleBacklinksInDocument: () => ws.toggleBacklinks(),
   editorMenuAtCaret: () => {
     const view = ws.view;
@@ -447,7 +450,17 @@ const rememberWorkspace = () => {
   clearTimeout(workspaceTimer);
   if (restored && ws.vault.path) saveWorkspace(ws.vault.path, ws.saveLayout());
 };
+const tauriWindow = isTauri ? import("@tauri-apps/api/window").then(({ getCurrentWindow }) => getCurrentWindow()) : null;
+
+/** "Note - vault - Grove", for the browser tab and the Tauri window. */
+function syncTitle() {
+  const title = [tabTitle(ws.active), ws.vault.name, "Grove"].filter(Boolean).join(" - ");
+  document.title = title;
+  void tauriWindow?.then((win) => win.setTitle(title));
+}
+
 ws.on((change) => {
+  if (change === "show" || change === "tabs") syncTitle();
   if (!restored || (change !== "tabs" && change !== "layout" && change !== "mode")) return;
   clearTimeout(workspaceTimer);
   workspaceTimer = window.setTimeout(rememberWorkspace, 500);
@@ -465,6 +478,7 @@ await settings.load();
 bookmarks.load();
 if (popoutNote) await ws.open(popoutNote);
 else await restoreLayout();
+syncTitle();
 warmUpPromptGlyphs();
 
 async function restoreLayout() {
