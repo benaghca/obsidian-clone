@@ -12,7 +12,7 @@ export interface VaultLayout {
   fileSort: SortOrder;
 }
 
-const DEFAULTS: VaultLayout = { rightOpen: false, rightWidth: 260, rightView: "backlinks", fileSort: "alphabetical" };
+const DEFAULTS: VaultLayout = { rightOpen: false, rightWidth: 300, rightView: "backlinks", fileSort: "alphabetical" };
 const key = (vaultPath: string) => `grove.layout:${vaultPath}`;
 
 export function loadLayout(vaultPath: string): VaultLayout {
