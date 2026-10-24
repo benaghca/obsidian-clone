@@ -21,7 +21,7 @@ await withBrowser(async({run,send,open,click,move,point,press,double,check,shot}
   check(await text(path)===target,mode+': heading acceptance leaves the target byte-identical');
   for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...headingPoint,button:'left',clickCount:1});
   check(await run(()=>ws.view.state.doc.toString().match(/\[\[/g).length===1),mode+': stationary repeat does not insert a second link');
-  await prepare(mode,'[[#');check(JSON.stringify(await labels())==='["Local heading"]',mode+': [[# lists only current-note headings');await press('ArrowDown');await accept();check(await run(()=>ws.view.state.doc.toString().endsWith('[[#Local heading]]')),mode+': current-note heading uses an empty file path');
+  await prepare(mode,'[[#');check(JSON.stringify(await labels())==='["Local heading"]',mode+': [[# lists only current-note headings');await sleep(150);await press('ArrowDown');await accept();check(await run(()=>ws.view.state.doc.toString().endsWith('[[#Local heading]]')),mode+': current-note heading uses an empty file path');
   await prepare(mode,`[[${name}#Fnl`);check((await labels())[0]==='Final heading',mode+': heading query uses fuzzy matching');await press('Escape');
   await prepare(mode,`[[${name}^Paragraph`);check((await labels())[0]==='Paragraph one spans\ntwo lines.',mode+': block labels show Markdown text across source lines');await accept();
   const changed=await text(path),id=/two lines\. \^([a-z0-9]{6})/.exec(changed)?.[1];
@@ -40,7 +40,7 @@ await withBrowser(async({run,send,open,click,move,point,press,double,check,shot}
  }
  await run(async()=>{const{settings}=await import('/src/settings/store.ts');settings.set('app.json','useMarkdownLinks',true);settings.set('app.json','newLinkFormat','relative');});
  await prepare('live','[[Target-live#Final');await accept();check(await run(()=>ws.view.state.doc.toString().endsWith('[Target-live](Target-live.md#Final%20heading)')),'Heading completion honors Markdown link and relative-path settings');
- await prepare('live','[[#Local');await press('ArrowDown');await accept();check(await run(()=>ws.view.state.doc.toString().endsWith('[Local heading](#Local%20heading)')),'Markdown current-note headings omit the file destination');
+ await prepare('live','[[#Local');await sleep(150);await press('ArrowDown');await accept();check(await run(()=>ws.view.state.doc.toString().endsWith('[Local heading](#Local%20heading)')),'Markdown current-note headings omit the file destination');
  await run(async()=>{const{settings}=await import('/src/settings/store.ts');settings.set('app.json','useMarkdownLinks',false);settings.set('app.json','newLinkFormat','shortest');});
  await prepare('live','[[Target-live^Item two');
  await run(()=>{const path='Target-live.md';ws.editors.change(path,{changes:{from:ws.editors.doc(path).length,insert:'\nChanged externally.'},userEvent:'input'});});
