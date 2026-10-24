@@ -144,7 +144,7 @@
 .canvas-node-connection-point[data-side="left"] { left: 0; top: 50%; }
 .canvas-node-connection-point::after, .canvas-edge-end::after { content: ""; position: absolute; inset: 0; border: 3px solid var(--background-modifier-border); border-radius: 50%; background: var(--interactive-accent); opacity: 0; }
 .canvas-node-connection-point:hover::after, .canvas-edge-end:hover::after { opacity: 1; }
-.canvas-edge-hit { pointer-events: stroke; stroke-width: 24; stroke-opacity: 0; cursor: pointer; }
+.canvas-edge-hit { pointer-events: stroke; stroke-width: calc(24px * var(--canvas-inverse-scale, 1)); stroke-opacity: 0; cursor: pointer; }
 .canvas-edge-hit.is-selected { stroke-opacity: .12; }
 .canvas-edge.is-selected { stroke-width: 5.5; }
 .canvas-edge-end { display: none; cursor: grab; z-index: 3; }
