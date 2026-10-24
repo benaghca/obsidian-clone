@@ -9,12 +9,15 @@
 
 import { api, type FileEntry } from "./api";
 import { isolateHistory } from "@codemirror/commands";
+import type { EditorView } from "@codemirror/view";
+import { attachmentPaths, embedFor } from "./editor/attachments";
 import { editorHost, type EditorHost, type EmbedHost } from "./editor/host";
 import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { noteName } from "./paths";
+import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
 import { recentNotes } from "./shell/switcherItems";
 
@@ -65,7 +68,55 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
     properties: () => ws.propertyHost,
     linkExists: (target, view) => ws.vault.linkExists(target, ws.editors.pathOf(view)),
     embeds: createEmbedHost(ws),
+    saveAttachments: (view, files, at) => saveAttachments(ws, view, files, at),
   };
+}
+
+const ATTACHMENT_MAX = 20 * 1024 * 1024;
+
+/** Write each file, refresh the file list, then insert the embeds as one paste. */
+async function saveAttachments(ws: Workspace, view: EditorView, files: File[], at?: number | null): Promise<boolean> {
+  if (view.state.readOnly) return true;
+  const from = ws.editors.pathOf(view);
+  if (!from || !files.length) return true;
+  const sel = view.state.selection.main;
+  const insertAt = at ?? sel.from;
+  const replaceTo = at == null ? sel.to : insertAt;
+  const incoming: { name: string; type: string; bytes: Uint8Array }[] = [];
+  for (const file of files) {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (bytes.byteLength > ATTACHMENT_MAX) {
+      console.warn("Grove skipped an attachment over 20 MB", file.name);
+      continue;
+    }
+    incoming.push({ name: file.name, type: file.type, bytes });
+  }
+  if (!incoming.length) return true;
+  const paths = attachmentPaths(from, settings.get("app.json").attachmentFolderPath, incoming, ws.vault.files.map((f) => f.path));
+  const saved: string[] = [];
+  for (let i = 0; i < incoming.length; i++) {
+    try {
+      await api.writeFileBytes(paths[i], incoming[i].bytes);
+      saved.push(paths[i]);
+    } catch (err) {
+      console.warn("Grove could not save an attachment", paths[i], err);
+    }
+  }
+  if (!saved.length) return true;
+  await ws.vault.refreshFiles();
+  const notes = ws.vault.files.filter((f) => !f.is_dir);
+  const text = saved.map((path) => embedFor(path, from, notes, ws.linkStyle())).join(view.state.lineBreak);
+  const doc = view.state.doc.length;
+  const fromPos = Math.min(insertAt, doc);
+  const toPos = Math.min(Math.max(replaceTo, fromPos), doc);
+  view.dispatch({
+    changes: { from: fromPos, to: toPos, insert: text },
+    selection: { anchor: fromPos + text.length },
+    userEvent: "input.paste",
+    scrollIntoView: true,
+    annotations: isolateHistory.of("full"),
+  });
+  return true;
 }
 
 function createEmbedHost(ws: Workspace): EmbedHost {

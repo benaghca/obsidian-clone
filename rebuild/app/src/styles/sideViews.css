@@ -1,5 +1,9 @@
 /* The right sidebar's views: outline, backlinks, outgoing links and tags. */
 
+.backlinks-tab {
+  display: flex;
+  flex-direction: column;
+}
 .outline-view,
 .backlink-pane {
   flex: 1;

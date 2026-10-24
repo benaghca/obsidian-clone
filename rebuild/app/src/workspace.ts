@@ -563,7 +563,7 @@ export class Workspace {
     const active = this.activeGroup.active;
     const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab" || !!active.path || !!active.type);
     tab.type = type;
-    tab.viewFile = type === "localgraph" ? file : undefined;
+    tab.viewFile = type === "localgraph" || type === "backlinks" ? file : undefined;
     this.show(group, tab, layoutChanged);
   }
 

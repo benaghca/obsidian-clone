@@ -11,6 +11,7 @@ fn main() {
             "read_note",
             "read_file_bytes",
             "write_note",
+            "write_file_bytes",
             "create_note",
             "create_folder",
             "rename_path",

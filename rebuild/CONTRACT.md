@@ -17,6 +17,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - `read_note(path: String) -> String`
 - `read_file_bytes(path: String) -> bytes` — an image file's raw bytes (a `tauri::ipc::Response`, so the page gets an `ArrayBuffer`), for `![[embeds]]`. The same path checks as `read_note` (vault-relative, no `..`, no symlink out of the vault, nothing in `.grove/`, `.obsidian/` or the other hidden folders), only `png`, `jpg`, `jpeg`, `gif`, `webp`, `svg`, `bmp`, `avif` (any case), at most 20 MB. Permission `allow-read-file-bytes` in the default capability. The front end shows the bytes through a `blob:` URL it revokes when no embed shows it (the CSP already allows `img-src blob:`); Tauri's asset protocol stays off. Added in round 12.
 - `write_note(path: String, content: String) -> ()` — atomic write (temp file + rename). Front end debounces saves ~300ms. Other windows (a note's own window) get a `vault-changed` `modify` for it; the window that saved does not. Changed in round 9.
+- `write_file_bytes(path: String, bytes: number[]) -> FileEntry` — a new attachment (a pasted image or a dropped file). The same path checks as `write_note` (vault-relative, no `..`, no symlink out of the vault, nothing in `.grove/`, `.obsidian/`, `.git` or `.trash`). Fails if anything already exists at `path` (the caller picks a free name) or if `bytes` is over 20 MB. Any extension, including none; empty is allowed. Parents are created. The bytes are a JSON array of numbers (an attachment, not a hot path). Other windows get a `vault-changed` `create`; the window that saved does not. Permission `allow-write-file-bytes`. Added in round 27.
 - `create_note(path: String, content: String) -> FileEntry`
 - `create_folder(path: String) -> FileEntry` — creates an empty folder (the file explorer's "New folder"); errors if anything already exists at `path`. Added in round 4.
 - `rename_path(from: String, to: String) -> ()` — and returns nothing; front end updates links itself later.
@@ -36,7 +37,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - `open_note_window(note: String) -> ()` — "Open in new window": a window of its own (label `note-<n>`, the main window's settings, navigation guard and capability) on `index.html?note=<note>`. `note` is the vault path, percent-encoded in full (only `A-Za-z0-9%-._~`); anything else is refused. Added in round 9.
 
 ## Events (backend emits)
-- `vault-changed` payload `{ kind: "create"|"modify"|"remove"|"rename", paths: string[] }` from a debounced (~100ms) file watcher. Ignore changes caused by our own `write_note` within 500ms.
+- `vault-changed` payload `{ kind: "create"|"modify"|"remove"|"rename", paths: string[] }` from a debounced (~100ms) file watcher. Ignore changes caused by our own `write_note` or `write_file_bytes` within 500ms.
 
 ## Feel/performance bar
 - Typing never lags on a 5,000+ line note; note switching feels instant (<50ms); popups open instantly.

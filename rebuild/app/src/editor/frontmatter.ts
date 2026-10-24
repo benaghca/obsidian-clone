@@ -399,3 +399,34 @@ export function addLines(fm: Frontmatter | null, lines: string): Change {
 
 /** Replace a property's lines with lines of YAML (a pasted property of the same name). */
 export const replaceLines = (fm: Frontmatter, p: Property, lines: string): Change => ({ from: fm.starts[p.line], to: lastLineEnd(fm, p), insert: lines });
+
+/**
+ * "Add alias" where the Properties block isn't shown: a blank list item, with
+ * the caret after `  - `. Null when the frontmatter can't be edited safely.
+ */
+export function aliasEdit(doc: Text): (Change & { caret: number }) | null {
+  const fm = readFrontmatter(doc);
+  if (fm && !fm.props) return null;
+  const existing = fm?.props?.find((p) => p.key === "aliases");
+  if (existing && fm) {
+    if (!Array.isArray(existing.value)) return null;
+    const start = fm.starts[existing.line];
+    const last = existing.line + existing.count - 1;
+    const end = fm.starts[last] + fm.lines[last].length;
+    const body = fm.lines.slice(existing.line + 1, last + 1);
+    const block = existing.count > 1 && body.every((l) => /^ *- /.test(l) || !l.trim());
+    if (block) {
+      const insert = "\n  - ";
+      return { from: end, to: end, insert, caret: end + insert.length };
+    }
+    const items = existing.value.filter((v) => v !== "");
+    const insert = ["aliases:", ...items.map((v) => `  - ${yamlString(v)}`), "  - "].join("\n");
+    return { from: start, to: end, insert, caret: start + insert.length };
+  }
+  const lines = "aliases:\n  - ";
+  if (!fm) {
+    const insert = `---\n${lines}\n---\n`;
+    return { from: 0, to: 0, insert, caret: 4 + lines.length };
+  }
+  return { from: fm.closeFrom, to: fm.closeFrom, insert: `${lines}\n`, caret: fm.closeFrom + lines.length };
+}

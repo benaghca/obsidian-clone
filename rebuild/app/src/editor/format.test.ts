@@ -9,8 +9,10 @@ import {
   backspaceList,
   insertBlock,
   indentList,
+  insertEmbed,
   insertFootnote,
   insertMarkdownLink,
+  insertTag,
   insertWikilink,
   markdownHome,
   setLineKind,
@@ -137,6 +139,11 @@ test("links: markdown link around the selection, wikilink with the caret inside"
   expect(run(insertMarkdownLink, "see «https://x.org» now")).toBe("see [|](https://x.org) now");
   expect(run(insertWikilink, "go |")).toBe("go [[|]]");
   expect(run(insertWikilink, "go «Note»")).toBe("go [[Note]]|");
+  expect(run(insertEmbed, "go |")).toBe("go ![[|]]");
+  expect(run(insertEmbed, "go «Note»")).toBe("go ![[Note]]|");
+  expect(run(insertTag, "go |")).toBe("go #|");
+  expect(run(insertTag, "go «topic»")).toBe("go #topic|");
+  expect(run(insertTag, "go «#topic»")).toBe("go #topic|");
 });
 
 test("Enter on an empty list item ends the list without a blank line (Obsidian)", () => {

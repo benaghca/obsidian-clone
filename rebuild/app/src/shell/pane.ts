@@ -416,7 +416,8 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       shownCrumb = crumb;
       breadcrumb.replaceChildren();
       if (tab.type && tab.type !== "canvas") {
-        breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "image" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph"));
+        const title = tab.type === "image" || tab.type === "backlinks" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph";
+        breadcrumb.append(h("span", { class: "view-header-title" }, title));
         return;
       }
       if (!path) return;
@@ -492,8 +493,10 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         if (canvas) { leaf.append(canvas.el); canvas.el.focus({ preventScroll: true }); }
       }
       const graph = tab.type === "graph" || tab.type === "localgraph" ? graphFor(tab) : null;
-      scroller.hidden = !path || !!graph;
-      empty.hidden = !!path || !!graph || !!image || !!board;
+      const links = tab.type === "backlinks" ? (tab.viewFile ?? null) : undefined;
+      showBacklinksTab(links);
+      scroller.hidden = !path || !!graph || links !== undefined;
+      empty.hidden = !!path || !!graph || !!image || !!board || links !== undefined;
       imageView.hidden = !image;
       renderImage(image);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
@@ -510,6 +513,34 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       renderHeader();
       renderView();
       if (empty.hidden === false) renderEmpty();
+    }
+
+    // A backlinks tab is pinned to the note it was opened for, unlike the sidebar.
+    let linksTab: SideView | null = null;
+    let linksBox: HTMLElement | null = null;
+    let linksFile: string | null = null;
+    let linksOn = false;
+    function showBacklinksTab(file: string | null | undefined) {
+      if (file === undefined) {
+        linksOn = false;
+        if (linksBox) linksBox.hidden = true;
+        linksTab?.setActive(false);
+        return;
+      }
+      if (!linksTab) {
+        linksTab = createBacklinksView(ws, () => linksFile);
+        linksBox = h("div", { class: "view-content backlinks-tab" }, linksTab.el);
+        leaf.append(linksBox);
+      }
+      linksBox!.hidden = false;
+      const changed = !linksOn || linksFile !== file;
+      linksOn = true;
+      linksFile = file;
+      if (!changed) linksTab.setActive(true);
+      else {
+        linksTab.setActive(false);
+        linksTab.setActive(true);
+      }
     }
 
     // Backlinks under the note (Obsidian's "Backlinks in document"): built
@@ -667,6 +698,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         fieldError(title, "");
         hold?.cancel();
         backlinks?.setActive(false);
+        linksTab?.setActive(false);
         renderImage(null);
         canvas?.dispose();
         el.remove();

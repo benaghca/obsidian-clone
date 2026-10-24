@@ -100,6 +100,8 @@ export const api = {
   /** An image file's bytes (vault images only, at most 20 MB), for an embed. */
   readFileBytes: (path: string) => call<ArrayBuffer>("read_file_bytes", { path }),
   writeNote: (path: string, content: string) => call<void>("write_note", { path, content }),
+  /** A new attachment. `bytes` is a JSON array of numbers (at most 20 MB). Fails if `path` exists. */
+  writeFileBytes: (path: string, bytes: Uint8Array) => call<FileEntry>("write_file_bytes", { path, bytes: Array.from(bytes) }),
   createNote: (path: string, content: string) => call<FileEntry>("create_note", { path, content }),
   createFolder: (path: string) => call<FileEntry>("create_folder", { path }),
   renamePath: (from: string, to: string) => call<void>("rename_path", { from, to }),

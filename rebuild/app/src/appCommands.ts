@@ -15,8 +15,8 @@ import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { copyNote, createNote, deleteFile, newCanvas, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
-import { addLines, frontmatterField } from "./editor/frontmatter";
-import { openNewProperty } from "./editor/properties";
+import { addLines, aliasEdit, frontmatterField } from "./editor/frontmatter";
+import { openAlias, openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
   clearFormatting,
@@ -24,8 +24,10 @@ import {
   type HighlightColor,
   insertBlock,
   indentList,
+  insertEmbed,
   insertFootnote,
   insertMarkdownLink,
+  insertTag,
   insertText,
   insertWikilink,
   type LineKind,
@@ -407,6 +409,8 @@ export function registerAppCommands(parts: AppParts) {
     { id: "bookmarks:open", name: "Bookmarks: Show bookmarks",
       plugin: "bookmarks", icon: "bookmark", run: () => showLeft("bookmarks") },
     { id: "backlink:open", name: "Backlinks: Show backlinks", plugin: "backlink", icon: "link", run: () => showRight("backlinks") },
+    pluginAction("backlink", "backlink:open-backlinks", "Backlinks: Open backlinks for the current note", "link",
+      () => ws.openView("backlinks", "tab", note()), hasNote),
     pluginAction("backlink", "backlink:toggle-backlinks-in-document", "Backlinks: Toggle backlinks in document", "link",
       () => parts.toggleBacklinksInDocument(), hasNote),
     { id: "outgoing-links:open", name: "Outgoing links: Show outgoing links", plugin: "outgoing-link", icon: "link-2", run: () => showRight("outgoing") },
@@ -446,6 +450,16 @@ export function registerAppCommands(parts: AppParts) {
         if (empty) startCompletion(ws.view);
       },
     },
+    {
+      ...editorCommand("editor:insert-embed", "Add embed", "link", insertEmbed),
+      run: () => {
+        const empty = ws.view.state.selection.main.empty;
+        insertEmbed(ws.view);
+        ws.view.focus();
+        if (empty) startCompletion(ws.view);
+      },
+    },
+    editorCommand("editor:insert-tag", "Add tag", "tags", insertTag),
     lineKind("editor:toggle-bullet-list", "Toggle bullet list", "list", "bullet"),
     lineKind("editor:toggle-numbered-list", "Toggle numbered list", "list-ordered", "numbered"),
     lineKind("editor:toggle-task-list", "Toggle task list", "list-checks", "task"),
@@ -473,6 +487,13 @@ export function registerAppCommands(parts: AppParts) {
         addProperty(ws.view);
         ws.view.focus();
       }, (focus) => hasNote() && (!typingElsewhere(focus) || ws.view.dom.contains(focus === undefined ? document.activeElement : focus)), mod(";")),
+    conditionalAction("editor:add-alias", "Add alias", "forward", () => {
+        if (openAlias(ws.view)) return;
+        const edit = aliasEdit(ws.view.state.doc);
+        if (!edit) return;
+        ws.view.dispatch({ changes: edit, selection: { anchor: edit.caret }, scrollIntoView: true, userEvent: "input" });
+        ws.view.focus();
+      }, (focus) => hasNote() && (!typingElsewhere(focus) || ws.view.dom.contains(focus === undefined ? document.activeElement : focus))),
     {
       ...editorCommand("editor:toggle-fold", "Toggle fold on the current line", "chevrons-down-up", (v) => toggleFoldAt(v, lineAtCaret())),
       when: (focus) => canEdit(focus) && (app().foldHeading || app().foldIndent),

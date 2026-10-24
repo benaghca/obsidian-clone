@@ -17,6 +17,9 @@ describe("tabs", () => {
     expect(tabTitle(blank())).toBe("New tab");
     expect(parseViewEntry(viewEntry({ type: "image", viewFile: "pics/a.png" }))).toEqual({ type: "image", file: "pics/a.png" });
     expect(tabTitle({ ...blank(), type: "image", viewFile: "pics/a.png" })).toBe("a");
+    expect(tabTitle({ ...blank(), type: "backlinks", viewFile: "Folder/B.md" })).toBe("Backlinks for B");
+    expect(loadTab(saveTab({ ...blank(), type: "backlinks", viewFile: "A.md" }), blank, isNote)).toMatchObject({ type: "backlinks", path: null, viewFile: "A.md" });
+    expect(loadTab(saveTab({ ...blank(), type: "backlinks", viewFile: "Gone.md" }), blank, isNote)).toMatchObject({ type: "backlinks", viewFile: null });
   });
 
   it("history keeps what a tab showed, and follows files that move or go", () => {
