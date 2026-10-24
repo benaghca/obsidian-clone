@@ -158,9 +158,8 @@ function linkFooter(): HTMLElement {
   const parts: [string, string][] = [["#", "to link heading"], ["^", "to link blocks"], ["|", "to change display text"]];
   parts.forEach(([key, rest], i) => {
     if (i) footer.append(document.createTextNode("   "));
-    footer.append(document.createTextNode("Type "));
     const mark = document.createElement("b");
-    mark.textContent = key;
+    mark.textContent = `Type ${key}`;
     footer.append(mark, document.createTextNode(` ${rest}`));
   });
   return footer;
@@ -182,7 +181,9 @@ function currentNoteHeadings(state: EditorState): boolean {
   return !!query && query.startsWith("#") && !query.startsWith("#^");
 }
 
-/** Anchor the popup at the character after `[[`, add the footer, and leave `[[#` with nothing picked. */
+interface SuggestPlace { tip: HTMLElement; subpath: boolean; dx: number | null; retried: boolean }
+
+/** Anchor the popup at the character after `[[`, keep the footer last, and leave `[[#` with nothing picked. */
 const linkSuggestLayout = ViewPlugin.fromClass(class {
   private primed = "";
   update(update: ViewUpdate) {
@@ -198,28 +199,36 @@ const linkSuggestLayout = ViewPlugin.fromClass(class {
         if (same && selectedCompletionIndex(view.state) == null) view.dispatch({ effects: setSelectedCompletion(0) });
       });
     }
-    view.requestMeasure({
-      read() {
-        const tip = view.dom.querySelector(".cm-tooltip.cm-link-suggest") as HTMLElement | null;
-        const open = bracketQuery(view.state);
-        if (!tip || open == null) return null;
-        const head = view.state.selection.main.head;
-        const pos = head - open.length - 2;
-        const coords = view.coordsAtPos(Math.min(view.state.doc.length, pos + 2)) ?? view.coordsAtPos(pos);
-        if (!coords) return null;
-        const rect = tip.getBoundingClientRect();
-        const shift = new DOMMatrix(getComputedStyle(tip).transform).m41;
-        return { tip, dx: coords.left - (rect.left - shift), subpath: /[#^]/.test(open) };
-      },
-      write(data) {
-        if (!data) return;
-        data.tip.style.transform = `translateX(${data.dx}px)`;
-        data.tip.classList.toggle("cm-link-subpath", data.subpath);
-        const footer = data.tip.querySelector(".cm-link-suggest-footer");
-        if (data.subpath) footer?.remove();
-        else if (!footer) data.tip.append(linkFooter());
-      },
-    });
+    const read = (retried: boolean): SuggestPlace | null => {
+      const tip = view.dom.querySelector(".cm-tooltip.cm-link-suggest") as HTMLElement | null;
+      const open = bracketQuery(view.state);
+      if (!tip || open == null) return null;
+      const subpath = /[#^]/.test(open);
+      // CodeMirror parks a new tooltip at top -10000 until its own measure sets `left`.
+      // Reading then makes dx equal the caret x, and the later `left` doubles it.
+      if (tip.style.top === "-10000px") return { tip, subpath, dx: null, retried };
+      const head = view.state.selection.main.head;
+      const pos = head - open.length - 2;
+      const coords = view.coordsAtPos(Math.min(view.state.doc.length, pos + 2)) ?? view.coordsAtPos(pos);
+      if (!coords) return { tip, subpath, dx: null, retried };
+      const rect = tip.getBoundingClientRect();
+      const shift = new DOMMatrix(getComputedStyle(tip).transform).m41;
+      return { tip, subpath, dx: coords.left - (rect.left - shift), retried };
+    };
+    const write = (data: SuggestPlace | null) => {
+      if (!data) return;
+      data.tip.classList.toggle("cm-link-subpath", data.subpath);
+      const footer = data.tip.querySelector(".cm-link-suggest-footer");
+      if (data.subpath) footer?.remove();
+      // The list is rebuilt after the footer on the next key, so append moves it back to the end.
+      else data.tip.append(footer ?? linkFooter());
+      if (data.dx == null) {
+        if (!data.retried) view.requestMeasure({ read: () => read(true), write });
+        return;
+      }
+      data.tip.style.transform = `translateX(${data.dx}px)`;
+    };
+    view.requestMeasure({ read: () => read(false), write });
   }
 });
 

@@ -232,7 +232,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   });
   console.log(`MEASURE [[Zep box x=${alias.boxX.toFixed(1)} w=${alias.w.toFixed(1)} alias h=${alias.h.toFixed(1)} footer ${JSON.stringify(alias.footer)}`);
   check(alias.selected && alias.arrow && Math.abs(alias.h - 47.1) < 3, `an alias row is preselected, about 47px, with a corner arrow (${alias.h.toFixed(1)})`);
-  check(!alias.footer.includes('·') && alias.bolds.join('') === '#^|' && alias.footer.includes('to link heading') && alias.footer.includes('to change display text'), `the footer names the keys in bold without dots (${alias.footer})`);
+  check(!alias.footer.includes('·') && alias.bolds.join('|') === 'Type #|Type ^|Type |' && alias.footer.includes('to link heading') && alias.footer.includes('to change display text'), `the footer bolds each Type command without dots (${alias.footer})`);
   check(alias.w > 300 && alias.w < 500 && alias.boxX >= alias.bracketX - 1 && alias.boxX - alias.bracketX < 18 && alias.labelX > alias.bracketX, `the alias popup is content-sized and anchored just after [[ (${alias.w.toFixed(1)}, Δ${(alias.boxX - alias.bracketX).toFixed(1)})`);
   await press('Escape');
 
