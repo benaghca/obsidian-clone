@@ -86,7 +86,8 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         dirty = false;
         if (reload) { reload = false; source = await api.readNote(path); model = baseModel(source); }
         const properties = await index.notes();
-        const tags = /file\.(?:tags|hasTag)/.test(source) ? await vaultTags(ws).read() : new Map<string, string[]>();
+        const needsTags = /file\.(?:tags|hasTag)/.test(source);
+        const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
         if (gone || dirty) continue;
         types = new Map();
         for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) types.set(p.key, index.host.typeOf(p.key) ?? p.type);
@@ -95,7 +96,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
           const props = properties.get(file.path)?.props ?? [];
           let allTags = tags.get(file.path) ?? props.filter(p => p.type === "tags").flatMap(p => Array.isArray(p.value) ? p.value : [String(p.value)]);
           // Loaded notes include unsaved tags, using the same fenced-code-aware reader as the Tags view.
-          if (tags.size && ws.editors.isLoaded(file.path)) {
+          if (needsTags && ws.editors.isLoaded(file.path)) {
             allTags = tagsInText(ws.editors.doc(file.path)!.toString());
           }
           return { file, props, tags: allTags, hasLink: link => {
