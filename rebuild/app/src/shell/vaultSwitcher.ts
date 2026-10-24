@@ -1,8 +1,9 @@
 // The vault name at the bottom of the left sidebar. A click opens the recent
-// vaults, "Open another vault..." and "Create new vault...". There is no
-// native folder dialog: the path is typed into the same instant prompt the
-// rest of the app uses, then the existing open_vault command (or create_vault
-// for a new folder). The window reloads so every view follows the new vault.
+// vaults and "Manage vaults...". That item opens the same open/create choices.
+// There is no native folder dialog: the path is typed into the same instant
+// prompt the rest of the app uses, then the existing open_vault command (or
+// create_vault for a new folder). The window reloads so every view follows
+// the new vault.
 
 import { api } from "../api";
 import type { Workspace } from "../workspace";
@@ -22,7 +23,7 @@ export function mountVaultSwitcher(ws: Workspace) {
       "aria-label": "Manage vaults",
       onclick: () => openMenu(ws, button),
     },
-    icon("vault", 16),
+    icon("chevrons-up-down", 16),
     name,
   );
 
@@ -50,10 +51,20 @@ function openMenu(ws: Workspace, anchor: HTMLElement) {
       },
     })),
     SEPARATOR,
-    { title: "Open another vault...", action: () => askPath("Folder to open", "to open", (path) => void useVault(path, false)) },
-    { title: "Create new vault...", action: () => askPath("Folder for the new vault", "to create", (path) => void useVault(path, true)) },
+    { title: "Manage vaults...", icon: "vault", action: () => showManage(anchor) },
   ];
   showMenu(items, anchor);
+}
+
+/** Open and create, the same path prompt the rest of the app uses. */
+function showManage(anchor: HTMLElement) {
+  showMenu(
+    [
+      { title: "Open another vault...", action: () => askPath("Folder to open", "to open", (path) => void useVault(path, false)) },
+      { title: "Create new vault...", action: () => askPath("Folder for the new vault", "to create", (path) => void useVault(path, true)) },
+    ],
+    anchor,
+  );
 }
 
 /** A path prompt. Enter on the typed path runs `go`. Nothing animates. */

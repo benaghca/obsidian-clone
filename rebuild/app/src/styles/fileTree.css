@@ -109,8 +109,9 @@
   flex: none;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 4px;
-  padding: 6px 8px 6px 12px;
+  padding: 8px;
   border-top: 1px solid var(--background-modifier-border);
 }
 .vault-switcher {
@@ -118,8 +119,8 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 2px 6px;
+  gap: 8px;
+  padding: 4px 8px;
   border-radius: var(--radius-s);
   color: var(--text-normal);
   cursor: var(--cursor, default);
@@ -129,17 +130,27 @@
   background: var(--background-modifier-hover);
 }
 .vault-switcher > .svg-icon {
-  width: 16px;
-  height: 16px;
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
   flex: none;
-  color: var(--icon-color);
+  color: var(--text-faint);
+}
+.vault-switcher:hover > .svg-icon,
+.vault-switcher.has-active-menu > .svg-icon {
+  color: var(--text-muted);
 }
 .workspace-drawer-vault-name {
   flex: 1;
   min-width: 0;
-  font-weight: 600;
+  font-size: var(--font-ui-small);
+  font-weight: 500;
   color: var(--text-normal);
   white-space: nowrap;
+}
+.workspace-drawer-vault-actions {
+  display: flex;
+  align-items: center;
+  flex: none;
 }
 .pane-empty {
   padding: 16px;

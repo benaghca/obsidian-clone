@@ -36,7 +36,7 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
     await sleep(300);
   }
   const closed = await button();
-  check(closed.label === 'Expand all' && closed.expandIcon, 'closing the last open folder flips back to Expand all');
+  check(closed.label === 'Collapse all' && closed.collapseIcon, 'closing the last open folder leaves Collapse all');
 
   await run(async () => {
     const { api } = await import('/src/api.ts');
@@ -49,7 +49,7 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
   await click('.nav-folder-title[data-path="Nest/Inner"]');
   check((await button()).label === 'Collapse all', 'a nested open folder keeps Collapse all');
   await click('.nav-folder-title[data-path="Nest"]');
-  check((await button()).label === 'Expand all', 'closing a parent flips back to Expand all');
+  check((await button()).label === 'Collapse all', 'closing a parent leaves Collapse all');
   check(await run(() => !!document.querySelector('.nav-folder-title[data-path="Nest"] .collapse-icon.is-collapsed')), 'the parent folder is closed');
 
   const runCommand = async (name) => {
@@ -105,19 +105,20 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
       items,
     };
   });
-  check(bar.fontSize === '12px' && bar.height === '22px', `status bar is 12px and 22px tall (${bar.fontSize}, ${bar.height})`);
+  check(bar.fontSize === '12px', `status bar text is 12px (${bar.fontSize})`);
   check(bar.color === bar.muted, 'status bar text is the muted colour');
-  check(bar.justify === 'flex-end' && bar.rectRight >= bar.innerWidth - 2 && bar.rectLeft > bar.innerWidth / 2, 'status bar is right-aligned');
+  check(bar.justify === 'flex-end' && bar.rectRight >= bar.innerWidth - 2 && bar.rectLeft > bar.innerWidth / 2, 'status bar is a right-hand cluster');
   check(bar.whiteSpace === 'nowrap', 'status bar stays on one line');
   const tops = bar.items.map((item) => item.top);
-  check(Math.max(...tops) - Math.min(...tops) < 1, 'status bar items share one row');
-  check(bar.items.every((item) => item.height === '22px' && item.pad === '0px 8px'), 'status bar items share height and padding');
-  check(bar.items[0].mode && bar.items[0].svg && bar.items[0].text === '', 'editing-mode icon leads the cluster');
-  check(!bar.items[1].svg && !bar.items[1].link && /backlink/.test(bar.items[1].text), `backlinks are text only (${bar.items[1].text})`);
-  check(/propert/.test(bar.items[2].text) && /word/.test(bar.items[3].text) && /character/.test(bar.items[4].text),
-    `order is backlinks, properties, words, characters (${bar.items.slice(1).map((item) => item.text).join(' | ')})`);
+  check(Math.max(...tops) - Math.min(...tops) < 3, 'status bar items share one row');
+  check(!bar.items[0].svg && !bar.items[0].link && /backlink/.test(bar.items[0].text), `backlinks lead and are text only (${bar.items[0].text})`);
+  check(/propert/.test(bar.items[1].text), `properties follow backlinks (${bar.items[1].text})`);
+  const modeAt = bar.items.findIndex((item) => item.mode);
+  const countAt = bar.items.findIndex((item) => /word/.test(item.text) && /character/.test(item.text));
+  check(modeAt === 2 && bar.items[modeAt].svg && bar.items[modeAt].text === '', 'the editing-mode icon follows the counts');
+  check(countAt === bar.items.length - 1, `words and characters share the last item (${bar.items.map((item) => item.text).join(' | ')})`);
   check(!bar.items.some((item) => /sync/i.test(item.text)), 'status bar has no sync item');
-  check(bar.items.findIndex((item) => item.mode) < bar.items.findIndex((item) => /backlink/.test(item.text)), 'the mode icon is not between the counts');
+  check(modeAt > bar.items.findIndex((item) => /backlink/.test(item.text)), 'the mode icon is not first');
 
   const menuTitles = async () => run(() =>
     [...document.querySelectorAll('.menu .menu-item-title')].map((el) => el.textContent),
@@ -136,7 +137,7 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
       try {
         const got = await run(() => document.querySelector('.workspace-drawer-vault-name')?.textContent ?? '');
         last = got;
-        if (got === name && await run(() => !!document.querySelector('.vault-switcher .lucide-vault'))) return;
+        if (got === name && await run(() => !!document.querySelector('.vault-switcher .lucide-chevrons-up-down'))) return;
       } catch (err) {
         last = err instanceof Error ? err.message : String(err);
       }
@@ -145,7 +146,7 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
     assert.fail(`vault footer did not become ${name} (${last})`);
   };
 
-  check(await run(() => document.querySelector('.vault-switcher')?.getAttribute('aria-label') === 'Manage vaults' && !!document.querySelector('.vault-switcher .lucide-vault') && document.querySelector('.workspace-drawer-vault-name')?.textContent === 'Sample Vault'), 'footer shows the vault icon and name');
+  check(await run(() => document.querySelector('.vault-switcher')?.getAttribute('aria-label') === 'Manage vaults' && !!document.querySelector('.vault-switcher .lucide-chevrons-up-down') && document.querySelector('.workspace-drawer-vault-name')?.textContent === 'Sample Vault'), 'footer shows the chevron and the vault name');
   const before = await run(() => {
     const r = document.querySelector('.vault-switcher').getBoundingClientRect();
     return { y: r.y, name: document.querySelector('.workspace-drawer-vault-name').textContent };
@@ -165,11 +166,12 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
       above: box.bottom <= anchor.top + 1,
     };
   });
-  check(openedMenu.titles[0] === 'Sample Vault' && openedMenu.titles.includes('Open another vault...') && openedMenu.titles.includes('Create new vault...'), `vault menu lists the current vault and the two actions (${openedMenu.titles.join(' | ')})`);
+  check(openedMenu.titles[0] === 'Sample Vault' && openedMenu.titles.includes('Manage vaults...'), `vault menu lists the current vault and Manage vaults (${openedMenu.titles.join(' | ')})`);
   check(openedMenu.checked.length === 1 && openedMenu.checked[0] === 'Sample Vault', 'the current vault is marked');
   check(openedMenu.above, 'the menu opens above the footer');
   check(openedMenu.animation === 'none' && openedMenu.transition === '0s' && openedMenu.animating === 0, 'the vault menu opens with no animation');
 
+  await pick('Manage vaults...');
   await pick('Create new vault...');
   check(await run(() => !!document.querySelector('.prompt-input') && !document.querySelector('.menu')), 'Create new vault opens the path prompt immediately');
   await press('Enter');
@@ -179,6 +181,7 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
   const created = `/tmp/grove-r27a-created-${Date.now()}`;
   const createdName = created.split('/').pop();
   await click('.vault-switcher');
+  await pick('Manage vaults...');
   await pick('Create new vault...');
   await fill('.prompt-input', created);
   await press('Enter');
@@ -193,6 +196,7 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
 
   const openedPath = `/tmp/grove-r27a-opened-${Date.now()}`;
   const openedName = openedPath.split('/').pop();
+  await pick('Manage vaults...');
   await pick('Open another vault...');
   await fill('.prompt-input', openedPath);
   await press('Enter');

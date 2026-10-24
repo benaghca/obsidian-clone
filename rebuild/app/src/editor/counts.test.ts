@@ -1,10 +1,39 @@
 import { EditorState } from "@codemirror/state";
 import { expect, test } from "vitest";
+import { sampleVault } from "../mock/sampleVault";
 import { countWords, countsField } from "./counts";
 import { frontmatterField } from "./frontmatter";
 
-test("markdown syntax is not counted as words", () => {
-  expect(countWords("- [ ] **Bold** text, don't #tag")).toBe(4);
+const FORMER = /[\p{L}\p{N}][\p{L}\p{N}_'’-]*/gu;
+
+test("markdown syntax is not counted as words, and a bullet hyphen is", () => {
+  // The hyphen is a word. Bold, text, don't and tag are the other four.
+  expect(countWords("- [ ] **Bold** text, don't #tag")).toBe(5);
+});
+
+test("list markers are the words a letter-only count misses", () => {
+  // Four bullets, and nothing else Obsidian counts differently: 42 against 38.
+  const words = Array.from({ length: 34 }, (_, i) => `w${i}`).join(" ");
+  const note = `${words}\n- a\n- b\n- c\n- d`;
+  expect(note.match(FORMER)?.length).toBe(38);
+  expect(countWords(note)).toBe(42);
+});
+
+test("grouped numbers, rules, underscores and CJK match Obsidian", () => {
+  expect(countWords("a 5,000-line note")).toBe(3);
+  expect(countWords("---")).toBe(1);
+  expect(countWords("code_1")).toBe(2);
+  expect(countWords("你好")).toBe(2);
+  expect(countWords("it’s fine")).toBe(2);
+});
+
+test("the sample Welcome note matches Obsidian's word count", () => {
+  // The previous counter reported 169 here: five bullet hyphens and the rule
+  // were missed, and "5,000-line" was split in two (174 after those cancel).
+  const text = sampleVault()["Welcome.md"];
+  expect(text.match(FORMER)?.length).toBe(169);
+  expect(countWords(text)).toBe(174);
+  expect(text.length).toBe(1019);
 });
 
 test("incremental counts match a full recount", () => {

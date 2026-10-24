@@ -1,5 +1,9 @@
 // Live word and character counts for the status bar, of the note's body:
-// the frontmatter is left out, as Obsidian leaves it out. Words never span
+// the frontmatter is left out, as Obsidian leaves it out. A word is a run of
+// numbers (a comma or a dot may group digits, so "5,000" is one), letters,
+// apostrophes and hyphens stuck together, so a bullet "-" and a rule "---"
+// each count and "5,000-line" is one word. CJK ideographs, kana and Tibetan
+// letters are one word each. An underscore splits a word. Words never span
 // lines, so a single edit only needs the touched lines recounted; a full
 // recount is reserved for loading, multi-range edits and edits to the
 // frontmatter itself.
@@ -7,12 +11,17 @@
 import { type EditorState, StateField, type Text } from "@codemirror/state";
 import { frontmatterField } from "./frontmatter";
 
-const WORD = /[\p{L}\p{N}][\p{L}\p{N}_'’-]*/gu;
+// CJK, kana and Tibetan are one word per character. Split them out first so
+// the run below (which treats every letter as part of a word) cannot join them.
+const SPLIT = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Tibetan}]/gu;
+const WORD = /(?:\d+(?:(?:,|\.)\d+)*|[-'’\p{L}\p{M}]+)+/gu;
 
 export function countWords(text: string): number {
+  SPLIT.lastIndex = 0;
+  const marked = text.replace(SPLIT, " $& ");
   let n = 0;
   WORD.lastIndex = 0;
-  while (WORD.exec(text)) n++;
+  while (WORD.exec(marked)) n++;
   return n;
 }
 
