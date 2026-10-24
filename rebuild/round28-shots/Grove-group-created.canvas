@@ -1,0 +1,13 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"id":"5c260d579d1c42d9","x":-20,"y":-20,"width":540,"height":320,"type":"group","label":"Untitled group"},
+		{"opaque":42,"id":"a","type":"text","x":0,"y":0,"width":200,"height":120,"text":"Alpha"},
+		{"id":"b","type":"text","x":300,"y":160,"width":200,"height":120,"text":"Beta"}
+	],
+	"edges":[
+		{"opaque":true,"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left"}
+	]
+}
