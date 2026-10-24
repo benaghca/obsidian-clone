@@ -111,7 +111,7 @@
 }
 .empty-state-actions {
   display: grid;
-  grid-template-columns: minmax(168px, max-content);
+  grid-template-columns: 168px;
   gap: 8px;
   max-width: 100%;
 }
@@ -121,6 +121,7 @@
   justify-content: flex-start;
   gap: 8px;
   box-sizing: border-box;
+  overflow: hidden;
   color: var(--text-normal);
   font-size: 13px;
   font-weight: 400;
@@ -143,9 +144,12 @@
   white-space: nowrap;
 }
 .empty-state-hotkey {
-  margin-left: auto;
-  color: var(--text-muted);
   flex: none;
+  margin-right: -4px;
+  padding: 2px 6px 2px 4px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: inherit;
   white-space: nowrap;
 }
 .empty-state-action:hover {

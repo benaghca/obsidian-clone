@@ -469,9 +469,8 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         "div",
         { class: "empty-state-actions" },
         emptyAction("New note", "file-explorer:new-file", "square-pen"),
-        emptyAction("Go to file", "switcher:open", "layout-list"),
-        emptyAction("Search", "global-search:open", "search"),
         emptyAction("New canvas", "canvas:new-file", "layout-dashboard"),
+        emptyAction("Go to file", "switcher:open", "search"),
       ),
     );
 
