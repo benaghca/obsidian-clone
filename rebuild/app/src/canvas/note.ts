@@ -1,4 +1,5 @@
 import { EditorView } from "@codemirror/view";
+import { isCardControl } from "./controls";
 import { embedPart } from "../editor/embeds";
 import { h } from "../shell/dom";
 import type { Group } from "../tabs";
@@ -32,6 +33,6 @@ export function editNoteCard(card: HTMLElement, content: HTMLElement, ws: Worksp
     if (e.key !== "Escape" || embedded && !card.contains(e.target as Node)) return;
     e.preventDefault(); e.stopPropagation(); stop(); board.focus();
   }, { capture: true, signal: events.signal });
-  document.addEventListener("pointerdown", e => { if (!card.contains(e.target as Node)) stop(); }, { capture: true, signal: events.signal });
+  document.addEventListener("pointerdown", e => { if (!card.contains(e.target as Node) && !isCardControl(e.target)) stop(); }, { capture: true, signal: events.signal });
   return stop;
 }

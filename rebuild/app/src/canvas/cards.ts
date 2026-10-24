@@ -9,7 +9,7 @@ import { closeMenu, showMenu } from "../shell/menu";
 import { hints, openPrompt, pickFrom, suggestionText } from "../shell/prompt";
 import { switcherItems } from "../shell/switcherItems";
 import type { Workspace } from "../workspace";
-import { canvasReadOnly } from "./controls";
+import { canvasReadOnly, isCardControl } from "./controls";
 import type { CanvasEdge, CanvasNode } from "./model";
 
 export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode | CanvasNode[], edge?: CanvasEdge) => void) {
@@ -127,7 +127,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   el.addEventListener("dblclick", doubleClick);
   const controlDouble = (e: MouseEvent) => { if (controlClick) { e.preventDefault(); e.stopImmediatePropagation(); } };
   el.addEventListener("dblclick", controlDouble, true);
-  const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu, .canvas-context-menu")) controlClick = true; };
+  const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu, .canvas-context-menu, .canvas-group-menu")) controlClick = true; };
   document.addEventListener("click", menuClick, true);
   return { connect, reset, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); el.removeEventListener("dblclick", controlDouble, true); } };
 }
@@ -149,7 +149,7 @@ export function editTextCard(card: HTMLElement, content: HTMLElement, text: stri
     if (e.key !== "Escape") return;
     e.preventDefault(); e.stopPropagation(); stop(); card.closest<HTMLElement>(".canvas-view")?.focus();
   }, { capture: true, signal: events.signal });
-  document.addEventListener("pointerdown", e => { if (!card.contains(e.target as Node)) stop(); }, { capture: true, signal: events.signal });
+  document.addEventListener("pointerdown", e => { if (!card.contains(e.target as Node) && !isCardControl(e.target)) stop(); }, { capture: true, signal: events.signal });
   view.focus();
   return stop;
 }

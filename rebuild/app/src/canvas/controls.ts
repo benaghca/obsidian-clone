@@ -3,8 +3,10 @@ import { h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { closeMenu, showMenu } from "../shell/menu";
 import { settings } from "../settings/store";
+import { groupAlign, type BackgroundPicker } from "./groups";
 import { edgeBounds, type CanvasEdge, type CanvasNode } from "./model";
 
+export const isCardControl = (target: EventTarget | null) => target instanceof Element && !!target.closest(".canvas-selection-menu, .canvas-color-menu");
 export const canvasReadOnly = new WeakSet<HTMLElement>();
 export function canvasSettings(el: HTMLElement, anchor: HTMLElement, refresh: () => void) {
   const opts = settings.get("canvas.json");
@@ -32,11 +34,12 @@ export function canvasHelp() {
   });
 }
 export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove: () => void, zoom: (items: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void,
-  edit: (item: CanvasNode | CanvasEdge) => void, recolor: (items: (CanvasNode | CanvasEdge)[]) => void, createGroup: () => void) {
+  edit: (item: CanvasNode | CanvasEdge) => void, recolor: (items: (CanvasNode | CanvasEdge)[]) => void, createGroup: () => void, background: BackgroundPicker) {
   let selected: (CanvasNode | CanvasEdge)[] = [], edges: CanvasEdge[] = [], disposed = false;
   let positions: Pick<CanvasNode, "x" | "y" | "width" | "height">[] = [];
   const zoomSelection = () => { closeMenu(); zoom(positions); };
   const toolbar = h("div", { class: "canvas-selection-menu", tabindex: "-1", role: "toolbar", "aria-label": "Selection" });
+  toolbar.addEventListener("mousedown", e => e.preventDefault());
   const colorButton = keyButton(icon("palette"), "Set color", () => {
     const choose = (color?: string) => {
       if (disposed) return;
@@ -56,6 +59,10 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
   });
   const editButton = keyButton(icon("square-pen"), "Edit", e => { if (e.type === "click" && (e as MouseEvent).detail > 1) return; closeMenu(); if (selected.length === 1) edit(selected[0]); });
   const groupButton = keyButton(icon("group"), "Create group", () => { closeMenu(); createGroup(); });
+  const alignButton = keyButton(icon("align-start-vertical"), "Align", () => {
+    const node = selected[0] as CanvasNode; groupAlign(node, allNodes, alignButton, recolor);
+  });
+  const backgroundButton = keyButton(icon("image"), "Set background", () => background(selected[0] as CanvasNode, backgroundButton, () => recolor([selected[0]])));
   const direction = keyButton(icon("arrow-right"), "Line direction", () => {
     showMenu((["Nondirectional", "Unidirectional", "Bidirectional"] as const).map((title, i) => ({
       title, icon: (["minus", "arrow-right", "move-horizontal"] as const)[i],
@@ -78,7 +85,8 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
     zoom: zoomSelection,
     update(nodes: CanvasNode[], chosenEdges: CanvasEdge[] = []) {
       edges = chosenEdges; selected = [...nodes, ...edges]; toolbar.hidden = !selected.length;
-      direction.remove(); removeLabel.remove(); groupButton.remove();
+      direction.remove(); removeLabel.remove(); groupButton.remove(); alignButton.remove(); backgroundButton.remove();
+      if (selected.length === 1 && nodes[0]?.type === "group") { toolbar.insertBefore(alignButton, editButton); toolbar.append(backgroundButton); backgroundButton.setAttribute("aria-label", nodes[0].background ? "Edit background" : "Set background"); }
       if (nodes.length > 1) toolbar.insertBefore(groupButton, editButton);
       if (edges.length) toolbar.insertBefore(direction, editButton);
       const heads = edges.length ? Number(edges[0].fromEnd === "arrow") + Number(edges[0].toEnd !== "none") : 1;

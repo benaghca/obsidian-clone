@@ -48,8 +48,8 @@
   left: -1px;
   padding: 4px 8px;
   border-radius: 4px;
-  background: var(--canvas-color);
-  color: white;
+  background: color-mix(in srgb, var(--canvas-color) 10%, transparent);
+  color: var(--canvas-color);
   font-size: 22.5px;
   line-height: 1;
   white-space: nowrap;
@@ -86,7 +86,7 @@
 .canvas-view.is-grabbable, .canvas-view.is-grabbable * { cursor: grab; }
 .canvas-view.is-panning, .canvas-view.is-panning * { cursor: grabbing; user-select: none; }
 
-.canvas-node.is-selected { box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%), 0 0 0 2px var(--interactive-accent); }
+.canvas-node.is-selected { border-color: var(--interactive-accent); box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%), 0 0 0 2px var(--interactive-accent); }
 .canvas-node-resizer { position: absolute; z-index: 3; }
 .canvas-node-group > .canvas-node-resizer { z-index: 1; }
 .canvas-node-resizer[data-resize="top"], .canvas-node-resizer[data-resize="bottom"] { left: 0; width: 100%; height: 20px; cursor: ns-resize; }
@@ -134,7 +134,7 @@
 
 .canvas-control-group { overflow: hidden; }
 .canvas-control-group .clickable-icon:not(:last-child) { height: 33px; }
-.canvas-world:has(.canvas-node.is-editing, .canvas-edge-label.is-editing) .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
+.canvas-world:has(.canvas-node-group.is-editing, .canvas-edge-label.is-editing) .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
 
 .canvas-swatch input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; }
 .canvas-selection-menu:focus { outline: none; }
@@ -163,3 +163,16 @@
 .canvas-node.is-editing > .canvas-node-connection-point { display: none; }
 
 .canvas-edge-label.is-editing { min-width: 12px; min-height: 38px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }
+
+.canvas-group-background { position: absolute; inset: 0; border-radius: inherit; background-position: center; pointer-events: none; }
+.canvas-group-label.is-editing { background: var(--background-primary); border-radius: 4px; }
+
+/* Detached previews use block spacing; no rule here reaches .cm-content. */
+.canvas-node-content.is-reading-mode > .canvas-block { margin-block: 16px; }
+.canvas-node-content.is-reading-mode > .canvas-block.cm-h { margin-block: 40px 16px; }
+.canvas-node-content.is-reading-mode > .canvas-block:first-child,
+.canvas-node-content.is-reading-mode > .canvas-note-title + .canvas-block { margin-top: 0; }
+.canvas-node-content.is-reading-mode > .canvas-block:last-child { margin-bottom: 0; }
+.canvas-list > .cm-list-line { position: relative; padding-left: 27.5px; }
+.canvas-list > .cm-list-line .cm-list-bullet,
+.canvas-list > .cm-list-line .cm-list-number { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); }

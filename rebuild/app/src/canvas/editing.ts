@@ -2,6 +2,7 @@ import { dragPointer, h } from "../shell/dom";
 import { settings } from "../settings/store";
 import { closeMenu, showMenu, SEPARATOR } from "../shell/menu";
 import { canvasReadOnly, selectionMenu } from "./controls";
+import type { BackgroundPicker } from "./groups";
 import { closestSide, type CanvasEdge, type CanvasNode, type Side } from "./model";
 
 const geometry = ["x", "y", "width", "height"] as const;
@@ -11,7 +12,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   commit: (changed: CanvasNode[], deleted?: Set<string>, changedEdges?: CanvasEdge[], deletedEdges?: Set<string>, added?: CanvasNode[]) => void,
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
-  history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId?: string) {
+  history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -33,8 +34,9 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const menu = selectionMenu(world, nodes, removeSelected, zoom, item => edit(item, selection), changed => {
     const cards = changed.filter((item): item is CanvasNode => !("fromNode" in item));
     paint(cards); commit(cards, undefined, changed.filter((item): item is CanvasEdge => "fromNode" in item));
-    menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); el.focus({ preventScroll: true });
-  }, createGroup);
+    menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
+    if (!world.querySelector(".canvas-node.is-editing")) el.focus({ preventScroll: true });
+  }, createGroup, background);
   const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); };
   function selection() {
     menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
