@@ -149,7 +149,10 @@ export function pressable<E extends HTMLElement>(el: E, onPress: (e: MouseEvent 
 export const keyButton = (icon: SVGElement, label: string, onPress: (e: MouseEvent | KeyboardEvent) => void, cls = "") =>
   pressable(h("div", { class: `clickable-icon ${cls}`.trim(), "aria-label": label, role: "button" }, icon), onPress);
 
-/** One delayed tooltip for icon controls; dismissal listeners exist only during a hover. */
+const TIP_DELAY = 300;
+const TIP_TARGET = ".clickable-icon[aria-label], .workspace-tab-header-inner-close-button[aria-label], .workspace-tab-header-status-icon[aria-label], .status-bar-item.mod-clickable[aria-label], .copy-code-button[aria-label], .code-block-flair[aria-label], .cm-foldPlaceholder[aria-label]";
+
+/** One delayed tooltip for labelled controls. It appears after a short wait, with no fade. */
 export function installTooltips() {
   let owner: HTMLElement | null = null, tip: HTMLElement | null = null;
   let timer = 0;
@@ -162,7 +165,7 @@ export function installTooltips() {
     tip = owner = null;
   };
   document.addEventListener("pointerover", event => {
-    const next = (event.target as Element).closest<HTMLElement>(".clickable-icon[aria-label], .workspace-tab-header-inner-close-button[aria-label], .workspace-tab-header-status-icon[aria-label], .status-bar-item.mod-clickable[aria-label]");
+    const next = (event.target as Element).closest<HTMLElement>(TIP_TARGET);
     if (next === owner) return;
     close();
     if (!next?.getAttribute("aria-label") || event.buttons) return;
@@ -185,7 +188,7 @@ export function installTooltips() {
       tip.style.left = `${left}px`;
       tip.style.top = `${top}px`;
       tip.style.setProperty("--tip-arrow", `${Math.max(8, Math.min(side ? r.top + r.height / 2 - top - 5 : r.left + r.width / 2 - left - 5, (side ? height : width) - 18))}px`);
-    }, 500);
+    }, TIP_DELAY);
   });
   document.addEventListener("pointerout", event => { if (owner && !owner.contains(event.relatedTarget as Node | null)) close(); });
 }

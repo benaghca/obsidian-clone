@@ -180,7 +180,7 @@ const hoverChevron = ViewPlugin.fromClass(
   },
 );
 
-const placeholder = (_view: EditorView, onclick: (e: Event) => void) => h("span", { class: "cm-foldPlaceholder", title: "Unfold", onclick }, "…");
+const placeholder = (_view: EditorView, onclick: (e: Event) => void) => h("span", { class: "cm-foldPlaceholder", "aria-label": "Unfold", onclick }, "…");
 
 /** Folding with the given kinds of fold turned on. */
 export function folding(heading: boolean, indent: boolean) {
