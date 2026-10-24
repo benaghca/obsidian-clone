@@ -68,7 +68,7 @@
 .bases-filter-row { display: flex; align-items: center; gap: 2px; min-height: 32px; }
 .bases-filter-where { width: 62px; flex: none; text-align: right; padding-right: 4px; }
 .bases-filter-row > button { flex: none; white-space: nowrap; }
-.bases-filter-row > input { flex: 1; width: 50px; min-width: 0; height: 29px; border-radius: 4px; font: inherit; }
+.bases-filter-row > input { flex: 1; width: 50px; min-width: 0; height: 29px; padding: 4px 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-normal); font: inherit; }
 .bases-filter-row > input:invalid { outline: 1px solid var(--text-error); }
 .bases-filter-editor .bases-filter-icon { font-size: 0; }
 .bases-filter-add { display: flex; gap: 4px; margin-top: 8px; color: var(--text-muted); }

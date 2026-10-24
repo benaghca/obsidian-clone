@@ -19,7 +19,7 @@ export function filterMenu(host: Host, at: HTMLElement) {
       const section = h("section",{"data-scope":local?"view":"all"});
       const heading = button(local?"This view":"All views",expanded.has(local)?"chevron-down":"chevron-right",()=>{expanded.has(local)?expanded.delete(local):expanded.add(local);draw(true);});
       heading.className="bases-filter-heading";heading.append(h("span",{class:"bases-badge"},String(countFilters(host.filters(local)))));section.append(heading);
-      const change = (path: number[], update: (v: Yaml | undefined) => Yaml) => host.write(local, value => changeFilter(value,path,update),()=>draw(true));
+      const change = (path: number[], update: (v: Yaml | undefined) => Yaml, reopen = true) => host.write(local, value => changeFilter(value,path,update),()=>{if(reopen || at.classList.contains("has-active-menu"))draw(true);});
       const pick = (target: HTMLElement, choices: [string,string][], selected: string, choose: (value: string) => void) => {
         showMenu(choices.map(([value,title])=>({title,checked:value===selected,action:()=>choose(value)})),target);
       };
@@ -38,7 +38,7 @@ export function filterMenu(host: Host, at: HTMLElement) {
           const row=h("div",{class:"bases-filter-row"},h("span",{class:"bases-filter-where"},i?op==="not"?"nor":op:"where"));
           const id=`${local}:${childPath.join(".")}`, parsed=comparison(child);
           let committed=false;
-          const save=(text:string)=>{if(committed)return;try{expression(text);committed=true;change(childPath,()=>text);}catch(e){inputError(text,e);}};
+          const save=(text:string)=>{if(committed)return;try{expression(text);committed=true;change(childPath,()=>text,false);}catch(e){inputError(text,e);}};
           let input: HTMLInputElement;
           const inputError=(_text:string,e:unknown)=>{input.setCustomValidity(e instanceof Error?e.message:String(e));input.reportValidity();};
           if(!parsed || advanced.has(id)) {

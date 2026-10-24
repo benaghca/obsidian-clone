@@ -43,7 +43,8 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  await run(async(notes,bases,source)=>{const{api}=await import('/src/api.ts');for(const[p,s]of Object.entries({...notes,...bases,'PartB.base':source}))await api.createNote(p,s);await ws.vault.refreshFiles();await ws.open('PartB.base');window.firstBaseTab=ws.active;},notes,bases,original);await count(5);
  await timed('.bases-toolbar [aria-label="Filter"]');await shot('grove-filter-initial');
  await fill(value,'waiting');assert.equal(await source(),original);await press('Escape');assert.equal(await source(),original);
- await click('.bases-toolbar [aria-label="Filter"]');await fill(value,'waiting');await press('Enter');await count(6);await ready();
+ await click('.bases-toolbar [aria-label="Filter"]');await fill(value,'waiting');await click('.bases-toolbar');await count(6);
+ assert.equal(await run(()=>!!document.querySelector('.bases-filter-menu')),false);await click('.bases-toolbar [aria-label="Filter"]');await ready();
  assert.equal(await source(),original.replace('        - status != "done"','        - status != "waiting"'));
  await click(local+' .bases-filter-conjunction');await choose('None of the following are true');await count(0);await ready();
  await click(local+' .bases-filter-conjunction');await choose('Any of the following are true');await count(6);await ready();
