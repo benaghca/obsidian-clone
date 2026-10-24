@@ -55,6 +55,7 @@
   white-space: nowrap;
 }
 .backlink-pane .search-result-file-match {
+  position: relative;
   margin-left: 12px;
   white-space: normal;
   display: -webkit-box;
@@ -63,6 +64,43 @@
   line-clamp: 3;
   overflow-wrap: anywhere;
   line-height: 1.45;
+}
+/* The Link button sits on the row, so the clamp stays on the text. */
+.backlink-pane .search-result-file-match:has(.search-result-file-match-replace-button) {
+  display: block;
+  overflow: visible;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  padding-right: 20px;
+}
+.backlink-pane .search-result-file-match-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.search-result-file-match-replace-button {
+  display: none;
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  z-index: 1;
+  transform: translateY(-50%);
+  margin: 0;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  line-height: 1;
+  cursor: var(--cursor, pointer);
+}
+.backlink-pane .search-result-file-match:hover .search-result-file-match-replace-button {
+  display: block;
 }
 /* Outgoing links, unlinked mentions: a card per mention, its line (up to
    three lines of it) and under it a small button naming the note that

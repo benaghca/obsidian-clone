@@ -460,8 +460,8 @@ export function createMenus(host: MenuHost) {
 
   /**
    * Right-click on a tab header. Like Obsidian's, every tab gets the close
-   * and pin items; the active tab of its group also gets the view, split and
-   * file items.
+   * and pin items; a file tab that is not the active one still offers Move
+   * to new window; the active tab also gets the view, split and file items.
    */
   function tab(t: Tab): MenuItems {
     const group = ws.groupOf(t);
@@ -481,6 +481,13 @@ export function createMenus(host: MenuHost) {
         ? { title: "Unlink tab", icon: "link", action: () => ws.setLink(t, null) }
         : { title: "Link with tab...", icon: "link", action: () => host.linkTab(t) },
       ...(isActive && t.path ? viewItems(t, t.path, true) : []),
+      ...(!isActive && t.path
+        ? [SEPARATOR, commands.menuItem("workspace:move-to-new-window", {
+            title: "Move to new window",
+            disabled: false,
+            action: () => void ws.moveToWindow(t).catch(warn(`move ${t.path} to a new window`)),
+          })]
+        : []),
       ...(isActive && !t.path ? [SEPARATOR, ...(t.type ? graphViewItems(t) : splitItems(t))] : []),
     ];
   }

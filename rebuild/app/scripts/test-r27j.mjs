@@ -110,7 +110,7 @@ await withBrowser(async ({ send, run, press, move, click, check }) => {
   });
   check(fields.due.width < 180 && fields.due.width < fields.due.column / 2, `the date field is sized to its value (${fields.due.width}px of a ${fields.due.column}px column)`);
   check(fields.when.value === '2026-10-23T20:15:30' && fields.when.width > fields.due.width * 2, `datetime keeps seconds and fills the column (${fields.when.value}, ${fields.when.width}px)`);
-  check(fields.due.calendar && !fields.when.calendar && !fields.due.clock && !fields.when.clock, 'a date value shows a calendar and a datetime value does not');
+  check(fields.due.calendar && fields.when.calendar && !fields.due.clock && !fields.when.clock, 'date and datetime values both show a calendar');
   check(fields.due.links.join() === 'Open daily note' && fields.when.links.length === 0 && fields.blankLinks === 'Open daily note', 'the daily-note link follows date values only');
 
   await clickAt(await at('.cm-content .property-value[data-type="date"] .property-date-icon'));
@@ -171,7 +171,7 @@ await withBrowser(async ({ send, run, press, move, click, check }) => {
       calendar: !!document.querySelector('.file-properties .property-value[data-type="datetime"] .lucide-calendar'),
     };
   });
-  check(side.width > 0 && side.width < 180 && side.when === '2026-10-23T20:15:30' && side.link === 'Open daily note' && !side.calendar, `file properties keeps the date field and leaves datetime without a calendar (${side.width}px, ${side.when})`);
+  check(side.width > 0 && side.width < 180 && side.when === '2026-10-23T20:15:30' && side.link === 'Open daily note' && side.calendar, `file properties keeps the date field and shows a calendar on datetime (${side.width}px, ${side.when})`);
 
   const bar = await run(() => {
     const el = document.querySelector('.status-bar');
