@@ -83,7 +83,7 @@ export async function renameFile(ws: Workspace, path: string, newName: string) {
   if (!newName || newName === "." || newName === "..") throw new Error("Enter a file or folder name.");
   if (/[\\/:\x00-\x1f]/.test(newName)) throw new Error("Names cannot contain /, \\ or : or control characters.");
   const isDir = ws.vault.isFolder(path);
-  const ext = isDir ? "" : /\.canvas$/i.test(path) ? path.slice(-7) : ".md";
+  const ext = isDir ? "" : /\.(canvas|base)$/i.test(path) ? path.slice(path.lastIndexOf(".")) : ".md";
   if (newName === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return;
   const dir = parentDir(path);
   await relocate(ws, path, `${dir ? dir + "/" : ""}${newName}${ext}`);

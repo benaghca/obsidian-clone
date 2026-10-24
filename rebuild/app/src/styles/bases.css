@@ -40,7 +40,8 @@
 .bases-sort-row { display: flex; align-items: center; gap: 4px; font-size: 13px; }
 .bases-sort-row button:first-child { min-width: 115px; }
 .bases-sort-row button:last-child { font-size: 0; }
-.bases-properties-menu { width: 280px; }
+.bases-properties-popover { width: 225px; min-width: 225px; }
+.bases-properties-menu { width: 100%; }
 .bases-properties-menu > input { width: 100%; padding: 6px; margin-bottom: 4px; }
 .bases-property-list { max-height: 380px; overflow: auto; }
 .bases-property-option { display: flex; align-items: center; gap: 8px; padding: 4px; font-size: 13px; cursor: pointer; --icon-size: 14px; }
@@ -52,3 +53,22 @@
 .bases-table .property-value.is-empty:not(:focus-within) .property-date-icon { opacity: 0; }
 
 .bases-table td.bases-file-date { padding: 0; }
+
+.bases-property-option.is-unchecked { color: var(--text-muted); }
+.bases-filter-menu { width: 520px; max-width: calc(100vw - 16px); }
+.bases-filter-menu > .menu-item { display: block; padding: 0; background: transparent; }
+.bases-filter-editor { max-height: 65vh; overflow: auto; font-size: 13px; }
+.bases-filter-editor button { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 4px; padding: 4px; background: transparent; color: inherit; font: inherit; cursor: pointer; --icon-size: 14px; }
+.bases-filter-editor button:hover { background: var(--background-modifier-hover); }
+.bases-filter-heading { width: 100%; height: 33px; text-align: left; }
+.bases-filter-editor section + section { border-top: 1px solid var(--background-modifier-border); }
+.bases-filter-group { padding: 8px; }
+.bases-filter-group .bases-filter-group { margin: 4px 0 4px 20px; border: 1px solid var(--background-modifier-border); border-radius: 4px; }
+.bases-filter-conjunction { margin-bottom: 4px; }
+.bases-filter-row { display: flex; align-items: center; gap: 2px; min-height: 32px; }
+.bases-filter-where { width: 62px; flex: none; text-align: right; padding-right: 4px; }
+.bases-filter-row > button { flex: none; white-space: nowrap; }
+.bases-filter-row > input { flex: 1; width: 50px; min-width: 0; height: 29px; border-radius: 4px; font: inherit; }
+.bases-filter-row > input:invalid { outline: 1px solid var(--text-error); }
+.bases-filter-editor .bases-filter-icon { font-size: 0; }
+.bases-filter-add { display: flex; gap: 4px; margin-top: 8px; color: var(--text-muted); }
