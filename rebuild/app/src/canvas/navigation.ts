@@ -87,7 +87,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     }
   }, { passive: false });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true], .cm-editor, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
     if (e.code === "Space" || e.key === " ") { e.preventDefault(); space = true; el.classList.add("is-grabbable"); }
     if (e.shiftKey && e.code === "Digit1") { e.preventDefault(); fit(); }
   });
@@ -98,7 +98,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   el.addEventListener("pointerdown", e => {
     suppressClick = false;
     if ((e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
-    if (!(e.target as Element).closest(".cm-editor")) el.focus({ preventScroll: true });
+    if (!(e.target as Element).closest(".cm-editor, [contenteditable], input, textarea")) el.focus({ preventScroll: true });
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();
@@ -120,7 +120,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   });
   size.observe(el);
   return {
-    zoomTo(nodes: CanvasNode[]) { if (nodes.length) fit({ left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) }, 2); },
+    zoomTo(nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) { if (nodes.length) fit({ left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) }, 2); },
     updateHistory(back: boolean, forward: boolean) {
       for (const [button, enabled] of [[undo, back], [redo, forward]] as const) {
         const disabled = !enabled || canvasReadOnly.has(el);

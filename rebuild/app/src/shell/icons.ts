@@ -114,6 +114,8 @@ const ICONS = {
   menu: lucide.Menu,
   "message-square-quote": lucide.MessageSquareQuote,
   minus: lucide.Minus,
+  "move-horizontal": lucide.MoveHorizontal,
+  "square-x": lucide.SquareX,
   monitor: lucide.Monitor,
   "mouse-pointer-click": lucide.MousePointerClick,
   navigation: lucide.Navigation,

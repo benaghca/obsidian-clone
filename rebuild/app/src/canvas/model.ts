@@ -58,5 +58,18 @@ export function edgeCurve(a: CanvasNode, b: CanvasNode, edge: CanvasEdge) {
   const start = [p[0] + u[0] * 7, p[1] + u[1] * 7], end = [q[0] + v[0] * 7, q[1] + v[1] * 7];
   const bend = Math.max(50, Math.max(Math.abs(q[0] - p[0]), Math.abs(q[1] - p[1])) / 2);
   const c = [start[0] + u[0] * bend, start[1] + u[1] * bend], d = [end[0] + v[0] * bend, end[1] + v[1] * bend];
-  return { path: `M${p} L${start} M${start} C${c} ${d} ${end} M${end} L${q}`, x: (start[0] + 3 * c[0] + 3 * d[0] + end[0]) / 8, y: (start[1] + 3 * c[1] + 3 * d[1] + end[1]) / 8, p, q, from, to };
+  return { path: `M${p} L${start} M${start} C${c} ${d} ${end} M${end} L${q}`, x: (start[0] + 3 * c[0] + 3 * d[0] + end[0]) / 8, y: (start[1] + 3 * c[1] + 3 * d[1] + end[1]) / 8, p, q, from, to, start, end, c, d };
+}
+// Exact curve bounds for selection controls, without forcing SVG layout after a drag.
+export function edgeBounds(a: CanvasNode, b: CanvasNode, edge: CanvasEdge) {
+  const { p, q, start, end, c, d } = edgeCurve(a, b, edge);
+  const limits = [0, 1].map(axis => {
+    const s = start[axis], e = end[axis], u = c[axis], v = d[axis];
+    const A = -s + 3 * u - 3 * v + e, B = 2 * (s - 2 * u + v), C = u - s;
+    const discriminant = B * B - 4 * A * C;
+    const roots = Math.abs(A) < 1e-9 ? [-C / B] : discriminant < 0 ? [] : [(-B + Math.sqrt(discriminant)) / (2 * A), (-B - Math.sqrt(discriminant)) / (2 * A)];
+    const values = [p[axis], q[axis], s, e, ...roots.filter(t => t > 0 && t < 1).map(t => s * (1 - t) ** 3 + 3 * u * (1 - t) ** 2 * t + 3 * v * (1 - t) * t ** 2 + e * t ** 3)];
+    return [Math.min(...values), Math.max(...values)];
+  });
+  return { x: limits[0][0], y: limits[1][0], width: limits[0][1] - limits[0][0], height: limits[1][1] - limits[1][0] };
 }

@@ -52,10 +52,12 @@
   white-space: nowrap;
 }
 .canvas-edge-label {
+  will-change: transform;
   z-index: 1;
   position: absolute;
   transform: translate(-50%, -50%);
-  padding: 0 4px;
+  padding: 4px 6px;
+  line-height: 1.5;
   border-radius: 4px;
   background: var(--background-primary);
   font-size: 20px;
@@ -118,7 +120,7 @@
 
 .canvas-control-group { overflow: hidden; }
 .canvas-control-group .clickable-icon:not(:last-child) { height: 33px; }
-.canvas-world:has(.canvas-node.is-editing) .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
+.canvas-world:has(.canvas-node.is-editing, .canvas-edge-label.is-editing) .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
 
 .canvas-swatch input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; }
 .canvas-selection-menu:focus { outline: none; }
@@ -145,3 +147,5 @@
 .canvas-world .is-reconnecting { visibility: hidden; }
 .canvas-view.is-readonly .canvas-node-connection-point, .canvas-view.is-readonly .canvas-edge-end,
 .canvas-node.is-editing > .canvas-node-connection-point { display: none; }
+
+.canvas-edge-label.is-editing { min-width: 12px; min-height: 38px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }

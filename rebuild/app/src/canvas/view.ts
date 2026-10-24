@@ -116,33 +116,37 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     world.append(drawing);
     const edits = new Map<string, () => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
-    const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; label?: HTMLElement }[] = [];
+    const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; marker: SVGMarkerElement; label?: HTMLElement }[] = [];
     function place(item: typeof updateEdges[number], curve: ReturnType<typeof edgeCurve>) {
       item.line.setAttribute("d", curve.path); item.hit.setAttribute("d", curve.path);
       [curve.p, curve.q].forEach((p, i) => Object.assign(item.ends[i].style, { left: `${p[0]}px`, top: `${p[1]}px` }));
       if (item.label) { item.label.style.left = `${curve.x}px`; item.label.style.top = `${curve.y}px`; }
     }
     function addEdge(edge: CanvasEdge, i: number) {
-      const curve = edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge);
       const line = svg("path", { class: "canvas-edge", "data-edge-id": edge.id, fill: "none", stroke: color(edge.color), "stroke-width": "2" });
       const hit = svg("path", { class: "canvas-edge-hit", "data-edge-id": edge.id, fill: "none", stroke: color(edge.color) });
       drawing.append(svg("g", {}, hit));
-      for (const [end, enabled] of [["start", edge.fromEnd === "arrow"], ["end", edge.toEnd !== "none"]] as const) {
-        if (!enabled) continue;
-        const id = `canvas-arrow-${group.id}-${mine}-${i}-${end}`;
-        drawing.append(arrowMarker(id, color(edge.color)));
-        line.setAttribute(`marker-${end}`, `url(#${id})`);
-      }
+      const marker = arrowMarker(`canvas-arrow-${group.id}-${mine}-${i}`, color(edge.color));
+      drawing.append(marker);
       drawing.append(line);
       const ends = ["from", "to"].map(end => h("div", { class: "canvas-edge-end", "data-edge-id": edge.id, "data-edge-end": end, "aria-label": `Reconnect ${end} end` }));
       world.append(...ends);
-      const update: typeof updateEdges[number] = { edge, line, hit, ends };
+      const update: typeof updateEdges[number] = { edge, line, hit, ends, marker };
       updateEdges.push(update);
+      updateEdge(update);
+    }
+    function updateEdge(update: typeof updateEdges[number]) {
+      const { edge, line, hit, marker } = update;
+      for (const path of [line, hit]) path.setAttribute("stroke", color(edge.color));
+      for (const key of ["fill", "stroke"]) marker.firstElementChild!.setAttribute(key, color(edge.color));
+      for (const [end, enabled] of [["start", edge.fromEnd === "arrow"], ["end", edge.toEnd !== "none"]] as const)
+        line.setAttribute(`marker-${end}`, enabled ? `url(#${marker.id})` : "none");
       if (typeof edge.label === "string" && edge.label) {
-        const label = h("div", { class: "canvas-edge-label", "data-edge-id": edge.id }, edge.label);
-        world.append(label); update.label = label;
+        if (!update.label) { update.label = h("div", { class: "canvas-edge-label", "data-edge-id": edge.id }); world.append(update.label); }
+        update.label.textContent = edge.label;
       }
-      place(update, curve);
+      else { update.label?.remove(); update.label = undefined; }
+      place(update, edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge));
     }
     edges.forEach(addEdge);
     const preview = svg("path", { fill: "none", "stroke-width": "2" });
@@ -263,17 +267,47 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
         place(item, edgeCurve(byId.get(item.edge.fromNode)!, byId.get(item.edge.toNode)!, item.edge));
       navigation.loaded(boundsOf());
-    }, (nodes, deleted, edge, deletedEdges) => {
-      const next = editCanvas(source, nodes, deleted, [], edge ? [edge] : [], deletedEdges);
+    }, (nodes, deleted, changedEdges, deletedEdges) => {
+      const next = editCanvas(source, nodes, deleted, [], changedEdges, deletedEdges);
       if (next === source) return;
       undo.push(source); redo = [];
-      if (edge) {
+      for (const edge of changedEdges ?? []) {
         const item = updateEdges.find(item => item.edge.id === edge.id);
-        if (item) { Object.assign(item.edge, edge); place(item, edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge)); }
+        if (item) { Object.assign(item.edge, edge); updateEdge(item); }
         else { edges.push(edge); addEdge(edge, edges.length - 1); }
       }
       changed(next, !!deleted?.size || !!deletedEdges?.size);
-    }, previewEdge, history, nodes => navigation.zoomTo(nodes), node => edits.get(node.id)?.(), selectedId));
+    }, previewEdge, history, nodes => navigation.zoomTo(nodes), (item, refresh) => {
+      if (!("fromNode" in item)) { edits.get(item.id)?.(); return; }
+      if (canvasReadOnly.has(el)) return;
+      const record = updateEdges.find(record => record.edge.id === item.id)!;
+      if (record.label?.classList.contains("is-editing")) return;
+      stopText?.();
+      const label = record.label ?? h("div", { class: "canvas-edge-label", "data-edge-id": item.id });
+      record.label = label; world.append(label); place(record, edgeCurve(byId.get(item.fromNode)!, byId.get(item.toNode)!, item));
+      label.textContent = item.label ?? ""; label.contentEditable = "plaintext-only";
+      label.setAttribute("aria-label", "Edge label"); label.classList.add("is-editing");
+      const events = new AbortController();
+      stopText = (save = true) => {
+        events.abort(); stopText = undefined;
+        label.contentEditable = "false"; label.classList.remove("is-editing");
+        if (save) {
+          const value = label.textContent || undefined;
+          if (value !== item.label) {
+            item.label = value; undo.push(source); redo = [];
+            changed(editCanvas(source, [], undefined, [], [item]));
+          }
+          updateEdge(record); refresh();
+        }
+      };
+      label.addEventListener("keydown", e => {
+        if (e.key !== "Enter" && e.key !== "Escape") return;
+        e.preventDefault(); e.stopPropagation(); stopText?.(); el.focus({ preventScroll: true });
+      }, { signal: events.signal });
+      label.addEventListener("blur", () => stopText?.(), { signal: events.signal });
+      document.addEventListener("pointerdown", e => { if (!label.contains(e.target as Node)) stopText?.(); }, { capture: true, signal: events.signal });
+      label.focus(); getSelection()?.selectAllChildren(label);
+    }, selectedId));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);

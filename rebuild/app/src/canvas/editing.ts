@@ -7,9 +7,9 @@ const geometry = ["x", "y", "width", "height"] as const;
 const sides = ["top", "right", "bottom", "left", "topright", "bottomright", "bottomleft", "topleft"];
 export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: CanvasNode[], edges: CanvasEdge[],
   paint: (changed: CanvasNode[]) => void,
-  commit: (changed: CanvasNode[], deleted?: Set<string>, edge?: CanvasEdge, deletedEdges?: Set<string>) => void,
+  commit: (changed: CanvasNode[], deleted?: Set<string>, changedEdges?: CanvasEdge[], deletedEdges?: Set<string>) => void,
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
-  history: (redo: boolean) => void, zoom: (nodes: CanvasNode[]) => void, edit: (node: CanvasNode) => void, selectedId?: string) {
+  history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId?: string) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -20,10 +20,14 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   let cancel: (() => void) | undefined, suppress = false;
   const chosen = () => nodes.filter(n => selected.has(n.id));
   const removeSelected = () => { if ((selected.size || selectedEdges.size) && !canvasReadOnly.has(el)) commit([], selected, undefined, selectedEdges); };
-  const menu = selectionMenu(world, removeSelected, () => zoom(chosen()), edit, changed => { paint(changed); commit(changed); });
-  const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen()); };
+  const menu = selectionMenu(world, nodes, removeSelected, zoom, item => edit(item, selection), changed => {
+    const cards = changed.filter((item): item is CanvasNode => !("fromNode" in item));
+    paint(cards); commit(cards, undefined, changed.filter((item): item is CanvasEdge => "fromNode" in item));
+    menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
+  });
+  const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); };
   function selection() {
-    menu.update(chosen());
+    menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
     for (const el of edgeElements()) el.classList.toggle("is-selected", selectedEdges.has(el.dataset.edgeId!));
     for (const [id, card] of cards) {
       card.classList.toggle("is-selected", selected.has(id));
@@ -89,7 +93,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         for (const el of edgeElements()) el.classList.remove("is-reconnecting");
         for (const card of cards.values()) card.classList.remove("is-connection-target");
         if (!cancelled && suppress && drop && (!edge || next[nodeKey] !== edge[nodeKey] || next[sideKey] !== edge[sideKey])) {
-          commit([], undefined, next); selected.clear(); selectedEdges.clear(); selectedEdges.add(next.id); selection();
+          commit([], undefined, [next]); selected.clear(); selectedEdges.clear(); selectedEdges.add(next.id); selection();
         }
       });
       return;
@@ -164,10 +168,15 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       }, () => { box.remove(); cancel = undefined; }, false);
     }
   }, { signal: events.signal });
+  el.addEventListener("dblclick", e => {
+    if (!e.isTrusted || canvasReadOnly.has(el) || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    const edge = edges.find(edge => edge.id === (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId);
+    if (edge) { e.preventDefault(); e.stopPropagation(); edit(edge, selection); }
+  }, { signal: events.signal });
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true]")) return;
-    if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); zoom(chosen()); return; }
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only]")) return;
+    if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); menu.zoom(); return; }
     const undo = (e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase());
     const remove = e.key === "Delete" || e.key === "Backspace";
     const direction = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, number[]>)[e.key];
