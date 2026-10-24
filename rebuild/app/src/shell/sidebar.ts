@@ -95,6 +95,11 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     },
     /** Create an "Untitled" folder and start renaming it. */
     newFolderIn: (parent: string) => void explorer.newFolderIn(parent),
+    /** Open the file list and put the keyboard ring on the active file. */
+    focusFiles() {
+      select("files");
+      explorer.focusActive();
+    },
     /** Show the search view running this query. */
     searchFor(query: string) {
       select("search");
@@ -231,10 +236,9 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   }
 
   function paintSelection() {
-    const focused = document.activeElement === list;
     for (const [path, row] of rows) {
       row.classList.toggle("is-selected", selected.has(path));
-      row.classList.toggle("is-focused", focused && path === cursor);
+      row.classList.toggle("is-focused", path === cursor);
     }
   }
 
@@ -488,6 +492,19 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     row.classList.add("is-revealed");
   }
 
+  /** Keyboard ring on the open file, without changing which rows are selected. */
+  function focusActive() {
+    const path = ws.active.path ?? ws.active.viewFile;
+    if (path) expandTo(path);
+    if (path && rows.has(path)) {
+      cursor = path;
+      anchor = path;
+      rows.get(path)?.scrollIntoView({ block: "nearest" });
+    }
+    list.focus({ preventScroll: true });
+    paintSelection();
+  }
+
   ws.onMove((swap) => {
     if (!expanded.size) return;
     const next = new Set<string>();
@@ -519,35 +536,28 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function focusPath(path: string) {
     cursor = path;
-    selected.clear();
-    selected.add(path);
     anchor = path;
     paintSelection();
     rows.get(path)?.scrollIntoView({ block: "nearest" });
   }
 
-  /** With no cursor yet, the first arrow lands on the row it points at. */
+  /** With no cursor yet, the first arrow lands on the active file, or the row it points at. */
   function moveCursor(delta: -1 | 1, extend: boolean) {
     const visible = visiblePaths();
     if (!visible.length) return;
     const index = cursor == null ? -1 : visible.indexOf(cursor);
+    const active = ws.active.path ?? ws.active.viewFile;
+    const landing = index < 0 && active && visible.includes(active) ? active : null;
     const from = index >= 0 ? index : delta > 0 ? -1 : visible.length;
-    const next = from + delta;
-    if (next < 0 || next >= visible.length) {
-      if (!extend && cursor && !selected.has(cursor)) focusPath(cursor);
-      return;
-    }
-    const path = visible[next]!;
+    const next = landing ?? from + delta;
+    if (typeof next === "number" && (next < 0 || next >= visible.length)) return;
+    const path = typeof next === "string" ? next : visible[next]!;
     cursor = path;
     if (extend) {
       if (anchor == null || !visible.includes(anchor)) anchor = visible[from] ?? path;
       selected.clear();
       for (const item of selectionRange(visible, anchor, path)) selected.add(item);
-    } else {
-      selected.clear();
-      selected.add(path);
-      anchor = path;
-    }
+    } else anchor = path;
     paintSelection();
     rows.get(path)?.scrollIntoView({ block: "nearest" });
   }
@@ -609,9 +619,6 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     landCursor();
     paintSelection();
   });
-  list.addEventListener("blur", () => {
-    for (const row of rows.values()) row.classList.remove("is-focused");
-  });
   list.addEventListener("keydown", (event) => {
     if (typingTarget(event.target) || isMenuOpen() || isPromptOpen() || isConfirmOpen()) return;
     const info = cursor ? placed.get(cursor) : undefined;
@@ -631,7 +638,17 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       if (next) focusPath(next);
     } else if (action.type === "parent") {
       const next = cursor ? parentPath(cursor) : null;
-      if (next) focusPath(next);
+      const onFile = !!cursor && placed.get(cursor)?.node.entry.is_dir === false;
+      if (next) {
+        if (onFile && expanded.has(next)) {
+          const parent = placed.get(next);
+          const row = rows.get(next);
+          const chevron = row?.querySelector<HTMLElement>(".collapse-icon");
+          const folder = row?.parentElement;
+          if (parent && chevron && folder) toggleFolder(parent.node, parent.depth, folder, chevron);
+        }
+        focusPath(next);
+      }
     } else if (action.type === "open") openCursor();
     else void deleteSelection();
   });
@@ -639,6 +656,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   return {
     el: h("div", { class: "nav-files" }, actions, list),
     reveal,
+    focusActive,
     collapseAll,
     expandAll,
     startRename,
