@@ -498,7 +498,10 @@ class Block {
       }
       case "date":
       case "datetime": {
-        const input = h("input", { class: "property-input", type: type === "datetime" ? "datetime-local" : "date", value: value as string, placeholder: "Empty", "data-part": "value" });
+        const input = h("input", { class: "property-input", type: type === "datetime" ? "datetime-local" : "date", placeholder: "Empty", "data-part": "value" });
+        // The default step is 60s, which rejects a value that has seconds and draws a blank field.
+        if (type === "datetime") input.step = "1";
+        input.value = typeof value === "string" ? value : "";
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
         // The icon sits on the left. The native picker glyph is hidden in CSS and its click target moved over this icon.
