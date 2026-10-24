@@ -1,0 +1,20 @@
+import assert from 'node:assert/strict';
+import {readFile,writeFile} from 'node:fs/promises';
+import {withObsidian,sleep} from '../round25-shots/obsidian-driver.mjs';
+const source=await readFile(new URL('Grove-written.base',import.meta.url),'utf8');
+const notes=JSON.parse(await readFile(new URL('notes.json',import.meta.url),'utf8'));
+const expected=JSON.parse(await readFile(new URL('written.json',import.meta.url),'utf8'));
+await withObsidian(async({run,send,click,press})=>{
+ await run(async(notes,source)=>{await app.vault.createFolder('BaseTest');for(const[p,s]of Object.entries(notes))await app.vault.create(p,s);await app.vault.create('Grove-written.base',source);await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath('Grove-written.base'));},notes,source);await sleep(700);
+ const actual=await run(()=>({headers:[...document.querySelectorAll('.bases-thead .bases-td')].map(e=>e.querySelector('.bases-table-header-name').innerText),rows:[...document.querySelectorAll('.bases-tbody .bases-tr')].map(e=>e.querySelector('.internal-link')?.dataset.href)}));
+ assert.deepEqual(actual.headers,expected.headers);assert.deepEqual(actual.rows,expected.rows);
+ assert.equal(await run(()=>app.vault.read(app.vault.getAbstractFileByPath('Grove-written.base'))),source);
+ for(const[path,text]of Object.entries(notes))assert.equal(await run(path=>app.vault.read(app.vault.getAbstractFileByPath(path)),path),text);
+ const shot=async name=>writeFile(new URL(name+'.png',import.meta.url),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ await shot('obsidian-written');
+ const label=async text=>click(await run(text=>{const e=[...document.querySelectorAll('.bases-toolbar *, .menu *, .popover *')].find(e=>e.textContent===text&&e.children.length===0&&e.getBoundingClientRect().width>0);const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},text));
+ await label('2 results');await label('Copy to clipboard');actual.copied=await run(()=>navigator.clipboard.readText());assert.equal(actual.copied,expected.copied.split('\n').slice(0,3).join('\n'));await press('Escape');
+ await run(()=>app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath('Untitled.md')));await sleep(300);await shot('obsidian-new-written');
+ assert.equal(await run(()=>app.workspace.activeLeaf.view.file.path),'Untitled.md');
+ await writeFile(new URL('roundtrip.json',import.meta.url),JSON.stringify(actual,null,2));console.log('PASS native return check: exact headers, row order, TSV, YAML and seeded notes');
+});

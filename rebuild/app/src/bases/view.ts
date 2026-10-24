@@ -39,7 +39,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
   let types = new Map<string, PropertyType>();
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, path, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; memory.set(path, index); scroller.scrollTop = 0; } reload = true; await update(); });
+  const menus = baseMenus(ws, path, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; memory.set(path, index); scroller.scrollTop = 0; } reload = true; await update(); }, () => selected.map(entry => model!.columns.map(key => entry.context.get(key))));
   let automatic: number[] = [];
   function applySizes(key?: string, width?: number) {
     if (!model || !automatic.length) return;
@@ -145,7 +145,8 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
             return !!target && [...links.outgoing[file.path] ?? [], ...links.markdown?.[file.path] ?? []].includes(target);
           } };
         });
-        selected = model!.select(rows);
+        const matches = model!.select(rows,true);model!.total=matches.length;
+        selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
         model!.results = selected.length;
         toolbar.replaceChildren(...menus.toolbar());
         table.setAttribute("aria-rowcount", String(selected.length + 1));

@@ -31,7 +31,7 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  const source=()=>run(async()=>{const{api}=await import('/src/api.ts');return api.readNote('PartB.base');});
  const rows=()=>run(()=>[...document.querySelectorAll('.bases-table tbody tr[data-path]')].map(tr=>tr.dataset.path));
  const count=async n=>wait(()=>run(n=>document.querySelector('.bases-count')?.textContent===`${n} results`,n),`${n} results`);
- const choose=async title=>click(await run(title=>{const el=[...document.querySelectorAll('.menu-item')].find(el=>el.querySelector('.menu-item-title')?.textContent===title);if(!el)throw Error('No menu item '+title);const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},title));
+ const choose=async title=>{if(await run(()=>!!document.querySelector('.bases-filter-picker')))await fill('[aria-label="Filter property search"]',title);await click(await run(title=>{const el=[...document.querySelectorAll('.menu-item')].find(el=>el.querySelector('.menu-item-title')?.textContent===title);if(!el)throw Error('No menu item '+title);const r=el.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},title));};
  const local='.bases-filter-editor [data-scope="view"]', global='.bases-filter-editor [data-scope="all"]';
  const value=local+' .bases-filter-row input';
  const ready=()=>wait(()=>run(()=>!!document.querySelector('.bases-filter-editor')),'Filter refreshed');

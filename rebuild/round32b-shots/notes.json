@@ -1,0 +1,10 @@
+{
+  "BaseTest/Task A.md": "---\nstatus: open\npriority: 3\ndue: 2000-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task A\n## Details\n### More\n[[Task A]] #inline\n",
+  "BaseTest/Task B.md": "---\nstatus: done\npriority: 4\ndue: 2099-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task B\n## Details\n### More\n[[Task A]] #inline\n",
+  "BaseTest/Task C.md": "---\nstatus: open\npriority: 2\ndue: 2099-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task C\n## Details\n### More\n[[Task A]] #inline\n",
+  "BaseTest/Task D.md": "---\nstatus: open\npriority: 5\ndue: 2099-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task D\n## Details\n### More\n[[Task A]] #inline\n",
+  "BaseTest/Task E.md": "---\nstatus: open\ntags:\n  - work/project\nactive: true\n---\n# Task E\n## Details\n### More\n[[Task A]] #inline\n",
+  "BaseTest/Task F.md": "---\nstatus: open\npriority: 3\ndue: 2000-01-01\ntags:\n  - work/project\nactive: true\n---\n# Task F\n## Details\n### More\n[[Task A]] #inline\n",
+  "Untitled.md": "---\ntags:\n  - work\nstatus:\ndue:\npriority:\n---\n",
+  "Created task.md": "---\ntags:\n  - work\nstatus:\ndue:\npriority:\n---\n"
+}

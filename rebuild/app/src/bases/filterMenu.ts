@@ -1,6 +1,7 @@
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
-import { closeMenu, showMenu } from "../shell/menu";
+import { closeMenu, showMenu, showMenuChild } from "../shell/menu";
+import { menuInputEscape } from "./menuInput";
 import { expression } from "./expression";
 import { changeFilter, comparison, conjunctions, countFilters, filterExpression, group, isGroup, literal, type Comparison } from "./filters";
 import type { Yaml } from "./yaml";
@@ -28,8 +29,8 @@ export function filterMenu(host: Host, at: HTMLElement) {
         const search=h("input",{type:"search",placeholder:"Search...","aria-label":"Filter property search"});
         const box=h("div",{class:"bases-search",onclick:(e:MouseEvent)=>e.stopPropagation()},icon("search",14),search);
         const keys=["file",...host.keys().filter(key=>key.startsWith("file.")),...host.keys().filter(key=>!key.startsWith("file."))].filter((key,i,all)=>all.indexOf(key)===i&&/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?$/.test(key));
-        const show=(refresh=false)=>{if(refresh)closeMenu();showMenu([{title:"Search properties",content:box},...keys.filter(key=>host.label(key).toLowerCase().includes(search.value.toLowerCase())).map(key=>({title:host.label(key),icon:host.kind(key),checked:key===selected,action:()=>choose(key)}))],target,{className:"bases-filter-picker"});search.focus();};
-        search.addEventListener("input",()=>show(true));show();
+        const show=()=>{showMenuChild([{title:"Search properties",content:box},...keys.filter(key=>host.label(key).toLowerCase().includes(search.value.toLowerCase())).map(key=>({title:host.label(key),icon:host.kind(key),hotkey:key==="file"?undefined:key,checked:key===selected,action:()=>choose(key)}))],target,"bases-filter-picker");search.focus();};
+        search.addEventListener("input",()=>show());show();
       };
       function render(value: Yaml | undefined, path: number[], depth = 0): HTMLElement {
         const {op,children}=group(value), box=h("div",{class:"bases-filter-group","data-depth":String(depth)});
@@ -92,12 +93,7 @@ export function filterMenu(host: Host, at: HTMLElement) {
       if(expanded.has(local))section.append(render(host.filters(local),[]));
       content.append(section);
     }
-    // Cancel before the shared menu closes and blurs its input on Escape.
-    const cancel=(e:KeyboardEvent)=>{if(e.key==="Escape" && e.target instanceof HTMLInputElement && content.contains(e.target))e.target.value=e.target.defaultValue;};
-    window.addEventListener("keydown",cancel,true);
-    const cleanup=()=>{window.removeEventListener("keydown",cancel,true);observer.disconnect();};
-    const observer=new MutationObserver(()=>{if(!content.isConnected)cleanup();});
-    observer.observe(document.body,{childList:true});
+    const cleanup=menuInputEscape(content);
     if(refresh)closeMenu();showMenu([{title:"Filter",content}],at,{className:"bases-filter-menu",align:"right"});
     if(!content.isConnected)cleanup();
   }

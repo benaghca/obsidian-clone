@@ -9,11 +9,14 @@ import { baseModel, noteKey, propertyId } from "./model";
 import { addView, writeFilters, writeView, type Sort } from "./write";
 import { filterMenu } from "./filterMenu";
 import { drag, dropSlot, reordered } from "./drag";
+import { resultsMenu } from "./results";
+import { newRow, rowSeed } from "./newRow";
+import type { Value } from "./expression";
 import { mapping } from "./yaml";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
-export function baseMenus(ws: Workspace, path: string, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>) {
+export function baseMenus(ws: Workspace, path: string, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][]) {
   let writing = Promise.resolve(), gone = false;
   const save = (change: (source: string, base: Model) => string, done?: () => void, select?: (base: Model) => number) => {
     const index = current().viewIndex;
@@ -36,9 +39,11 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
     base.sorts.forEach((sort,i)=>{
       const direction=sort.direction===1?"ASC":"DESC", type=types().get(noteKey(sort.property))??(/file\.[cm]time/.test(sort.property)?"datetime":sort.property==="file.size"?"number":"text");
       const numeric=type==="number", date=["date","datetime"].includes(type);
+      const label=(asc:boolean)=>date?asc?"Old to new":"New to old":numeric?asc?"0 → 1":"1 → 0":asc?"A → Z":"Z → A";
       const property = button(base.label(sort.property),kind(sort.property),()=>{const r=property.getBoundingClientRect();showMenu(keys().map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,property:key}:s),()=>sortMenu(at,true))})),{x:r.x,y:r.bottom});});
-      const toggle = button(date ? direction==="ASC"?"Old to new":"New to old" : numeric ? direction==="ASC"?"0 → 1":"1 → 0" : direction==="ASC"?"A → Z":"Z → A",direction==="ASC"?"chevron-up":"chevron-down",()=>write("sort",b=>sortsOf(b).map<Sort>((s,n)=>n===i?{...s,direction:s.direction==="ASC"?"DESC":"ASC"}:s),()=>sortMenu(at,true)));
+      const toggle = button(label(direction==="ASC"),"chevrons-up-down",()=>showMenu((["ASC","DESC"] as const).map(d=>({title:label(d==="ASC"),checked:d===direction,action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,direction:d}:s),()=>sortMenu(at,true))})),toggle));
       const remove = button("Remove sort","trash-2",()=>write("sort",b=>sortsOf(b).filter((_,n)=>n!==i),()=>sortMenu(at,true)));
+      property.append(icon("chevrons-up-down"));toggle.replaceChildren(h("span",null,label(direction==="ASC")),icon("chevrons-up-down"));remove.replaceChildren(icon("trash-2"));
       const grip=h("span",{class:"bases-sort-grip","aria-label":"Reorder sort"},icon("grip-vertical",16));
       const row=h("div",{class:"bases-sort-row"},grip,property,toggle,remove);
       grip.addEventListener("pointerdown",e=>{
@@ -52,7 +57,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       });
       items.push({title:`Sort ${sort.property}`,content:row});
     });
-    items.push({title:"Add sort",icon:"plus",action:()=>showMenu(keys().filter(key=>!base.sorts.some(s=>same(s.property,key))).map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>[...sortsOf(b),{property:key,direction:"ASC"}],()=>sortMenu(at,true))})),at)});
+    items.push(SEPARATOR,{title:"Add sort",icon:"plus",action:()=>showMenu(keys().filter(key=>!base.sorts.some(s=>same(s.property,key))).map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>[...sortsOf(b),{property:key,direction:"ASC"}],()=>sortMenu(at,true))})),at)});
     // A write completion rebuilds a menu at the same anchor; close first to avoid toggling it off.
     if(refresh)closeMenu();showMenu(items,at,{className:"bases-sort-menu",align:"right"});
   }
@@ -101,6 +106,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       write:(local,change,done)=>save((source,b)=>writeFilters(source,change(local?b.view.filters:b.root.filters),local?b.viewIndex:undefined),done),
       keys,label:key=>current().label(key),kind,type:key=>types().get(noteKey(key))??(key==="file.size"?"number":"text")},at);
   }
+  const baseLimit=()=>{const value=current().view.limit;return typeof value==="number"?value:undefined;};
   let buttons: HTMLElement[] | null = null;
   function toolbar() {
     const base=current();
@@ -113,11 +119,12 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       return buttons;
     }
     const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View",onclick:()=>views(view)},icon("table"),h("span",null,base.name),icon("chevrons-up-down"));
-    const count=h("button",{type:"button",class:"bases-count"},icon("text-align-start"),h("span",null,`${base.results} results`));
+    const count=h("button",{type:"button",class:"bases-count","aria-label":"Results",onclick:()=>resultsMenu(count,baseLimit(),current().total,current().columns.map(current().label),rows(),value=>save((source,b)=>writeView(source,"limit",value,b.viewIndex)))},icon("text-align-start"),h("span",null,`${base.results} results`));
     const sort=button("Sort","arrow-up-narrow-wide",()=>sortMenu(sort));sort.classList.toggle("is-active",!!base.sorts.length);if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
     const filter=button("Filter","list-filter",()=>filters(filter));filter.classList.toggle("is-active",base.filtered);
     const props=button("Properties","list",()=>properties(props));
-    return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props)];
+    const create=button("New","plus",()=>void newRow(ws,rowSeed(current().columns,[current().root.filters,current().view.filters],types())).catch(error));
+    return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props,create)];
   }
   const size=(key:string,width?:number)=>save((source,b)=>{
     const sizes={...b.sizes}, id=propertyId(key);delete sizes[key];delete sizes[id];

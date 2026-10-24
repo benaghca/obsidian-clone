@@ -70,7 +70,7 @@ export function baseModel(source: string, viewIndex = 0) {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
     return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");
   };
-  function select(rows: Row[]) {
+  function select(rows: Row[], unlimited = false) {
     const found = rows.map(row => ({ row, context: context(row) })).filter(r => global(r.context) && local(r.context));
     found.sort((a, b) => {
       for (const sort of sorts) {
@@ -83,7 +83,7 @@ export function baseModel(source: string, viewIndex = 0) {
       }
       return compareNames(noteName(a.row.file.path), noteName(b.row.file.path)) || compareNames(a.row.file.path, b.row.file.path);
     });
-    return typeof view.limit === "number" ? found.slice(0, view.limit) : found;
+    return !unlimited && typeof view.limit === "number" ? found.slice(0, view.limit) : found;
   }
-  return { sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }
