@@ -46,7 +46,7 @@ interface EditorEvents {
   loaded(): void;
   /** A note's text changed in an editor. */
   changed(): void;
-  /** A note was written to disk. */
+  /** A note's disk text changed (save or external reload). */
   saved(path: string): void;
 }
 
@@ -401,6 +401,7 @@ export class NoteEditors {
     const current = this.doc(path);
     if (text === null || !current || text === current.toString()) return;
     this.change(path, { changes: { from: 0, to: current.length, insert: text }, userEvent: "external" });
+    this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }
 
   /** Paths under a moved folder (or a moved note) follow it. */

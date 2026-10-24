@@ -1,0 +1,11 @@
+{
+	"future":{
+		"keep":29
+	},
+	"nodes":[
+		{"opaque":true,"id":"g","type":"group","x":-20,"y":-20,"width":640,"height":440,"label":"Group","color":"6"},
+		{"id":"a","type":"text","x":0,"y":0,"width":250,"height":350,"text":"Alpha"},
+		{"id":"b","type":"text","x":350,"y":150,"width":200,"height":200,"text":"Beta"}
+	],
+	"edges":[]
+}

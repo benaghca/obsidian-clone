@@ -34,3 +34,5 @@ await withBrowser(async({run,send,open,read,point,move,click,double,press,chord,
  const native=await readFile(new URL('../../round28-shots/Obsidian-groups.canvas',import.meta.url),'utf8');await open('NativeGroups.canvas',native);const expected=JSON.parse(native);
  check(await run(expected=>expected.nodes.every(n=>{const e=document.querySelector(`[data-node-id="${n.id}"]`);return e&&['x','y','width','height'].every(k=>parseFloat(e.style[{x:'left',y:'top',width:'width',height:'height'}[k]])===n[k]);})&&document.querySelector('.canvas-group-label').textContent==='Native group',expected),'Native group geometry and renamed label return unchanged to Grove');assert.equal(await read(),native);check((await group()).color==='3','Native group color and every original file byte return unchanged');await shot('grove-group-return');
 }, {screenshots:new URL('../../round28-shots/',import.meta.url).pathname});
+
+await import("./test-canvas-polish.mjs");
