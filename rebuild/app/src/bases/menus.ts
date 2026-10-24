@@ -41,7 +41,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       const direction=sort.direction===1?"ASC":"DESC", type=types().get(noteKey(sort.property))??(/file\.[cm]time/.test(sort.property)?"datetime":sort.property==="file.size"?"number":"text");
       const numeric=type==="number", date=["date","datetime"].includes(type);
       const label=(asc:boolean)=>date?asc?"Old to new":"New to old":numeric?asc?"0 → 1":"1 → 0":asc?"A → Z":"Z → A";
-      const property = button(base.label(sort.property),kind(sort.property),()=>{const r=property.getBoundingClientRect();showMenu(keys().map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,property:key}:s),()=>sortMenu(at,true))})),{x:r.x,y:r.bottom});});
+      const property = button(base.label(sort.property),sort.property==="file.name"?"text":kind(sort.property),()=>{const r=property.getBoundingClientRect();showMenu(keys().map(key=>({title:base.label(key),icon:key==="file.name"?"text":kind(key),action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,property:key}:s),()=>sortMenu(at,true))})),{x:r.x,y:r.bottom});});
       const toggle = button(label(direction==="ASC"),"chevrons-up-down",()=>showMenu((["ASC","DESC"] as const).map(d=>({title:label(d==="ASC"),checked:d===direction,action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,direction:d}:s),()=>sortMenu(at,true))})),toggle));
       const remove = button("Remove sort","trash-2",()=>write("sort",b=>sortsOf(b).filter((_,n)=>n!==i),()=>sortMenu(at,true)));
       property.append(icon("chevrons-up-down"));toggle.replaceChildren(h("span",null,label(direction==="ASC")),icon("chevrons-up-down"));remove.replaceChildren(icon("trash-2"));

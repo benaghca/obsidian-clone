@@ -182,6 +182,7 @@ const ICONS = {
   "text-align-center": lucide.TextAlignCenter,
   "text-align-end": lucide.TextAlignEnd,
   "text-align-start": lucide.TextAlignStart,
+  text: lucide.Text,
   "text-cursor-input": lucide.TextCursorInput,
   "toy-brick": lucide.ToyBrick,
   "trash-2": lucide.Trash2,
