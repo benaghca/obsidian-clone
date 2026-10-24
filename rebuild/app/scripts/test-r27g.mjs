@@ -99,7 +99,7 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
       focus,
     };
   });
-  check(menu.titles[0] === 'New folder with selection' && menu.titles.includes('Bookmark...') && menu.titles.includes('Move 2 items to...'), `the multi-select menu leads with a new folder and Bookmark... (${menu.titles.join(' | ')})`);
+  check(menu.titles[0] === 'New folder with selection (2 items)' && menu.titles.includes('Bookmark...') && menu.titles.includes('Move 2 items to...'), `the multi-select menu leads with a new folder and Bookmark... (${menu.titles.join(' | ')})`);
   check(menu.animation === 'none' && menu.transition === '0s' && menu.animations === 0, 'the selection menu opens with no animation');
   check(menu.radius === '8px' && menu.clicked && !menu.other && menu.shadow.includes(menu.focus) && menu.otherShadow === 'none', `selected rows are 8px pills and only the right-clicked row is outlined (${menu.radius}, ${menu.shadow})`);
   await press('Escape');
@@ -119,7 +119,7 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
 
   await click('.mod-left-split .workspace-tab-header[aria-label="Files"]');
   await click(row('G/B.md'), 'right');
-  await menuAt('New folder with selection');
+  await menuAt('New folder with selection (2 items)');
   await wait(() => run(() => document.querySelector('.nav-files .tree-item-inner[contenteditable]')?.textContent === 'Untitled'), 'the new folder is ready to rename');
   check(await has('G/Untitled/A.md') && await has('G/Untitled/B.md') && !await has('G/A.md') && !await has('G/B.md') && await has('G/C.md'), 'the new folder holds the selection and leaves the other file');
   await press('Escape');
@@ -182,16 +182,15 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
   });
   const wanted = [
     ['New note', 'Ctrl + N', 'lucide-square-pen'],
-    ['Go to file', 'Ctrl + O', 'lucide-layout-list'],
-    ['Search', 'Ctrl + Shift + F', 'lucide-search'],
     ['New canvas', '', 'lucide-layout-dashboard'],
+    ['Go to file', 'Ctrl + O', 'lucide-search'],
   ];
   const got = empty.actions.map((action) => [action.label, action.hotkey, action.icon.includes('lucide-') ? action.icon.split(' ').find((name) => name.startsWith('lucide-')) : action.icon]);
   check(empty.title === 'New tab' && !empty.close && JSON.stringify(got) === JSON.stringify(wanted), `the empty tab is titled New tab and its pills are ${got.map((item) => item.join(' ')).join(' | ')}`);
   check(empty.actions.every((action) => action.hotkeyHidden === !action.hotkey && !/[[\]]/.test(action.hotkey)), 'each shortcut is its own span, with no brackets, and a missing shortcut is hidden');
   const width = empty.actions[0]?.width ?? 0;
-  check(empty.actions.every((action) => action.font === '13px' && action.weight === '400' && action.color === empty.normal && action.pad === '8px 12px' && action.radius === '999px' && action.justify === 'flex-start' && action.iconLeft > 10 && action.iconLeft < 16 && (action.hotkey === '' || action.hotkeyColor === empty.muted)), 'pills are 13px normal text, padded 8px 12px, with the icon and label on the left');
-  check(empty.actions.every((action) => Math.abs(action.width - width) < 1 && Math.abs(action.width - 184) < 2 && !action.labelClip && !action.hotkeyClip && action.transition === '0s' && action.animation === 'none' && action.animations === 0) && empty.centered, `pills share one width near 184px so Ctrl + Shift + F fits (${width}px, clips ${empty.actions.map((action) => action.labelClip || action.hotkeyClip).join(',')})`);
+  check(empty.actions.every((action) => action.font === '13px' && action.weight === '400' && action.color === empty.normal && action.pad === '8px 12px' && action.radius === '999px' && action.justify === 'flex-start' && action.iconLeft > 10 && action.iconLeft < 16 && (action.hotkey === '' || action.hotkeyColor === empty.normal)), 'pills are 13px normal text, padded 8px 12px, with the icon and label on the left');
+  check(empty.actions.every((action) => Math.abs(action.width - width) < 1 && Math.abs(action.width - 168) < 2 && !action.labelClip && !action.hotkeyClip && action.transition === '0s' && action.animation === 'none' && action.animations === 0) && empty.centered, `pills share one width near 168px (${width}px, clips ${empty.actions.map((action) => action.labelClip || action.hotkeyClip).join(',')})`);
 
   const vault = await run(() => {
     const name = document.querySelector('.workspace-drawer-vault-name');
