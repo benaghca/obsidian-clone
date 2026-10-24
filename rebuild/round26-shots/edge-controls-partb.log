@@ -1,0 +1,75 @@
+PASS Geometry bounds match native SVG for every side combination
+PASS Edge toolbar appears within two frames; max 16.8ms
+PASS Edge toolbar has no animations
+PASS Edge toolbar has observed order and bundled icons
+PASS Edge toolbar matches native 170×34 screen-pixel size
+PASS Edge palette appears within two frames; max 16.7ms
+PASS Edge palette has no animations
+PASS Double-clicking color never adds a card
+PASS Red writes the native edge color
+PASS Red updates edge and arrowhead together
+PASS Orange writes the native edge color
+PASS Orange updates edge and arrowhead together
+PASS Yellow writes the native edge color
+PASS Yellow updates edge and arrowhead together
+PASS Green writes the native edge color
+PASS Green updates edge and arrowhead together
+PASS Cyan writes the native edge color
+PASS Cyan updates edge and arrowhead together
+PASS Purple writes the native edge color
+PASS Purple updates edge and arrowhead together
+PASS Stationary color click reopens the shared palette
+PASS No-op color adds no history step
+PASS Color redo restores exact saved bytes
+PASS Custom native picker cancellation preserves bytes
+PASS Native picker accepts a hex edge color through real keyboard input
+PASS Custom hex color is one undo step
+PASS Custom hex color redoes immediately after native picker closes
+PASS Default removes the edge color key
+PASS Double-clicking direction never adds a card
+PASS Line direction menu appears within two frames; max 16.7ms
+PASS Line direction menu has no animations
+PASS Direction rows match native order
+PASS Nondirectional saves native implicit/default arrowheads
+PASS Nondirectional changes visible markers immediately
+PASS Nondirectional updates the toolbar direction icon
+PASS Nondirectional is immediately undoable without refocusing
+PASS Nondirectional is immediately redoable
+PASS Bidirectional saves native implicit/default arrowheads
+PASS Bidirectional changes visible markers immediately
+PASS Bidirectional updates the toolbar direction icon
+PASS Bidirectional is immediately undoable without refocusing
+PASS Bidirectional is immediately redoable
+PASS Unidirectional saves native implicit/default arrowheads
+PASS Unidirectional changes visible markers immediately
+PASS Unidirectional updates the toolbar direction icon
+PASS Unidirectional is immediately undoable without refocusing
+PASS Unidirectional is immediately redoable
+PASS Stationary direction click reopens menu
+PASS Double-clicking an edge opens a plain label editor
+PASS Path label is centered and saved
+PASS Selection toolbar stays above the centered edge label
+PASS Labeled edge adds the observed Remove label control
+PASS Double-clicking a label edits it; Escape keeps the draft like Obsidian
+PASS Double-clicking Edit label never adds a card
+PASS Double-clicking Edit label and clicking away commits without adding a card
+PASS Empty label removes the JSON key and rendered label
+PASS Empty label is one undo step
+PASS Ctrl+Shift+Z redoes empty-label removal
+PASS Double-clicking Remove label removes only the label
+PASS Remove label is one undo step
+PASS Redo button restores label removal
+PASS Every toolbar and label action preserves unknown root, node and edge data
+PASS Removing metadata preserves original key order
+PASS Bent-path label uses the curve midpoint
+PASS Repeated/double zoom fits the selected edge and does not save or add a card
+PASS Read-only permits edge zoom but hides edit controls and blocks label edits
+PASS Single toolbar Remove is immediately undoable without refocusing
+PASS Double and repeated stationary Remove delete the edge without adding a card
+PASS Shared palette colors a mixed card/edge selection atomically
+PASS Mixed color is one history step
+PASS Native Obsidian metadata returns centered with exact disk bytes
+PASS Native reverse color, heads and label render in Grove
+PASS External canvas reload closes the button-anchored direction menu
+PASS Clicking the old menu position cannot overwrite an externally changed canvas
+PASS Adding and clearing color/direction restores the original structured document

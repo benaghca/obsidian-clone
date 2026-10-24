@@ -197,3 +197,162 @@ source held fixed and no competing builds.
 
 The notes/evidence commit completes Part A. Stop here; Part B requires the
 separate user message.
+
+# Part B — edge toolbar and labels
+
+Authorized separately after Part A; baseline `a476c00`, same worktree and
+branch. No new dependencies, Rust changes, pushes, merges or real vaults.
+
+## Further native observation
+
+The same installed Obsidian/private headless driver confirms the toolbar's
+170×34px dimensions and order: Remove (`trash-2`), Set color (`palette`),
+Zoom to selection, Line direction (`arrow-right`), Edit label (`edit`).
+An existing label adds **Remove label** (`x-square`) immediately before
+Edit label. Direction rows are Nondirectional, Unidirectional and
+Bidirectional, with horizontal-line, arrow-right and move-horizontal icons.
+The six presets and custom native color picker match the card palette.
+
+Double-clicking a path or label opens a centered, 20px contenteditable
+label; its empty editing box is 12×38px. Escape and clicking away keep the
+draft. The follow-up empty-label experiment also clarifies the earlier
+Enter observation: native Enter can insert a newline (`label:"\n"`). Grove
+uses the brief's permitted smaller single-line editor: Enter, Escape or
+blur finish the edit, and an empty string removes the key as requested.
+[Observation driver](round26-shots/observe-partb.mjs),
+[results](round26-shots/obsidian-partb.txt),
+[native screenshot](round26-shots/obsidian-partb.png).
+
+## Implementation and commits
+
+- `6d7868c` — Extend the existing raw-document patcher to edge color,
+  arrowheads and labels. Removing defaults deletes only those keys;
+  inserting a new field respects native metadata order without moving
+  existing or unknown keys. A serializer regression covers hex colors,
+  head defaults, empty labels and unknown-field order.
+- `1e2f8b7` — Reuse the existing selection toolbar, palette, native color
+  input, shared menu, history and save path for selected edges. Add the
+  observed direction menu and conditional Remove label action, using
+  bundled Lucide icons. Color changes support mixed card/edge selections
+  as one history step. Zoom/Shift+2 fit the selected curve bounds. A small
+  geometry helper computes exact extrema without an SVG layout read.
+  Visible strokes, head colors/directions and labels update incrementally;
+  card DOM and editors stay intact. Both heads share one existing arrow
+  marker. Double-clicking a path or label, or Edit label, starts a temporary
+  plain-text label editor. Labels remain centered as attached cards move.
+  Read-only blocks editing and retains zoom; no animations were added.
+
+- `ab604d4` — Add the native CDP regression suite, 18 saved Grove action
+  fixtures, the native return fixture and reproducible Obsidian observation/
+  round-trip drivers. Wire the suite into `npm test`.
+
+- `3d42a4a` — Dispose an open direction menu anchored inside the toolbar
+  when an external canvas reload replaces that toolbar. Two real-pointer
+  regressions check dismissal and prevent an old menu position from
+  overwriting the externally changed document.
+
+- `6dccac1` — Include the selected edge label in the toolbar placement
+  bounds, preventing overlap, and reflect the current arrowheads in the
+  direction button glyph. Native screenshot comparison and assertions
+  cover label clearance and all three icons.
+- `bb2e127` — Return focus to the canvas after toolbar mutations. Immediate
+  Ctrl+Z/Ctrl+Y on each direction choice and a single Remove click exposed
+  focus loss when a toolbar button was moved/removed. Native input now
+  verifies history without an intervening canvas click.
+
+The native-input regressions cover the keyboard deletion guard for a
+`plaintext-only` editor and a double click falling on the shifted Edit
+label control after Remove label disappears. The second click cannot
+start another label edit or create a card.
+
+Profiling caught a real large-board regression: enlarged label backgrounds
+made Chromium's Layerize work take about 43–49ms, yielding 50–66.7ms frames.
+The comparison with Part A and the old stylesheet isolated label painting.
+Keeping the labels on transform layers removes that long compositing work
+while retaining the observed padding/line height. The existing 20ms
+thresholds remain unchanged.
+[Before trace summary](round26-shots/label-layer-before-partb.log),
+[after](round26-shots/label-layer-after-partb.log).
+
+## Part B round trip
+
+All **18** `Grove-B-*.canvas` action snapshots open in Obsidian with every
+known displayed property matching and every original disk byte unchanged:
+six presets, default, a native-picker hex color, all three directions,
+path label insertion, label double-click editing, toolbar/blur editing,
+empty removal, Remove label, edge deletion and mixed-selection color.
+Unknown root/node/edge fields and their order survive Grove's changes.
+Obsidian then edits a label, chooses bidirectional and yellow, and saves
+`Obsidian-partb.canvas`; Grove renders that native result without rewriting
+it. Zoom is verified to leave file bytes unchanged.
+[Driver](round26-shots/roundtrip-partb.mjs),
+[results](round26-shots/roundtrip-partb.log),
+[native return](round26-shots/obsidian-partb-return.png),
+[Grove return](round26-shots/grove-partb-return.png).
+
+## Part B line counts
+
+Using tracked app files and excluding `/gen/`, with newline counts matching
+the brief's `git ls-files`/`wc -l` method. Baseline is the Part A stop.
+[Machine-readable counts](round26-shots/line-counts-partb.json).
+
+- Production TS: **20,679 → 20,775 (+96)**.
+- Test TS: **3,252 → 3,262 (+10)**.
+- Total TS: **23,931 → 24,037 (+106)**.
+- CSS: **3,887 → 3,891 (+4)**.
+- Rust: **3,145 → 3,145 (0)**.
+- mjs: **3,287 → 3,362 (+75)**.
+- TS/CSS/Rust: **30,963 → 31,073 (+110)**.
+- Including mjs: **34,250 → 34,435 (+185)**.
+
+The largest production file remains `pane.ts` at 678 lines; the canvas
+view remains below 330. Across all of round 26, TS/CSS/Rust grow by 272
+lines from the round-25 baseline.
+
+## Next improvements after Part B
+
+1. Offer Add card / Add note after an empty connection drop. Completes the
+   observed drawing workflow with existing pickers and one compound undo
+   step; roughly 40–80 TS/test lines.
+2. Round 27 canvas indexing plus group/note-card editing. Makes board
+   content discoverable in search/backlinks/graph and completes remaining
+   card editing; roughly 550–950 TS/Rust/test lines across small slices.
+
+## Part B verification
+
+- `npm run build` passed. [Build](round26-shots/build-partb.log).
+- Final `npm test` passed: **254 TypeScript tests in 44 files**, four
+  browser-discovery tests, **1,109 named browser checks** and existing paste
+  cases. The new edge-control suite supplies **75** real CDP-input checks,
+  including repeated stationary clicks, double-clicking toolbar buttons,
+  preset/default/native-picker hex colors, all direction glyphs and saved
+  defaults, immediate keyboard undo/redo, path/label/toolbar editing,
+  empty/removal semantics, label clearance, mixed selection, read-only,
+  stale-menu cleanup and native reverse-file rendering.
+  [Full run](round26-shots/npm-test-partb.log),
+  [focused edge run](round26-shots/edge-controls-partb.log).
+- The separate `npm run test:geometry` passed **187 checks**, including
+  frontmatter in Live Preview, Source and Reading, line tops within 1px,
+  zero direct-child vertical margins and stationary fold/unfold arrows.
+  All **18** popup checks opened within two frames; maximum sampled frame
+  **17.0ms**. [Geometry](round26-shots/geometry-partb.log).
+- Final 300-card/400-edge pan, zoom, card drag and edge create/commit all
+  sampled a maximum **16.8ms**; 401-edge reconnect/commit also stayed at
+  **16.8ms** while retaining every existing card DOM node. The new edge
+  toolbar, palette and direction menu opened within two frames, maximum
+  **16.7ms**, without animations. No thresholds or legacy assertions were
+  relaxed.
+- `npm run audit:offline` passed for **138** source files, built output,
+  CSP, capabilities and dependencies. [Audit](round26-shots/audit-partb.log).
+- `cargo build --offline` and `cargo test --offline` passed, including all
+  **34** Rust tests. Tauri was never launched.
+  [Rust build](round26-shots/cargo-build-partb.log),
+  [Rust tests](round26-shots/cargo-test-partb.log).
+- `git diff --check` and the staged whitespace check passed. Generated
+  changes to prior-round snapshots were restored to avoid unrelated churn.
+  All UI and native observations used private headless processes/scratch
+  vaults; no owner-screen windows or real vaults were opened. No push or
+  merge was performed.
+
+The final local documentation commit records these appended notes, counts,
+checked logs and screenshots. Part B is complete; stop after committing.
