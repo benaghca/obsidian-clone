@@ -79,6 +79,8 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
       edges = chosenEdges; selected = [...nodes, ...edges]; toolbar.hidden = !selected.length;
       direction.remove(); removeLabel.remove();
       if (edges.length) toolbar.insertBefore(direction, editButton);
+      const heads = edges.length ? Number(edges[0].fromEnd === "arrow") + Number(edges[0].toEnd !== "none") : 1;
+      direction.replaceChildren(icon((["minus", "arrow-right", "move-horizontal"] as const)[heads]));
       if (edges.some(edge => edge.label)) toolbar.insertBefore(removeLabel, editButton);
       editButton.hidden = selected.length !== 1 || !!nodes.length && nodes[0].type !== "text";
       editButton.setAttribute("aria-label", edges.length ? "Edit label" : "Edit");
@@ -86,9 +88,9 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
       positions = [...nodes, ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
       const left = Math.min(...positions.map(n => n.x)), right = Math.max(...positions.map(n => n.x + n.width));
       toolbar.style.left = `${(left + right) / 2}px`;
-      const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label")]
-        .filter(label => nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
-      toolbar.style.top = `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.parentElement!.offsetTop + label.offsetTop))}px`;
+      const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label, .canvas-edge-label")]
+        .filter(label => label.dataset.edgeId ? edges.some(e => e.id === label.dataset.edgeId) : nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
+      toolbar.style.top = `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.dataset.edgeId ? label.offsetTop - label.offsetHeight / 2 : label.parentElement!.offsetTop + label.offsetTop))}px`;
     },
     dispose() { disposed = true; if (toolbar.matches(".has-active-menu") || toolbar.querySelector(".has-active-menu")) closeMenu(); toolbar.remove(); },
   };
