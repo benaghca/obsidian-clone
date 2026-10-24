@@ -95,6 +95,7 @@
   display: flex;
   flex: none;
   width: 20px;
+  padding-left: 4px;
   color: var(--text-muted);
   cursor: pointer;
 }
@@ -112,6 +113,11 @@
 .property-key-input {
   flex: 1;
 }
+/* The key's box is 124×28 inside the 29px row. The value can be the taller one. */
+.cm-content .property-key-input {
+  height: 28px;
+  line-height: 20px;
+}
 .property-value {
   display: flex;
   flex: 1;
@@ -126,7 +132,8 @@
 .property-value .property-input {
   font-size: inherit;
 }
-/* Date and time: a calendar on the left. The native glyph is invisible and its click target covers that icon.
+/* A date has a calendar on the left. The native glyph is invisible and its click target covers that icon.
+   A datetime value has no icon. The native glyph stays hidden, and its click target still opens the picker.
    In a note the date field is 116px. Chromium's content minimum is wider, and that extra
    width is what pushed the daily-note link right. File properties stays content-sized, so
    the narrow column keeps it near 101px. A datetime field fills the value column, so seconds
@@ -155,13 +162,14 @@
   position: relative;
   width: auto;
   max-width: 100%;
-  padding-left: 24px;
 }
 .property-value[data-type="date"] .property-date .property-input,
 .property-value[data-type="datetime"] .property-date .property-input {
   height: 29px;
 }
+/* The date glyph sits in the left padding. A datetime value has no icon. */
 .property-value[data-type="date"] .property-date .property-input {
+  padding-left: 24px;
   padding-right: 0;
   field-sizing: content;
 }

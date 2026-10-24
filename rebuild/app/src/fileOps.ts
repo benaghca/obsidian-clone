@@ -29,6 +29,9 @@ export const fileSettings = {
 export async function createNote(ws: Workspace, path: string, content = ""): Promise<FileEntry> {
   const entry = await api.createNote(path, content);
   await ws.vault.refreshFiles();
+  // A copy or a daily note from a template can already contain links. Without
+  // this, the link index waits for a later save and those backlinks never appear.
+  ws.vault.written(entry.path);
   return entry;
 }
 

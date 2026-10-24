@@ -36,8 +36,18 @@ await withBrowser(async ({ send, run, press, point, move, click, fill, check }) 
   };
   const release = async (p) => { await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...p, button: 'left', clickCount: 1 }); await sleep(80); };
   const begin = async (source, destination) => {
-    const start = await at(source);
-    const end = typeof destination === 'string' ? await at(destination) : destination;
+    // A folder drop scrolls that row to the centre. Read the source after that
+    // scroll, or the press lands on whichever row slid under the old point.
+    let start;
+    let end;
+    if (typeof destination === 'string') {
+      await at(destination);
+      start = await point(row(source));
+      end = await point(row(destination));
+    } else {
+      start = await at(source);
+      end = destination;
+    }
     await move(start);
     await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...start, button: 'left', clickCount: 1 });
     for (let i = 1; i <= 8; i++) {

@@ -201,7 +201,7 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
     name.textContent = short.text;
     return { dock: dock.width, short, long };
   });
-  check(Math.abs(vault.dock - 200) < 1 && vault.short.text === 'Sample Vault' && vault.short.scroll <= vault.short.client, `Sample Vault fits the 200px sidebar (${vault.short.scroll}px in ${vault.short.client}px, dock ${vault.dock})`);
+  check(Math.abs(vault.dock - 300) < 1 && vault.short.text === 'Sample Vault' && vault.short.scroll <= vault.short.client, `Sample Vault fits the 300px sidebar (${vault.short.scroll}px in ${vault.short.client}px, dock ${vault.dock})`);
   check(vault.long.scroll > vault.long.client && vault.long.overflow === 'ellipsis', 'a long vault name still ends in an ellipsis');
 
   const spot = await run(() => {
