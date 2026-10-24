@@ -1,0 +1,20 @@
+import {withObsidian,sleep} from '../round25-shots/obsidian-driver.mjs';
+import {notes,bases} from '../round31-shots/fixtures.mjs';
+import {writeFile} from 'node:fs/promises';
+await withObsidian(async({run,send,click,press,point})=>{
+ await run(async(notes,source)=>{await app.vault.createFolder('BaseTest');for(const[p,s]of Object.entries(notes))await app.vault.create(p,s);await app.vault.create('Multi.base',source);await app.workspace.getLeaf(false).openFile(app.vault.getAbstractFileByPath('Multi.base'));},notes,bases['By due.base']);await sleep(700);
+ const result={};
+ await run(()=>{window.observedInput=[];for(const type of ['pointerdown','pointerup'])window.addEventListener(type,e=>observedInput.push({type:e.type,x:e.clientX,y:e.clientY,buttons:e.buttons,target:e.target.className}));});
+ const snap=()=>run(()=>({headers:[...document.querySelectorAll('.bases-thead .bases-td')].map(el=>({text:el.innerText,x:el.getBoundingClientRect().x,w:el.getBoundingClientRect().width,parts:[...el.querySelectorAll('.bases-table-header-resizer')].map(e=>({class:e.getAttribute('class'),cursor:getComputedStyle(e).cursor,w:e.getBoundingClientRect().width,h:e.getBoundingClientRect().height}))})),menus:[...document.querySelectorAll('.menu,.popover,.suggestion-container')].map(el=>({text:el.innerText,w:el.getBoundingClientRect().width}))}));
+ const shot=async name=>writeFile(new URL(name+'.png',import.meta.url),Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ const drag=async(a,b)=>{await send('Input.dispatchMouseEvent',{type:'mouseMoved',...a});await sleep(80);await send('Input.dispatchMouseEvent',{type:'mousePressed',...a,button:'left',buttons:1,clickCount:1});await sleep(80);for(let i=1;i<=8;i++){await send('Input.dispatchMouseEvent',{type:'mouseMoved',button:'left',x:a.x+(b.x-a.x)*i/8,y:a.y+(b.y-a.y)*i/8,buttons:1});await sleep(20);}await send('Input.dispatchMouseEvent',{type:'mouseReleased',...b,button:'left',clickCount:1});await sleep(250);};
+ result.initial=await snap();console.log(JSON.stringify(result.initial));
+ const headers=()=>run(()=>[...document.querySelectorAll('.bases-thead .bases-td')].map(el=>{const r=el.getBoundingClientRect();return{x:r.x,y:r.y,w:r.width,h:r.height};}));
+ let hs=await headers();await drag({x:hs[0].x+25,y:hs[0].y+15},{x:hs[2].x+hs[2].w-10,y:hs[2].y+15});await sleep(2300);result.firstDrag={snapshot:await snap(),source:await run(()=>app.vault.read(app.vault.getAbstractFileByPath('Multi.base')))};
+ hs=await headers();const resizePoint=await point('.bases-table-header-resizer');await drag(resizePoint,{x:resizePoint.x+60,y:resizePoint.y});await sleep(2300);result.resized={snapshot:await snap(),source:await run(()=>app.vault.read(app.vault.getAbstractFileByPath('Multi.base')))};await shot('obsidian-resized');
+ const label=async text=>click(await run(text=>{const e=[...document.querySelectorAll('.workspace-leaf.mod-active .bases-toolbar *, .menu *, .popover *')].find(e=>e.textContent===text&&e.children.length===0&&e.getBoundingClientRect().width>0);const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},text));
+ await label('Sort');result.sort=await snap();await shot('obsidian-sort');const sg=await point('svg.lucide-grip-vertical');await drag(sg,{x:sg.x,y:sg.y+42});await sleep(2300);result.sortDrag={snapshot:await snap(),source:await run(()=>app.vault.read(app.vault.getAbstractFileByPath('Multi.base')))};await press('Escape');
+ await label('Filter');const before=await run(()=>app.vault.read(app.vault.getAbstractFileByPath('Multi.base')));await label('Add filter');result.incomplete=await snap();result.incomplete.unchanged=before===await run(()=>app.vault.read(app.vault.getAbstractFileByPath('Multi.base')));await shot('obsidian-incomplete');await press('Escape');await press('Escape');
+ result.input=await run(()=>observedInput);
+ await writeFile(new URL('observed.json',import.meta.url),JSON.stringify(result,null,2));
+});
