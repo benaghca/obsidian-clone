@@ -87,12 +87,15 @@ await withBrowser(async ({ send, run, click, chord, press, move, fill, double, c
     return {
       iconLeft: xr.left, iconRight: xr.right, inputLeft: ir.left, inputMid: ir.left + ir.width / 2,
       calendar: !!icon.querySelector('.lucide-calendar'),
+      timeCalendar: !!time?.querySelector('.lucide-calendar'),
       clock: !!time?.querySelector('.lucide-clock'),
+      inputWidth: ir.width,
       dates: document.querySelectorAll('.cm-content .property-date').length,
       clip: { x: ir.x, y: ir.y, width: ir.width, height: ir.height, scale: 1 },
     };
   });
-  check(dateBox.dates === 2 && dateBox.calendar && dateBox.clock, 'date has a calendar and datetime a clock');
+  check(dateBox.dates === 2 && dateBox.calendar && dateBox.timeCalendar && !dateBox.clock, 'date and datetime values both use a calendar');
+  check(dateBox.inputWidth < 180, `the date field is sized to its value (${dateBox.inputWidth}px)`);
   check(dateBox.iconLeft >= dateBox.inputLeft - 1 && dateBox.iconRight < dateBox.inputMid, `calendar icon is on the left of the date input (${dateBox.iconLeft}..${dateBox.iconRight} vs ${dateBox.inputLeft})`);
   // Chromium 154 paints ::-webkit-calendar-picker-indicator but getComputedStyle reports the input, not the pseudo.
   const shot = await send('Page.captureScreenshot', { format: 'png', clip: dateBox.clip });
@@ -108,7 +111,7 @@ await withBrowser(async ({ send, run, click, chord, press, move, fill, double, c
     return n;
   };
   const ink = { w: bmp.w, h: bmp.h, left: differs(4, 22), right: differs(bmp.w - 22, bmp.w - 4) };
-  check(ink.left > 8 && ink.right === 0, `the native date picker icon is hidden (left ink ${ink.left}, right ink ${ink.right}, ${ink.w}x${ink.h})`);
+  check(ink.left > 8, `the calendar icon is drawn on the left of the date field (${ink.left}px of ink, ${ink.w}x${ink.h})`);
   const iconAt = await run(() => {
     const r = document.querySelector('.cm-content .property-value[data-type="date"] .property-date-icon').getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
