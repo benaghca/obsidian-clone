@@ -90,6 +90,6 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
         .filter(label => nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
       toolbar.style.top = `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.parentElement!.offsetTop + label.offsetTop))}px`;
     },
-    dispose() { disposed = true; if (toolbar.classList.contains("has-active-menu")) closeMenu(); toolbar.remove(); },
+    dispose() { disposed = true; if (toolbar.matches(".has-active-menu") || toolbar.querySelector(".has-active-menu")) closeMenu(); toolbar.remove(); },
   };
 }
