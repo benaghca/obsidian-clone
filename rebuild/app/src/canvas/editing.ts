@@ -19,11 +19,11 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const events = new AbortController();
   let cancel: (() => void) | undefined, suppress = false;
   const chosen = () => nodes.filter(n => selected.has(n.id));
-  const removeSelected = () => { if ((selected.size || selectedEdges.size) && !canvasReadOnly.has(el)) commit([], selected, undefined, selectedEdges); };
+  const removeSelected = () => { if ((selected.size || selectedEdges.size) && !canvasReadOnly.has(el)) { commit([], selected, undefined, selectedEdges); el.focus({ preventScroll: true }); } };
   const menu = selectionMenu(world, nodes, removeSelected, zoom, item => edit(item, selection), changed => {
     const cards = changed.filter((item): item is CanvasNode => !("fromNode" in item));
     paint(cards); commit(cards, undefined, changed.filter((item): item is CanvasEdge => "fromNode" in item));
-    menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
+    menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); el.focus({ preventScroll: true });
   });
   const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); };
   function selection() {
