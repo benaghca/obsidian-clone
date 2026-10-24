@@ -12,11 +12,13 @@
 import { api, type SearchHit } from "../api";
 import { updateNoteText } from "../fileOps";
 import { kept } from "../memo";
-import { compareNames, noteName } from "../paths";
+import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
-import { h } from "./dom";
+import { h, iconButton } from "./dom";
+import { icon } from "./icons";
 import { linkSpans, mentionSpans, type Span } from "./mentions";
-import { afterPaint, bindResultKeys, collapseResultsButton, hitColumns, highlighted, pagedRows, resultGroup, resultMatch, section, type SideView } from "./sideView";
+import { showMenu } from "./menu";
+import { afterPaint, bindResultKeys, collapseResultsButton, hitColumns, highlighted, linesAround, noteText, pagedRows, resultGroup, section, type SideView } from "./sideView";
 
 interface Mention {
   from: string;
@@ -40,27 +42,91 @@ const PAGE = 25;
  */
 export function createBacklinksView(ws: Workspace, pathOf: () => string | null = () => ws.active.path): SideView {
   const collapsedFiles = new Set<string>();
+  /** A row opened from its chevron, and a row folded while Show more context is on. */
+  const opened = new Set<string>();
+  const closed = new Set<string>();
+  const noteCache = new Map<string, string>();
   let unlinkedOpen = false;
+  let moreContext = false;
+  let sort: SortOrder = "alphabetical";
+  let filterText = "";
 
   const linked = section("Linked mentions", true, () => {});
   const unlinked = section("Unlinked mentions", false, (open) => {
     unlinkedOpen = open;
     if (open) scheduleUnlinked(0);
   });
-  const el = h("div", { class: "backlink-pane", tabindex: "0" });
-  el.append(h("div", { class: "backlink-toolbar" }, collapseResultsButton(el)), linked.el, unlinked.el);
-  bindResultKeys(el);
+  const pane = h("div", { class: "backlink-pane", tabindex: "0" });
+  const filterInput = h("input", { class: "backlink-filter", type: "search", placeholder: "Filter...", "aria-label": "Filter backlinks" });
+  filterInput.hidden = true;
+  const contextBtn = iconButton(icon("wrap-text", 16), "Show more context", () => {
+    moreContext = !moreContext;
+    closed.clear();
+    contextBtn.classList.toggle("is-active", moreContext);
+    shownLinked = "";
+    renderLinked();
+    scheduleUnlinked(0);
+  });
+  const sortBtn = iconButton(icon("arrow-up-down", 16), "Change sort order", () => {
+    showMenu(SORT_ORDERS.map(([order, title]) => ({
+      title,
+      checked: order === sort,
+      action: () => {
+        sort = order;
+        sortBtn.classList.toggle("is-active", order !== "alphabetical");
+        shownLinked = "";
+        renderLinked();
+        scheduleUnlinked(0);
+      },
+    })), sortBtn);
+  });
+  const filterBtn = iconButton(icon("list-filter", 16), "Show search filter", () => {
+    const on = filterInput.hidden !== false;
+    filterBtn.classList.toggle("is-active", on);
+    filterInput.hidden = !on;
+    if (!on && filterText) {
+      filterText = "";
+      filterInput.value = "";
+      shownLinked = "";
+      renderLinked();
+      scheduleUnlinked(0);
+    } else if (on) filterInput.focus();
+  });
+  const toolbar = h("div", { class: "nav-buttons-container backlink-toolbar" }, collapseResultsButton(pane), contextBtn, sortBtn, filterBtn);
+  const el = h("div", { class: "backlink-view" }, h("div", { class: "nav-header" }, toolbar, filterInput), pane);
+  pane.append(linked.el, unlinked.el);
+  bindResultKeys(pane);
 
   let active = false;
   let shownLinked = "";
   let unlinkedTimer = 0;
   let unlinkedSeq = 0;
 
+  const rowKey = (m: Mention) => `${m.from}:${m.line}`;
+  const wantsContext = (m: Mention) => !closed.has(rowKey(m)) && (moreContext || opened.has(rowKey(m)));
+
+  filterInput.addEventListener("input", () => {
+    filterText = filterInput.value;
+    shownLinked = "";
+    renderLinked();
+    scheduleUnlinked(0);
+  });
+
+  function passes(m: Mention): boolean {
+    const q = filterText.trim().toLowerCase();
+    return !q || noteName(m.from).toLowerCase().includes(q) || m.text.toLowerCase().includes(q);
+  }
+
   /** Rows grouped per note; returns the number of mentions shown (Obsidian's count). */
-  function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string, row: (m: Mention) => HTMLElement = matchRow) {
+  function renderGroups(into: HTMLElement, mentions: Mention[], emptyText: string, row: (m: Mention) => HTMLElement) {
     const byFile = new Map<string, Mention[]>();
-    for (const m of mentions) kept(byFile, m.from, () => []).push(m);
-    const files = [...byFile.keys()].sort((a, b) => compareNames(noteName(a), noteName(b)));
+    for (const m of mentions) if (passes(m)) kept(byFile, m.from, () => []).push(m);
+    const entries = new Map(ws.vault.files.map((f) => [f.path, f]));
+    const order = compareFiles(sort);
+    const files = [...byFile.keys()].sort((a, b) => order(
+      entries.get(a) ?? { name: noteName(a), mtime_ms: 0, ctime_ms: 0 },
+      entries.get(b) ?? { name: noteName(b), mtime_ms: 0, ctime_ms: 0 },
+    ));
     into.replaceChildren(
       ...files.map((path) => {
         const all = byFile.get(path)!;
@@ -70,19 +136,71 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       }),
     );
     if (!files.length) into.append(h("div", { class: "search-empty-state" }, emptyText));
-    return total(mentions);
+    return total(mentions.filter(passes));
   }
 
   const total = (mentions: Mention[]) => mentions.reduce((n, m) => n + m.count, 0);
 
-  const matchRow = (m: Mention) => resultMatch(ws, m.from, m, m.spans());
+  function contextOf(m: Mention): { before: string; after: string } | null {
+    if (!wantsContext(m)) return null;
+    const text = noteCache.get(m.from);
+    if (text === undefined) return null;
+    const around = linesAround(text, m.line);
+    return around.before || around.after ? around : null;
+  }
 
-  function renderLinked() {
+  function queueContext(mentions: Mention[], again: () => void) {
+    const missing = [...new Set(mentions.filter(wantsContext).map((m) => m.from))].filter((p) => !noteCache.has(p));
+    if (!missing.length) return;
+    void Promise.all(missing.map(async (p) => noteCache.set(p, await noteText(ws, p)))).then(again);
+  }
+
+  function contextChevron(m: Mention) {
+    const on = wantsContext(m);
+    return h("div", {
+      class: `clickable-icon backlink-context-toggle${on ? " is-expanded" : ""}`,
+      "aria-label": on ? "Hide context" : "Show more context",
+      onclick: (e: MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const key = rowKey(m);
+        if (wantsContext(m)) {
+          opened.delete(key);
+          if (moreContext) closed.add(key);
+          else closed.delete(key);
+        } else {
+          closed.delete(key);
+          opened.add(key);
+        }
+        shownLinked = "";
+        renderLinked();
+        if (unlinkedOpen) void renderUnlinked();
+      },
+    }, icon(on ? "chevron-down" : "chevron-right", 14));
+  }
+
+  function mentionRow(m: Mention, button: HTMLElement | null) {
+    const spans = m.spans();
+    const ctx = contextOf(m);
+    const open = (event: MouseEvent) => void ws.open(m.from, { line: m.line, ch: hitColumns(event, spans) });
+    const chevron = contextChevron(m);
+    if (!ctx && !button) {
+      return h("div", { class: "search-result-file-match", "data-preview-path": m.from, onclick: open }, ...highlighted(m.text, spans), chevron);
+    }
+    return h("div", { class: "search-result-file-match", "data-preview-path": m.from, onclick: open },
+      ctx?.before ? h("div", { class: "search-result-context" }, ctx.before) : null,
+      h("div", { class: "search-result-file-match-text" }, ...highlighted(m.text, spans)),
+      ctx?.after ? h("div", { class: "search-result-context" }, ctx.after) : null,
+      button,
+      chevron);
+  }
+
+  function renderLinked(force = false) {
     const path = pathOf();
     const entries = path ? (ws.vault.links.backlinks[path] ?? []) : [];
     // Skip the DOM work (and keep scroll and collapsed groups) when nothing changed.
-    const key = `${path}\n${entries.map((b) => `${b.from}:${b.line}:${b.text}`).join("\n")}`;
-    if (key === shownLinked) return;
+    const key = `${path}\n${sort}\n${filterText}\n${moreContext ? 1 : 0}\n${[...opened].sort()}\n${[...closed].sort()}\n${entries.map((b) => `${b.from}:${b.line}:${b.text}`).join("\n")}`;
+    if (!force && key === shownLinked) return;
     shownLinked = key;
     const resolved = new Map<string, boolean>();
     // Link targets resolve from the note they are in.
@@ -94,8 +212,10 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       if (row) row.count++;
       else byLine.set(`${b.from}:${b.line}`, { ...b, count: 1, spans: () => linkSpans(b.text, (t) => isHere(t, b.from)) });
     }
-    const n = renderGroups(linked.body, [...byLine.values()], path ? "No backlinks found." : "No file is open.");
+    const mentions = [...byLine.values()];
+    const n = renderGroups(linked.body, mentions, path ? "No backlinks found." : "No file is open.", (m) => mentionRow(m, null));
     linked.count.textContent = n ? n.toLocaleString() : "";
+    queueContext(mentions, () => shownLinked === key && renderLinked(true));
   }
 
   function scheduleUnlinked(ms: number) {
@@ -107,7 +227,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     const path = pathOf();
     const seq = ++unlinkedSeq;
     if (!path) {
-      renderGroups(unlinked.body, [], "No file is open.");
+      renderGroups(unlinked.body, [], "No file is open.", (m) => mentionRow(m, null));
       unlinked.count.textContent = "";
       return;
     }
@@ -129,11 +249,11 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     }
     const n = renderGroups(unlinked.body, mentions, "No unlinked mentions found.", unlinkedRow);
     unlinked.count.textContent = n ? n.toLocaleString() : "";
+    queueContext(mentions, () => seq === unlinkedSeq && void renderUnlinked());
   }
 
   /** The line, with this mention highlighted, and a Link button that wraps it. */
   function unlinkedRow(m: Mention) {
-    const spans = m.spans();
     const button = h("button", {
       class: "search-result-file-match-replace-button",
       type: "button",
@@ -143,11 +263,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
         void linkMention(m);
       },
     }, "Link");
-    return h("div", {
-      class: "search-result-file-match",
-      "data-preview-path": m.from,
-      onclick: (event: MouseEvent) => void ws.open(m.from, { line: m.line, ch: hitColumns(event, spans) }),
-    }, h("div", { class: "search-result-file-match-text" }, ...highlighted(m.text, spans)), button);
+    return mentionRow(m, button);
   }
 
   /** Turn this one mention into a link in the other note, if that text is still there. */
@@ -174,6 +290,8 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   }
 
   function refresh() {
+    noteCache.clear();
+    shownLinked = "";
     renderLinked();
     scheduleUnlinked(UNLINKED_DELAY);
   }

@@ -160,8 +160,14 @@
   user-select: none;
   cursor: default;
 }
+.embedded-backlinks .backlink-view {
+  flex: none;
+  min-height: auto;
+  overflow: visible;
+}
 .embedded-backlinks .backlink-pane {
   overflow: visible;
+  flex: none;
   padding: 0;
 }
 
