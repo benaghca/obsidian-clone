@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window and a note's own windows (Open in new window), on the app's own origin only, can call the vault commands (and read and write their own settings in the vault's .grove folder), open a note in a window of its own, listen for vault-changed, drive their own frameless window, set their own zoom level (Settings → Interface → Zoom level), and hand http, https and mailto links to the system opener.",
+  "description": "The main window and a note's own windows (Open in new window), on the app's own origin only, can call the vault commands (and read and write their own settings in the vault's .grove folder), open or create a vault folder, open a note in a window of its own, listen for vault-changed, drive their own frameless window, set their own zoom level (Settings → Interface → Zoom level), and hand http, https and mailto links to the system opener.",
   "windows": [
     "main",
     "note-*"
@@ -10,6 +10,7 @@
     "core:default",
     "core:event:default",
     "allow-open-vault",
+    "allow-create-vault",
     "allow-last-vault",
     "allow-list-files",
     "allow-read-note",

@@ -13,6 +13,8 @@
 //! display name. Several words must all occur on the same line. Link paths keep the file's real
 //! casing. Notes with no resolved links are omitted from `outgoing` and `backlinks`.
 //! `last_vault` does not open the folder; call `open_vault` with its path.
+//! `create_vault` makes one new empty folder (the parent must already exist; an
+//! existing path is refused) and then opens it the same way as `open_vault`.
 
 mod config;
 mod fsutil;
@@ -82,6 +84,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_vault,
+            create_vault,
             last_vault,
             list_files,
             read_note,
@@ -123,12 +126,8 @@ fn with_vault<T>(
     f(inner.vault.as_mut().ok_or("no vault open")?)
 }
 
-#[tauri::command]
-fn open_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
-    let raw = fsutil::expand_user(path.trim());
-    if !raw.is_dir() {
-        return Err(format!("not a folder: {}", raw.display()));
-    }
+/// Remember `raw`, watch it, and hand back its name. Shared by open and create.
+fn install_vault(state: &AppState, raw: std::path::PathBuf) -> Result<VaultInfo, String> {
     let opened = vault::Vault::open(raw)?;
     let info = VaultInfo::from_path(&opened.root);
     let root = opened.root.clone();
@@ -139,6 +138,22 @@ fn open_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, Str
     }
     let _ = state.watch_tx.send(WatchMsg::Watch(root));
     Ok(info)
+}
+
+#[tauri::command]
+fn open_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
+    let raw = fsutil::expand_user(path.trim());
+    if !raw.is_dir() {
+        return Err(format!("not a folder: {}", raw.display()));
+    }
+    install_vault(&state, raw)
+}
+
+/// A new empty vault folder, then the same remember-and-watch path as `open_vault`.
+#[tauri::command]
+fn create_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
+    let raw = fsutil::create_vault_dir(&path)?;
+    install_vault(&state, raw)
 }
 
 #[tauri::command]

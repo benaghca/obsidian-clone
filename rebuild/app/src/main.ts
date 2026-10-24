@@ -47,6 +47,7 @@ import { warmUpPromptGlyphs } from "./shell/prompt";
 import { loadLayout, loadWorkspace, saveLayout, saveWorkspace } from "./shell/prefs";
 import { pathQuery } from "./shell/searchQuery";
 import { createRightSidebar } from "./shell/rightSidebar";
+import { rememberVault } from "./shell/recentVaults";
 import { createSidebar } from "./shell/sidebar";
 import { createSidedocks } from "./shell/sidedock";
 import { fileName, noteName, parentDir, trimSlashes } from "./paths";
@@ -176,16 +177,17 @@ installTooltips();
 // ----- status bar: backlinks, word and character counts for the open note -----
 
 // Clicking the backlink count opens the Backlinks view, like Obsidian.
+// Text only: Obsidian's status bar does not put an icon on this count.
 const backlinkCount = h("span");
 const backlinks = h(
   "div",
   { class: "status-bar-item mod-clickable", "aria-label": "Show backlinks", onclick: () => commands.run("backlink:open") },
-  icon("link", 14),
   backlinkCount,
 );
 // "N properties": the open note's, as in Obsidian (not shown without
 // frontmatter); a click shows them in the File properties view.
 const propertyCount = h("div", { class: "status-bar-item mod-clickable", onclick: () => commands.run("properties:open-local") });
+propertyCount.hidden = true;
 const words = h("div", { class: "status-bar-item" });
 const chars = h("div", { class: "status-bar-item" });
 // The editing mode (Settings → Editor → Show editing mode in status bar), as
@@ -213,7 +215,9 @@ function renderEditorStatus() {
   editorStatus.replaceChildren(icon(m.icon, 14));
   editorStatus.setAttribute("aria-label", m.title);
 }
-const statusBar = h("div", { class: "status-bar" }, backlinks, propertyCount, editorStatus, words, chars);
+// Editing-mode icon first (Obsidian shows that one), then the text counts:
+// backlinks, properties, words, characters. No sync item.
+const statusBar = h("div", { class: "status-bar" }, editorStatus, backlinks, propertyCount, words, chars);
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 function renderCounts() {
@@ -455,6 +459,7 @@ window.addEventListener("beforeunload", () => {
 });
 
 await ws.vault.open(!!popoutNote);
+if (ws.vault.path) rememberVault({ path: ws.vault.path, name: ws.vault.name });
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
 bookmarks.load();

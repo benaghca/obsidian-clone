@@ -187,7 +187,12 @@ await withBrowser(async ({ send, run, press, chord, point, move, click, check })
     for (let i = 0; i < 140; i++) await api.createNote(`Scroll${String(i).padStart(3, '0')}.md`, 'Scroll fixture');
     await ws.vault.refreshFiles();
   });
-  await click('.nav-files [aria-label="Collapse all"]'); await sleep(250);
+  // Collapse only when folders are still open. Expand all would open the tree
+  // and the scroll-speed checks below would measure the wrong rows.
+  if (await run(() => !!document.querySelector('.nav-files [aria-label="Collapse all"]'))) {
+    await click('.nav-files [aria-label="Collapse all"]');
+    await sleep(250);
+  }
   for (const distance of [39, 25, 10]) {
     await run(selector => { document.querySelector(selector).scrollTop = 0; }, list);
     const edge = await run((selector, distance) => { const r = document.querySelector(selector).getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.bottom - distance }; }, list, distance);

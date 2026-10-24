@@ -11,6 +11,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 
 ## Tauri commands (backend implements, front end calls via `invoke`)
 - `open_vault(path: String) -> VaultInfo { path, name }` — remembers last vault.
+- `create_vault(path: String) -> VaultInfo { path, name }` — creates one new empty vault folder and opens it (same remember and watch as `open_vault`). The parent must already be a folder. An empty path, a missing parent, and a path that already exists are refused, so nothing is overwritten. Added in round 27.
 - `last_vault() -> Option<VaultInfo>`
 - `list_files() -> Vec<FileEntry { path (vault-relative, forward slashes), name (no .md), is_dir, mtime_ms, ctime_ms, size }>` — recursive, skips `.obsidian`, `.git`, `.trash`, `.grove`. `ctime_ms` is when the file was created (its modified time where the file system doesn't record that; 0 for folders), for the "Created time" sort orders; added in round 15. `create_note` and `create_folder` return the same entry.
 - `read_note(path: String) -> String`
