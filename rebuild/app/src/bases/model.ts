@@ -4,6 +4,7 @@ import { compareNames, noteName, parentDir } from "../paths";
 import { compare, expression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
+const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
 export const noteKey = (key: string) => key.replace(/^note\./, "");
 const canonical = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export function baseModel(source: string) {
@@ -30,7 +31,7 @@ export function baseModel(source: string) {
   const global = tree(root.filters), local = tree(view.filters);
   const formulas = new Map(Object.entries(mapping(root.formulas)).map(([k, v]) => [k, compile(v)]));
   if (view.order != null && (!Array.isArray(view.order) || !view.order.every(k => typeof k === "string"))) throw Error("order must be a list of property names");
-  const columns = (Array.isArray(view.order) && view.order.length ? view.order : ["file.name"]) as string[];
+  const columns = (Array.isArray(view.order) ? view.order : ["file.name"]) as string[];
   if (view.sort != null && !Array.isArray(view.sort)) throw Error("sort must be a list");
   const sorts = ((view.sort ?? []) as Yaml[]).map(s => {
     const config = mapping(s);
@@ -64,7 +65,7 @@ export function baseModel(source: string) {
   };
   const label = (key: string) => {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
-    return typeof config.displayName === "string" ? config.displayName : key.startsWith("file.") ? key.replace(".", " ") : key.replace(/^(note|formula)\./, "");
+    return typeof config.displayName === "string" ? config.displayName : FILE_LABELS[key] ?? key.replace(/^(note|formula)\./, "");
   };
   function select(rows: Row[]) {
     const found = rows.map(row => ({ row, context: context(row) })).filter(r => global(r.context) && local(r.context));
@@ -81,5 +82,5 @@ export function baseModel(source: string) {
     });
     return typeof view.limit === "number" ? found.slice(0, view.limit) : found;
   }
-  return { name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { results: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }
