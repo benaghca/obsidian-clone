@@ -6,7 +6,7 @@ import type { FileEntry } from "../api";
 import type { Bookmarks } from "../bookmarks";
 import { commands } from "../commands";
 import { slideHeight } from "../motion";
-import { deleteFile, fileSettings, newFolder, renameFile } from "../fileOps";
+import { deleteFile, fileSettings, newFolder, renameError, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
 import { compareFiles, compareNames, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
 import { readStored, store } from "../storage";
@@ -171,6 +171,10 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   let anchor: string | null = null;
   /** Keyboard cursor. Independent of the open file (`is-active`) and the selection. */
   let cursor: string | null = null;
+  /** The ring is drawn only after an arrow. A click and Show file explorer leave it off. */
+  let ring = false;
+  /** Show file explorer parks on the active file. The next plain arrow draws the ring there. */
+  let armed = false;
   const placed = new Map<string, { node: TreeNode; depth: number }>();
   let cancelDrag: (() => void) | undefined;
   const sorted = listeners();
@@ -238,7 +242,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function paintSelection() {
     for (const [path, row] of rows) {
       row.classList.toggle("is-selected", selected.has(path));
-      row.classList.toggle("is-focused", path === cursor);
+      row.classList.toggle("is-focused", ring && path === cursor);
     }
   }
 
@@ -251,7 +255,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function startRename(path: string) {
     const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
-    if (label) editInPlace(label, (name) => renameFile(ws, path, name));
+    if (label) editInPlace(label, (name) => renameFile(ws, path, name), (name) => renameError(ws, path, name));
   }
 
   async function newFolderIn(parent: string) {
@@ -285,6 +289,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
           onclick: (e: MouseEvent) => {
             if ((e.target as HTMLElement).isContentEditable) return;
             cursor = entry.path;
+            ring = false;
+            armed = false;
             const gesture = selectGesture(e);
             if (gesture === "toggle") {
               if (selected.has(entry.path)) selected.delete(entry.path);
@@ -492,9 +498,11 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     row.classList.add("is-revealed");
   }
 
-  /** Keyboard ring on the open file, without changing which rows are selected. */
+  /** Focus the list on the open file. The ring stays off until an arrow key. */
   function focusActive() {
     const path = ws.active.path ?? ws.active.viewFile;
+    ring = false;
+    armed = false;
     if (path) expandTo(path);
     if (path && rows.has(path)) {
       cursor = path;
@@ -502,6 +510,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       rows.get(path)?.scrollIntoView({ block: "nearest" });
     }
     list.focus({ preventScroll: true });
+    ring = false;
+    armed = !!cursor && rows.has(cursor);
     paintSelection();
   }
 
@@ -537,14 +547,25 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function focusPath(path: string) {
     cursor = path;
     anchor = path;
+    armed = false;
+    ring = true;
     paintSelection();
     rows.get(path)?.scrollIntoView({ block: "nearest" });
   }
 
-  /** With no cursor yet, the first arrow lands on the active file, or the row it points at. */
+  /** Arrows move the ring. The first one after Show file explorer only reveals it. */
   function moveCursor(delta: -1 | 1, extend: boolean) {
     const visible = visiblePaths();
     if (!visible.length) return;
+    if (armed && cursor && visible.includes(cursor) && !extend) {
+      armed = false;
+      ring = true;
+      paintSelection();
+      rows.get(cursor)?.scrollIntoView({ block: "nearest" });
+      return;
+    }
+    armed = false;
+    ring = true;
     const index = cursor == null ? -1 : visible.indexOf(cursor);
     const active = ws.active.path ?? ws.active.viewFile;
     const landing = index < 0 && active && visible.includes(active) ? active : null;
@@ -632,7 +653,12 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (!action) return;
     event.preventDefault();
     if (action.type === "move") moveCursor(action.delta, action.extend);
-    else if (action.type === "expand" || action.type === "collapse") toggleCursor();
+    else if (action.type === "expand" || action.type === "collapse") {
+      armed = false;
+      ring = true;
+      paintSelection();
+      toggleCursor();
+    }
     else if (action.type === "child") {
       const next = cursor ? childPath(cursor) : null;
       if (next) focusPath(next);
