@@ -1,0 +1,36 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{
+			"id":"a",
+			"type":"text",
+			"x":0,
+			"y":0,
+			"width":200,
+			"height":120,
+			"text":"Alpha",
+			"extra":{"keep":true}
+		},
+		{"id":"b","type":"text","x":400,"y":0,"width":200,"height":120,"text":"Beta"},
+		{"id":"c","type":"text","x":200,"y":260,"width":200,"height":120,"text":"Gamma"},
+		{"id":"opaque","type":"text","x":700,"y":260,"width":100,"height":120,"text":"Untouched","payload":42}
+	],
+	"edges":[
+		{
+			"future":{"keep":true},
+			"id":"old",
+			"fromNode":"a",
+			"fromSide":"bottom",
+			"toNode":"b",
+			"toSide":"top",
+			"fromEnd":"arrow",
+			"toEnd":"none",
+			"color":"4",
+			"label":"Existing"
+		},
+		{"id":"opaque-edge","fromNode":"opaque","fromSide":"left","toNode":"b","toSide":"bottom","future":42},
+		{"id":"22178013d860413c","fromNode":"b","fromSide":"left","toNode":"c","toSide":"top"}
+	]
+}

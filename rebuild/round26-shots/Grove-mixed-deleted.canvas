@@ -1,0 +1,13 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"id":"b","type":"text","x":400,"y":0,"width":200,"height":120,"text":"Beta"},
+		{"id":"c","type":"text","x":200,"y":260,"width":200,"height":120,"text":"Gamma"},
+		{"id":"opaque","type":"text","x":700,"y":260,"width":100,"height":120,"text":"Untouched","payload":42}
+	],
+	"edges":[
+		{"id":"opaque-edge","fromNode":"opaque","fromSide":"left","toNode":"b","toSide":"bottom","future":42}
+	]
+}

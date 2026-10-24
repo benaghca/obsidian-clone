@@ -1,0 +1,12 @@
+[
+  {
+    name: 'UpdateLayoutTree',
+    dur: 5.744,
+    data: { beginData: [Object], elementCount: 2005 }
+  },
+  {
+    name: 'Layout',
+    dur: 5.504,
+    data: { beginData: [Object], endData: [Object] }
+  }
+]

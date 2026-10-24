@@ -1,0 +1,29 @@
+LABELED_TOOLBAR [{"label":"Remove","display":"flex","icons":["svg-icon lucide-trash-2"]},{"label":"Set color","display":"flex","icons":["svg-icon lucide-palette"]},{"label":"Zoom to selection\n(Shift + 2)","display":"flex","icons":["svg-icon zoom-to-selection"]},{"label":"Line direction","display":"flex","icons":["svg-icon lucide-arrow-right"]},{"label":"Remove label","display":"flex","icons":["svg-icon lucide-x-square"]},{"label":"Edit label","display":"flex","icons":["svg-icon lucide-edit"]}]
+ESCAPE {
+	"nodes":[
+		{"id":"a","type":"text","text":"Alpha","x":0,"y":0,"width":220,"height":140},
+		{"id":"b","type":"text","text":"Beta","x":440,"y":0,"width":220,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Escape edit"}
+	]
+}
+AWAY {
+	"nodes":[
+		{"id":"a","type":"text","text":"Alpha","x":0,"y":0,"width":220,"height":140},
+		{"id":"b","type":"text","text":"Beta","x":440,"y":0,"width":220,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"Click away"}
+	]
+}
+EMPTY {
+	"nodes":[
+		{"id":"a","type":"text","text":"Alpha","x":0,"y":0,"width":220,"height":140},
+		{"id":"b","type":"text","text":"Beta","x":440,"y":0,"width":220,"height":140}
+	],
+	"edges":[
+		{"id":"e","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left","label":"\n"}
+	]
+}
+MIXED [{"label":"Remove","display":"flex"},{"label":"Set color","display":"flex"},{"label":"Zoom to selection\n(Shift + 2)","display":"flex"},{"label":"Line direction","display":"flex"},{"label":"Remove label","display":"flex"},{"label":"Edit label","display":"flex"}]

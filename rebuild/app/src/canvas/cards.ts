@@ -68,7 +68,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   // Remember the first target even when its action removes the toolbar.
   const click = (e: MouseEvent) => { if (e.detail === 1) controlClick = !!(e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu"); };
   const doubleClick = (e: MouseEvent) => {
-    if (e.isTrusted && !e.defaultPrevented && !controlClick && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, .canvas-edge-label, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) insert("text", point(e.clientX, e.clientY));
+    if (e.isTrusted && !e.defaultPrevented && !controlClick && !el.classList.contains("is-grabbable") && !(e.target as Element).closest(".canvas-node, [data-edge-id], .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) insert("text", point(e.clientX, e.clientY));
   };
   el.addEventListener("click", click, true);
   el.addEventListener("dblclick", doubleClick);

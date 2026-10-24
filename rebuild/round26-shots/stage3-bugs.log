@@ -1,0 +1,6 @@
+PASS outer-half target is on the visible left handle, got {"outer":{"x":848,"y":469,"cardLeft":854.5,"shown":"block","hit":"Connect left"},"from":{"x":653.5,"y":469,"w":20}}
+PASS dropping on the outer half of the target connection dot creates the edge, got [{"id":"0d1804303fef440f","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left"}]
+PASS dropping 6px inside the card still creates the edge, got [{"id":"9a47aa06ecdb43c3","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left"}]
+PASS edge toolbar stays inside the canvas when the edge is at the top, got {"top":88,"bottom":122,"viewTop":78,"at":{"x":705,"y":105},"hit":"Set color"}
+PASS Set color opens after the edge is panned to the top of the view
+PASS double-clicking a short edge label edits it and adds no card, got {"nodes":[{"id":"d","x":80,"y":240,"text":"Dee"},{"id":"f","x":270,"y":240,"text":"Eff"}],"editing":{"label":true,"card":null}}

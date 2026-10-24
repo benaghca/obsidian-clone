@@ -52,10 +52,12 @@
   white-space: nowrap;
 }
 .canvas-edge-label {
+  will-change: transform;
   z-index: 1;
   position: absolute;
   transform: translate(-50%, -50%);
-  padding: 0 4px;
+  padding: 4px 6px;
+  line-height: 1.5;
   border-radius: 4px;
   background: var(--background-primary);
   font-size: 20px;
@@ -100,7 +102,11 @@
 .canvas-node.is-editing > .canvas-node-content > .cm-editor > .cm-scroller { overflow: auto; }
 
 .canvas-control-group, .canvas-selection-menu { border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); box-shadow: 0 1px 2px rgb(0 0 0 / 10%); }
-.canvas-selection-menu { position: absolute; z-index: 4; display: flex; padding: 2px; gap: 1px; transform: scale(var(--canvas-inverse-scale, 1)) translate(-50%, calc(-100% - 10px)); transform-origin: 0 0; box-shadow: 0 2px 10px rgb(0 0 0 / 7%); --icon-size: 16px; }
+.canvas-selection-menu { position: absolute; z-index: 4; display: flex; padding: 2px; gap: 1px; left: var(--canvas-menu-x); top: var(--canvas-menu-y);
+  transform: scale(var(--canvas-inverse-scale, 1)) translate(
+    clamp(calc((var(--canvas-view-left) - var(--canvas-menu-x)) / var(--canvas-inverse-scale, 1)), -50%, calc((var(--canvas-view-right) - var(--canvas-menu-x)) / var(--canvas-inverse-scale, 1) - 100%)),
+    clamp(calc((var(--canvas-view-top) - var(--canvas-menu-y)) / var(--canvas-inverse-scale, 1)), calc(-100% - 10px), calc((var(--canvas-view-bottom) - var(--canvas-menu-y)) / var(--canvas-inverse-scale, 1) - 100%)));
+  transform-origin: 0 0; box-shadow: 0 2px 10px rgb(0 0 0 / 7%); --icon-size: 16px; }
 .canvas-selection-menu .clickable-icon { width: 32px; height: 28px; padding: 6px 8px; }
 .canvas-controls .canvas-control-group .clickable-icon:first-child { border-top: 0; }
 .canvas-controls .is-disabled { pointer-events: auto; }
@@ -118,8 +124,32 @@
 
 .canvas-control-group { overflow: hidden; }
 .canvas-control-group .clickable-icon:not(:last-child) { height: 33px; }
-.canvas-world:has(.canvas-node.is-editing) .canvas-selection-menu { display: none; }
+.canvas-world:has(.canvas-node.is-editing, .canvas-edge-label.is-editing) .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
 
 .canvas-swatch input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; }
 .canvas-selection-menu:focus { outline: none; }
 .canvas-selection-menu.has-active-menu [aria-label="Set color"] { background: var(--background-modifier-hover); color: var(--text-accent); }
+
+.canvas-node-connection-point, .canvas-edge-end { position: absolute; width: 20px; height: 20px; transform: translate(-50%, -50%); transform-origin: 0 0; cursor: crosshair; z-index: 4; }
+.canvas-node-connection-point { display: none; }
+.canvas-node:hover > .canvas-node-connection-point, .canvas-node.is-selected > .canvas-node-connection-point { display: block; transform: scale(var(--canvas-inverse-scale, 1)) translate(-50%, -50%); }
+.canvas-node-connection-point[data-side="top"] { left: 50%; top: 0; }
+.canvas-node-connection-point[data-side="right"] { left: 100%; top: 50%; }
+.canvas-node-connection-point[data-side="bottom"] { left: 50%; top: 100%; }
+.canvas-node-connection-point[data-side="left"] { left: 0; top: 50%; }
+.canvas-node-connection-point::after, .canvas-edge-end::after { content: ""; position: absolute; inset: 0; border: 3px solid var(--background-modifier-border); border-radius: 50%; background: var(--interactive-accent); opacity: 0; }
+.canvas-node-connection-point:hover::after, .canvas-edge-end:hover::after { opacity: 1; }
+.canvas-edge-hit { pointer-events: stroke; stroke-width: 24; stroke-opacity: 0; cursor: pointer; }
+.canvas-edge-hit.is-selected { stroke-opacity: .12; }
+.canvas-edge.is-selected { stroke-width: 5.5; }
+.canvas-edge-end { display: none; cursor: grab; z-index: 3; }
+.canvas-edge-end.is-selected { display: block; transform: scale(var(--canvas-inverse-scale, 1)) translate(-50%, -50%); }
+.canvas-edge-label { cursor: pointer; }
+.canvas-edge-label.is-selected { box-shadow: 0 0 0 2px var(--interactive-accent); }
+.canvas-node.is-connection-target { outline: 2px solid var(--interactive-accent); }
+.canvas-world.is-connecting .canvas-node-connection-point, .canvas-world.is-connecting .canvas-edge-end { pointer-events: none; }
+.canvas-world .is-reconnecting { visibility: hidden; }
+.canvas-view.is-readonly .canvas-node-connection-point, .canvas-view.is-readonly .canvas-edge-end,
+.canvas-node.is-editing > .canvas-node-connection-point { display: none; }
+
+.canvas-edge-label.is-editing { min-width: 12px; min-height: 38px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }

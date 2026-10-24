@@ -17,13 +17,25 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   let space = false, dragging = false, suppressClick = false;
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
+  // Size only controls; inheriting a zoom variable through every card's Markdown
+  // makes zoom recalculate the whole board's styles on each frame.
+  world.id = `canvas-world-${crypto.randomUUID()}`;
+  const sizing = new CSSStyleSheet();
+  sizing.replaceSync(`#${world.id} :is(.canvas-selection-menu, .canvas-node-connection-point, .canvas-edge-end) { --canvas-inverse-scale: 1; }
+    #${world.id} > .canvas-selection-menu {}`);
+  document.adoptedStyleSheets = [...document.adoptedStyleSheets, sizing];
+  const controlSize = (sizing.cssRules[0] as CSSStyleRule).style;
+  const menuBounds = (sizing.cssRules[1] as CSSStyleRule).style;
   function draw() {
     cancelAnimationFrame(frame);
     frame = 0;
     if (!state || !width || !height) return;
     const { cx, cy, scale } = state;
     const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
-    world.style.setProperty("--canvas-inverse-scale", String(1 / scale));
+    controlSize.setProperty("--canvas-inverse-scale", String(1 / scale));
+    // Only the toolbar needs viewport bounds; keep pan/zoom out of child DOM.
+    for (const [side, value] of [["left", (10 - x) / scale], ["right", (width - 10 - x) / scale], ["top", (10 - y) / scale], ["bottom", (height - 10 - y) / scale]] as const)
+      menuBounds.setProperty(`--canvas-view-${side}`, `${value}px`);
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
@@ -80,7 +92,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     }
   }, { passive: false });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true], .cm-editor, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
     if (e.code === "Space" || e.key === " ") { e.preventDefault(); space = true; el.classList.add("is-grabbable"); }
     if (e.shiftKey && e.code === "Digit1") { e.preventDefault(); fit(); }
   });
@@ -91,7 +103,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   el.addEventListener("pointerdown", e => {
     suppressClick = false;
     if ((e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
-    if (!(e.target as Element).closest(".cm-editor")) el.focus({ preventScroll: true });
+    if (!(e.target as Element).closest(".cm-editor, [contenteditable], input, textarea")) el.focus({ preventScroll: true });
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();
@@ -113,7 +125,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   });
   size.observe(el);
   return {
-    zoomTo(nodes: CanvasNode[]) { if (nodes.length) fit({ left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) }, 2); },
+    zoomTo(nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) { if (nodes.length) fit({ left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) }, 2); },
     updateHistory(back: boolean, forward: boolean) {
       for (const [button, enabled] of [[undo, back], [redo, forward]] as const) {
         const disabled = !enabled || canvasReadOnly.has(el);
@@ -121,6 +133,6 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       }
     },
     loaded(next: Bounds) { bounds = next; if (!state) fit(); else draw(); },
-    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); size.disconnect(); events.abort(); },
+    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); size.disconnect(); events.abort(); document.adoptedStyleSheets = document.adoptedStyleSheets.filter(sheet => sheet !== sizing); },
   };
 }

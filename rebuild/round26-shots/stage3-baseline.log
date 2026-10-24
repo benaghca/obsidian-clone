@@ -1,0 +1,36 @@
+PASS outer-half target is on the visible left handle, got {"outer":{"x":848,"y":469,"cardLeft":854.5,"shown":"block","hit":"Connect left"},"from":{"x":653.5,"y":469,"w":20}}
+FAIL dropping on the outer half of the target connection dot creates the edge, got []
+PASS dropping 6px inside the card still creates the edge, got [{"id":"84215c2da50d4e91","fromNode":"a","fromSide":"right","toNode":"b","toSide":"left"}]
+FAIL edge toolbar stays inside the canvas when the edge is at the top, got {"top":27,"bottom":61,"viewTop":78,"at":{"x":705,"y":44},"hit":"view-header"}
+FAIL Set color opens after the edge is panned to the top of the view
+FAIL double-clicking a short edge label edits it and adds no card, got {"nodes":[{"id":"d","x":80,"y":240,"text":"Dee"},{"id":"f","x":270,"y":240,"text":"Eff"},{"id":"366c50a1659c48e4","x":140,"y":250,"text":""}],"editing":{"label":false,"card":"366c50a1659c48e4"}}
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
++ actual - expected
+
++ [
++   'dropping on the outer half of the target connection dot creates the edge, got []',
++   'edge toolbar stays inside the canvas when the edge is at the top, got {"top":27,"bottom":61,"viewTop":78,"at":{"x":705,"y":44},"hit":"view-header"}',
++   'Set color opens after the edge is panned to the top of the view',
++   'double-clicking a short edge label edits it and adds no card, got {"nodes":[{"id":"d","x":80,"y":240,"text":"Dee"},{"id":"f","x":270,"y":240,"text":"Eff"},{"id":"366c50a1659c48e4","x":140,"y":250,"text":""}],"editing":{"label":false,"card":"366c50a1659c48e4"}}'
++ ]
+- []
+
+    at file:///home/chris/workspaces/remote/grove-r26-codex/rebuild/app/scripts/test-r26-bugs.mjs:119:8 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: [
+    'dropping on the outer half of the target connection dot creates the edge, got []',
+    'edge toolbar stays inside the canvas when the edge is at the top, got {"top":27,"bottom":61,"viewTop":78,"at":{"x":705,"y":44},"hit":"view-header"}',
+    'Set color opens after the edge is panned to the top of the view',
+    'double-clicking a short edge label edits it and adds no card, got {"nodes":[{"id":"d","x":80,"y":240,"text":"Dee"},{"id":"f","x":270,"y":240,"text":"Eff"},{"id":"366c50a1659c48e4","x":140,"y":250,"text":""}],"editing":{"label":false,"card":"366c50a1659c48e4"}}'
+  ],
+  expected: [],
+  operator: 'deepStrictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.8.2

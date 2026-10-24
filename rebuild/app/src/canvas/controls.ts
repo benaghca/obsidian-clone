@@ -3,7 +3,7 @@ import { h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { closeMenu, showMenu } from "../shell/menu";
 import { settings } from "../settings/store";
-import type { CanvasNode } from "./model";
+import { edgeBounds, type CanvasEdge, type CanvasNode } from "./model";
 
 export const canvasReadOnly = new WeakSet<HTMLElement>();
 export function canvasSettings(el: HTMLElement, anchor: HTMLElement, refresh: () => void) {
@@ -31,9 +31,11 @@ export function canvasHelp() {
       h("span", null, ...keys.map(key => h("kbd", null, key)))))),
   });
 }
-export function selectionMenu(world: HTMLElement, remove: () => void, zoom: () => void,
-  edit: (node: CanvasNode) => void, recolor: (nodes: CanvasNode[]) => void) {
-  let selected: CanvasNode[] = [], disposed = false;
+export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove: () => void, zoom: (items: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void,
+  edit: (item: CanvasNode | CanvasEdge) => void, recolor: (items: (CanvasNode | CanvasEdge)[]) => void) {
+  let selected: (CanvasNode | CanvasEdge)[] = [], edges: CanvasEdge[] = [], disposed = false;
+  let positions: Pick<CanvasNode, "x" | "y" | "width" | "height">[] = [];
+  const zoomSelection = () => { closeMenu(); zoom(positions); };
   const toolbar = h("div", { class: "canvas-selection-menu", tabindex: "-1", role: "toolbar", "aria-label": "Selection" });
   const colorButton = keyButton(icon("palette"), "Set color", () => {
     const choose = (color?: string) => {
@@ -52,21 +54,44 @@ export function selectionMenu(world: HTMLElement, remove: () => void, zoom: () =
       { title: "Custom color", content: h("span", { class: "canvas-swatch mod-custom" }, custom) },
     ], toolbar, { className: "canvas-color-menu", align: "center" });
   });
-  const editButton = keyButton(icon("square-pen"), "Edit", () => { closeMenu(); if (selected.length === 1) edit(selected[0]); });
+  const editButton = keyButton(icon("square-pen"), "Edit", e => { if (e.type === "click" && (e as MouseEvent).detail > 1) return; closeMenu(); if (selected.length === 1) edit(selected[0]); });
+  const direction = keyButton(icon("arrow-right"), "Line direction", () => {
+    showMenu((["Nondirectional", "Unidirectional", "Bidirectional"] as const).map((title, i) => ({
+      title, icon: (["minus", "arrow-right", "move-horizontal"] as const)[i],
+      checked: edges.every(edge => (edge.fromEnd === "arrow" ? 1 : 0) + (edge.toEnd !== "none" ? 1 : 0) === i),
+      action: () => {
+        const changed = edges.filter(edge => edge.fromEnd !== (i === 2 ? "arrow" : undefined) || edge.toEnd !== (i === 0 ? "none" : undefined));
+        changed.forEach(edge => { edge.fromEnd = i === 2 ? "arrow" : undefined; edge.toEnd = i === 0 ? "none" : undefined; });
+        if (changed.length) recolor(changed);
+      },
+    })), direction);
+  });
+  const removeLabel = keyButton(icon("square-x"), "Remove label", () => {
+    closeMenu(); const changed = edges.filter(edge => edge.label);
+    changed.forEach(edge => { edge.label = undefined; }); if (changed.length) recolor(changed);
+  });
   toolbar.append(keyButton(icon("trash-2"), "Remove", () => { closeMenu(); remove(); }), colorButton,
-    keyButton(icon("scan-search"), "Zoom to selection\n(Shift + 2)", () => { closeMenu(); zoom(); }), editButton);
+    keyButton(icon("scan-search"), "Zoom to selection\n(Shift + 2)", zoomSelection), editButton);
   world.append(toolbar);
   return {
-    update(nodes: CanvasNode[]) {
-      selected = nodes; toolbar.hidden = !nodes.length;
-      editButton.hidden = nodes.length !== 1 || nodes[0].type !== "text";
-      if (!nodes.length) return;
-      const left = Math.min(...nodes.map(n => n.x)), right = Math.max(...nodes.map(n => n.x + n.width));
-      toolbar.style.left = `${(left + right) / 2}px`;
-      const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label")]
-        .filter(label => nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
-      toolbar.style.top = `${Math.min(...nodes.map(n => n.y), ...labels.map(label => label.parentElement!.offsetTop + label.offsetTop))}px`;
+    zoom: zoomSelection,
+    update(nodes: CanvasNode[], chosenEdges: CanvasEdge[] = []) {
+      edges = chosenEdges; selected = [...nodes, ...edges]; toolbar.hidden = !selected.length;
+      direction.remove(); removeLabel.remove();
+      if (edges.length) toolbar.insertBefore(direction, editButton);
+      const heads = edges.length ? Number(edges[0].fromEnd === "arrow") + Number(edges[0].toEnd !== "none") : 1;
+      direction.replaceChildren(icon((["minus", "arrow-right", "move-horizontal"] as const)[heads]));
+      if (edges.some(edge => edge.label)) toolbar.insertBefore(removeLabel, editButton);
+      editButton.hidden = selected.length !== 1 || !!nodes.length && nodes[0].type !== "text";
+      editButton.setAttribute("aria-label", edges.length ? "Edit label" : "Edit");
+      if (!selected.length) return;
+      positions = [...nodes, ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
+      const left = Math.min(...positions.map(n => n.x)), right = Math.max(...positions.map(n => n.x + n.width));
+      toolbar.style.setProperty("--canvas-menu-x", `${(left + right) / 2}px`);
+      const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label, .canvas-edge-label")]
+        .filter(label => label.dataset.edgeId ? edges.some(e => e.id === label.dataset.edgeId) : nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
+      toolbar.style.setProperty("--canvas-menu-y", `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.dataset.edgeId ? label.offsetTop - label.offsetHeight / 2 : label.parentElement!.offsetTop + label.offsetTop))}px`);
     },
-    dispose() { disposed = true; if (toolbar.classList.contains("has-active-menu")) closeMenu(); toolbar.remove(); },
+    dispose() { disposed = true; if (toolbar.matches(".has-active-menu") || toolbar.querySelector(".has-active-menu")) closeMenu(); toolbar.remove(); },
   };
 }

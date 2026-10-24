@@ -1,8 +1,8 @@
-import type { CanvasNode } from "./model";
+import type { CanvasEdge, CanvasNode } from "./model";
 
 // Keep raw records separate from the tolerant rendering projection. Only the
-// card fields actually edited are patched; unknown records/keys retain their order.
-export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = []) {
+// fields actually edited are patched; unknown records/keys retain their order.
+export function editCanvas(source: string, changed: CanvasNode[], deleted = new Set<string>(), added: CanvasNode[] = [], edges: CanvasEdge[] = [], deletedEdges = new Set<string>()) {
   let data;
   try { data = JSON.parse(source); } catch { data = {}; }
   if (!data || typeof data !== "object" || Array.isArray(data)) data = {};
@@ -16,11 +16,32 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
     }
     return n;
   });
-  if (deleted.size && Array.isArray(data.edges)) data.edges = data.edges.filter((e: { fromNode?: string; toNode?: string } | null) => !e || !deleted.has(e.fromNode!) && !deleted.has(e.toNode!));
+  if ((deleted.size || deletedEdges.size) && Array.isArray(data.edges)) data.edges = data.edges.filter((e: CanvasEdge | null) => !e || !deletedEdges.has(e.id) && !deleted.has(e.fromNode) && !deleted.has(e.toNode));
   if (added.length) {
     if (!Array.isArray(data.nodes)) data.nodes = [];
     data.nodes.push(...added);
     if (!("edges" in data)) data.edges = [];
+  }
+  if (edges.length) {
+    if (!Array.isArray(data.edges)) data.edges = [];
+    for (const edge of edges) {
+      const index = data.edges.findIndex((e: CanvasEdge | null) => e?.id === edge.id);
+      if (index < 0) { data.edges.push(edge); continue; }
+      let old = data.edges[index];
+      const keys = ["fromNode", "fromSide", "toNode", "toSide", "fromEnd", "toEnd", "color", "label"] as const;
+      for (const key of keys) if (key in edge) {
+        const value = edge[key];
+        if (value === undefined || key === "label" && value === "") delete old[key];
+        else if (key in old) old[key] = value;
+        else {
+          // Insert new native fields in native order without moving old keys.
+          const entries = Object.entries(old), before = entries.findIndex(([k]) => keys.indexOf(k as typeof key) > keys.indexOf(key));
+          entries.splice(before < 0 ? entries.length : before, 0, [key, value]);
+          old = Object.fromEntries(entries);
+        }
+      }
+      data.edges[index] = old;
+    }
   }
   return format(data);
 }

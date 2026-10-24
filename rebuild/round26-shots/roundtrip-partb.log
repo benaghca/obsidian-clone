@@ -1,0 +1,19 @@
+PASS Grove-B-color-1.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-2.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-3.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-4.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-5.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-6.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-default.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-color-hex.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-delete.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-direction-bidirectional.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-direction-nondirectional.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-direction-unidirectional.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-label-add.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-label-edit.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-label-empty.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-label-remove.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-label-toolbar.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Grove-B-mixed-color.canvas: every displayed node/edge property and original disk byte is unchanged in Obsidian
+PASS Native label, bidirectional and yellow actions save the reverse Grove fixture
