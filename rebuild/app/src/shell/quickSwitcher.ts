@@ -1,13 +1,22 @@
 // Ctrl+O quick switcher: the shared prompt with notes as items (fuzzy
 // matches with bolded letters, recent notes first for an empty query).
 
-import { parentDir } from "../paths";
+import { noteName, parentDir } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { altKey, modKey } from "./keys";
 import { openPrompt, suggestionText } from "./prompt";
 import { type SwitcherItem, switcherItems } from "./switcherItems";
+
+/** Notes, then every other file (canvases, bases, images). An empty query still lists recents only. */
+function switcherNotes(ws: Workspace) {
+  const notes = ws.vault.includedNotes();
+  const seen = new Set(notes.map((note) => note.path));
+  const rest = ws.vault.files.filter((file) => !file.is_dir && !seen.has(file.path) && !ws.vault.isExcluded(file.path))
+    .map((file) => ({ name: noteName(file.path), path: file.path }));
+  return [...notes, ...rest];
+}
 
 // Enter opens in the tab, Ctrl/Cmd+Enter in a new tab, Ctrl/Cmd+Alt+Enter
 // to the right, as in Obsidian (a click works the same with the modifiers).
@@ -24,7 +33,7 @@ export function openQuickSwitcher(ws: Workspace) {
       ["shift ↵", "to create"],
       ["esc", "to dismiss"],
     ],
-    items: (query) => switcherItems(query, [...ws.vault.includedNotes(), ...ws.vault.files.filter(f => !f.is_dir && /\.(canvas|base)$/i.test(f.path) && !ws.vault.isExcluded(f.path))], ws.recent, ws.active.path),
+    items: (query) => switcherItems(query, switcherNotes(ws), ws.recent, ws.active.path),
     render(item, row) {
       suggestionText(row, item.name, item.indices, item.path ? parentDir(item.path) : "");
       if (item.path === null) row.append(h("div", { class: "suggestion-aux" }, h("span", { class: "suggestion-action" }, "Enter to create")));
