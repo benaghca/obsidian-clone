@@ -170,7 +170,7 @@ const ribbon = h(
   h("div", { class: "side-dock-actions" }, ...ribbonActions),
   h("div", { class: "side-dock-settings" }, settingsButton()),
 );
-sidebar.footer.append(h("div", { class: "vault-profile-actions" }, settingsButton()));
+sidebar.footer.querySelector(".workspace-drawer-vault-actions")!.append(settingsButton());
 
 installTooltips();
 
@@ -188,10 +188,14 @@ const backlinks = h(
 // frontmatter); a click shows them in the File properties view.
 const propertyCount = h("div", { class: "status-bar-item mod-clickable", onclick: () => commands.run("properties:open-local") });
 propertyCount.hidden = true;
-const words = h("div", { class: "status-bar-item" });
-const chars = h("div", { class: "status-bar-item" });
-// The editing mode (Settings → Editor → Show editing mode in status bar), as
-// in Obsidian: its icon, and a click offers the three modes.
+// Words and characters share one item, as Obsidian's word-count plugin draws
+// them (two segments inside the one status-bar item).
+const words = h("span", { class: "status-bar-item-segment" });
+const chars = h("span", { class: "status-bar-item-segment" });
+const wordCount = h("div", { class: "status-bar-item plugin-word-count" }, words, chars);
+// The editing mode (Settings → Editor → Show editing mode in status bar).
+// The installed Obsidian editor-status menu lists Reading, then Source mode,
+// then Live Preview, so Reading stays.
 const MODES: { mode: "reading" | "source" | "live"; title: string; icon: IconName }[] = [
   { mode: "reading", title: "Reading", icon: "book-open" },
   { mode: "source", title: "Source mode", icon: "code-xml" },
@@ -215,23 +219,26 @@ function renderEditorStatus() {
   editorStatus.replaceChildren(icon(m.icon, 14));
   editorStatus.setAttribute("aria-label", m.title);
 }
-// Editing-mode icon first (Obsidian shows that one), then the text counts:
-// backlinks, properties, words, characters. No sync item.
-const statusBar = h("div", { class: "status-bar" }, editorStatus, backlinks, propertyCount, words, chars);
+// Backlinks, then properties (hidden when the note has none), then the
+// editing-mode icon, then words and characters together. No sync item.
+const statusBar = h("div", { class: "status-bar" }, backlinks, propertyCount, editorStatus, wordCount);
 const plural = (n: number, word: string) => `${n.toLocaleString()} ${word}${n === 1 ? "" : "s"}`;
 
 function renderCounts() {
   const path = ws.active.path;
-  statusBar.hidden = !path || (backlinks.hidden && words.hidden && editorStatus.hidden);
   // A tab whose note is still loading shows no counts until it is on screen.
   const counts = path ? ws.view.state.field(countsField, false) : undefined;
-  if (!counts) return;
+  if (!counts) {
+    statusBar.hidden = !path || [backlinks, propertyCount, editorStatus, wordCount].every((el) => el.hidden);
+    return;
+  }
   const { words: w, chars: c } = counts;
   words.textContent = plural(w, "word");
   chars.textContent = plural(c, "character");
   const props = ws.view.state.field(frontmatterField, false)?.props?.length ?? 0;
   propertyCount.hidden = !props || !commands.pluginEnabled("properties");
   propertyCount.textContent = `${props.toLocaleString()} ${props === 1 ? "property" : "properties"}`;
+  statusBar.hidden = !path || [backlinks, propertyCount, editorStatus, wordCount].every((el) => el.hidden);
 }
 function renderBacklinks() {
   const path = ws.active.path;
@@ -350,7 +357,7 @@ function applyPlugins() {
   app.classList.toggle("is-right-sidebar-empty", !anyRight);
   sidebar.setBookmarksEnabled(on("bookmarks"));
   backlinks.hidden = !on("backlink");
-  words.hidden = chars.hidden = !on("word-count");
+  wordCount.hidden = !on("word-count");
   renderEditorStatus();
   panes.setBacklinksAllowed(on("backlink"));
   renderCounts();

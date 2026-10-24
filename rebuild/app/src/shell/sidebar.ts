@@ -9,8 +9,10 @@ import { slideHeight } from "../motion";
 import { newFolder, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
 import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } from "../paths";
+import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
+import { confirmDialog } from "./confirm";
 import { editInPlace, fieldError, h, iconButton } from "./dom";
 import { icon } from "./icons";
 import { type MenuItems, SEPARATOR, showMenu } from "./menu";
@@ -52,7 +54,18 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
   }
 
   const vaultSwitcher = mountVaultSwitcher(ws);
-  const footer = h("div", { class: "workspace-sidedock-vault-profile" }, vaultSwitcher.el);
+  // Help sits beside the settings gear, which main appends into this row.
+  // It stays on this machine: a short note, no network.
+  const help = iconButton(icon("circle-help"), "Help", () => {
+    void confirmDialog({
+      title: "Help",
+      message: "This vault is a folder of markdown files on this computer. The gear next to this button opens settings.",
+      confirm: "Close",
+      cancel: false,
+    });
+  });
+  const actions = h("div", { class: "workspace-drawer-vault-actions" }, help);
+  const footer = h("div", { class: "workspace-sidedock-vault-profile" }, vaultSwitcher.el, actions);
   ws.on((change) => {
     if (change === "files") vaultSwitcher.sync();
   });
@@ -62,8 +75,6 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     { class: "workspace-split mod-sidedock mod-left-split" },
     tabs.header,
     tabs.content,
-    // The vault name, and Obsidian's settings button at the right. (Obsidian
-    // also has help here; help would mean the network, so Grove has none.)
     footer,
   );
   select("files");
@@ -143,6 +154,10 @@ function contextMenu(e: MouseEvent, items: MenuItems) {
 
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
+  // Expand all until something is opened. Closing folders by hand does not
+  // flip it back; only Collapse all does. Same flag Obsidian keeps.
+  let allCollapsed = true;
+  let foldsVault = "";
   const rows = new Map<string, HTMLElement>();
   const openFolders = new Map<string, () => void>();
   let cancelDrag: (() => void) | undefined;
@@ -165,9 +180,10 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (autoReveal && ws.active.path) reveal(ws.active.path);
   });
   revealButton.setAttribute("aria-pressed", "false");
-  // Starts as Expand all: nothing is open until a folder is.
+  // Starts as Expand all. The label follows `allCollapsed`, not whether a
+  // folder happens to be open right now.
   const collapseButton = iconButton(icon("chevrons-up-down"), "Expand all", () =>
-    commands.run(expanded.size === 0 ? "file-explorer:expand-all" : "file-explorer:collapse-all"),
+    commands.run(allCollapsed ? "file-explorer:expand-all" : "file-explorer:collapse-all"),
   );
   const actions = h(
     "div",
@@ -268,10 +284,13 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function toggleFolder(node: TreeNode, depth: number, folder: HTMLElement, chevron: HTMLElement, instant = false) {
     const path = node.entry.path;
     const open = !expanded.has(path);
-    if (open) expanded.add(path);
-    else dropExpanded(path);
+    if (open) {
+      expanded.add(path);
+      allCollapsed = false;
+    } else expanded.delete(path);
     chevron.classList.toggle("is-collapsed", !open);
     syncCollapseButton();
+    rememberFolds();
     let box = childrenOf(folder);
     if (open && !box) {
       folder.append((box = renderChildren(node, depth)));
@@ -292,14 +311,6 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     });
   }
 
-  /** A closed folder takes its nested open paths with it, so the header button can flip. */
-  function dropExpanded(path: string) {
-    const prefix = `${path}/`;
-    for (const item of [...expanded]) {
-      if (item === path || item.startsWith(prefix)) expanded.delete(item);
-    }
-  }
-
   function directoryPaths() {
     const paths: string[] = [];
     for (const file of ws.vault.files) if (file.is_dir) paths.push(file.path);
@@ -311,38 +322,52 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     for (const path of [...expanded]) if (!dirs.has(path)) expanded.delete(path);
   }
 
-  /** Everything closed: Expand all. Anything open: Collapse all. */
+  /** Expand all while nothing has been opened since the last Collapse all. */
   function syncCollapseButton() {
-    const collapsed = expanded.size === 0;
-    collapseButton.replaceChildren(icon(collapsed ? "chevrons-up-down" : "chevrons-down-up"));
-    collapseButton.setAttribute("aria-label", collapsed ? "Expand all" : "Collapse all");
+    collapseButton.replaceChildren(icon(allCollapsed ? "chevrons-up-down" : "chevrons-down-up"));
+    collapseButton.setAttribute("aria-label", allCollapsed ? "Expand all" : "Collapse all");
   }
 
+  const foldKey = (vault: string) => `grove.explorer-unfold:${vault}`;
+
+  /** One read per vault. A reload opens the same folders again. */
+  function loadFolds() {
+    const vault = ws.vault.path;
+    if (!vault || foldsVault === vault) return false;
+    foldsVault = vault;
+    expanded.clear();
+    const saved = readStored(foldKey(vault), []);
+    if (Array.isArray(saved)) {
+      for (const path of saved) if (typeof path === "string" && path) expanded.add(path);
+    }
+    return true;
+  }
+
+  function rememberFolds() {
+    const vault = ws.vault.path;
+    if (!vault || foldsVault !== vault) return;
+    store(foldKey(vault), [...expanded]);
+  }
+
+  /** Close every folder at every depth, at once, and show Expand all. */
   function collapseAll() {
     expanded.clear();
-    for (const chevron of list.querySelectorAll(".collapse-icon")) chevron.classList.add("is-collapsed");
-    for (const folder of list.querySelectorAll<HTMLElement>(":scope > .nav-folder")) {
-      const box = childrenOf(folder);
-      if (box) slideAndDrop(box, false);
-    }
-    syncCollapseButton();
+    allCollapsed = true;
+    render();
   }
 
-  /** Open every folder at once. Rebuilding the tree is instant (no slide). */
+  /** Open every folder at every depth, at once (no slide). */
   function expandAll() {
-    let changed = false;
-    for (const path of directoryPaths()) {
-      if (expanded.has(path)) continue;
-      expanded.add(path);
-      changed = true;
-    }
-    if (changed) render();
-    else syncCollapseButton();
+    for (const path of directoryPaths()) expanded.add(path);
+    allCollapsed = false;
+    render();
   }
 
   function render() {
     cancelDrag?.();
+    const loaded = loadFolds();
     pruneExpanded();
+    if (loaded) allCollapsed = expanded.size === 0;
     openFolders.clear();
     for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
     rows.clear();
@@ -351,6 +376,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     list.replaceChildren(frag);
     markActive();
     syncCollapseButton();
+    rememberFolds();
   }
 
   let activeRow: HTMLElement | undefined;
@@ -371,6 +397,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       expanded.add(dir);
       changed = true;
     }
+    if (changed) allCollapsed = false;
     if (changed || !rows.has(path)) render();
     else syncCollapseButton();
   }
@@ -384,6 +411,15 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     void row.offsetWidth; // restart the flash
     row.classList.add("is-revealed");
   }
+
+  ws.onMove((swap) => {
+    if (!expanded.size) return;
+    const next = new Set<string>();
+    for (const path of expanded) next.add(swap(path));
+    expanded.clear();
+    for (const path of next) expanded.add(path);
+    rememberFolds();
+  });
 
   ws.on((change) => {
     if (change === "files") render();

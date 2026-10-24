@@ -126,8 +126,8 @@
   text-decoration: underline;
 }
 
-/* Floating status bar, no background. One thin row of 12px muted text,
-   right-aligned, with the same padding on every item. */
+/* Floating status pill, bottom right: secondary fill, a thin border on the
+   top and left, and the top-left corner rounded. Tight padding, 12px text. */
 .status-bar {
   position: absolute;
   right: 0;
@@ -136,23 +136,35 @@
   align-items: center;
   justify-content: flex-end;
   flex-wrap: nowrap;
-  height: 22px;
-  padding: 0 4px;
+  width: auto;
+  min-height: 18px;
+  padding: 4px 8px 4px 4px;
+  gap: 4px;
   font-size: var(--font-ui-smaller);
-  line-height: 22px;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
   color: var(--text-muted);
+  background: var(--background-secondary);
+  border-style: solid;
+  border-width: 1px 0 0 1px;
+  border-color: var(--background-modifier-border);
+  border-radius: var(--radius-m) 0 0 0;
   pointer-events: none;
   white-space: nowrap;
+  user-select: none;
   z-index: 10;
 }
 .status-bar-item {
   display: flex;
   align-items: center;
   flex: none;
-  height: 22px;
-  padding: 0 8px;
+  padding: 3px 4px;
+  line-height: 1;
   border-radius: var(--radius-s);
   white-space: nowrap;
+}
+.status-bar-item.plugin-editor-status {
+  padding: 0 4px;
 }
 .status-bar-item.mod-clickable {
   pointer-events: auto;
@@ -163,6 +175,13 @@
   background-color: var(--background-modifier-hover);
 }
 .status-bar-item .svg-icon {
-  width: 14px;
-  height: 14px;
+  --icon-size: var(--icon-s);
+  --icon-stroke: var(--icon-s-stroke-width);
+}
+.status-bar-item-segment {
+  display: flex;
+  align-items: center;
+}
+.plugin-word-count {
+  gap: 8px;
 }
