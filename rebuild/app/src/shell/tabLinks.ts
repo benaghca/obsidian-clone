@@ -14,7 +14,7 @@ export function createTabLinks(ws: Workspace) {
     const tab = ws.active;
     const behind = behindLink(tab, ws.layout.tabs());
     if (!behind.length) return;
-    behind.forEach(pushBack);
+    behind.forEach((tab) => pushBack(tab));
     ws.reopen(behind, tab.path!);
   });
 
