@@ -27,12 +27,52 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   // `?synthetic=1000` on the dev page adds a generated 1,000-note vault (for measuring the graph).
   const synthetic = Number(new URLSearchParams(location.search).get("synthetic")) || 0;
   const vaultFiles = { ...sampleVault(), ...(synthetic > 0 ? syntheticVault(Math.min(synthetic, 20000)) : {}) };
-  for (const [path, content] of Object.entries(vaultFiles)) {
-    put(path, content);
+  // The switcher remembers the chosen vault here so a reload (same tab) opens
+  // it. The sample vault is the default. A different path starts empty: this
+  // mock does not create a folder on disk.
+  const SAMPLE_PATH = "/mock/Sample Vault";
+  const OPEN_KEY = "grove.mock.openVault";
+  const CREATED_KEY = "grove.mock.createdVaults";
+  const folderName = (path: string) => path.split(/[/\\]/).filter(Boolean).pop() || path;
+  const readSaved = (): VaultInfo | null => {
+    try {
+      const saved = JSON.parse(sessionStorage.getItem(OPEN_KEY) ?? "null") as { path?: unknown; name?: unknown } | null;
+      if (!saved || typeof saved.path !== "string" || !saved.path.trim()) return null;
+      const path = saved.path.trim();
+      const name = typeof saved.name === "string" && saved.name.trim() ? saved.name.trim() : folderName(path);
+      return { path, name };
+    } catch {
+      return null;
+    }
+  };
+  const saved = readSaved();
+  const vault: VaultInfo = saved ?? { path: SAMPLE_PATH, name: "Sample Vault" };
+  if (vault.path === SAMPLE_PATH) {
+    for (const [path, content] of Object.entries(vaultFiles)) put(path, content);
   }
   // Folders made with create_folder that hold no files yet.
   const emptyDirs = new Set<string>();
-  const vault: VaultInfo = { path: "/mock/Sample Vault", name: "Sample Vault" };
+  const persistVault = (path: string): VaultInfo => {
+    const trimmed = path.trim();
+    if (!trimmed) throw new Error("empty path");
+    const info = trimmed === SAMPLE_PATH ? { path: SAMPLE_PATH, name: "Sample Vault" } : { path: trimmed, name: folderName(trimmed) };
+    vault.path = info.path;
+    vault.name = info.name;
+    try {
+      sessionStorage.setItem(OPEN_KEY, JSON.stringify(info));
+    } catch {
+      // the next load keeps the previous vault
+    }
+    return { path: info.path, name: info.name };
+  };
+  const createdVaults = (): string[] => {
+    try {
+      const raw = JSON.parse(sessionStorage.getItem(CREATED_KEY) ?? "[]") as unknown;
+      return Array.isArray(raw) ? raw.filter((item): item is string => typeof item === "string") : [];
+    } catch {
+      return [];
+    }
+  };
   // The vault's .grove settings files. Kept in the browser's localStorage so
   // settings survive a reload of the dev page, as they survive a restart in
   // Tauri (where they are files in the vault).
@@ -144,8 +184,26 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   }
 
   const commands: Record<string, (a: any) => unknown> = {
-    open_vault: () => vault,
-    last_vault: () => vault,
+    open_vault: ({ path }) => persistVault(String(path ?? "")),
+    // A new folder name only. The parent and "already exists" checks that
+    // touch the disk live in the Rust command; here a path is refused when it
+    // is empty, the sample vault, the vault already open, or one this tab
+    // already created. The file list changes on the next load, not this one.
+    create_vault: ({ path }) => {
+      const trimmed = String(path ?? "").trim();
+      if (!trimmed) throw new Error("empty path");
+      if (trimmed === SAMPLE_PATH || trimmed === vault.path || createdVaults().includes(trimmed)) {
+        throw new Error(`already exists: ${trimmed}`);
+      }
+      const info = persistVault(trimmed);
+      try {
+        sessionStorage.setItem(CREATED_KEY, JSON.stringify([...createdVaults(), trimmed]));
+      } catch {
+        // not remembered
+      }
+      return info;
+    },
+    last_vault: () => ({ path: vault.path, name: vault.name }),
     list_files: () => listFiles(),
     read_note: ({ path }) => need(path).content,
     read_file_bytes: ({ path }) => {

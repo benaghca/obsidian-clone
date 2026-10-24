@@ -145,6 +145,29 @@ fn temp_path_for(path: &Path) -> PathBuf {
     parent.join(format!(".{name}.{}.{nanos}{TEMP_MARK}", std::process::id()))
 }
 
+/// Create one new empty vault folder. The parent must already be a directory.
+/// An empty path, a missing parent, and a path that already exists are refused,
+/// so nothing is overwritten and no missing parents are created.
+pub fn create_vault_dir(path: &str) -> Result<PathBuf, String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("empty path".into());
+    }
+    let raw = expand_user(trimmed);
+    if raw.as_os_str().is_empty() {
+        return Err("empty path".into());
+    }
+    match raw.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() && parent.is_dir() => {}
+        _ => return Err(format!("parent is not a folder: {}", raw.display())),
+    }
+    if raw.exists() {
+        return Err(format!("already exists: {}", raw.display()));
+    }
+    fs::create_dir(&raw).map_err(|err| err.to_string())?;
+    Ok(raw)
+}
+
 /// `~` and `~/...` expand from `HOME`. Anything else is used as given.
 pub fn expand_user(path: &str) -> PathBuf {
     if path == "~" || path.starts_with("~/") {
@@ -185,6 +208,33 @@ pub fn tmp_dir(label: &str) -> Tmp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn create_vault_dir_makes_a_new_folder_and_refuses_to_clobber() {
+        let parent = tmp_dir("vault-parent");
+        let path = parent.path.join("Fresh Vault");
+        let made = create_vault_dir(&path.to_string_lossy()).unwrap();
+        assert!(made.is_dir());
+        assert_eq!(made, path);
+        let err = create_vault_dir(&path.to_string_lossy()).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        let names: Vec<_> = fs::read_dir(&parent.path)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names, vec![std::ffi::OsString::from("Fresh Vault")]);
+    }
+
+    #[test]
+    fn create_vault_dir_refuses_a_missing_parent_and_an_empty_path() {
+        let parent = tmp_dir("vault-missing");
+        let missing = parent.path.join("nope").join("Fresh");
+        let err = create_vault_dir(&missing.to_string_lossy()).unwrap_err();
+        assert!(err.contains("parent is not a folder"), "{err}");
+        assert!(!parent.path.join("nope").exists());
+        let empty = create_vault_dir("  ").unwrap_err();
+        assert!(empty.contains("empty"), "{empty}");
+    }
 
     #[test]
     fn atomic_write_replaces_and_leaves_no_temp() {

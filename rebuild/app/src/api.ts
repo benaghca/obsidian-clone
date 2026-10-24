@@ -92,6 +92,8 @@ async function openExternal(url: string): Promise<void> {
 
 export const api = {
   openVault: (path: string) => call<VaultInfo>("open_vault", { path }),
+  /** A new empty folder (its parent must exist). Opens it, like `openVault`. */
+  createVault: (path: string) => call<VaultInfo>("create_vault", { path }),
   lastVault: () => call<VaultInfo | null>("last_vault"),
   listFiles: () => call<FileEntry[]>("list_files"),
   readNote: (path: string) => call<string>("read_note", { path }),

@@ -126,25 +126,33 @@
   text-decoration: underline;
 }
 
-/* floating status bar, no background */
+/* Floating status bar, no background. One thin row of 12px muted text,
+   right-aligned, with the same padding on every item. */
 .status-bar {
   position: absolute;
   right: 0;
   bottom: 0;
   display: flex;
-  gap: 4px;
-  padding: 4px 8px;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  height: 22px;
+  padding: 0 4px;
   font-size: var(--font-ui-smaller);
+  line-height: 22px;
   color: var(--text-muted);
   pointer-events: none;
+  white-space: nowrap;
   z-index: 10;
 }
 .status-bar-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 4px;
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
   border-radius: var(--radius-s);
+  white-space: nowrap;
 }
 .status-bar-item.mod-clickable {
   pointer-events: auto;

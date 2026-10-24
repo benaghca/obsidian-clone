@@ -18,6 +18,7 @@ import type { Menus } from "./menus";
 import { createSearchView } from "./searchView";
 import { viewTabs } from "./sideView";
 import { startTreeDrag } from "./treeDrag";
+import { mountVaultSwitcher } from "./vaultSwitcher";
 
 export type LeftView = "files" | "search" | "bookmarks";
 
@@ -50,10 +51,10 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     if (name === "search") views.search.querySelector("input")?.focus();
   }
 
-  const vaultName = h("div", { class: "workspace-drawer-vault-name" });
-  const footer = h("div", { class: "workspace-sidedock-vault-profile" }, vaultName);
+  const vaultSwitcher = mountVaultSwitcher(ws);
+  const footer = h("div", { class: "workspace-sidedock-vault-profile" }, vaultSwitcher.el);
   ws.on((change) => {
-    if (change === "files") vaultName.textContent = ws.vault.name;
+    if (change === "files") vaultSwitcher.sync();
   });
 
   const el = h(
@@ -72,6 +73,7 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     /** Expand the folders above a path and scroll it into view. */
     reveal: explorer.reveal,
     collapseAll: explorer.collapseAll,
+    expandAll: explorer.expandAll,
     /** Start an inline rename of a row. */
     renameInTree(path: string) {
       select("files");
@@ -163,6 +165,10 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     if (autoReveal && ws.active.path) reveal(ws.active.path);
   });
   revealButton.setAttribute("aria-pressed", "false");
+  // Starts as Expand all: nothing is open until a folder is.
+  const collapseButton = iconButton(icon("chevrons-up-down"), "Expand all", () =>
+    commands.run(expanded.size === 0 ? "file-explorer:expand-all" : "file-explorer:collapse-all"),
+  );
   const actions = h(
     "div",
     { class: "nav-header" },
@@ -173,7 +179,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       iconButton(icon("folder-plus"), "New folder", () => commands.run("file-explorer:new-folder")),
       sortButton,
       revealButton,
-      iconButton(icon("chevrons-down-up"), "Collapse all", () => commands.run("file-explorer:collapse-all")),
+      collapseButton,
     ),
   );
 
@@ -263,8 +269,9 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     const path = node.entry.path;
     const open = !expanded.has(path);
     if (open) expanded.add(path);
-    else expanded.delete(path);
+    else dropExpanded(path);
     chevron.classList.toggle("is-collapsed", !open);
+    syncCollapseButton();
     let box = childrenOf(folder);
     if (open && !box) {
       folder.append((box = renderChildren(node, depth)));
@@ -285,6 +292,32 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     });
   }
 
+  /** A closed folder takes its nested open paths with it, so the header button can flip. */
+  function dropExpanded(path: string) {
+    const prefix = `${path}/`;
+    for (const item of [...expanded]) {
+      if (item === path || item.startsWith(prefix)) expanded.delete(item);
+    }
+  }
+
+  function directoryPaths() {
+    const paths: string[] = [];
+    for (const file of ws.vault.files) if (file.is_dir) paths.push(file.path);
+    return paths;
+  }
+
+  function pruneExpanded() {
+    const dirs = new Set(directoryPaths());
+    for (const path of [...expanded]) if (!dirs.has(path)) expanded.delete(path);
+  }
+
+  /** Everything closed: Expand all. Anything open: Collapse all. */
+  function syncCollapseButton() {
+    const collapsed = expanded.size === 0;
+    collapseButton.replaceChildren(icon(collapsed ? "chevrons-up-down" : "chevrons-down-up"));
+    collapseButton.setAttribute("aria-label", collapsed ? "Expand all" : "Collapse all");
+  }
+
   function collapseAll() {
     expanded.clear();
     for (const chevron of list.querySelectorAll(".collapse-icon")) chevron.classList.add("is-collapsed");
@@ -292,10 +325,24 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       const box = childrenOf(folder);
       if (box) slideAndDrop(box, false);
     }
+    syncCollapseButton();
+  }
+
+  /** Open every folder at once. Rebuilding the tree is instant (no slide). */
+  function expandAll() {
+    let changed = false;
+    for (const path of directoryPaths()) {
+      if (expanded.has(path)) continue;
+      expanded.add(path);
+      changed = true;
+    }
+    if (changed) render();
+    else syncCollapseButton();
   }
 
   function render() {
     cancelDrag?.();
+    pruneExpanded();
     openFolders.clear();
     for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");
     rows.clear();
@@ -303,6 +350,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     renderNodes(buildTree(ws.vault.files, sortOrder), 0, frag);
     list.replaceChildren(frag);
     markActive();
+    syncCollapseButton();
   }
 
   let activeRow: HTMLElement | undefined;
@@ -324,6 +372,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       changed = true;
     }
     if (changed || !rows.has(path)) render();
+    else syncCollapseButton();
   }
 
   function reveal(path: string) {
@@ -349,6 +398,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
     el: h("div", { class: "nav-files" }, actions, list),
     reveal,
     collapseAll,
+    expandAll,
     startRename,
     newFolderIn,
     get sortOrder() {

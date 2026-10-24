@@ -402,6 +402,7 @@ export function registerAppCommands(parts: AppParts) {
     // ----- views -----
     { id: "file-explorer:open", name: "Files: Show file explorer", icon: "files", run: () => showLeft("files") },
     { id: "file-explorer:collapse-all", name: "Files: Collapse all", icon: "chevrons-down-up", run: () => parts.left.collapseAll() },
+    { id: "file-explorer:expand-all", name: "Files: Expand all", icon: "chevrons-up-down", run: () => parts.left.expandAll() },
     action("global-search:open", "Search: Search in all files", "search", () => showLeft("search"), mod("f", { shift: true })),
     { id: "bookmarks:open", name: "Bookmarks: Show bookmarks",
       plugin: "bookmarks", icon: "bookmark", run: () => showLeft("bookmarks") },
