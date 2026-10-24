@@ -79,17 +79,25 @@ await withBrowser(async ({ send, run, move, click, point, chord, press, fill, ch
       check(await run(prefix=>ws.view.state.doc.toString()===prefix+'word tail',prefix), 'Reading: native URL paste remains read-only');
       continue;
     }
-    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+`[word](${url}) tail`);
-    check(await run(end => ws.view.state.selection.main.empty && ws.view.state.selection.main.head===end,prefix.length+url.length+8), `${mode}: URL-over-selection caret follows the whole link, before trailing text`);
+    const link = `[word](${url})`;
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+`${link} tail`);
+    check(await run((from, to) => {
+      const sel = ws.view.state.selection.main;
+      return !sel.empty && sel.from === from && sel.to === to;
+    }, prefix.length, prefix.length + link.length), `${mode}: URL-over-selection selects the whole link and leaves the trailing text`);
     await send('Input.insertText',{text:'!'});
-    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+`[word](${url})! tail`);
-    check(true, `${mode}: typing after URL paste inserts outside the link`);
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+'! tail');
+    check(true, `${mode}: typing replaces the selected link`);
     await chord('z'); await chord('z');
     assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+'word tail');
     check(true, `${mode}: typing and URL paste undo separately`);
     await run(() => navigator.clipboard.writeText('www.example.com')); await chord('v'); await sleep(100);
-    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+'[word](https://www.example.com) tail');
-    check(await run(()=>ws.view.state.selection.main.empty), `${mode}: www URL normalization remains intact`);
+    const www = '[word](https://www.example.com)';
+    assert.equal(await run(()=>ws.view.state.doc.toString()),prefix+`${www} tail`);
+    check(await run((from, to) => {
+      const sel = ws.view.state.selection.main;
+      return !sel.empty && sel.from === from && sel.to === to;
+    }, prefix.length, prefix.length + www.length), `${mode}: www URL normalization selects the whole link`);
   }
 
 });

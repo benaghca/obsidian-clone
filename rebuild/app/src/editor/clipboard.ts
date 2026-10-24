@@ -93,10 +93,12 @@ function insertRich(view: EditorView, html: string, plain: string): boolean {
 function insertUrl(view: EditorView, text: string): boolean {
   if (/^(?:https?:\/\/|mailto:|xmpp:|www\.)\S+$/i.test(text) && view.state.selection.ranges.some(r => !r.empty) && !protectedSelection(view)) {
     const url = /^www\./i.test(text) ? "https://" + text : text;
-    view.dispatch(view.state.changeByRange(r => ({
-      changes: { from: r.from, to: r.to, insert: r.empty ? url : `[${view.state.sliceDoc(r.from, r.to)}](${url})` },
-      range: r.empty ? EditorSelection.cursor(r.from + url.length) : EditorSelection.cursor(r.to + url.length + 4),
-    })), { userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full") });
+    view.dispatch(view.state.changeByRange(r => {
+      const insert = r.empty ? url : `[${view.state.sliceDoc(r.from, r.to)}](${url})`;
+      // Over a selection the whole link stays selected, as in Obsidian. A bare URL leaves the caret after it.
+      const range = r.empty ? EditorSelection.cursor(r.from + insert.length) : EditorSelection.range(r.from, r.from + insert.length);
+      return { changes: { from: r.from, to: r.to, insert }, range };
+    }), { userEvent: "input.paste", scrollIntoView: true, annotations: isolateHistory.of("full") });
     return true;
   }
   return false;
