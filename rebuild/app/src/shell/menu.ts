@@ -97,7 +97,7 @@ class Menu {
       clearTimeout(this.timer);
     });
     // The menu never takes focus, so a press inside it must not move focus either.
-    this.el.addEventListener("mousedown", e => { if (!(e.target as Element).closest("input")) e.preventDefault(); });
+    this.el.addEventListener("mousedown", e => { if (!(e.target as Element).closest("input,select")) e.preventDefault(); });
   }
 
   private row(item: MenuEntry, i: number, withIcons: boolean) {
@@ -298,6 +298,7 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
 }
 
 // A searchable picker beneath a control inside the root's custom content row.
+export const closeMenuChild = () => root?.closeChild();
 export function showMenuChild(items: MenuItems, at: HTMLElement, className: string) {
   if(!root||root.items[0]===SEPARATOR||!root.items[0])return;root.items[0].submenu=items;root.closeChild();root.openChild(0,false);delete root.items[0].submenu;const r=at.getBoundingClientRect(), child=root.child!;child.el.classList.add(className);const size=child.el.getBoundingClientRect();place(child.el,Math.min(r.left,innerWidth-size.width-EDGE),Math.min(r.bottom+4,innerHeight-size.height-EDGE));
 }
@@ -312,7 +313,7 @@ function onPress(e: MouseEvent) {
 
 function onKey(e: KeyboardEvent) {
   if (!root) return;
-  if (e.target instanceof HTMLInputElement && e.key !== "Escape") return;
+  if ((e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) && e.key !== "Escape") return;
   if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
   e.preventDefault();
   e.stopPropagation();

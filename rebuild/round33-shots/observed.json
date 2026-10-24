@@ -1,0 +1,278 @@
+{
+  "views": [
+    {
+      "text": "By due\nAdd view",
+      "width": 220,
+      "controls": [
+        {
+          "tag": "INPUT",
+          "class": "",
+          "label": null,
+          "text": "",
+          "value": ""
+        },
+        {
+          "tag": "DIV",
+          "class": "clickable-icon bases-toolbar-menu-item-icon",
+          "label": null,
+          "text": ""
+        }
+      ]
+    }
+  ],
+  "configure": [
+    {
+      "text": "Configure view\nLayout\nTable\nRow height\nShort\nMedium\nTall\nExtra tall",
+      "width": 220,
+      "controls": [
+        {
+          "tag": "DIV",
+          "class": "clickable-icon",
+          "label": null,
+          "text": ""
+        },
+        {
+          "tag": "DIV",
+          "class": "close-icon clickable-icon",
+          "label": null,
+          "text": ""
+        },
+        {
+          "tag": "INPUT",
+          "class": "",
+          "label": null,
+          "text": "",
+          "value": "By due"
+        },
+        {
+          "tag": "SELECT",
+          "class": "dropdown",
+          "label": null,
+          "text": "Short\nMedium\nTall\nExtra tall",
+          "value": "",
+          "options": [
+            {
+              "text": "Short",
+              "value": ""
+            },
+            {
+              "text": "Medium",
+              "value": "medium"
+            },
+            {
+              "text": "Tall",
+              "value": "tall"
+            },
+            {
+              "text": "Extra tall",
+              "value": "extra"
+            }
+          ]
+        },
+        {
+          "tag": "SELECT",
+          "class": "dropdown is-measuring",
+          "label": null,
+          "text": "Short",
+          "value": "Short",
+          "options": [
+            {
+              "text": "Short",
+              "value": "Short"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "selection": {
+    "selected": "By due",
+    "active": "INPUT",
+    "start": 0,
+    "end": 6
+  },
+  "back": {
+    "menus": [
+      {
+        "text": "Renamed: view\nAdd view",
+        "width": 220,
+        "controls": [
+          {
+            "tag": "INPUT",
+            "class": "",
+            "label": null,
+            "text": "",
+            "value": ""
+          },
+          {
+            "tag": "DIV",
+            "class": "clickable-icon bases-toolbar-menu-item-icon",
+            "label": null,
+            "text": ""
+          }
+        ]
+      }
+    ],
+    "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: \"Renamed: view\"\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - file.name\n      - due\n      - priority\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n"
+  },
+  "heights": [
+    {
+      "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: \"Renamed: view\"\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - file.name\n      - due\n      - priority\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n    rowHeight: medium\n",
+      "rows": [
+        60,
+        60,
+        60
+      ]
+    },
+    {
+      "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: \"Renamed: view\"\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - file.name\n      - due\n      - priority\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n    rowHeight: tall\n",
+      "rows": [
+        120,
+        120,
+        120
+      ]
+    },
+    {
+      "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: \"Renamed: view\"\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - file.name\n      - due\n      - priority\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n    rowHeight: extra\n",
+      "rows": [
+        240,
+        240,
+        240
+      ]
+    }
+  ],
+  "short": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: \"Renamed: view\"\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - file.name\n      - due\n      - priority\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n",
+  "more": [],
+  "escapeMore": [],
+  "addView": [
+    {
+      "text": "Configure view\nLayout\nTable\nRow height\nShort\nMedium\nTall\nExtra tall",
+      "width": 220,
+      "controls": [
+        {
+          "tag": "DIV",
+          "class": "clickable-icon",
+          "label": null,
+          "text": ""
+        },
+        {
+          "tag": "DIV",
+          "class": "close-icon clickable-icon",
+          "label": null,
+          "text": ""
+        },
+        {
+          "tag": "INPUT",
+          "class": "",
+          "label": null,
+          "text": "",
+          "value": "View"
+        },
+        {
+          "tag": "SELECT",
+          "class": "dropdown",
+          "label": null,
+          "text": "Short\nMedium\nTall\nExtra tall",
+          "value": "",
+          "options": [
+            {
+              "text": "Short",
+              "value": ""
+            },
+            {
+              "text": "Medium",
+              "value": "medium"
+            },
+            {
+              "text": "Tall",
+              "value": "tall"
+            },
+            {
+              "text": "Extra tall",
+              "value": "extra"
+            }
+          ]
+        },
+        {
+          "tag": "SELECT",
+          "class": "dropdown is-measuring",
+          "label": null,
+          "text": "Short",
+          "value": "Short",
+          "options": [
+            {
+              "text": "Short",
+              "value": "Short"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "escape": [
+    {
+      "text": "Configure view\nLayout\nTable\nRow height\nShort\nMedium\nTall\nExtra tall",
+      "width": 220,
+      "controls": [
+        {
+          "tag": "DIV",
+          "class": "clickable-icon",
+          "label": null,
+          "text": ""
+        },
+        {
+          "tag": "DIV",
+          "class": "close-icon clickable-icon",
+          "label": null,
+          "text": ""
+        },
+        {
+          "tag": "INPUT",
+          "class": "",
+          "label": null,
+          "text": "",
+          "value": "View"
+        },
+        {
+          "tag": "SELECT",
+          "class": "dropdown",
+          "label": null,
+          "text": "Short\nMedium\nTall\nExtra tall",
+          "value": "",
+          "options": [
+            {
+              "text": "Short",
+              "value": ""
+            },
+            {
+              "text": "Medium",
+              "value": "medium"
+            },
+            {
+              "text": "Tall",
+              "value": "tall"
+            },
+            {
+              "text": "Extra tall",
+              "value": "extra"
+            }
+          ]
+        },
+        {
+          "tag": "SELECT",
+          "class": "dropdown is-measuring",
+          "label": null,
+          "text": "Short",
+          "value": "Short",
+          "options": [
+            {
+              "text": "Short",
+              "value": "Short"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "final": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: \"Renamed: view\"\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - file.name\n      - due\n      - priority\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n  - type: table\n    name: View\n"
+}

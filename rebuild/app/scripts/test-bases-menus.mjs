@@ -74,7 +74,7 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  await run(async()=>{await ws.open('BaseTest/Task A.md');await ws.open('PartB.base');});await count(1);assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Done');
  await run(async()=>{await ws.open('PartB.base',{where:'tab'});window.secondBaseTab=ws.active;});await count(6);assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Open');
  await run(()=>ws.activate(firstBaseTab));await count(1);
- await click('.bases-view-name');await choose('Add view');await wait(()=>run(()=>document.querySelector('.bases-view-name span')?.textContent==='View'),'new view selected');
+ await click('.bases-view-name');await choose('Add view');await wait(()=>run(()=>document.querySelector('.bases-view-name span')?.textContent==='View'),'new view selected');await press('Escape');
  assert.equal(await source(),written.replace('# preserve footer','  - type: table\n    name: View\n# preserve footer'));
  await click('.bases-view-name');await shot('grove-views');await choose('Open');await count(6);
  await run(()=>ws.activate(secondBaseTab));await count(6);assert.equal(await run(()=>document.querySelector('.bases-view-name span').textContent),'Open');

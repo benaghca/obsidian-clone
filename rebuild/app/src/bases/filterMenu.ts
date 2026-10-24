@@ -1,6 +1,6 @@
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
-import { closeMenu, showMenu, showMenuChild } from "../shell/menu";
+import { closeMenu, closeMenuChild, showMenu, showMenuChild } from "../shell/menu";
 import { menuInputEscape } from "./menuInput";
 import { expression } from "./expression";
 import { changeFilter, comparison, conjunctions, countFilters, filterExpression, group, isGroup, literal, type Comparison } from "./filters";
@@ -14,6 +14,8 @@ export function filterMenu(host: Host, at: HTMLElement) {
   const expanded = new Set<boolean>([countFilters(host.filters(true)) ? true : false]);
   const drafts=new Map<string,{local:boolean;path:number[];row:Comparison}>();let serial=0;
   const advanced = new Set<string>();
+  let pickerAt:HTMLElement|undefined;
+  const kind=(key:string)=>key==="file"?"file":host.kind(key);
   const button = (name: string, glyph: IconName, run: () => void) => h("button", {type:"button","aria-label":name,onclick:run},icon(glyph),h("span",null,name));
   function draw(refresh = false) {
     const content = h("div",{class:"bases-filter-editor",onclick:(e:MouseEvent)=>e.stopPropagation()});
@@ -26,10 +28,11 @@ export function filterMenu(host: Host, at: HTMLElement) {
         showMenu(choices.map(([value,title])=>({title,checked:value===selected,action:()=>choose(value)})),target);
       };
       const propertyPicker=(target:HTMLElement, selected:string, choose:(key:string)=>void)=>{
+        if(pickerAt===target&&document.querySelector('.bases-filter-picker')){closeMenuChild();pickerAt=undefined;return;}pickerAt=target;
         const search=h("input",{type:"search",placeholder:"Search...","aria-label":"Filter property search"});
         const box=h("div",{class:"bases-search",onclick:(e:MouseEvent)=>e.stopPropagation()},icon("search",14),search);
         const keys=["file",...host.keys().filter(key=>key.startsWith("file.")),...host.keys().filter(key=>!key.startsWith("file."))].filter((key,i,all)=>all.indexOf(key)===i&&/^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?$/.test(key));
-        const show=()=>{showMenuChild([{title:"Search properties",content:box},...keys.filter(key=>host.label(key).toLowerCase().includes(search.value.toLowerCase())).map(key=>({title:host.label(key),icon:host.kind(key),hotkey:key==="file"?undefined:key,checked:key===selected,action:()=>choose(key)}))],target,"bases-filter-picker");search.focus();};
+        const show=()=>{showMenuChild([{title:"Search properties",content:box},...keys.filter(key=>host.label(key).toLowerCase().includes(search.value.toLowerCase())).map(key=>({title:host.label(key),icon:kind(key),hotkey:key==="file"?undefined:key,checked:key===selected,action:()=>choose(key)}))],target,"bases-filter-picker");search.focus();};
         search.addEventListener("input",()=>show());show();
       };
       function render(value: Yaml | undefined, path: number[], depth = 0): HTMLElement {
@@ -64,9 +67,9 @@ export function filterMenu(host: Host, at: HTMLElement) {
               if(draftId){drafts.get(draftId)!.row=next;if(["isEmpty","notEmpty"].includes(next.operator))save(filterExpression(next));else draw(true);}
               else change(childPath,()=>filterExpression(next));
             };
-            const property=button(host.label(parsed.property),host.kind(parsed.property),()=>propertyPicker(property,parsed.property,key=>replace({property:key,operator:key==="file"?"hasLink":"==",value:draftId?'""':host.type(key)==="number"?"0":host.type(key)==="checkbox"?"true":'""'})));
+            const property=button(host.label(parsed.property),kind(parsed.property),()=>propertyPicker(property,parsed.property,key=>replace({property:key,operator:key==="file"?"hasLink":"==",value:draftId?'""':host.type(key)==="number"?"0":host.type(key)==="checkbox"?"true":'""'})));
             if(draftId)property.dataset.draft=draftId;
-            const ops=parsed.property==="file"?[['inFolder','in folder'],['hasTag','has tag'],['hasLink','has link']]:[["==","is"],["!=","is not"],["isEmpty","is empty"],["notEmpty","is not empty"],...(!bool?[[">",">"],[">=","≥"],["<","<"],["<=","≤"]]:[]),...(!numeric&&!bool?[["contains","contains"]]:[])];
+            const ops=parsed.property==="file"?[['inFolder','in folder'],['hasTag','has tag'],['hasLink','links to']]:[["==","is"],["!=","is not"],["isEmpty","is empty"],["notEmpty","is not empty"],...(!bool?[[">",">"],[">=","≥"],["<","<"],["<=","≤"]]:[]),...(!numeric&&!bool?[["contains","contains"]]:[])];
             const operator=button(ops.find(o=>o[0]===parsed.operator)?.[1]??parsed.operator,"chevrons-up-down",()=>pick(operator,ops as [string,string][],parsed.operator,operator=>replace({...parsed,operator})));
             let display=parsed.value;
             if(display.startsWith('"'))display=JSON.parse(display);else if(display.startsWith("'"))display=display.slice(1,-1).replace(/\\(['\\])/g,"$1");

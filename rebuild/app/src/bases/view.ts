@@ -97,19 +97,19 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
   }
   function paint(force = false) {
     if (!model || gone || editing()) return;
-    const virtual = selected.length > 200, first = virtual ? Math.min(Math.max(0, selected.length - Math.ceil(scroller.clientHeight / 30)), Math.max(0, Math.floor((scroller.scrollTop - 30) / 30) - 8)) : 0;
+    const rowHeight=model.rowHeight, virtual = selected.length > 200, first = virtual ? Math.min(Math.max(0, selected.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
     if (!force && first === start) return;
     start = first;
-    const end = virtual ? Math.min(selected.length, first + Math.ceil(scroller.clientHeight / 30) + 16) : selected.length;
+    const end = virtual ? Math.min(selected.length, first + Math.ceil(scroller.clientHeight / rowHeight) + 16) : selected.length;
     const fragment = document.createDocumentFragment();
     const space = (height: number) => {
       if (!height) return;
       const td = h("td", { style: `height:${height}px;padding:0;border:0`, "aria-hidden": "true" });
       td.colSpan = model!.columns.length; fragment.append(h("tr", { class: "bases-spacer" }, td));
     };
-    space(first * 30);
+    space(first * rowHeight);
     for (let i = first; i < end; i++) fragment.append(h("tr", { "data-path": selected[i].row.file.path }, ...model.columns.map(key => cell(key, selected[i]))));
-    space((selected.length - end) * 30);
+    space((selected.length - end) * rowHeight);
     body.replaceChildren(fragment);
     notice.textContent = [...model.notices].join(" · "); notice.hidden = !notice.textContent;
   }
@@ -122,7 +122,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     try {
       while (dirty && !gone) {
         dirty = false;
-        if (reload) { reload = false; source = await api.readNote(path); model = baseModel(source, viewIndex); viewIndex = model.viewIndex; memory.set(path, viewIndex); }
+        if (reload || !model) { reload = false; source = await api.readNote(path); model = baseModel(source, viewIndex); viewIndex = model.viewIndex; memory.set(path, viewIndex); }
         const properties = await index.notes();
         const needsTags = /file\.(?:tags|hasTag)/.test(source);
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
@@ -147,7 +147,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         });
         const matches = model!.select(rows,true);model!.total=matches.length;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
-        model!.results = selected.length;
+        model!.results = selected.length;table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
         toolbar.replaceChildren(...menus.toolbar());
         table.setAttribute("aria-rowcount", String(selected.length + 1));
         head.replaceChildren(h("tr", null, ...model!.columns.map(key => {

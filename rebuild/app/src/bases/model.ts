@@ -7,6 +7,7 @@ export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLi
 const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
 export const propertyId = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export const noteKey = (key: string) => key.replace(/^note\./, "");
+export const ROW_HEIGHTS:Record<string,number> = {"":30,medium:60,tall:120,extra:240};
 const canonical = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export function baseModel(source: string, viewIndex = 0) {
   const root = readYaml(source), notices = new Set<string>();
@@ -85,5 +86,5 @@ export function baseModel(source: string, viewIndex = 0) {
     });
     return !unlimited && typeof view.limit === "number" ? found.slice(0, view.limit) : found;
   }
-  return { sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }
