@@ -29,6 +29,7 @@ export function comparison(source: string): Comparison | null {
 }
 export function filterExpression(row: Comparison): string {
   if (row.property === "file" && ["inFolder","hasTag","hasLink"].includes(row.operator)) return `file.${row.operator}(${row.value})`;
+  if (["isEmpty","notEmpty"].includes(row.operator)) return `${row.property} ${row.operator === "isEmpty" ? "==" : "!="} null`;
   if (row.operator === "contains") return `${row.property}.contains(${row.value})`;
   return `${row.property} ${row.operator} ${row.value}`;
 }
