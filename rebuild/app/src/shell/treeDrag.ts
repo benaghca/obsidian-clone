@@ -62,6 +62,7 @@ export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLEl
     }
     destination.hidden = target === null;
     destination.textContent = target === null ? "" : `Move into “${target ? fileName(target) : ws.vault.name}”`;
+    window.dispatchEvent(new CustomEvent("grove:explorer-drag", { detail: { entry, x, y } }));
     const folder = target !== null && over?.collapsed ? over.entry.path : "";
     if (folder !== hover) {
       clearTimeout(timer);
@@ -118,6 +119,7 @@ export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLEl
     row.classList.remove("is-being-dragged");
     document.body.classList.remove("is-grabbing");
     const dragged = !!ghost;
+    if (dragged) window.dispatchEvent(new CustomEvent("grove:explorer-drag", { detail: { entry, x, y, done: true, cancelled } }));
     ghost?.remove();
     ghost = null;
     if (dragged && focus?.isConnected) focus.focus({ preventScroll: true });
