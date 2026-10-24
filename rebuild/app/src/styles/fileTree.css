@@ -23,7 +23,7 @@
 .tree-item-self {
   display: flex;
   align-items: center;
-  border-radius: var(--radius-s);
+  border-radius: var(--radius-m);
   padding: 2px 8px 2px calc(8px + var(--depth, 0) * 17px + 14px);
   color: var(--text-muted);
   font-size: var(--font-ui-small);
@@ -42,6 +42,10 @@
 .tree-item-self.is-selected {
   background: var(--background-modifier-active-hover);
   color: var(--text-normal);
+}
+/* The right-clicked row, while its menu is open. */
+.tree-item-self.has-active-menu {
+  box-shadow: 0 0 0 2px var(--background-modifier-border-focus);
 }
 .tree-item-inner {
   outline: none;
@@ -120,7 +124,8 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 8px;
+  /* One pixel less on the end, so "Sample Vault" fits a 200px sidebar. */
+  padding: 4px 7px 4px 8px;
   border-radius: var(--radius-s);
   color: var(--text-normal);
   cursor: var(--cursor, default);
