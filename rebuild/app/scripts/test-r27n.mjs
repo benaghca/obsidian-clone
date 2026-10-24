@@ -184,7 +184,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     const r = row.getBoundingClientRect();
     return { x: r.x + 20, y: r.y + r.height / 2, h: r.height };
   });
-  check(Math.abs(rowBox.h - 48) < 1.5, `a mention row is 48px tall (${rowBox.h})`);
+  check(Math.abs(rowBox.h - 31.6) < 1.5, `a mention row is 31.6px tall (${rowBox.h})`);
   await move({ x: rowBox.x, y: rowBox.y });
   const hover = await run(() => {
     const row = document.querySelector('.backlink-pane .search-result-file-match');
@@ -272,6 +272,12 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   await click(expandAll);
   check(await run(() => document.querySelectorAll('.outline-item').length) === 3, 'Expand all shows every heading');
 
+  const showFilter = await run(() => {
+    const el = document.querySelector('.outline-toolbar [aria-label="Show search filter"]');
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await click(showFilter);
   const filterAt = await run(() => {
     const el = document.querySelector('.outline-filter');
     const r = el.getBoundingClientRect();
