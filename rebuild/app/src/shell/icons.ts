@@ -270,23 +270,25 @@ export function autoScrollGlyph(): SVGElement {
   return svg;
 }
 
-/** Search "more options": an 11px filled circle with three light dots. */
-export function moreOptionsGlyph(): SVGElement {
+/** Search "more options": an 11px circle (the div) with three light dots. */
+export function moreOptionsGlyph(): HTMLElement {
+  const wrap = document.createElement("div");
+  wrap.className = "search-more-options";
+  wrap.setAttribute("aria-hidden", "true");
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 11 11");
-  svg.setAttribute("class", "svg-icon search-more-options");
-  svg.setAttribute("aria-hidden", "true");
+  svg.setAttribute("class", "svg-icon");
   svg.setAttribute("width", "11");
   svg.setAttribute("height", "11");
-  const add = (tag: string, attrs: Record<string, string>) => {
-    const el = document.createElementNS(SVG_NS, tag);
-    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-    svg.append(el);
-  };
-  add("circle", { cx: "5.5", cy: "5.5", r: "5.5", fill: "currentColor" });
   const dot = "var(--background-secondary)";
-  add("circle", { cx: "3.15", cy: "5.5", r: "0.7", fill: dot });
-  add("circle", { cx: "5.5", cy: "5.5", r: "0.7", fill: dot });
-  add("circle", { cx: "7.85", cy: "5.5", r: "0.7", fill: dot });
-  return svg;
+  for (const cx of ["3.15", "5.5", "7.85"]) {
+    const circle = document.createElementNS(SVG_NS, "circle");
+    circle.setAttribute("cx", cx);
+    circle.setAttribute("cy", "5.5");
+    circle.setAttribute("r", "0.7");
+    circle.setAttribute("fill", dot);
+    svg.append(circle);
+  }
+  wrap.append(svg);
+  return wrap;
 }

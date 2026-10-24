@@ -97,14 +97,15 @@ export function fieldError(field: HTMLElement, message: string, cancel?: () => v
   }
 }
 
-/** Inline rename: Enter or blur commits; an error keeps the draft editable, Escape cancels. */
-export function editInPlace(label: HTMLElement, commit: (text: string) => void | Promise<void>) {
+/** Inline rename: Enter or blur commits; an error keeps the draft editable, Escape cancels. `invalid` is shown while typing. */
+export function editInPlace(label: HTMLElement, commit: (text: string) => void | Promise<void>, invalid?: (text: string) => string) {
   const shown = label.textContent ?? "";
   let pending = false, closed = false;
   label.contentEditable = "plaintext-only";
   label.focus();
   getSelection()?.selectAllChildren(label);
   const clear = () => fieldError(label, "");
+  const preview = () => fieldError(label, invalid?.(label.textContent ?? "") ?? "");
   const close = () => {
     closed = true;
     clear();
@@ -112,7 +113,7 @@ export function editInPlace(label: HTMLElement, commit: (text: string) => void |
     label.textContent = shown;
     label.onkeydown = null;
     label.removeEventListener("blur", finish);
-    label.removeEventListener("input", clear);
+    label.removeEventListener("input", preview);
   };
   const finish = async () => {
     if (pending || closed) return;
@@ -122,7 +123,7 @@ export function editInPlace(label: HTMLElement, commit: (text: string) => void |
     finally { pending = false; }
   };
   label.addEventListener("blur", finish);
-  label.addEventListener("input", clear);
+  label.addEventListener("input", preview);
   label.onkeydown = (ev) => {
     if (ev.key === "Enter" || ev.key === "Escape") {
       ev.preventDefault();

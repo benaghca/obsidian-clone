@@ -449,6 +449,27 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     }
   }
 
+  // An unclosed `[[` is already a link while it is typed: brackets faint, text in the accent.
+  if (!reading) {
+    const blocked = (at: number) => {
+      for (let node: SyntaxNode | null = syntaxTree(state).resolveInner(at, 1); node; node = node.parent) {
+        if (node.name === "WikiLink" || node.name === "FencedCode" || node.name === "InlineCode" || node.name === "HTMLBlock" || node.name === "Frontmatter") return true;
+      }
+      return false;
+    };
+    for (const range of ranges) {
+      for (let pos = Math.max(range.from, bodyFrom); pos < range.to; ) {
+        const line = doc.lineAt(pos);
+        const open = line.text.lastIndexOf("[[");
+        if (open >= 0 && !line.text.includes("]]", open + 2) && !blocked(line.from + open)) {
+          mark("cm-formatting cm-formatting-link", line.from + open, line.from + open + 2);
+          if (line.to > line.from + open + 2) mark("cm-wikilink", line.from + open + 2, line.to);
+        }
+        pos = line.to + 1;
+      }
+    }
+  }
+
   return decos;
 }
 

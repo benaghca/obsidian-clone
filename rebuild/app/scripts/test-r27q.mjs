@@ -240,7 +240,7 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   await click(row('KeyFolder'));
   await sleep(200);
   check(await run(() => document.activeElement?.classList.contains('nav-files-container')), 'clicking a folder leaves the explorer focused');
-  check(await focused() === 'KeyFolder' && (await selected()) === '', 'a plain click focuses the folder without starting a multi-selection');
+  check(await focused() === '' && (await selected()) === '', 'a plain click leaves no focus ring and does not start a multi-selection');
   await press('ArrowDown');
   check(await selected() === '' && await focused() === 'KeyFolder/A.md', 'ArrowDown moves the ring onto the first child and selects nothing');
   await press('ArrowDown');

@@ -611,6 +611,27 @@
 .modal.mod-confirm button {
   padding: 4px 14px;
 }
+/* Obsidian's confirm box. Canvas help keeps the padding it already has. */
+.modal.mod-confirm:not(:has(.canvas-help)) {
+  width: min(560px, calc(100vw - 32px));
+  padding: 16px;
+}
+.modal.mod-confirm:not(:has(.canvas-help)) .modal-title {
+  margin-bottom: 26px;
+  line-height: 19.5px;
+}
+.modal.mod-confirm:not(:has(.canvas-help)) .modal-content p {
+  font-size: 15px;
+  line-height: 19.5px;
+}
+.modal.mod-confirm:not(:has(.canvas-help)) .modal-checkbox input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+.modal.mod-confirm:not(:has(.canvas-help)) button {
+  padding: 4px 12px;
+}
 .modal.mod-confirm button:focus-visible {
   outline: 2px solid var(--background-modifier-border-focus);
 }

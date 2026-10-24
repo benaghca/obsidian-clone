@@ -90,6 +90,8 @@ async function subpathSource(ctx: CompletionContext, from: number, target: strin
       insertLink(view, from, to, host.formatLink(target ? document.path! : "", view, undefined, `#${headingTarget(raw)}`));
     } });
   }
+  // A note with no headings still offers the muted placeholder Obsidian shows.
+  if (!blocks && !options.length) options.push({ label: "Heading", type: "heading is-empty", apply() {} });
   options.forEach((option, i) => option.sortText = String(i).padStart(8, "0"));
   return { from: queryFrom, options, validFor: document.current ? undefined : /^[^[\]|#^\n]*$/ };
 }
@@ -159,7 +161,7 @@ function linkFooter(): HTMLElement {
     footer.append(document.createTextNode("Type "));
     const mark = document.createElement("b");
     mark.textContent = key;
-    footer.append(mark, document.createTextNode(`  ${rest}`));
+    footer.append(mark, document.createTextNode(` ${rest}`));
   });
   return footer;
 }
@@ -180,7 +182,7 @@ function currentNoteHeadings(state: EditorState): boolean {
   return !!query && query.startsWith("#") && !query.startsWith("#^");
 }
 
-/** Anchor the popup 7px left of `[[`, add the footer, and leave `[[#` with nothing picked. */
+/** Anchor the popup at the character after `[[`, add the footer, and leave `[[#` with nothing picked. */
 const linkSuggestLayout = ViewPlugin.fromClass(class {
   private primed = "";
   update(update: ViewUpdate) {
@@ -203,11 +205,11 @@ const linkSuggestLayout = ViewPlugin.fromClass(class {
         if (!tip || open == null) return null;
         const head = view.state.selection.main.head;
         const pos = head - open.length - 2;
-        const coords = view.coordsAtPos(pos);
+        const coords = view.coordsAtPos(Math.min(view.state.doc.length, pos + 2)) ?? view.coordsAtPos(pos);
         if (!coords) return null;
         const rect = tip.getBoundingClientRect();
         const shift = new DOMMatrix(getComputedStyle(tip).transform).m41;
-        return { tip, dx: coords.left - 7 - (rect.left - shift), subpath: /[#^]/.test(open) };
+        return { tip, dx: coords.left - (rect.left - shift), subpath: /[#^]/.test(open) };
       },
       write(data) {
         if (!data) return;

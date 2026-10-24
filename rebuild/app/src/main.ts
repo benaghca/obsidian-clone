@@ -247,8 +247,8 @@ function renderCounts() {
 function renderBacklinks() {
   const path = ws.active.path;
   if (!path) return;
-  const from = new Set((ws.vault.links.backlinks[path] ?? []).map((b) => b.from));
-  backlinkCount.textContent = plural(from.size, "backlink");
+  const mentions = ws.vault.links.backlinks[path] ?? [];
+  backlinkCount.textContent = plural(mentions.length, "backlink");
 }
 ws.on((change) => {
   // Links to notes that were just created (or deleted) are drawn again.
