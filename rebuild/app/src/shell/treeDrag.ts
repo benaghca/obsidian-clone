@@ -1,12 +1,14 @@
 // Explorer moves use the tab drag's threshold/ghost and the shared pointer
 // driver. Measure rows at drag start, then only again after auto-expansion;
 // scrolling changes their offset, not their measured content coordinates.
+import type { EditorView } from "@codemirror/view";
 import type { FileEntry } from "../api";
 import { moveFile } from "../fileOps";
 import { fileName, isUnder, noteName, parentDir } from "../paths";
 import type { Workspace } from "../workspace";
 import { dragPointer, h } from "./dom";
 import { dragGhost, THRESHOLD } from "./tabDrag";
+import { dropLinkText, topLevelPaths } from "./treeSelect";
 
 type Entry = Pick<FileEntry, "path" | "is_dir">;
 
@@ -21,13 +23,38 @@ export function treeScrollSpeed(distance: number): number {
   return distance > 40 ? 0 : distance >= 25 ? 200 + (40 - distance) * 20 : 500 + (25 - Math.max(0, distance)) * 1100 / 15;
 }
 
-export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLElement, ws: Workspace, expand: (path: string) => void) {
+/** The note editor under the pointer, when a drop there can insert a link. */
+function editorUnder(ws: Workspace, x: number, y: number): EditorView | null {
+  const dom = document.elementFromPoint(x, y)?.closest<HTMLElement>(".cm-editor");
+  if (!dom || dom.classList.contains("is-reading-mode")) return null;
+  for (const group of ws.groups()) {
+    if (!ws.editors.has(group)) continue;
+    const view = ws.editors.viewOf(group);
+    if (view.dom === dom && ws.editors.pathOf(view)) return view;
+  }
+  return null;
+}
+
+export function startTreeDrag(
+  down: PointerEvent,
+  entry: FileEntry,
+  list: HTMLElement,
+  ws: Workspace,
+  expand: (path: string) => void,
+  paths: readonly string[] = [entry.path],
+) {
   const row = down.currentTarget as HTMLElement;
   const focus = document.activeElement as HTMLElement | null;
+  const draggedPaths = paths.length > 1 ? paths : [entry.path];
+  const fileEntries = new Map(ws.vault.files.map((file) => [file.path, file]));
+  const linking = draggedPaths.some((path) => fileEntries.get(path) && !fileEntries.get(path)!.is_dir);
   // Keep the editor's selection/focus, including on Escape; a click still opens the row.
   down.preventDefault();
   let ghost: HTMLElement | null = null;
   const destination = h("span", { class: "drag-ghost-destination" });
+  let dropView: EditorView | null = null;
+  let dropAt = -1;
+  let tookFocus = false;
   let bounds: DOMRect;
   let measured: { entry: FileEntry; row: HTMLElement; top: number; bottom: number; collapsed: boolean }[] = [];
   let x = down.clientX, y = down.clientY;
@@ -62,6 +89,30 @@ export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLEl
     }
     destination.hidden = target === null;
     destination.textContent = target === null ? "" : `Move into “${target ? fileName(target) : ws.vault.name}”`;
+    const view = linking ? editorUnder(ws, x, y) : null;
+    if (view) {
+      // Over an editable note: the caret follows, and the file is not also moved.
+      if (target !== null) {
+        target = null;
+        highlight?.classList.remove("is-being-dragged-over");
+        highlight = null;
+        destination.hidden = true;
+        destination.textContent = "";
+      }
+      dropView = view;
+      const pos = view.posAtCoords({ x, y }, false);
+      if (pos != null && pos !== dropAt) {
+        dropAt = pos;
+        view.dispatch({ selection: { anchor: pos }, userEvent: "select" });
+        if (!tookFocus) {
+          view.focus();
+          tookFocus = true;
+        }
+      }
+    } else {
+      dropView = null;
+      dropAt = -1;
+    }
     const folder = target !== null && over?.collapsed ? over.entry.path : "";
     if (folder !== hover) {
       clearTimeout(timer);
@@ -98,7 +149,8 @@ export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLEl
     if (!ghost) {
       if (Math.hypot(x - down.clientX, y - down.clientY) < THRESHOLD) return;
       measure();
-      ghost = dragGhost(entry.is_dir ? entry.name : noteName(entry.path), entry.is_dir ? "folder-closed" : "file");
+      const title = draggedPaths.length > 1 ? `${draggedPaths.length} items` : entry.is_dir ? entry.name : noteName(entry.path);
+      ghost = dragGhost(title, draggedPaths.length > 1 ? "files" : entry.is_dir ? "folder-closed" : "file");
       ghost.classList.add("mod-tree");
       ghost.append(destination);
       document.body.append(ghost);
@@ -118,10 +170,30 @@ export function startTreeDrag(down: PointerEvent, entry: FileEntry, list: HTMLEl
     row.classList.remove("is-being-dragged");
     document.body.classList.remove("is-grabbing");
     const dragged = !!ghost;
+    const view = dropView;
+    const at = dropAt;
+    const text = dragged && !cancelled && view && at >= 0
+      ? dropLinkText(draggedPaths, (path) => !!fileEntries.get(path)?.is_dir, ws.editors.pathOf(view), (target, from) => ws.linkTo(target, from))
+      : "";
     ghost?.remove();
     ghost = null;
-    if (dragged && focus?.isConnected) focus.focus({ preventScroll: true });
-    if (dragged && !cancelled && target !== null) void moveFile(ws, entry.path, target).catch((err) => console.warn(`Could not move ${entry.path}`, err));
+    if (text && view) {
+      const from = Math.min(at, view.state.doc.length);
+      view.dispatch({ changes: { from, insert: text }, selection: { anchor: from + text.length }, userEvent: "input" });
+      view.focus();
+    } else if (dragged && focus?.isConnected) focus.focus({ preventScroll: true });
+    if (!text && dragged && !cancelled && target !== null) {
+      const folder = target;
+      void (async () => {
+        for (const path of topLevelPaths(draggedPaths, (item) => !!fileEntries.get(item)?.is_dir)) {
+          try {
+            await moveFile(ws, path, folder);
+          } catch (err) {
+            console.warn(`Could not move ${path}`, err);
+          }
+        }
+      })();
+    }
   }, false);
   window.addEventListener("keydown", (event) => {
     if (event.key !== "Escape") return;
