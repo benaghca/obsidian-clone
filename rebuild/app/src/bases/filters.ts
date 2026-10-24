@@ -25,10 +25,12 @@ export function comparison(source: string): Comparison | null {
   if (!result) return null;
   // Only literal RHS values (or today()) can safely be edited as one value.
   if (!/^(?:"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|-?\d+(?:\.\d+)?|true|false|null|today\(\))$/.test(result.value)) return null;
+  if(result.value==="null" && ["==","!="].includes(result.operator)) result.operator=result.operator==="=="?"isEmpty":"notEmpty";
   try { expression(source); return result; } catch { return null; }
 }
 export function filterExpression(row: Comparison): string {
   if (row.property === "file" && ["inFolder","hasTag","hasLink"].includes(row.operator)) return `file.${row.operator}(${row.value})`;
+  if (["isEmpty","notEmpty"].includes(row.operator)) return `${row.property} ${row.operator === "isEmpty" ? "==" : "!="} null`;
   if (row.operator === "contains") return `${row.property}.contains(${row.value})`;
   return `${row.property} ${row.operator} ${row.value}`;
 }

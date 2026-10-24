@@ -5,9 +5,10 @@ import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import { closeMenu, SEPARATOR, showMenu, type MenuItems } from "../shell/menu";
 import type { Workspace } from "../workspace";
-import { baseModel, noteKey } from "./model";
+import { baseModel, noteKey, propertyId } from "./model";
 import { addView, writeFilters, writeView, type Sort } from "./write";
 import { filterMenu } from "./filterMenu";
+import { drag, dropSlot, reordered } from "./drag";
 import { mapping } from "./yaml";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
@@ -33,11 +34,22 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
     const base = current();
     const items: MenuItems = [{title:"Sort by",label:true}];
     base.sorts.forEach((sort,i)=>{
-      const direction=sort.direction===1?"ASC":"DESC", numeric=types().get(noteKey(sort.property))==="number";
+      const direction=sort.direction===1?"ASC":"DESC", type=types().get(noteKey(sort.property))??(/file\.[cm]time/.test(sort.property)?"datetime":sort.property==="file.size"?"number":"text");
+      const numeric=type==="number", date=["date","datetime"].includes(type);
       const property = button(base.label(sort.property),kind(sort.property),()=>{const r=property.getBoundingClientRect();showMenu(keys().map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,property:key}:s),()=>sortMenu(at,true))})),{x:r.x,y:r.bottom});});
-      const toggle = button(numeric ? direction==="ASC"?"0 → 1":"1 → 0" : direction==="ASC"?"A → Z":"Z → A",direction==="ASC"?"chevron-up":"chevron-down",()=>write("sort",b=>sortsOf(b).map<Sort>((s,n)=>n===i?{...s,direction:s.direction==="ASC"?"DESC":"ASC"}:s),()=>sortMenu(at,true)));
+      const toggle = button(date ? direction==="ASC"?"Old to new":"New to old" : numeric ? direction==="ASC"?"0 → 1":"1 → 0" : direction==="ASC"?"A → Z":"Z → A",direction==="ASC"?"chevron-up":"chevron-down",()=>write("sort",b=>sortsOf(b).map<Sort>((s,n)=>n===i?{...s,direction:s.direction==="ASC"?"DESC":"ASC"}:s),()=>sortMenu(at,true)));
       const remove = button("Remove sort","trash-2",()=>write("sort",b=>sortsOf(b).filter((_,n)=>n!==i),()=>sortMenu(at,true)));
-      const row=h("div",{class:"bases-sort-row"},property,toggle,remove);
+      const grip=h("span",{class:"bases-sort-grip","aria-label":"Reorder sort"},icon("grip-vertical",16));
+      const row=h("div",{class:"bases-sort-row"},grip,property,toggle,remove);
+      grip.addEventListener("pointerdown",e=>{
+        if(e.button!==0)return;let slot:number|null=null, moved=false;
+        const rows=()=>[...document.querySelectorAll<HTMLElement>(".bases-sort-row")];
+        const clear=()=>rows().forEach(row=>row.classList.remove("drop-before","drop-after"));
+        drag(e,event=>{moved ||= Math.abs(event.clientY-e.clientY)>4;clear();slot=dropSlot(rows(),event.clientX,event.clientY,true);if(moved&&slot!==null){const list=rows();list[Math.min(slot,list.length-1)].classList.add(slot===list.length?"drop-after":"drop-before");}},(cancelled,event)=>{
+          clear();if(event)slot=dropSlot(rows(),event.clientX,event.clientY,true);
+          if(!cancelled&&moved&&slot!==null){const before=slot;write("sort",b=>reordered(sortsOf(b),b.sorts.findIndex(s=>same(s.property,sort.property)),before),()=>sortMenu(at,true));}
+        });
+      });
       items.push({title:`Sort ${sort.property}`,content:row});
     });
     items.push({title:"Add sort",icon:"plus",action:()=>showMenu(keys().filter(key=>!base.sorts.some(s=>same(s.property,key))).map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>[...sortsOf(b),{property:key,direction:"ASC"}],()=>sortMenu(at,true))})),at)});
@@ -55,24 +67,34 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       return row;
     }));
     search.addEventListener("input",draw);draw();
-    const content=h("div",{class:"bases-properties-menu",onclick:(e:MouseEvent)=>e.stopPropagation()},search,list);
-    if(refresh)closeMenu();showMenu([{title:"Properties",content},{title:"Add formula",icon:"plus",disabled:true},{title:"Hide all",action:()=>write("order",()=>[],()=>properties(at,true))}],at,{className:"bases-properties-popover",align:"right"});
+    const content=h("div",{class:"bases-properties-menu",onclick:(e:MouseEvent)=>e.stopPropagation()},h("div",{class:"bases-search"},icon("search",14),search),list);
+    if(refresh)closeMenu();showMenu([{title:"Properties",content},{title:"Add formula",icon:"plus",disabled:true},{title:"Hide all",icon:"eye-off",action:()=>write("order",()=>[],()=>properties(at,true))}],at,{className:"bases-properties-popover",align:"right"});
     search.focus();
   }
   const hide=(key:string)=>write("order",b=>b.columns.filter(k=>!same(k,key)));
   function header(e: MouseEvent,key: string) {
     e.preventDefault();
     const sort=(direction:Sort["direction"])=>write("sort",b=>[{property:key,direction},...sortsOf(b).filter(s=>!same(s.property,key))]);
-    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))}],{x:e.clientX,y:e.clientY});
+    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",disabled:true},{title:"Group by this property",icon:"group",disabled:true},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",disabled:true},SEPARATOR,{title:"Property type",icon:"type",disabled:true}],{x:e.clientX,y:e.clientY});
   }
   function views(at: HTMLElement) {
-    const base=current();
-    showMenu([...base.views.map((v,i)=>({title:typeof mapping(v).name==="string"?String(mapping(v).name):"View",icon:"table" as const,checked:i===base.viewIndex,disabled:mapping(v).type!=null&&mapping(v).type!=="table",action:()=>void changed(i)})),SEPARATOR,{title:"Add view",icon:"plus",action:()=>{
-      save((source,b)=>{
-        const names=new Set(b.views.map(v=>mapping(v).name));let n=1;while(names.has(`View ${n}`))n++;
-        return addView(source,`View ${n}`);
-      },undefined,b=>b.views.length);
-    }}],at,{className:"bases-view-menu"});
+    const search=h("input",{type:"search",placeholder:"Search...","aria-label":"Search views"});
+    const content=h("div",{class:"bases-search",onclick:(e:MouseEvent)=>e.stopPropagation()},icon("search",14),search);
+    const draw=(refresh=false)=>{
+      const base=current();
+      if(refresh)closeMenu();
+      showMenu([{title:"Search views",content},...base.views.flatMap((v,i)=>{
+        const title=typeof mapping(v).name==="string"?String(mapping(v).name):"View";
+        if(!title.toLowerCase().includes(search.value.toLowerCase()))return [];
+        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon("table",14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"View options","aria-disabled":"true",onclick:(e:MouseEvent)=>e.stopPropagation()},icon("chevron-right",14))),disabled:mapping(v).type!=null&&mapping(v).type!=="table",action:()=>void changed(i)}];
+      }),SEPARATOR,{title:"Add view",icon:"plus",action:()=>{
+        save((source,b)=>{
+          const names=new Set(b.views.map(v=>mapping(v).name));let n=0;while(names.has(n?`View ${n}`:"View"))n++;
+          return addView(source,n?`View ${n}`:"View");
+        },undefined,b=>b.views.length);
+      }}],at,{className:"bases-view-menu"});search.focus();
+    };
+    search.addEventListener("input",()=>draw(true));draw();
   }
   function filters(at: HTMLElement) {
     filterMenu({filters:local=>local?current().view.filters:current().root.filters,
@@ -97,5 +119,10 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
     const props=button("Properties","list",()=>properties(props));
     return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props)];
   }
-  return {toolbar,header,dispose(){gone=true;}};
+  const size=(key:string,width?:number)=>save((source,b)=>{
+    const sizes={...b.sizes}, id=propertyId(key);delete sizes[key];delete sizes[id];
+    if(width!==undefined)sizes[id]=Math.max(40,width);
+    return writeView(source,"columnSize",Object.keys(sizes).length?sizes:undefined,b.viewIndex);
+  });
+  return {toolbar,header,size,order:(change:(keys:string[])=>string[])=>write("order",b=>change(b.columns)),dispose(){gone=true;}};
 }

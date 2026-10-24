@@ -5,6 +5,7 @@ import { compare, expression, type Context, type Expression, type Value } from "
 import { mapping, readYaml, type Yaml } from "./yaml";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
 const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
+export const propertyId = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export const noteKey = (key: string) => key.replace(/^note\./, "");
 const canonical = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export function baseModel(source: string, viewIndex = 0) {
@@ -84,5 +85,5 @@ export function baseModel(source: string, viewIndex = 0) {
     });
     return typeof view.limit === "number" ? found.slice(0, view.limit) : found;
   }
-  return { root, view, views, viewIndex, results: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }

@@ -14,8 +14,9 @@ import { tagsInText } from "../shell/linksTags";
 import { whereFromEvent, type Group, type Tab } from "../tabs";
 import type { Workspace } from "../workspace";
 import { baseMenus } from "./menus";
+import { columnControls } from "./columns";
 import { cellEditor } from "./cells";
-import { baseModel, noteKey, type Row } from "./model";
+import { baseModel, noteKey, propertyId, type Row } from "./model";
 import type { Value } from "./expression";
 
 const viewsByTab = new WeakMap<Tab, Map<string, number>>();
@@ -39,7 +40,20 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
   let types = new Map<string, PropertyType>();
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
   const menus = baseMenus(ws, path, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; memory.set(path, index); scroller.scrollTop = 0; } reload = true; await update(); });
-  const editing = () => body.contains(document.activeElement) && document.activeElement?.matches('input:not([type="checkbox"]),[contenteditable="plaintext-only"]');
+  let automatic: number[] = [];
+  function applySizes(key?: string, width?: number) {
+    if (!model || !automatic.length) return;
+    const widths=model.columns.map((column,i)=>{
+      const id=propertyId(column), saved=column===key?width:Object.hasOwn(model!.sizes,id)?model!.sizes[id]:model!.sizes[column];
+      return saved === undefined ? automatic[i] : Math.max(40,Number.isFinite(Number(saved))?Number(saved):40);
+    });
+    const last=model.columns.length-1, lastKey=model.columns[last];
+    if(last>=0 && lastKey!==key && model.sizes[propertyId(lastKey)]===undefined && model.sizes[lastKey]===undefined) widths[last]=Math.max(widths[last],scroller.clientWidth-1-widths.slice(0,last).reduce((sum,n)=>sum+n,0));
+    [...columns.children].forEach((col,i)=>(col as HTMLElement).style.width=`${widths[i]}px`);
+    table.style.width=`${widths.reduce((sum,n)=>sum+n,0)}px`;
+  }
+  const controls=columnControls(head,applySizes,(key,width)=>menus.size(key,width),change=>menus.order(change),schedule);
+  const editing = () => controls.active || body.contains(document.activeElement) && document.activeElement?.matches('input:not([type="checkbox"]),[contenteditable="plaintext-only"]');
   el.addEventListener("focusout", () => { setTimeout(() => { if (!gone && !editing()) schedule(); }, 0); });
   function type(key: string, value?: Value): PropertyType {
     if (key === "file.mtime" || key === "file.ctime") return "datetime";
@@ -100,7 +114,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     notice.textContent = [...model.notices].join(" · "); notice.hidden = !notice.textContent;
   }
   scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; paint(); }); }, { passive: true });
-  const resize = new ResizeObserver(() => paint(true)); resize.observe(scroller);
+  const resize = new ResizeObserver(() => { if(!controls.active)applySizes();paint(true); }); resize.observe(scroller);
   async function update() {
     dirty = true;
     if (running) return;
@@ -137,14 +151,13 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         table.setAttribute("aria-rowcount", String(selected.length + 1));
         head.replaceChildren(h("tr", null, ...model!.columns.map(key => {
           const sort = model!.sorts.find(s => noteKey(s.property) === noteKey(key));
-          return h("th", { "data-property": key, oncontextmenu: (e: MouseEvent) => menus.header(e, key) }, h("div", { class: "bases-header" }, icon(key === "file.name" ? "info" : key.startsWith("formula.") ? "square-function" : TYPE_ICONS[type(key)], 14), h("span", null, model!.label(key)), sort ? icon(sort.direction === 1 ? "chevron-up" : "chevron-down", 14) : null));
+          const th = h("th", { "data-property": key, oncontextmenu: (e: MouseEvent) => menus.header(e, key) }, h("div", { class: "bases-header" }, icon(key === "file.name" ? "info" : key.startsWith("formula.") ? "square-function" : TYPE_ICONS[type(key)], 14), h("span", null, model!.label(key)), sort ? icon(sort.direction === 1 ? "chevron-up" : "chevron-down", 14) : null));
+          controls.attach(th,key);return th;
         })));
         // Measure the interface font; reserve a sort glyph and native date width.
         const measure = document.createElement("canvas").getContext("2d")!;
         measure.font = `13.125px ${getComputedStyle(table).fontFamily}`;
-        columns.replaceChildren(...model!.columns.map((key, i) => {
-          const col = h("col");
-          if (i < model!.columns.length - 1) {
+        automatic = model!.columns.map(key => {
             const sort = model!.sorts.some(s => noteKey(s.property) === noteKey(key));
             let width = Math.max(key === "file.name" ? 78 : 60, Math.ceil(measure.measureText(model!.label(key)).width + 34 + (sort ? 16 : 0)));
             if (["date", "datetime"].includes(type(key))) width = type(key) === "date" ? 128 : 210;
@@ -152,10 +165,9 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
               const v = entry.context.get(key);
               if (Array.isArray(v)) width = Math.max(width, Math.ceil(v.reduce<number>((sum, item) => sum + measure.measureText(String(item)).width + 44, 16)));
             }
-            col.style.width = `${width}px`;
-          }
-          return col;
-        }));
+            return width;
+        });
+        columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
         paint(true);
       }
     } catch (error) {
@@ -166,5 +178,5 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
   const unwatch = ws.vault.onModified(changed => { if (changed === path) reload = true; schedule(); });
   const off = ws.on(change => { if (["files", "doc", "links"].includes(change)) schedule(); });
   void update();
-  return { el, dispose() { gone = true; menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
+  return { el, dispose() { gone = true; controls.dispose(); menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
 }

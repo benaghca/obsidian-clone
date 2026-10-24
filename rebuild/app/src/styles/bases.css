@@ -38,11 +38,9 @@
 .bases-table td:focus { outline: 1px solid var(--interactive-accent); outline-offset: -1px; }
 .bases-spacer td { line-height: 0; box-shadow: none; }
 .bases-sort-row { display: flex; align-items: center; gap: 4px; font-size: 13px; }
-.bases-sort-row button:first-child { min-width: 115px; }
 .bases-sort-row button:last-child { font-size: 0; }
 .bases-properties-popover { width: 225px; min-width: 225px; }
 .bases-properties-menu { width: 100%; }
-.bases-properties-menu > input { width: 100%; padding: 6px; margin-bottom: 4px; }
 .bases-property-list { max-height: 380px; overflow: auto; }
 .bases-property-option { display: flex; align-items: center; gap: 8px; padding: 4px; font-size: 13px; cursor: pointer; --icon-size: 14px; }
 .bases-property-option:hover { background: var(--background-modifier-hover); }
@@ -64,11 +62,31 @@
 .bases-filter-editor section + section { border-top: 1px solid var(--background-modifier-border); }
 .bases-filter-group { padding: 8px; }
 .bases-filter-group .bases-filter-group { margin: 4px 0 4px 20px; border: 1px solid var(--background-modifier-border); border-radius: 4px; }
-.bases-filter-conjunction { margin-bottom: 4px; }
-.bases-filter-row { display: flex; align-items: center; gap: 2px; min-height: 32px; }
+.bases-filter-conjunction { margin-bottom: 4px; width: 226px; height: 28px; justify-content: space-between; }
+.bases-filter-row { display: flex; align-items: center; gap: 2px; min-height: 28px; height: 28px; }
 .bases-filter-where { width: 62px; flex: none; text-align: right; padding-right: 4px; }
 .bases-filter-row > button { flex: none; white-space: nowrap; }
-.bases-filter-row > input { flex: 1; width: 50px; min-width: 0; height: 29px; padding: 4px 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-normal); font: inherit; }
+.bases-filter-row > input { flex: 1; width: 50px; min-width: 0; height: 28px; padding: 4px 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-normal); font: inherit; }
 .bases-filter-row > input:invalid { outline: 1px solid var(--text-error); }
 .bases-filter-editor .bases-filter-icon { font-size: 0; }
 .bases-filter-add { display: flex; gap: 4px; margin-top: 8px; color: var(--text-muted); }
+
+.bases-table th { overflow: visible; user-select: none; }
+.bases-header { overflow: hidden; }
+.bases-resizer { position: absolute; z-index: 3; right: -1px; top: 0; width: 6px; height: 30px; cursor: col-resize; }
+.bases-resizer:hover::after, .is-resizing > .bases-resizer::after { content: ""; position: absolute; right: 1px; top: 0; height: 100%; width: 2px; background: var(--interactive-accent); }
+.bases-column-drop { position: fixed; z-index: 110; width: 2px; background: var(--interactive-accent); pointer-events: none; }
+.bases-sort-grip { cursor: grab; padding: 0; flex: none; --icon-size: 16px; }
+.bases-sort-row { position: relative; }
+.bases-sort-row button:nth-child(2) { min-width: 115px; }
+.bases-sort-row.drop-before::before, .bases-sort-row.drop-after::after { content: ""; position: absolute; left: 0; right: 0; height: 2px; background: var(--interactive-accent); pointer-events: none; }
+.bases-sort-row.drop-before::before { top: 0; }
+.bases-sort-row.drop-after::after { bottom: 0; }
+.bases-view-menu { width: 225px; }
+.bases-view-option { display: flex; align-items: center; gap: 8px; width: 100%; }
+.bases-view-menu .menu-item:has(.is-current-view) { background: var(--background-modifier-hover); }
+.bases-search { display: flex; align-items: center; gap: 4px; width: 100%; border-radius: 4px; background: var(--background-modifier-form-field); box-shadow: var(--input-shadow); padding: 0 6px; margin-bottom: 4px; }
+.bases-search input { border: 0; outline: none; background: transparent; box-shadow: none; width: 100%; min-width: 0; height: 28px; font: inherit; }
+.bases-properties-popover .menu-item.is-disabled, .bases-properties-popover .menu-item.is-disabled .menu-item-icon { color: var(--text-normal); }
+.bases-filter-editor .bases-filter-icon { width: 28px; height: 24px; justify-content: center; padding: 4px 6px; }
+.bases-view-options { display: flex; padding: 0; border: 0; color: var(--text-muted); background: transparent; cursor: default; }

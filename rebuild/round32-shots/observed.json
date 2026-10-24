@@ -1,0 +1,445 @@
+{
+  "initial": {
+    "headers": [
+      {
+        "text": "Task",
+        "x": 344,
+        "w": 78,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "Due date",
+        "x": 422,
+        "w": 128,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "priority",
+        "x": 550,
+        "w": 74,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "status",
+        "x": 624,
+        "w": 643,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      }
+    ],
+    "menus": []
+  },
+  "firstDrag": {
+    "snapshot": {
+      "headers": [
+        {
+          "text": "Due date",
+          "x": 344,
+          "w": 128,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "priority",
+          "x": 472,
+          "w": 74,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "Task",
+          "x": 546,
+          "w": 78,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "status",
+          "x": 624,
+          "w": 643,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        }
+      ],
+      "menus": []
+    },
+    "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: By due\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - due\n      - priority\n      - file.name\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n"
+  },
+  "resized": {
+    "snapshot": {
+      "headers": [
+        {
+          "text": "Due date",
+          "x": 344,
+          "w": 188,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "priority",
+          "x": 532,
+          "w": 74,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "Task",
+          "x": 606,
+          "w": 78,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "status",
+          "x": 684,
+          "w": 583,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        }
+      ],
+      "menus": []
+    },
+    "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: By due\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - due\n      - priority\n      - file.name\n      - status\n    sort:\n      - property: due\n        direction: ASC\n      - property: file.name\n        direction: DESC\n    limit: 3\n    columnSize:\n      note.due: 188\n"
+  },
+  "sort": {
+    "headers": [
+      {
+        "text": "Due date",
+        "x": 344,
+        "w": 188,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "priority",
+        "x": 532,
+        "w": 74,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "Task",
+        "x": 606,
+        "w": 78,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "status",
+        "x": 684,
+        "w": 583,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      }
+    ],
+    "menus": [
+      {
+        "text": "Sort by\nDue date\nOld to new\nTask\nZ → A\nAdd sort",
+        "w": 263.921875
+      }
+    ]
+  },
+  "sortDrag": {
+    "snapshot": {
+      "headers": [
+        {
+          "text": "Due date",
+          "x": 344,
+          "w": 188,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "priority",
+          "x": 532,
+          "w": 74,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "Task",
+          "x": 606,
+          "w": 78,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        },
+        {
+          "text": "status",
+          "x": 684,
+          "w": 583,
+          "parts": [
+            {
+              "class": "bases-table-header-resizer",
+              "cursor": "col-resize",
+              "w": 6,
+              "h": 30
+            }
+          ]
+        }
+      ],
+      "menus": [
+        {
+          "text": "Sort by\nTask\nZ → A\nDue date\nOld to new\nAdd sort",
+          "w": 263.921875
+        }
+      ]
+    },
+    "source": "filters:\n  not:\n    - status == \"waiting\"\nproperties:\n  file.name:\n    displayName: Task\n  note.due:\n    displayName: Due date\nviews:\n  - type: table\n    name: By due\n    filters:\n      or:\n        - file.hasTag(\"work\")\n        - priority > 1\n    order:\n      - due\n      - priority\n      - file.name\n      - status\n    sort:\n      - property: file.name\n        direction: DESC\n      - property: due\n        direction: ASC\n    limit: 3\n    columnSize:\n      note.due: 188\n"
+  },
+  "incomplete": {
+    "headers": [
+      {
+        "text": "Due date",
+        "x": 344,
+        "w": 188,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "priority",
+        "x": 532,
+        "w": 74,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "Task",
+        "x": 606,
+        "w": 78,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      },
+      {
+        "text": "status",
+        "x": 684,
+        "w": 583,
+        "parts": [
+          {
+            "class": "bases-table-header-resizer",
+            "cursor": "col-resize",
+            "w": 6,
+            "h": 30
+          }
+        ]
+      }
+    ],
+    "menus": [
+      {
+        "text": "All views\n1\nThis view\n2\nAll the following are true\nAny of the following are true\nNone of the following are true\nwhere\nfile\nhas tag\nwork\nor\npriority\n>\nor\nfile\nlinks to\nAdd filter\nAdd filter group",
+        "w": 520
+      },
+      {
+        "text": "file\nTask\nfile.name\nfile base name\nfile.basename\nfile full name\nfile.fullname\nfile path\nfile.path\nfolder\nfile.folder\nfile extension\nfile.ext\ncreated time\nfile.ctime\nmodified time\nfile.mtime\nfile size\nfile.size\nfile links\nfile.links\nfile embeds\nfile.embeds\nfile tags\nfile.tags\naliases\ncssclasses\nstatus\npriority\nDue date\nnote.due\nactive",
+        "w": 239.265625
+      }
+    ],
+    "unchanged": true
+  },
+  "input": [
+    {
+      "type": "pointerdown",
+      "x": 369,
+      "y": 133.046875,
+      "buttons": 1,
+      "target": "bases-table-header-label"
+    },
+    {
+      "type": "pointerdown",
+      "x": 470,
+      "y": 133.046875,
+      "buttons": 1,
+      "target": "bases-table-header-resizer"
+    },
+    {
+      "type": "pointerdown",
+      "x": 893.578125,
+      "y": 97.5390625,
+      "buttons": 1,
+      "target": "text-button-label"
+    },
+    {
+      "type": "pointerup",
+      "x": 893.578125,
+      "y": 97.5390625,
+      "buttons": 0,
+      "target": "text-button-label"
+    },
+    {
+      "type": "pointerdown",
+      "x": 871.65625,
+      "y": 167.875,
+      "buttons": 1,
+      "target": {}
+    },
+    {
+      "type": "pointerup",
+      "x": 871.65625,
+      "y": 209.875,
+      "buttons": 0,
+      "target": "base-toolbar-sort-item drag-ghost-hidden"
+    },
+    {
+      "type": "pointerdown",
+      "x": 1024.0859375,
+      "y": 97.5390625,
+      "buttons": 1,
+      "target": "text-button-label"
+    },
+    {
+      "type": "pointerup",
+      "x": 1024.0859375,
+      "y": 97.5390625,
+      "buttons": 0,
+      "target": "text-button-label"
+    },
+    {
+      "type": "pointerdown",
+      "x": 811.65625,
+      "y": 316.4296875,
+      "buttons": 1,
+      "target": "text-button-label"
+    },
+    {
+      "type": "pointerup",
+      "x": 811.65625,
+      "y": 316.4296875,
+      "buttons": 0,
+      "target": "text-button-label"
+    }
+  ]
+}

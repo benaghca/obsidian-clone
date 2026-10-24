@@ -1,0 +1,49 @@
+{
+  "headers": [
+    {
+      "label": "status",
+      "width": 129
+    },
+    {
+      "label": "Due date",
+      "width": 188
+    },
+    {
+      "label": "priority",
+      "width": 134
+    },
+    {
+      "label": "Task",
+      "width": 484
+    }
+  ],
+  "rows": [
+    {
+      "path": "BaseTest/Task F.md",
+      "values": [
+        "open",
+        "2000-01-01",
+        "3",
+        "Task F"
+      ]
+    },
+    {
+      "path": "BaseTest/Task E.md",
+      "values": [
+        "open",
+        "",
+        "",
+        "Task E"
+      ]
+    },
+    {
+      "path": "BaseTest/Task D.md",
+      "values": [
+        "open",
+        "2099-01-01",
+        "5",
+        "Task D"
+      ]
+    }
+  ]
+}
