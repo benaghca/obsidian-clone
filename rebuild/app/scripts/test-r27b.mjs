@@ -86,8 +86,8 @@ await withBrowser(async ({ send, run, press, point, move, click, fill, check }) 
   check(await run(() => ws.view.state.doc.toString().startsWith('---\nstatus: drop')), 'the opened note has frontmatter');
 
   const beforeSelect = await run(() => ws.active.path);
-  await clickAt(await at('Sel/B.md'), 2);
-  check(await selected().then((paths) => paths.join() === 'Sel/B.md') && await run(() => ws.active.path) === beforeSelect, 'ctrl-click selects a row without opening it');
+  await clickAt(await at('Sel/B.md'), 1);
+  check(await selected().then((paths) => paths.join() === 'Sel/B.md') && await run(() => ws.active.path) === beforeSelect, 'alt-click selects a row without opening it');
   await sleep(150);
   const colors = await run(() => {
     const probe = (value) => {
@@ -106,27 +106,27 @@ await withBrowser(async ({ send, run, press, point, move, click, fill, check }) 
     };
   });
   check(colors.selected === colors.accent && colors.selected !== colors.hover && colors.active === colors.hover, `a selected row uses the accent highlight, distinct from hover and the open file (${colors.selected} accent ${colors.accent} hover ${colors.hover} active ${colors.active})`);
-  await clickAt(await at('Sel/B.md'), 2);
-  check((await selected()).length === 0, 'ctrl-click again removes the row');
+  await clickAt(await at('Sel/B.md'), 1);
+  check((await selected()).length === 0, 'alt-click again removes the row');
   const openSel = await run(() => !document.querySelector('.nav-folder-title[data-path="Sel"] .collapse-icon.is-collapsed'));
-  await clickAt(await at('Sel'), 2);
-  check((await selected()).join() === 'Sel' && await run(() => !document.querySelector('.nav-folder-title[data-path="Sel"] .collapse-icon.is-collapsed')) === openSel, 'ctrl-click selects a folder without toggling it');
+  await clickAt(await at('Sel'), 1);
+  check((await selected()).join() === 'Sel' && await run(() => !document.querySelector('.nav-folder-title[data-path="Sel"] .collapse-icon.is-collapsed')) === openSel, 'alt-click selects a folder without toggling it');
   await press('Escape');
   check((await selected()).length === 0, 'escape clears the selection');
 
-  await clickAt(await at('Sel/A.md'), 2);
+  await clickAt(await at('Sel/A.md'), 1);
   await clickAt(await at('Sel/C.md'), 8);
   check((await selected()).join() === 'Sel/A.md,Sel/B.md,Sel/C.md', 'shift-click selects the visible range');
-  await clickAt(await at('Sel/B.md'), 2);
-  check((await selected()).join() === 'Sel/A.md,Sel/C.md', 'ctrl-click toggles one row out of the range');
+  await clickAt(await at('Sel/B.md'), 1);
+  check((await selected()).join() === 'Sel/A.md,Sel/C.md', 'alt-click toggles one row out of the range');
   await click(row('Welcome.md'), 'right');
   check((await titles()).includes('Move file to...') && !(await titles()).some((title) => title.startsWith('Move ') && title.endsWith(' items to...')), 'right-click on an unselected row keeps the single-file menu');
   await press('Escape');
   check((await selected()).join() === 'Sel/A.md,Sel/C.md', 'closing that menu leaves the selection');
   await press('Escape');
   check((await selected()).length === 0, 'escape after the menu clears the selection');
-  await clickAt(await at('Sel/A.md'), 2);
-  await clickAt(await at('Sel/B.md'), 2);
+  await clickAt(await at('Sel/A.md'), 1);
+  await clickAt(await at('Sel/B.md'), 1);
   await clickAt(await at('Sel/D.md'));
   check((await selected()).length === 0 && await run(() => ws.active.path === 'Sel/D.md'), 'a plain click clears the selection and opens the note');
 
@@ -188,7 +188,7 @@ await withBrowser(async ({ send, run, press, point, move, click, fill, check }) 
   await release(end);
   check(await doc() === folderBefore && await has('Sel/A.md') && await has('Sel'), 'dropping a folder on a note does nothing');
 
-  for (const path of ['Sel/A.md', 'Sel/B.md', 'Sel/C.md']) await clickAt(await at(path), 2);
+  for (const path of ['Sel/A.md', 'Sel/B.md', 'Sel/C.md']) await clickAt(await at(path), 1);
   end = await begin('Sel/A.md', await spot().then((places) => places.second));
   const many = await run(() => ({ anchor: ws.view.state.selection.main.anchor, text: ws.view.state.doc.toString(), selected: [...document.querySelectorAll('.nav-files .tree-item-self.is-selected')].map((el) => el.dataset.path) }));
   await release(end);
@@ -205,14 +205,14 @@ await withBrowser(async ({ send, run, press, point, move, click, fill, check }) 
   await release(end);
   check(await has('Sel/D.md'), 'escape cancels a single drag');
 
-  for (const path of ['Move/One.md', 'Move/Two.md', 'Move/Three.md']) await clickAt(await at(path), 2);
+  for (const path of ['Move/One.md', 'Move/Two.md', 'Move/Three.md']) await clickAt(await at(path), 1);
   end = await begin('Move/One.md', 'Dest');
   check(await run(() => document.querySelector('.drag-ghost-title')?.textContent === '3 items' && document.querySelector('.drag-ghost-destination')?.textContent === 'Move into “Dest”' && document.querySelectorAll('.is-being-dragged').length === 1 && document.querySelector('.is-being-dragged')?.dataset.path === 'Move/One.md'), 'dragging a selected row ghosts “3 items” and marks only the pressed row');
   await release(end);
   await wait(() => has('Dest/One.md'), 'first of three arrived');
   check(await has('Dest/Two.md') && await has('Dest/Three.md') && !await has('Move/One.md') && !await has('Move/Two.md') && !await has('Move/Three.md'), 'dropping the selection on a folder moves every selected file');
 
-  for (const path of ['Move/Four.md', 'Move/Five.md']) await clickAt(await at(path), 2);
+  for (const path of ['Move/Four.md', 'Move/Five.md']) await clickAt(await at(path), 1);
   await click(row('Move/Five.md'), 'right');
   check((await titles()).includes('Move 2 items to...') && (await titles()).includes('Delete'), 'the multi-selection menu offers move and delete');
   await menuAt('Move 2 items to...');
@@ -222,7 +222,7 @@ await withBrowser(async ({ send, run, press, point, move, click, fill, check }) 
   await wait(() => has('MenuDest/Four.md'), 'menu move');
   check(await has('MenuDest/Five.md') && !await has('Move/Four.md') && !await has('Move/Five.md'), 'Move 2 items to... moves both files');
 
-  for (const path of ['Del/P.md', 'Del/Q.md']) await clickAt(await at(path), 2);
+  for (const path of ['Del/P.md', 'Del/Q.md']) await clickAt(await at(path), 1);
   await click(row('Del/Q.md'), 'right');
   await menuAt('Delete');
   const confirm = await run(() => ({

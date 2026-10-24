@@ -21,7 +21,7 @@ import { noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
 import { dragPointer, fieldError, h, iconButton } from "./dom";
-import { icon } from "./icons";
+import { icon, type IconName } from "./icons";
 import { showMenu } from "./menu";
 import type { Menus } from "./menus";
 import { createBacklinksView } from "./backlinksView";
@@ -411,7 +411,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       actions.hidden = !path && !tab.type;
       modeButton.hidden = !!tab.type;
       renderMode();
-      const crumb = tab.type && tab.type !== "canvas" ? `\0${tab.type}\0${tab.viewFile ?? ""}` : (path ?? "");
+      const crumb = tab.type && tab.type !== "canvas" ? `\0${tab.type}\0${tab.viewFile ?? ""}` : (path ?? "\0new-tab");
       if (crumb === shownCrumb) return;
       shownCrumb = crumb;
       breadcrumb.replaceChildren();
@@ -420,7 +420,10 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         breadcrumb.append(h("span", { class: "view-header-title" }, title));
         return;
       }
-      if (!path) return;
+      if (!path) {
+        breadcrumb.append(h("span", { class: "view-header-title" }, "New tab"));
+        return;
+      }
       const dir = parentDir(path);
       for (const part of dir ? dir.split("/") : []) {
         breadcrumb.append(
@@ -437,28 +440,39 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     const sizer = h("div", { class: "markdown-sizer" }, title, ws.editors.viewOf(group).dom);
     const scroller = h("div", { class: "view-content" }, sizer);
 
-    const emptyActions: [HTMLElement, string, string][] = [];
-    const emptyAction = (label: string, id: string) => {
-      const el = h("div", { class: "empty-state-action", onclick: () => commands.run(id) });
-      emptyActions.push([el, label, id]);
+    const emptyActions: { el: HTMLElement; id: string; hotkey: HTMLElement }[] = [];
+    const emptyAction = (label: string, id: string, iconName: IconName) => {
+      const hotkey = h("span", { class: "empty-state-hotkey" });
+      const el = h(
+        "div",
+        { class: "empty-state-action", onclick: () => commands.run(id) },
+        icon(iconName, 16),
+        h("span", { class: "empty-state-action-label" }, label),
+        hotkey,
+      );
+      emptyActions.push({ el, id, hotkey });
       return el;
     };
-    // Labels carry the current hotkey; a command whose core plugin is off is left out.
+    // The shortcut is its own muted span. A command whose core plugin is off is left out.
     function renderEmpty() {
-      for (const [el, label, id] of emptyActions) {
-        const hotkey = commands.hotkey(id);
-        const text = `${label}${hotkey ? ` (${hotkey})` : ""}`;
-        if (el.textContent !== text) el.textContent = text;
+      for (const { el, id, hotkey } of emptyActions) {
+        const text = commands.hotkey(id) ?? "";
+        if (hotkey.textContent !== text) hotkey.textContent = text;
+        hotkey.hidden = !text;
         el.hidden = !commands.isEnabled(id);
       }
     }
     const empty = h(
       "div",
       { class: "empty-state" },
-      emptyAction("New note", "file-explorer:new-file"),
-      emptyAction("New canvas", "canvas:new-file"),
-      emptyAction("Go to file", "switcher:open"),
-      h("div", { class: "empty-state-action", onclick: () => ws.closeTab(group.active) }, "Close"),
+      h(
+        "div",
+        { class: "empty-state-actions" },
+        emptyAction("New note", "file-explorer:new-file", "square-pen"),
+        emptyAction("Go to file", "switcher:open", "layout-list"),
+        emptyAction("Search", "global-search:open", "search"),
+        emptyAction("New canvas", "canvas:new-file", "layout-dashboard"),
+      ),
     );
 
     // An image tab: the picture at its own size, centred, through the same blob: URLs as embeds.

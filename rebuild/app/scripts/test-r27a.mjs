@@ -163,12 +163,13 @@ await withBrowser(async ({ run, press, click, fill, check }) => {
       animation: style.animationName,
       transition: style.transitionDuration,
       animating: menu.getAnimations().length,
-      above: box.bottom <= anchor.top + 1,
+      dx: Math.min(Math.abs(box.left - (anchor.left + anchor.width / 2)), Math.abs(box.right - (anchor.left + anchor.width / 2))),
+      dy: Math.min(Math.abs(box.top - (anchor.top + anchor.height / 2)), Math.abs(box.bottom - (anchor.top + anchor.height / 2))),
     };
   });
   check(openedMenu.titles[0] === 'Sample Vault' && openedMenu.titles.includes('Manage vaults...'), `vault menu lists the current vault and Manage vaults (${openedMenu.titles.join(' | ')})`);
   check(openedMenu.checked.length === 1 && openedMenu.checked[0] === 'Sample Vault', 'the current vault is marked');
-  check(openedMenu.above, 'the menu opens above the footer');
+  check(openedMenu.dx < 8 && openedMenu.dy < 8, `the vault menu opens at the click (${openedMenu.dx}px across, ${openedMenu.dy}px down)`);
   check(openedMenu.animation === 'none' && openedMenu.transition === '0s' && openedMenu.animating === 0, 'the vault menu opens with no animation');
 
   await pick('Manage vaults...');

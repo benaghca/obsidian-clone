@@ -21,7 +21,7 @@ export function mountVaultSwitcher(ws: Workspace) {
       class: "vault-switcher",
       role: "button",
       "aria-label": "Manage vaults",
-      onclick: () => openMenu(ws, button),
+      onclick: (e: MouseEvent) => openMenu(ws, button, e),
     },
     icon("chevrons-up-down", 16),
     name,
@@ -39,7 +39,7 @@ function current(ws: Workspace): VaultRef {
   return { path: ws.vault.path, name: ws.vault.name };
 }
 
-function openMenu(ws: Workspace, anchor: HTMLElement) {
+function openMenu(ws: Workspace, anchor: HTMLElement, event: MouseEvent) {
   const here = current(ws);
   const recents = here.path ? addRecent(readRecents(), here) : readRecents();
   const items: MenuItems = [
@@ -53,7 +53,7 @@ function openMenu(ws: Workspace, anchor: HTMLElement) {
     SEPARATOR,
     { title: "Manage vaults...", icon: "vault", action: () => showManage(anchor) },
   ];
-  showMenu(items, anchor);
+  showMenu(items, anchor, { point: { x: event.clientX, y: event.clientY } });
 }
 
 /** Open and create, the same path prompt the rest of the app uses. */

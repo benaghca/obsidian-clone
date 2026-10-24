@@ -1,6 +1,16 @@
 import { expect, test } from "vitest";
 import { formatLink } from "../links/internal";
-import { dropLinkText, selectionRange, topLevelPaths } from "./treeSelect";
+import { dropLinkText, selectGesture, selectionFolderParent, selectionRange, topLevelPaths } from "./treeSelect";
+
+test("alt toggles, shift extends, and ctrl or cmd opens instead of selecting", () => {
+  const none = { altKey: false, shiftKey: false, ctrlKey: false, metaKey: false };
+  expect(selectGesture({ ...none, altKey: true })).toBe("toggle");
+  expect(selectGesture({ ...none, shiftKey: true })).toBe("range");
+  expect(selectGesture({ ...none, altKey: true, shiftKey: true })).toBe("range");
+  expect(selectGesture({ ...none, ctrlKey: true })).toBe("open");
+  expect(selectGesture({ ...none, metaKey: true, altKey: true })).toBe("open");
+  expect(selectGesture(none)).toBe("open");
+});
 
 test("shift range is the inclusive visible span, and a missing anchor is just the row", () => {
   const order = ["A", "B", "C", "D"];
@@ -14,6 +24,13 @@ test("a selected folder carries its selected children, and sibling files all sta
   const folder = (path: string) => path === "Sel" || path === "Sel/Nested";
   expect(topLevelPaths(["Sel", "Sel/A.md", "Sel/Nested", "Sel/Nested/B.md", "Other.md"], folder)).toEqual(["Sel", "Other.md"]);
   expect(topLevelPaths(["Sel/A.md", "Sel/B.md"], folder)).toEqual(["Sel/A.md", "Sel/B.md"]);
+});
+
+test("a new folder for a selection uses the folder every item already shares", () => {
+  expect(selectionFolderParent(["Sel/A.md", "Sel/B.md"])).toBe("Sel");
+  expect(selectionFolderParent(["Sel", "Other.md"])).toBe("");
+  expect(selectionFolderParent(["A/B/One.md", "A/C/Two.md"])).toBe("A");
+  expect(selectionFolderParent([])).toBe("");
 });
 
 test("a note drop writes one suggester link per line and embeds other files", () => {
