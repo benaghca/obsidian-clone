@@ -19,15 +19,19 @@
   justify-content: center;
   gap: 2px;
 }
-.nav-buttons-container .clickable-icon.is-active,
-.search-view .search-input-container > .clickable-icon.is-active {
+.nav-buttons-container .clickable-icon.is-active {
   color: var(--text-normal);
   background: var(--background-modifier-hover);
+}
+/* Search settings is the one toolbar button that uses the accent when open. */
+.search-view .search-input-container > .clickable-icon.is-active {
+  color: var(--text-accent);
+  background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
 }
 .nav-files-container:focus {
   outline: none;
 }
-.nav-files-container:focus .tree-item-self.is-focused {
+.nav-files-container .tree-item-self.is-focused {
   box-shadow: inset 0 0 0 2px var(--background-modifier-border-focus);
 }
 .nav-files-container {
@@ -274,20 +278,38 @@
 .search-settings:not([hidden]) {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  /* The field's padding leaves the switches 3px low, and this block's own
-     padding leaves the count another 2px low. */
-  margin-top: -3px;
-  padding: 0 12px 6px;
+  gap: 16px;
+  /* 16px inset in the 300px view. The block is 97px (three 19px rows,
+     16px gaps, 8px under the last row). 4px of top margin puts the first
+     row at y=94; 4px under the block puts the count row at y=195. */
+  margin: 4px 16px 4px;
+  padding: 0 0 8px;
+  box-sizing: border-box;
 }
 .search-settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 32px;
-  font-size: var(--font-ui-small);
+  height: 19px;
+  min-height: 19px;
+  font-size: 13px;
+  line-height: 19px;
   color: var(--text-normal);
+}
+.search-settings .checkbox-container {
+  width: 34px;
+  height: 19px;
+  border-radius: 19px;
+}
+.search-settings .checkbox-container::after {
+  width: 15px;
+  height: 15px;
+  top: 2px;
+  transform: translateX(2px);
+}
+.search-settings .checkbox-container.is-enabled::after {
+  transform: translateX(17px);
 }
 .search-explain:not([hidden]) {
   padding: 0 12px 8px;
@@ -309,8 +331,9 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  box-sizing: border-box;
   height: 24px;
-  padding: 0 2px;
+  padding: 4px 6px;
   border-radius: var(--radius-s);
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
@@ -323,9 +346,8 @@
   color: var(--text-normal);
 }
 .search-results-result-count .search-more-options {
-  --icon-size: 14px;
-  width: 14px;
-  height: 14px;
+  width: 11px;
+  height: 11px;
   flex: none;
 }
 .search-results-info .dropdown-container {
@@ -338,13 +360,16 @@
   height: 24px;
   width: 166px;
   max-width: 166px;
-  padding: 0 22px 0 8px;
+  padding: 0 28.8px 0 9.6px;
   color: var(--text-muted);
   background: transparent;
   box-shadow: none;
   border: 0;
   font-size: var(--font-ui-smaller);
-  text-align: right;
+  text-align: start;
+}
+.search-results-info .dropdown-chevron {
+  right: 7.8px;
 }
 .search-results {
   overflow-y: auto;
