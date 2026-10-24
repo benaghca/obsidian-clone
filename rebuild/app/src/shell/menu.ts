@@ -39,6 +39,10 @@ interface MenuOptions {
   className?: string;
   /** Opened from the keyboard: highlight the first item straight away. */
   keyboard?: boolean;
+  /** Open at the pointer even when `at` is the button that toggles the menu. */
+  point?: { x: number; y: number };
+  /** A row that keeps an outline while this menu is open. */
+  highlight?: HTMLElement;
 }
 
 const SUBMENU_DELAY = 150;
@@ -46,6 +50,7 @@ const EDGE = 8;
 
 let root: Menu | null = null;
 let anchorEl: HTMLElement | null = null;
+let highlightEl: HTMLElement | null = null;
 
 /** Drop separators at the ends and doubled ones, and the falsy entries. */
 export function tidy(items: MenuItems): (MenuEntry | typeof SEPARATOR)[] {
@@ -230,6 +235,8 @@ function place(el: HTMLElement, x: number, y: number) {
 
 /** Close the open menu and release its input listeners. */
 export function closeMenu() {
+  highlightEl?.classList.remove("has-active-menu");
+  highlightEl = null;
   if (!root) return;
   const focused = root.contains(document.activeElement!);
   root.close();
@@ -259,19 +266,26 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
   const size = menu.el.getBoundingClientRect();
   let x: number;
   let y: number;
-  if (at instanceof HTMLElement) {
-    const r = at.getBoundingClientRect();
+  const point = opts.point ?? (at instanceof HTMLElement ? null : at);
+  if (point) {
+    // At the pointer; flipped to the other side of it when there is no room.
+    x = point.x;
+    y = point.y;
+    if (x + size.width > innerWidth - EDGE) x = point.x - size.width;
+    if (y + size.height > innerHeight - EDGE) y = point.y - size.height;
+  } else {
+    const r = (at as HTMLElement).getBoundingClientRect();
     x = opts.align === "right" ? r.right - size.width : opts.align === "center" ? r.left + (r.width - size.width) / 2 : r.left;
     y = r.bottom + 4;
     if (y + size.height > innerHeight - EDGE && r.top - size.height - 4 >= EDGE) y = r.top - size.height - 4;
+  }
+  if (at instanceof HTMLElement) {
     at.classList.add("has-active-menu");
     anchorEl = at;
-  } else {
-    // At the pointer; flipped to the other side of it when there is no room.
-    x = at.x;
-    y = at.y;
-    if (x + size.width > innerWidth - EDGE) x = at.x - size.width;
-    if (y + size.height > innerHeight - EDGE) y = at.y - size.height;
+  }
+  if (opts.highlight) {
+    highlightEl = opts.highlight;
+    highlightEl.classList.add("has-active-menu");
   }
   place(menu.el, Math.min(x, innerWidth - size.width - EDGE), Math.min(y, innerHeight - size.height - EDGE));
   root = menu;

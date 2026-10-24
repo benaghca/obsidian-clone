@@ -21,7 +21,7 @@ import { isPromptOpen } from "./prompt";
 import { createSearchView } from "./searchView";
 import { viewTabs } from "./sideView";
 import { startTreeDrag } from "./treeDrag";
-import { selectionRange } from "./treeSelect";
+import { selectGesture, selectionRange } from "./treeSelect";
 import { mountVaultSwitcher } from "./vaultSwitcher";
 
 export type LeftView = "files" | "search" | "bookmarks";
@@ -147,11 +147,11 @@ function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
   return root;
 }
 
-/** A row's (or the list's) right-click menu. */
-function contextMenu(e: MouseEvent, items: MenuItems) {
+/** A row's (or the list's) right-click menu. The row keeps an outline until the menu closes. */
+function contextMenu(e: MouseEvent, items: MenuItems, row?: HTMLElement) {
   e.preventDefault();
   e.stopPropagation();
-  showMenu(items, { x: e.clientX, y: e.clientY });
+  showMenu(items, { x: e.clientX, y: e.clientY }, { highlight: row });
 }
 
 function createFileExplorer(ws: Workspace, menus: () => Menus) {
@@ -272,15 +272,15 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
           "data-path": entry.path,
           onclick: (e: MouseEvent) => {
             if ((e.target as HTMLElement).isContentEditable) return;
-            if (e.ctrlKey || e.metaKey) {
+            const gesture = selectGesture(e);
+            if (gesture === "toggle") {
               if (selected.has(entry.path)) selected.delete(entry.path);
               else selected.add(entry.path);
               anchor = entry.path;
               paintSelection();
               return;
             }
-            if (e.shiftKey) {
-              selected.clear();
+            if (gesture === "range") {
               for (const path of selectionRange(visiblePaths(), anchor, entry.path)) selected.add(path);
               paintSelection();
               return;
@@ -301,7 +301,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
           },
           oncontextmenu: (e: MouseEvent) => {
             const paths = selected.has(entry.path) && selected.size > 1 ? visiblePaths().filter((path) => selected.has(path)) : null;
-            contextMenu(e, paths && paths.length > 1 ? menus().selection(paths) : menus().file(entry));
+            contextMenu(e, paths && paths.length > 1 ? menus().selection(paths) : menus().file(entry), self);
           },
         },
         chevron ?? (/\.canvas$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("layout-dashboard", 14)) : null),
@@ -513,7 +513,7 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
               if (entry.is_dir) revealFolder(path);
               else void ws.open(path, { where: whereFromEvent(e) });
             },
-            oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry)),
+            oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry), row),
           },
           h("div", { class: "tree-item-icon" }, icon(entry.is_dir ? "folder-closed" : "file-text", 16)),
           h("div", { class: "tree-item-inner" }, entry.is_dir ? entry.name : noteName(path)),
