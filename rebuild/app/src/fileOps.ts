@@ -77,16 +77,31 @@ function freeName(ws: Workspace, stem: string, ext: string, numbered = false) {
   }
 }
 
-/** Rename a note/canvas (keeping its folder and extension) or a folder. */
-export async function renameFile(ws: Workspace, path: string, newName: string) {
-  newName = newName.trim();
-  if (!newName || newName === "." || newName === "..") throw new Error("Enter a file or folder name.");
-  if (/[\\/:\x00-\x1f]/.test(newName)) throw new Error("Names cannot contain /, \\ or : or control characters.");
+/** Why a rename is refused, or "" when it can be committed. An empty draft is only an error on commit. */
+export function renameError(ws: Workspace, path: string, newName: string, commit = false): string {
+  const name = newName.trim();
+  if (!name || name === "." || name === "..") return commit ? "Enter a file or folder name." : "";
+  if (/[\\/:\x00-\x1f]/.test(name)) return "File name cannot contain any of these characters: \\ / :";
   const isDir = ws.vault.isFolder(path);
   const ext = isDir ? "" : /\.(canvas|base)$/i.test(path) ? path.slice(path.lastIndexOf(".")) : ".md";
-  if (newName === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return;
+  if (name === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return "";
   const dir = parentDir(path);
-  await relocate(ws, path, `${dir ? dir + "/" : ""}${newName}${ext}`);
+  const to = `${dir ? dir + "/" : ""}${name}${ext}`;
+  const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
+  if (clash && clash.path !== path) return "There's already a file with the same name";
+  return "";
+}
+
+/** Rename a note/canvas (keeping its folder and extension) or a folder. */
+export async function renameFile(ws: Workspace, path: string, newName: string) {
+  const problem = renameError(ws, path, newName, true);
+  if (problem) throw new Error(problem);
+  const name = newName.trim();
+  const isDir = ws.vault.isFolder(path);
+  const ext = isDir ? "" : /\.(canvas|base)$/i.test(path) ? path.slice(path.lastIndexOf(".")) : ".md";
+  if (name === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return;
+  const dir = parentDir(path);
+  await relocate(ws, path, `${dir ? dir + "/" : ""}${name}${ext}`);
 }
 
 /** Move a note or folder into another folder ("" for the vault root). */

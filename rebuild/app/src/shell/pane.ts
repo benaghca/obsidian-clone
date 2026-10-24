@@ -15,7 +15,7 @@ import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
 import { createGraphView, type GraphView } from "../graph/view";
-import { renameFile } from "../fileOps";
+import { renameError, renameFile } from "../fileOps";
 import { EditorView } from "@codemirror/view";
 import { editAt, readingMode } from "../editor/render";
 import { noteName, parentDir } from "../paths";
@@ -696,7 +696,10 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     title.addEventListener("blur", () => {
       void commitTitle().then((ok) => { if (ok) title.classList.remove("is-renaming"); });
     });
-    title.addEventListener("input", () => fieldError(title, ""));
+    title.addEventListener("input", () => {
+      const path = group.active.path;
+      fieldError(title, path ? renameError(ws, path, title.textContent ?? "") : "");
+    });
     // Margins place the caret beside the line; only space below the text goes to the end.
     scroller.addEventListener("mousedown", (e) => {
       const view = ws.editors.viewOf(group);

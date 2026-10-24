@@ -21,7 +21,7 @@ test("invalid names reject without stripping characters or touching files", asyn
 });
 
 test("case-insensitive clashes report the existing destination before saving", async () => {
-  await expect(renameFile(ws, "Note.md", "taken")).rejects.toThrow('"taken.md" already exists');
+  await expect(renameFile(ws, "Note.md", "taken")).rejects.toThrow("There's already a file with the same name");
   expect(flush).not.toHaveBeenCalled();
   expect(api.renamePath).not.toHaveBeenCalled();
 });

@@ -47,7 +47,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, point, click:
   check(await evaluate('(()=>{const f=document.querySelector(".inline-title"),e=f.nextElementSibling;return f.getAttribute("aria-invalid")==="true" && e.getBoundingClientRect().top>=f.getBoundingClientRect().bottom})()'), 'inline title error is beneath the field');
   await shot('rename-title-invalid');
   await fill('.inline-title','taken19');await press('Enter');await sleep(100);
-  check(await evaluate('document.querySelector(".inline-title + .rename-error").textContent.includes("already exists") && ws.active.path === "Rename19.md"'), 'inline title reports a case-insensitive name clash');
+  check(await evaluate('document.querySelector(".inline-title + .rename-error").textContent.includes("same name") && ws.active.path === "Rename19.md"'), 'inline title reports a case-insensitive name clash');
   await fill('.inline-title','Corrected19');await press('Enter');await sleep(200);
   check(await evaluate('ws.active.path === "Corrected19.md" && !document.querySelector(".inline-title + .rename-error")'), 'correcting inline title commits and clears its error');
   await fill('.inline-title','');await press('Enter');await sleep(100);
@@ -62,7 +62,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, point, click:
   for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...menu,button:'left',clickCount:1});await sleep(100);
   const field=row+' .tree-item-inner';
   await fill(field,'Taken19');await press('Enter');await sleep(100);
-  check(await evaluate('(()=>{const f=document.querySelector(`[data-path="Corrected19.md"] .tree-item-inner`);return f.isContentEditable && f.textContent==="Taken19" && f.nextElementSibling.textContent.includes("already exists")})()'), 'explorer clash keeps the draft editable with an error');
+  check(await evaluate('(()=>{const f=document.querySelector(`[data-path="Corrected19.md"] .tree-item-inner`);return f.isContentEditable && f.textContent==="Taken19" && f.nextElementSibling.textContent.includes("same name")})()'), 'explorer clash keeps the draft editable with an error');
   await fill(field,'Bad:name');await click('.view-header');await sleep(100);
   check(await evaluate('(()=>{const f=document.querySelector(`[data-path="Corrected19.md"] .tree-item-inner`),e=f.nextElementSibling;return f.textContent==="Bad:name" && e.className==="rename-error" && e.getBoundingClientRect().top>=f.getBoundingClientRect().bottom})()'), 'invalid explorer rename reports below the field on blur without dropping characters');
   await shot('rename-explorer-invalid');
