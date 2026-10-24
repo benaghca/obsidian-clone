@@ -165,6 +165,7 @@
 .canvas-edge-label.is-editing { min-width: 12px; min-height: 38px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }
 
 .canvas-group-background { position: absolute; inset: 0; border-radius: inherit; background-position: center; pointer-events: none; }
+.canvas-node-group.is-colored.is-selected > .canvas-group-label:not(.is-editing) { background: var(--canvas-color); color: white; }
 .canvas-group-label.is-editing { background: var(--background-primary); border-radius: 4px; }
 
 /* Detached previews use block spacing; no rule here reaches .cm-content. */
