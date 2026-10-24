@@ -174,7 +174,12 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       world.append(card);
       if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => {
         if (!world.querySelector(".canvas-node-file.is-editing") || !ws.vault.files.some(f => f.path === node.file))
-          queueMicrotask(() => { if (!gone && mine === generation) draw(); });
+          queueMicrotask(() => {
+            if (gone || mine !== generation) return;
+            const chosen = world.querySelectorAll<HTMLElement>(".canvas-node.is-selected");
+            if (chosen.length === 1 && !world.querySelector(".canvas-edge.is-selected")) selectAfterDraw = chosen[0].dataset.nodeId;
+            draw();
+          });
       }));
       if (node.type === "group") {
         const label = h("div", { class: "canvas-group-label", "aria-label": "Group label" }, node.label ?? ""); card.append(label);
@@ -276,7 +281,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           stopText?.();
           if (painted) { release(painted); painted = undefined; }
           stopText = editNoteCard(card, content, ws, group, origin, node.subpath, line, repaint => {
-            stopText = undefined; if (repaint) draw();
+            stopText = undefined; if (repaint) { selectAfterDraw = node.id; draw(); }
           });
         };
         edits.set(node.id, edit);
