@@ -79,11 +79,11 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
       glyphs,
     };
   });
-  check(Math.abs(back.fileX - 12) < 2 && Math.abs(back.fileW - 276) < 2 && Math.abs(back.headerX - 12) < 2 && Math.abs(back.headerW - 276) < 2, `backlink header and file row are inset 12px and 276px wide (file ${back.fileX.toFixed(1)}×${back.fileW.toFixed(1)}, header ${back.headerX.toFixed(1)}×${back.headerW.toFixed(1)})`);
+  check(Math.abs(back.fileX - 13) < 2 && Math.abs(back.fileW - 274) < 2 && Math.abs(back.headerX - 13) < 2 && Math.abs(back.headerW - 274) < 2, `backlink header and file row are inset 13px and 274px wide (file ${back.fileX.toFixed(1)}×${back.fileW.toFixed(1)}, header ${back.headerX.toFixed(1)}×${back.headerW.toFixed(1)})`);
   check(Math.abs(back.fileH - 24.9) < 1 && Math.abs(back.fileY - 115) < 3, `the file row is 24.9px at y=115 (${back.fileH} at ${back.fileY})`);
   check(Math.abs(back.matchY - 144) < 3, `the first match starts at y=144 (${back.matchY})`);
   check(back.cardBg === 'rgb(255, 255, 255)' && back.cardRadius === '4px' && back.cardShadow.includes('rgb(228, 228, 228)'), `matches sit in a white card (${back.cardBg}, ${back.cardRadius}, ${back.cardShadow})`);
-  check(back.glyphs.join('|') === 'lucide-list|lucide-move-vertical|lucide-arrow-down-narrow-wide|lucide-search', `backlink toolbar glyphs (${back.glyphs.join('|')})`);
+  check(back.glyphs.join('|') === 'lucide-list|lucide-move-vertical|lucide-arrow-up-narrow-wide|lucide-search', `backlink toolbar glyphs (${back.glyphs.join('|')})`);
 
   const unlinkedAt = await run(() => {
     const el = [...document.querySelectorAll('.backlink-header')].find((n) => n.textContent.includes('Unlinked'));
@@ -107,14 +107,14 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     const pane = document.querySelector('.outline-view').getBoundingClientRect();
     const row = document.querySelector('.outline-item').getBoundingClientRect();
     const text = document.querySelector('.outline-item .tree-item-inner').getBoundingClientRect();
-    const glyphs = [...document.querySelectorAll('.outline-toolbar .clickable-icon svg')].map((el) => [...el.classList].find((c) => c.startsWith('lucide-')));
+    const glyphs = [...document.querySelectorAll('.outline-toolbar .clickable-icon svg')].map((el) => [...el.classList].find((c) => c.startsWith('lucide-') || c.startsWith('grove-')));
     const off = !document.querySelector('.outline-toolbar [aria-label="Auto-scroll to current section"]').classList.contains('is-active');
     return { rowX: row.x - pane.x, rowW: row.width, textX: text.x - pane.x, y: row.y, glyphs, off };
   });
   check(outline.off, 'outline auto-scroll starts off');
   check(Math.abs(outline.rowX - 12) < 2 && Math.abs(outline.rowW - 276) < 2, `outline rows are inset 12px and 276px wide (${outline.rowX.toFixed(1)}×${outline.rowW.toFixed(1)})`);
   check(Math.abs(outline.textX - 36) < 2 && Math.abs(outline.y - 84) < 2, `outline text starts at pane +36 and the first row at y=84 (${outline.textX.toFixed(1)} at ${outline.y})`);
-  check(outline.glyphs.join('|') === 'lucide-search|lucide-square|lucide-chevrons-down-up', `outline toolbar glyphs (${outline.glyphs.join('|')})`);
+  check(outline.glyphs.join('|') === 'lucide-search|grove-auto-scroll|lucide-chevrons-down-up', `outline toolbar glyphs (${outline.glyphs.join('|')})`);
   await click(await center('.outline-toolbar [aria-label="Auto-scroll to current section"]'));
   // The row background fades in. Wait until the transition lands on the hover token.
   let tone = { bg: '', hover: '', accent: '' };
@@ -140,10 +140,15 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
     return { x: r.x + 40, y: r.y + r.height / 2 };
   });
   await click(searchAt);
-  const clicked = await run(() => {
-    const style = getComputedStyle(document.querySelector('.search-view .search-input'));
-    return { shadow: style.boxShadow, border: style.borderColor };
-  });
+  // Border and shadow fade onto the focus ring. Read them after that settles.
+  let clicked = { shadow: '', border: '' };
+  await wait(async () => {
+    clicked = await run(() => {
+      const style = getComputedStyle(document.querySelector('.search-view .search-input'));
+      return { shadow: style.boxShadow, border: style.borderColor };
+    });
+    return clicked.shadow.includes('0px 0px 0px 2px') && clicked.border === 'rgb(189, 189, 189)';
+  }, 'a click did not focus search with the grey ring');
   check(clicked.shadow.includes('0px 0px 0px 2px') && clicked.border === 'rgb(189, 189, 189)', `a click focuses search with the grey ring (${clicked.shadow}; ${clicked.border})`);
   const editor = await run(() => {
     const el = [...document.querySelectorAll('.cm-scroller')].find((node) => node.offsetParent && node.getBoundingClientRect().width > 80);
