@@ -44,7 +44,7 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  await click(td(d,'tags')+' .property-pill-remove');await click('.bases-toolbar');await wait(async()=>!(await source(d)).includes('work/project'),'tag removed');
  assert.equal(await source('Tasks.base'),bases['Tasks.base']);
  // Sort menu and header menu only change the sort block.
- await timedOpen('.bases-toolbar [aria-label="Sort"]','Sort');await wait(()=>run(()=>!!document.querySelector('.bases-sort-menu')),'sort menu');await click('.bases-sort-row button:nth-of-type(2)');await wait(async()=>(await source('Tasks.base')).includes('direction: ASC'),'direction changed');
+ await timedOpen('.bases-toolbar [aria-label="Sort"]','Sort');await wait(()=>run(()=>!!document.querySelector('.bases-sort-menu')),'sort menu');await click('.bases-sort-row button:nth-of-type(2)');await menu('0 → 1');await wait(async()=>(await source('Tasks.base')).includes('direction: ASC'),'direction changed');
  assert.equal(await source('Tasks.base'),bases['Tasks.base'].replace('direction: DESC','direction: ASC'));
  await press('Escape');await click('th[data-property="status"]','right');await menu('Sort A → Z');await wait(async()=>(await source('Tasks.base')).includes('property: status'),'header sorts');
  await timedOpen('.bases-toolbar [aria-label="Properties"]','Properties');await fill('.bases-properties-menu input[type="search"]','due');await click('.bases-property-option input');await wait(()=>run(()=>!document.querySelector('th[data-property="due"]')),'column hidden');await press('Escape');

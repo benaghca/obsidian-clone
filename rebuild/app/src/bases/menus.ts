@@ -39,9 +39,11 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
     base.sorts.forEach((sort,i)=>{
       const direction=sort.direction===1?"ASC":"DESC", type=types().get(noteKey(sort.property))??(/file\.[cm]time/.test(sort.property)?"datetime":sort.property==="file.size"?"number":"text");
       const numeric=type==="number", date=["date","datetime"].includes(type);
+      const label=(asc:boolean)=>date?asc?"Old to new":"New to old":numeric?asc?"0 → 1":"1 → 0":asc?"A → Z":"Z → A";
       const property = button(base.label(sort.property),kind(sort.property),()=>{const r=property.getBoundingClientRect();showMenu(keys().map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,property:key}:s),()=>sortMenu(at,true))})),{x:r.x,y:r.bottom});});
-      const toggle = button(date ? direction==="ASC"?"Old to new":"New to old" : numeric ? direction==="ASC"?"0 → 1":"1 → 0" : direction==="ASC"?"A → Z":"Z → A",direction==="ASC"?"chevron-up":"chevron-down",()=>write("sort",b=>sortsOf(b).map<Sort>((s,n)=>n===i?{...s,direction:s.direction==="ASC"?"DESC":"ASC"}:s),()=>sortMenu(at,true)));
+      const toggle = button(label(direction==="ASC"),"chevrons-up-down",()=>showMenu((["ASC","DESC"] as const).map(d=>({title:label(d==="ASC"),checked:d===direction,action:()=>write("sort",b=>sortsOf(b).map((s,n)=>n===i?{...s,direction:d}:s),()=>sortMenu(at,true))})),toggle));
       const remove = button("Remove sort","trash-2",()=>write("sort",b=>sortsOf(b).filter((_,n)=>n!==i),()=>sortMenu(at,true)));
+      property.append(icon("chevrons-up-down"));toggle.replaceChildren(h("span",null,label(direction==="ASC")),icon("chevrons-up-down"));remove.replaceChildren(icon("trash-2"));
       const grip=h("span",{class:"bases-sort-grip","aria-label":"Reorder sort"},icon("grip-vertical",16));
       const row=h("div",{class:"bases-sort-row"},grip,property,toggle,remove);
       grip.addEventListener("pointerdown",e=>{
@@ -55,7 +57,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       });
       items.push({title:`Sort ${sort.property}`,content:row});
     });
-    items.push({title:"Add sort",icon:"plus",action:()=>showMenu(keys().filter(key=>!base.sorts.some(s=>same(s.property,key))).map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>[...sortsOf(b),{property:key,direction:"ASC"}],()=>sortMenu(at,true))})),at)});
+    items.push(SEPARATOR,{title:"Add sort",icon:"plus",action:()=>showMenu(keys().filter(key=>!base.sorts.some(s=>same(s.property,key))).map(key=>({title:base.label(key),icon:kind(key),action:()=>write("sort",b=>[...sortsOf(b),{property:key,direction:"ASC"}],()=>sortMenu(at,true))})),at)});
     // A write completion rebuilds a menu at the same anchor; close first to avoid toggling it off.
     if(refresh)closeMenu();showMenu(items,at,{className:"bases-sort-menu",align:"right"});
   }
