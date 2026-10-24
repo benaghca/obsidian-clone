@@ -1,6 +1,6 @@
 import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
-import { addLines, addProperty, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, rewriteProperty, setValue, yamlString } from "./frontmatter";
+import { addLines, addProperty, aliasEdit, asType, type Change, fits, type Frontmatter, type Property, readFrontmatter, removeProperty, renameKey, rewriteProperty, setValue, yamlString } from "./frontmatter";
 
 const NOTE = `---
 title: Hello world
@@ -198,4 +198,18 @@ test("All properties' Rename and Delete property in a note, as Obsidian writes t
   expect(rewrite(note, "missing", "x")).toBeNull();
   expect(rewrite(note, "status", "rating")).toBeNull();
   expect(rewrite("---\nstatus: a\nStatus: b\n---\n", "status", null)).toBeNull();
+});
+
+test("Add alias writes a blank list item and leaves the caret after it", () => {
+  const marked = (note: string) => {
+    const edit = aliasEdit(Text.of(note.split("\n")));
+    if (!edit) return null;
+    const next = apply(note, edit);
+    return next.slice(0, edit.caret) + "|" + next.slice(edit.caret);
+  };
+  expect(marked("Body\n")).toBe("---\naliases:\n  - |\n---\nBody\n");
+  expect(marked("---\ntitle: Hi\n---\nBody\n")).toBe("---\ntitle: Hi\naliases:\n  - |\n---\nBody\n");
+  expect(marked("---\naliases:\n  - one\n---\n")).toBe("---\naliases:\n  - one\n  - |\n---\n");
+  expect(marked("---\naliases: [one]\n---\n")).toBe("---\naliases:\n  - one\n  - |\n---\n");
+  expect(marked("---\naliases: []\n---\n")).toBe("---\naliases:\n  - |\n---\n");
 });

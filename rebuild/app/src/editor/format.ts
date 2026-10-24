@@ -400,6 +400,34 @@ export const insertMarkdownLink: StateCommand = ({ state, dispatch }) => {
   return true;
 };
 
+/** "![[selection]]", or an empty "![[]]" with the caret inside for the link suggester. */
+export const insertEmbed: StateCommand = ({ state, dispatch }) => {
+  const changes = state.changeByRange((range) => {
+    const text = state.sliceDoc(range.from, range.to);
+    const insert = `![[${text}]]`;
+    return {
+      changes: { from: range.from, to: range.to, insert },
+      range: text ? EditorSelection.cursor(range.from + insert.length) : EditorSelection.cursor(range.from + 3),
+    };
+  });
+  update({ state, dispatch }, changes);
+  return true;
+};
+
+/** "#selection" with the caret after it. A selection that already starts with # is not doubled. */
+export const insertTag: StateCommand = ({ state, dispatch }) => {
+  const changes = state.changeByRange((range) => {
+    const text = state.sliceDoc(range.from, range.to).replace(/^#+/, "");
+    const insert = `#${text}`;
+    return {
+      changes: { from: range.from, to: range.to, insert },
+      range: EditorSelection.cursor(range.from + insert.length),
+    };
+  });
+  update({ state, dispatch }, changes);
+  return true;
+};
+
 /** "[[selection]]", or an empty "[[]]" with the caret inside for the link suggester. */
 export const insertWikilink: StateCommand = ({ state, dispatch }) => {
   const changes = state.changeByRange((range) => {

@@ -21,16 +21,16 @@ export interface Tab {
   backlinks: boolean;
   /** Where this tab left its note (scroll, selection), restored when it shows that note again. */
   memory: TabMemory | null;
-  /** A view instead of a note: the graph, the local graph of `viewFile`, or the image `viewFile` (path is null then). */
+  /** A view instead of a note: the graph, the local graph of `viewFile`, an image, or backlinks for `viewFile` (path is null then). */
   type?: ViewType;
-  /** The note a local graph shows (it follows the note open in the active pane), or the image an image tab shows. */
+  /** The note a local graph or a backlinks tab shows, or the image an image tab shows. */
   viewFile?: string | null;
   /** "Link with tab...": tabs with the same link show the same note. */
   link?: number;
 }
 
 /** The views a tab can show instead of a note. */
-export type ViewType = "graph" | "localgraph" | "image" | "canvas";
+export type ViewType = "graph" | "localgraph" | "image" | "canvas" | "backlinks";
 
 interface TabMemory {
   path: string;
@@ -110,12 +110,13 @@ export function tabForgets(tab: Tab, under: (path: string) => boolean) {
 }
 
 /** The icon a view's tab shows (a note's tab has none). */
-export const viewIcon = (tab: Tab) => (tab.type === "canvas" ? "layout-dashboard" : tab.type === "image" ? "image" : tab.type ? "git-fork" : null);
+export const viewIcon = (tab: Tab) => (tab.type === "canvas" ? "layout-dashboard" : tab.type === "image" ? "image" : tab.type === "backlinks" ? "link" : tab.type ? "git-fork" : null);
 
 /** A tab's title: its note's name, the view's name, or "New tab". */
 export function tabTitle(tab: Tab): string {
   if (tab.type === "graph") return "Graph view";
   if (tab.type === "localgraph") return tab.viewFile ? `Graph of ${noteName(tab.viewFile)}` : "Local graph";
+  if (tab.type === "backlinks") return tab.viewFile ? `Backlinks for ${noteName(tab.viewFile)}` : "Backlinks";
   if (tab.type === "image" || tab.type === "canvas") return fileName(tab.viewFile ?? "").replace(/\.[^.]+$/, "");
   return tab.path ? noteName(tab.path) : "New tab";
 }
