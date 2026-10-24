@@ -32,7 +32,7 @@ export function canvasHelp() {
   });
 }
 export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove: () => void, zoom: (items: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void,
-  edit: (item: CanvasNode | CanvasEdge) => void, recolor: (items: (CanvasNode | CanvasEdge)[]) => void) {
+  edit: (item: CanvasNode | CanvasEdge) => void, recolor: (items: (CanvasNode | CanvasEdge)[]) => void, createGroup: () => void) {
   let selected: (CanvasNode | CanvasEdge)[] = [], edges: CanvasEdge[] = [], disposed = false;
   let positions: Pick<CanvasNode, "x" | "y" | "width" | "height">[] = [];
   const zoomSelection = () => { closeMenu(); zoom(positions); };
@@ -55,6 +55,7 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
     ], toolbar, { className: "canvas-color-menu", align: "center" });
   });
   const editButton = keyButton(icon("square-pen"), "Edit", e => { if (e.type === "click" && (e as MouseEvent).detail > 1) return; closeMenu(); if (selected.length === 1) edit(selected[0]); });
+  const groupButton = keyButton(icon("group"), "Create group", () => { closeMenu(); createGroup(); });
   const direction = keyButton(icon("arrow-right"), "Line direction", () => {
     showMenu((["Nondirectional", "Unidirectional", "Bidirectional"] as const).map((title, i) => ({
       title, icon: (["minus", "arrow-right", "move-horizontal"] as const)[i],
@@ -77,13 +78,14 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
     zoom: zoomSelection,
     update(nodes: CanvasNode[], chosenEdges: CanvasEdge[] = []) {
       edges = chosenEdges; selected = [...nodes, ...edges]; toolbar.hidden = !selected.length;
-      direction.remove(); removeLabel.remove();
+      direction.remove(); removeLabel.remove(); groupButton.remove();
+      if (nodes.length > 1) toolbar.insertBefore(groupButton, editButton);
       if (edges.length) toolbar.insertBefore(direction, editButton);
       const heads = edges.length ? Number(edges[0].fromEnd === "arrow") + Number(edges[0].toEnd !== "none") : 1;
       direction.replaceChildren(icon((["minus", "arrow-right", "move-horizontal"] as const)[heads]));
       if (edges.some(edge => edge.label)) toolbar.insertBefore(removeLabel, editButton);
-      editButton.hidden = selected.length !== 1 || !!nodes.length && nodes[0].type !== "text" && !(nodes[0].type === "file" && /\.md$/i.test(nodes[0].file ?? ""));
-      editButton.setAttribute("aria-label", edges.length ? "Edit label" : "Edit");
+      editButton.hidden = selected.length !== 1 || !!nodes.length && !["text", "group"].includes(nodes[0].type) && !(nodes[0].type === "file" && /\.md$/i.test(nodes[0].file ?? ""));
+      editButton.setAttribute("aria-label", edges.length || nodes[0]?.type === "group" ? "Edit label" : "Edit");
       if (!selected.length) return;
       positions = [...nodes, ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
       const left = Math.min(...positions.map(n => n.x)), right = Math.max(...positions.map(n => n.x + n.width));

@@ -105,6 +105,7 @@ const ICONS = {
   loader: lucide.Loader,
   lock: lucide.Lock,
   "grid-2x2": lucide.Grid2x2,
+  group: lucide.Group,
   "scan-line": lucide.ScanLine,
   "scan-search": lucide.ScanSearch,
   "redo-2": lucide.Redo2,

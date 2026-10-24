@@ -39,6 +39,7 @@
 .canvas-node-file:has(> .canvas-node-content > img) > .canvas-node-content { padding: 0; overflow: hidden; }
 .canvas-node-group { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); z-index: auto; }
 .canvas-group-label:empty { display: none; }
+.canvas-group-label.is-editing { display: block; min-width: 12px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }
 .canvas-node-group:not(.is-colored) > .canvas-group-label { background: color-mix(in srgb, var(--canvas-color) 10%, transparent); color: var(--text-muted); }
 .canvas-group-label {
   z-index: 2;

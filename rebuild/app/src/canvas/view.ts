@@ -20,6 +20,7 @@ import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
 import { editNoteCard } from "./note";
+import { editCanvasLabel } from "./labels";
 import { edgeCurve, readCanvas, type CanvasEdge } from "./model";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -115,7 +116,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const bounds = boundsOf();
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     world.append(drawing);
-    const edits = new Map<string, (line?: number) => void>();
+    const edits = new Map<string, (line?: number, refresh?: () => void) => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
     const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; marker: SVGMarkerElement; label?: HTMLElement }[] = [];
     function place(item: typeof updateEdges[number], curve: ReturnType<typeof edgeCurve>) {
@@ -176,7 +177,17 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           queueMicrotask(() => { if (!gone && mine === generation) draw(); });
       }));
       if (node.type === "group") {
-        card.append(h("div", { class: "canvas-group-label" }, node.label ?? ""));
+        const label = h("div", { class: "canvas-group-label", "aria-label": "Group label" }, node.label ?? ""); card.append(label);
+        const edit = (_line?: number, refresh?: () => void) => {
+          if (canvasReadOnly.has(el) || card.classList.contains("is-editing")) return;
+          stopText?.(); card.classList.add("is-editing");
+          stopText = editCanvasLabel(label, (value, save) => {
+            stopText = undefined; card.classList.remove("is-editing");
+            if (save && value !== node.label) { node.label = value; undo.push(source); redo = []; changed(editCanvas(source, [node])); }
+            if (save) { label.textContent = node.label ?? ""; refresh?.(); }
+          });
+        };
+        edits.set(node.id, edit); if (node.id === editId) startEditor = edit;
         continue;
       }
       if (node.type === "file" || node.type === "link") {
@@ -288,8 +299,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
         place(item, edgeCurve(byId.get(item.edge.fromNode)!, byId.get(item.edge.toNode)!, item.edge));
       navigation.loaded(boundsOf());
-    }, (nodes, deleted, changedEdges, deletedEdges) => {
-      const next = editCanvas(source, nodes, deleted, [], changedEdges, deletedEdges);
+    }, (nodes, deleted, changedEdges, deletedEdges, added = []) => {
+      const next = editCanvas(source, nodes, deleted, added, changedEdges, deletedEdges);
       if (next === source) return;
       undo.push(source); redo = [];
       for (const edge of changedEdges ?? []) {
@@ -297,37 +308,28 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         if (item) { Object.assign(item.edge, edge); updateEdge(item); }
         else { edges.push(edge); addEdge(edge, edges.length - 1); }
       }
-      changed(next, !!deleted?.size || !!deletedEdges?.size);
+      if (added.length) { selectAfterDraw = added[0].id; editAfterDraw = added[0].id; }
+      changed(next, !!deleted?.size || !!deletedEdges?.size || !!added.length);
     }, previewEdge, cardActions.connect, history, nodes => navigation.zoomTo(nodes), (item, refresh) => {
-      if (!("fromNode" in item)) { edits.get(item.id)?.(); return; }
+      if (!("fromNode" in item)) { edits.get(item.id)?.(undefined, refresh); return; }
       if (canvasReadOnly.has(el)) return;
       const record = updateEdges.find(record => record.edge.id === item.id)!;
       if (record.label?.classList.contains("is-editing")) return;
       stopText?.();
       const label = record.label ?? h("div", { class: "canvas-edge-label", "data-edge-id": item.id });
       record.label = label; world.append(label); place(record, edgeCurve(byId.get(item.fromNode)!, byId.get(item.toNode)!, item));
-      label.textContent = item.label ?? ""; label.contentEditable = "plaintext-only";
-      label.setAttribute("aria-label", "Edge label"); label.classList.add("is-editing");
-      const events = new AbortController();
-      stopText = (save = true) => {
-        events.abort(); stopText = undefined;
-        label.contentEditable = "false"; label.classList.remove("is-editing");
+      label.textContent = item.label ?? "";
+      label.setAttribute("aria-label", "Edge label");
+      stopText = editCanvasLabel(label, (value, save) => {
+        stopText = undefined;
         if (save) {
-          const value = label.textContent || undefined;
           if (value !== item.label) {
             item.label = value; undo.push(source); redo = [];
             changed(editCanvas(source, [], undefined, [], [item]));
           }
           updateEdge(record); refresh();
         }
-      };
-      label.addEventListener("keydown", e => {
-        if (e.key !== "Enter" && e.key !== "Escape") return;
-        e.preventDefault(); e.stopPropagation(); stopText?.(); el.focus({ preventScroll: true });
-      }, { signal: events.signal });
-      label.addEventListener("blur", () => stopText?.(), { signal: events.signal });
-      document.addEventListener("pointerdown", e => { if (!label.contains(e.target as Node)) stopText?.(); }, { capture: true, signal: events.signal });
-      label.focus(); getSelection()?.selectAllChildren(label);
+      });
     }, selectedId));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }

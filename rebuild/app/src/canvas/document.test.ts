@@ -50,6 +50,27 @@ test("card and edge IDs have independent deletion namespaces", () => {
   expect(JSON.parse(editCanvas(source, [], undefined, [], [], new Set(["same"]))).nodes).toHaveLength(3);
 });
 
+test("group labels preserve unknown metadata/order and an empty label removes its key", () => {
+  const source = '{"future":42,"nodes":[{"future":{"keep":true},"id":"g","type":"group","label":"Old","x":0,"y":0,"width":400,"height":300,"tail":true}],"edges":[]}';
+  const node = readCanvas(source).nodes[0]; node.label = "New";
+  const changed = JSON.parse(editCanvas(source, [node])).nodes[0];
+  expect(changed).toEqual({ ...JSON.parse(source).nodes[0], label: "New" });
+  expect(Object.keys(changed)).toEqual(Object.keys(JSON.parse(source).nodes[0]));
+  node.label = "";
+  expect(JSON.parse(editCanvas(source, [node])).nodes[0]).not.toHaveProperty("label");
+});
+
+test("new groups precede existing cards without changing their raw fields or unknown labels", () => {
+  const source = '{"nodes":[{"id":"a","type":"text","future":42},{"id":"g","type":"group","label":{"future":true},"x":0,"y":0,"width":100,"height":80}],"edges":[],"tail":true}';
+  const group = { id: "new", x: -20, y: -20, width: 140, height: 120, type: "group" as const, label: "Untitled group" };
+  const moved = readCanvas(source).nodes.find(n => n.id === "g")!; moved.x = 20;
+  const result = JSON.parse(editCanvas(source, [moved], undefined, [group]));
+  expect(result.nodes[0]).toEqual(group);
+  expect(result.nodes[1]).toEqual(JSON.parse(source).nodes[0]);
+  expect(result.nodes[2].label).toEqual({ future: true });
+  expect(Object.keys(result)).toEqual(["nodes", "edges", "tail"]);
+});
+
 test("edge metadata inserts native keys without moving unknown fields, and removes defaults", () => {
   const source = '{"nodes":[],"edges":[{"future":42,"id":"e","fromNode":"a","toNode":"b","label":"Old","tail":true}]}';
   const edge = { ...JSON.parse(source).edges[0], fromEnd: "arrow", color: "#123abc", label: "New" };
