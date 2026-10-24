@@ -49,8 +49,37 @@ body {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+/* Obsidian's inline-title error is a wide red tooltip under the title, centred, with an arrow. No open animation. */
 .inline-title + .rename-error {
-  margin: -4px 0 12px;
+  position: absolute;
+  left: 50%;
+  /* The sizer's 32px padding sits above the title, and `top` is measured from that padding edge. */
+  top: calc(32px + var(--font-text-size) * 1.618 * 1.2 + 8px);
+  z-index: 5;
+  width: 400px;
+  max-width: calc(100% - 16px);
+  margin: 0;
+  padding: 8px 12px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-l);
+  background: var(--text-error);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 16.9px;
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.inline-title + .rename-error::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -5px;
+  margin-left: -5px;
+  border-right: 5px solid transparent;
+  border-bottom: 5px solid var(--text-error);
+  border-left: 5px solid transparent;
 }
 .tree-item-self:has(> .rename-error) {
   flex-wrap: wrap;

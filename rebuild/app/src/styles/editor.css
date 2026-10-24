@@ -258,16 +258,16 @@
   font-family: var(--font-interface);
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul > li {
-  padding: 0 8px;
+  padding: 6px 12px;
   border-radius: var(--radius-s);
-  font-size: 13px;
+  font-size: 15px;
   color: var(--text-normal);
   display: flex;
   flex-direction: row;
   align-items: center;
   box-sizing: border-box;
-  min-height: 28px;
-  line-height: 1.4;
+  min-height: 31.5px;
+  line-height: 19.5px;
 }
 .cm-editor .cm-tooltip.cm-link-suggest > ul > li.mod-link-heading {
   height: 31.5px;
@@ -322,8 +322,8 @@
   white-space: nowrap;
 }
 .cm-link-suggest-footer b {
-  font-weight: 700;
-  color: var(--text-normal);
+  font-weight: 600;
+  color: inherit;
 }
 .cm-link-suggest.cm-link-subpath .cm-link-suggest-footer {
   display: none;
@@ -554,6 +554,9 @@
   font-size: 15px;
 }
 /* CodeMirror's autocomplete list is at least 250px. The empty heading row is not. */
+.cm-editor .cm-tooltip.cm-link-suggest:has(> ul > li.is-empty) {
+  min-width: 94px;
+}
 .cm-editor .cm-tooltip.cm-link-suggest:has(> ul > li.is-empty) > ul {
   min-width: 0;
   width: max-content;
