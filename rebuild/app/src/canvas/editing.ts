@@ -86,8 +86,12 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       cancel = dragPointer(e, el, move => {
         suppress ||= Math.hypot(move.clientX - e.clientX, move.clientY - e.clientY) >= 3;
         const x = (move.clientX - rect.left - matrix.e) / matrix.a, y = (move.clientY - rect.top - matrix.f) / matrix.a;
-        drop = nodes.findLast(n => n.type !== "group" && x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height)
-          ?? nodes.findLast(n => x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height);
+        // Dots are 20 screen pixels, centered inside the card's 1px border.
+        const radius = 10 / matrix.a;
+        const hit = (n: CanvasNode) => x >= n.x && x <= n.x + n.width && y >= n.y && y <= n.y + n.height
+          || Math.abs(y - n.y - n.height / 2) < radius && (Math.abs(x - n.x - 1) < radius || Math.abs(x - n.x - n.width + 1) < radius)
+          || Math.abs(x - n.x - n.width / 2) < radius && (Math.abs(y - n.y - 1) < radius || Math.abs(y - n.y - n.height + 1) < radius);
+        drop = nodes.findLast(n => n.type !== "group" && hit(n)) ?? nodes.findLast(hit);
         if (drop?.id === next[movingEnd === "from" ? "toNode" : "fromNode"]) drop = undefined;
         for (const [id, card] of cards) card.classList.toggle("is-connection-target", id === drop?.id);
         if (drop) { next[nodeKey] = drop.id; next[sideKey] = closestSide(drop, x, y); }
