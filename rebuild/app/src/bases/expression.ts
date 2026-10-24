@@ -9,7 +9,10 @@ export function compare(a: Value, b: Value): number | null {
   if (empty(a) || empty(b)) return null;
   if (typeof a === "number" && typeof b === "number") return a - b;
   if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
-  if (typeof a === "string" && typeof b === "string") return a < b ? -1 : a > b ? 1 : 0;
+  if (typeof a === "string" && typeof b === "string") {
+    if (/^\d{4}-\d{2}-\d{2}/.test(a) && /^\d{4}-\d{2}-\d{2}/.test(b) && Number.isFinite(Date.parse(a)) && Number.isFinite(Date.parse(b))) return Date.parse(a) - Date.parse(b);
+    return a < b ? -1 : a > b ? 1 : 0;
+  }
   return null;
 }
 export function expression(source: string): Expression {

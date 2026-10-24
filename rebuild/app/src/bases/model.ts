@@ -1,7 +1,7 @@
 import type { FileEntry } from "../api";
 import type { Property } from "../editor/frontmatter";
 import { compareNames, noteName, parentDir } from "../paths";
-import { expression, type Context, type Expression, type Value } from "./expression";
+import { compare, expression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
 export const noteKey = (key: string) => key.replace(/^note\./, "");
@@ -64,7 +64,7 @@ export function baseModel(source: string) {
   };
   const label = (key: string) => {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
-    return typeof config.displayName === "string" ? config.displayName : key === "file.name" ? "file name" : key.replace(/^(note|file|formula)\./, "");
+    return typeof config.displayName === "string" ? config.displayName : key.startsWith("file.") ? key.replace(".", " ") : key.replace(/^(note|formula)\./, "");
   };
   function select(rows: Row[]) {
     const found = rows.map(row => ({ row, context: context(row) })).filter(r => global(r.context) && local(r.context));
@@ -73,7 +73,8 @@ export function baseModel(source: string) {
         const x = a.context.get(sort.property), y = b.context.get(sort.property);
         const missing = (v: Value) => v === null || v === "" || Array.isArray(v) && !v.length;
         if (missing(x) !== missing(y)) return missing(x) ? 1 : -1;
-        const diff = typeof x === "number" && typeof y === "number" ? x - y : compareNames(String(x ?? ""), String(y ?? ""));
+        const dates = typeof x === "string" && typeof y === "string" && /^\d{4}-\d{2}-\d{2}/.test(x) && /^\d{4}-\d{2}-\d{2}/.test(y);
+        const diff = typeof x === "number" && typeof y === "number" ? x - y : dates ? compare(x, y) ?? 0 : compareNames(String(x ?? ""), String(y ?? ""));
         if (diff) return diff * sort.direction;
       }
       return compareNames(noteName(a.row.file.path), noteName(b.row.file.path)) || compareNames(a.row.file.path, b.row.file.path);
