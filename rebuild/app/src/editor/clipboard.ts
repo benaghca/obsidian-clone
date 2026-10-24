@@ -160,7 +160,7 @@ export const clipboard = [
       if (!files.length) return false;
       if (view.state.readOnly) return true;
       const at = view.posAtCoords({ x: event.clientX, y: event.clientY });
-      void view.state.facet(editorHost)?.saveAttachments?.(view, files, at);
+      void view.state.facet(editorHost)?.saveAttachments?.(view, files, at, true);
       return true;
     },
   }),
