@@ -1,0 +1,25 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"id":"a","type":"text","text":"Alpha","extra":42,"x":0,"y":0,"width":200,"height":120},
+		{"id":"b","type":"text","text":"Beta","x":500,"y":0,"width":200,"height":120},
+		{"id":"c","type":"text","text":"Gamma","x":300,"y":300,"width":200,"height":120}
+	],
+	"edges":[
+		{
+			"future":{"keep":true},
+			"id":"e",
+			"tail":42,
+			"fromNode":"a",
+			"fromSide":"right",
+			"toNode":"b",
+			"toSide":"left",
+			"fromEnd":"arrow",
+			"color":"3",
+			"label":"Obsidian return label"
+		},
+		{"id":"bend","fromNode":"b","fromSide":"bottom","toNode":"c","toSide":"right","label":"Bent"}
+	]
+}

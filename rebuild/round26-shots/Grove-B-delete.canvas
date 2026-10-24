@@ -1,0 +1,13 @@
+{
+	"future":{
+		"keep":[1,2]
+	},
+	"nodes":[
+		{"id":"a","type":"text","x":0,"y":0,"width":200,"height":120,"text":"Alpha","extra":42},
+		{"id":"b","type":"text","x":500,"y":0,"width":200,"height":120,"text":"Beta"},
+		{"id":"c","type":"text","x":300,"y":300,"width":200,"height":120,"text":"Gamma"}
+	],
+	"edges":[
+		{"id":"bend","fromNode":"b","fromSide":"bottom","toNode":"c","toSide":"right","label":"Bent"}
+	]
+}
