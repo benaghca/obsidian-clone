@@ -49,3 +49,13 @@ test("card and edge IDs have independent deletion namespaces", () => {
   expect(JSON.parse(editCanvas(source, [], new Set(["same"]))).edges).toHaveLength(1);
   expect(JSON.parse(editCanvas(source, [], undefined, [], [], new Set(["same"]))).nodes).toHaveLength(3);
 });
+
+test("edge metadata inserts native keys without moving unknown fields, and removes defaults", () => {
+  const source = '{"nodes":[],"edges":[{"future":42,"id":"e","fromNode":"a","toNode":"b","label":"Old","tail":true}]}';
+  const edge = { ...JSON.parse(source).edges[0], fromEnd: "arrow", color: "#123abc", label: "New" };
+  const changed = JSON.parse(editCanvas(source, [], undefined, [], [edge])).edges[0];
+  expect(Object.keys(changed)).toEqual(["future", "id", "fromNode", "toNode", "fromEnd", "color", "label", "tail"]);
+  expect(changed).toEqual({ ...edge });
+  const cleared = JSON.parse(editCanvas(JSON.stringify({ edges: [changed] }), [], undefined, [], [{ ...edge, fromEnd: undefined, toEnd: "none", color: undefined, label: "" }])).edges[0];
+  expect(cleared).toEqual({ future: 42, id: "e", fromNode: "a", toNode: "b", toEnd: "none", tail: true });
+});

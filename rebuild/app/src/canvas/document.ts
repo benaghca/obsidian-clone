@@ -25,9 +25,22 @@ export function editCanvas(source: string, changed: CanvasNode[], deleted = new 
   if (edges.length) {
     if (!Array.isArray(data.edges)) data.edges = [];
     for (const edge of edges) {
-      const old = data.edges.find((e: CanvasEdge | null) => e?.id === edge.id);
-      if (old) for (const key of ["fromNode", "fromSide", "toNode", "toSide"] as const) { if (key in edge) old[key] = edge[key]; }
-      else data.edges.push(edge);
+      const index = data.edges.findIndex((e: CanvasEdge | null) => e?.id === edge.id);
+      if (index < 0) { data.edges.push(edge); continue; }
+      let old = data.edges[index];
+      const keys = ["fromNode", "fromSide", "toNode", "toSide", "fromEnd", "toEnd", "color", "label"] as const;
+      for (const key of keys) if (key in edge) {
+        const value = edge[key];
+        if (value === undefined || key === "label" && value === "") delete old[key];
+        else if (key in old) old[key] = value;
+        else {
+          // Insert new native fields in native order without moving old keys.
+          const entries = Object.entries(old), before = entries.findIndex(([k]) => keys.indexOf(k as typeof key) > keys.indexOf(key));
+          entries.splice(before < 0 ? entries.length : before, 0, [key, value]);
+          old = Object.fromEntries(entries);
+        }
+      }
+      data.edges[index] = old;
     }
   }
   return format(data);
