@@ -86,7 +86,7 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,check,shot})
  await wait(async()=>(await source()).includes('sort: []'),'sort cleared');
  await click('.bases-toolbar [aria-label="Properties"]');
  assert.equal(await run(()=>document.querySelector('.bases-properties-popover').getBoundingClientRect().width),225);
- assert.equal(await run(()=>{const row=document.querySelector('.bases-property-option.is-unchecked');return getComputedStyle(row).color===getComputedStyle(document.querySelector('.bases-count')).color;}),true);await press('Escape');
+ assert.equal(await run(()=>{const row=document.querySelector('.bases-property-option.is-unchecked');return getComputedStyle(row).color==='rgb(171, 171, 171)'&&getComputedStyle(row.querySelector('svg')).color==='rgb(171, 171, 171)';}),true);await press('Escape');
  // Filter and view buttons toggle at one stationary pointer location.
  for(const [selector,menu] of [['.bases-toolbar [aria-label="Filter"]','.bases-filter-menu'],['.bases-view-name','.bases-view-menu']]){
   const p=await point(selector);await move(p);

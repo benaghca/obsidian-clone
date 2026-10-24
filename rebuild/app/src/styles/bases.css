@@ -54,7 +54,7 @@
 
 .bases-table td.bases-file-date { padding: 0; }
 
-.bases-property-option.is-unchecked { color: var(--text-muted); }
+.bases-property-option.is-unchecked { color: var(--text-faint); }
 .bases-filter-menu { width: 520px; max-width: calc(100vw - 16px); }
 .bases-filter-menu > .menu-item { display: block; padding: 0; background: transparent; }
 .bases-filter-editor { max-height: 65vh; overflow: auto; font-size: 13px; }
