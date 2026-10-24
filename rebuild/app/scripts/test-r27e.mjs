@@ -101,9 +101,9 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
     const leaf = document.querySelector('.workspace-leaf');
     const empty = document.querySelector('.empty-state');
     const probe = document.createElement('div');
-    probe.style.color = 'var(--text-muted)';
+    probe.style.color = 'var(--text-normal)';
     document.body.append(probe);
-    const muted = getComputedStyle(probe).color;
+    const normal = getComputedStyle(probe).color;
     probe.remove();
     const lr = leaf.getBoundingClientRect();
     const er = empty.getBoundingClientRect();
@@ -121,6 +121,8 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
         margin: `${s.marginTop} ${s.marginBottom}`,
         decoration: s.textDecorationLine,
         color: s.color,
+        font: s.fontSize,
+        width: r.width,
         cx: r.x + r.width / 2,
         cy: r.y + r.height / 2,
       };
@@ -129,8 +131,7 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
     return {
       hidden: empty.hidden,
       title: empty.querySelector('.empty-state-title')?.textContent ?? '',
-      font: getComputedStyle(empty).fontSize,
-      muted,
+      normal,
       actions,
       leafCx: lr.x + lr.width / 2,
       emptyCx: er.x + er.width / 2,
@@ -138,9 +139,10 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
       midY,
     };
   });
-  check(!pills.hidden && pills.title === '' && pills.font === '15px', 'the empty tab is a 15px column with no heading');
-  check(pills.actions.map((a) => a.text).join('|') === 'New note (Ctrl + N)|New canvas|Go to file (Ctrl + O)|Close', `pills are New note, New canvas, Go to file, Close (${pills.actions.map((a) => a.text).join(' | ')})`);
-  check(pills.actions.every((a) => a.radius === '999px' && a.border === '1px' && a.pad === '6px 16px' && a.margin === '0px 0px' && a.color === pills.muted && a.decoration === 'none'), 'pills are muted, fully rounded, and padded');
+  check(!pills.hidden && pills.title === '' && pills.actions.every((a) => a.font === '13px'), 'the empty tab is a 13px column with no heading');
+  check(pills.actions.map((a) => a.text).join('|') === 'New noteCtrl + N|Go to fileCtrl + O|SearchCtrl + Shift + F|New canvas', `pills are New note, Go to file, Search, New canvas (${pills.actions.map((a) => a.text).join(' | ')})`);
+  const pillWidth = pills.actions[0]?.width ?? 0;
+  check(pills.actions.every((a) => a.radius === '999px' && a.border === '1px' && a.pad === '8px 12px' && a.margin === '0px 0px' && a.color === pills.normal && a.decoration === 'none' && Math.abs(a.width - pillWidth) < 1 && Math.abs(a.width - 184) < 2), `pills are normal-coloured, equally wide (measured ${pillWidth}px), fully rounded, and padded 8px 12px`);
   check(pills.actions.every((a) => a.transition === '0s' && a.animation === 'none' && a.animations === 0), 'pills do not animate');
   check(pills.actions.every((a) => Math.abs(a.cx - pills.emptyCx) < 2) && Math.abs(pills.midY - pills.emptyMid) < 24, 'the column is centred in the empty page');
 
@@ -183,10 +185,10 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
   check(open.slice(0, beforePlus.length).every((t, i) => t.id === beforePlus[i]) && open.at(-1).active && open.at(-1).path === null && open.length === beforePlus.length + 1, `the + button appends a tab (${open.map((t) => t.path ?? 'new').join(', ')})`);
 
   const beforeClose = await tabs();
-  await click(await pillAt('Close'));
+  await click('.workspace-tab-header.is-active .workspace-tab-header-inner-close-button');
   await sleep(200);
   open = await tabs();
-  check(open.length === beforeClose.length - 1 && open.at(-1).id === beforeClose.at(-2).id && open.at(-1).active, 'Close removes the empty tab and shows its neighbour');
+  check(open.length === beforeClose.length - 1 && open.at(-1).id === beforeClose.at(-2).id && open.at(-1).active, 'the tab close button removes the empty tab and shows its neighbour');
 
   const noteHost = (await tabs()).find((t) => t.path === null);
   assert.ok(noteHost, 'an empty tab remains for New note');
