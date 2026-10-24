@@ -236,18 +236,29 @@ await withBrowser(async ({ send, run, move, click, press, check }) => {
   await send('Input.insertText', { text: 'zebrar27n' });
   await wait(async () => (await run(() => document.querySelectorAll('.search-view .search-result-file-match').length)) >= 2, 'search did not list both notes');
   await press('ArrowDown');
+  check(await run(() => !!document.querySelector('.search-view .search-result.has-focus') && !document.querySelector('.search-view .search-result-file-match.is-selected')), 'the first ArrowDown focuses the file row');
+  await press('ArrowDown');
   const firstPick = await run(() => document.querySelector('.search-view .search-result-file-match.is-selected')?.dataset.previewPath ?? '');
-  check(firstPick.endsWith('.md'), `ArrowDown selects the first search result (${firstPick || 'none'})`);
+  check(firstPick.endsWith('.md'), `the next ArrowDown selects the first match (${firstPick || 'none'})`);
+  await press('ArrowDown');
   await press('ArrowDown');
   const secondPick = await run(() => document.querySelector('.search-view .search-result-file-match.is-selected')?.dataset.previewPath ?? '');
-  check(secondPick && secondPick !== firstPick, `a second ArrowDown moves the selection (${firstPick} -> ${secondPick})`);
+  check(secondPick && secondPick !== firstPick, `ArrowDown moves on to the next file's match (${firstPick} -> ${secondPick})`);
+  await press('ArrowUp');
   await press('ArrowUp');
   await press('Enter');
   await wait(() => run((path) => ws.active.path === path, firstPick), 'Enter did not open the selected result');
 
   await run(() => { ws.open('Outline.md'); grove.run('outline:open'); });
   await wait(async () => (await run(() => [...document.querySelectorAll('.outline-item .tree-item-inner')].map((el) => el.textContent).join('|'))) === 'Heading|Section|Detail', 'the outline did not list the three headings');
-  check(await run(() => document.querySelector('.outline-item.is-active .tree-item-inner')?.textContent) === 'Heading', 'the outline highlights the heading at the top');
+  check(await run(() => !document.querySelector('.outline-toolbar [aria-label="Auto-scroll to current section"]').classList.contains('is-active')), 'auto-scroll starts off');
+  const followAt = await run(() => {
+    const el = document.querySelector('.outline-toolbar [aria-label="Auto-scroll to current section"]');
+    const r = el.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await click(followAt);
+  check(await run(() => document.querySelector('.outline-item.is-active .tree-item-inner')?.textContent) === 'Heading', 'turning auto-scroll on highlights the heading at the top');
   const headChevron = await run(() => {
     const el = document.querySelector('.outline-item .collapse-icon');
     const r = el.getBoundingClientRect();

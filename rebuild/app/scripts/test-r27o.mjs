@@ -171,6 +171,11 @@ await withBrowser(async ({ send, run, move, click, press, chord, check }) => {
     return { x: r.x + r.width / 2, y: Math.min(r.bottom - 24, r.y + 140) };
   });
   await move(editor);
+  check(await run(() => !document.querySelector('.outline-toolbar [aria-label="Auto-scroll to current section"]').classList.contains('is-active')), 'auto-scroll starts off');
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: editor.x, y: editor.y, deltaX: 0, deltaY: 280 });
+  await sleep(40);
+  check((await run(() => document.querySelector('.outline-item.is-active .tree-item-inner')?.textContent ?? '')) !== 'Beta', 'auto-scroll stays off until its button is pressed');
+  await click(await center('.outline-toolbar [aria-label="Auto-scroll to current section"]'));
   let followed = '';
   for (let i = 0; i < 16 && followed !== 'Beta'; i++) {
     await send('Input.dispatchMouseEvent', { type: 'mouseWheel', x: editor.x, y: editor.y, deltaX: 0, deltaY: 280 });
@@ -194,17 +199,23 @@ await withBrowser(async ({ send, run, move, click, press, chord, check }) => {
     return { x: ir.x + 40, y: ir.y + ir.height / 2, inputRight: ir.right, buttonX: br.x, buttonW: br.width, buttonH: br.height };
   });
   await click({ x: searchBox.x, y: searchBox.y });
-  const ring = await run(() => getComputedStyle(document.querySelector('.search-view .search-input')).boxShadow);
-  check(!ring.includes('0px 0px 0px 2px'), `the search field has no thick focus ring (${ring})`);
+  const ring = await run(() => {
+    const style = getComputedStyle(document.querySelector('.search-view .search-input'));
+    return { shadow: style.boxShadow, border: style.borderColor };
+  });
+  check(ring.shadow.includes('0px 0px 0px 2px') && ring.border === 'rgb(189, 189, 189)', `a focused search field uses the grey ring (${ring.shadow}; ${ring.border})`);
   check(searchBox.buttonX >= searchBox.inputRight - 1 && Math.abs(searchBox.buttonW - 28) < 1 && Math.abs(searchBox.buttonH - 24) < 1, `Search settings is a 28×24 button to the right of the field (${searchBox.buttonX} vs ${searchBox.inputRight}, ${searchBox.buttonW}×${searchBox.buttonH})`);
-  check(await run(() => !document.querySelector('.search-results-info .clickable-icon')), 'Collapse results is not beside the result count');
+  check(await run(() => {
+    const info = document.querySelector('.search-results-info');
+    return !!info?.querySelector('[aria-label="Sort order"]') && !!info?.querySelector('[aria-label="More options"]');
+  }), 'the count row keeps the sort and the more button');
 
   await click(await center('.search-view [aria-label="Search settings"]'));
   check(await run(() => {
     const panel = document.querySelector('.search-settings');
-    const labels = [...panel.querySelectorAll('[aria-label]')].map((el) => el.getAttribute('aria-label'));
-    return !panel.hidden && labels.includes('Collapse results') && labels.includes('Show more context') && labels.includes('Explain search terms') && labels.includes('Sort order');
-  }), 'Search settings holds collapse, context, explain, and sort');
+    const toggles = [...panel.querySelectorAll('[role="switch"]')].map((el) => el.getAttribute('aria-label'));
+    return !panel.hidden && !panel.querySelector('select') && toggles.includes('Collapse results') && toggles.includes('Show more context') && toggles.includes('Explain search terms');
+  }), 'Search settings holds labeled toggles for collapse, context, and explain');
   await click(await center('.search-settings [aria-label="Explain search terms"]'));
   await click({ x: searchBox.x, y: searchBox.y });
   await send('Input.insertText', { text: 'file:R27oPair' });
@@ -216,15 +227,17 @@ await withBrowser(async ({ send, run, move, click, press, chord, check }) => {
   await send('Input.insertText', { text: 'middle' });
   await wait(async () => (await run(() => document.querySelectorAll('.search-view .search-result-file-match').length)) > 0, 'search did not list the mention');
   await press('ArrowDown');
+  check(await run(() => !!document.querySelector('.search-view .search-result.has-focus') && !document.querySelector('.search-view .search-result-file-match.is-selected')), 'the first ArrowDown focuses the file row');
+  await press('ArrowDown');
   const picked = await run(() => {
     const row = document.querySelector('.search-view .search-result-file-match.is-selected');
     if (!row) return null;
     const style = getComputedStyle(row);
     const bg = style.backgroundColor;
     const nums = bg.match(/[\d.]+/g)?.map(Number) ?? [];
-    return { path: row.dataset.previewPath, bg, plain: nums.length < 3 || nums[3] === 0 || (nums[0] === nums[1] && nums[1] === nums[2]), shadow: style.boxShadow };
+    return { path: row.dataset.previewPath, bg, plain: nums.length < 3 || nums[3] === 0 || (nums[0] === nums[1] && nums[1] === nums[2]), shadow: style.boxShadow, radius: style.borderRadius };
   });
-  check(picked?.plain && picked.shadow.includes('0px 0px 0px 2px'), `ArrowDown outlines the row instead of filling it (${picked?.bg}; ${picked?.shadow})`);
+  check(picked?.plain && picked.shadow.includes('0px 0px 0px 2px') && picked.radius === '4px', `ArrowDown outlines the match with a 4px radius (${picked?.bg}; ${picked?.shadow}; ${picked?.radius})`);
   await click(await center('.search-settings [aria-label="Show more context"]'));
   await wait(async () => (await run(() => [...document.querySelectorAll('.search-view .search-result-file-match')].some((row) => row.textContent.includes('before the mention')))), 'search Show more context did not draw the surrounding lines');
 }, { height: 800 });
