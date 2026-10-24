@@ -126,6 +126,38 @@
 .property-value .property-input {
   font-size: inherit;
 }
+/* Date and time: a calendar or clock on the left. The native glyph is invisible and its hit target covers that icon. */
+.property-date {
+  position: relative;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+.property-date-icon {
+  position: absolute;
+  left: 4px;
+  z-index: 1;
+  display: flex;
+  pointer-events: none;
+  color: var(--text-muted);
+}
+.property-date .property-input {
+  position: relative;
+  width: 100%;
+  padding-left: 26px;
+}
+.property-date .property-input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 28px;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
 .property-value[data-type="list"],
 .property-value[data-type="tags"],
 .property-value[data-type="aliases"] {

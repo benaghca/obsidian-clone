@@ -153,6 +153,20 @@ export function openNewProperty(view: EditorView): boolean {
   return true;
 }
 
+/**
+ * "Add alias": focus the aliases field, creating the property when the note
+ * has none. False when the block isn't shown, so the caller can edit the YAML.
+ */
+export function openAlias(view: EditorView): boolean {
+  const state = view.state;
+  if (!state.field(blockField, false) || !showsBlock(state)) return false;
+  const block = view.dom.querySelector<HTMLElement>(".properties");
+  const ctl = block && blocks.get(block);
+  if (!ctl) return false;
+  ctl.openAlias();
+  return true;
+}
+
 /** The File properties view's rows: `view`'s note's properties, as its block shows them but without the heading (`render` again when they change). */
 export function propertyRows(view: EditorView): { el: HTMLElement; render(): void } {
   const block = new Block(view, false);
@@ -303,6 +317,16 @@ class Block {
     if (!row) return;
     const target = part === "row" ? row : (row.querySelector<HTMLElement>(`[data-part="${part}"]`) ?? row);
     target.focus();
+  }
+
+  /** "Add alias": the aliases row's add field, creating `aliases` when it isn't there. */
+  openAlias() {
+    this.el.classList.remove("is-collapsed");
+    folded.delete(this.view);
+    const fm = this.fm;
+    const existing = fm?.props?.find((p) => p.key === "aliases");
+    if (existing) this.focus({ key: "aliases", part: "add" });
+    else this.dispatch(addProperty(fm, "aliases", "aliases", []), { key: "aliases", part: "add" });
   }
 
   /** "Add property": a row with an empty key, focused; written once it has a key. */
@@ -464,14 +488,21 @@ class Block {
         box.append(check);
         break;
       }
-      case "number":
-      case "date":
-      case "datetime": {
-        const input = h("input", { class: "property-input", type: type === "datetime" ? "datetime-local" : type, value: value as string, placeholder: "Empty", "data-part": "value" });
-        if (type === "number") input.step = "any";
+      case "number": {
+        const input = h("input", { class: "property-input", type: "number", value: value as string, placeholder: "Empty", "data-part": "value" });
+        input.step = "any";
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
         box.append(input);
+        break;
+      }
+      case "date":
+      case "datetime": {
+        const input = h("input", { class: "property-input", type: type === "datetime" ? "datetime-local" : "date", value: value as string, placeholder: "Empty", "data-part": "value" });
+        input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
+        input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
+        // The icon sits on the left. The native picker glyph is hidden in CSS and its click target moved over this icon.
+        box.append(h("label", { class: "property-date" }, input, h("span", { class: "property-date-icon", "aria-hidden": "true" }, icon(type === "date" ? "calendar" : "clock"))));
         break;
       }
       case "list":
