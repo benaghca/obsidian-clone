@@ -68,7 +68,7 @@ export async function withBrowser(test, { height = 1000, screenshots } = {}) {
     };
     const run = (fn, ...args) => evaluate(`(${fn})(...${JSON.stringify(args)})`);
     const key = async (key, modifiers = 0, type = 'keyDown') => {
-      const virtual = { Enter: 13, Escape: 27, Control: 17, End: 35, Tab: 9, Backspace: 8, Shift: 16, ArrowDown: 40, Home: 36, ArrowLeft: 37 }[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
+      const virtual = { Enter: 13, Escape: 27, Control: 17, End: 35, Tab: 9, Backspace: 8, Shift: 16, ArrowDown: 40, ArrowUp: 38, Home: 36, ArrowLeft: 37, ArrowRight: 39, Alt: 18 }[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
       await send('Input.dispatchKeyEvent', { type, key, modifiers, windowsVirtualKeyCode: virtual });
     };
     const press = async (k, modifiers = 0) => { await key(k, modifiers); await key(k, modifiers, 'keyUp'); };
