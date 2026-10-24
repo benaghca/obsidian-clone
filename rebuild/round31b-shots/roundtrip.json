@@ -1,0 +1,117 @@
+{
+  "Open": {
+    "columns": [
+      "file name",
+      "Status",
+      "priority"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "open",
+          "3"
+        ]
+      },
+      {
+        "path": "BaseTest/Task B.md",
+        "values": [
+          "Task B",
+          "done",
+          "4"
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C",
+          "open",
+          "2"
+        ]
+      },
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D",
+          "open",
+          "5"
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E",
+          "open",
+          ""
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "open",
+          "3"
+        ]
+      }
+    ]
+  },
+  "Done": {
+    "columns": [
+      "file name",
+      "Status"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task B.md",
+        "values": [
+          "Task B",
+          "done"
+        ]
+      }
+    ]
+  },
+  "View 1": {
+    "columns": [
+      "file name"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A"
+        ]
+      },
+      {
+        "path": "BaseTest/Task B.md",
+        "values": [
+          "Task B"
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C"
+        ]
+      },
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D"
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F"
+        ]
+      }
+    ]
+  }
+}

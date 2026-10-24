@@ -11,14 +11,19 @@ import { TYPE_ICONS } from "../editor/propertyFields";
 import { propertyIndex } from "../shell/propertyIndex";
 import { vaultTags } from "../shell/vaultTags";
 import { tagsInText } from "../shell/linksTags";
-import { whereFromEvent, type Group } from "../tabs";
+import { whereFromEvent, type Group, type Tab } from "../tabs";
 import type { Workspace } from "../workspace";
 import { baseMenus } from "./menus";
 import { cellEditor } from "./cells";
 import { baseModel, noteKey, type Row } from "./model";
 import type { Value } from "./expression";
 
+const viewsByTab = new WeakMap<Tab, Map<string, number>>();
 export function createBaseView(ws: Workspace, path: string, group: Group) {
+  const tab = group.active;
+  if (!viewsByTab.has(tab)) viewsByTab.set(tab, new Map());
+  const memory = viewsByTab.get(tab)!;
+  let viewIndex = memory.get(path) ?? 0;
   const el = h("div", { class: "bases-view", tabindex: "0", "aria-label": "Base table" });
   const toolbar = h("div", { class: "bases-toolbar" });
   const notice = h("div", { class: "bases-notice", role: "status" });
@@ -33,7 +38,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
   let types = new Map<string, PropertyType>();
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, path, () => model!, () => types, error, async () => { reload = true; await update(); });
+  const menus = baseMenus(ws, path, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; memory.set(path, index); scroller.scrollTop = 0; } reload = true; await update(); });
   const editing = () => body.contains(document.activeElement) && document.activeElement?.matches('input:not([type="checkbox"]),[contenteditable="plaintext-only"]');
   el.addEventListener("focusout", () => { setTimeout(() => { if (!gone && !editing()) schedule(); }, 0); });
   function type(key: string, value?: Value): PropertyType {
@@ -103,7 +108,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     try {
       while (dirty && !gone) {
         dirty = false;
-        if (reload) { reload = false; source = await api.readNote(path); model = baseModel(source); }
+        if (reload) { reload = false; source = await api.readNote(path); model = baseModel(source, viewIndex); viewIndex = model.viewIndex; memory.set(path, viewIndex); }
         const properties = await index.notes();
         const needsTags = /file\.(?:tags|hasTag)/.test(source);
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();

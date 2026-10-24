@@ -7,10 +7,12 @@ export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLi
 const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
 export const noteKey = (key: string) => key.replace(/^note\./, "");
 const canonical = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
-export function baseModel(source: string) {
+export function baseModel(source: string, viewIndex = 0) {
   const root = readYaml(source), notices = new Set<string>();
   if (root.views != null && !Array.isArray(root.views)) throw Error("views must be a list");
-  const first = Array.isArray(root.views) ? root.views[0] : undefined;
+  const views = Array.isArray(root.views) && root.views.length ? root.views : [{type:"table",name:"View"}];
+  viewIndex = Math.max(0, Math.min(viewIndex, views.length - 1));
+  const first = views[viewIndex];
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
   if (view.type != null && view.type !== "table") throw Error(`Unsupported view type: ${String(view.type)}`);
@@ -82,5 +84,5 @@ export function baseModel(source: string) {
     });
     return typeof view.limit === "number" ? found.slice(0, view.limit) : found;
   }
-  return { results: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { root, view, views, viewIndex, results: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }

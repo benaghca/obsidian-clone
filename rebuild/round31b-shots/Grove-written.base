@@ -1,0 +1,25 @@
+# preserve header
+filters:
+  and:
+    - file.inFolder("BaseTest")
+# global end
+properties:
+  note.status:
+    displayName: Status
+views:
+  - type: table
+    name: "Open"
+    filters:
+      and:
+        - status != "waiting"
+    # local end
+    order: [file.name, status, priority]
+    sort: []
+  - type: table
+    name: Done
+    filters: 'status == "done"'
+    order: [file.name, status]
+  - type: table
+    name: View 1
+# preserve footer
+extra: 'unknown bytes'

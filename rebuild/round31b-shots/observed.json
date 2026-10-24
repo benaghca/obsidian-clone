@@ -1,0 +1,399 @@
+{
+  "obsidian-filter": [
+    {
+      "text": "All views\n1\nThis view\n2\nAll the following are true\nAny of the following are true\nNone of the following are true\nwhere\nfile\nhas tag\nwork\nor\npriority\n>\nAdd filter\nAdd filter group",
+      "box": {
+        "x": 750,
+        "y": 113.984375,
+        "w": 520,
+        "h": 225.890625
+      },
+      "controls": [
+        {
+          "tag": "SELECT",
+          "text": "All the following are trueAny of the following are trueNone of the following are true",
+          "value": "not",
+          "label": null,
+          "class": "conjunction dropdown"
+        },
+        {
+          "tag": "DIV",
+          "text": "waiting",
+          "label": null,
+          "class": "metadata-input-longtext"
+        },
+        {
+          "tag": "BUTTON",
+          "text": "",
+          "value": "",
+          "label": "Advanced filter",
+          "class": "clickable-icon filer-expression-mode-toggle"
+        },
+        {
+          "tag": "BUTTON",
+          "text": "",
+          "value": "",
+          "label": "Remove filter",
+          "class": "clickable-icon"
+        },
+        {
+          "tag": "SELECT",
+          "text": "All the following are true\nAny of the following are true\nNone of the following are true",
+          "value": "or",
+          "label": null,
+          "class": "conjunction dropdown"
+        },
+        {
+          "tag": "DIV",
+          "text": "",
+          "label": null,
+          "class": "multi-select-input"
+        },
+        {
+          "tag": "BUTTON",
+          "text": "",
+          "value": "",
+          "label": "Advanced filter",
+          "class": "clickable-icon filer-expression-mode-toggle"
+        },
+        {
+          "tag": "BUTTON",
+          "text": "",
+          "value": "",
+          "label": "Remove filter",
+          "class": "clickable-icon"
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "1",
+          "placeholder": "Empty",
+          "label": null,
+          "class": "metadata-input metadata-input-number"
+        },
+        {
+          "tag": "BUTTON",
+          "text": "",
+          "value": "",
+          "label": "Advanced filter",
+          "class": "clickable-icon filer-expression-mode-toggle"
+        },
+        {
+          "tag": "BUTTON",
+          "text": "",
+          "value": "",
+          "label": "Remove filter",
+          "class": "clickable-icon"
+        }
+      ]
+    }
+  ],
+  "obsidian-properties": [
+    {
+      "text": "Task\nDue date\npriority\nstatus\nfile backlinks\nfile base name\ncreated time\nfile embeds\nfile extension\nfolder\nfile full name\nfile links\nmodified time\nfile path\nfile size\nfile tags\nactive\ntags\nAdd formula\nHide all",
+      "box": {
+        "x": 1047.53125,
+        "y": 113.984375,
+        "w": 220,
+        "h": 575.8125
+      },
+      "controls": [
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "",
+          "placeholder": "Find or create...",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "on",
+          "placeholder": "",
+          "label": null,
+          "class": ""
+        }
+      ]
+    }
+  ],
+  "propertyColors": [
+    {
+      "text": "Task",
+      "color": "rgb(34, 34, 34)"
+    },
+    {
+      "text": "Due date",
+      "color": "rgb(34, 34, 34)"
+    },
+    {
+      "text": "priority",
+      "color": "rgb(34, 34, 34)"
+    },
+    {
+      "text": "status",
+      "color": "rgb(34, 34, 34)"
+    },
+    {
+      "text": "file backlinks",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file base name",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "created time",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file embeds",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file extension",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "folder",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file full name",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file links",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "modified time",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file path",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file size",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "file tags",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "active",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "tags",
+      "color": "rgb(171, 171, 171)"
+    },
+    {
+      "text": "Add formula",
+      "color": "rgb(34, 34, 34)"
+    },
+    {
+      "text": "Hide all",
+      "color": "rgb(34, 34, 34)"
+    }
+  ],
+  "obsidian-views": [
+    {
+      "text": "By due\nAdd view",
+      "box": {
+        "x": 352,
+        "y": 113.984375,
+        "w": 220,
+        "h": 109.78125
+      },
+      "controls": [
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "",
+          "placeholder": "Search...",
+          "label": null,
+          "class": ""
+        }
+      ]
+    }
+  ],
+  "obsidian-add-view": [
+    {
+      "text": "Configure view\nLayout\nTable\nRow height\nShort\nMedium\nTall\nExtra tall",
+      "box": {
+        "x": 352,
+        "y": 113.984375,
+        "w": 220,
+        "h": 196.671875
+      },
+      "controls": [
+        {
+          "tag": "INPUT",
+          "text": "",
+          "value": "View",
+          "placeholder": "View name",
+          "label": null,
+          "class": ""
+        },
+        {
+          "tag": "SELECT",
+          "text": "Short\nMedium\nTall\nExtra tall",
+          "value": "",
+          "label": null,
+          "class": "dropdown"
+        },
+        {
+          "tag": "SELECT",
+          "text": "Short",
+          "value": "Short",
+          "label": null,
+          "class": "dropdown is-measuring"
+        }
+      ]
+    }
+  ],
+  "newBase": {
+    "selection": "Untitled",
+    "focused": "view-header-title",
+    "content": "Untitled.base"
+  }
+}

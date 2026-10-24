@@ -6,19 +6,23 @@ import { icon, type IconName } from "../shell/icons";
 import { closeMenu, SEPARATOR, showMenu, type MenuItems } from "../shell/menu";
 import type { Workspace } from "../workspace";
 import { baseModel, noteKey } from "./model";
-import { writeView, type Sort } from "./write";
+import { addView, writeFilters, writeView, type Sort } from "./write";
+import { filterMenu } from "./filterMenu";
+import { mapping } from "./yaml";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
-export function baseMenus(ws: Workspace, path: string, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: () => Promise<void>) {
+export function baseMenus(ws: Workspace, path: string, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>) {
   let writing = Promise.resolve(), gone = false;
-  const write = (key: "sort" | "order", change: (base: Model) => Sort[] | string[], done?: () => void) => {
+  const save = (change: (source: string, base: Model) => string, done?: () => void, select?: (base: Model) => number) => {
+    const index = current().viewIndex;
     writing = writing.then(async () => {
-      const source = await api.readNote(path), base = baseModel(source), next = writeView(source, key, change(base));
+      const source = await api.readNote(path), base = baseModel(source, index), next = change(source, base);
       if (next !== source) { await api.writeNote(path, next); ws.vault.written(path); }
-      if (!gone) { await changed(); done?.(); }
+      if (!gone) { await changed(select?.(base)); done?.(); }
     }).catch(error);
   };
+  const write = (key: "sort" | "order", change: (base: Model) => Sort[] | string[], done?: () => void) => save((source, base) => writeView(source, key, change(base), base.viewIndex), done);
   const keys = () => {
     const seen = new Set<string>();
     return [...current().columns, "file.name", "file.ctime", "file.ext", "file.folder", "file.mtime", "file.path", "file.size", "file.tags", ...types().keys(), ...current().formulaNames].filter(key => { const id = noteKey(key); if (seen.has(id)) return false; seen.add(id); return true; });
@@ -47,7 +51,7 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       const check=h("input",{type:"checkbox","aria-label":current().label(key)});check.checked=current().columns.some(k=>same(k,key));
       const toggle=()=>write("order",b=>b.columns.some(k=>same(k,key))?b.columns.filter(k=>!same(k,key)):[...b.columns,key],draw);
       check.addEventListener("change",toggle);
-      const row=h("label",{class:"bases-property-option",onmousedown:(e:MouseEvent)=>e.stopPropagation(),onclick:(e:MouseEvent)=>e.stopPropagation()},check,icon(kind(key)),h("span",null,current().label(key)),icon("chevron-right"));
+      const row=h("label",{class:`bases-property-option${check.checked?"":" is-unchecked"}`,onmousedown:(e:MouseEvent)=>e.stopPropagation(),onclick:(e:MouseEvent)=>e.stopPropagation()},check,icon(kind(key)),h("span",null,current().label(key)),icon("chevron-right"));
       return row;
     }));
     search.addEventListener("input",draw);draw();
@@ -59,7 +63,21 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
   function header(e: MouseEvent,key: string) {
     e.preventDefault();
     const sort=(direction:Sort["direction"])=>write("sort",b=>[{property:key,direction},...sortsOf(b).filter(s=>!same(s.property,key))]);
-    showMenu([{title:"Hide column",action:()=>hide(key)},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",action:()=>sort("DESC")},{title:"Clear sort",action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))}],{x:e.clientX,y:e.clientY});
+    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))}],{x:e.clientX,y:e.clientY});
+  }
+  function views(at: HTMLElement) {
+    const base=current();
+    showMenu([...base.views.map((v,i)=>({title:typeof mapping(v).name==="string"?String(mapping(v).name):"View",icon:"table" as const,checked:i===base.viewIndex,disabled:mapping(v).type!=null&&mapping(v).type!=="table",action:()=>void changed(i)})),SEPARATOR,{title:"Add view",icon:"plus",action:()=>{
+      save((source,b)=>{
+        const names=new Set(b.views.map(v=>mapping(v).name));let n=1;while(names.has(`View ${n}`))n++;
+        return addView(source,`View ${n}`);
+      },undefined,b=>b.views.length);
+    }}],at,{className:"bases-view-menu"});
+  }
+  function filters(at: HTMLElement) {
+    filterMenu({filters:local=>local?current().view.filters:current().root.filters,
+      write:(local,change,done)=>save((source,b)=>writeFilters(source,change(local?b.view.filters:b.root.filters),local?b.viewIndex:undefined),done),
+      keys,label:key=>current().label(key),kind,type:key=>types().get(noteKey(key))??(key==="file.size"?"number":"text")},at);
   }
   let buttons: HTMLElement[] | null = null;
   function toolbar() {
@@ -69,12 +87,13 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
       buttons[1].querySelector("span")!.textContent = `${base.results} results`;
       const sort=buttons[2].querySelector("button")!;sort.classList.toggle("is-active",!!base.sorts.length);
       sort.querySelector(".bases-badge")?.remove();if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
+      buttons[2].querySelector('[aria-label="Filter"]')!.classList.toggle("is-active",base.filtered);
       return buttons;
     }
-    const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View"},icon("table"),h("span",null,base.name),icon("chevrons-up-down"));
+    const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View",onclick:()=>views(view)},icon("table"),h("span",null,base.name),icon("chevrons-up-down"));
     const count=h("button",{type:"button",class:"bases-count"},icon("text-align-start"),h("span",null,`${base.results} results`));
     const sort=button("Sort","arrow-up-narrow-wide",()=>sortMenu(sort));sort.classList.toggle("is-active",!!base.sorts.length);if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
-    const filter=button("Filter","list-filter",()=>{});filter.disabled=true;filter.classList.toggle("is-active",base.filtered);filter.title="Filter editing is held for Part B";
+    const filter=button("Filter","list-filter",()=>filters(filter));filter.classList.toggle("is-active",base.filtered);
     const props=button("Properties","list",()=>properties(props));
     return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props)];
   }
