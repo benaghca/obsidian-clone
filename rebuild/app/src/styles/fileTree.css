@@ -39,6 +39,10 @@
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
+.tree-item-self.is-selected {
+  background: var(--background-modifier-active-hover);
+  color: var(--text-normal);
+}
 .tree-item-inner {
   outline: none;
 }

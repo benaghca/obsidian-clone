@@ -11,13 +11,16 @@ import { listeners } from "../listeners";
 import { compareFiles, compareNames, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
+import { isConfirmOpen } from "./confirm";
 import { editInPlace, fieldError, h, iconButton } from "./dom";
 import { icon } from "./icons";
-import { type MenuItems, SEPARATOR, showMenu } from "./menu";
+import { isMenuOpen, type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
+import { isPromptOpen } from "./prompt";
 import { createSearchView } from "./searchView";
 import { viewTabs } from "./sideView";
 import { startTreeDrag } from "./treeDrag";
+import { selectionRange } from "./treeSelect";
 import { mountVaultSwitcher } from "./vaultSwitcher";
 
 export type LeftView = "files" | "search" | "bookmarks";
@@ -145,6 +148,8 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   const expanded = new Set<string>();
   const rows = new Map<string, HTMLElement>();
   const openFolders = new Map<string, () => void>();
+  const selected = new Set<string>();
+  let anchor: string | null = null;
   let cancelDrag: (() => void) | undefined;
   const sorted = listeners();
   let sortOrder: SortOrder = "alphabetical";
@@ -191,6 +196,31 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   }
 
   list.addEventListener("contextmenu", (e) => contextMenu(e, menus().vault()));
+  // Bubble phase, so a drag's or menu's capturing Escape still wins.
+  window.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !selected.size || event.defaultPrevented) return;
+    // An inline rename handles its own Escape. The editor is also contenteditable, and Escape there still clears the file selection.
+    if ((event.target as HTMLElement | null)?.closest?.(".tree-item-inner[contenteditable]")) return;
+    if (isMenuOpen() || isPromptOpen() || isConfirmOpen()) return;
+    selected.clear();
+    anchor = null;
+    paintSelection();
+  });
+
+  function visiblePaths(): string[] {
+    return [...list.querySelectorAll<HTMLElement>(".tree-item-self[data-path]")].map((row) => row.dataset.path!);
+  }
+
+  function paintSelection() {
+    for (const [path, row] of rows) row.classList.toggle("is-selected", selected.has(path));
+  }
+
+  /** The pressed row's drag: every selected path when that row is part of a multi-selection. */
+  function draggedPaths(entry: FileEntry): string[] {
+    if (!selected.has(entry.path) || selected.size < 2) return [entry.path];
+    const paths = visiblePaths().filter((path) => selected.has(path));
+    return paths.length > 1 ? paths : [entry.path];
+  }
 
   function startRename(path: string) {
     const label = rows.get(path)?.querySelector<HTMLElement>(".tree-item-inner");
@@ -223,22 +253,41 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
       const self = h(
         "div",
         {
-          class: `tree-item-self${entry.is_dir ? " nav-folder-title mod-collapsible" : " nav-file-title"}`,
+          class: `tree-item-self${entry.is_dir ? " nav-folder-title mod-collapsible" : " nav-file-title"}${selected.has(entry.path) ? " is-selected" : ""}`,
           "data-path": entry.path,
           onclick: (e: MouseEvent) => {
             if ((e.target as HTMLElement).isContentEditable) return;
+            if (e.ctrlKey || e.metaKey) {
+              if (selected.has(entry.path)) selected.delete(entry.path);
+              else selected.add(entry.path);
+              anchor = entry.path;
+              paintSelection();
+              return;
+            }
+            if (e.shiftKey) {
+              selected.clear();
+              for (const path of selectionRange(visiblePaths(), anchor, entry.path)) selected.add(path);
+              paintSelection();
+              return;
+            }
+            selected.clear();
+            anchor = entry.path;
+            paintSelection();
             if (entry.is_dir) toggleFolder(node, depth, folder!, chevron!);
             else void ws.open(entry.path, { where: whereFromEvent(e) });
           },
           onpointerdown: (e: PointerEvent) => {
             if (e.button !== 0 || (e.target as HTMLElement).isContentEditable) return;
             cancelDrag?.();
-            cancelDrag = startTreeDrag(e, entry, list, ws, (path) => openFolders.get(path)?.());
+            cancelDrag = startTreeDrag(e, entry, list, ws, (path) => openFolders.get(path)?.(), draggedPaths(entry));
           },
           onauxclick: (e: MouseEvent) => {
             if (e.button === 1 && !entry.is_dir) void ws.open(entry.path, { where: "tab" });
           },
-          oncontextmenu: (e: MouseEvent) => contextMenu(e, menus().file(entry)),
+          oncontextmenu: (e: MouseEvent) => {
+            const paths = selected.has(entry.path) && selected.size > 1 ? visiblePaths().filter((path) => selected.has(path)) : null;
+            contextMenu(e, paths && paths.length > 1 ? menus().selection(paths) : menus().file(entry));
+          },
         },
         chevron ?? (/\.canvas$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("layout-dashboard", 14)) : null),
         h("div", { class: "tree-item-inner" }, label),
@@ -342,6 +391,9 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
 
   function render() {
     cancelDrag?.();
+    const live = new Set(ws.vault.files.map((file) => file.path));
+    for (const path of selected) if (!live.has(path)) selected.delete(path);
+    if (anchor && !live.has(anchor)) anchor = null;
     pruneExpanded();
     openFolders.clear();
     for (const field of list.querySelectorAll<HTMLElement>("[aria-invalid]")) fieldError(field, "");

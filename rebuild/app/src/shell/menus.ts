@@ -14,12 +14,15 @@ import { IMAGE_EXT, resetSize } from "../editor/embeds";
 import type { ImageRef } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
-import { copyNote, deleteFile, newCanvas } from "../fileOps";
+import { copyNote, deleteFile, fileSettings, newCanvas } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
+import { confirmDialog } from "./confirm";
 import { type MenuEntry, type MenuItems, SEPARATOR } from "./menu";
+import { openMovePrompt } from "./movePrompt";
 import { pickFrom } from "./prompt";
+import { topLevelPaths } from "./treeSelect";
 
 interface MenuHost {
   ws: Workspace;
@@ -132,6 +135,32 @@ export function createMenus(host: MenuHost) {
       SEPARATOR,
       (isNote || isCanvas) && renameItem(() => host.renameInTree(path)),
       deleteItem(path),
+    ];
+  }
+
+  /** Right-click on a row that is part of a multi-selection. */
+  function selection(paths: string[]): MenuItems {
+    const items = topLevelPaths(paths, (path) => ws.vault.isFolder(path));
+    const n = paths.length;
+    return [
+      { title: `Move ${n} items to...`, icon: "folder-tree", action: () => openMovePrompt(ws, items) },
+      {
+        title: "Delete",
+        icon: "trash-2",
+        danger: true,
+        action: () => {
+          const where = fileSettings.permanentDelete() ? "They will be permanently deleted." : "They will be moved to the vault's .trash folder.";
+          void confirmDialog({
+            title: "Delete",
+            message: `Are you sure you want to delete ${n} items? ${where}`,
+            confirm: "Delete",
+            warning: true,
+          }).then(async (answer) => {
+            if (!answer.ok) return;
+            for (const path of items) await deleteFile(ws, path, { confirmed: true }).catch(warn(`delete ${path}`));
+          });
+        },
+      },
     ];
   }
 
@@ -495,7 +524,7 @@ export function createMenus(host: MenuHost) {
     ];
   }
 
-  return { file, vault, editor, image, tab, tabList, moreOptions, graphNode };
+  return { file, selection, vault, editor, image, tab, tabList, moreOptions, graphNode };
 }
 
 export type Menus = ReturnType<typeof createMenus>;
