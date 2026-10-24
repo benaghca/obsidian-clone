@@ -23,11 +23,17 @@
 .side-dock-actions {
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 6px;
-  padding-top: 6px;
+  /* The toggle fills the 40px tab row. Actions start 8px under it. */
+  padding-top: 8px;
 }
-.side-dock-ribbon-action {
-  padding: 4px;
+.side-dock-ribbon-action,
+.workspace-ribbon .side-dock-settings .clickable-icon {
+  width: 28px;
+  height: 24px;
+  padding: 4px 6px;
+  --icon-size: var(--icon-s);
 }
 /* The settings gear: at the foot of the ribbon only while the left sidebar
    is closed (otherwise it is in the sidebar's vault footer, as in Obsidian). */
@@ -115,9 +121,14 @@
   height: var(--header-height);
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   padding: 0 8px;
   flex: none;
+}
+.mod-sidedock > .workspace-tab-header-container .workspace-tab-header {
+  width: 28px;
+  height: 25px;
+  --icon-size: var(--icon-s);
 }
 .mod-sidedock .workspace-tab-header.is-active {
   background: var(--background-modifier-hover);

@@ -94,7 +94,7 @@ await withBrowser(async ({ send, run, click, chord, press, move, fill, double, c
       clip: { x: ir.x, y: ir.y, width: ir.width, height: ir.height, scale: 1 },
     };
   });
-  check(dateBox.dates === 2 && dateBox.calendar && dateBox.timeCalendar && !dateBox.clock, 'date and datetime values both use a calendar');
+  check(dateBox.dates === 2 && dateBox.calendar && !dateBox.timeCalendar && !dateBox.clock, 'a date value keeps its calendar and a datetime value has none');
   check(dateBox.inputWidth < 180, `the date field is sized to its value (${dateBox.inputWidth}px)`);
   check(dateBox.iconLeft >= dateBox.inputLeft - 1 && dateBox.iconRight < dateBox.inputMid, `calendar icon is on the left of the date input (${dateBox.iconLeft}..${dateBox.iconRight} vs ${dateBox.inputLeft})`);
   // Chromium 154 paints ::-webkit-calendar-picker-indicator but getComputedStyle reports the input, not the pseudo.

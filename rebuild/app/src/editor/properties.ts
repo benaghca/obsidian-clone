@@ -504,8 +504,11 @@ class Block {
         input.value = typeof value === "string" ? value : "";
         input.addEventListener("change", () => input.validity.valid && set(input.value, "value"));
         input.addEventListener("keydown", (e) => e.key === "Enter" && leave(input));
-        // The calendar sits on the left. The native picker glyph is hidden in CSS and its click target moved over this icon.
-        box.append(h("label", { class: "property-date" }, input, h("span", { class: "property-date-icon", "aria-hidden": "true" }, icon("calendar"))));
+        // A date keeps a calendar on the left. The native picker glyph is hidden and its click target covers that icon.
+        // A datetime value has no icon; the same hidden target still opens the picker.
+        const field = h("label", { class: "property-date" }, input);
+        if (type === "date") field.append(h("span", { class: "property-date-icon", "aria-hidden": "true" }, icon("calendar")));
+        box.append(field);
         if (type === "date") {
           const host = this.view.state.facet(editorHost);
           box.append(keyButton(icon("link"), "Open daily note", () => host?.openDaily?.(input.value), "property-daily"));
