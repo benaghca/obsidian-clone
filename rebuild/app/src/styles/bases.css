@@ -95,8 +95,12 @@
 .bases-filter-editor .bases-filter-icon { width: 28px; height: 24px; justify-content: center; padding: 4px 6px; }
 .bases-view-options { display: flex; padding: 0; border: 0; color: var(--text-muted); background: transparent; cursor: default; }
 .bases-results-menu { width: 220px; }
-.bases-results-limit { display: flex; flex-direction: column; gap: 4px; width: 100%; }
-.bases-results-limit input { width: 100%; height: 28px; padding: 4px 6px; font: inherit; }
-.bases-copy-notice { position: fixed; right: 16px; bottom: 24px; z-index: 120; padding: 12px 16px; border-radius: 6px; background: var(--background-secondary); color: var(--text-normal); box-shadow: var(--menu-shadow); font-size: 13px; }
+.bases-results-menu > .menu-item:first-child { padding-top: 0; }
+.bases-results-limit { display: flex; flex-direction: column; width: 100%; }
+.bases-results-limit > span { display: flex; align-items: center; height: 25px; }
+.bases-results-limit input { width: 100%; height: 28px; padding: 4px 6px; border: 1px solid var(--background-modifier-border); border-radius: 4px; font: inherit; }
+.bases-notices { position: fixed; top: 32px; right: 10px; z-index: 120; display: flex; align-items: flex-end; flex-direction: column; gap: 8px; pointer-events: none; }
+.bases-copy-notice { padding: 8px 12px; border-radius: 8px; background: rgba(0,0,0,.9); color: white; font-size: 12px; line-height: 17px; }
 .bases-filter-picker { width: 247px; max-height: 300px; }
 .bases-filter-picker .menu-item-hotkey { margin-left: 4px; color: var(--text-muted); font-size: 11px; }
+.bases-filter-picker .is-checked { background: var(--background-modifier-hover); }
