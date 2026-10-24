@@ -448,7 +448,7 @@ export class Workspace {
     path: string,
     opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
   ) {
-    if (IMAGE_EXT.test(path) || /\.canvas$/i.test(path)) return this.openAttachment(path, opts.where ?? false, opts.group);
+    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path)) return this.openAttachment(path, opts.where ?? false, opts.group);
     const state = await this.editors.load(path);
     if (!state) return;
     const from = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
@@ -488,7 +488,7 @@ export class Workspace {
     const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
     pushBack(tab, this.caretIn(from));
     tab.path = null;
-    tab.type = /\.canvas$/i.test(path) ? "canvas" : "image";
+    tab.type = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : "image";
     this.recent = [path, ...this.recent.filter(p => p !== path)].slice(0, 50);
     tab.viewFile = path;
     this.show(group, tab, layoutChanged);

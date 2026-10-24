@@ -1,0 +1,349 @@
+{
+  "Tasks.base": {
+    "text": "Open tasks\n5 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\nStatus\npriority\ndue\ntags\nLate\nTask D\nopen\nwork/project\nTask A\nopen\nwork/project\nlate\nTask F\nopen\nwork/project\nTask C\nopen\nwork/project\nTask E\nopen\nwork/project",
+    "columns": [
+      "file name",
+      "Status",
+      "priority",
+      "due",
+      "tags",
+      "Late"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D",
+          "open",
+          "5",
+          "2099-01-01",
+          "work/project",
+          ""
+        ]
+      },
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "open",
+          "3",
+          "2000-01-01",
+          "work/project",
+          "late"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "open",
+          "3",
+          "",
+          "work/project",
+          ""
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C",
+          "open",
+          "2",
+          "2099-01-01",
+          "work/project",
+          ""
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E",
+          "open",
+          "",
+          "",
+          "work/project",
+          ""
+        ]
+      }
+    ]
+  },
+  "Empty.base": {
+    "text": "View\n14 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\nEmpty.base\nFunctions.base\nInvalid.base\nMultiple.base\nNot.base\nTask A\nTask B\nTask C\nTask D\nTask E\nTask F\nTasks.base\nUnsupported filter.base\nUnsupported.base",
+    "columns": [
+      "file name"
+    ],
+    "rows": [
+      {
+        "path": "Empty.base",
+        "values": [
+          "Empty.base"
+        ]
+      },
+      {
+        "path": "Functions.base",
+        "values": [
+          "Functions.base"
+        ]
+      },
+      {
+        "path": "Invalid.base",
+        "values": [
+          "Invalid.base"
+        ]
+      },
+      {
+        "path": "Multiple.base",
+        "values": [
+          "Multiple.base"
+        ]
+      },
+      {
+        "path": "Not.base",
+        "values": [
+          "Not.base"
+        ]
+      },
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A"
+        ]
+      },
+      {
+        "path": "BaseTest/Task B.md",
+        "values": [
+          "Task B"
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C"
+        ]
+      },
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D"
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F"
+        ]
+      },
+      {
+        "path": "Tasks.base",
+        "values": [
+          "Tasks.base"
+        ]
+      },
+      {
+        "path": "Unsupported filter.base",
+        "values": [
+          "Unsupported filter.base"
+        ]
+      },
+      {
+        "path": "Unsupported.base",
+        "values": [
+          "Unsupported.base"
+        ]
+      }
+    ]
+  },
+  "Multiple.base": {
+    "text": "Multiple\n4 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\npriority\nactive\nTask C\nTask F\nTask A\nTask B",
+    "columns": [
+      "file name",
+      "priority",
+      "active"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C",
+          "2",
+          "true"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "3",
+          "true"
+        ]
+      },
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "3",
+          "true"
+        ]
+      },
+      {
+        "path": "BaseTest/Task B.md",
+        "values": [
+          "Task B",
+          "4",
+          "true"
+        ]
+      }
+    ]
+  },
+  "Not.base": {
+    "text": "Not\n4 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\nTask A\nTask C\nTask E\nTask F",
+    "columns": [
+      "file name"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A"
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C"
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F"
+        ]
+      }
+    ]
+  },
+  "Unsupported.base": {
+    "text": "Unsupported\n6 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\nmissing\nTask A\nCannot find function \"unknownFunction\"\nTask B\nCannot find function \"unknownFunction\"\nTask C\nCannot find function \"unknownFunction\"\nTask D\nCannot find function \"unknownFunction\"\nTask E\nCannot find function \"unknownFunction\"\nTask F\nCannot find function \"unknownFunction\"",
+    "columns": [
+      "file name",
+      "missing"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "Cannot find function \"unknownFunction\""
+        ]
+      },
+      {
+        "path": "BaseTest/Task B.md",
+        "values": [
+          "Task B",
+          "Cannot find function \"unknownFunction\""
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C",
+          "Cannot find function \"unknownFunction\""
+        ]
+      },
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D",
+          "Cannot find function \"unknownFunction\""
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E",
+          "Cannot find function \"unknownFunction\""
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "Cannot find function \"unknownFunction\""
+        ]
+      }
+    ]
+  },
+  "Functions.base": {
+    "text": "Functions\n5 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name\nactive\nfile tags\nTask A\ninline work/project\nTask C\ninline work/project\nTask D\ninline work/project\nTask E\ninline work/project\nTask F\ninline work/project",
+    "columns": [
+      "file name",
+      "active",
+      "file tags"
+    ],
+    "rows": [
+      {
+        "path": "BaseTest/Task A.md",
+        "values": [
+          "Task A",
+          "true",
+          "inline work/project"
+        ]
+      },
+      {
+        "path": "BaseTest/Task C.md",
+        "values": [
+          "Task C",
+          "true",
+          "inline work/project"
+        ]
+      },
+      {
+        "path": "BaseTest/Task D.md",
+        "values": [
+          "Task D",
+          "true",
+          "inline work/project"
+        ]
+      },
+      {
+        "path": "BaseTest/Task E.md",
+        "values": [
+          "Task E",
+          "true",
+          "inline work/project"
+        ]
+      },
+      {
+        "path": "BaseTest/Task F.md",
+        "values": [
+          "Task F",
+          "true",
+          "inline work/project"
+        ]
+      }
+    ]
+  },
+  "Unsupported filter.base": {
+    "text": "Unsupported filter\n0 results\nSort\nGroup\nFilter\nProperties\nSearch\nNew\nfile name",
+    "columns": [
+      "file name"
+    ],
+    "rows": []
+  },
+  "Invalid.base": {
+    "text": "Unable to parse your base file:\n\nFlow sequence in block collection must be sufficiently indented and end with a ] at line 3, column 1: - type: [broken ^",
+    "columns": [],
+    "rows": []
+  }
+}
