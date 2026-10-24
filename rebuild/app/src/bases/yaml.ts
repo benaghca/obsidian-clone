@@ -14,7 +14,7 @@ function boundary(text: string, marker: string) {
         else quote = "";
       }
     } else if ((ch === '"' || ch === "'") && (i === 0 || !/[\w]/.test(text[i - 1]))) quote = ch;
-    else if (ch === marker && (marker === "#" ? i === 0 || /\s/.test(text[i - 1]) : i + 1 === text.length || /\s/.test(text[i + 1]))) return i;
+    else if (ch === marker && (marker === "," || (marker === "#" ? i === 0 || /\s/.test(text[i - 1]) : i + 1 === text.length || /\s/.test(text[i + 1])))) return i;
   }
   if (quote) throw Error("Unclosed quoted value");
   return -1;
@@ -30,6 +30,11 @@ function scalar(raw: string): Yaml {
     return v.slice(1, -1).replace(/''/g, "'");
   }
   if (v === "[]") return [];
+  if (/^\[.*\]$/.test(v)) {
+    const out: Yaml[] = []; let rest = v.slice(1, -1);
+    while (rest.trim()) { const comma = boundary(rest, ","); out.push(scalar(comma < 0 ? rest : rest.slice(0, comma))); if (comma < 0) break; rest = rest.slice(comma + 1); }
+    return out;
+  }
   if (v === "{}") return {};
   if (/^[\[\]{}&*!|>%@`]/.test(v) || boundary(v, ":") >= 0) throw Error("Unsupported YAML value");
   if (!v || /^(null|~)$/i.test(v)) return null;

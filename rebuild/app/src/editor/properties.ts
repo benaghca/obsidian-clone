@@ -174,6 +174,11 @@ export function propertyRows(view: EditorView): { el: HTMLElement; render(): voi
   return block;
 }
 
+/** The same typed value control for a Bases cell, with a note-specific writer. */
+export function propertyValue(view: EditorView, p: Property, set: (value: Property["value"], part: string) => void): HTMLElement {
+  return new Block(view, false).value(p.key, p.type, p.value, set);
+}
+
 class PropertiesWidget extends WidgetType {
   /** `source`: the frontmatter as written; with the types' version, what makes two widgets the same. */
   constructor(
@@ -476,10 +481,10 @@ class Block {
   }
 
   /** The value's editor for its type. */
-  private value(key: string, type: PropertyType, value: Property["value"]): HTMLElement {
+  value(key: string, type: PropertyType, value: Property["value"], write?: (value: Property["value"], part: string) => void): HTMLElement {
     const box = h("div", { class: "property-value", "data-type": type });
     const leave = (el: HTMLElement) => el.closest<HTMLElement>(".property")?.focus();
-    const set = (v: Property["value"], part: string) => this.set(key, v, part, type);
+    const set = write ?? ((v: Property["value"], part: string) => this.set(key, v, part, type));
     switch (type) {
       case "checkbox": {
         const check = h("input", { class: "cm-task-checkbox", type: "checkbox", "data-part": "value" });
@@ -516,7 +521,7 @@ class Block {
       case "list":
       case "tags":
       case "aliases":
-        this.list(box, key, type, value as string[]);
+        this.list(box, key, type, value as string[], set);
         break;
       case "unknown":
         box.append(h("span", { class: "property-unknown", "data-part": "value", tabindex: "0" }, value as string));
@@ -530,21 +535,21 @@ class Block {
   }
 
   /** Items as pills (× removes one), and a field that adds one on Enter. */
-  private list(box: HTMLElement, key: string, type: PropertyType, items: string[]) {
+  private list(box: HTMLElement, key: string, type: PropertyType, items: string[], set: (value: Property["value"], part: string) => void) {
     const host = this.view.state.facet(editorHost);
     items.forEach((item, i) => {
       const link = /^\[\[([^\]|#]+)[^\]|]*(?:\|([^\]]*))?\]\]$/.exec(item);
       const label = h("span", { class: link ? "property-link" : undefined }, link ? (link[2] ?? link[1]) : item);
       if (link) label.addEventListener("click", (e) => host?.openLink(link[1].trim(), e.ctrlKey || e.metaKey ? "tab" : false, this.view));
       const remove = h("span", { class: "property-pill-remove", "aria-label": "Remove" }, icon("x"));
-      remove.addEventListener("click", () => this.set(key, items.filter((_, k) => k !== i), "add", type));
+      remove.addEventListener("click", () => set(items.filter((_, k) => k !== i), "add"));
       box.append(h("span", { class: `property-pill${type === "tags" ? " is-tag" : ""}` }, label, remove));
     });
     const commit = () => {
       let item = add.textContent!.trim();
       if (type === "tags") item = item.replace(/^#/, "");
       add.textContent = "";
-      if (item) this.set(key, [...items, item], "add", type);
+      if (item) set([...items, item], "add");
     };
     const add = editable("", () => {}, () => {}, () => this.values(key, items), (item) => {
       add.textContent = item.text;
@@ -555,7 +560,7 @@ class Block {
       if (e.key === "Enter" || e.key === ",") {
         e.preventDefault();
         commit();
-      } else if (e.key === "Backspace" && !add.textContent && items.length) this.set(key, items.slice(0, -1), "add", type);
+      } else if (e.key === "Backspace" && !add.textContent && items.length) set(items.slice(0, -1), "add");
     });
     add.addEventListener("blur", commit);
     box.append(add);

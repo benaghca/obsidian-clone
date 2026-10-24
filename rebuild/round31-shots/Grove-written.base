@@ -1,0 +1,25 @@
+filters:
+  and:
+    - file.inFolder("BaseTest")
+    - 'status != "done"'
+formulas:
+  late: 'if(due < today(), "late", "")'
+properties:
+  note.status:
+    displayName: Status
+  formula.late:
+    displayName: Late
+views:
+  - type: table
+    name: Open tasks
+    order:
+      - file.name
+      - status
+      - priority
+      - tags
+      - formula.late
+    sort:
+      - property: status
+        direction: ASC
+      - property: priority
+        direction: ASC

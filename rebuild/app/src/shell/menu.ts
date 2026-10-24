@@ -306,6 +306,7 @@ function onPress(e: MouseEvent) {
 
 function onKey(e: KeyboardEvent) {
   if (!root) return;
+  if (e.target instanceof HTMLInputElement && e.key !== "Escape") return;
   if (e.key === "Shift" || e.key === "Control" || e.key === "Alt" || e.key === "Meta") return;
   e.preventDefault();
   e.stopPropagation();

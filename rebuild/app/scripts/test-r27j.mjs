@@ -194,7 +194,7 @@ await withBrowser(async ({ send, run, press, move, click, check }) => {
       ellipsis: el.classList.contains('is-ellipsized'),
     };
   }));
-  check(labels.map((label) => label.text).join('|') === 'New note|New canvas|Go to file', `empty tab labels (${labels.map((label) => label.text).join(' | ')})`);
+  check(labels.map((label) => label.text).join('|') === 'New note|New canvas|New base|Go to file', `empty tab labels (${labels.map((label) => label.text).join(' | ')})`);
   check(labels.every((label) => label.textWidth <= label.client + 0.5 && !label.ellipsis && label.overflow === 'clip'), `short labels fit without an ellipsis (${labels.map((label) => `${label.textWidth}/${label.client}`).join(', ')})`);
 
   await run(() => { document.querySelector('.empty-state-action-label').textContent = 'This label is intentionally far too long for the pill'; });

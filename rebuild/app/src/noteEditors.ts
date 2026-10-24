@@ -339,7 +339,7 @@ export class NoteEditors {
   private historyCommand(view: EditorView, isRedo: boolean): boolean {
     const path = this.paneOfView.get(view)?.path;
     const owner = path ? this.owners.get(path) : undefined;
-    if (!owner || owner === view) return false;
+    if (!owner || owner === view && !owner.state.readOnly) return false;
     const mode = viewModeOf(owner.state);
     // An editable mirror may share its history with a Reading tab.
     if (owner.state.readOnly) this.applyMode(owner, "live");
@@ -356,7 +356,7 @@ export class NoteEditors {
       const doc = await api.readNote(path);
       state = this.states.get(path); // loaded meanwhile
       if (state) return state;
-      state = createNoteState({ doc, host: this.host });
+      state = createNoteState({ doc, host: this.host, extensions: this.mirrorKeys });
       this.states.set(path, state);
       return state;
     } catch (err) {

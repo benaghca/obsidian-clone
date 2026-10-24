@@ -14,6 +14,7 @@ import { IMAGE_EXT, resetSize } from "../editor/embeds";
 import type { ImageRef } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
+import { newBase } from "../bases/new";
 import { copyNote, deleteFile, fileSettings, moveFile, newCanvas, newFolder } from "../fileOps";
 import { noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
@@ -110,6 +111,7 @@ export function createMenus(host: MenuHost) {
         { title: "New note", icon: "square-pen", action: () => host.newNoteIn(path) },
         { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn(path) },
         { title: "New canvas", icon: "layout-dashboard", action: () => newCanvas(ws, path) },
+        { title: "New base", icon: "table", action: () => newBase(ws, path) },
         SEPARATOR,
         moveItem(path, true),
         { title: "Search in folder", icon: "folder-search", action: () => host.searchInFolder(path) },
@@ -196,6 +198,7 @@ export function createMenus(host: MenuHost) {
       { title: "New note", icon: "square-pen", action: () => host.newNoteIn("") },
       { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn("") },
       { title: "New canvas", icon: "layout-dashboard", action: () => newCanvas(ws, "") },
+      { title: "New base", icon: "table", action: () => newBase(ws, "") },
     ];
   }
 
