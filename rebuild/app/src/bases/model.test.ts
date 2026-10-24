@@ -47,3 +47,7 @@ describe("Bases tables", () => {
     expect(() => baseModel('views:\n  - type: cards')).toThrow();
   });
 });
+
+it("keeps custom note names literal alongside native file labels",()=>{
+ const base=baseModel("");expect(base.label("constructor")).toBe("constructor");expect(base.label("__proto__")).toBe("__proto__");expect(base.label("file.ctime")).toBe("created time");
+});

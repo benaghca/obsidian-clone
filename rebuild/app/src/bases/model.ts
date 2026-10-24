@@ -65,7 +65,7 @@ export function baseModel(source: string) {
   };
   const label = (key: string) => {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
-    return typeof config.displayName === "string" ? config.displayName : FILE_LABELS[key] ?? key.replace(/^(note|formula)\./, "");
+    return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");
   };
   function select(rows: Row[]) {
     const found = rows.map(row => ({ row, context: context(row) })).filter(r => global(r.context) && local(r.context));
