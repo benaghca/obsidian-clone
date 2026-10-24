@@ -42,6 +42,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
     for (const el of edgeElements()) el.classList.toggle("is-selected", selectedEdges.has(el.dataset.edgeId!));
     for (const [id, card] of cards) {
+      if (card.classList.contains("is-selected") === selected.has(id)) continue;
       card.classList.toggle("is-selected", selected.has(id));
       card.querySelectorAll(".canvas-node-resizer").forEach(handle => handle.remove());
       if (selected.has(id)) for (const side of sides) card.append(h("div", { class: "canvas-node-resizer", "data-resize": side }));

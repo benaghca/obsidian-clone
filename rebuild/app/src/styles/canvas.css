@@ -86,6 +86,7 @@
 .canvas-view.is-grabbable, .canvas-view.is-grabbable * { cursor: grab; }
 .canvas-view.is-panning, .canvas-view.is-panning * { cursor: grabbing; user-select: none; }
 
+.canvas-node.is-selected:not(.is-editing) { will-change: transform; }
 .canvas-node.is-selected { border-color: var(--interactive-accent); box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%), 0 0 0 2px var(--interactive-accent); }
 .canvas-node-resizer { position: absolute; z-index: 3; }
 .canvas-node-group > .canvas-node-resizer { z-index: 1; }
@@ -169,11 +170,12 @@
 .canvas-group-label.is-editing { background: var(--background-primary); border-radius: 4px; }
 
 /* Detached previews use block spacing; no rule here reaches .cm-content. */
-.canvas-node-content.is-reading-mode > .canvas-block { margin-block: 16px; }
+.canvas-node-content.is-reading-mode > .canvas-block { margin-top: 16px; }
+.canvas-node-content.is-reading-mode > .canvas-block-end { margin-bottom: 16px; }
 .canvas-node-content.is-reading-mode > .canvas-block.cm-h { margin-block: 40px 16px; }
 .canvas-node-content.is-reading-mode > .canvas-block:first-child,
 .canvas-node-content.is-reading-mode > .canvas-note-title + .canvas-block { margin-top: 0; }
-.canvas-node-content.is-reading-mode > .canvas-block:last-child { margin-bottom: 0; }
-.canvas-list > .cm-list-line { position: relative; padding-left: 27.5px; }
-.canvas-list > .cm-list-line .cm-list-bullet,
-.canvas-list > .cm-list-line .cm-list-number { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); }
+.canvas-node-content.is-reading-mode > .canvas-block-end:last-child { margin-bottom: 0; }
+.canvas-node-content.is-reading-mode > .canvas-list.cm-list-line { position: relative; padding-left: 27.5px; }
+.canvas-list.cm-list-line .cm-list-bullet,
+.canvas-list.cm-list-line .cm-list-number { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); }

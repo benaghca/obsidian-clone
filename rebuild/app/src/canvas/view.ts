@@ -271,7 +271,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         if (painted) release(painted);
         content.replaceChildren(); content.classList.add("is-reading-mode");
         painted = render(content, node.type === "file" ? withoutBlockIds(shown.text) : shown.text, context, [origin], () => {});
-        spaceCardBody(content, painted.state.doc);
+        spaceCardBody(content, painted.state);
         if (node.type === "file") content.prepend(h("div", { class: "canvas-note-title" }, noteName(node.file!)));
         content.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(input => input.disabled = true);
       };
