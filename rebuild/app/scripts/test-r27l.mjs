@@ -1,5 +1,5 @@
 // Round 27l: explorer pitch, header, ribbon, default sidebar, property key
-// icon, datetime without a value icon, vault footer, sidebar tabs, and a
+// icon, date and datetime calendars, vault footer, sidebar tabs, and a
 // new note's links showing up in backlinks. Headless Chromium, real pointer
 // input. Scratch vault only.
 import assert from 'node:assert/strict';
@@ -86,7 +86,7 @@ await withBrowser(async ({ send, run, move, click, check }) => {
   check(chrome.tab.w === 28 && chrome.tab.h === 25 && chrome.tabIcon.w === 16 && chrome.tabIcon.h === 16, `an active sidebar tab is 28×25 around a 16px icon (${chrome.tab.w}×${chrome.tab.h}, icon ${chrome.tabIcon.w})`);
   check(Math.abs(chrome.footer - 41.9) < 0.4 && chrome.nameLh === '16.9px', `the vault footer is 41.9px (${chrome.footer}, line ${chrome.nameLh})`);
   check(Math.abs(chrome.keyIcon - 4) < 0.6 && Math.abs(chrome.keyLabel - 20) < 0.6 && chrome.keyBox.w === 124 && chrome.keyBox.h === 28 && chrome.rowH === 29, `the key icon is 4px in, the label is 124×28, and the row stays 29px (icon +${chrome.keyIcon}, label +${chrome.keyLabel} ${chrome.keyBox.w}×${chrome.keyBox.h}, row ${chrome.rowH})`);
-  check(chrome.dateIcon && !chrome.timeIcon, 'a date value keeps its calendar and a datetime value has none');
+  check(chrome.dateIcon && chrome.timeIcon, 'a date value and a datetime value both keep a calendar');
 
   const openAt = await run(() => {
     const row = document.querySelector('.nav-files .tree-item-self[data-path="Folder/Nested.md"]');
