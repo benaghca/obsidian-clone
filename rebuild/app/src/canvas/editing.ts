@@ -9,6 +9,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   paint: (changed: CanvasNode[]) => void,
   commit: (changed: CanvasNode[], deleted?: Set<string>, changedEdges?: CanvasEdge[], deletedEdges?: Set<string>) => void,
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
+  connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
   history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId?: string) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
@@ -80,10 +81,11 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       const next: CanvasEdge = edge ? { ...edge } : { id: crypto.randomUUID().replaceAll("-", "").slice(0, 16), fromNode: node!.id, fromSide: dot!.dataset.side as Side, toNode: node!.id, toSide: "top" };
       const movingEnd = end ?? "to", nodeKey = movingEnd === "from" ? "fromNode" : "toNode", sideKey = movingEnd === "from" ? "fromSide" : "toSide";
       const matrix = new DOMMatrix(getComputedStyle(world).transform), rect = el.getBoundingClientRect();
-      let drop: CanvasNode | undefined;
+      let drop: CanvasNode | undefined, endPoint = e;
       world.classList.add("is-connecting");
       for (const el of edgeElements()) if (el.dataset.edgeId === edge?.id) el.classList.add("is-reconnecting");
       cancel = dragPointer(e, el, move => {
+        endPoint = move;
         suppress ||= Math.hypot(move.clientX - e.clientX, move.clientY - e.clientY) >= 3;
         const x = (move.clientX - rect.left - matrix.e) / matrix.a, y = (move.clientY - rect.top - matrix.f) / matrix.a;
         // Dots are 20 screen pixels, centered inside the card's 1px border.
@@ -97,12 +99,16 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         if (drop) { next[nodeKey] = drop.id; next[sideKey] = closestSide(drop, x, y); }
         preview(next, drop ? undefined : { end: movingEnd, x, y });
       }, cancelled => {
-        cancel = undefined; preview(); world.classList.remove("is-connecting");
+        cancel = undefined; world.classList.remove("is-connecting");
         for (const el of edgeElements()) el.classList.remove("is-reconnecting");
         for (const card of cards.values()) card.classList.remove("is-connection-target");
         if (!cancelled && suppress && drop && (!edge || next[nodeKey] !== edge[nodeKey] || next[sideKey] !== edge[sideKey])) {
           commit([], undefined, [next]); selected.clear(); selectedEdges.clear(); selectedEdges.add(next.id); selection();
         }
+        const over = document.elementFromPoint(endPoint.clientX, endPoint.clientY);
+        if (!cancelled && suppress && !edge && !drop && el.contains(over) && !over?.closest(".canvas-node, [data-edge-id], .canvas-controls, .canvas-card-menu, .canvas-selection-menu"))
+          connect(next, { x: endPoint.clientX, y: endPoint.clientY }, () => preview());
+        else preview();
       });
       return;
     }

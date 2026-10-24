@@ -19,7 +19,7 @@ import { canvasCards, editTextCard } from "./cards";
 import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
-import { edgeCurve, readCanvas, type CanvasEdge, type CanvasNode } from "./model";
+import { edgeCurve, readCanvas, type CanvasEdge } from "./model";
 
 const NS = "http://www.w3.org/2000/svg";
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>, ...children: SVGElement[]) {
@@ -84,14 +84,14 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     to.push(source); changed(next, true); el.focus({ preventScroll: true });
   }
   let cleanups: (() => void)[] = [];
-  const clear = () => { stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
+  const clear = () => { cardActions.reset(); stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
   const navigation = canvasNavigation(el, world, tab, path, history, () => draw());
-  const disposeCards = canvasCards(el, world, ws, (node: CanvasNode) => {
+  const cardActions = canvasCards(el, world, ws, (node, edge) => {
     if (gone || canvasReadOnly.has(el)) return;
     stopText?.();
     undo.push(source); redo = [];
     selectAfterDraw = node.id; editAfterDraw = node.type === "text" ? node.id : undefined;
-    changed(editCanvas(source, [], undefined, [node]), true);
+    changed(editCanvas(source, [], undefined, [node], edge ? [edge] : []), true);
     if (node.type !== "text") el.focus({ preventScroll: true });
   });
   async function load() {
@@ -278,7 +278,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         else { edges.push(edge); addEdge(edge, edges.length - 1); }
       }
       changed(next, !!deleted?.size || !!deletedEdges?.size);
-    }, previewEdge, history, nodes => navigation.zoomTo(nodes), (item, refresh) => {
+    }, previewEdge, cardActions.connect, history, nodes => navigation.zoomTo(nodes), (item, refresh) => {
       if (!("fromNode" in item)) { edits.get(item.id)?.(); return; }
       if (canvasReadOnly.has(el)) return;
       const record = updateEdges.find(record => record.edge.id === item.id)!;
@@ -318,5 +318,5 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   window.addEventListener("beforeunload", flush);
   const unwatch = ws.vault.onModified(changed => { if (changed === path && !notifying) { clearTimeout(timer); timer = 0; void load(); } });
   void load();
-  return { el, dispose() { gone = true; flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); disposeCards(); unwatch(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); clear(); el.remove(); } };
 }
