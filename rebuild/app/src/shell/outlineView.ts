@@ -1,6 +1,7 @@
 // Outline view for the right sidebar: the open note's headings as an
-// indented tree. Click one to glide to it. The heading at the top of the
-// editor stays highlighted, and the list scrolls to keep it in view.
+// indented tree. Click one to glide to it. Auto-scroll starts off. While it
+// is on, the heading at the top of the editor stays highlighted and the list
+// scrolls to keep it in view.
 // A heading with children folds them; Collapse all folds every such heading.
 // The filter hides rows whose text does not contain it.
 //
@@ -25,8 +26,8 @@ const SLICE_MS = 4;
 export function createOutlineView(ws: Workspace): SideView {
   const query = h("input", { class: "outline-filter", type: "search", placeholder: "Filter...", "aria-label": "Filter outline" });
   query.hidden = true;
-  let followOn = true;
-  const filterBtn = iconButton(icon("list-filter", 16), "Show search filter", () => {
+  let followOn = false;
+  const filterBtn = iconButton(icon("search", 16), "Show search filter", () => {
     const on = query.hidden !== false;
     filterBtn.classList.toggle("is-active", on);
     query.hidden = !on;
@@ -35,12 +36,11 @@ export function createOutlineView(ws: Workspace): SideView {
       paint();
     } else query.focus();
   });
-  const followBtn = iconButton(icon("arrow-down-to-line", 16), "Auto-scroll to current section", () => {
+  const followBtn = iconButton(icon("square", 16), "Auto-scroll to current section", () => {
     followOn = !followOn;
     followBtn.classList.toggle("is-active", followOn);
     if (followOn) follow();
   });
-  followBtn.classList.add("is-active");
   const toggle = iconButton(icon("chevrons-down-up", 16), "Collapse all", () => foldAll());
   const list = h("div", { class: "outline-list" });
   const empty = h("div", { class: "pane-empty" });

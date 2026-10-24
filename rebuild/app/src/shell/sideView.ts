@@ -143,7 +143,7 @@ export function hitColumns(event: MouseEvent, spans: Span[]): [number, number] |
 
 /** A note's foldable result group, shared by Search and Backlinks. */
 export function resultGroup(path: string, matches: HTMLElement, count: string | null, collapsed: Set<string>, open: (event: MouseEvent) => void) {
-  return h("div", { class: "search-result" },
+  return h("div", { class: "tree-item search-result" },
     h("div", { class: "search-result-file-title", "data-preview-path": path, onclick: open },
       foldToggle(matches, collapsed.has(path), foldIn(collapsed, path)),
       h("div", { class: "search-result-file-name" }, noteName(path)),
@@ -160,12 +160,11 @@ export function setGroupsCollapsed(root: ParentNode, collapsed: boolean) {
 
 /** Folds every result group under `root`, then opens them on the next press. */
 export function collapseResultsButton(root: ParentNode): HTMLElement {
-  const button = iconButton(icon("chevrons-down-up", 16), "Collapse results", () => {
+  const button = iconButton(icon("list", 16), "Collapse results", () => {
     const icons = [...root.querySelectorAll(".search-result-file-title .collapse-icon")];
     const collapse = icons.some((node) => !node.classList.contains("is-collapsed"));
     setGroupsCollapsed(root, collapse);
     button.setAttribute("aria-label", collapse ? "Expand results" : "Collapse results");
-    button.replaceChildren(icon(collapse ? "chevrons-up-down" : "chevrons-down-up", 16));
   });
   return button;
 }
@@ -179,9 +178,28 @@ const reveal = (row: HTMLElement) => {
   else if (r.bottom > box.bottom) scroller.scrollTop += r.bottom - box.bottom;
 };
 
+type ResultStop = { kind: "file" | "match"; el: HTMLElement };
+
+/** The file group first, then each of its visible matches. */
+function resultStops(root: HTMLElement): ResultStop[] {
+  const groups = [...root.querySelectorAll<HTMLElement>(".search-result")].filter((el) => el.offsetParent);
+  if (!groups.length) {
+    return [...root.querySelectorAll<HTMLElement>(".search-result-file-match")].filter((row) => row.offsetParent).map((el) => ({ kind: "match", el }));
+  }
+  const out: ResultStop[] = [];
+  for (const group of groups) {
+    out.push({ kind: "file", el: group });
+    for (const row of group.querySelectorAll<HTMLElement>(".search-result-file-match")) {
+      if (row.offsetParent) out.push({ kind: "match", el: row });
+    }
+  }
+  return out;
+}
+
 /**
- * ArrowDown and ArrowUp move a highlight through the visible matches.
- * Enter opens the highlighted one. A menu that is already open keeps the keys.
+ * ArrowDown and ArrowUp move through each file row, then its visible matches.
+ * The first ArrowDown from the field lands on the file. Enter opens the
+ * highlighted row. A menu that is already open keeps the keys.
  */
 export function bindResultKeys(root: HTMLElement) {
   root.addEventListener("keydown", (event) => {
@@ -190,19 +208,25 @@ export function bindResultKeys(root: HTMLElement) {
     // The search field keeps these keys (they move the result highlight). A sort menu or a filter does not.
     const target = event.target as HTMLElement | null;
     if (target?.closest("select, input:not(.search-input), textarea")) return;
-    const rows = [...root.querySelectorAll<HTMLElement>(".search-result-file-match")].filter((row) => row.offsetParent);
-    if (!rows.length) return;
-    const current = rows.findIndex((row) => row.classList.contains("is-selected"));
+    const stops = resultStops(root);
+    if (!stops.length) return;
+    const current = stops.findIndex((stop) => (stop.kind === "file" ? stop.el.classList.contains("has-focus") : stop.el.classList.contains("is-selected")));
     if (event.key === "Enter") {
       if (current < 0) return;
       event.preventDefault();
-      rows[current].click();
+      const stop = stops[current];
+      if (stop.kind === "file") stop.el.querySelector<HTMLElement>(".search-result-file-title")?.click();
+      else stop.el.click();
       return;
     }
     event.preventDefault();
-    const next = event.key === "ArrowDown" ? Math.min(rows.length - 1, current + 1) : Math.max(0, current < 0 ? rows.length - 1 : current - 1);
-    rows.forEach((row, i) => row.classList.toggle("is-selected", i === next));
-    reveal(rows[next]);
+    const next = event.key === "ArrowDown" ? Math.min(stops.length - 1, current + 1) : Math.max(0, current < 0 ? stops.length - 1 : current - 1);
+    for (const stop of stops) {
+      stop.el.classList.toggle("has-focus", stop.kind === "file" && stop === stops[next]);
+      if (stop.kind === "match") stop.el.classList.toggle("is-selected", stop === stops[next]);
+    }
+    const row = stops[next].kind === "file" ? stops[next].el.querySelector<HTMLElement>(".search-result-file-title") ?? stops[next].el : stops[next].el;
+    reveal(row);
   });
 }
 
@@ -219,21 +243,21 @@ export async function noteText(ws: Workspace, path: string): Promise<string> {
   }
 }
 
-/** Up to `radius` lines on each side of a 1-based line, not including it. */
-export function linesAround(text: string, line: number, radius = 2): { before: string; after: string } {
+const headingLine = (line: string) => /^#{1,6}(?:\s|$)/.test(line);
+/** A blank line or a heading ends the block. A heading is its own block. */
+const blockBreak = (line: string) => line.trim() === "" || headingLine(line);
+
+/** The rest of the hit's paragraph: lines until a blank line or a heading. Not the hit itself. */
+export function linesAround(text: string, line: number): { before: string; after: string } {
   const lines = text.split("\n");
   const i = line - 1;
-  if (i < 0 || i >= lines.length) return { before: "", after: "" };
+  if (i < 0 || i >= lines.length || headingLine(lines[i])) return { before: "", after: "" };
+  let start = i;
+  while (start > 0 && !blockBreak(lines[start - 1])) start--;
+  let end = i;
+  while (end + 1 < lines.length && !blockBreak(lines[end + 1])) end++;
   return {
-    before: lines.slice(Math.max(0, i - radius), i).join("\n"),
-    after: lines.slice(i + 1, Math.min(lines.length, i + 1 + radius)).join("\n"),
+    before: lines.slice(start, i).join("\n"),
+    after: lines.slice(i + 1, end + 1).join("\n"),
   };
-}
-
-/** A snippet whose pressed highlight selects its original source columns. */
-export function resultMatch(ws: Workspace, path: string, hit: { text: string; line: number }, spans: Span[]) {
-  return h("div", {
-    class: "search-result-file-match", "data-preview-path": path,
-    onclick: (event: MouseEvent) => void ws.open(path, { line: hit.line, ch: hitColumns(event, spans) }),
-  }, ...highlighted(hit.text, spans));
 }

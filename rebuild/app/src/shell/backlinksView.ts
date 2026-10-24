@@ -59,7 +59,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   const pane = h("div", { class: "backlink-pane", tabindex: "0" });
   const filterInput = h("input", { class: "backlink-filter", type: "search", placeholder: "Filter...", "aria-label": "Filter backlinks" });
   filterInput.hidden = true;
-  const contextBtn = iconButton(icon("wrap-text", 16), "Show more context", () => {
+  const contextBtn = iconButton(icon("move-vertical", 16), "Show more context", () => {
     moreContext = !moreContext;
     closed.clear();
     contextBtn.classList.toggle("is-active", moreContext);
@@ -67,7 +67,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     renderLinked();
     scheduleUnlinked(0);
   });
-  const sortBtn = iconButton(icon("arrow-up-down", 16), "Change sort order", () => {
+  const sortBtn = iconButton(icon("arrow-down-narrow-wide", 16), "Change sort order", () => {
     showMenu(SORT_ORDERS.map(([order, title]) => ({
       title,
       checked: order === sort,
@@ -80,7 +80,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       },
     })), sortBtn);
   });
-  const filterBtn = iconButton(icon("list-filter", 16), "Show search filter", () => {
+  const filterBtn = iconButton(icon("search", 16), "Show search filter", () => {
     const on = filterInput.hidden !== false;
     filterBtn.classList.toggle("is-active", on);
     filterInput.hidden = !on;
@@ -176,7 +176,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
         renderLinked();
         if (unlinkedOpen) void renderUnlinked();
       },
-    }, icon(on ? "chevron-down" : "chevron-right", 14));
+    }, icon("chevrons-up-down", 14));
   }
 
   function mentionRow(m: Mention, button: HTMLElement | null) {

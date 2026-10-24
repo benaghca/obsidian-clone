@@ -5,12 +5,16 @@
   flex-direction: column;
 }
 .backlink-view,
-.outline-view {
+.outline-view,
+.tag-view {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
   overflow: hidden;
+}
+.tag-view > .nav-header {
+  padding: 8px;
 }
 .backlink-view > .nav-header,
 .outline-view > .nav-header {
@@ -23,9 +27,14 @@
   /* room to scroll the last rows above the floating status bar */
   padding: 4px 8px 32px;
 }
+/* Backlink rows sit 12px in, so a 300px pane holds a 276px row. */
+.backlink-view .backlink-pane {
+  padding: 4px 12px 32px;
+}
 /* 28×24, the same size as the file explorer's nav buttons. */
 .backlink-toolbar .clickable-icon,
-.outline-toolbar .clickable-icon {
+.outline-toolbar .clickable-icon,
+.tag-toolbar .clickable-icon {
   width: 28px;
   height: 24px;
   padding: 4px 6px;
@@ -49,7 +58,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 2px 8px 32px;
+  padding: 4px 12px 32px;
 }
 /* Same level, same text x. 24px, then 17px per nested level. */
 .outline-item {
@@ -72,7 +81,7 @@
   pointer-events: none;
 }
 .outline-item.is-active {
-  background: var(--background-modifier-active-hover);
+  background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
 .backlink-header {
@@ -96,6 +105,10 @@
 .backlink-section + .backlink-section {
   margin-top: 8px;
 }
+/* The expanded section's own padding is the gap before the next header. */
+.backlink-view .backlink-section + .backlink-section {
+  margin-top: 0;
+}
 .tree-item-flair {
   margin-left: auto;
   padding-left: 8px;
@@ -106,17 +119,36 @@
 .search-result-container {
   padding: 2px 0 4px;
 }
+.backlink-view .search-result-container {
+  padding: 6px 0 16px;
+}
 .backlink-pane .search-result-file-title {
   position: relative;
   padding-left: 22px;
 }
+.backlink-view .search-result-file-title {
+  padding: 4px 8px 4px 22px;
+  font-size: var(--font-ui-small);
+  font-weight: 400;
+  line-height: 1.3;
+}
 .search-result-file-name {
   white-space: nowrap;
 }
+.backlink-view .search-result-file-matches {
+  margin: 4px 0 8px;
+  background: var(--background-primary);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgb(228, 228, 228);
+  overflow: hidden;
+}
+.theme-dark .backlink-view .search-result-file-matches {
+  box-shadow: 0 0 0 1px var(--background-modifier-border);
+}
 .backlink-pane .search-result-file-match {
   position: relative;
-  /* 13px from each side of a 300px pane: the pane's 8px padding plus 5px here. */
-  margin: 0 5px;
+  /* 13px from each side of a 300px pane: the pane's 12px padding plus 1px here. */
+  margin: 0 1px;
   white-space: normal;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -163,7 +195,10 @@
   transform: translateY(-50%);
   --icon-size: 14px;
 }
-.backlink-pane .search-result-file-match:hover .backlink-context-toggle {
+.backlink-pane .search-result-file-match:hover .backlink-context-toggle,
+.backlink-pane .search-result-file-match.is-selected .backlink-context-toggle,
+.search-view .search-result-file-match:hover .backlink-context-toggle,
+.search-view .search-result-file-match.is-selected .backlink-context-toggle {
   display: flex;
 }
 .search-result-file-match-replace-button {

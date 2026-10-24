@@ -2,24 +2,26 @@
 // (searchQuery.ts). The query is parsed once per change; the backend is
 // asked only about its terms (searchFacts.ts keeps their lines until the
 // vault changes) and each note is then matched in memory. Laid out as
-// Obsidian 1.14.4's (observed): a Match case toggle in the field; "N
-// results" (the matches, not the notes) beside the sort order (Obsidian's
-// six, remembered); each matching note with its count of matches, folding
-// away its lines (the first five), the words looked for highlighted. A
-// note's count is worked out when its row is drawn, and the total just
-// after the results are painted, so counting never holds up a key.
+// Obsidian 1.14.4's (observed): a Match case toggle and a filled clear
+// button in the field; Search settings opens labeled toggles; "N results"
+// stays beside a round "..." menu and the sort order. Each matching note
+// folds away its lines (the first five). ArrowDown lands on the file row
+// first. A note's count is worked out when its row is drawn, and the total
+// just after the results are painted, so counting never holds up a key.
 
-import { compareFiles, SORT_ORDERS, type SortOrder } from "../paths";
+import { writeClipboard } from "../editor/clipboard";
+import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import { kept } from "../memo";
-import { dropdown } from "../settings/controls";
+import { dropdown, toggle } from "../settings/controls";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
+import { showMenu } from "./menu";
 import { searchFacts, type VaultFacts } from "./searchFacts";
 import { explainQuery, highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, bindResultKeys, collapseResultsButton, noteText, pagedRows, resultGroup, resultMatch } from "./sideView";
+import { afterPaint, bindResultKeys, hitColumns, highlighted, linesAround, noteText, pagedRows, resultGroup } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -34,7 +36,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   const remember = () => store(OPTIONS_KEY, { sort, matchCase });
 
   const input = h("input", { class: "search-input", type: "search", placeholder: "Search...", "aria-label": "Search" });
-  const clear = h("div", { class: "search-input-clear-button", "aria-label": "Clear search", onclick: () => (search(""), input.focus()) }, icon("circle-x", 16));
+  const clear = h("div", { class: "search-input-clear-button", "aria-label": "Clear search", onclick: () => (search(""), input.focus()) }, icon("x", 14));
   const caseToggle = h(
     "div",
     {
@@ -56,44 +58,65 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   let settingsOpen = false;
   let moreContext = false;
   let explain = false;
+  let collapse = false;
   const texts = new Map<string, string>();
-  const collapseBtn = collapseResultsButton(results);
-  const contextBtn = iconButton(icon("wrap-text", 16), "Show more context", () => {
-    moreContext = !moreContext;
-    contextBtn.classList.toggle("is-active", moreContext);
-    void run();
-  });
-  const explainBtn = iconButton(icon("circle-help", 16), "Explain search terms", () => {
-    explain = !explain;
-    explainBtn.classList.toggle("is-active", explain);
-    explainEl.hidden = !explain;
-    void run();
-  });
-  const order = dropdown(SORT_ORDERS, sort, (o) => {
-    sort = o;
-    remember();
-    void run();
-  }, "Sort order");
-  const panel = h("div", { class: "search-settings" }, h("div", { class: "search-settings-actions" }, collapseBtn, contextBtn, explainBtn), order);
+  const openedRows = new Set<string>();
+  const closedRows = new Set<string>();
+  const rowKey = (path: string, line: number) => `${path}:${line}`;
+  const wantsContext = (path: string, line: number) => (moreContext ? !closedRows.has(rowKey(path, line)) : openedRows.has(rowKey(path, line)));
+  let copied: { name: string; lines: string[] }[] = [];
+  const settingRow = (name: string, onChange: (on: boolean) => void) =>
+    h("div", { class: "search-settings-row" }, h("div", { class: "search-settings-name" }, name), toggle(false, onChange, name));
+  const panel = h(
+    "div",
+    { class: "search-settings" },
+    settingRow("Collapse results", (on) => {
+      collapse = on;
+      if (!on) collapsed.clear();
+      void run();
+    }),
+    settingRow("Show more context", (on) => {
+      moreContext = on;
+      closedRows.clear();
+      void run();
+    }),
+    settingRow("Explain search terms", (on) => {
+      explain = on;
+      explainEl.hidden = !on;
+      void run();
+    }),
+  );
   panel.hidden = true;
   const settingsBtn = iconButton(icon("sliders-horizontal", 16), "Search settings", () => {
     settingsOpen = !settingsOpen;
     settingsBtn.classList.toggle("is-active", settingsOpen);
     panel.hidden = !settingsOpen;
   });
-  const info = h("div", { class: "search-results-info" }, count);
+  const menuBtn = iconButton(icon("ellipsis", 16), "More options", () => {
+    const text = copied.map((n) => `${n.name}\n${n.lines.map((line) => `\t${line}`).join("\n")}`).join("\n\n");
+    showMenu([{ title: "Copy search results", icon: "copy", disabled: !copied.length, action: () => writeClipboard(text) }], menuBtn);
+  });
+  menuBtn.classList.add("search-results-menu");
+  const order = dropdown(SORT_ORDERS, sort, (o) => {
+    sort = o;
+    remember();
+    void run();
+  }, "Sort order");
+  const info = h("div", { class: "search-results-info" }, h("div", { class: "search-results-leading" }, menuBtn, count), order);
   const collapsed = new Set<string>();
   let seq = 0;
 
-  function expand(path: string, hits: { line: number; text: string }[]) {
-    const text = texts.get(path);
-    if (!moreContext || !text) return hits;
-    const lines = text.split("\n");
-    const out = new Map<number, { line: number; text: string }>();
-    for (const hit of hits) {
-      for (let n = Math.max(1, hit.line - 2); n <= Math.min(lines.length, hit.line + 2); n++) out.set(n, { line: n, text: lines[n - 1] ?? "" });
+  function toggleContext(path: string, line: number) {
+    const key = rowKey(path, line);
+    if (wantsContext(path, line)) {
+      openedRows.delete(key);
+      if (moreContext) closedRows.add(key);
+      else closedRows.delete(key);
+    } else {
+      closedRows.delete(key);
+      openedRows.add(key);
     }
-    return [...out.values()].sort((a, b) => a.line - b.line);
+    void run();
   }
 
   async function run() {
@@ -102,7 +125,8 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     clear.hidden = !input.value;
     if (explain) explainEl.textContent = q ? explainQuery(q) : "Enter a search to explain it.";
     if (!q) {
-      info.hidden = true;
+      count.textContent = "";
+      copied = [];
       results.replaceChildren();
       return;
     }
@@ -114,7 +138,9 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       const inOrder = compareFiles(sort);
       found = found.map((n) => entries.get(n.path)!).filter(Boolean).sort(inOrder);
     }
-    if (moreContext) {
+    if (collapse) for (const n of found) collapsed.add(n.path);
+    const needText = moreContext || openedRows.size > 0;
+    if (needText) {
       texts.clear();
       await Promise.all(found.map(async (n) => texts.set(n.path, await noteText(ws, n.path))));
       if (mine !== seq) return;
@@ -123,19 +149,45 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     const lines = (path: string) => shownLines(path, q, facts, (key) => propertyLine(facts.notes?.get(path), key));
     const counts = new Map<string, number>();
     const countOf = (path: string, shown?: ReturnType<typeof lines>) => kept(counts, path, () => matchCount(shown ?? lines(path), words, matchCase));
+    const matchRow = (path: string, hit: { line: number; text: string }) => {
+      const spans = spansOf(hit.text, words, matchCase);
+      const around = wantsContext(path, hit.line) ? linesAround(texts.get(path) ?? "", hit.line) : { before: "", after: "" };
+      const open = wantsContext(path, hit.line) && !!(around.before || around.after);
+      const chevron = h(
+        "div",
+        {
+          class: "clickable-icon backlink-context-toggle",
+          "aria-label": open ? "Hide context" : "Show more context",
+          onclick: (e: MouseEvent) => {
+            e.preventDefault();
+            e.stopPropagation();
+            toggleContext(path, hit.line);
+          },
+        },
+        icon("chevrons-up-down", 14),
+      );
+      return h(
+        "div",
+        {
+          class: "search-result-file-match",
+          "data-preview-path": path,
+          onclick: (event: MouseEvent) => void ws.open(path, { line: hit.line, ch: hitColumns(event, spans) }),
+        },
+        around.before ? h("div", { class: "search-result-context" }, around.before) : null,
+        h("div", { class: "search-result-file-match-text" }, ...highlighted(hit.text, spans)),
+        around.after ? h("div", { class: "search-result-context" }, around.after) : null,
+        chevron,
+      );
+    };
     const row = ({ path }: { path: string }) => {
       const shown = lines(path);
       const n = countOf(path, shown);
-      const matches = h(
-        "div",
-        { class: "search-result-file-matches" },
-        ...expand(path, shown.slice(0, LINES)).map((hit) => resultMatch(ws, path, hit, spansOf(hit.text, words, matchCase))),
-      );
+      const matches = h("div", { class: "search-result-file-matches" }, ...shown.slice(0, LINES).map((hit) => matchRow(path, hit)));
       const result = resultGroup(path, matches, n ? n.toLocaleString() : null, collapsed, (event) => void ws.open(path, { where: whereFromEvent(event) }));
       if (!shown.length) matches.remove();
       return result;
     };
-    info.hidden = false;
+    copied = found.map((n) => ({ name: noteName(n.path), lines: lines(n.path).slice(0, LINES).map((hit) => hit.text) }));
     results.replaceChildren();
     if (!found.length) {
       count.textContent = "0 results";
@@ -161,8 +213,8 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     { class: "search-view" },
     h("div", { class: "search-input-container global-search-input-container" }, h("div", { class: "search-input-field" }, icon("search", 16), input, caseToggle, clear), settingsBtn),
     panel,
-    info,
     explainEl,
+    info,
     results,
   );
   bindResultKeys(el);
