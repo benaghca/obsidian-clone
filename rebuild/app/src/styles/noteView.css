@@ -109,21 +109,21 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  font-size: 15px;
-}
-.empty-state-title {
-  font-size: 22px;
-  font-weight: 700;
-  color: var(--text-muted);
-  margin-bottom: 8px;
+  gap: 8px;
+  font-size: var(--font-ui-medium);
 }
 .empty-state-action {
-  color: var(--text-accent);
+  color: var(--text-muted);
   cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 6px 16px;
+  line-height: 1.4;
+  transition: none;
 }
 .empty-state-action:hover {
-  text-decoration: underline;
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
 }
 
 /* Floating status bar, no background. One thin row of 12px muted text,

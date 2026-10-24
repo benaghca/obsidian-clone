@@ -454,8 +454,8 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     const empty = h(
       "div",
       { class: "empty-state" },
-      h("div", { class: "empty-state-title" }, "No file is open"),
-      emptyAction("Create new note", "file-explorer:new-file"),
+      emptyAction("New note", "file-explorer:new-file"),
+      emptyAction("New canvas", "canvas:new-file"),
       emptyAction("Go to file", "switcher:open"),
       h("div", { class: "empty-state-action", onclick: () => ws.closeTab(group.active) }, "Close"),
     );
