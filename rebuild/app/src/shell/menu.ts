@@ -298,6 +298,7 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
 }
 
 // A searchable picker beneath a control inside the root's custom content row.
+export const closeMenuChild = () => root?.closeChild();
 export function showMenuChild(items: MenuItems, at: HTMLElement, className: string) {
   if(!root||root.items[0]===SEPARATOR||!root.items[0])return;root.items[0].submenu=items;root.closeChild();root.openChild(0,false);delete root.items[0].submenu;const r=at.getBoundingClientRect(), child=root.child!;child.el.classList.add(className);const size=child.el.getBoundingClientRect();place(child.el,Math.min(r.left,innerWidth-size.width-EDGE),Math.min(r.bottom+4,innerHeight-size.height-EDGE));
 }

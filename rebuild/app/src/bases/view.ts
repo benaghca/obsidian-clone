@@ -122,7 +122,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     try {
       while (dirty && !gone) {
         dirty = false;
-        if (reload) { reload = false; source = await api.readNote(path); model = baseModel(source, viewIndex); viewIndex = model.viewIndex; memory.set(path, viewIndex); }
+        if (reload || !model) { reload = false; source = await api.readNote(path); model = baseModel(source, viewIndex); viewIndex = model.viewIndex; memory.set(path, viewIndex); }
         const properties = await index.notes();
         const needsTags = /file\.(?:tags|hasTag)/.test(source);
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
