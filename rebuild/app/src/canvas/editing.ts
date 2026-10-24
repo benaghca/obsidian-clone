@@ -17,7 +17,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   for (const card of cards.values()) for (const side of sides.slice(0, 4))
     card.append(h("div", { class: "canvas-node-connection-point", "data-side": side, "aria-label": `Connect ${side}` }));
   const events = new AbortController();
-  let cancel: (() => void) | undefined, suppress = false;
+  let cancel: (() => void) | undefined, suppress = false, pressedLabel: string | undefined;
   const chosen = () => nodes.filter(n => selected.has(n.id));
   const removeSelected = () => { if ((selected.size || selectedEdges.size) && !canvasReadOnly.has(el)) { commit([], selected, undefined, selectedEdges); el.focus({ preventScroll: true }); } };
   const menu = selectionMenu(world, nodes, removeSelected, zoom, item => edit(item, selection), changed => {
@@ -50,17 +50,21 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     }
   }
   el.addEventListener("pointerdown", e => {
-    suppress = false;
+    suppress = false; pressedLabel = undefined;
     if (e.defaultPrevented || e.button !== 0 || el.classList.contains("is-grabbable")) return;
     const target = e.target as Element;
     if (target.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu, .is-editing, a, [data-href], input, button")) return;
+    // Reconnect handles may overlap a short label; cards still cover labels.
+    const beneath = target.closest(".canvas-edge-end") ? document.elementsFromPoint(e.clientX, e.clientY).find(el => el.matches(".canvas-edge-label, .canvas-node")) : target;
+    const label = beneath?.closest<HTMLElement>(".canvas-edge-label");
+    pressedLabel = label?.dataset.edgeId;
     const card = target.closest<HTMLElement>(".canvas-node");
     const node = nodes.find(n => n.id === card?.dataset.nodeId);
     const side = target.closest<HTMLElement>("[data-resize]")?.dataset.resize;
     const edge = edges.find(edge => edge.id === target.closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId);
     const dot = target.closest<HTMLElement>(".canvas-node-connection-point");
-    let end = target.closest<HTMLElement>("[data-edge-end]")?.dataset.edgeEnd as "from" | "to" | undefined;
-    if (!end && edge && selectedEdges.has(edge.id) && !e.shiftKey) {
+    let end = label ? undefined : target.closest<HTMLElement>("[data-edge-end]")?.dataset.edgeEnd as "from" | "to" | undefined;
+    if (!label && !end && edge && selectedEdges.has(edge.id) && !e.shiftKey) {
       let distance = 24;
       for (const point of edgeElements()) if (point.dataset.edgeId === edge.id && point.dataset.edgeEnd) {
         const r = point.getBoundingClientRect(), gap = Math.hypot(e.clientX - r.x - r.width / 2, e.clientY - r.y - r.height / 2);
@@ -170,9 +174,9 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   }, { signal: events.signal });
   el.addEventListener("dblclick", e => {
     if (!e.isTrusted || canvasReadOnly.has(el) || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
-    const edge = edges.find(edge => edge.id === (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId);
+    const edge = edges.find(edge => edge.id === (pressedLabel ?? (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId));
     if (edge) { e.preventDefault(); e.stopPropagation(); edit(edge, selection); }
-  }, { signal: events.signal });
+  }, { capture: true, signal: events.signal });
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
   el.addEventListener("keydown", e => {
     if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only]")) return;
