@@ -276,10 +276,11 @@ export class NoteEmbedWidget extends DrawnWidget {
       editAt(view, line.from + Math.max(0, line.text.lastIndexOf("![[", at - line.from)) + 3);
     });
     let painted: ReturnType<typeof render> | null = null;
-    let gone = false;
-    const fill = () =>
+    let gone = false, generation = 0;
+    const fill = () => {
+      const mine = ++generation;
       void embeds.read(path).then((text) => {
-        if (gone) return;
+        if (gone || mine !== generation) return;
         if (painted) release(painted);
         content.replaceChildren();
         content.style.paddingBottom = "";
@@ -299,8 +300,9 @@ export class NoteEmbedWidget extends DrawnWidget {
           }
         }
       }, () => {
-        if (!gone) content.replaceChildren(missingBox(`“${name}” is not created yet.`));
+        if (!gone && mine === generation) content.replaceChildren(missingBox(`“${name}” is not created yet.`));
       });
+    };
     fill();
     const unwatch = embeds.watch(path, fill);
     onDestroy(dom, () => {

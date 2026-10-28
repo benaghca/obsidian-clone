@@ -45,7 +45,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   /** A row opened from its chevron, and a row folded while Show more context is on. */
   const opened = new Set<string>();
   const closed = new Set<string>();
-  const noteCache = new Map<string, string>();
+  let noteCache = new Map<string, string>();
   let unlinkedOpen = false;
   let moreContext = false;
   let sort: SortOrder = "alphabetical";
@@ -152,7 +152,10 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   function queueContext(mentions: Mention[], again: () => void) {
     const missing = [...new Set(mentions.filter(wantsContext).map((m) => m.from))].filter((p) => !noteCache.has(p));
     if (!missing.length) return;
-    void Promise.all(missing.map(async (p) => noteCache.set(p, await noteText(ws, p)))).then(again);
+    const cache = noteCache;
+    void Promise.all(missing.map(async (p) => cache.set(p, await noteText(ws, p)))).then(() => {
+      if (noteCache === cache) again();
+    });
   }
 
   function contextChevron(m: Mention) {
@@ -290,7 +293,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   }
 
   function refresh() {
-    noteCache.clear();
+    noteCache = new Map();
     shownLinked = "";
     renderLinked();
     scheduleUnlinked(UNLINKED_DELAY);
