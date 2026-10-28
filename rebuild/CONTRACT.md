@@ -10,6 +10,7 @@ Goal: get as close as possible to how Obsidian looks, feels, and responds. `rebu
 - Neither side edits the other's files. If the contract needs to change, edit this file and say so in the commit message.
 
 ## Tauri commands (backend implements, front end calls via `invoke`)
+Read commands run off the main thread; replies to separate calls may arrive in any order.
 - `open_vault(path: String) -> VaultInfo { path, name }` — remembers last vault.
 - `create_vault(path: String) -> VaultInfo { path, name }` — creates one new empty vault folder and opens it (same remember and watch as `open_vault`). The parent must already be a folder. An empty path, a missing parent, and a path that already exists are refused, so nothing is overwritten. Added in round 27.
 - `last_vault() -> Option<VaultInfo>`

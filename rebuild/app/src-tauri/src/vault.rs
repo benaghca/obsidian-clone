@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 /// How long a `write_note` suppresses watcher events for that path.
@@ -25,6 +26,7 @@ pub struct Vault {
     pub root: PathBuf,
     pub index: Index,
     own_writes: HashMap<String, Instant>,
+    rescan: Option<Arc<()>>,
 }
 
 impl Vault {
@@ -38,6 +40,7 @@ impl Vault {
             root,
             index,
             own_writes: HashMap::new(),
+            rescan: None,
         })
     }
 
@@ -268,11 +271,30 @@ impl Vault {
         }
     }
 
-    /// Diff a fresh scan. Used when the watcher asks for a rescan.
-    pub fn rescan(&mut self) -> Vec<VaultChanged> {
-        let Ok(fresh) = Index::scan(&self.root) else {
+    /// Start recording index mutations before releasing the state lock to scan.
+    /// The token also rejects a scan if the vault was reopened (even at the same root).
+    pub fn begin_rescan(&mut self) -> Arc<()> {
+        let token = Arc::new(());
+        self.rescan = Some(token.clone());
+        self.index.begin_rescan();
+        token
+    }
+
+    /// Reconcile only paths changed by the app during the scan, then diff and swap.
+    /// Both replay and swap hold the state lock: a completed write can never be lost.
+    pub fn finish_rescan(&mut self, token: &Arc<()>, fresh: Result<Index, String>) -> Vec<VaultChanged> {
+        if !self.rescan.as_ref().is_some_and(|current| Arc::ptr_eq(current, token)) {
+            return Vec::new();
+        }
+        self.rescan = None;
+        let paths = self.index.take_rescan_changes();
+        let Ok(mut fresh) = fresh else {
             return Vec::new();
         };
+        for path in paths {
+            fresh.remove_tree(&path);
+            fresh.refresh_path(&self.root, &path);
+        }
         let mut removed = Vec::new();
         let mut created = Vec::new();
         let mut modified = Vec::new();

@@ -64,6 +64,7 @@ export class Workspace {
   readonly embeds: EmbedHost;
 
   private nextTabId = 1;
+  private opens = new WeakMap<Group, symbol>();
   private changes = listeners<[Change, Group?]>();
   private moves = listeners<[(path: string) => string]>();
   private shownKey = "";
@@ -181,6 +182,7 @@ export class Workspace {
   }
 
   private select(group: Group, tab: Tab) {
+    this.opens.delete(group);
     if (group.active === tab && this.layout.activeGroup === group && this.editors.shows(group, tab)) return;
     this.show(group, tab);
     if (tab.path) this.editors.viewOf(group).focus();
@@ -270,11 +272,26 @@ export class Workspace {
   /** Obsidian's "Undo close tab": reopen the last closed tab where it was (or in the active pane). */
   async undoCloseTab() {
     while (this.closed.length) {
-      const { saved, group: was, index } = this.closed.pop()!;
-      const tab = this.loadTab(saved);
-      if (!tab || (!tab.type && (!tab.path || !(await this.editors.load(tab.path))))) continue;
-      const group = this.layout.groups().includes(was) ? was : this.activeGroup;
-      this.layout.addTab(group, tab, index);
+      const item = this.closed.pop()!;
+      const tab = this.loadTab(item.saved);
+      if (!tab) continue;
+      const group = this.layout.groups().includes(item.group) ? item.group : this.activeGroup;
+      if (!tab.type) {
+        if (!tab.path) continue;
+        const previous = this.opens.get(group);
+        const mine = Symbol();
+        this.opens.set(group, mine);
+        if (!(await this.editors.load(tab.path))) {
+          this.restoreOpen(group, mine, previous);
+          continue;
+        }
+        // A note opened while this read ran is the newer intent. Put the closed tab back.
+        if (!this.layout.groups().includes(group) || this.opens.get(group) !== mine) {
+          this.closed.push(item);
+          return;
+        }
+      }
+      this.layout.addTab(group, tab, item.index);
       this.select(group, tab);
       return;
     }
@@ -448,10 +465,15 @@ export class Workspace {
     path: string,
     opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
   ) {
-    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path)) return this.openAttachment(path, opts.where ?? false, opts.group);
-    const state = await this.editors.load(path);
-    if (!state) return;
     const from = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
+    // Only a pane replacement is ordered with other replacements. A new tab or
+    // split must not cancel an open already in flight, and must still be created.
+    const replaces = !opts.where;
+    const mine = Symbol();
+    if (replaces) this.opens.set(from, mine);
+    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path)) return this.openAttachment(path, opts.where ?? false, from);
+    const state = await this.editors.load(path);
+    if (!state || !this.layout.groups().includes(from) || (replaces && this.opens.get(from) !== mine)) return;
     let where = opts.where ?? false;
     const current = from.active;
     // A pinned tab keeps its note; anything else opened from it gets a new tab.
@@ -520,6 +542,13 @@ export class Workspace {
     await this.open(path, { where, heading, group });
   }
 
+  /** Put back the pane-replacement token `mine` took, when this navigation did not apply. */
+  private restoreOpen(group: Group, mine: symbol, previous: symbol | undefined) {
+    if (this.opens.get(group) !== mine) return;
+    if (previous === undefined) this.opens.delete(group);
+    else this.opens.set(group, previous);
+  }
+
   /** The caret in a pane's note, saved on the history step that leaves it. */
   private caretIn(group: Group): CaretPlace | undefined {
     if (!group.active.path || !this.editors.shows(group, group.active)) return undefined;
@@ -533,8 +562,16 @@ export class Workspace {
     const tab = group.active;
     const entry = (dir < 0 ? tab.back : tab.forward).at(-1);
     if (!entry) return;
+    const previous = this.opens.get(group);
+    const mine = Symbol();
+    this.opens.set(group, mine);
     const parsed = parseViewEntry(entry);
-    if (!parsed && !(await this.editors.load(entry))) return;
+    if (!parsed && !(await this.editors.load(entry))) {
+      this.restoreOpen(group, mine, previous);
+      return;
+    }
+    // A note opened while this history step was loading is newer than this step.
+    if (this.opens.get(group) !== mine || group.active !== tab || !this.layout.groups().includes(group)) return;
     const step = stepHistory(tab, dir, this.caretIn(group));
     if (!step) return;
     tab.type = parsed?.type;

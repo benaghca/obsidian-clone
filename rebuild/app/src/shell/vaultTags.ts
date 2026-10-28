@@ -42,11 +42,16 @@ export const vaultTags = perWorkspace((ws: Workspace) => {
   });
   return {
     /** Every note's saved tags (notes without tags are left out), read again only after a change. */
-    read: () =>
-      (tags ??= readTags().catch((err) => {
-        forget();
-        throw err;
-      })),
+    read: () => {
+      if (!tags) {
+        const pending = readTags().catch((err) => {
+          if (tags === pending) forget();
+          throw err;
+        });
+        tags = pending;
+      }
+      return tags;
+    },
     forget,
   };
 });

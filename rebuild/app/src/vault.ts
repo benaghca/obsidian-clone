@@ -23,6 +23,8 @@ export class Vault {
   isExcluded: (path: string) => boolean = () => false;
 
   private linkTimer = 0;
+  private filesRequest = 0;
+  private linksRequest = 0;
   private modified = listeners<[string]>();
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
@@ -55,7 +57,10 @@ export class Vault {
   }
 
   async refreshFiles() {
-    this.files = await api.listFiles();
+    const mine = ++this.filesRequest;
+    const files = await api.listFiles();
+    if (mine !== this.filesRequest) return;
+    this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && f.path.endsWith(".md"))
       .map((f) => ({ name: noteName(f.path), path: f.path }));
@@ -63,7 +68,10 @@ export class Vault {
   }
 
   async refreshLinks() {
-    this.links = await api.linkIndex();
+    const mine = ++this.linksRequest;
+    const links = await api.linkIndex();
+    if (mine !== this.linksRequest) return;
+    this.links = links;
     this.changed("links");
   }
 

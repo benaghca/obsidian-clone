@@ -68,6 +68,11 @@ export class NoteEditors {
   /** Last scroll position per note, for a tab arriving at it through history. */
   private scrollTops = new Map<string, number>();
   private saveTimers = new Map<string, number>();
+  private reloads = new Map<string, symbol>();
+  /** Bumped when a note changes on disk, so an in-flight `load` does not publish the old text. */
+  private loadEpoch = new Map<string, number>();
+  /** One disk read per path. Callers that arrive while it runs share the result. */
+  private loading = new Map<string, Promise<EditorState | null>>();
   /** Mirrors have no history: undo and redo there act on the note's main state. */
   private readonly mirrorKeys = Prec.high(
     keymap.of([
@@ -350,18 +355,42 @@ export class NoteEditors {
   // ----- notes -----
 
   async load(path: string): Promise<EditorState | null> {
-    let state = this.states.get(path);
+    const state = this.states.get(path);
     if (state) return state;
-    try {
-      const doc = await api.readNote(path);
-      state = this.states.get(path); // loaded meanwhile
-      if (state) return state;
-      state = createNoteState({ doc, host: this.host, extensions: this.mirrorKeys });
-      this.states.set(path, state);
-      return state;
-    } catch (err) {
-      console.error(`Could not open ${path}`, err);
-      return null;
+    let pending = this.loading.get(path);
+    if (!pending) {
+      pending = this.loadFromDisk(path);
+      this.loading.set(path, pending);
+      void pending.finally(() => {
+        if (this.loading.get(path) === pending) this.loading.delete(path);
+      });
+    }
+    return pending;
+  }
+
+  /**
+   * Read `path` and publish it. A disk change (`reload`) during the read starts
+   * it again, so the note that appears is not an older snapshot.
+   */
+  private async loadFromDisk(path: string): Promise<EditorState | null> {
+    for (;;) {
+      const generation = this.loadEpoch.get(path) ?? 0;
+      let doc: string;
+      try {
+        doc = await api.readNote(path);
+      } catch (err) {
+        console.error(`Could not open ${path}`, err);
+        return null;
+      }
+      const installed = this.states.get(path);
+      if (installed) return installed;
+      if ((this.loadEpoch.get(path) ?? 0) !== generation) continue;
+      const created = createNoteState({ doc, host: this.host, extensions: this.mirrorKeys });
+      const raced = this.states.get(path);
+      if (raced) return raced;
+      if ((this.loadEpoch.get(path) ?? 0) !== generation) continue;
+      this.states.set(path, created);
+      return created;
     }
   }
 
@@ -396,10 +425,18 @@ export class NoteEditors {
 
   /** A loaded note changed on disk (not by us, nothing unsaved): take the new text. */
   async reload(path: string) {
+    // Even when this note is not loaded yet: the open that is in flight must not keep the old text.
+    this.loadEpoch.set(path, (this.loadEpoch.get(path) ?? 0) + 1);
     if (!this.states.has(path) || this.saveTimers.has(path)) return;
+    const before = this.doc(path);
+    const mine = Symbol();
+    this.reloads.set(path, mine);
     const text = await api.readNote(path).catch(() => null);
+    if (this.reloads.get(path) !== mine) return;
+    this.reloads.delete(path);
     const current = this.doc(path);
-    if (text === null || !current || text === current.toString()) return;
+    // A newer reload or local typing while the read ran takes precedence.
+    if (text === null || !current || current !== before || this.saveTimers.has(path) || text === current.toString()) return;
     this.change(path, { changes: { from: 0, to: current.length, insert: text }, userEvent: "external" });
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }

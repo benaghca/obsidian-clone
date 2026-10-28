@@ -14,7 +14,7 @@ mod tests;
 use crate::fsutil::{self, is_ignored_rel};
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit};
 use parse::{clean_target, parse_note, Note};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
@@ -56,6 +56,9 @@ struct Node {
 #[derive(Default)]
 pub struct Index {
     files: BTreeMap<String, Node>,
+    // Present only while the watcher scans without the state lock. Unlike echo
+    // suppression, this journal cannot expire before the replacement is installed.
+    rescan_changes: Option<BTreeSet<String>>,
     by_name: HashMap<String, Vec<String>>,
     by_alias: HashMap<String, String>,
     by_path_lower: HashMap<String, String>,
@@ -256,7 +259,22 @@ impl Index {
         }
     }
 
+    pub fn begin_rescan(&mut self) {
+        self.rescan_changes = Some(BTreeSet::new());
+    }
+
+    pub fn take_rescan_changes(&mut self) -> BTreeSet<String> {
+        self.rescan_changes.take().unwrap_or_default()
+    }
+
+    fn changed_during_rescan(&mut self, rel: &str) {
+        if let Some(paths) = &mut self.rescan_changes {
+            paths.insert(rel.to_string());
+        }
+    }
+
     pub fn remove_tree(&mut self, rel: &str) {
+        self.changed_during_rescan(rel);
         let prefix = format!("{rel}/");
         self.files
             .retain(|k, _| k != rel && !k.starts_with(&prefix));
@@ -268,6 +286,8 @@ impl Index {
         if from == to || (!self.files.contains_key(from) && !self.has_child(from)) {
             return;
         }
+        self.changed_during_rescan(from);
+        self.changed_during_rescan(to);
         let prefix = format!("{from}/");
         let keys: Vec<String> = self
             .files
@@ -298,6 +318,7 @@ impl Index {
         if is_ignored_rel(rel) {
             return;
         }
+        self.changed_during_rescan(rel);
         let full = root.join(rel);
         match fs::symlink_metadata(&full) {
             Ok(md) if md.file_type().is_symlink() => self.remove_tree(rel),
@@ -319,6 +340,7 @@ impl Index {
     }
 
     pub fn upsert_note(&mut self, root: &Path, rel: &str, content: &str, stamp: Stamp) {
+        self.changed_during_rescan(rel);
         self.ensure_dirs(root, rel);
         self.insert_file(rel, stamp, || content.to_string());
         self.rebuild_maps();

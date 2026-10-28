@@ -157,24 +157,24 @@ fn create_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, S
     install_vault(&state, raw)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn last_vault(state: State<'_, AppState>) -> Result<Option<VaultInfo>, String> {
     let inner = lock(&state.inner);
     Ok(config::last_vault(&inner.config_dir).map(|path| VaultInfo::from_path(&path)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn list_files(state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
     with_vault(&state, |v| Ok(v.list_files()))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn read_note(state: State<'_, AppState>, path: String) -> Result<String, String> {
     with_vault(&state, |v| v.read_note(&path))
 }
 
 /// Sent as raw bytes (an ArrayBuffer in the page), not as a JSON array of numbers.
-#[tauri::command]
+#[tauri::command(async)]
 fn read_file_bytes(
     state: State<'_, AppState>,
     path: String,
@@ -260,7 +260,7 @@ fn delete_path(
 }
 
 /// A settings file from the vault's `.grove/` folder (`None` if missing).
-#[tauri::command]
+#[tauri::command(async)]
 fn read_config(state: State<'_, AppState>, name: String) -> Result<Option<String>, String> {
     with_vault(&state, |v| v.read_config(&name))
 }
@@ -271,18 +271,18 @@ fn write_config(state: State<'_, AppState>, name: String, content: String) -> Re
     with_vault(&state, |v| v.write_config(&name, &content))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<SearchHit>, String> {
     with_vault(&state, |v| Ok(v.index.search(&query, limit)))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
     with_vault(&state, |v| Ok(v.index.link_index()))
 }
 
 /// Each note's frontmatter block (only `paths`' when given), for the properties index.
-#[tauri::command]
+#[tauri::command(async)]
 fn frontmatter(
     state: State<'_, AppState>,
     paths: Option<Vec<String>>,
