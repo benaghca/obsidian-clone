@@ -7,6 +7,8 @@
 
 mod parse;
 #[cfg(test)]
+mod parity;
+#[cfg(test)]
 mod tests;
 
 use crate::fsutil::{self, is_ignored_rel};

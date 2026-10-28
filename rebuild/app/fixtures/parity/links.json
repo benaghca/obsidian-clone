@@ -1,0 +1,114 @@
+{
+  "about": "The [[wikilink]] and ![[embed]] targets in a note's text, in order, as written: without a #heading, ^block or |alias, trimmed. Empty targets are left out. Markdown [text](path) links are not in this file.",
+  "typescript": "wikilinkTargets in src/shell/linksTags.ts (the Outgoing links view)",
+  "rust": "parse_note in src-tauri/src/index/parse.rs: the targets of its links that are not markdown links",
+  "cases": [
+    { "name": "plain, alias and heading", "input": "[[A]] and [[B|alias]] and [[C#Heading]]", "expected": ["A", "B", "C"] },
+    { "name": "embed", "input": "![[image.png]] ![[Note#Part]]", "expected": ["image.png", "Note"] },
+    { "name": "block reference", "input": "[[C#^abc]]", "expected": ["C"] },
+    {
+      "name": "^ without #",
+      "input": "[[C^abc]]",
+      "expected": ["C"],
+      "rust": "todo",
+      "note": "TS cuts the target at ^ as well as # and |. Rust cuts at | and # only, so it gives \"C^abc\". Unverified in Obsidian, which writes block links as [[C#^abc]]."
+    },
+    { "name": "folder path", "input": "[[folder/Note]] [[../Up]]", "expected": ["folder/Note", "../Up"] },
+    { "name": "spaces trimmed", "input": "[[  Spaced Name  ]]", "expected": ["Spaced Name"] },
+    { "name": "empty targets left out", "input": "[[]] [[ ]] [[|alias]] [[#Heading]] [[#^block]]", "expected": [] },
+    { "name": "unclosed", "input": "[[A and [[B] and [[C", "expected": [] },
+    { "name": "a ] inside the alias", "input": "[[A|b]c]]", "expected": [] },
+    {
+      "name": "a [ inside the target",
+      "input": "[[a[b]]",
+      "expected": ["a[b"],
+      "rust": "todo",
+      "note": "TS allows [ in a target; Rust skips any [[...]] with a bracket inside. Unverified in Obsidian."
+    },
+    {
+      "name": "escaped pipe in a table cell",
+      "input": "| [[Note\\|alias]] | x |",
+      "expected": ["Note\\"],
+      "rust": "todo",
+      "obsidian": ["Note"],
+      "note": "Inside a table, \\| is how [[Note|alias]] is written. Rust reads it that way (\"Note\"); TS keeps the backslash (\"Note\\\"). Obsidian resolves it to Note. TS is likely wrong here."
+    },
+    { "name": "markdown links are not wikilinks", "input": "[A](A.md) ![img](i.png)", "expected": [] },
+    { "name": "in frontmatter", "input": ["---", "up: \"[[Parent]]\"", "---", "[[Body]]"], "expected": ["Parent", "Body"] },
+    { "name": "CRLF line ends", "input": "[[A]]\r\n[[B]]\r\n", "expected": ["A", "B"] },
+    { "name": "backtick fence skipped", "input": ["[[A]]", "```", "[[no]]", "```", "[[B]]"], "expected": ["A", "B"] },
+    { "name": "tilde fence skipped", "input": ["~~~", "[[no]]", "~~~", "[[B]]"], "expected": ["B"] },
+    { "name": "fence with an info string", "input": ["```js", "[[no]]", "```", "[[B]]"], "expected": ["B"] },
+    { "name": "unclosed fence runs to the end", "input": ["[[A]]", "```", "[[no]]"], "expected": ["A"] },
+    {
+      "name": "the other marker closes a fence (TS)",
+      "input": ["~~~", "```", "[[A]]", "~~~", "[[B]]"],
+      "expected": ["A"],
+      "rust": "todo",
+      "obsidian": ["B"],
+      "note": "TS's wikilinkTargets toggles on any fence line, so ``` closes the ~~~ block and [[B]] ends up inside a new one. Rust (and CommonMark, so likely Obsidian) only closes on the same marker. tagsInText's fence rule also agrees with Rust (see tags.json)."
+    },
+    {
+      "name": "a shorter fence closes a longer one (TS)",
+      "input": ["````", "```", "[[A]]", "````", "[[B]]"],
+      "expected": ["A"],
+      "rust": "todo",
+      "obsidian": ["B"],
+      "note": "As above: TS's wikilinkTargets ignores fence length. Rust and CommonMark need a closing fence at least as long."
+    },
+    {
+      "name": "fence indented with a tab",
+      "input": ["\t```", "[[A]]", "\t```", "[[B]]"],
+      "expected": ["B"],
+      "obsidian": ["A", "B"],
+      "note": "TS's wikilinkTargets allows any spaces or tabs before a fence; Rust allows up to 3 whitespace characters, tabs included. Both open a fence here. In CommonMark a tab is 4 columns, so this is an indented code line and not a fence; tagsInText agrees with that (see tags.json)."
+    },
+    {
+      "name": "fence indented 4 spaces",
+      "input": ["    ```", "[[A]]", "    ```", "[[B]]"],
+      "expected": ["B"],
+      "rust": "todo",
+      "obsidian": ["A", "B"],
+      "note": "TS's wikilinkTargets opens a fence at any indent. Rust, tagsInText and CommonMark allow at most 3 spaces, so this is not a fence."
+    },
+    {
+      "name": "closing fence indented 4 spaces",
+      "input": ["```", "[[A]]", "    ```", "[[B]]"],
+      "expected": ["B"],
+      "obsidian": [],
+      "note": "TS's wikilinkTargets and Rust's fence_close both close at any indent. tagsInText and CommonMark need at most 3 spaces, so the block runs to the end."
+    },
+    {
+      "name": "closing fence with text after it",
+      "input": ["```", "[[A]]", "``` x", "[[B]]"],
+      "expected": ["B"],
+      "rust": "todo",
+      "obsidian": [],
+      "note": "TS's wikilinkTargets closes on any line starting with ```. Rust, tagsInText and CommonMark do not close on a fence line with text after it."
+    },
+    {
+      "name": "a backtick in a backtick fence's info string",
+      "input": ["```a`b", "[[A]]"],
+      "expected": [],
+      "rust": "todo",
+      "obsidian": ["A"],
+      "note": "TS's wikilinkTargets opens a fence on any line starting with ```. Rust, tagsInText and CommonMark: a backtick in the info string means it is not a fence."
+    },
+    {
+      "name": "inline code",
+      "input": "`[[A]]` [[B]]",
+      "expected": ["A", "B"],
+      "rust": "todo",
+      "obsidian": ["B"],
+      "note": "TS's wikilinkTargets does not skip inline code. CONTRACT.md says links in inline code are skipped, and Rust does that. TS is likely wrong here."
+    },
+    {
+      "name": "double-backtick inline code",
+      "input": "``[[A]] ` x`` [[B]]",
+      "expected": ["A", "B"],
+      "rust": "todo",
+      "obsidian": ["B"],
+      "note": "Rust blanks CommonMark code spans (any run length). TS's wikilinkTargets does not skip inline code at all."
+    }
+  ]
+}

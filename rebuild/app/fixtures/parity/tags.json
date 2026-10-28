@@ -1,0 +1,104 @@
+{
+  "about": "Every tag in a note's text, in order: its frontmatter tags, then the #tags in its body (fenced code and inline code skipped). Duplicates are kept.",
+  "typescript": "tagsInText in src/shell/linksTags.ts",
+  "rust": "todo",
+  "cases": [
+    { "name": "one tag", "input": "Some #tag here", "expected": ["tag"] },
+    { "name": "at line start and after a list marker", "input": ["#first", "- #todo item", "1. #numbered"], "expected": ["first", "todo", "numbered"] },
+    { "name": "in a heading", "input": "## Section #tag", "expected": ["tag"] },
+    { "name": "nested", "input": "#project/grove and #a/b/c", "expected": ["project/grove", "a/b/c"] },
+    { "name": "hyphen and underscore", "input": "#my-tag #my_tag", "expected": ["my-tag", "my_tag"] },
+    { "name": "duplicates are kept", "input": "#a and #a", "expected": ["a", "a"] },
+    { "name": "trailing slashes dropped", "input": "#a/ and #b//", "expected": ["a", "b"], "note": "Unverified in Obsidian." },
+    { "name": "digits only is not a tag", "input": "#123 #2026 #v2 #1a", "expected": ["v2", "1a"] },
+    { "name": "headings are not tags", "input": ["# Heading", "## Two", "#", "##"], "expected": [] },
+    { "name": "needs a space or line start before the #", "input": "a#b c#d (#e) \\#f", "expected": [], "note": "Obsidian likely agrees for a#b and \\#f; (#e) unverified." },
+    { "name": "a URL fragment is not a tag", "input": "see https://example.com/page#frag", "expected": [] },
+    { "name": "a wikilink heading is not a tag", "input": "[[Note#Heading]] [[#Local]]", "expected": [] },
+    { "name": "ASCII punctuation ends a tag", "input": "#tag, #other. #bang! #it's", "expected": ["tag", "other", "bang", "it"] },
+    { "name": "letters from other scripts", "input": "#日本語 #café #straße #Ελληνικά", "expected": ["日本語", "café", "straße", "Ελληνικά"] },
+    {
+      "name": "combining accent (decomposed é)",
+      "input": "#café",
+      "expected": ["cafe"],
+      "obsidian": ["café"],
+      "note": "TS stops at U+0301 (a mark, not \\p{L}). Obsidian's tag pattern is believed to exclude only whitespace, ASCII punctuation and U+2000-206F / U+2E00-2E7F, so it keeps the mark. Verify."
+    },
+    {
+      "name": "Devanagari vowel signs",
+      "input": "#हिंदी",
+      "expected": ["ह"],
+      "obsidian": ["हिंदी"],
+      "note": "TS stops at the first vowel sign (Mc/Mn, not \\p{L}). Obsidian likely keeps the word whole (see the combining accent case). Verify."
+    },
+    {
+      "name": "emoji",
+      "input": "#🙂 #a🙂b",
+      "expected": ["a"],
+      "obsidian": ["🙂", "a🙂b"],
+      "note": "TS allows only letters, digits, _ - /. Obsidian likely allows emoji in tags. Verify."
+    },
+    {
+      "name": "CJK full stop",
+      "input": "#tag。",
+      "expected": ["tag"],
+      "obsidian": ["tag。"],
+      "note": "U+3002 is outside the ranges Obsidian is believed to exclude. Verify."
+    },
+    { "name": "inline code skipped", "input": "`#notatag` #yes", "expected": ["yes"] },
+    {
+      "name": "double-backtick inline code",
+      "input": "``#a ` #b`` #c",
+      "expected": ["a", "c"],
+      "obsidian": ["c"],
+      "note": "TS blanks single-backtick pairs only (`[^`]*`), so it splits the span at the inner backtick. CommonMark (and so Obsidian, likely) reads ``#a ` #b`` as one code span. Rust's blank_inline_code (links) does it the CommonMark way."
+    },
+    { "name": "backtick fence", "input": ["```", "#no", "```", "#yes"], "expected": ["yes"] },
+    { "name": "tilde fence", "input": ["~~~", "#no", "~~~", "#yes"], "expected": ["yes"] },
+    { "name": "fence with an info string", "input": ["```js", "x = 1 // #no", "```", "#yes"], "expected": ["yes"] },
+    { "name": "a shorter fence does not close a longer one", "input": ["````", "```", "#no", "````", "#yes"], "expected": ["yes"] },
+    { "name": "the other marker does not close a fence", "input": ["~~~", "```", "#no", "~~~", "#yes"], "expected": ["yes"] },
+    { "name": "fence indented 3 spaces", "input": ["   ```", "#no", "   ```", "#yes"], "expected": ["yes"] },
+    {
+      "name": "fence indented with a tab is not a fence",
+      "input": ["\t```", "#a", "\t```", "#b"],
+      "expected": ["a", "b"],
+      "note": "TS: a fence opens with at most 3 spaces, so a tab-indented ``` is not one. CommonMark agrees (a tab is 4 columns: an indented code line). Rust's fence_open trims any whitespace up to 3 characters, so it opens a fence here (see links.json)."
+    },
+    { "name": "fence indented 4 spaces is not a fence", "input": ["    ```", "#a", "    ```", "#b"], "expected": ["a", "b"] },
+    {
+      "name": "closing fence indented 4 spaces does not close",
+      "input": ["```", "#a", "    ```", "#b"],
+      "expected": [],
+      "note": "TS and CommonMark: a closing fence has at most 3 spaces of indent, so the block runs on to the end. Rust's fence_close trims any indent and closes here (see links.json)."
+    },
+    { "name": "closing fence with text after it does not close", "input": ["```", "#a", "``` x", "#b"], "expected": [] },
+    { "name": "a backtick in a backtick fence's info string: not a fence", "input": ["```a`b", "#x"], "expected": ["x"] },
+    { "name": "unclosed fence runs to the end", "input": ["#before", "```", "#a", "#b"], "expected": ["before"] },
+    {
+      "name": "indented code block",
+      "input": ["Para", "", "    #indented"],
+      "expected": ["indented"],
+      "note": "TS has no indented-code-block rule. Obsidian probably does not tag inside an indented code block. Unverified; no obsidian value given."
+    },
+    { "name": "frontmatter inline list", "input": ["---", "tags: [a, \"#b\", 'c']", "---", "body"], "expected": ["a", "b", "c"] },
+    { "name": "frontmatter YAML list", "input": ["---", "tags:", "  - a", "  - \"#b\"", "other: x", "  - notatag", "---"], "expected": ["a", "b"] },
+    { "name": "frontmatter comma list", "input": ["---", "tags: a, b", "---"], "expected": ["a", "b"] },
+    { "name": "frontmatter space list", "input": ["---", "tags: a b", "---"], "expected": ["a", "b"] },
+    { "name": "frontmatter legacy tag: key", "input": ["---", "tag: one", "---"], "expected": ["one"] },
+    { "name": "frontmatter YAML comment after the value", "input": ["---", "tags: a # a comment", "---"], "expected": ["a"] },
+    { "name": "frontmatter key in any case", "input": ["---", "Tags: Upper", "---"], "expected": ["Upper"], "note": "Unverified in Obsidian." },
+    { "name": "frontmatter invalid values dropped", "input": ["---", "tags: [a/b/, \"#c d\", 123]", "---"], "expected": ["a/b"] },
+    { "name": "frontmatter must start on line 1", "input": ["#body1", "---", "tags: [x]", "---"], "expected": ["body1"], "note": "Frontmatter must start on line 1; here it does not, so the --- block is body text." },
+    { "name": "frontmatter then body", "input": ["---", "tags: [fm]", "---", "#body"], "expected": ["fm", "body"] },
+    { "name": "a # inside frontmatter is not a body tag", "input": ["---", "status: #draft", "---", "#body"], "expected": ["body"] },
+    { "name": "frontmatter with CRLF line ends", "input": "---\r\ntags: [a]\r\n---\r\n#b\r\n", "expected": ["a", "b"] },
+    {
+      "name": "BOM before frontmatter",
+      "input": "﻿---\ntags: [a]\n---\n#b",
+      "expected": ["b"],
+      "obsidian": ["a", "b"],
+      "note": "TS: frontmatter must start with ---, and a BOM comes first. Rust's parse_note strips a BOM. Obsidian likely reads the frontmatter. Verify."
+    }
+  ]
+}
