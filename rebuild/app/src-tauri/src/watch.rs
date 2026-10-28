@@ -6,7 +6,8 @@
 //! `[from, to]`; a move into `.trash` is reported as `remove`.
 
 use crate::model::{push_change, ChangeKind, VaultChanged};
-use crate::{lock, AppState};
+use crate::{lock, AppState, Inner};
+use crate::index::Index;
 use notify::event::{AccessKind, AccessMode, EventKind, ModifyKind, RenameMode};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::collections::{BTreeSet, HashMap};
@@ -98,30 +99,45 @@ fn start_watcher(
 
 fn flush(app: &AppHandle, events: &[Event]) {
     let state = app.state::<AppState>();
-    let changes = {
-        let mut inner = lock(&state.inner);
-        let Some(vault) = inner.vault.as_mut() else {
-            return;
-        };
-        let now = Instant::now();
-        let changes = if events.iter().any(|event| event.need_rescan()) {
-            vault.rescan()
-        } else {
-            let root = vault.root.clone();
-            let raw = coalesce(&root, events, |path| vault.is_own_write(path, now));
-            let changes = vault.normalize(raw);
-            vault.apply(&changes);
-            changes
-        };
-        vault.gc_own_writes(now);
-        changes
-    };
+    let changes = flush_changes(&state.inner, events, Index::scan);
     for change in changes {
         if change.paths.is_empty() {
             continue;
         }
         let _ = app.emit("vault-changed", &change);
     }
+}
+
+/// `scan` is injectable so tests can write while the state lock is released.
+fn flush_changes(
+    inner: &std::sync::Mutex<Inner>,
+    events: &[Event],
+    scan: impl FnOnce(&Path) -> Result<Index, String>,
+) -> Vec<VaultChanged> {
+    let (root, token) = {
+        let mut inner = lock(inner);
+        let Some(vault) = inner.vault.as_mut() else {
+            return Vec::new();
+        };
+        let now = Instant::now();
+        if !events.iter().any(|event| event.need_rescan()) {
+            let raw = coalesce(&vault.root, events, |path| vault.is_own_write(path, now));
+            let changes = vault.normalize(raw);
+            vault.apply(&changes);
+            vault.gc_own_writes(now);
+            return changes;
+        }
+        (vault.root.clone(), vault.begin_rescan())
+    };
+    // The expensive full-vault disk read must not hold AppState.inner.
+    let fresh = scan(&root);
+    let mut inner = lock(inner);
+    let Some(vault) = inner.vault.as_mut() else {
+        return Vec::new();
+    };
+    let changes = vault.finish_rescan(&token, fresh);
+    vault.gc_own_writes(Instant::now());
+    changes
 }
 
 /// What the events of one rename (one tracker) said: its two halves, or both ends at once.
@@ -303,6 +319,87 @@ mod tests {
     fn one(kind: ChangeKind, paths: &[&str]) -> Vec<VaultChanged> {
         let paths = paths.iter().map(|p| p.to_string()).collect();
         vec![VaultChanged { kind, paths }]
+    }
+
+    fn rescanning() -> Vec<Event> {
+        vec![Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan)]
+    }
+
+    fn state(root: &Path) -> std::sync::Mutex<Inner> {
+        std::sync::Mutex::new(Inner {
+            config_dir: root.join(".grove"),
+            vault: Some(crate::vault::Vault::open(root.to_path_buf()).unwrap()),
+        })
+    }
+
+    #[test]
+    fn rescan_keeps_app_mutations_even_after_own_write_suppression_expires() {
+        let dir = tmp_dir("rescan-writes");
+        for path in ["saved.md", "moved.md", "removed.md"] {
+            fs::write(dir.path.join(path), "old").unwrap();
+        }
+        let inner = state(&dir.path);
+        // This hook runs with a stale scan in hand, at the worst point for a write.
+        // Acquiring the mutex here also proves that the full scan isn't under it.
+        let changes = flush_changes(&inner, &rescanning(), |root| {
+            let fresh = Index::scan(root)?;
+            let mut guard = inner.try_lock().expect("scan must not hold the state lock");
+            let vault = guard.vault.as_mut().unwrap();
+            vault.write_note("saved.md", "---\nstatus: new\n---\n[[created]]\nlatest").unwrap();
+            vault.write_note("new-parent/own.md", "latest").unwrap();
+            vault.create_note("created.md", "latest").unwrap();
+            vault.create_folder("empty").unwrap();
+            vault.write_file_bytes("image.png", b"png").unwrap();
+            vault.rename_path("moved.md", "folder/moved.md").unwrap();
+            vault.delete_path("removed.md", true).unwrap();
+            // A long scan plus later saves may garbage-collect all echo suppression.
+            vault.gc_own_writes(Instant::now() + crate::vault::OWN_WRITE);
+            assert!(!vault.is_own_write("saved.md", Instant::now()));
+            // An unrelated external change still generates an event after the swap.
+            fs::write(root.join("external.md"), "external").unwrap();
+            let mut fresh = fresh;
+            fresh.refresh_path(root, "external.md");
+            Ok(fresh)
+        });
+        assert_eq!(changes, one(ChangeKind::Create, &["external.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        for path in ["saved.md", "new-parent/own.md", "created.md", "empty", "image.png", "folder/moved.md"] {
+            assert!(vault.index.contains(path), "lost {path}");
+        }
+        for path in ["moved.md", "removed.md"] {
+            assert!(!vault.index.contains(path), "resurrected {path}");
+        }
+        assert_eq!(vault.index.search("latest", 10).len(), 3);
+        assert!(vault.index.frontmatter(None)["saved.md"].contains("status: new"));
+        assert_eq!(vault.index.link_index().outgoing["saved.md"], vec!["created.md"]);
+    }
+
+    #[test]
+    fn rescan_does_not_replace_a_reopened_vault_even_at_the_same_root() {
+        let dir = tmp_dir("rescan-reopen");
+        fs::write(dir.path.join("saved.md"), "old").unwrap();
+        let inner = state(&dir.path);
+        let changes = flush_changes(&inner, &rescanning(), |root| {
+            let fresh = Index::scan(root)?;
+            fs::write(root.join("saved.md"), "new").unwrap();
+            lock(&inner).vault = Some(crate::vault::Vault::open(root.to_path_buf())?);
+            Ok(fresh)
+        });
+        assert!(changes.is_empty());
+        assert_eq!(lock(&inner).vault.as_ref().unwrap().index.search("new", 10).len(), 1);
+    }
+
+    #[test]
+    fn failed_rescan_keeps_the_live_index_and_allows_the_next_rescan() {
+        let dir = tmp_dir("rescan-failed");
+        let inner = state(&dir.path);
+        assert!(flush_changes(&inner, &rescanning(), |_| {
+            lock(&inner).vault.as_mut().unwrap().write_note("saved.md", "latest")?;
+            Err("injected scan failure".into())
+        }).is_empty());
+        assert_eq!(lock(&inner).vault.as_ref().unwrap().index.search("latest", 10).len(), 1);
+        assert!(flush_changes(&inner, &rescanning(), Index::scan).is_empty());
     }
 
     #[test]
