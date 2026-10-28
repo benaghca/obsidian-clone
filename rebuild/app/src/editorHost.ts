@@ -197,7 +197,7 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       return kept(notes, path, () => {
         if (notes.size >= MAX_NOTES) notes.delete(notes.keys().next().value!);
         const text = api.readNote(path);
-        text.catch(() => notes.delete(path));
+        text.catch(() => { if (notes.get(path) === text) notes.delete(path); });
         return text;
       });
     },

@@ -64,6 +64,7 @@ export class Workspace {
   readonly embeds: EmbedHost;
 
   private nextTabId = 1;
+  private opens = new WeakMap<Group, symbol>();
   private changes = listeners<[Change, Group?]>();
   private moves = listeners<[(path: string) => string]>();
   private shownKey = "";
@@ -181,6 +182,7 @@ export class Workspace {
   }
 
   private select(group: Group, tab: Tab) {
+    this.opens.delete(group);
     if (group.active === tab && this.layout.activeGroup === group && this.editors.shows(group, tab)) return;
     this.show(group, tab);
     if (tab.path) this.editors.viewOf(group).focus();
@@ -448,10 +450,14 @@ export class Workspace {
     path: string,
     opts: { where?: OpenWhere; line?: number; ch?: [number, number]; heading?: string; group?: Group } = {},
   ) {
-    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path)) return this.openAttachment(path, opts.where ?? false, opts.group);
-    const state = await this.editors.load(path);
-    if (!state) return;
     const from = opts.group && this.layout.groups().includes(opts.group) ? opts.group : this.activeGroup;
+    const mine = Symbol();
+    this.opens.set(from, mine);
+    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path)) return this.openAttachment(path, opts.where ?? false, from);
+    const state = await this.editors.load(path);
+    // Replacing this pane follows the latest navigation intent. Explicit new
+    // tabs/panes are independent opens, so all of them must still be created.
+    if (!state || !this.layout.groups().includes(from) || (!opts.where && this.opens.get(from) !== mine)) return;
     let where = opts.where ?? false;
     const current = from.active;
     // A pinned tab keeps its note; anything else opened from it gets a new tab.

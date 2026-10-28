@@ -68,6 +68,7 @@ export class NoteEditors {
   /** Last scroll position per note, for a tab arriving at it through history. */
   private scrollTops = new Map<string, number>();
   private saveTimers = new Map<string, number>();
+  private reloads = new Map<string, symbol>();
   /** Mirrors have no history: undo and redo there act on the note's main state. */
   private readonly mirrorKeys = Prec.high(
     keymap.of([
@@ -397,9 +398,15 @@ export class NoteEditors {
   /** A loaded note changed on disk (not by us, nothing unsaved): take the new text. */
   async reload(path: string) {
     if (!this.states.has(path) || this.saveTimers.has(path)) return;
+    const before = this.doc(path);
+    const mine = Symbol();
+    this.reloads.set(path, mine);
     const text = await api.readNote(path).catch(() => null);
+    if (this.reloads.get(path) !== mine) return;
+    this.reloads.delete(path);
     const current = this.doc(path);
-    if (text === null || !current || text === current.toString()) return;
+    // A newer reload or local typing while the read ran takes precedence.
+    if (text === null || !current || current !== before || this.saveTimers.has(path) || text === current.toString()) return;
     this.change(path, { changes: { from: 0, to: current.length, insert: text }, userEvent: "external" });
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }
