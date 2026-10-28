@@ -47,7 +47,7 @@ it("keeps newer file and link refreshes when older replies arrive last", async (
 function reloadHost() {
   let doc = Text.of(["original"]);
   const host = {
-    states: new Map([["a.md", true]]), saveTimers: new Map(), reloads: new Map(),
+    states: new Map([["a.md", true]]), saveTimers: new Map(), reloads: new Map(), loadEpoch: new Map(),
     doc: () => doc,
     change: vi.fn((_path: string, spec: { changes: { insert: string } }) => { doc = Text.of(spec.changes.insert.split("\n")); }),
     events: { saved: vi.fn() },
@@ -135,12 +135,21 @@ function navigationHost() {
   const shown: string[] = [];
   const host = {
     opens: new WeakMap(), activeGroup: group, layout: { groups: () => [group] },
-    editors: { load: vi.fn(), viewOf: () => ({ state: { doc: Text.of(["body"]) }, focus: vi.fn() }) },
+    editors: {
+      load: vi.fn(),
+      shows: () => false,
+      present: () => {},
+      viewOf: () => ({ state: { doc: Text.of(["body"]) }, focus: vi.fn() }),
+    },
+    settle: () => {},
     target: () => ({ group, tab, layoutChanged: false }), caretIn: () => undefined,
     show: () => { shown.push(tab.path!); },
-    openAttachment: () => { host.opens.delete(group); shown.push("canvas"); },
+    openAttachment: () => { shown.push("canvas"); },
   };
-  return { host, shown, open: (path: string) => Workspace.prototype.open.call(host as never, path) };
+  return {
+    host, shown, tab, group,
+    open: (path: string, opts?: object) => Workspace.prototype.open.call(host as never, path, opts),
+  };
 }
 
 it("keeps the latest ordinary note navigation when the older note loads last", async () => {
@@ -160,4 +169,83 @@ it("opening a canvas supersedes an in-flight ordinary note navigation", async ()
   const first = open("old.md");
   await open("Board.canvas"); pending.resolve({}); await first;
   expect(shown).toEqual(["canvas"]);
+});
+
+it("still opens an in-flight note when a new tab is opened while it loads", async () => {
+  const pending = deferred<unknown>();
+  const { host, shown, open } = navigationHost();
+  host.editors.load.mockReturnValueOnce(pending.promise).mockResolvedValueOnce({});
+  const first = open("old.md");
+  await open("tab.md", { where: "tab" });
+  pending.resolve({});
+  await first;
+  expect(shown).toEqual(["tab.md", "old.md"]);
+});
+
+it("does not apply history after a newer note open", async () => {
+  const history = deferred<unknown>(), opened = deferred<unknown>();
+  const { host, shown, tab, open } = navigationHost();
+  tab.path = "current.md";
+  tab.back = ["older.md"];
+  host.editors.load.mockImplementation((path: string) => (path === "older.md" ? history.promise : opened.promise));
+  const traveling = Workspace.prototype.travel.call(host as never, -1);
+  const opening = open("new.md");
+  opened.resolve({});
+  await opening;
+  history.resolve({});
+  await traveling;
+  expect(shown).toEqual(["new.md"]);
+  expect(tab.path).toBe("new.md");
+  // History was not consumed. Opening the note records the one that was on screen.
+  expect(tab.back).toEqual(["older.md", "current.md"]);
+});
+
+it("lets history supersede an in-flight note open", async () => {
+  const history = deferred<unknown>(), opened = deferred<unknown>();
+  const { host, shown, tab, open } = navigationHost();
+  tab.path = "current.md";
+  tab.back = ["older.md"];
+  host.editors.load.mockImplementation((path: string) => (path === "older.md" ? history.promise : opened.promise));
+  const opening = open("new.md");
+  const traveling = Workspace.prototype.travel.call(host as never, -1);
+  history.resolve({});
+  await traveling;
+  opened.resolve({});
+  await opening;
+  expect(shown).toEqual([]);
+  expect(tab.path).toBe("older.md");
+});
+
+it("does not reopen a closed tab over a note opened while it loaded", async () => {
+  const closedRead = deferred<unknown>(), opened = deferred<unknown>();
+  const { host, shown, group, open } = navigationHost();
+  const closedTab = { path: "closed.md", back: [], forward: [], pinned: false };
+  const layout = host.layout as { groups: () => unknown[]; addTab: ReturnType<typeof vi.fn> };
+  const restored = host as typeof host & { closed: unknown[]; loadTab: () => unknown; select: () => void };
+  restored.closed = [{ saved: {}, group, index: 0 }];
+  restored.loadTab = () => closedTab;
+  layout.addTab = vi.fn();
+  restored.select = () => { shown.push("closed"); };
+  host.editors.load.mockImplementation((path: string) => (path === "closed.md" ? closedRead.promise : opened.promise));
+  const restoring = Workspace.prototype.undoCloseTab.call(host as never);
+  const opening = open("new.md");
+  opened.resolve({});
+  await opening;
+  closedRead.resolve({});
+  await restoring;
+  expect(shown).toEqual(["new.md"]);
+  expect(layout.addTab).not.toHaveBeenCalled();
+  expect(restored.closed).toHaveLength(1);
+});
+
+it("does not publish a note read that lost a disk change while it was in flight", async () => {
+  const stale = deferred<string>(), fresh = deferred<string>();
+  vi.mocked(api.readNote).mockReturnValueOnce(stale.promise).mockReturnValueOnce(fresh.promise);
+  const editors = new NoteEditors({} as never, { shown() {}, loaded() {}, changed() {}, saved() {} });
+  const loading = editors.load("a.md");
+  const reloading = editors.reload("a.md");
+  stale.resolve("stale");
+  fresh.resolve("fresh");
+  await reloading;
+  expect((await loading)?.doc.toString()).toBe("fresh");
 });
