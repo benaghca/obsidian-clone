@@ -32,3 +32,6 @@ webkit2gtk = "2"
 # frontend does not have to be built first.
 default = []
 custom-protocol = ["tauri/custom-protocol"]
+
+[profile.dev.package."*"]
+opt-level = 2
