@@ -9,7 +9,7 @@ import { api } from "../api";
 import { kept, perWorkspace } from "../memo";
 import type { Workspace } from "../workspace";
 import { type NoteProperties, propertyIndex } from "./propertyIndex";
-import { type Facts, type Line, needs, type Query, termsOf } from "./searchQuery";
+import { type Facts, type Line, needs, type Query, termLines, termsOf } from "./searchQuery";
 import { vaultTags } from "./vaultTags";
 
 export interface VaultFacts extends Facts {
@@ -32,8 +32,8 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
 
   /**
    * The lines with a term, per note. The backend finds lines with all its
-   * words, in any case; a phrase is then looked for whole, and with Match
-   * case the term as typed.
+   * words, in any case; `termLines` then requires the whole phrase, and with
+   * Match case the term as typed. Name hits are not lines.
    */
   function linesOf(term: string, matchCase: boolean) {
     const lines = caches[Number(matchCase)];
@@ -44,8 +44,13 @@ export const searchFacts = perWorkspace((ws: Workspace) => {
         (hits) => {
           const out = new Map<string, Line[]>();
           for (const hit of hits) {
-            if (hit.line <= 0 || ((matchCase || term.includes(" ")) && !(matchCase ? hit.text : hit.text.toLowerCase()).includes(term))) continue;
+            if (hit.line <= 0) continue;
             kept(out, hit.path, () => []).push(hit);
+          }
+          for (const [path, group] of out) {
+            const keptLines = termLines(group, term, matchCase);
+            if (keptLines.length) out.set(path, keptLines);
+            else out.delete(path);
           }
           return out;
         },

@@ -1,0 +1,1633 @@
+{
+  "about": "Which files a query matches in a small vault, with each note's match count and every shown line number. An attachment that matches maps to {}. null means the query has nothing to search for. Keys are a map: order is not part of the result.",
+  "typescript": "searchVault in src/shell/searchVault.ts, over parseQuery, matches, shownLines and matchCount",
+  "rust": "todo",
+  "vaults": {
+    "obsidian-1.14.4": {
+      "A.md": [
+        "---",
+        "status: done",
+        "project: Grove",
+        "tags: [gamma]",
+        "---",
+        "Alpha line here",
+        "another line with beta",
+        "star wars is a phrase",
+        "wars star reversed",
+        "#inline-tag"
+      ],
+      "B.md": [
+        "---",
+        "status: in progress",
+        "category:",
+        "  - one",
+        "  - two",
+        "---",
+        "alpha beta on one line"
+      ],
+      "C.md": [
+        "No frontmatter here. alpha only."
+      ],
+      "Props.md": [
+        "---",
+        "tags:",
+        "  - alpha",
+        "  - beta",
+        "status: draft",
+        "---",
+        "Body text with five words."
+      ],
+      "Projects/Roadmap.md": [
+        "---",
+        "status: draft",
+        "---",
+        "The roadmap mentions alpha and gamma."
+      ],
+      "Gamma file.md": [
+        "Nothing relevant inside."
+      ],
+      "Daily/2026-10-21.md": [
+        "Daily note with beta."
+      ]
+    },
+    "match-case": {
+      "Other.md": [
+        "---",
+        "status: done",
+        "---",
+        "",
+        "alpha beta alpha gamma",
+        "Alpha again"
+      ],
+      "Props.md": [
+        "---",
+        "tags:",
+        "  - alpha",
+        "---",
+        "",
+        "Body text with Alpha and alpha and ALPHA."
+      ],
+      "Upper.md": [
+        "Only ALPHA here"
+      ]
+    },
+    "names": {
+      "Upper.MD": [
+        "Nothing about the extension."
+      ],
+      "Note.md": [
+        "nope"
+      ],
+      "photo.png": "alpha sits in the file bytes",
+      "Board.canvas": "{\"nodes\":[{\"text\":\"alpha\"}]}"
+    },
+    "tags": {
+      "Nested.md": [
+        "---",
+        "tags:",
+        "  - a/b",
+        "---",
+        "body"
+      ],
+      "Flat.md": [
+        "---",
+        "tags: [ab]",
+        "---",
+        "body"
+      ],
+      "UpperTag.md": [
+        "---",
+        "tags: [A]",
+        "---",
+        "body"
+      ],
+      "Slash.md": [
+        "---",
+        "tags: [a/]",
+        "---",
+        "body"
+      ],
+      "Idea.md": [
+        "---",
+        "tags: [Idea]",
+        "---",
+        "#Idea"
+      ]
+    },
+    "props": {
+      "Empty.md": [
+        "---",
+        "status:",
+        "---",
+        "body"
+      ],
+      "Check.md": [
+        "---",
+        "done: true",
+        "---",
+        "body"
+      ],
+      "List.md": [
+        "---",
+        "category:",
+        "  - one",
+        "  - two",
+        "---",
+        "body"
+      ],
+      "Hash.md": [
+        "---",
+        "tags: \"#a\"",
+        "---",
+        "body"
+      ],
+      "Number.md": [
+        "---",
+        "n: 1",
+        "---",
+        "body"
+      ],
+      "Dup.md": [
+        "---",
+        "status: one",
+        "Status: two",
+        "---",
+        "body"
+      ]
+    },
+    "text": {
+      "Line.md": [
+        "a",
+        "b",
+        "#x",
+        "x",
+        "a b"
+      ],
+      "Phrase.md": [
+        "a b",
+        "a  b",
+        "a\tb"
+      ],
+      "Overlap.md": [
+        "star wars and stars"
+      ],
+      "Fence.md": [
+        "before",
+        "```",
+        "fence phrase",
+        "```",
+        "after"
+      ],
+      "Crlf.md": "---\r\nstatus: crlf\r\n---\r\ncrlfword\r\n",
+      "Bom.md": "﻿---\nstatus: bomdraft\ntags: [bomtag]\n---\nbombody\n",
+      "Bare.md": "hello\r"
+    },
+    "unicode": {
+      "FinalSigma.md": [
+        "ΑΣ"
+      ],
+      "Sigma.md": [
+        "Σ"
+      ],
+      "IstanbulFold.md": [
+        "i̇stanbul"
+      ],
+      "Istanbul.md": [
+        "İstanbul"
+      ],
+      "Eszett.md": [
+        "ß"
+      ],
+      "EszettCap.md": [
+        "ẞ"
+      ],
+      "Kelvin.md": [
+        "k"
+      ],
+      "KelvinSign.md": [
+        "K"
+      ],
+      "Accent.md": [
+        "é"
+      ],
+      "AccentOk.md": [
+        "é"
+      ],
+      "Cjk.md": [
+        "漢字"
+      ],
+      "Emoji.md": [
+        "a 😀 b"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "name": "a word",
+      "vault": "obsidian-1.14.4",
+      "input": "alpha",
+      "expected": {
+        "A.md": {
+          "count": 1,
+          "lines": [
+            6
+          ]
+        },
+        "B.md": {
+          "count": 1,
+          "lines": [
+            7
+          ]
+        },
+        "C.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            4
+          ]
+        },
+        "Props.md": {
+          "count": 1,
+          "lines": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "two words anywhere in the note",
+      "vault": "obsidian-1.14.4",
+      "input": "alpha beta",
+      "expected": {
+        "A.md": {
+          "count": 2,
+          "lines": [
+            6,
+            7
+          ]
+        },
+        "B.md": {
+          "count": 2,
+          "lines": [
+            7
+          ]
+        },
+        "Props.md": {
+          "count": 2,
+          "lines": [
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "a phrase",
+      "vault": "obsidian-1.14.4",
+      "input": "\"star wars\"",
+      "expected": {
+        "A.md": {
+          "count": 1,
+          "lines": [
+            8
+          ]
+        }
+      },
+      "note": "The phrase has to occur whole on one line. wars star reversed is not star wars. The old unit test split the phrase into words and would have counted that line too."
+    },
+    {
+      "name": "a word and a negation",
+      "vault": "obsidian-1.14.4",
+      "input": "alpha -beta",
+      "expected": {
+        "C.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "only the negation",
+      "vault": "obsidian-1.14.4",
+      "input": "-alpha",
+      "expected": {
+        "Daily/2026-10-21.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Gamma file.md": {
+          "count": 0,
+          "lines": []
+        }
+      }
+    },
+    {
+      "name": "OR, and the name counts",
+      "vault": "obsidian-1.14.4",
+      "input": "alpha OR gamma",
+      "expected": {
+        "A.md": {
+          "count": 2,
+          "lines": [
+            4,
+            6
+          ]
+        },
+        "B.md": {
+          "count": 1,
+          "lines": [
+            7
+          ]
+        },
+        "C.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "Gamma file.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Projects/Roadmap.md": {
+          "count": 2,
+          "lines": [
+            4
+          ]
+        },
+        "Props.md": {
+          "count": 1,
+          "lines": [
+            3
+          ]
+        }
+      },
+      "note": "Gamma file.md has no gamma in the text. The word is in the file name, with .md stripped."
+    },
+    {
+      "name": "a tag",
+      "vault": "obsidian-1.14.4",
+      "input": "tag:gamma",
+      "expected": {
+        "A.md": {
+          "count": 0,
+          "lines": []
+        }
+      }
+    },
+    {
+      "name": "a tag written with a hash",
+      "vault": "obsidian-1.14.4",
+      "input": "tag:#gamma",
+      "expected": {
+        "A.md": {
+          "count": 0,
+          "lines": []
+        }
+      }
+    },
+    {
+      "name": "a hash is text, not a tag",
+      "vault": "obsidian-1.14.4",
+      "input": "#gamma",
+      "expected": {},
+      "note": "The frontmatter value is gamma, without a hash, so the text query matches nothing."
+    },
+    {
+      "name": "a tag prefix is not a parent",
+      "vault": "obsidian-1.14.4",
+      "input": "tag:#inline",
+      "expected": {},
+      "note": "The term loses one # and becomes inline. The tag inline-tag is not under inline."
+    },
+    {
+      "name": "file:",
+      "vault": "obsidian-1.14.4",
+      "input": "file:roadmap",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "file: against a dated name",
+      "vault": "obsidian-1.14.4",
+      "input": "file:2026",
+      "expected": {
+        "Daily/2026-10-21.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "path:",
+      "vault": "obsidian-1.14.4",
+      "input": "path:proj",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "line: both words",
+      "vault": "obsidian-1.14.4",
+      "input": "line:(alpha beta)",
+      "expected": {
+        "B.md": {
+          "count": 2,
+          "lines": [
+            7
+          ]
+        }
+      }
+    },
+    {
+      "name": "a property that exists",
+      "vault": "obsidian-1.14.4",
+      "input": "[status]",
+      "expected": {
+        "A.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        },
+        "B.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        },
+        "Props.md": {
+          "count": 0,
+          "lines": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "a quoted property name",
+      "vault": "obsidian-1.14.4",
+      "input": "[\"status\"]",
+      "expected": {
+        "A.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        },
+        "B.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        },
+        "Props.md": {
+          "count": 0,
+          "lines": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "a property value",
+      "vault": "obsidian-1.14.4",
+      "input": "[status:draft]",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        },
+        "Props.md": {
+          "count": 1,
+          "lines": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "a quoted property value",
+      "vault": "obsidian-1.14.4",
+      "input": "[status:\"in progress\"]",
+      "expected": {
+        "B.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      }
+    },
+    {
+      "name": "a property value is a substring",
+      "vault": "obsidian-1.14.4",
+      "input": "[status:dra]",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        },
+        "Props.md": {
+          "count": 1,
+          "lines": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "a list item",
+      "vault": "obsidian-1.14.4",
+      "input": "[category:one]",
+      "expected": {
+        "B.md": {
+          "count": 0,
+          "lines": [
+            3
+          ]
+        }
+      }
+    },
+    {
+      "name": "either property value",
+      "vault": "obsidian-1.14.4",
+      "input": "[status:draft OR done]",
+      "expected": {
+        "A.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        },
+        "Props.md": {
+          "count": 1,
+          "lines": [
+            5
+          ]
+        }
+      }
+    },
+    {
+      "name": "notes without the property",
+      "vault": "obsidian-1.14.4",
+      "input": "-[status]",
+      "expected": {
+        "C.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Daily/2026-10-21.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Gamma file.md": {
+          "count": 0,
+          "lines": []
+        }
+      }
+    },
+    {
+      "name": "AND of a word and an OR",
+      "vault": "obsidian-1.14.4",
+      "input": "alpha (beta OR gamma)",
+      "expected": {
+        "A.md": {
+          "count": 3,
+          "lines": [
+            4,
+            6,
+            7
+          ]
+        },
+        "B.md": {
+          "count": 2,
+          "lines": [
+            7
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 2,
+          "lines": [
+            4
+          ]
+        },
+        "Props.md": {
+          "count": 2,
+          "lines": [
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "content: ignores the name",
+      "vault": "obsidian-1.14.4",
+      "input": "content:gamma",
+      "expected": {
+        "A.md": {
+          "count": 1,
+          "lines": [
+            4
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            4
+          ]
+        }
+      },
+      "note": "Gamma file.md has gamma only in the name, so content: misses it. The roadmap's text has it."
+    },
+    {
+      "name": "path and a word",
+      "vault": "obsidian-1.14.4",
+      "input": "path:\"Projects\" alpha",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      }
+    },
+    {
+      "name": "Search in folder",
+      "vault": "obsidian-1.14.4",
+      "input": "path:\"Projects\" ",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      },
+      "note": "pathQuery adds a trailing space. It does not add a term."
+    },
+    {
+      "name": "a property line and a text line",
+      "vault": "obsidian-1.14.4",
+      "input": "alpha -beta [status]",
+      "expected": {
+        "Projects/Roadmap.md": {
+          "count": 1,
+          "lines": [
+            2,
+            4
+          ]
+        }
+      },
+      "note": "The status line is shown with the text line. The negated word is not a shown line."
+    },
+    {
+      "name": "file:md matches every note",
+      "vault": "obsidian-1.14.4",
+      "input": "file:md",
+      "expected": {
+        "A.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10
+          ]
+        },
+        "B.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        },
+        "C.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "Daily/2026-10-21.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "Gamma file.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "Projects/Roadmap.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4
+          ]
+        },
+        "Props.md": {
+          "count": 0,
+          "lines": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7
+          ]
+        }
+      },
+      "note": "The extension is part of the file name, so file:md matches every note."
+    },
+    {
+      "name": "an empty path quote",
+      "vault": "obsidian-1.14.4",
+      "input": "path:\"\"",
+      "expected": null,
+      "note": "The quoted path is empty, so there is nothing to search for."
+    },
+    {
+      "name": "path:/ matches every file",
+      "vault": "names",
+      "input": "path:/",
+      "expected": {
+        "Board.canvas": {},
+        "Note.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "Upper.MD": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "photo.png": {}
+      },
+      "note": "The term's text is empty, and every path contains the empty string. Notes match with no shown line. Attachments match as {}."
+    },
+    {
+      "name": "tag:# matches nothing",
+      "vault": "tags",
+      "input": "tag:#",
+      "expected": {},
+      "note": "The term is an empty tag, not null. No stored tag is under an empty name."
+    },
+    {
+      "name": "an empty colour group",
+      "vault": "obsidian-1.14.4",
+      "input": "   ",
+      "expected": null,
+      "note": "Nothing to search for. The graph treats that as every file and does not call searchVault."
+    },
+    {
+      "name": "line:(file:) matches nothing",
+      "vault": "obsidian-1.14.4",
+      "input": "line:(file:x)",
+      "expected": {},
+      "note": "file: is not looked up in the text, so the line group has no candidate line."
+    },
+    {
+      "name": "alpha, any case",
+      "vault": "match-case",
+      "input": "alpha",
+      "expected": {
+        "Other.md": {
+          "count": 3,
+          "lines": [
+            5,
+            6
+          ]
+        },
+        "Props.md": {
+          "count": 4,
+          "lines": [
+            3,
+            6
+          ]
+        },
+        "Upper.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "alpha, match case",
+      "vault": "match-case",
+      "input": "alpha",
+      "matchCase": true,
+      "expected": {
+        "Other.md": {
+          "count": 2,
+          "lines": [
+            5
+          ]
+        },
+        "Props.md": {
+          "count": 2,
+          "lines": [
+            3,
+            6
+          ]
+        }
+      }
+    },
+    {
+      "name": "ALPHA, match case",
+      "vault": "match-case",
+      "input": "ALPHA",
+      "matchCase": true,
+      "expected": {
+        "Props.md": {
+          "count": 1,
+          "lines": [
+            6
+          ]
+        },
+        "Upper.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "negated alpha, match case",
+      "vault": "match-case",
+      "input": "-alpha",
+      "matchCase": true,
+      "expected": {
+        "Upper.md": {
+          "count": 0,
+          "lines": []
+        }
+      }
+    },
+    {
+      "name": "file:upper, match case",
+      "vault": "match-case",
+      "input": "file:upper",
+      "matchCase": true,
+      "expected": {},
+      "note": "The file term stays upper. Upper.md does not contain those letters."
+    },
+    {
+      "name": "Upper.MD by name, any case",
+      "vault": "names",
+      "input": "upper",
+      "expected": {
+        "Upper.MD": {
+          "count": 0,
+          "lines": []
+        }
+      },
+      "note": "Without Match case the path is folded, so .MD is stripped by the lowercase name test. The same files match after the any-case strip."
+    },
+    {
+      "name": "Upper.MD by name, match case",
+      "vault": "names",
+      "input": "Upper",
+      "matchCase": true,
+      "expected": {
+        "Upper.MD": {
+          "count": 0,
+          "lines": []
+        }
+      },
+      "note": "Upper is in the stem either way. Match case does not fold the path."
+    },
+    {
+      "name": "MD matches the extension today",
+      "vault": "names",
+      "input": "MD",
+      "matchCase": true,
+      "expected": {},
+      "ts": "todo",
+      "note": "Match case compares the file name as written. noteName only strips a lowercase .md, so MD matches the extension of Upper.MD and the body has no MD. The decided rule strips .md in any case, and then this matches nothing."
+    },
+    {
+      "name": "file:md includes Upper.MD",
+      "vault": "names",
+      "input": "file:md",
+      "expected": {
+        "Note.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "Upper.MD": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "file: uses the file name, extension included. Without Match case the path is folded, so Upper.MD matches. An attachment whose name has no md does not."
+    },
+    {
+      "name": "a word in an attachment name",
+      "vault": "names",
+      "input": "photo",
+      "expected": {
+        "photo.png": {}
+      },
+      "note": "noteName only strips .md, so photo matches photo.png by name. The match is an attachment, {}."
+    },
+    {
+      "name": "attachment bytes are not content",
+      "vault": "names",
+      "input": "alpha",
+      "expected": {},
+      "note": "photo.png and Board.canvas both contain alpha. Neither is a note, so neither has content lines, and the word is not in the file name."
+    },
+    {
+      "name": "an image matches a negation",
+      "vault": "names",
+      "input": "-alpha",
+      "expected": {
+        "Board.canvas": {},
+        "Note.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Upper.MD": {
+          "count": 0,
+          "lines": []
+        },
+        "photo.png": {}
+      },
+      "note": "Attachments have no content lines, so -alpha matches photo.png even though its bytes contain alpha, and Board.canvas even though its JSON does. A matching attachment is {}."
+    },
+    {
+      "name": "file:png",
+      "vault": "names",
+      "input": "file:png",
+      "expected": {
+        "photo.png": {}
+      }
+    },
+    {
+      "name": "a canvas file has no lines",
+      "vault": "names",
+      "input": "file:canvas",
+      "expected": {
+        "Board.canvas": {}
+      },
+      "note": "A .canvas file is an attachment. Its JSON is not searched. The browser mock's own search does read that JSON; this reference does not."
+    },
+    {
+      "name": "tag:a matches a parent, not a prefix",
+      "vault": "tags",
+      "input": "tag:a",
+      "expected": {
+        "Nested.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Slash.md": {
+          "count": 0,
+          "lines": []
+        },
+        "UpperTag.md": {
+          "count": 0,
+          "lines": []
+        }
+      },
+      "note": "a/b is under a, and A is the same tag in lower case. ab is not. A stored tag a/ has its trailing slash removed, so it is a and also matches."
+    },
+    {
+      "name": "tag:a/ matches nothing",
+      "vault": "tags",
+      "input": "tag:a/",
+      "expected": {},
+      "note": "The term keeps the trailing slash. Stored tags lose it, so isUnder matches nothing."
+    },
+    {
+      "name": "tag:Idea shows the line",
+      "vault": "tags",
+      "input": "tag:Idea",
+      "expected": {
+        "Idea.md": {
+          "count": 1,
+          "lines": [
+            4
+          ]
+        }
+      },
+      "note": "Without Match case the shown line looks for #idea in any case, so #Idea is shown."
+    },
+    {
+      "name": "tag:Idea with match case shows no line",
+      "vault": "tags",
+      "input": "tag:Idea",
+      "matchCase": true,
+      "expected": {
+        "Idea.md": {
+          "count": 0,
+          "lines": []
+        }
+      },
+      "note": "The tag matches in lower case, but the shown line looks for #idea with Match case. #Idea does not contain it, so the note matches with no line."
+    },
+    {
+      "name": "an empty property value",
+      "vault": "props",
+      "input": "[status]",
+      "expected": {
+        "Empty.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "An empty value is still a value, so [status] matches Empty.md. Dup.md repeats status in another case, readProperties returns null, and [status] does not match it."
+    },
+    {
+      "name": "a checkbox",
+      "vault": "props",
+      "input": "[done:true]",
+      "expected": {
+        "Check.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "A checkbox is the text true or false."
+    },
+    {
+      "name": "a list value",
+      "vault": "props",
+      "input": "[category:one]",
+      "expected": {
+        "List.md": {
+          "count": 0,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "Each list item is its own value."
+    },
+    {
+      "name": "a tag property keeps the hash",
+      "vault": "props",
+      "input": "[tags:#a]",
+      "expected": {
+        "Hash.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "readProperties keeps the # on the value. tag: search strips it; [tags:#a] does not."
+    },
+    {
+      "name": "a number is its text",
+      "vault": "props",
+      "input": "[n:1]",
+      "expected": {
+        "Number.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "A number property is the text 1, not a JS number."
+    },
+    {
+      "name": "line: of a negation matches nothing",
+      "vault": "text",
+      "input": "line:(-a)",
+      "expected": {},
+      "note": "line: only considers lines that contain the group's terms. Those lines fail the negation, and lines without the term are not considered, so it matches nothing."
+    },
+    {
+      "name": "line: of an OR",
+      "vault": "text",
+      "input": "line:(a OR b)",
+      "expected": {
+        "Bom.md": {
+          "count": 8,
+          "lines": [
+            2,
+            3,
+            5
+          ]
+        },
+        "Crlf.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        },
+        "Fence.md": {
+          "count": 3,
+          "lines": [
+            1,
+            3,
+            5
+          ]
+        },
+        "Line.md": {
+          "count": 4,
+          "lines": [
+            1,
+            2,
+            5
+          ]
+        },
+        "Overlap.md": {
+          "count": 4,
+          "lines": [
+            1
+          ]
+        },
+        "Phrase.md": {
+          "count": 6,
+          "lines": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "note": "Phrase.md contains a and b on each line, so it matches too."
+    },
+    {
+      "name": "line:(tag:) compares the text",
+      "vault": "text",
+      "input": "line:(tag:x)",
+      "expected": {
+        "Line.md": {
+          "count": 1,
+          "lines": [
+            3
+          ]
+        }
+      },
+      "note": "Inside line:, the tag term is compared as the text x, and the candidate line has to contain #x. The line that is only x does not match."
+    },
+    {
+      "name": "a phrase is one substring",
+      "vault": "text",
+      "input": "\"a b\"",
+      "expected": {
+        "Line.md": {
+          "count": 1,
+          "lines": [
+            5
+          ]
+        },
+        "Phrase.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      }
+    },
+    {
+      "name": "two spaces are not one",
+      "vault": "text",
+      "input": "\"a  b\"",
+      "expected": {
+        "Phrase.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "The phrase is the whole substring, so two spaces do not match one."
+    },
+    {
+      "name": "a tab inside a phrase, any case",
+      "vault": "text",
+      "input": "\"a\tb\"",
+      "expected": {
+        "Bom.md": {
+          "count": 0,
+          "lines": [
+            2,
+            3
+          ]
+        },
+        "Line.md": {
+          "count": 0,
+          "lines": [
+            5
+          ]
+        },
+        "Phrase.md": {
+          "count": 1,
+          "lines": [
+            1,
+            2,
+            3
+          ]
+        }
+      },
+      "note": "The term has no space, so without Match case the whole phrase is not required. a\\tb and a b both have the words a and b."
+    },
+    {
+      "name": "a tab inside a phrase, match case",
+      "vault": "text",
+      "input": "\"a\tb\"",
+      "matchCase": true,
+      "expected": {
+        "Phrase.md": {
+          "count": 1,
+          "lines": [
+            3
+          ]
+        }
+      },
+      "note": "Match case requires the tab itself."
+    },
+    {
+      "name": "overlapping counts",
+      "vault": "text",
+      "input": "\"star wars\" star",
+      "expected": {
+        "Overlap.md": {
+          "count": 2,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "Overlapping highlights count once. star wars and star on star wars and stars is 2."
+    },
+    {
+      "name": "a phrase inside a fence",
+      "vault": "text",
+      "input": "\"fence phrase\"",
+      "expected": {
+        "Fence.md": {
+          "count": 1,
+          "lines": [
+            3
+          ]
+        }
+      },
+      "note": "Text search does not skip fenced code. Tags and links do."
+    },
+    {
+      "name": "CRLF text has no CR",
+      "vault": "text",
+      "input": "crlfword",
+      "expected": {
+        "Crlf.md": {
+          "count": 1,
+          "lines": [
+            4
+          ]
+        }
+      },
+      "note": "A CR before LF is dropped. crlfword is its own line."
+    },
+    {
+      "name": "CRLF frontmatter",
+      "vault": "text",
+      "input": "[status:crlf]",
+      "expected": {
+        "Crlf.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "The CR before each LF is dropped, and the property is read."
+    },
+    {
+      "name": "BOM does not move the body line",
+      "vault": "text",
+      "input": "bombody",
+      "expected": {
+        "Bom.md": {
+          "count": 1,
+          "lines": [
+            5
+          ]
+        }
+      },
+      "note": "The BOM sits on the opening fence, so bombody is still line 5."
+    },
+    {
+      "name": "BOM frontmatter is already a property",
+      "vault": "text",
+      "input": "[status:bomdraft]",
+      "expected": {
+        "Bom.md": {
+          "count": 1,
+          "lines": [
+            2
+          ]
+        }
+      },
+      "note": "splitFrontmatter trims U+FEFF, so the property is already read. tagsInText requires the text to start with ---, so the tag is not read until the BOM is skipped."
+    },
+    {
+      "name": "BOM before frontmatter",
+      "vault": "text",
+      "input": "tag:bomtag",
+      "expected": {
+        "Bom.md": {
+          "count": 0,
+          "lines": []
+        }
+      },
+      "ts": "todo",
+      "note": "A leading U+FEFF is skipped, so line 1 is --- and tagsInText reads the frontmatter tag. Today the tag is missed. The shown term is #bomtag, which the note does not contain, so the match has no line. splitFrontmatter already trims the BOM, which is why [status:bomdraft] matches today."
+    },
+    {
+      "name": "a trailing CR stays",
+      "vault": "text",
+      "input": "hello",
+      "expected": {
+        "Bare.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "A final CR with no LF stays on the line, as Rust str::lines does. hello still matches. A query cannot include the CR, because the parser treats it as whitespace, so the corpus cannot see the CR itself."
+    },
+    {
+      "name": "final sigma fails the lower-case check",
+      "vault": "unicode",
+      "input": "Σ",
+      "matchCase": true,
+      "expected": {
+        "Sigma.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "The word check lowercases Σ to σ. ΑΣ lowercases to ας, which does not contain σ, so FinalSigma.md fails before the Match case compare. Sigma.md is the letter itself and matches."
+    },
+    {
+      "name": "İstanbul folds to i + dot",
+      "vault": "unicode",
+      "input": "İstanbul",
+      "expected": {
+        "Istanbul.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "IstanbulFold.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "İ lowercases to i plus U+0307, so both the folded line and the typed line match."
+    },
+    {
+      "name": "İstanbul with match case",
+      "vault": "unicode",
+      "input": "İstanbul",
+      "matchCase": true,
+      "expected": {
+        "Istanbul.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "Match case keeps İstanbul, so the folded line i + U+0307 does not match."
+    },
+    {
+      "name": "capital sharp s",
+      "vault": "unicode",
+      "input": "ẞ",
+      "expected": {
+        "Eszett.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "EszettCap.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "ẞ lowercases to ß, so both lines match."
+    },
+    {
+      "name": "capital sharp s with match case",
+      "vault": "unicode",
+      "input": "ẞ",
+      "matchCase": true,
+      "expected": {
+        "EszettCap.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "Match case requires ẞ itself."
+    },
+    {
+      "name": "the Kelvin sign",
+      "vault": "unicode",
+      "input": "K",
+      "expected": {
+        "AccentOk.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Cjk.md": {
+          "count": 0,
+          "lines": []
+        },
+        "Kelvin.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "KelvinSign.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "U+212A lowercases to k, so it matches a line k and a line that is the sign."
+    },
+    {
+      "name": "the Kelvin sign with match case",
+      "vault": "unicode",
+      "input": "K",
+      "matchCase": true,
+      "expected": {
+        "KelvinSign.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "Match case requires U+212A itself, so the line k does not match."
+    },
+    {
+      "name": "a precomposed accent",
+      "vault": "unicode",
+      "input": "é",
+      "expected": {
+        "AccentOk.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "No normalization. é does not match e plus U+0301."
+    },
+    {
+      "name": "a decomposed accent",
+      "vault": "unicode",
+      "input": "é",
+      "expected": {
+        "Accent.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "e plus U+0301 does not match é."
+    },
+    {
+      "name": "CJK",
+      "vault": "unicode",
+      "input": "漢字",
+      "expected": {
+        "Cjk.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "A CJK substring matches as itself."
+    },
+    {
+      "name": "an emoji in a term",
+      "vault": "unicode",
+      "input": "😀",
+      "expected": {
+        "Emoji.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "An emoji in a term is a substring, like any other character."
+    }
+  ]
+}

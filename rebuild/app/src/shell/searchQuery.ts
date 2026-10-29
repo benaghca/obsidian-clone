@@ -168,6 +168,24 @@ export interface Line {
   text: string;
 }
 
+/**
+ * The lines a term survives on, in order. The backend already requires every
+ * whitespace-separated word on the line, in any case. A phrase (the term
+ * contains a space) or Match case then has to contain the term whole.
+ * Name hits are not text lines; the caller drops those.
+ */
+export function termLines(lines: readonly Line[], term: string, matchCase = false): Line[] {
+  const words = term.split(/\s+/).filter(Boolean).map((word) => word.toLowerCase());
+  const needle = matchCase ? term : term.toLowerCase();
+  const phrase = matchCase || term.includes(" ");
+  return lines.filter((line) => {
+    const lower = line.text.toLowerCase();
+    if (words.length && !words.every((word) => lower.includes(word))) return false;
+    if (phrase && !(matchCase ? line.text : lower).includes(needle)) return false;
+    return true;
+  });
+}
+
 export interface Facts {
   /** The lines of each note that contain a term (from termsOf), by path. */
   lines(term: string): ReadonlyMap<string, readonly Line[]> | undefined;

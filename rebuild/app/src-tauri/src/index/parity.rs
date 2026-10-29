@@ -16,6 +16,8 @@ fn runner(file: &str) -> Option<fn(&str) -> Value> {
         "tags" => Some(note_tags),
         // No Rust properties yet (plan step 3). The file must say `"rust": "todo"`.
         "properties" => None,
+        // No Rust query parser or search evaluator yet (plan step 4). Both files must say `"rust": "todo"`.
+        "query" | "search" => None,
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
 }
@@ -37,8 +39,18 @@ fn wikilink_targets(input: &str) -> Value {
         .collect()
 }
 
-const KEYS: [&str; 7] = ["name", "input", "expected", "rust", "ts", "obsidian", "note"];
-const FILE_KEYS: [&str; 4] = ["about", "typescript", "rust", "cases"];
+const KEYS: [&str; 9] = [
+    "name",
+    "input",
+    "expected",
+    "rust",
+    "ts",
+    "obsidian",
+    "note",
+    "vault",
+    "matchCase",
+];
+const FILE_KEYS: [&str; 5] = ["about", "typescript", "rust", "cases", "vaults"];
 
 fn unknown_keys(obj: &Map<String, Value>, allowed: &[&str]) -> Vec<String> {
     obj.keys()
@@ -60,6 +72,47 @@ fn input_of(case: &Map<String, Value>) -> Option<String> {
     }
 }
 
+/// `vaults` is `{ name: { path: text | [lines] } }`. Lines are joined with `\n` by the TS runner.
+fn check_vaults(file: &str, corpus: &Map<String, Value>, problems: &mut Vec<String>) {
+    let Some(vaults) = corpus.get("vaults") else {
+        return;
+    };
+    let Some(vaults) = vaults.as_object() else {
+        problems.push(format!("{file}.json: \"vaults\" must be an object"));
+        return;
+    };
+    for (name, spec) in vaults {
+        let Some(spec) = spec.as_object() else {
+            problems.push(format!(
+                "{file}.json: vault {name:?} must be an object of paths"
+            ));
+            continue;
+        };
+        for (path, text) in spec {
+            let ok = match text {
+                Value::String(_) => true,
+                Value::Array(lines) => lines.iter().all(Value::is_string),
+                _ => false,
+            };
+            if !ok {
+                problems.push(format!(
+                    "{file}.json: vault {name:?} path {path:?} must be a string or an array of strings"
+                ));
+            }
+        }
+    }
+}
+
+fn vault_names_one(corpus: &Map<String, Value>, case: &Map<String, Value>) -> bool {
+    let Some(name) = case.get("vault").and_then(Value::as_str) else {
+        return false;
+    };
+    corpus
+        .get("vaults")
+        .and_then(Value::as_object)
+        .is_some_and(|vaults| vaults.contains_key(name))
+}
+
 /// Every problem with one corpus file (empty when it passes).
 fn check(file: &str, corpus: &Value) -> Vec<String> {
     let mut problems = Vec::new();
@@ -69,6 +122,7 @@ fn check(file: &str, corpus: &Value) -> Vec<String> {
     for key in unknown_keys(corpus, &FILE_KEYS) {
         problems.push(format!("{file}.json: unknown key {key:?}"));
     }
+    check_vaults(file, corpus, &mut problems);
     let todo_file = corpus.get("rust").and_then(Value::as_str) == Some("todo");
     let run = runner(file);
     match (todo_file, run.is_some()) {
@@ -90,7 +144,10 @@ fn check(file: &str, corpus: &Value) -> Vec<String> {
             problems.push(format!("{file}.json: a case is not an object"));
             continue;
         };
-        let name = case.get("name").and_then(Value::as_str).unwrap_or("(no name)");
+        let name = case
+            .get("name")
+            .and_then(Value::as_str)
+            .unwrap_or("(no name)");
         let at = format!("{file}.json {name:?}");
         if !names.insert(name.to_string()) {
             problems.push(format!("{at}: duplicate name"));
@@ -103,8 +160,18 @@ fn check(file: &str, corpus: &Value) -> Vec<String> {
                 problems.push(format!("{at}: {marker:?} must be \"todo\""));
             }
         }
+        if let Some(flag) = case.get("matchCase") {
+            if !flag.is_boolean() {
+                problems.push(format!("{at}: \"matchCase\" must be true or false"));
+            }
+        }
+        if (file == "search" || case.contains_key("vault")) && !vault_names_one(corpus, case) {
+            problems.push(format!("{at}: \"vault\" must name a vault in \"vaults\""));
+        }
         let (Some(input), Some(expected)) = (input_of(case), case.get("expected")) else {
-            problems.push(format!("{at}: needs a string or string-array \"input\" and an \"expected\""));
+            problems.push(format!(
+                "{at}: needs a string or string-array \"input\" and an \"expected\""
+            ));
             continue;
         };
         let Some(run) = run else { continue };
@@ -158,4 +225,61 @@ fn todo_markers_are_checked() {
     assert!(problems[0].contains("stale todo") && problems[0].contains("remove"));
     assert!(problems[1].contains("\"wrong\"") && problems[1].contains("got [\"A\",\"B\"]"));
     assert!(problems[2].contains("unknown key \"rusts\""));
+}
+
+#[test]
+fn search_vault_names_are_checked_without_a_runner() {
+    let bad_text = serde_json::json!({
+        "about": "", "typescript": "", "rust": "todo",
+        "vaults": { "one": { "A.md": ["alpha"], "N.md": 1 } },
+        "cases": [{ "name": "shape", "vault": "one", "input": "a", "expected": {} }]
+    });
+    let shape = check("search", &bad_text);
+    assert!(
+        shape
+            .iter()
+            .any(|p| p.contains("N.md") && p.contains("string")),
+        "{shape:#?}"
+    );
+
+    let corpus = serde_json::json!({
+        "about": "", "typescript": "", "rust": "todo",
+        "vaults": { "one": { "A.md": ["alpha", "beta"], "B.md": "one line" } },
+        "cases": [
+            { "name": "bad", "vault": "missing", "input": "a", "expected": null },
+            { "name": "ok", "vault": "one", "matchCase": true, "input": "a", "expected": {} },
+            { "name": "flag", "vault": "one", "matchCase": "yes", "input": "a", "expected": {} },
+            { "name": "none", "input": "a", "expected": null }
+        ]
+    });
+    let problems = check("search", &corpus);
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("bad") && p.contains("vault")),
+        "{problems:#?}"
+    );
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("flag") && p.contains("matchCase")),
+        "{problems:#?}"
+    );
+    assert!(
+        problems
+            .iter()
+            .any(|p| p.contains("none") && p.contains("vault")),
+        "{problems:#?}"
+    );
+    assert!(
+        !problems.iter().any(|p| p.contains("\"ok\"")),
+        "{problems:#?}"
+    );
+
+    let query = serde_json::json!({
+        "about": "", "typescript": "", "rust": "todo",
+        "cases": [{ "name": "cased", "matchCase": true, "input": "A", "expected": { "op": "term" } }]
+    });
+    let query_problems = check("query", &query);
+    assert!(query_problems.is_empty(), "{query_problems:#?}");
 }
