@@ -13,10 +13,19 @@ use std::path::Path;
 fn runner(file: &str) -> Option<fn(&str) -> Value> {
     match file {
         "links" => Some(wikilink_targets),
+        "tags" => Some(note_tags),
         // No Rust properties yet (plan step 3). The file must say `"rust": "todo"`.
-        "tags" | "properties" => None,
+        "properties" => None,
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
+}
+
+fn note_tags(input: &str) -> Value {
+    parse_note(input)
+        .tags
+        .into_iter()
+        .map(Value::String)
+        .collect()
 }
 
 fn wikilink_targets(input: &str) -> Value {

@@ -17,7 +17,8 @@
 //! defaults to `meeting`, the word the generator puts on prose lines.
 //! Each figure is three runs after one warmup scan. The milliseconds include
 //! the JSON serialization the command would send, except `scan`, which only
-//! reads the vault.
+//! reads the vault. `vault_tags` is the five searches the Tags view made
+//! before step 1; `tags` is the one command it makes now.
 
 use super::{is_note_path, Index};
 use std::path::Path;
@@ -138,6 +139,26 @@ fn bench_vault() {
         "GROVE_BENCH vault_tags_ms={} median={:.1} json_bytes={tag_bytes} hash_json_bytes={hash_bytes} hits={hit_list}",
         ms_list(&tag_ms),
         median(&tag_ms)
+    );
+
+    // What the Tags view reads since step 1: one `tags` command instead of the five searches.
+    let mut tags_ms = Vec::with_capacity(RUNS);
+    let mut tags_bytes = 0usize;
+    let mut tag_notes = 0usize;
+    let mut tag_uses = 0usize;
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        let tags = idx.tags(None);
+        let size = json_len(&tags);
+        tags_ms.push(elapsed_ms(started));
+        tags_bytes = size;
+        tag_notes = tags.len();
+        tag_uses = tags.values().map(Vec::len).sum();
+    }
+    println!(
+        "GROVE_BENCH tags_ms={} median={:.1} json_bytes={tags_bytes} notes={tag_notes} uses={tag_uses}",
+        ms_list(&tags_ms),
+        median(&tags_ms)
     );
 
     let mut link_ms = Vec::with_capacity(RUNS);

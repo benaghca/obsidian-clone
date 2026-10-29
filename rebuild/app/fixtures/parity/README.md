@@ -40,7 +40,7 @@ Required: `name`, `input` and `expected`. Optional: `rust`, `ts`, `obsidian` and
 
 | File | TypeScript | Rust |
 |---|---|---|
-| `tags.json` | `tagsInText` (`src/shell/linksTags.ts`) | none yet (plan step 1 adds `index/tags.rs`) |
+| `tags.json` | `tagsInText` (`src/shell/linksTags.ts`) | `parse_note` (`index/parse.rs`), its tags from `note_tags` (`index/tags.rs`) |
 | `links.json` | `wikilinkTargets` (`src/shell/linksTags.ts`) | `parse_note` (`index/parse.rs`), its non-markdown links |
 | `properties.json` | `splitFrontmatter` + `readProperties` (`src/editor/frontmatter.ts`); the runner drops `line` and `count` | none yet (plan step 3 adds `index/props.rs`) |
 

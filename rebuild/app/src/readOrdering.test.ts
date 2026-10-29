@@ -11,7 +11,7 @@ import { vaultTags } from "./shell/vaultTags";
 import { propertyIndex } from "./shell/propertyIndex";
 
 vi.mock("./api", () => ({ api: {
-  listFiles: vi.fn(), linkIndex: vi.fn(), readNote: vi.fn(), search: vi.fn(), frontmatter: vi.fn(),
+  listFiles: vi.fn(), linkIndex: vi.fn(), readNote: vi.fn(), search: vi.fn(), frontmatter: vi.fn(), tags: vi.fn(),
 }, isTauri: false }));
 
 function deferred<T>() {
@@ -104,9 +104,8 @@ it("keys search facts by term and does not repopulate an invalidated cache", asy
 });
 
 it("does not evict newer tags when an invalidated request fails later", async () => {
-  const old = deferred<SearchHit[]>();
-  vi.mocked(api.search).mockReturnValueOnce(old.promise).mockResolvedValue([]);
-  vi.mocked(api.frontmatter).mockResolvedValue({});
+  const old = deferred<Record<string, string[]>>();
+  vi.mocked(api.tags).mockReturnValueOnce(old.promise).mockResolvedValue({});
   const { ws, change } = workspace(), tags = vaultTags(ws);
   const first = tags.read().catch(() => null);
   change();
@@ -114,7 +113,7 @@ it("does not evict newer tags when an invalidated request fails later", async ()
   await second;
   old.reject(new Error("old request failed")); await first;
   expect(tags.read()).toBe(second);
-  expect(api.search).toHaveBeenCalledTimes(10);
+  expect(api.tags).toHaveBeenCalledTimes(2);
 });
 
 it("serializes property reads and re-reads a note changed during the first read", async () => {

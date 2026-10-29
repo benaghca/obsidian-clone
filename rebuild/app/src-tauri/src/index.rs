@@ -1,4 +1,4 @@
-//! In-memory file list, wikilink graph, and search.
+//! In-memory file list, wikilink graph, tags, and search.
 //!
 //! Wikilinks resolve by note name, case-insensitively. A name that occurs in more than one
 //! folder prefers a markdown file, then the same folder as the source, then the shorter path.
@@ -6,6 +6,7 @@
 //! are used only when no note has that name. Links inside fenced or inline code are skipped.
 
 mod parse;
+mod tags;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -258,6 +259,22 @@ impl Index {
         match paths {
             Some(paths) => paths.iter().filter_map(block).collect(),
             None => self.files.keys().filter_map(block).collect(),
+        }
+    }
+
+    /// Each note's tags (see `tags::note_tags`), for `paths` or every note. Notes without tags,
+    /// and paths that aren't notes, are left out.
+    pub fn tags(&self, paths: Option<&[String]>) -> BTreeMap<String, Vec<String>> {
+        let tags = |path: &String| {
+            let node = self
+                .files
+                .get(path)
+                .filter(|n| !n.is_dir && is_note_path(path) && !n.note.tags.is_empty())?;
+            Some((path.clone(), node.note.tags.clone()))
+        };
+        match paths {
+            Some(paths) => paths.iter().filter_map(tags).collect(),
+            None => self.files.keys().filter_map(tags).collect(),
         }
     }
 

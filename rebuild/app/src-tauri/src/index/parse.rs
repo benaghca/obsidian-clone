@@ -21,6 +21,8 @@ pub(super) struct Note {
     pub(super) links: Vec<RawLink>,
     /// Frontmatter aliases, lower case.
     pub(super) aliases: Vec<String>,
+    /// Its tags, as `tags::note_tags` reads them.
+    pub(super) tags: Vec<String>,
     pub(super) lines: Vec<Line>,
 }
 
@@ -81,6 +83,7 @@ pub(super) fn parse_note(content: &str) -> Note {
     Note {
         links,
         aliases: parse_aliases(content),
+        tags: super::tags::note_tags(content),
         lines,
     }
 }

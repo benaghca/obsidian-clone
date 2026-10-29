@@ -98,6 +98,7 @@ pub fn run() {
             search,
             link_index,
             frontmatter,
+            tags,
             read_config,
             write_config,
             open_note_window,
@@ -288,4 +289,14 @@ fn frontmatter(
     paths: Option<Vec<String>>,
 ) -> Result<BTreeMap<String, String>, String> {
     with_vault(&state, |v| Ok(v.index.frontmatter(paths.as_deref())))
+}
+
+/// Each note's tags (only `paths`' when given), for the Tags view, `tag:` search, the graph and
+/// Bases. Notes without tags are left out.
+#[tauri::command(async)]
+fn tags(
+    state: State<'_, AppState>,
+    paths: Option<Vec<String>>,
+) -> Result<BTreeMap<String, Vec<String>>, String> {
+    with_vault(&state, |v| Ok(v.index.tags(paths.as_deref())))
 }
