@@ -13,7 +13,8 @@ use std::path::Path;
 fn runner(file: &str) -> Option<fn(&str) -> Value> {
     match file {
         "links" => Some(wikilink_targets),
-        "tags" => None,
+        // No Rust properties yet (plan step 3). The file must say `"rust": "todo"`.
+        "tags" | "properties" => None,
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
 }
