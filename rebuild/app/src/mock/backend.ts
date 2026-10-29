@@ -186,7 +186,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   }
 
   // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
-  function linkIndex(): LinkIndex {
+  function linkData(wanted?: Set<string>): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
     const notes = [...files.keys()].map((path) => ({ name: noteName(path), path }));
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
@@ -207,7 +207,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
             continue;
           }
           out.add(target);
-          (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
+          if (wanted?.has(target)) (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
         }
         for (const m of text.matchAll(MDLINK)) {
           const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
@@ -215,7 +215,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
           const hit = resolveLink(raw, path, notes);
           if (hit) {
             md.add(hit);
-            (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
+            if (wanted?.has(hit)) (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
           }
           else unknown(markdownURL(raw).replace(/^\.\//, "").replace(/\.md$/i, ""));
         }
@@ -224,7 +224,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       if (md.size) markdown[path] = [...md];
       if (missing.size) unresolved[path] = [...missing.values()];
     }
-    return { outgoing, backlinks, markdown, unresolved };
+    return { links: { outgoing, markdown, unresolved }, backlinks };
   }
 
   const commands: Record<string, (a: any) => unknown> = {
@@ -305,7 +305,8 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       keepEmptyParents(path);
     },
     search: ({ query, limit }) => search(query, limit),
-    link_index: () => linkIndex(),
+    link_index: () => linkData().links,
+    backlinks: ({ paths }) => paths.length ? linkData(new Set(paths)).backlinks : {},
     frontmatter: ({ paths }) => {
       const out: Record<string, string> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {

@@ -34,10 +34,10 @@ it("keeps newer file and link refreshes when older replies arrive last", async (
   const first = Promise.all([vault.refreshFiles(), vault.refreshLinks()]);
   const second = Promise.all([vault.refreshFiles(), vault.refreshLinks()]);
   newFiles.resolve([file("new.md")]);
-  const links = { outgoing: { "new.md": ["target.md"] }, backlinks: {} };
+  const links = { outgoing: { "new.md": ["target.md"] } };
   newLinks.resolve(links);
   await second;
-  oldFiles.resolve([file("old.md")]); oldLinks.resolve({ outgoing: {}, backlinks: {} });
+  oldFiles.resolve([file("old.md")]); oldLinks.resolve({ outgoing: {} });
   await first;
   expect(vault.notes.map(n => n.path)).toEqual(["new.md"]);
   expect(vault.links).toBe(links);

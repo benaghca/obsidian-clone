@@ -34,8 +34,6 @@ export interface Backlink {
 export interface LinkIndex {
   /** Resolved [[wikilink]] targets per note. */
   outgoing: Record<string, string[]>;
-  /** Resolved wikilink and Markdown link mentions, with their source lines. */
-  backlinks: Record<string, Backlink[]>;
   /** Resolved [text](path) link targets per note (not in outgoing). */
   markdown?: Record<string, string[]>;
   /** Link targets that match no file, per note, as written. */
@@ -109,6 +107,8 @@ export const api = {
   deletePath: (path: string, permanent = false) => call<void>("delete_path", { path, permanent }),
   search: (query: string, limit: number) => call<SearchHit[]>("search", { query, limit }),
   linkIndex: () => call<LinkIndex>("link_index"),
+  /** Linked mentions for the requested targets only; targets with none are omitted. */
+  backlinks: (paths: string[]) => call<Record<string, Backlink[]>>("backlinks", { paths }),
   /** Each note's frontmatter block (`---` lines included), for `paths` or every note; notes without one are left out. */
   frontmatter: (paths?: string[]) => call<Record<string, string>>("frontmatter", { paths: paths ?? null }),
   /** A settings file from the vault's .grove folder (null if there is none yet). */

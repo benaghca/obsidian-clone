@@ -5,7 +5,7 @@ import { buildGraph, type GraphModel, neighbours, nodeColor, nodeRadius } from "
 import { matches, parseQuery } from "../shell/searchQuery";
 import { ALPHA_MIN, Simulation } from "./sim";
 
-const links = (outgoing: Record<string, string[]>, extra: Partial<LinkIndex> = {}): LinkIndex => ({ outgoing, backlinks: {}, ...extra });
+const links = (outgoing: Record<string, string[]>, extra: Partial<LinkIndex> = {}): LinkIndex => ({ outgoing, ...extra });
 const base = { showTags: false, showAttachments: false, hideUnresolved: false, showOrphans: true };
 const labels = (m: GraphModel) => m.nodes.map((n) => n.label).sort();
 const edges = (m: GraphModel) => m.links.map((l) => [m.nodes[l.source].label, m.nodes[l.target].label].sort().join("–")).sort();

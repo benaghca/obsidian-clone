@@ -2,7 +2,7 @@
 // or moved, the links pointing at it are rewritten in every note that has
 // them. With the setting off, Grove asks first, as Obsidian does.
 
-import { api } from "../api";
+import { api, type Backlink } from "../api";
 import type { NoteRef } from "../editor/host";
 import { updateNoteText } from "../fileOps";
 import { isUnder, movedPath } from "../paths";
@@ -13,7 +13,7 @@ const SEARCH_LIMIT = 500;
 
 /**
  * Rewrite links after `from` moved to `to`. `before` is the vault's notes as
- * they were. `ask` gets the number of links and notes and decides (it is
+ * they were; `backlinks` was fetched before the backend rename. `ask` gets the number of links and notes and decides (it is
  * skipped when nothing links there). Returns the number of links changed.
  */
 export async function updateLinks(
@@ -21,6 +21,7 @@ export async function updateLinks(
   from: string,
   to: string,
   before: NoteRef[],
+  backlinks: Record<string, Backlink[]>,
   style: LinkStyle,
   ask: ((links: number, notes: number) => Promise<boolean>) | null,
 ): Promise<number> {
@@ -28,10 +29,10 @@ export async function updateLinks(
   const pairs = before.filter((n) => isUnder(n.path, from)).map((n) => ({ old: n.path, now: swap(n.path), name: n.name }));
   if (!pairs.length) return 0;
 
-  // Which notes may link there: the link index's backlinks (read now,
-  // before it refreshes) and a search for names in each destination style.
+  // Start from the pre-rename snapshot. A fresh backend query now could no
+  // longer resolve links using the old name. Search also covers unindexed text.
   const sources = new Set<string>();
-  for (const p of pairs) for (const b of ws.vault.links.backlinks[p.old] ?? []) sources.add(b.from);
+  for (const p of pairs) for (const b of backlinks[p.old] ?? []) sources.add(b.from);
   for (const p of pairs.slice(0, 20)) {
     for (const q of new Set([p.name, p.name.replace(/ /g, "%20"), p.name.replace(/[()]/g, "\\$&"), encodeDest(p.name), encodeDest(p.name, true)])) {
       const hits = await api.search(q, SEARCH_LIMIT).catch(() => []);

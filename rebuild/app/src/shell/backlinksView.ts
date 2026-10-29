@@ -1,5 +1,5 @@
 // Backlinks view for the right sidebar. "Linked mentions" are the notes
-// whose [[links]] resolve to the open note, from the backend's link index,
+// whose [[links]] resolve to the open note, from a targeted backend read,
 // grouped per note with the line around each link and the link
 // highlighted. "Unlinked mentions" are plain-text uses of the note's title,
 // found with the backend's search; that section starts collapsed and is only
@@ -9,9 +9,10 @@
 // None of this runs on a keystroke: it follows note switches, and the link
 // index, which the workspace refreshes a second after a save.
 
-import { api, type SearchHit } from "../api";
+import { api, type Backlink, type SearchHit } from "../api";
 import { updateNoteText } from "../fileOps";
 import { kept } from "../memo";
+import { noteBacklinks } from "../links/backlinks";
 import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
@@ -101,6 +102,9 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
   let shownLinked = "";
   let unlinkedTimer = 0;
   let unlinkedSeq = 0;
+  let linkedSeq = 0;
+  let linkedPath: string | null = null;
+  let linkedEntries: Backlink[] = [];
 
   const rowKey = (m: Mention) => `${m.from}:${m.line}`;
   const wantsContext = (m: Mention) => !closed.has(rowKey(m)) && (moreContext || opened.has(rowKey(m)));
@@ -200,7 +204,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
 
   function renderLinked(force = false) {
     const path = pathOf();
-    const entries = path ? (ws.vault.links.backlinks[path] ?? []) : [];
+    const entries = path === linkedPath ? linkedEntries : [];
     // Skip the DOM work (and keep scroll and collapsed groups) when nothing changed.
     const key = `${path}\n${sort}\n${filterText}\n${moreContext ? 1 : 0}\n${[...opened].sort()}\n${[...closed].sort()}\n${entries.map((b) => `${b.from}:${b.line}:${b.text}`).join("\n")}`;
     if (!force && key === shownLinked) return;
@@ -292,11 +296,27 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     await updateNoteText(ws, m.from, lines.join("\n"));
   }
 
-  function refresh() {
+  async function refresh() {
+    if (!active) return;
+    const mine = ++linkedSeq;
+    const path = pathOf();
     noteCache = new Map();
     shownLinked = "";
+    if (path !== linkedPath) {
+      linkedPath = path;
+      linkedEntries = [];
+    }
     renderLinked();
     scheduleUnlinked(UNLINKED_DELAY);
+    if (!path) return;
+    try {
+      const entries = await noteBacklinks(ws)(path);
+      if (!active || mine !== linkedSeq || pathOf() !== path) return;
+      linkedEntries = entries;
+      renderLinked();
+    } catch (err) {
+      console.error("Could not read backlinks", err);
+    }
   }
 
   ws.on((change) => {
@@ -311,7 +331,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
       if (next === active) return;
       active = next;
       if (active) afterPaint(refresh);
-      else clearTimeout(unlinkedTimer);
+      else { clearTimeout(unlinkedTimer); ++linkedSeq; ++unlinkedSeq; }
     },
   };
 }
