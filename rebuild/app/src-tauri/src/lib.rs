@@ -310,3 +310,36 @@ fn tags(
 ) -> Result<BTreeMap<String, Vec<String>>, String> {
     with_vault(&state, |v| Ok(v.index.tags(paths.as_deref())))
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn every_command_is_in_build_manifest_and_default_capability() {
+        let lib = include_str!("lib.rs");
+        let build = include_str!("../build.rs");
+        let cap = include_str!("../capabilities/default.json");
+
+        let (_, rest) = lib.split_once("tauri::generate_handler![").unwrap();
+        let (handler, _) = rest.split_once(']').unwrap();
+        let names: Vec<&str> = handler
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert!(!names.is_empty());
+
+        for name in names {
+            let quoted = format!("\"{name}\"");
+            assert!(
+                build.contains(&quoted),
+                "command `{name}` in generate_handler! is missing from build.rs"
+            );
+            let perm = format!("\"allow-{}\"", name.replace('_', "-"));
+            assert!(
+                cap.contains(&perm),
+                "command `{name}` in generate_handler! is missing {perm} in capabilities/default.json"
+            );
+        }
+    }
+}
+
