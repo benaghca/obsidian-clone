@@ -6,6 +6,40 @@ test("wikilink targets skip fenced code and keep repeats", () => {
   expect(wikilinkTargets(text)).toEqual(["A", "B", "A", "C"]);
 });
 
+test("wikilink targets follow CommonMark fence rules and skip inline code", () => {
+  const text = [
+    "[[Start]] `[[InSingle]]` ``[[InDouble]] ` [[StillInDouble]]`` `unclosed [[AfterUnclosed]]",
+    "~~~",
+    "```",
+    "[[InTildeFence]]",
+    "~~~",
+    "````",
+    "```",
+    "[[InFourBacktickFence]]",
+    "````",
+    "\t```",
+    "[[TabIndentedIsNotAFence]]",
+    "\t```",
+    "    ```",
+    "[[FourSpaceIndentedIsNotAFence]]",
+    "    ```",
+    "```info`backtick",
+    "[[BacktickInInfoStringIsNotAFence]]",
+    "```",
+    "[[InsideFenceNotClosedBy4SpaceIndent]]",
+    "    ```",
+    "``` trailing",
+    "[[StillInsideFence]]",
+  ].join("\n");
+  expect(wikilinkTargets(text)).toEqual([
+    "Start",
+    "AfterUnclosed",
+    "TabIndentedIsNotAFence",
+    "FourSpaceIndentedIsNotAFence",
+    "BacktickInInfoStringIsNotAFence",
+  ]);
+});
+
 test("tags: words after # at a word start, not headings, numbers, code or URL fragments", () => {
   expect(tagsInLine("#idea and #project/grove, x#no http://a.b/#frag")).toEqual(["idea", "project/grove"]);
   expect(tagsInLine("# Heading #tag")).toEqual(["tag"]);
