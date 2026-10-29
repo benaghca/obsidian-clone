@@ -42,10 +42,14 @@ Required: `name`, `input` and `expected`. Optional: `rust`, `ts`, `obsidian` and
 |---|---|---|
 | `tags.json` | `tagsInText` (`src/shell/linksTags.ts`) | none yet (plan step 1 adds `index/tags.rs`) |
 | `links.json` | `wikilinkTargets` (`src/shell/linksTags.ts`) | `parse_note` (`index/parse.rs`), its non-markdown links |
+| `properties.json` | `splitFrontmatter` + `readProperties` (`src/editor/frontmatter.ts`); the runner drops `line` and `count` | none yet (plan step 3 adds `index/props.rs`) |
+
+`properties.json`: `input` is a note's text. The runner joins a line array with `\n`, then calls `splitFrontmatter`. No frontmatter, or one longer than 2,000 lines, is `null`. Otherwise it calls `readProperties` on the lines between the fences and keeps `key`, `type`, and `value`. `null` from `readProperties` (the block is shown as source) is `null` too. An empty `---\n---\n` is `[]`. `line` and `count` are where the property sits in the editor, so they are not in `expected`.
+
+The editor's `readFrontmatter` also requires the first line to start with `---` before it will call `splitFrontmatter`. This runner does not. Saved notes go through `splitFrontmatter` in the properties index, which is the path step 3 ports. A leading BOM or a leading space is the difference: see those cases.
 
 Planned (see `rebuild/RUST_MIGRATION_PLAN.md`):
 
-- `properties.json` (step 3): `input` a note's text, `expected` its properties as `[{ "key", "type", "value" }]` from `readProperties` (`src/editor/frontmatter.ts`).
 - `query.json` (step 4): `input` a query string, `expected` its parse tree from `parseQuery` (`src/shell/searchQuery.ts`). Matching against a vault may need extra case keys. If so, add them to `KEYS` in both runners and document them here.
 
 ## Adding cases

@@ -3,6 +3,7 @@
 // runs the TypeScript side; src-tauri/src/index/parity.rs runs the Rust one.
 
 import { describe, expect, test } from "vitest";
+import { readProperties, splitFrontmatter } from "./editor/frontmatter";
 import { tagsInText, wikilinkTargets } from "./shell/linksTags";
 
 interface Case {
@@ -22,10 +23,23 @@ interface Corpus {
   cases: Case[];
 }
 
+/**
+ * Properties as the corpus stores them. `line` and `count` are editor positions.
+ * Null: no frontmatter, or a block `readProperties` will not place.
+ */
+function propertiesOf(input: string): { key: string; type: string; value: unknown }[] | null {
+  const fm = splitFrontmatter(input);
+  if (!fm) return null;
+  const props = readProperties(fm.lines);
+  if (!props) return null;
+  return props.map(({ key, type, value }) => ({ key, type, value }));
+}
+
 /** The TypeScript function each corpus file checks, by file name. A new file needs an entry here (and in parity.rs). */
 const RUNNERS: Record<string, (input: string) => unknown> = {
   tags: tagsInText,
   links: wikilinkTargets,
+  properties: propertiesOf,
 };
 
 const KEYS = new Set(["name", "input", "expected", "rust", "ts", "obsidian", "note"]);

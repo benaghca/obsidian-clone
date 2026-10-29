@@ -1,0 +1,2020 @@
+{
+  "about": "A note's properties as Grove reads them today. The runner calls splitFrontmatter, then readProperties, and keeps key, type, and value. line and count are editor positions and are left out. Null means there is no frontmatter, or the block is shown as source.",
+  "typescript": "splitFrontmatter and readProperties in src/editor/frontmatter.ts, wrapped by propertiesOf in src/parity.test.ts",
+  "rust": "todo",
+  "cases": [
+    {
+      "name": "the sample note",
+      "input": [
+        "---",
+        "title: Hello world",
+        "tags:",
+        "  - alpha",
+        "  - beta",
+        "count: 42",
+        "done: true",
+        "due: 2026-10-21",
+        "when: 2026-10-21T10:30",
+        "aliases: [Hi, \"a, b\"]",
+        "links:",
+        "  - \"[[Other]]\"",
+        "quoted: \"42\"",
+        "nested:",
+        "  a: 1",
+        "block: |",
+        "  two",
+        "  lines",
+        "# a comment of its own",
+        "noted: value # with a comment",
+        "empty:",
+        "---",
+        "Body text."
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello world"
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "alpha",
+            "beta"
+          ]
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "value": "42"
+        },
+        {
+          "key": "done",
+          "type": "checkbox",
+          "value": true
+        },
+        {
+          "key": "due",
+          "type": "date",
+          "value": "2026-10-21"
+        },
+        {
+          "key": "when",
+          "type": "datetime",
+          "value": "2026-10-21T10:30"
+        },
+        {
+          "key": "aliases",
+          "type": "aliases",
+          "value": [
+            "Hi",
+            "a, b"
+          ]
+        },
+        {
+          "key": "links",
+          "type": "list",
+          "value": [
+            "[[Other]]"
+          ]
+        },
+        {
+          "key": "quoted",
+          "type": "text",
+          "value": "42"
+        },
+        {
+          "key": "nested",
+          "type": "unknown",
+          "value": "a: 1"
+        },
+        {
+          "key": "block",
+          "type": "unknown",
+          "value": "|\n  two\n  lines"
+        },
+        {
+          "key": "noted",
+          "type": "unknown",
+          "value": "value # with a comment"
+        },
+        {
+          "key": "empty",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "note": "The note from frontmatter.test.ts. A comment on its own line is skipped. A comment on a value, a nested map, and a block scalar are unknown."
+    },
+    {
+      "name": "empty values and nulls",
+      "input": [
+        "---",
+        "empty:",
+        "quotes: \"\"",
+        "single: ''",
+        "tilde: ~",
+        "word: null",
+        "upper: NULL",
+        "mixed: Null",
+        "letter: n",
+        "spaced:   ",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "empty",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "quotes",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "single",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "tilde",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "word",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "upper",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "mixed",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "letter",
+          "type": "text",
+          "value": "n"
+        },
+        {
+          "key": "spaced",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "note": "An empty value, quotes, ~, and null in any case are text \"\". The word n is text. Trailing spaces after the colon still leave the value empty."
+    },
+    {
+      "name": "plain numbers",
+      "input": [
+        "---",
+        "zero: 0",
+        "neg: -1.5",
+        "one: 1.0",
+        "zero_dec: 0.0",
+        "negzero: -0",
+        "fine: 12.5",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "zero",
+          "type": "number",
+          "value": "0"
+        },
+        {
+          "key": "neg",
+          "type": "number",
+          "value": "-1.5"
+        },
+        {
+          "key": "one",
+          "type": "number",
+          "value": "1.0"
+        },
+        {
+          "key": "zero_dec",
+          "type": "number",
+          "value": "0.0"
+        },
+        {
+          "key": "negzero",
+          "type": "number",
+          "value": "-0"
+        },
+        {
+          "key": "fine",
+          "type": "number",
+          "value": "12.5"
+        }
+      ],
+      "note": "The text is kept as written, including -0 and the trailing .0. These match NUMBER, so every YAML reader agrees."
+    },
+    {
+      "name": "checkboxes in any case",
+      "input": [
+        "---",
+        "yes: true",
+        "no: false",
+        "upper: TRUE",
+        "mixed: False",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "yes",
+          "type": "checkbox",
+          "value": true
+        },
+        {
+          "key": "no",
+          "type": "checkbox",
+          "value": false
+        },
+        {
+          "key": "upper",
+          "type": "checkbox",
+          "value": true
+        },
+        {
+          "key": "mixed",
+          "type": "checkbox",
+          "value": false
+        }
+      ],
+      "note": "Only true and false, in any case. The value is a boolean, true only when the word lowercases to true."
+    },
+    {
+      "name": "yes no on off",
+      "input": [
+        "---",
+        "yes: yes",
+        "no: no",
+        "on: on",
+        "off: off",
+        "short: y",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "yes",
+          "type": "text",
+          "value": "yes"
+        },
+        {
+          "key": "no",
+          "type": "text",
+          "value": "no"
+        },
+        {
+          "key": "on",
+          "type": "text",
+          "value": "on"
+        },
+        {
+          "key": "off",
+          "type": "text",
+          "value": "off"
+        },
+        {
+          "key": "short",
+          "type": "text",
+          "value": "y"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "yes",
+          "type": "checkbox",
+          "value": true
+        },
+        {
+          "key": "no",
+          "type": "checkbox",
+          "value": false
+        },
+        {
+          "key": "on",
+          "type": "checkbox",
+          "value": true
+        },
+        {
+          "key": "off",
+          "type": "checkbox",
+          "value": false
+        },
+        {
+          "key": "short",
+          "type": "checkbox",
+          "value": true
+        }
+      ],
+      "note": "YAML 1.1 reads yes/no/on/off/y as booleans, and Obsidian's parser is believed to do that, so these would be checkboxes. Grove only treats true and false as checkboxes, on purpose, so the line is never rewritten. Verify."
+    },
+    {
+      "name": "a date, including one that is not a real day",
+      "input": [
+        "---",
+        "due: 2026-10-21",
+        "odd: 2026-13-40",
+        "slashes: 2026/10/21",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "due",
+          "type": "date",
+          "value": "2026-10-21"
+        },
+        {
+          "key": "odd",
+          "type": "date",
+          "value": "2026-13-40"
+        },
+        {
+          "key": "slashes",
+          "type": "text",
+          "value": "2026/10/21"
+        }
+      ],
+      "note": "DATE is four digits, a dash, two digits, a dash, two digits. There is no calendar check, so 2026-13-40 is a date. Slashes are text. Obsidian's calendar check is unverified."
+    },
+    {
+      "name": "datetimes the pattern accepts",
+      "input": [
+        "---",
+        "minutes: 2026-10-21T10:30",
+        "seconds: 2026-10-21T10:30:00",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "minutes",
+          "type": "datetime",
+          "value": "2026-10-21T10:30"
+        },
+        {
+          "key": "seconds",
+          "type": "datetime",
+          "value": "2026-10-21T10:30:00"
+        }
+      ],
+      "note": "DATETIME is a date, T, HH:MM, and optional :SS. Nothing else."
+    },
+    {
+      "name": "datetimes with a zone or a fraction",
+      "input": [
+        "---",
+        "z: 2026-10-21T10:30:00Z",
+        "offset: 2026-10-21T10:30:00+01:00",
+        "neg: 2026-10-21T10:30:00-05:00",
+        "frac: 2026-10-21T10:30:00.000Z",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "z",
+          "type": "text",
+          "value": "2026-10-21T10:30:00Z"
+        },
+        {
+          "key": "offset",
+          "type": "text",
+          "value": "2026-10-21T10:30:00+01:00"
+        },
+        {
+          "key": "neg",
+          "type": "text",
+          "value": "2026-10-21T10:30:00-05:00"
+        },
+        {
+          "key": "frac",
+          "type": "text",
+          "value": "2026-10-21T10:30:00.000Z"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "z",
+          "type": "datetime",
+          "value": "2026-10-21T10:30:00Z"
+        },
+        {
+          "key": "offset",
+          "type": "datetime",
+          "value": "2026-10-21T10:30:00+01:00"
+        },
+        {
+          "key": "neg",
+          "type": "datetime",
+          "value": "2026-10-21T10:30:00-05:00"
+        },
+        {
+          "key": "frac",
+          "type": "datetime",
+          "value": "2026-10-21T10:30:00.000Z"
+        }
+      ],
+      "note": "The pattern has no zone and no fraction, so these are text. Obsidian treats ISO-8601 datetimes as datetimes. Verify."
+    },
+    {
+      "name": "a space instead of T, and a one-digit hour",
+      "input": [
+        "---",
+        "space: 2026-10-21 10:30",
+        "hour: 2026-10-21T1:30",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "space",
+          "type": "text",
+          "value": "2026-10-21 10:30"
+        },
+        {
+          "key": "hour",
+          "type": "text",
+          "value": "2026-10-21T1:30"
+        }
+      ],
+      "note": "Neither matches DATETIME. Obsidian often accepts a space instead of T. The one-digit hour is unverified. No obsidian value."
+    },
+    {
+      "name": "quoted scalars stay text",
+      "input": [
+        "---",
+        "num: \"42\"",
+        "flag: \"true\"",
+        "day: \"2026-10-21\"",
+        "when: '2026-10-21T10:30'",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "num",
+          "type": "text",
+          "value": "42"
+        },
+        {
+          "key": "flag",
+          "type": "text",
+          "value": "true"
+        },
+        {
+          "key": "day",
+          "type": "text",
+          "value": "2026-10-21"
+        },
+        {
+          "key": "when",
+          "type": "text",
+          "value": "2026-10-21T10:30"
+        }
+      ],
+      "note": "Quotes force text, including values that would otherwise be a number, a checkbox, a date, or a datetime."
+    },
+    {
+      "name": "double-quoted escapes",
+      "input": [
+        "---",
+        "say: \"a\\\"b\"",
+        "line: \"a\\nb\"",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "say",
+          "type": "text",
+          "value": "a\"b"
+        },
+        {
+          "key": "line",
+          "type": "text",
+          "value": "a\nb"
+        }
+      ],
+      "note": "Double quotes are unescaped with JSON.parse. \\n becomes a real newline. This is JSON's set of escapes, not every YAML escape."
+    },
+    {
+      "name": "a JSON-illegal escape is unknown",
+      "input": [
+        "---",
+        "bad: \"\\ \"",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "bad",
+          "type": "unknown",
+          "value": "\"\\ \""
+        }
+      ],
+      "note": "The quotes look closed, but JSON.parse rejects a backslash before a space, so the value is unknown rather than text."
+    },
+    {
+      "name": "single quotes are literal",
+      "input": [
+        "---",
+        "plain: 'it''s'",
+        "slash: 'a\\nb'",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "plain",
+          "type": "text",
+          "value": "it's"
+        },
+        {
+          "key": "slash",
+          "type": "text",
+          "value": "a\\nb"
+        }
+      ],
+      "note": "A doubled single quote is one apostrophe. A backslash is kept. There is no \\n escape."
+    },
+    {
+      "name": "unicode values",
+      "input": [
+        "---",
+        "place: 日本語",
+        "cafe: café",
+        "mark: café",
+        "face: 🙂",
+        "名前: 森",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "place",
+          "type": "text",
+          "value": "日本語"
+        },
+        {
+          "key": "cafe",
+          "type": "text",
+          "value": "café"
+        },
+        {
+          "key": "mark",
+          "type": "text",
+          "value": "café"
+        },
+        {
+          "key": "face",
+          "type": "text",
+          "value": "🙂"
+        },
+        {
+          "key": "名前",
+          "type": "text",
+          "value": "森"
+        }
+      ],
+      "note": "A value keeps a combining mark (U+0301). tagsInText drops that mark. The key 名前 is kept as written."
+    },
+    {
+      "name": "a url, and a hash with no space before it",
+      "input": [
+        "---",
+        "site: https://example.com/a#frag",
+        "hash: a#b",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "site",
+          "type": "text",
+          "value": "https://example.com/a#frag"
+        },
+        {
+          "key": "hash",
+          "type": "text",
+          "value": "a#b"
+        }
+      ],
+      "note": "A # starts a comment only at the start of the value or after whitespace. A colon in a url is not the colon-space rule."
+    },
+    {
+      "name": "block and flow lists",
+      "input": [
+        "---",
+        "block:",
+        "  - alpha",
+        "  - beta",
+        "flow: [alpha, beta]",
+        "deeper:",
+        "    - alpha",
+        "    - beta",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "list",
+          "value": [
+            "alpha",
+            "beta"
+          ]
+        },
+        {
+          "key": "flow",
+          "type": "list",
+          "value": [
+            "alpha",
+            "beta"
+          ]
+        },
+        {
+          "key": "deeper",
+          "type": "list",
+          "value": [
+            "alpha",
+            "beta"
+          ]
+        }
+      ],
+      "note": "A block list uses the first item's indent for every item. A deeper indent is fine when every item shares it. Flow is one line."
+    },
+    {
+      "name": "an empty value is text and an empty list is a list",
+      "input": [
+        "---",
+        "name:",
+        "items: []",
+        "spaced: [  ]",
+        "tags:",
+        "aliases: []",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "name",
+          "type": "text",
+          "value": ""
+        },
+        {
+          "key": "items",
+          "type": "list",
+          "value": []
+        },
+        {
+          "key": "spaced",
+          "type": "list",
+          "value": []
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": []
+        },
+        {
+          "key": "aliases",
+          "type": "aliases",
+          "value": []
+        }
+      ],
+      "note": "name: is text \"\". An empty flow list is a list, including with spaces inside the brackets. tags: with no items is tags []. aliases: [] is aliases []."
+    },
+    {
+      "name": "empty flow items are dropped",
+      "input": [
+        "---",
+        "items: [a, null, ~, b, ]",
+        "tags: [a, null, b]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "items",
+          "type": "list",
+          "value": [
+            "a",
+            "b"
+          ]
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "note": "null and ~ are dropped, and so is the empty item a trailing comma leaves. The tags key keeps the tags type."
+    },
+    {
+      "name": "commas and typed tokens inside a list",
+      "input": [
+        "---",
+        "flow: [1, true, 2026-10-21, \"a, b\"]",
+        "tags: [\"a, b\", c]",
+        "aliases: [Hi, \"a, b\"]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "flow",
+          "type": "list",
+          "value": [
+            "1",
+            "true",
+            "2026-10-21",
+            "a, b"
+          ]
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "a, b",
+            "c"
+          ]
+        },
+        {
+          "key": "aliases",
+          "type": "aliases",
+          "value": [
+            "Hi",
+            "a, b"
+          ]
+        }
+      ],
+      "note": "List items are text. A number, a boolean, and a date are not re-typed. A quoted comma stays inside the item. A tags list is not split again, and neither is an aliases list."
+    },
+    {
+      "name": "an escaped quote in a flow list",
+      "input": [
+        "---",
+        "flow: [\"a\\\"b\", c]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "flow",
+          "type": "unknown",
+          "value": "[\"a\\\"b\", c]"
+        }
+      ],
+      "note": "The flow splitter ends a quote at the next quote character and does not treat a backslash as an escape, so this quote never closes and the value is unknown."
+    },
+    {
+      "name": "a nested flow list is unknown",
+      "input": [
+        "---",
+        "flow: [a, [b]]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "flow",
+          "type": "unknown",
+          "value": "[a, [b]]"
+        }
+      ],
+      "note": "A flow item has to be one scalar. A nested list is not."
+    },
+    {
+      "name": "a blank line between list items",
+      "input": [
+        "---",
+        "block:",
+        "  - alpha",
+        "",
+        "  - beta",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "list",
+          "value": [
+            "alpha",
+            "beta"
+          ]
+        }
+      ],
+      "note": "Blank lines count toward the property's span and are not items. The list is still [alpha, beta]."
+    },
+    {
+      "name": "a tab-indented block list",
+      "input": [
+        "---",
+        "block:",
+        "\t- alpha",
+        "\t- beta",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "list",
+          "value": [
+            "alpha",
+            "beta"
+          ]
+        }
+      ],
+      "note": "A tab is an indent. Both items use the same indent, so it is a list."
+    },
+    {
+      "name": "mixed list indentation is unknown",
+      "input": [
+        "---",
+        "block:",
+        "  - alpha",
+        "\t- beta",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "unknown",
+          "value": "- alpha\n\t- beta"
+        }
+      ],
+      "note": "The indent string has to be equal, not merely the same width. Two spaces and a tab differ. The unknown value is the raw lines joined and trimmed, so the first item's indent is dropped."
+    },
+    {
+      "name": "a nested list item",
+      "input": [
+        "---",
+        "block:",
+        "  - - alpha",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "list",
+          "value": [
+            "- alpha"
+          ]
+        }
+      ],
+      "note": "The scalar check does not reject a leading dash. The item text is the rest of the line, dash included, when that rest is a plain scalar."
+    },
+    {
+      "name": "a list item that is a map",
+      "input": [
+        "---",
+        "block:",
+        "  - alpha: 1",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "unknown",
+          "value": "- alpha: 1"
+        }
+      ],
+      "note": "A colon followed by a space is not a scalar, so the list is unknown."
+    },
+    {
+      "name": "tags split on commas and spaces",
+      "input": [
+        "---",
+        "Tags: a, b c",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "Tags",
+          "type": "tags",
+          "value": [
+            "a",
+            "b",
+            "c"
+          ]
+        }
+      ],
+      "note": "The key keeps its spelling. The type is tags in any case. A plain value splits on commas and whitespace. A leading # is not stripped here."
+    },
+    { "name": "tags as a block list", "input": ["---", "tags:", "  - alpha", "  - beta", "---"], "expected": [{"key": "tags", "type": "tags", "value": ["alpha", "beta"]}] },
+    { "name": "tags as a flow list", "input": ["---", "tags: [alpha, beta]", "---"], "expected": [{"key": "tags", "type": "tags", "value": ["alpha", "beta"]}] },
+    {
+      "name": "a quoted tags string is still split",
+      "input": [
+        "---",
+        "tags: \"a, b\"",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "note": "Quotes are removed first. A plain tags value is then split on commas and whitespace, so the quotes do not keep it as one tag. Whether Obsidian keeps one tag is unverified."
+    },
+    {
+      "name": "a tags list item keeps an internal comma",
+      "input": [
+        "---",
+        "tags: [\"a, b\", c]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "a, b",
+            "c"
+          ]
+        }
+      ],
+      "note": "Splitting happens only for a plain tags value. A list item stays whole."
+    },
+    {
+      "name": "the legacy tag key is plain text",
+      "input": [
+        "---",
+        "tag: solo, pair",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tag",
+          "type": "text",
+          "value": "solo, pair"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "tag",
+          "type": "tags",
+          "value": [
+            "solo",
+            "pair"
+          ]
+        }
+      ],
+      "note": "fixedType is only tags, aliases, and cssclasses. tag is not one of them, so a plain value stays one string and is not split. Obsidian treats tag as the tags property. Verify."
+    },
+    {
+      "name": "the legacy tag key as a list",
+      "input": [
+        "---",
+        "tag:",
+        "  - solo",
+        "  - pair",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tag",
+          "type": "list",
+          "value": [
+            "solo",
+            "pair"
+          ]
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "tag",
+          "type": "tags",
+          "value": [
+            "solo",
+            "pair"
+          ]
+        }
+      ],
+      "note": "A block list under tag is a list, not tags. Obsidian still types the legacy key as tags. Verify."
+    },
+    {
+      "name": "a quoted hash stays on a tag",
+      "input": [
+        "---",
+        "tags: \"#project\"",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "#project"
+          ]
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "project"
+          ]
+        }
+      ],
+      "note": "readProperties does not strip a leading #. tagValue (the tag index) does. Obsidian's property value is believed to drop the #. Verify."
+    },
+    {
+      "name": "a quoted hash in a tags flow list",
+      "input": [
+        "---",
+        "tags: [\"#a\", b]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "#a",
+            "b"
+          ]
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "note": "The quoted item is the text #a. Obsidian is believed to store a and b. Verify."
+    },
+    {
+      "name": "an unquoted hash in a flow list",
+      "input": [
+        "---",
+        "tags: [#a, #b]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tags",
+          "type": "unknown",
+          "value": "[#a, #b]"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "a",
+            "b"
+          ]
+        }
+      ],
+      "note": "A scalar may not start with #, so the flow list fails and the property is unknown. It is not hasComment: the # does not follow the start of the value or whitespace. Obsidian is believed to read the tags. Verify."
+    },
+    {
+      "name": "a bare hash after the tags colon",
+      "input": [
+        "---",
+        "tags: #project",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "tags",
+          "type": "unknown",
+          "value": "#project"
+        }
+      ],
+      "note": "The # is a comment on the value, so the property is unknown and the text is kept. YAML would treat the value as empty. frontmatter.test.ts treats a comment in a value as unknown, the way it reads Obsidian, so there is no obsidian value. The tag index is a different function."
+    },
+    {
+      "name": "aliases stay one string",
+      "input": [
+        "---",
+        "aliases: Hi, there",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "aliases",
+          "type": "aliases",
+          "value": [
+            "Hi, there"
+          ]
+        }
+      ],
+      "note": "A plain alias is not split on commas or spaces. The comment in frontmatter.ts says that is Obsidian's reading."
+    },
+    {
+      "name": "aliases as a list",
+      "input": [
+        "---",
+        "Aliases: [Hi, \"a, b\"]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "Aliases",
+          "type": "aliases",
+          "value": [
+            "Hi",
+            "a, b"
+          ]
+        }
+      ],
+      "note": "The key keeps its spelling. The type is aliases in any case. A quoted comma stays inside the item."
+    },
+    {
+      "name": "the legacy alias key is text",
+      "input": [
+        "---",
+        "alias: Road",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "alias",
+          "type": "text",
+          "value": "Road"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "alias",
+          "type": "aliases",
+          "value": [
+            "Road"
+          ]
+        }
+      ],
+      "note": "alias is not a fixed type. Obsidian treats alias like aliases. Verify."
+    },
+    {
+      "name": "cssclasses is a list",
+      "input": [
+        "---",
+        "CSSClasses:",
+        "  - wide",
+        "  - cards",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "CSSClasses",
+          "type": "list",
+          "value": [
+            "wide",
+            "cards"
+          ]
+        }
+      ],
+      "note": "cssclasses is the fixed type list, in any case. The key is kept as written."
+    },
+    {
+      "name": "a plain cssclasses value is one item",
+      "input": [
+        "---",
+        "cssclasses: one two",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "cssclasses",
+          "type": "list",
+          "value": [
+            "one two"
+          ]
+        }
+      ],
+      "note": "Only a plain tags value is split on whitespace. A plain cssclasses value becomes a one-item list. Whether Obsidian splits it is unverified."
+    },
+    {
+      "name": "the legacy cssclass key is text",
+      "input": [
+        "---",
+        "cssclass: wide",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "cssclass",
+          "type": "text",
+          "value": "wide"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "cssclass",
+          "type": "list",
+          "value": [
+            "wide"
+          ]
+        }
+      ],
+      "note": "cssclass is not a fixed type, so a plain value is text. Obsidian treats cssclass like cssclasses, a list. Verify."
+    },
+    {
+      "name": "a nested map is unknown",
+      "input": [
+        "---",
+        "nested:",
+        "  a: 1",
+        "  b: 2",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "nested",
+          "type": "unknown",
+          "value": "a: 1\n  b: 2"
+        }
+      ],
+      "note": "The indented lines are not a block list, so the value is the raw lines joined and trimmed (the first line's indent is dropped). frontmatter.test.ts treats this as Obsidian's reading: shown, never rewritten."
+    },
+    {
+      "name": "a flow map is unknown",
+      "input": [
+        "---",
+        "flow: {a: 1}",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "flow",
+          "type": "unknown",
+          "value": "{a: 1}"
+        }
+      ],
+      "note": "A flow map is not a flow list and not a scalar."
+    },
+    {
+      "name": "literal and folded blocks are unknown",
+      "input": [
+        "---",
+        "block: |",
+        "  two",
+        "  lines",
+        "fold: >",
+        "  two",
+        "  lines",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "block",
+          "type": "unknown",
+          "value": "|\n  two\n  lines"
+        },
+        {
+          "key": "fold",
+          "type": "unknown",
+          "value": ">\n  two\n  lines"
+        }
+      ],
+      "note": "A block scalar is unknown. The value is the indicator and the following lines, as written. frontmatter.test.ts treats the literal block as Obsidian's reading."
+    },
+    {
+      "name": "a block indicator with the closer next",
+      "input": [
+        "---",
+        "poem: |",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "poem",
+          "type": "unknown",
+          "value": "|"
+        }
+      ],
+      "note": "The next --- closes the frontmatter before any body line of the block. The value is the indicator alone."
+    },
+    {
+      "name": "an anchor, an alias, and a tag directive are unknown",
+      "input": [
+        "---",
+        "star: *a",
+        "amp: &a",
+        "bang: !!str",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "star",
+          "type": "unknown",
+          "value": "*a"
+        },
+        {
+          "key": "amp",
+          "type": "unknown",
+          "value": "&a"
+        },
+        {
+          "key": "bang",
+          "type": "unknown",
+          "value": "!!str"
+        }
+      ],
+      "note": "A scalar may not start with * & or !."
+    },
+    {
+      "name": "a leading dash",
+      "input": [
+        "---",
+        "dash: -x",
+        "neg: -1",
+        "spaced: - x",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "dash",
+          "type": "text",
+          "value": "-x"
+        },
+        {
+          "key": "neg",
+          "type": "number",
+          "value": "-1"
+        },
+        {
+          "key": "spaced",
+          "type": "text",
+          "value": "- x"
+        }
+      ],
+      "note": "The scalar check allows a leading dash. -x and - x are text. -1 matches NUMBER and is a number. yamlString still quotes -x so a later edit round-trips."
+    },
+    {
+      "name": "comments",
+      "input": [
+        "---",
+        "# a comment of its own",
+        "title: Hello",
+        "noted: value # with a comment",
+        "quoted: \"a # b\"",
+        "items:",
+        "  - alpha # no",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        },
+        {
+          "key": "noted",
+          "type": "unknown",
+          "value": "value # with a comment"
+        },
+        {
+          "key": "quoted",
+          "type": "text",
+          "value": "a # b"
+        },
+        {
+          "key": "items",
+          "type": "unknown",
+          "value": "- alpha # no"
+        }
+      ],
+      "note": "A # line of its own is skipped. A # after whitespace on the value or on an item makes that property unknown. A # inside quotes is part of the text."
+    },
+    {
+      "name": "an indented comment belongs to the property above",
+      "input": [
+        "---",
+        "a: 1",
+        "  # note",
+        "b: 2",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "a",
+          "type": "unknown",
+          "value": "1\n  # note"
+        },
+        {
+          "key": "b",
+          "type": "number",
+          "value": "2"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "a",
+          "type": "number",
+          "value": "1"
+        },
+        {
+          "key": "b",
+          "type": "number",
+          "value": "2"
+        }
+      ],
+      "note": "Any indented line continues the property above it, so the comment is part of a and a is unknown. YAML would treat the indented # as a comment of its own. Belief: Obsidian still has both numbers. Verify."
+    },
+    {
+      "name": "duplicate keys in any case",
+      "input": [
+        "---",
+        "name: first",
+        "count: 1",
+        "Name: second",
+        "---"
+      ],
+      "expected": null,
+      "obsidian": [
+        {
+          "key": "count",
+          "type": "number",
+          "value": "1"
+        },
+        {
+          "key": "Name",
+          "type": "text",
+          "value": "second"
+        }
+      ],
+      "note": "A key repeated in any case makes the whole block source, so nothing is rewritten. Belief: Obsidian keeps the block, the last value wins, and count stays. The spelling Name and its position at the end are a guess. Verify before changing anything."
+    },
+    {
+      "name": "a line that is not a property",
+      "input": [
+        "---",
+        "title: Hello",
+        "not a property",
+        "count: 1",
+        "---"
+      ],
+      "expected": null,
+      "note": "One line that is not a key, a blank, or a # comment makes the whole block source, including the keys around it."
+    },
+    { "name": "a list at the top", "input": ["---", "- alpha", "title: Hello", "---"], "expected": null, "note": "A top-level list is not a property. The block is source." },
+    {
+      "name": "an explicit YAML key",
+      "input": [
+        "---",
+        "? title",
+        ": Hello",
+        "---"
+      ],
+      "expected": null,
+      "note": "A line starting with ? is not a key. The block is source. Whether Obsidian's parser accepts an explicit key is unverified."
+    },
+    {
+      "name": "a bare at-sign nulls the block",
+      "input": [
+        "---",
+        "@key: value",
+        "title: Hello",
+        "---"
+      ],
+      "expected": null,
+      "note": "A plain key may not start with @. The later good key does not save the block."
+    },
+    {
+      "name": "a quoted at-sign key",
+      "input": [
+        "---",
+        "\"@key\": value",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "@key",
+          "type": "text",
+          "value": "value"
+        }
+      ],
+      "note": "Quotes allow a key the plain form rejects."
+    },
+    { "name": "empty frontmatter", "input": ["---", "---"], "expected": [], "note": "Fences with nothing between them are an empty list, not null." },
+    {
+      "name": "only comments and blank lines",
+      "input": [
+        "---",
+        "",
+        "# just a comment",
+        "   ",
+        "# another",
+        "---"
+      ],
+      "expected": [],
+      "note": "Comments and blank lines belong to no property. The result is an empty list."
+    },
+    { "name": "no frontmatter", "input": "title: Hello\nBody.\n", "expected": null, "note": "The first line is not ---." },
+    {
+      "name": "a blank line before the fence",
+      "input": "\n---\ntitle: Hello\n---\n",
+      "expected": null,
+      "note": "The first line has to trim to ---. A blank line above the fence means there is no frontmatter. Obsidian agrees."
+    },
+    { "name": "unclosed frontmatter", "input": "---\ntitle: Hello\n", "expected": null, "note": "No closing ---. The note has no frontmatter." },
+    {
+      "name": "a YAML end marker does not close",
+      "input": "---\ntitle: Dots\n...\n",
+      "expected": null,
+      "note": "... is not a closing fence. The frontmatter never closes, so the result is null. The comment in frontmatter.ts says Obsidian agrees: the note has no frontmatter."
+    },
+    {
+      "name": "an end marker and a later fence",
+      "input": [
+        "---",
+        "title: Dots",
+        "...",
+        "---"
+      ],
+      "expected": null,
+      "note": "... does not close, so the later --- does. The ... line is then not a key, and the block is source. Same result as no frontmatter, for a different reason."
+    },
+    {
+      "name": "fences with surrounding spaces",
+      "input": [
+        "--- ",
+        "title: Hello",
+        " ---"
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        }
+      ],
+      "note": "Both fences match after trim. A trailing space on the opener and a leading space on the closer still close."
+    },
+    {
+      "name": "four dashes do not close",
+      "input": [
+        "---",
+        "title: Hello",
+        "----",
+        "next: 1",
+        "---"
+      ],
+      "expected": null,
+      "note": "The closer has to trim to exactly ---. ---- is also not a key, so the block is source."
+    },
+    {
+      "name": "a comment on the closing fence",
+      "input": [
+        "---",
+        "title: Hello",
+        "--- # comment"
+      ],
+      "expected": null,
+      "note": "The closer has to be only --- after trim. A comment on that line leaves the frontmatter unclosed."
+    },
+    {
+      "name": "CRLF line ends",
+      "input": "---\r\ntitle: Hello\r\ncount: 2\r\ntags:\r\n  - alpha\r\n---\r\n",
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "value": "2"
+        },
+        {
+          "key": "tags",
+          "type": "tags",
+          "value": [
+            "alpha"
+          ]
+        }
+      ],
+      "note": "Each line loses one trailing CR before it is read. The values do not keep the CR. Obsidian agrees."
+    },
+    {
+      "name": "a BOM before the fences",
+      "input": "﻿---\ntitle: Hello\ncount: 2\n---\n",
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "value": "2"
+        }
+      ],
+      "note": "splitFrontmatter trims the first line, and trim removes U+FEFF, so the fence still matches. readFrontmatter and tagsInText do not: both require the text to start with ---, which is why the BOM case in tags.json drops the frontmatter tags. Rust's parse_note strips a BOM. Obsidian reads the frontmatter. This runner follows splitFrontmatter."
+    },
+    {
+      "name": "a BOM and CRLF",
+      "input": "﻿---\r\ntitle: Hello\r\n---\r\n",
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        }
+      ],
+      "note": "The BOM is trimmed with the first line and the CR is stripped. Same reading as LF."
+    },
+    {
+      "name": "a space before the opening fence",
+      "input": " ---\ntitle: Hello\n---\n",
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        }
+      ],
+      "obsidian": null,
+      "note": "splitFrontmatter trims, so one leading space still opens frontmatter. readFrontmatter and tagsInText require the first line to start with ---, so they would miss it. Obsidian requires the fence at the start of the file. Verify."
+    },
+    {
+      "name": "quoted keys and a key with a space",
+      "input": [
+        "---",
+        "\"my: key\": old",
+        "'it''s': fine",
+        "my key: hello",
+        "\"\": blank",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "my: key",
+          "type": "text",
+          "value": "old"
+        },
+        {
+          "key": "it's",
+          "type": "text",
+          "value": "fine"
+        },
+        {
+          "key": "my key",
+          "type": "text",
+          "value": "hello"
+        },
+        {
+          "key": "",
+          "type": "text",
+          "value": "blank"
+        }
+      ],
+      "note": "A double-quoted key is JSON.parse'd. A single-quoted key uses the same '' rule as a value. A plain key may contain a space. An empty quoted key is kept."
+    },
+    {
+      "name": "a tab before the colon",
+      "input": [
+        "---",
+        "key\t: value",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "key",
+          "type": "text",
+          "value": "value"
+        }
+      ],
+      "note": "Spaces or tabs may separate the key from the colon."
+    },
+    {
+      "name": "no space after the colon",
+      "input": [
+        "---",
+        "key:value",
+        "title: Hello",
+        "---"
+      ],
+      "expected": null,
+      "note": "The value needs whitespace after the colon, or the line is not a key. One such line makes the block source."
+    },
+    {
+      "name": "a colon inside the value",
+      "input": [
+        "---",
+        "title: a: b",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "unknown",
+          "value": "a: b"
+        }
+      ],
+      "note": "A colon followed by a space is not a plain scalar, so the property is unknown."
+    },
+    {
+      "name": "every key is indented",
+      "input": [
+        "---",
+        "  title: Hello",
+        "  count: 2",
+        "---"
+      ],
+      "expected": null,
+      "obsidian": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        },
+        {
+          "key": "count",
+          "type": "number",
+          "value": "2"
+        }
+      ],
+      "note": "A key has to start at column 0, so an indented mapping is not a property line and the block is source. Obsidian's YAML parser accepts an indented mapping. Verify."
+    },
+    {
+      "name": "an indented line continues the value",
+      "input": [
+        "---",
+        "title: Hello",
+        "  more",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "unknown",
+          "value": "Hello\n  more"
+        }
+      ],
+      "note": "An indented line that is not a list item, under a key that already has a value, makes that property unknown. It is not a second key."
+    },
+    {
+      "name": "a quoted string split across lines",
+      "input": [
+        "---",
+        "title: \"foo",
+        "bar\"",
+        "---"
+      ],
+      "expected": null,
+      "obsidian": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "foo bar"
+        }
+      ],
+      "note": "The next line is not indented, so it does not continue the value, and it is not a key. The whole block is source. YAML allows a double-quoted scalar to span lines and folds the break into a space. Belief: Obsidian reads the text foo bar. The space is the uncertain part. Verify."
+    },
+    {
+      "name": "the body is not read",
+      "input": [
+        "---",
+        "title: First",
+        "---",
+        "count: 99\n---\ntitle: Second\n---\n"
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "First"
+        }
+      ],
+      "note": "The first closing fence ends the frontmatter. A later fence and a later key are body text."
+    },
+    {
+      "name": "wikilinks",
+      "input": [
+        "---",
+        "link: [[Note]]",
+        "quoted: \"[[Note]]\"",
+        "items:",
+        "  - \"[[Other]]\"",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "link",
+          "type": "unknown",
+          "value": "[[Note]]"
+        },
+        {
+          "key": "quoted",
+          "type": "text",
+          "value": "[[Note]]"
+        },
+        {
+          "key": "items",
+          "type": "list",
+          "value": [
+            "[[Other]]"
+          ]
+        }
+      ],
+      "note": "An unquoted [[ starts a flow sequence, so it is not a scalar and the property is unknown. Quoted, it is text, including as a list item. Whether Obsidian shows the unquoted wikilink as text is unverified."
+    },
+    {
+      "name": "values YAML readers disagree on",
+      "input": [
+        "---",
+        "octal: 012",
+        "hex: 0x1F",
+        "binary: 0b10",
+        "octalword: 0o10",
+        "under: 1_000",
+        "inf: .inf",
+        "nan: .nan",
+        "clock: 10:30",
+        "zeros: 007",
+        "trail: 12.",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "octal",
+          "type": "unknown",
+          "value": "012"
+        },
+        {
+          "key": "hex",
+          "type": "unknown",
+          "value": "0x1F"
+        },
+        {
+          "key": "binary",
+          "type": "unknown",
+          "value": "0b10"
+        },
+        {
+          "key": "octalword",
+          "type": "unknown",
+          "value": "0o10"
+        },
+        {
+          "key": "under",
+          "type": "unknown",
+          "value": "1_000"
+        },
+        {
+          "key": "inf",
+          "type": "unknown",
+          "value": ".inf"
+        },
+        {
+          "key": "nan",
+          "type": "unknown",
+          "value": ".nan"
+        },
+        {
+          "key": "clock",
+          "type": "unknown",
+          "value": "10:30"
+        },
+        {
+          "key": "zeros",
+          "type": "unknown",
+          "value": "007"
+        },
+        {
+          "key": "trail",
+          "type": "unknown",
+          "value": "12."
+        }
+      ],
+      "note": "NUMBERISH is read-only: unknown, text kept as written. Likely numbers in a YAML 1.1 reader, but the values are not agreed (012 as octal 10 or decimal 12, 10:30 as sexagesimal 630, underscores, infinity). No obsidian value. Grove keeps them unknown so they are never rewritten."
+    },
+    {
+      "name": "scientific notation, a leading dot, and a leading plus",
+      "input": [
+        "---",
+        "sci: 1e3",
+        "half: .5",
+        "plus: +5",
+        "zero: +0",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "sci",
+          "type": "unknown",
+          "value": "1e3"
+        },
+        {
+          "key": "half",
+          "type": "unknown",
+          "value": ".5"
+        },
+        {
+          "key": "plus",
+          "type": "unknown",
+          "value": "+5"
+        },
+        {
+          "key": "zero",
+          "type": "unknown",
+          "value": "+0"
+        }
+      ],
+      "obsidian": [
+        {
+          "key": "sci",
+          "type": "number",
+          "value": "1000"
+        },
+        {
+          "key": "half",
+          "type": "number",
+          "value": "0.5"
+        },
+        {
+          "key": "plus",
+          "type": "number",
+          "value": "5"
+        },
+        {
+          "key": "zero",
+          "type": "number",
+          "value": "0"
+        }
+      ],
+      "note": "These are unknown here (NUMBERISH) so they are never rewritten. Belief: Obsidian types them as numbers and shows the canonical text 1000, 0.5, 5, and 0. The type is the confident part. The canonical text is unverified. Verify."
+    },
+    {
+      "name": "one numberish item makes the list unknown",
+      "input": [
+        "---",
+        "flow: [a, 012]",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "flow",
+          "type": "unknown",
+          "value": "[a, 012]"
+        }
+      ],
+      "note": "Every flow item has to be a scalar. 012 is NUMBERISH, so the whole list is unknown and the text is kept. A plain 012 is the numberish case."
+    },
+    {
+      "name": "1999 blank lines still have frontmatter",
+      "input": "---\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n---\n",
+      "expected": [],
+      "note": "MAX_LINES is 2000. The opening fence counts as line 1 and is not stored. After 1999 body lines the count is 2000, and the next line can still be the closer. Blank lines count. Nothing is between the fences but blanks, so the properties are []."
+    },
+    {
+      "name": "2000 blank lines have no frontmatter",
+      "input": "---\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n---\n",
+      "expected": null,
+      "note": "The 2000th body line is stored and the count becomes 2001, which fails. The closer after it is never seen, so there is no frontmatter. The lines are blank on purpose: a reader that ignored the cap would return [], and a reader that rejected 1999 lines would fail the case above."
+    },
+    {
+      "name": "an unclosed flow list",
+      "input": [
+        "---",
+        "items: [a, b",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "items",
+          "type": "unknown",
+          "value": "[a, b"
+        }
+      ],
+      "note": "A flow list has to start with [ and end with ] on that one line. This is not a scalar either."
+    },
+    {
+      "name": "trailing spaces on a value",
+      "input": [
+        "---",
+        "title: Hello  ",
+        "empty:   ",
+        "---"
+      ],
+      "expected": [
+        {
+          "key": "title",
+          "type": "text",
+          "value": "Hello"
+        },
+        {
+          "key": "empty",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "note": "Trailing spaces are outside the value. Hello keeps no trailing space. A colon with only spaces is empty text."
+    }
+  ]
+}
