@@ -239,6 +239,59 @@ fn frontmatter_returns_only_the_block() {
 }
 
 #[test]
+fn tags_follow_saves_renames_and_deletes() {
+    let tmp = tmp_dir("tags");
+    let mut idx = Index::from_notes(&[
+        (
+            "dir/a.md",
+            "---\ntags: [front]\n---\n#a and #a\n```\n#code\n```\n",
+        ),
+        ("dir/plain.md", "no tags here\n"),
+        ("other.md", "#other\n"),
+        ("pic.png", "#notatag"),
+    ]);
+    let tags = |idx: &Index| serde_json::to_value(idx.tags(None)).unwrap();
+    assert_eq!(
+        tags(&idx),
+        json!({ "dir/a.md": ["front", "a", "a"], "other.md": ["other"] })
+    );
+
+    // A save replaces the note's tags. A note that loses its last tag is left out.
+    idx.upsert_note(
+        &tmp.path,
+        "other.md",
+        "now #changed/nested\n",
+        Stamp::sized(20),
+    );
+    idx.upsert_note(&tmp.path, "dir/a.md", "no more tags\n", Stamp::sized(13));
+    idx.upsert_note(&tmp.path, "new.md", "#fresh", Stamp::sized(6));
+    assert_eq!(
+        tags(&idx),
+        json!({ "new.md": ["fresh"], "other.md": ["changed/nested"] })
+    );
+
+    // A rename carries the tags along, a folder's notes included. Away from `.md`, they go.
+    idx.upsert_note(&tmp.path, "dir/b.md", "#b", Stamp::sized(2));
+    idx.relocate("dir", "moved");
+    idx.relocate("new.md", "new.txt");
+    assert_eq!(
+        tags(&idx),
+        json!({ "moved/b.md": ["b"], "other.md": ["changed/nested"] })
+    );
+
+    // Only the paths asked for. Folders and unknown paths are left out.
+    let some = idx.tags(Some(&[
+        "moved/b.md".into(),
+        "moved".into(),
+        "nope.md".into(),
+    ]));
+    assert_eq!(some.keys().collect::<Vec<_>>(), ["moved/b.md"]);
+
+    idx.remove_tree("moved");
+    assert_eq!(tags(&idx), json!({ "other.md": ["changed/nested"] }));
+}
+
+#[test]
 fn search_is_case_insensitive_and_ranks_names_first() {
     let idx = Index::from_notes(&[
         ("Garden.md", "flowers\n"),

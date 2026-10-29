@@ -121,14 +121,19 @@ function parseTags(lines: string[]): string[] {
   return out;
 }
 
-/** Every tag in a note's text: its frontmatter tags, then #tags in the body, skipping fenced code blocks. */
+/**
+ * Every tag in a note's text: its frontmatter tags, then #tags in the body,
+ * skipping fenced code blocks. The backend's tag index (index/tags.rs) is a
+ * port of this; fixtures/parity/tags.json holds both to the same cases.
+ */
 export function tagsInText(text: string): string[] {
   const fm = frontmatterTags(text);
   const out = [...fm.tags];
   const fences = new Fences();
   let n = 0;
-  for (const line of text.split("\n")) {
+  for (const raw of text.split("\n")) {
     if (++n <= fm.end) continue;
+    const line = raw.replace(/\r$/, "");
     if (fences.step(line) || !line.includes("#")) continue;
     out.push(...tagsInLine(line));
   }
