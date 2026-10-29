@@ -172,7 +172,7 @@ pub(super) fn wiki_targets(line: &str) -> Vec<String> {
             break;
         };
         let inner = &after[..close];
-        if !inner.contains('[') && !inner.contains(']') {
+        if !inner.contains(']') {
             out.extend(clean_target(inner));
         }
         rest = &after[close + 2..];

@@ -83,7 +83,7 @@ fn markdown_links_and_unresolved_targets_for_the_graph() {
         ),
         ("b/c.md", "[up](../a.md#Top \"title\") [x](My%20Note.md) [pic](img.png) ![alt](img.png)\n"),
         ("Design.md", "[[Nowhere]] [[nowhere#h|alias]] [gone](Gone.md) [[a]] `[code](a.md)` [[x]](a.md)\n"),
-        ("My Note.md", "[[[weird]]] [self](#heading) [](a.md)\n"),
+        ("My Note.md", "[[weird]x]] [self](#heading) [](a.md)\n"),
         ("img.png", ""),
     ]);
     let links = idx.link_index();
@@ -140,10 +140,11 @@ fn escaped_markdown_parentheses_are_syntax_and_index_as_backlinks() {
 #[test]
 fn wikilink_target_parsing() {
     assert_eq!(
-        wiki_targets("[[a#h|x]] ![[b]] [[c\\|d]] [[ ]] [[e[f]] [[g]] [[h"),
-        vec!["a", "b", "c", "g"]
+        wiki_targets("[[a#h|x]] ![[b]] [[c\\|d]] [[ ]] [[e[f]] [[C^abc]] [[g]] [[h"),
+        vec!["a", "b", "c", "e[f", "C^abc", "g"]
     );
-    assert!(wiki_targets("[[a[[b]] [[|x]] [[#h]]").is_empty());
+    assert_eq!(wiki_targets("[[[Note]]] [[a\\[b]]"), vec!["[Note", "a\\[b"]);
+    assert!(wiki_targets("[[a]b]] [[|x]] [[#h]]").is_empty());
 }
 
 #[test]

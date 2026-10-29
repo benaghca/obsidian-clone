@@ -4,7 +4,7 @@ import { splitFrontmatter } from "../editor/frontmatter";
 import { kept } from "../memo";
 import { compareNames } from "../paths";
 
-const WIKILINK = /!?\[\[([^\]|#^\n]*)(?:[#^][^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
+const WIKILINK = /!?\[\[([^\]]*)\]\]/g;
 /** Obsidian tags: # then letters, digits, _ - /, not only digits, after a space or line start. */
 const TAG = /(?<=^|\s)#([\p{L}\p{N}_/-]+)/gu;
 
@@ -29,7 +29,7 @@ export function wikilinkTargets(text: string): string[] {
   for (const line of text.split("\n")) {
     if (fences.step(line) || !line.includes("[[")) continue;
     for (const m of withoutInlineCode(line).matchAll(WIKILINK)) {
-      const target = m[1].trim();
+      const target = m[1].replace(/\\\|/g, "|").split("|")[0].split("#")[0].trim();
       if (target) out.push(target);
     }
   }
@@ -91,7 +91,8 @@ function tagValue(raw: string): string | null {
  * a plain value (`a, b` or `a b`); with or without the #.
  */
 export function frontmatterTags(text: string): Frontmatter {
-  const fm = text.startsWith("---") ? splitFrontmatter(text) : null;
+  const s = text.startsWith("\uFEFF") ? text.slice(1) : text;
+  const fm = s.startsWith("---") ? splitFrontmatter(s) : null;
   return fm ? { tags: parseTags(fm.lines), end: fm.close + 1 } : { tags: [], end: 0 };
 }
 
