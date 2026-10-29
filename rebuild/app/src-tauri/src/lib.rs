@@ -24,7 +24,7 @@ mod model;
 mod vault;
 mod watch;
 
-use crate::model::{FileEntry, LinkIndex, SearchHit, VaultInfo};
+use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, VaultInfo};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
 use std::sync::{mpsc, Mutex};
@@ -97,6 +97,7 @@ pub fn run() {
             delete_path,
             search,
             link_index,
+            backlinks,
             frontmatter,
             read_config,
             write_config,
@@ -279,6 +280,15 @@ fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<S
 #[tauri::command(async)]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
     with_vault(&state, |v| Ok(v.index.link_index()))
+}
+
+/// Linked mentions for the requested target paths only; empty targets are omitted.
+#[tauri::command(async)]
+fn backlinks(
+    state: State<'_, AppState>,
+    paths: Vec<String>,
+) -> Result<BTreeMap<String, Vec<Backlink>>, String> {
+    with_vault(&state, |v| Ok(v.index.backlinks(&paths)))
 }
 
 /// Each note's frontmatter block (only `paths`' when given), for the properties index.
