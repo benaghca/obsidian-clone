@@ -123,16 +123,34 @@ await withBrowser(async ({ send, run, move, click, check }) => {
     await createNote(ws, 'Linked.md', 'See [[Welcome]]\n');
     await ws.open('Welcome.md');
   });
-  await sleep(1500);
   await run(() => grove.run('backlink:open'));
-  await wait(() => run(() => [...document.querySelectorAll('.backlink-pane .search-result-file-name')].some((el) => el.textContent === 'Linked')), 'the new note did not show in backlinks');
-  const linkedAt = await run(() => {
-    const el = [...document.querySelectorAll('.backlink-pane .search-result-file-name')].find((n) => n.textContent === 'Linked');
-    el.scrollIntoView({ block: 'center' });
-    const rect = el.getBoundingClientRect();
-    return { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
-  });
-  await click(linkedAt);
-  await wait(() => run(() => ws.active.path === 'Linked.md'), 'the backlink row did not open');
-  check(await run(() => ws.active.path === 'Linked.md'), 'a note created with a link is indexed and opens from backlinks');
+  // The name is in the DOM while the dock is still widening, and it starts
+  // below the fold. A point taken then is over the editor, so the click misses.
+  // Wait until the pointer would hit this row, then click. A link refresh can
+  // rebuild the list, so try again until the note is actually open.
+  const deadline = Date.now() + 8000;
+  let saw = false;
+  while (Date.now() < deadline) {
+    if (await run(() => ws.active.path === 'Linked.md')) break;
+    const at = await run(() => {
+      const el = [...document.querySelectorAll('.backlink-pane .search-result-file-name')].find((n) => n.textContent === 'Linked');
+      const dock = document.querySelector('.mod-right-split');
+      if (!el || !dock) return null;
+      if (dock.getAnimations().some((a) => a.playState === 'running')) return null;
+      const box = dock.getBoundingClientRect();
+      if (box.width < 280) return null;
+      el.scrollIntoView({ block: 'center' });
+      const rect = el.getBoundingClientRect();
+      const point = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      if (point.x < box.left || point.x > box.right || point.y < box.top || point.y > box.bottom) return null;
+      const hit = document.elementFromPoint(point.x, point.y);
+      const title = hit?.closest('.search-result-file-title');
+      if (!title || !title.contains(el) || hit.closest('.collapse-icon')) return null;
+      return point;
+    });
+    if (!at) { await sleep(25); continue; }
+    saw = true;
+    await click(at);
+  }
+  check(await run(() => ws.active.path === 'Linked.md'), saw ? 'the backlink row did not open' : 'the new note did not show in backlinks');
 }, { height: 800 });
