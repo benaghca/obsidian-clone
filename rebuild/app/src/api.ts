@@ -111,6 +111,8 @@ export const api = {
   linkIndex: () => call<LinkIndex>("link_index"),
   /** Each note's frontmatter block (`---` lines included), for `paths` or every note; notes without one are left out. */
   frontmatter: (paths?: string[]) => call<Record<string, string>>("frontmatter", { paths: paths ?? null }),
+  /** Each note's saved tags (`tagsInText`), for `paths` or every note; notes without tags are left out. */
+  tags: (paths?: string[]) => call<Record<string, string[]>>("tags", { paths: paths ?? null }),
   /** A settings file from the vault's .grove folder (null if there is none yet). */
   readConfig: (name: string) => call<string | null>("read_config", { name }),
   /** Write a settings file (JSON) into the vault's .grove folder. */

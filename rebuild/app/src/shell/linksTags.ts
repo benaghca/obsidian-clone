@@ -38,24 +38,13 @@ export function tagsInLine(line: string): string[] {
   return out;
 }
 
-/** A line of a note, as the backend's search returns it (1-based line). */
-export interface NoteLine {
-  path: string;
-  line: number;
-  text: string;
-}
-
 /**
- * Fenced code tracking that matches the backend's index: a fence opens with
- * 3+ backticks or tildes (at most 3 spaces in) and closes on a line of the
- * same marker at least as long. Feed lines in order.
+ * Fenced code tracking (CommonMark's rule): a fence opens with 3+ backticks
+ * or tildes (at most 3 spaces in) and closes on a line of the same marker at
+ * least as long. Feed lines in order.
  */
 class Fences {
   private open: { marker: string; len: number } | null = null;
-
-  get inside() {
-    return this.open !== null;
-  }
 
   /** Step over one line. True when it is a fence line or inside a block (no tags there). */
   step(line: string): boolean {
@@ -138,51 +127,6 @@ export function tagsInText(text: string): string[] {
     out.push(...tagsInLine(line));
   }
   return out;
-}
-
-/**
- * Tags per note from the search hits for "#", skipping lines in fenced code.
- * `fenceLines` are the hits for "```" and "~~~". Only fence lines can change
- * the fence state, so walking them in order gives each note's code ranges
- * without reading its full text. `frontmatter` holds the notes whose
- * frontmatter has tags: those are added, and "#" lines inside it skipped.
- */
-export function tagsByNote(tagLines: NoteLine[], fenceLines: NoteLine[], frontmatter = new Map<string, Frontmatter>()): Map<string, string[]> {
-  const fencesByPath = new Map<string, NoteLine[]>();
-  for (const hit of fenceLines) {
-    if (hit.line <= 0) continue;
-    kept(fencesByPath, hit.path, () => []).push(hit);
-  }
-  /** Per note: [first, last] lines of each fenced block, inclusive, in order. */
-  const ranges = new Map<string, [number, number][]>();
-  for (const [path, list] of fencesByPath) {
-    list.sort((x, y) => x.line - y.line);
-    const fences = new Fences();
-    const out: [number, number][] = [];
-    let start = 0;
-    let last = 0;
-    for (const hit of list) {
-      if (hit.line === last) continue; // the same line found by both markers
-      last = hit.line;
-      const was = fences.inside;
-      fences.step(hit.text);
-      if (!was && fences.inside) start = hit.line;
-      else if (was && !fences.inside) out.push([start, hit.line]);
-    }
-    if (fences.inside) out.push([start, Infinity]);
-    if (out.length) ranges.set(path, out);
-  }
-  const tags = new Map<string, string[]>();
-  for (const [path, fm] of frontmatter) if (fm.tags.length) tags.set(path, [...fm.tags]);
-  for (const hit of tagLines) {
-    if (hit.line <= 0 || !hit.path.endsWith(".md")) continue;
-    if (hit.line <= (frontmatter.get(hit.path)?.end ?? 0)) continue;
-    if (ranges.get(hit.path)?.some(([a, b]) => hit.line >= a && hit.line <= b)) continue;
-    const found = tagsInLine(hit.text);
-    if (!found.length) continue;
-    kept(tags, hit.path, () => []).push(...found);
-  }
-  return tags;
 }
 
 export interface TagNode {

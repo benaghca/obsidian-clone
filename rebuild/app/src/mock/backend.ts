@@ -3,6 +3,7 @@
 
 import type { Backlink, FileEntry, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
 import { markdownURL, resolveLink } from "../links/internal";
+import { tagsInText } from "../shell/linksTags";
 import { fileName, noteName } from "../paths";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
@@ -312,6 +313,15 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
         const lines = path.endsWith(".md") ? files.get(path)?.content.split("\n") : undefined;
         const close = lines && lines[0].trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
         if (close > 0 && close <= 2000) out[path] = lines!.slice(0, close + 1).join("\n");
+      }
+      return out;
+    },
+    tags: ({ paths }) => {
+      const out: Record<string, string[]> = {};
+      for (const path of (paths as string[] | null) ?? [...files.keys()]) {
+        const content = path.endsWith(".md") ? files.get(path)?.content : undefined;
+        const tags = content ? tagsInText(content) : [];
+        if (tags.length) out[path] = tags;
       }
       return out;
     },

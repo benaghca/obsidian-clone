@@ -1,8 +1,8 @@
 // Tags view for the right sidebar: every #tag in the vault with how often
 // it is used, nested tags ("#project/grove") as a tree, like Obsidian's tag
-// pane. The saved tags come from vaultTags.ts (the backend's search); the
+// pane. The saved tags come from vaultTags.ts (the backend's index); the
 // open note is read from the editor instead, so unsaved text counts. It runs
-// only while the view is shown: the search after a vault change settles,
+// only while the view is shown: the backend read after a vault change settles,
 // the open note on a debounce after typing.
 
 import { compareNames } from "../paths";
