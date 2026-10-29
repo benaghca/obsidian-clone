@@ -18,7 +18,7 @@ const NOTE = /\.md$/i;
 /**
  * Lines as Rust's `str::lines` splits them. Split on `\n`, drop a final
  * empty piece, and drop a `\r` only when it was the character before `\n`.
- * A trailing `\r` with no `\n` stays. A leading U+FEFF stays on line 1.
+ * A trailing `\r` with no `\n` stays. The caller drops one leading U+FEFF.
  */
 function rustLines(text: string): string[] {
   if (text === "") return [];
@@ -39,7 +39,11 @@ export function searchVault(
   const q = parseQuery(query, matchCase);
   if (!q) return null;
 
-  const source = (path: string) => files[path];
+  // One leading BOM is not part of the note, so line 1 can be `---` and tagsInText sees the frontmatter.
+  const source = (path: string) => {
+    const text = files[path];
+    return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  };
   const paths = Object.keys(files).sort();
   const notes = paths.filter((path) => NOTE.test(path));
   const byPath = new Map<string, Line[]>();

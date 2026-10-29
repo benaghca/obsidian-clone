@@ -560,8 +560,7 @@
       "name": "65 levels of (",
       "input": "(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
       "expected": null,
-      "ts": "todo",
-      "note": "Deeper than 64 levels of (, - or [property] is nothing to search for. Today's parser still returns the term (it throws only around 4096 to 8192)."
+      "note": "Deeper than 64 levels of (, - or [property] is nothing to search for."
     },
     {
       "name": "64 levels of -",
@@ -769,8 +768,7 @@
       "name": "65 levels of -",
       "input": "-----------------------------------------------------------------a",
       "expected": null,
-      "ts": "todo",
-      "note": "The 65th negation is past the decided limit, so the query is nothing to search for. Today it still parses."
+      "note": "The 65th negation is past the limit of 64, so the query is nothing to search for."
     },
     {
       "name": "64 levels of [a:",
@@ -1042,8 +1040,7 @@
       "name": "65 levels of [a:",
       "input": "[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:x]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
       "expected": null,
-      "ts": "todo",
-      "note": "The 65th nested property is past the decided limit. Today it still parses."
+      "note": "The 65th nested property is past the limit of 64, so the query is nothing to search for."
     },
     {
       "name": "10,000 words",

@@ -965,7 +965,7 @@
           "lines": []
         }
       },
-      "note": "Without Match case the path is folded, so .MD is stripped by the lowercase name test. The same files match after the any-case strip."
+      "note": "Without Match case the path is folded, so .MD is stripped by the lowercase name test. The any-case strip removes .MD as well, and the same file matches."
     },
     {
       "name": "Upper.MD by name, match case",
@@ -981,13 +981,12 @@
       "note": "Upper is in the stem either way. Match case does not fold the path."
     },
     {
-      "name": "MD matches the extension today",
+      "name": "MD does not match the extension of Upper.MD",
       "vault": "names",
       "input": "MD",
       "matchCase": true,
       "expected": {},
-      "ts": "todo",
-      "note": "Match case compares the file name as written. noteName only strips a lowercase .md, so MD matches the extension of Upper.MD and the body has no MD. The decided rule strips .md in any case, and then this matches nothing."
+      "note": "Match case compares the stem. .md in any case is the extension, not part of the name, so MD does not match Upper.MD."
     },
     {
       "name": "file:md includes Upper.MD",
@@ -1416,7 +1415,7 @@
           ]
         }
       },
-      "note": "splitFrontmatter trims U+FEFF, so the property is already read. tagsInText requires the text to start with ---, so the tag is not read until the BOM is skipped."
+      "note": "splitFrontmatter trims U+FEFF, so the property is already read. tagsInText requires the text to start with ---, which is why a leading BOM is skipped before tags are read."
     },
     {
       "name": "BOM before frontmatter",
@@ -1428,8 +1427,7 @@
           "lines": []
         }
       },
-      "ts": "todo",
-      "note": "A leading U+FEFF is skipped, so line 1 is --- and tagsInText reads the frontmatter tag. Today the tag is missed. The shown term is #bomtag, which the note does not contain, so the match has no line. splitFrontmatter already trims the BOM, which is why [status:bomdraft] matches today."
+      "note": "A leading U+FEFF is skipped, so line 1 is --- and tagsInText reads the frontmatter tag. The shown term is #bomtag, which the note does not contain, so the match has no line. splitFrontmatter already trimmed the BOM, which is why [status:bomdraft] matches either way."
     },
     {
       "name": "a trailing CR stays",
