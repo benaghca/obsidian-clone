@@ -20,6 +20,7 @@ fn main() {
             "link_index",
             "backlinks",
             "frontmatter",
+            "properties",
             "read_config",
             "write_config",
             "open_note_window",
