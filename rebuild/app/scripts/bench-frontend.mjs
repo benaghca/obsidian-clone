@@ -97,7 +97,6 @@ try {
   const linkMs = [];
   let linkBytes = 0;
   let outgoingNotes = 0;
-  let backlinkNotes = 0;
 
   for (let run = 0; run < 3; run++) {
     vaultTags(ws).forget();
@@ -119,7 +118,6 @@ try {
     linkMs.push(performance.now() - started);
     linkBytes = Buffer.byteLength(JSON.stringify(vault.links));
     outgoingNotes = Object.keys(vault.links.outgoing).length;
-    backlinkNotes = Object.keys(vault.links.backlinks).length;
   }
 
   console.log(JSON.stringify({
@@ -139,7 +137,6 @@ try {
     link_refresh_median_ms: Number(median(linkMs).toFixed(1)),
     link_json_bytes: linkBytes,
     outgoing_notes: outgoingNotes,
-    backlink_notes: backlinkNotes,
   }));
 } finally {
   await server.close();

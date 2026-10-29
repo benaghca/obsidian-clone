@@ -18,7 +18,7 @@ export class Vault {
   name = "";
   files: FileEntry[] = [];
   notes: NoteRef[] = [];
-  links: LinkIndex = { outgoing: {}, backlinks: {} };
+  links: LinkIndex = { outgoing: {} };
   /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
   isExcluded: (path: string) => boolean = () => false;
 

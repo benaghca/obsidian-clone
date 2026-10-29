@@ -18,6 +18,7 @@ fn main() {
             "delete_path",
             "search",
             "link_index",
+            "backlinks",
             "frontmatter",
             "read_config",
             "write_config",

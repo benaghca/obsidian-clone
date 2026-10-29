@@ -29,18 +29,29 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
     settings.set('app.json', 'alwaysUpdateLinks', true);
   }, fm);
 
-  const indexed = await run(() => ({
-    back: ws.vault.links.backlinks['Projects/a(b).md']?.map((b) => b.from) ?? [],
-    unresolved: ws.vault.links.unresolved?.['LinkerHidden.md'] ?? [],
-  }));
+  const indexed = await run(async () => {
+    const { api } = await import('/src/api.ts');
+    return {
+      back: (await api.backlinks(['Projects/a(b).md']))['Projects/a(b).md']?.map(b => b.from) ?? [],
+      unresolved: ws.vault.links.unresolved?.['LinkerHidden.md'] ?? [],
+    };
+  });
   check(indexed.back.includes('LinkerHidden.md'), `escaped destination is a backlink of Projects/a(b).md, got ${JSON.stringify(indexed)}`);
   check(!indexed.unresolved.some((name) => name.includes('\\')), `escaped destination is not stored with a backslash, got ${JSON.stringify(indexed.unresolved)}`);
 
   await run(async () => {
-    // Exercise the search fallback too: these notes are absent from a stale index.
-    ws.vault.links.backlinks['Projects/a(b).md'] = ws.vault.links.backlinks['Projects/a(b).md']?.filter(b => !['SearchOnly.md', 'PercentOnly.md'].includes(b.from));
-    const { renameFile } = await import('/src/fileOps.ts');
-    await renameFile(ws, 'Projects/a(b).md', 'c(d)');
+    // Exercise the search fallback too: omit these notes from the pre-rename snapshot.
+    const { api } = await import('/src/api.ts');
+    const original = api.backlinks;
+    api.backlinks = async paths => {
+      const found = await original(paths);
+      if (found['Projects/a(b).md']) found['Projects/a(b).md'] = found['Projects/a(b).md'].filter(b => !['SearchOnly.md', 'PercentOnly.md'].includes(b.from));
+      return found;
+    };
+    try {
+      const { renameFile } = await import('/src/fileOps.ts');
+      await renameFile(ws, 'Projects/a(b).md', 'c(d)');
+    } finally { api.backlinks = original; }
   });
   let renamed = null;
   for (let i = 0; i < 20; i++) {

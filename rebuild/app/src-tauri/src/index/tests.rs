@@ -60,7 +60,9 @@ fn resolves_names_paths_aliases_and_skips_code() {
         json!(["Hello.md", "world.md"])
     );
     assert_eq!(value["outgoing"]["Code.md"], json!(["world.md"]));
-    let backs = value["backlinks"]["world.md"].as_array().unwrap();
+    assert!(value.get("backlinks").is_none());
+    let backlinks = serde_json::to_value(idx.backlinks(&["world.md".into()])).unwrap();
+    let backs = backlinks["world.md"].as_array().unwrap();
     assert!(backs.iter().any(|b| b["from"] == "Hello.md"
         && b["line"] == 1
         && b["text"] == "See [[World]] and [[missing]]"));
@@ -90,7 +92,7 @@ fn markdown_links_and_unresolved_targets_for_the_graph() {
     assert_eq!(links.markdown["My Note.md"], ["a.md"]);
     // Outgoing keeps its wikilink map; backlinks include Markdown mentions too.
     assert!(links.outgoing.get("a.md").is_none());
-    assert_eq!(links.backlinks["Design.md"].len(), 2);
+    assert_eq!(idx.backlinks(&["Design.md".into()])["Design.md"].len(), 2);
     assert_eq!(links.outgoing["Design.md"], ["a.md"]);
     // Inline code and `[[x]](a.md)` are not markdown links.
     assert!(links.markdown.get("Design.md").is_none());
@@ -130,8 +132,8 @@ fn escaped_markdown_parentheses_are_syntax_and_index_as_backlinks() {
     ]);
     let links = idx.link_index();
     assert_eq!(links.markdown["Source.md"], ["Projects/a(b).md"]);
-    assert_eq!(links.backlinks["Projects/a(b).md"][0].from, "Source.md");
-    assert_eq!(links.backlinks["Projects/a(b).md"][0].line, 4);
+    assert_eq!(idx.backlinks(&["Projects/a(b).md".into()])["Projects/a(b).md"][0].from, "Source.md");
+    assert_eq!(idx.backlinks(&["Projects/a(b).md".into()])["Projects/a(b).md"][0].line, 4);
     assert!(links.unresolved.get("Source.md").is_none());
 }
 
@@ -149,7 +151,7 @@ fn duplicate_links_on_one_line_dedupe_outgoing() {
     let idx = Index::from_notes(&[("a.md", "[[Hello]] and [[hello]]\n"), ("Hello.md", "x\n")]);
     let links = idx.link_index();
     assert_eq!(links.outgoing["a.md"], ["Hello.md"]);
-    assert_eq!(links.backlinks["Hello.md"].len(), 2);
+    assert_eq!(idx.backlinks(&["Hello.md".into()])["Hello.md"].len(), 2);
 }
 
 #[test]
@@ -187,7 +189,7 @@ fn scan_skips_hidden_dirs_and_names_notes() {
         idx.resolve("Hello.md", "Deep").as_deref(),
         Some("sub/Deep.md")
     );
-    assert!(idx.link_index().backlinks.get("Hello.md").is_none());
+    assert!(idx.backlinks(&["Hello.md".into()]).get("Hello.md").is_none());
 }
 
 #[test]
@@ -215,7 +217,7 @@ fn rename_moves_children_and_resolution_follows() {
     assert!(idx.resolve("dir2/a.md", "b").is_none());
     let links = idx.link_index();
     assert!(links.outgoing.get("dir2/a.md").is_none());
-    assert!(links.backlinks.get("Renamed.md").is_none());
+    assert!(idx.backlinks(&["Renamed.md".into()]).get("Renamed.md").is_none());
 }
 
 #[test]

@@ -3,7 +3,7 @@
 // Each goes to the backend first; then the editors and the open tabs follow
 // (Workspace.followMove, Workspace.forget).
 
-import { api, type FileEntry } from "./api";
+import { api, type Backlink, type FileEntry } from "./api";
 import type { ViewMode } from "./editor/editor";
 import type { NoteRef } from "./editor/host";
 import { fileName, isUnder, movedPath, parentDir } from "./paths";
@@ -22,8 +22,8 @@ export const fileSettings = {
   confirmDelete: (_path: string): Promise<boolean> => Promise.resolve(true),
   /** Asked before merging one note into another; false cancels. */
   confirmMerge: (_from: string, _into: string): Promise<boolean> => Promise.resolve(true),
-  /** Told after a note or folder moved, with the notes as they were before (to update links). */
-  renamed: (_from: string, _to: string, _before: NoteRef[]) => {},
+  /** Told after a move, with the notes and backlink snapshot from before it (to update links). */
+  renamed: (_from: string, _to: string, _before: NoteRef[], _backlinks: Record<string, Backlink[]>) => {},
 };
 
 export async function createNote(ws: Workspace, path: string, content = ""): Promise<FileEntry> {
@@ -124,11 +124,15 @@ async function relocate(ws: Workspace, from: string, to: string) {
   const under = (p: string) => isUnder(p, from);
   await ws.editors.flush(under);
   const before = ws.vault.notes;
+  // The backend resolves links against the new paths as soon as renamePath returns.
+  // Snapshot every moved note first; otherwise old-name links can disappear.
+  const targets = before.filter((n) => under(n.path)).map((n) => n.path);
+  const backlinks = targets.length ? await api.backlinks(targets) : {};
   await api.renamePath(from, to);
   const swap = (p: string) => movedPath(p, from, to);
   ws.editors.move(under, swap);
   await ws.followMove(swap);
-  fileSettings.renamed(from, to, before);
+  fileSettings.renamed(from, to, before, backlinks);
 }
 
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */

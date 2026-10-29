@@ -27,6 +27,7 @@ import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
+import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
 import { excluder } from "./settings/exclude";
 import { isSettingsOpen, openSettings } from "./settings/modal";
@@ -244,11 +245,16 @@ function renderCounts() {
   propertyCount.textContent = `${props.toLocaleString()} ${props === 1 ? "property" : "properties"}`;
   statusBar.hidden = !path || [backlinks, propertyCount, editorStatus, wordCount].every((el) => el.hidden);
 }
-function renderBacklinks() {
+let backlinkRequest = 0;
+async function renderBacklinks() {
+  const mine = ++backlinkRequest;
   const path = ws.active.path;
   if (!path) return;
-  const mentions = ws.vault.links.backlinks[path] ?? [];
-  backlinkCount.textContent = plural(mentions.length, "backlink");
+  const mentions = await noteBacklinks(ws)(path).catch((err) => {
+    console.warn("Could not read backlink count", err);
+    return [];
+  });
+  if (mine === backlinkRequest && ws.active.path === path) backlinkCount.textContent = plural(mentions.length, "backlink");
 }
 ws.on((change) => {
   // Links to notes that were just created (or deleted) are drawn again.
@@ -332,7 +338,7 @@ fileSettings.confirmMerge = async (from, into) => {
   if (r.dontAskAgain) settings.set("note-composer.json", "askBeforeMerging", false);
   return r.ok;
 };
-fileSettings.renamed = (from, to, before) => {
+fileSettings.renamed = (from, to, before, backlinks) => {
   const ask = appSettings().alwaysUpdateLinks
     ? null
     : async (links: number, notes: number) => {
@@ -346,7 +352,7 @@ fileSettings.renamed = (from, to, before) => {
         if (r.dontAskAgain) settings.set("app.json", "alwaysUpdateLinks", true);
         return r.ok;
       };
-  void updateLinks(ws, from, to, before, ws.linkStyle(), ask).catch((err) => console.warn("Could not update links", err));
+  void updateLinks(ws, from, to, before, backlinks, ws.linkStyle(), ask).catch((err) => console.warn("Could not update links", err));
 };
 
 /** A core plugin turned on or off: its views, ribbon buttons, status bar items and hints follow. */

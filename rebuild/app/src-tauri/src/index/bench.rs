@@ -163,7 +163,6 @@ fn bench_vault() {
 
     let mut link_ms = Vec::with_capacity(RUNS);
     let mut link_bytes = 0usize;
-    let mut back_bytes = 0usize;
     let mut out_bytes = 0usize;
     let mut md_bytes = 0usize;
     let mut missing_bytes = 0usize;
@@ -172,17 +171,42 @@ fn bench_vault() {
         let links = idx.link_index();
         let size = json_len(&links);
         link_ms.push(elapsed_ms(started));
-        back_bytes = json_len(&links.backlinks);
         out_bytes = json_len(&links.outgoing);
         md_bytes = json_len(&links.markdown);
         missing_bytes = json_len(&links.unresolved);
         link_bytes = size;
     }
     println!(
-        "GROVE_BENCH link_index_ms={} median={:.1} json_bytes={link_bytes} backlinks_bytes={back_bytes} outgoing_bytes={out_bytes} markdown_bytes={md_bytes} unresolved_bytes={missing_bytes}",
+        "GROVE_BENCH link_index_ms={} median={:.1} json_bytes={link_bytes} outgoing_bytes={out_bytes} markdown_bytes={md_bytes} unresolved_bytes={missing_bytes}",
         ms_list(&link_ms),
         median(&link_ms)
     );
+
+    // One displayed target (the first note with an outgoing edge), plus the
+    // full command for callers explicitly asking about every note, e.g. a move.
+    let targets: Vec<String> = idx.paths().filter(|p| is_note_path(p)).cloned().collect();
+    let target = idx
+        .link_index()
+        .outgoing
+        .values()
+        .flatten()
+        .next()
+        .cloned()
+        .expect("linked target");
+    for (label, paths) in [("one", vec![target]), ("all", targets)] {
+        let mut samples = Vec::with_capacity(RUNS);
+        let mut bytes = 0;
+        for _ in 0..RUNS {
+            let started = Instant::now();
+            bytes = json_len(&idx.backlinks(&paths));
+            samples.push(elapsed_ms(started));
+        }
+        println!(
+            "GROVE_BENCH backlinks_{label}_ms={} median={:.1} json_bytes={bytes}",
+            ms_list(&samples),
+            median(&samples)
+        );
+    }
 
     let mut fm_ms = Vec::with_capacity(RUNS);
     let mut fm_bytes = 0usize;

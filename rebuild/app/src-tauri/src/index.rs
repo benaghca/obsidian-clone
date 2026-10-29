@@ -7,6 +7,7 @@
 
 mod parse;
 mod tags;
+mod backlinks;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]
@@ -15,7 +16,7 @@ mod parity;
 mod tests;
 
 use crate::fsutil::{self, is_ignored_rel};
-use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit};
+use crate::model::{FileEntry, LinkIndex, SearchHit};
 use parse::{clean_target, parse_note, Note};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -130,7 +131,6 @@ impl Index {
 
     pub fn link_index(&self) -> LinkIndex {
         let mut outgoing = BTreeMap::new();
-        let mut backlinks: BTreeMap<String, Vec<Backlink>> = BTreeMap::new();
         let mut markdown = BTreeMap::new();
         let mut unresolved = BTreeMap::new();
         for (path, node) in &self.files {
@@ -159,11 +159,6 @@ impl Index {
                 } else if !outs.contains(&dest) {
                     outs.push(dest.clone());
                 }
-                backlinks.entry(dest).or_default().push(Backlink {
-                    from: path.clone(),
-                    line: link.line,
-                    text: link.text.clone(),
-                });
             }
             if !outs.is_empty() {
                 outgoing.insert(path.clone(), outs);
@@ -177,7 +172,6 @@ impl Index {
         }
         LinkIndex {
             outgoing,
-            backlinks,
             markdown,
             unresolved,
         }
