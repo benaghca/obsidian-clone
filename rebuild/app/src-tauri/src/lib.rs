@@ -24,6 +24,7 @@ mod model;
 mod vault;
 mod watch;
 
+use crate::index::NoteProperties;
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, VaultInfo};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
@@ -99,6 +100,7 @@ pub fn run() {
             link_index,
             backlinks,
             frontmatter,
+            properties,
             tags,
             read_config,
             write_config,
@@ -309,6 +311,15 @@ fn tags(
     paths: Option<Vec<String>>,
 ) -> Result<BTreeMap<String, Vec<String>>, String> {
     with_vault(&state, |v| Ok(v.index.tags(paths.as_deref())))
+}
+
+/// Saved properties parsed once while indexing; source-only/no-frontmatter notes are omitted.
+#[tauri::command(async)]
+fn properties(
+    state: State<'_, AppState>,
+    paths: Option<Vec<String>>,
+) -> Result<BTreeMap<String, NoteProperties>, String> {
+    with_vault(&state, |v| Ok(v.index.properties(paths.as_deref())))
 }
 
 #[cfg(test)]

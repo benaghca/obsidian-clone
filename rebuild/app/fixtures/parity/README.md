@@ -42,7 +42,7 @@ Required: `name`, `input` and `expected`. Optional: `rust`, `ts`, `obsidian` and
 |---|---|---|
 | `tags.json` | `tagsInText` (`src/shell/linksTags.ts`) | `parse_note` (`index/parse.rs`), its tags from `note_tags` (`index/tags.rs`) |
 | `links.json` | `wikilinkTargets` (`src/shell/linksTags.ts`) | `parse_note` (`index/parse.rs`), its non-markdown links |
-| `properties.json` | `splitFrontmatter` + `readProperties` (`src/editor/frontmatter.ts`); the runner drops `line` and `count` | none yet (plan step 3 adds `index/props.rs`) |
+| `properties.json` | `splitFrontmatter` + `readProperties` (`src/editor/frontmatter.ts`); the runner drops `line` and `count` | `note_properties` (`index/props.rs`); the runner drops `line` and `count` |
 
 `properties.json`: `input` is a note's text. The runner joins a line array with `\n`, then calls `splitFrontmatter`. No frontmatter, or one longer than 2,000 lines, is `null`. Otherwise it calls `readProperties` on the lines between the fences and keeps `key`, `type`, and `value`. `null` from `readProperties` (the block is shown as source) is `null` too. An empty `---\n---\n` is `[]`. `line` and `count` are where the property sits in the editor, so they are not in `expected`.
 

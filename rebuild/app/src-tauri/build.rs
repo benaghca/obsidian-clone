@@ -21,6 +21,7 @@ fn main() {
             "backlinks",
             "frontmatter",
             "tags",
+            "properties",
             "read_config",
             "write_config",
             "open_note_window",

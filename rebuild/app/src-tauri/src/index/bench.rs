@@ -225,6 +225,43 @@ fn bench_vault() {
         median(&fm_ms)
     );
 
+    let mut props_ms = Vec::with_capacity(RUNS);
+    let mut props_bytes = 0;
+    let mut props_notes = 0;
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        let properties = idx.properties(None);
+        props_bytes = json_len(&properties);
+        props_ms.push(elapsed_ms(started));
+        props_notes = properties.len();
+    }
+    println!(
+        "GROVE_BENCH properties_ms={} median={:.1} json_bytes={props_bytes} notes={props_notes}",
+        ms_list(&props_ms),
+        median(&props_ms)
+    );
+    // Optional actual IPC bodies for the Node page-side comparison. Bench-only,
+    // explicitly selected scratch output; ordinary tests/app commands never write these.
+    if let Ok(raw) = std::env::var("GROVE_BENCH_JSON_DIR") {
+        let dir = std::path::PathBuf::from(raw);
+        let temp = std::env::temp_dir();
+        assert!(
+            dir.starts_with(&temp) && dir != temp,
+            "bench JSON must be under a temp subdirectory"
+        );
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("frontmatter.json"),
+            serde_json::to_vec(&idx.frontmatter(None)).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(
+            dir.join("properties.json"),
+            serde_json::to_vec(&idx.properties(None)).unwrap(),
+        )
+        .unwrap();
+    }
+
     let limit = u32::try_from(files.saturating_mul(4).max(2000)).unwrap_or(u32::MAX);
     let mut search_ms = Vec::with_capacity(RUNS);
     let mut search_bytes = 0usize;

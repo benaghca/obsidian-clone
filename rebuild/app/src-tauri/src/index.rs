@@ -6,6 +6,8 @@
 //! are used only when no note has that name. Links inside fenced or inline code are skipped.
 
 mod parse;
+mod props;
+pub use props::NoteProperties;
 mod tags;
 mod backlinks;
 #[cfg(test)]

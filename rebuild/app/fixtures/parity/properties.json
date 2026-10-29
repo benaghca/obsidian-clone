@@ -1,7 +1,7 @@
 {
   "about": "A note's properties as Grove reads them today. The runner calls splitFrontmatter, then readProperties, and keeps key, type, and value. line and count are editor positions and are left out. Null means there is no frontmatter, or the block is shown as source.",
   "typescript": "splitFrontmatter and readProperties in src/editor/frontmatter.ts, wrapped by propertiesOf in src/parity.test.ts",
-  "rust": "todo",
+  "rust": "note_properties in src-tauri/src/index/props.rs",
   "cases": [
     {
       "name": "the sample note",

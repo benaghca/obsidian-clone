@@ -23,6 +23,7 @@ pub(super) struct Note {
     pub(super) aliases: Vec<String>,
     /// Its tags, as `tags::note_tags` reads them.
     pub(super) tags: Vec<String>,
+    pub(super) props: Option<super::props::NoteProperties>,
     pub(super) lines: Vec<Line>,
 }
 
@@ -84,6 +85,7 @@ pub(super) fn parse_note(content: &str) -> Note {
         links,
         aliases: parse_aliases(content),
         tags: super::tags::note_tags(content),
+        props: super::props::note_properties(content),
         lines,
     }
 }
