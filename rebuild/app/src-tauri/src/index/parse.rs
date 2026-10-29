@@ -86,7 +86,7 @@ pub(super) fn parse_note(content: &str) -> Note {
 }
 
 fn fence_open(line: &str) -> Option<(u8, usize)> {
-    let trimmed = line.trim_start();
+    let trimmed = line.trim_start_matches(' ');
     if line.len() - trimmed.len() > 3 {
         return None;
     }
@@ -112,8 +112,11 @@ fn fence_open(line: &str) -> Option<(u8, usize)> {
 }
 
 fn fence_close(line: &str, marker: u8, len: usize) -> bool {
-    let trimmed = line.trim();
-    let bytes = trimmed.as_bytes();
+    let trimmed = line.trim_start_matches(' ');
+    if line.len() - trimmed.len() > 3 {
+        return false;
+    }
+    let bytes = trimmed.trim_end().as_bytes();
     bytes.len() >= len && bytes.iter().all(|b| *b == marker)
 }
 

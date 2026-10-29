@@ -43,70 +43,63 @@
     {
       "name": "the other marker closes a fence (TS)",
       "input": ["~~~", "```", "[[A]]", "~~~", "[[B]]"],
-      "expected": ["A"],
-      "rust": "todo",
+      "expected": ["B"],
       "obsidian": ["B"],
       "note": "TS's wikilinkTargets toggles on any fence line, so ``` closes the ~~~ block and [[B]] ends up inside a new one. Rust (and CommonMark, so likely Obsidian) only closes on the same marker. tagsInText's fence rule also agrees with Rust (see tags.json)."
     },
     {
       "name": "a shorter fence closes a longer one (TS)",
       "input": ["````", "```", "[[A]]", "````", "[[B]]"],
-      "expected": ["A"],
-      "rust": "todo",
+      "expected": ["B"],
       "obsidian": ["B"],
       "note": "As above: TS's wikilinkTargets ignores fence length. Rust and CommonMark need a closing fence at least as long."
     },
     {
       "name": "fence indented with a tab",
       "input": ["\t```", "[[A]]", "\t```", "[[B]]"],
-      "expected": ["B"],
+      "expected": ["A", "B"],
       "obsidian": ["A", "B"],
       "note": "TS's wikilinkTargets allows any spaces or tabs before a fence; Rust allows up to 3 whitespace characters, tabs included. Both open a fence here. In CommonMark a tab is 4 columns, so this is an indented code line and not a fence; tagsInText agrees with that (see tags.json)."
     },
     {
       "name": "fence indented 4 spaces",
       "input": ["    ```", "[[A]]", "    ```", "[[B]]"],
-      "expected": ["B"],
-      "rust": "todo",
+      "expected": ["A", "B"],
       "obsidian": ["A", "B"],
       "note": "TS's wikilinkTargets opens a fence at any indent. Rust, tagsInText and CommonMark allow at most 3 spaces, so this is not a fence."
     },
     {
       "name": "closing fence indented 4 spaces",
       "input": ["```", "[[A]]", "    ```", "[[B]]"],
-      "expected": ["B"],
+      "expected": [],
       "obsidian": [],
       "note": "TS's wikilinkTargets and Rust's fence_close both close at any indent. tagsInText and CommonMark need at most 3 spaces, so the block runs to the end."
     },
     {
       "name": "closing fence with text after it",
       "input": ["```", "[[A]]", "``` x", "[[B]]"],
-      "expected": ["B"],
-      "rust": "todo",
+      "expected": [],
       "obsidian": [],
       "note": "TS's wikilinkTargets closes on any line starting with ```. Rust, tagsInText and CommonMark do not close on a fence line with text after it."
     },
     {
       "name": "a backtick in a backtick fence's info string",
       "input": ["```a`b", "[[A]]"],
-      "expected": [],
-      "rust": "todo",
+      "expected": ["A"],
       "obsidian": ["A"],
       "note": "TS's wikilinkTargets opens a fence on any line starting with ```. Rust, tagsInText and CommonMark: a backtick in the info string means it is not a fence."
     },
     {
       "name": "inline code",
       "input": "`[[A]]` [[B]]",
-      "expected": ["A", "B"],
-      "rust": "todo",
+      "expected": ["B"],
       "obsidian": ["B"],
       "note": "TS's wikilinkTargets does not skip inline code. CONTRACT.md says links in inline code are skipped, and Rust does that. TS is likely wrong here."
     },
     {
       "name": "double-backtick inline code",
       "input": "``[[A]] ` x`` [[B]]",
-      "expected": ["A", "B"],
-      "rust": "todo",
+      "expected": ["B"],
       "obsidian": ["B"],
       "note": "Rust blanks CommonMark code spans (any run length). TS's wikilinkTargets does not skip inline code at all."
     },
@@ -126,6 +119,6 @@
     { "name": "a same-note heading has an empty file target", "input": "[[#Heading|alias]] [[#^block-id]]", "expected": [], "note": "Obsidian does treat these as links, to a heading or block of the current note. The file target is empty, and this list leaves empty targets out. Both runners agree." },
     { "name": "links written next to each other", "input": "[[A]][[B]] ![[C]]", "expected": ["A", "B", "C"], "note": "No space is required between them. Obsidian agrees." },
     { "name": "an escaped pipe outside a table", "input": "[[Note\\|alias]]", "expected": ["Note\\"], "rust": "todo", "obsidian": ["Note"], "note": "The table case already covers \\| inside a cell. Outside a table, Obsidian still treats \\| as the alias separator, and Rust does too. TS keeps the backslash. Do not change Rust to match expected." },
-    { "name": "an embed inside inline code", "input": "`![[no.png]]` ![[yes.png]]", "expected": ["no.png", "yes.png"], "rust": "todo", "obsidian": ["yes.png"], "note": "Same gap as the inline-code case: TS's wikilinkTargets does not skip inline code, so the embed counts. Rust and Obsidian skip it." }
+    { "name": "an embed inside inline code", "input": "`![[no.png]]` ![[yes.png]]", "expected": ["yes.png"], "obsidian": ["yes.png"], "note": "Same gap as the inline-code case: TS's wikilinkTargets does not skip inline code, so the embed counts. Rust and Obsidian skip it." }
   ]
 }

@@ -5,21 +5,30 @@ import { kept } from "../memo";
 import { compareNames } from "../paths";
 
 const WIKILINK = /!?\[\[([^\]|#^\n]*)(?:[#^][^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
-const FENCE = /^[ \t]*(```|~~~)/;
 /** Obsidian tags: # then letters, digits, _ - /, not only digits, after a space or line start. */
 const TAG = /(?<=^|\s)#([\p{L}\p{N}_/-]+)/gu;
 
-/** The [[link]] targets in a note, in order, skipping fenced code blocks. */
+/** Blank CommonMark inline code spans (any backtick run length) on a single line. */
+function withoutInlineCode(line: string): string {
+  if (!line.includes("`")) return line;
+  const parts = line.split(/(`+)/);
+  for (let i = 1; i < parts.length; i += 2) {
+    const close = parts.indexOf(parts[i], i + 2);
+    if (close > 0) {
+      parts.fill(" ", i, close + 1);
+      i = close;
+    }
+  }
+  return parts.join("");
+}
+
+/** The [[link]] targets in a note, in order, skipping fenced and inline code. */
 export function wikilinkTargets(text: string): string[] {
   const out: string[] = [];
-  let inFence = false;
+  const fences = new Fences();
   for (const line of text.split("\n")) {
-    if (FENCE.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence || !line.includes("[[")) continue;
-    for (const m of line.matchAll(WIKILINK)) {
+    if (fences.step(line) || !line.includes("[[")) continue;
+    for (const m of withoutInlineCode(line).matchAll(WIKILINK)) {
       const target = m[1].trim();
       if (target) out.push(target);
     }

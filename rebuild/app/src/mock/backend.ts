@@ -198,8 +198,30 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       const md = new Set<string>();
       const missing = new Map<string, string>();
       const unknown = (name: string) => missing.has(name.toLowerCase()) || missing.set(name.toLowerCase(), name);
+      let fence: { marker: string; len: number } | null = null;
       f.content.split("\n").forEach((text, i) => {
-        for (const m of text.matchAll(WIKILINK)) {
+        const fm = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(text);
+        if (fence) {
+          if (fm && fm[1][0] === fence.marker && fm[1].length >= fence.len && !fm[2].trim()) fence = null;
+          return;
+        }
+        if (fm && !(fm[1][0] === "`" && fm[2].includes("`"))) {
+          fence = { marker: fm[1][0], len: fm[1].length };
+          return;
+        }
+        let scan = text;
+        if (text.includes("`")) {
+          const parts = text.split(/(`+)/);
+          for (let j = 1; j < parts.length; j += 2) {
+            const close = parts.indexOf(parts[j], j + 2);
+            if (close > 0) {
+              parts.fill(" ", j, close + 1);
+              j = close;
+            }
+          }
+          scan = parts.join("");
+        }
+        for (const m of scan.matchAll(WIKILINK)) {
           const name = m[1].trim();
           const target = resolveLink(name, path, notes);
           if (!target) {
@@ -209,7 +231,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
           out.add(target);
           (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
         }
-        for (const m of text.matchAll(MDLINK)) {
+        for (const m of scan.matchAll(MDLINK)) {
           const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
           if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
           const hit = resolveLink(raw, path, notes);
