@@ -99,6 +99,32 @@
       "expected": ["b"],
       "obsidian": ["a", "b"],
       "note": "TS: frontmatter must start with ---, and a BOM comes first. Rust's parse_note strips a BOM. Obsidian likely reads the frontmatter. Verify."
-    }
+    },
+    { "name": "nested tag four deep", "input": "#a/b/c/d", "expected": ["a/b/c/d"], "note": "Obsidian nested tags are slash-separated to any depth. Same list." },
+    { "name": "digits with a slash are a tag", "input": "#2024/02 #123/456", "expected": ["2024/02", "123/456"], "note": "A slash is a non-numerical character, so this is a tag even though each side is digits. #1984 alone is not. Obsidian agrees." },
+    { "name": "digits with a hyphen or underscore are a tag", "input": "#123-4 #123_4 #3d_printing", "expected": ["123-4", "123_4", "3d_printing"], "note": "Hyphen and underscore count as the required non-numerical character. Obsidian agrees." },
+    { "name": "a dot or comma after digits is not a tag", "input": "#12.34 #37. #42,", "expected": [], "note": "The punctuation ends the token and the rest is only digits, so nothing is kept. Obsidian does not treat #12.34 as a tag either." },
+    { "name": "trailing punctuation ends a tag", "input": "#tag? #tag: #tag; #a/b/c. (#spaced)", "expected": ["tag", "tag", "tag", "a/b/c"], "note": "?, :, ; and . are not tag characters. (#spaced) has no space before the #, so it is not a tag. Obsidian agrees." },
+    { "name": "an apostrophe or quote ends a tag", "input": "See #tag's end and #quoted\" here", "expected": ["tag", "quoted"], "note": "The apostrophe and the quote are not tag characters. Obsidian agrees." },
+    { "name": "a fullwidth hash is not a tag", "input": "＃notatag #yes", "expected": ["yes"], "note": "Only ASCII # starts a tag. Obsidian agrees." },
+    { "name": "a tag in link text, not in the URL", "input": "See [the #tag](https://example.com/a#frag) and <https://example.com/b#no>.", "expected": ["tag"], "note": "The # in the link text follows a space, so it is a tag. The # in each URL does not. Obsidian agrees." },
+    { "name": "a space before a fragment makes it a tag", "input": "https://example.com/page #frag", "expected": ["frag"], "note": "The existing URL case has no space. With a space, the # starts a tag. Obsidian agrees." },
+    { "name": "a heading line can still hold a tag", "input": "### #release/1.2", "expected": ["release/1"], "note": "The heading hashes are not a tag. #release/1 is; the dot ends it. Obsidian allows the same characters." },
+    { "name": "a numeric hash in a heading is not a tag", "input": "### #123", "expected": [], "note": "#123 is only digits. Obsidian agrees." },
+    { "name": "a tag in a blockquote or a table cell", "input": ["> #quoted", "| #cell |"], "expected": ["quoted", "cell"], "note": "Both are ordinary text. Obsidian indexes them." },
+    { "name": "a tag inside an HTML comment", "input": "<!-- #secret --> #open", "expected": ["secret", "open"], "obsidian": ["open"], "note": "TS has no comment rule. Obsidian does not index a tag inside <!-- -->." },
+    { "name": "a tag inside a %% comment", "input": "%% #hidden %% #shown", "expected": ["hidden", "shown"], "obsidian": ["shown"], "note": "Obsidian hides %% comments and does not index tags inside them. TS has no comment rule." },
+    { "name": "frontmatter string and legacy tag key", "input": ["---", "tags: project/grove", "tag: legacy/one", "---", "#body/two"], "expected": ["project/grove", "legacy/one", "body/two"], "note": "A plain string is one tag, and the legacy tag: key counts too. Obsidian accepts both." },
+    { "name": "frontmatter list drops numeric and dotted values", "input": ["---", "tags:", "  - 1984", "  - y1984", "  - 2024/02", "  - 12.34", "---"], "expected": ["y1984", "2024/02"], "note": "1984 is only digits. 12.34 has a dot, so the whole value is rejected rather than cut to 12. Obsidian rejects both." },
+    { "name": "frontmatter emoji tag", "input": ["---", "tags:", "  - 🙂", "  - ok", "---"], "expected": ["ok"], "obsidian": ["🙂", "ok"], "note": "Obsidian's tag format includes emoji. A frontmatter value must match the whole token, and TS allows only letters, digits, _, - and /, so the emoji is dropped. The body case is the existing emoji case." },
+    { "name": "frontmatter combining accent", "input": "---\ntags: [café]\n---\n", "expected": [], "obsidian": ["café"], "note": "A body tag keeps the letters before the mark. A frontmatter value has to match the whole token, so TS drops it. Obsidian is believed to keep the mark, as in the body case. Verify." },
+    { "name": "frontmatter aliases are not tags", "input": ["---", "aliases: [NotATag, Other]", "tags: [real]", "---"], "expected": ["real"], "note": "aliases is a different property. Obsidian agrees." },
+    { "name": "frontmatter quoted hash and a numeric tag", "input": ["---", "tags: [\"#project/grove\", \"#1984\", plain]", "---"], "expected": ["project/grove", "plain"], "note": "A leading # is stripped. #1984 is still only digits. Obsidian strips the hash and rejects the numeric value." },
+    { "name": "frontmatter comma string", "input": ["---", "tags: project/grove, café, y1984, 1984", "---"], "expected": ["project/grove", "café", "y1984"], "note": "Comma-separated string form. 1984 is dropped. Precomposed é is a letter. Obsidian agrees." },
+    { "name": "letters from Arabic and Japanese, nested", "input": "#العربية #プロジェクト/active", "expected": ["العربية", "プロジェクト/active"], "note": "Alphabetical letters from other scripts are allowed, including inside a nested tag. Obsidian agrees." },
+    { "name": "a hash glued to an emoji is not a tag", "input": "🙂#tag #yes", "expected": ["yes"], "note": "The # has to follow a space or the start of the line. Obsidian uses the same boundary." },
+    { "name": "a hash on a fence's info string is not a tag", "input": ["```js #no", "#inside", "```", "#yes"], "expected": ["yes"], "note": "The fence line is not scanned, and the inside of the block is skipped. Obsidian agrees." },
+    { "name": "empty slash segments", "input": "#a//b #/leading", "expected": ["a//b", "/leading"], "note": "TS keeps an empty segment and a leading slash. Unverified in Obsidian, so no obsidian value." },
+    { "name": "three casings of one tag", "input": "#Tag #tag #TAG", "expected": ["Tag", "tag", "TAG"], "note": "This list keeps each spelling. Obsidian's tag index treats them as one tag and displays the casing it saw first. Each occurrence is still a tag, so the list is not given an obsidian override." }
   ]
 }

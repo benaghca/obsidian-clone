@@ -109,6 +109,23 @@
       "rust": "todo",
       "obsidian": ["B"],
       "note": "Rust blanks CommonMark code spans (any run length). TS's wikilinkTargets does not skip inline code at all."
-    }
+    },
+    { "name": "heading, block and alias", "input": "[[a#h|x]] ![[b#^id|y]] [[c#^block|z]]", "expected": ["a", "b", "c"], "note": "The file target drops the heading, the block and the alias. Obsidian agrees." },
+    { "name": "embed display width", "input": "![[image.png|100]] ![[shot.png|100x200]]", "expected": ["image.png", "shot.png"], "note": "The pipe sets a width, not a different file. Obsidian agrees." },
+    { "name": "md extension stays in the raw target", "input": "[[Note.md]] [[Note.md#Heading]] [[folder/My Note.md#Top|up]]", "expected": ["Note.md", "Note.md", "folder/My Note.md"], "note": "The raw target keeps .md, the heading and the alias aside. Obsidian's resolver later treats a .md target as that note. This list is the raw target." },
+    { "name": "spaces and case stay in the raw target", "input": "[[My Note]] [[NOTE]]", "expected": ["My Note", "NOTE"], "note": "Spaces inside the name stay, and so does case. Obsidian resolves two casings to one file, which is a later step than this list." },
+    { "name": "a percent-encoded wikilink stays encoded", "input": "[[My%20Note]] [[folder/My%20Note.md]]", "expected": ["My%20Note", "folder/My%20Note.md"], "note": "A wikilink is not percent-decoded. Obsidian keeps this text as the target." },
+    { "name": "an encoded markdown link is not a wikilink", "input": "[x](y.md) [Spaced](My%20Note.md) [Hash](Note.md#Heading)", "expected": [], "note": "There is no wikilink here. Obsidian's markdown-link index does include these targets, decoded and without the heading. That index is not this function, so there is no obsidian override." },
+    { "name": "a backslash before the opening brackets", "input": "\\[[Note]] [[Real]]", "expected": ["Note", "Real"], "obsidian": ["Real"], "note": "Obsidian treats the backslash as an escape, so the first pair is text. TS and Rust both still see [[." },
+    { "name": "triple brackets", "input": "[[[Note]]]", "expected": ["[Note"], "rust": "todo", "obsidian": ["[Note"], "note": "Obsidian keeps the extra [ in the target (a forum report; the staff did not call it a bug). TS does too. Rust skips any [[...]] that contains a bracket." },
+    { "name": "an escaped bracket inside the target", "input": "[[a\\[b]]", "expected": ["a\\[b"], "rust": "todo", "note": "TS keeps the backslash and the bracket. Rust skips the link because of the bracket. Unverified in Obsidian, so no obsidian value." },
+    { "name": "a link in an indented code block", "input": ["Para", "", "    [[Inside]]", "[[Outside]]"], "expected": ["Inside", "Outside"], "obsidian": ["Outside"], "note": "Four spaces after a blank line is an indented code block. Obsidian's reading view and its link index skip the link inside it. TS and Rust have no indented-code rule, so both return Inside." },
+    { "name": "a link inside an HTML comment", "input": "<!-- [[Secret]] --> [[Open]]", "expected": ["Secret", "Open"], "obsidian": ["Open"], "note": "Obsidian does not put a link inside <!-- --> into the graph or the backlinks. TS and Rust both keep Secret." },
+    { "name": "a link inside a %% comment", "input": "%% [[Secret]] %% [[Open]]", "expected": ["Secret", "Open"], "note": "Reading view hides the comment. The metadata cache still indexes the link (a rename updates it). Both runners return both targets. Obsidian agrees with this list." },
+    { "name": "percent signs inside the target", "input": "[[Note%%draft]]", "expected": ["Note%%draft"], "note": "The cache's target is the whole text, Note%%draft. The editor may style %% as a comment, but the link target does not stop there. Both runners agree." },
+    { "name": "a same-note heading has an empty file target", "input": "[[#Heading|alias]] [[#^block-id]]", "expected": [], "note": "Obsidian does treat these as links, to a heading or block of the current note. The file target is empty, and this list leaves empty targets out. Both runners agree." },
+    { "name": "links written next to each other", "input": "[[A]][[B]] ![[C]]", "expected": ["A", "B", "C"], "note": "No space is required between them. Obsidian agrees." },
+    { "name": "an escaped pipe outside a table", "input": "[[Note\\|alias]]", "expected": ["Note\\"], "rust": "todo", "obsidian": ["Note"], "note": "The table case already covers \\| inside a cell. Outside a table, Obsidian still treats \\| as the alias separator, and Rust does too. TS keeps the backslash. Do not change Rust to match expected." },
+    { "name": "an embed inside inline code", "input": "`![[no.png]]` ![[yes.png]]", "expected": ["no.png", "yes.png"], "rust": "todo", "obsidian": ["yes.png"], "note": "Same gap as the inline-code case: TS's wikilinkTargets does not skip inline code, so the embed counts. Rust and Obsidian skip it." }
   ]
 }
