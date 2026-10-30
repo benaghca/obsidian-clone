@@ -74,10 +74,10 @@ describe("Bases tables", () => {
     const sibling = baseModel(unsupported, 1);
     expect(sibling.name).toBe("Table");
     expect(sibling.notices.size).toBe(0);
-    const map = baseModel('views:\n  - type: map\n    name: Places\n');
-    expect(map.type).toBe("table");
-    expect(map.name).toBe("Places");
-    expect([...map.notices]).toEqual(["This layout isn't supported yet"]);
+    const places = baseModel('views:\n  - type: map\n    name: Places\n');
+    expect(places.type).toBe("table");
+    expect(places.name).toBe("Places");
+    expect([...places.notices]).toEqual(["This layout isn't supported yet"]);
     expect(baseModel('views:\n  - type: table\n').notices.size).toBe(0);
     expect(baseModel('views:\n  - type: cards\n').notices.size).toBe(0);
     // K4: Kanban is a layout of its own.
