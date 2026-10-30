@@ -115,3 +115,25 @@ test("search commands share the reference, cache only unchanged saved content, a
     expect(await invoke("search_match", { queries: ["path:C1B"] })).toEqual([[]]);
   } finally { vi.unstubAllGlobals(); }
 });
+
+test("merged search commands treat nameless .md files as attachments and keep named .MD notes", async () => {
+  const store = () => ({ getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("location", { search: "" }); vi.stubGlobal("sessionStorage", store()); vi.stubGlobal("localStorage", store());
+  try {
+    const { invoke } = createMockBackend();
+    const paths = ["C1B-INT/.md", "C1B-INT/.MD", "C1B-INT/Upper.MD"];
+    for (const path of paths) await invoke("create_note", { path, content: "---\nstatus: c1bintprobe\n---\nc1bintprobe #c1binttag\n" });
+    const notes = (query: string) => invoke("search_notes", { query, matchCase: false });
+    expect(await notes("content:c1bintprobe")).toEqual([{ path: "C1B-INT/Upper.MD", count: 2 }]);
+    expect(await notes("path:C1B-INT file:md")).toEqual([{ path: "C1B-INT/Upper.MD", count: 0 }]);
+    expect(await invoke("search_lines", { query: "path:C1B-INT file:md", matchCase: false, paths, limit: 5 })).toEqual({});
+    expect(await invoke("search_lines", { query: "content:c1bintprobe", matchCase: false, paths, limit: 5 })).toEqual({
+      "C1B-INT/Upper.MD": [{ line: 2, text: "status: c1bintprobe" }, { line: 4, text: "c1bintprobe #c1binttag" }],
+    });
+    expect(await invoke("tags", { paths })).toEqual({ "C1B-INT/Upper.MD": ["c1binttag"] });
+    expect(Object.keys(await invoke<Record<string, NoteProperties>>("properties", { paths }))).toEqual(["C1B-INT/Upper.MD"]);
+    expect(await invoke("search_match", { queries: ["content:c1bintprobe", "path:C1B-INT file:md"] })).toEqual([
+      ["C1B-INT/Upper.MD"], ["C1B-INT/.MD", "C1B-INT/.md", "C1B-INT/Upper.MD"],
+    ]);
+  } finally { vi.unstubAllGlobals(); }
+});

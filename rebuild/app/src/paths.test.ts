@@ -7,6 +7,8 @@ describe("paths", () => {
     expect(noteName("A/B/Note.md")).toBe("Note");
     expect(noteName("Folder/Upper.MD")).toBe("Upper");
     expect(noteName("pic.png")).toBe("pic.png");
+    expect(noteName("Upper.MD")).toBe("Upper");
+    expect(noteName(".MD")).toBe(".MD");
     expect(isNoteFile("Note.md")).toBe(true);
     expect(isNoteFile("Upper.MD")).toBe(true);
     expect(isNoteFile("a.Md")).toBe(true);
@@ -16,6 +18,17 @@ describe("paths", () => {
     expect(parentDir("A/B/Note.md")).toBe("A/B");
     expect(parentDir("Note.md")).toBe("");
     expect(trimSlashes(" /Daily/notes/ ")).toBe("Daily/notes");
+  });
+
+  it("a file named .md is not a note", () => {
+    expect(isNoteFile("Note.md")).toBe(true);
+    expect(isNoteFile("Folder/Upper.MD")).toBe(true);
+    expect(isNoteFile("a.md")).toBe(true);
+    expect(isNoteFile(".md")).toBe(false);
+    expect(isNoteFile(".MD")).toBe(false);
+    expect(isNoteFile("Folder/.md")).toBe(false);
+    expect(isNoteFile("readme.markdown")).toBe(false);
+    expect(isNoteFile("photo.png")).toBe(false);
   });
 
   it("moves follow a folder, not a name that starts the same", () => {

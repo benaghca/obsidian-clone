@@ -1,9 +1,11 @@
 // Search over a vault of plain text: the reference the parity corpus checks,
-// and later the browser mock. A note is any path ending in `.md`, in any
-// case. Another file that matches is an attachment (`{}`): no lines, tags
+// and later the browser mock. A note's file name ends in `.md`, in any
+// case, and has characters before that. A file named `.md` is an attachment.
+// Another file that matches is an attachment (`{}`): no lines, tags
 // or properties. Null means the query has nothing to search for (the search
 // view shows nothing; the graph treats that as every file and does not ask).
 
+import { isNoteFile } from "../paths";
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { tagsInText } from "./linksTags";
 import { type Facts, highlightsOf, type Line, matchCount, matches, needs, parseQuery, propertyLine, shownLines, termLines } from "./searchQuery";
@@ -29,8 +31,6 @@ export function createSearchVault() {
     return searchVault(selected, query, matchCase, cache);
   };
 }
-
-const NOTE = /\.md$/i;
 
 /**
  * Lines as Rust's `str::lines` splits them. Split on `\n`, drop a final
@@ -68,7 +68,7 @@ export function searchVault(
     return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   };
   const paths = Object.keys(files).sort();
-  const notes = paths.filter(path => NOTE.test(path));
+  const notes = paths.filter(path => isNoteFile(path));
   const content = (path: string): Line[] => factsOf(path).lines ??=
     rustLines(source(path)).map((text, i) => ({ line: i + 1, text }));
 
@@ -115,7 +115,7 @@ export function searchVault(
   const out: Record<string, NoteMatch | Record<string, never>> = {};
   for (const path of paths) {
     if (!matches(path, q, facts)) continue;
-    if (!NOTE.test(path)) {
+    if (!isNoteFile(path)) {
       out[path] = {};
       continue;
     }

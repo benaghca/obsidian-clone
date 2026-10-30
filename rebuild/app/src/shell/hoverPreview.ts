@@ -8,6 +8,7 @@ import { editorHost } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { readingMode } from "../editor/render";
 import { isNotePath } from "../links/external";
+import { isNoteFile } from "../paths";
 import { resolveLink } from "../links/internal";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
@@ -44,7 +45,7 @@ export function installHoverPreviews(ws: Workspace) {
     if (!host) return close();
     const [name, sub] = splitSubpath(target);
     const path = name ? ws.resolve(name, from) : from;
-    if (path && !/\.md$/i.test(path)) return close();
+    if (path && !isNoteFile(path)) return close();
     const origin = path ?? from;
     const resolve = (href: string) => resolveLink(href, origin, ws.vault.files.filter((f) => !f.is_dir));
     const context = new EditorView({ state: EditorState.create({ extensions: [

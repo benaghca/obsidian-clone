@@ -21,6 +21,7 @@ import type { SyntaxNode } from "@lezer/common";
 import { writeClipboard } from "./clipboard";
 import { codeLabel, codeMarks } from "./codeHighlight";
 import { isNotePath, isRemoteUrl } from "../links/external";
+import { isNoteFile } from "../paths";
 import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
@@ -379,7 +380,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }
-    if (/\.[a-z0-9]+$/i.test(src.split("#")[0]) && !/\.md$/i.test(src.split("#")[0])) return false; // other files stay links
+    if (/\.[a-z0-9]+$/i.test(src.split("#")[0]) && !isNoteFile(src.split("#")[0])) return false; // other files stay links
     const widget = new NoteEmbedWidget(src, resolve(src.split("#")[0]), state.facet(embedChain));
     if (!touchesLines(from, node.to)) {
       decos.push(Decoration.replace({ widget }).range(from, node.to));

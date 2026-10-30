@@ -17,7 +17,7 @@ import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
-import { noteName, trimSlashes } from "./paths";
+import { fileName, isNoteFile, noteName, trimSlashes } from "./paths";
 import { fillTemplate, formatDate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
@@ -71,6 +71,7 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
       const candidates = new Map(ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path))
         .map(f => [f.path.toLowerCase(), { name: noteName(f.path), path: f.path }]));
       for (const targets of Object.values(ws.vault.links.unresolved ?? {})) for (const target of targets) {
+        if (fileName(target).toLowerCase() === ".md") continue;
         const path = /\.md$/i.test(target) ? target : `${target}.md`;
         if (!ws.vault.isExcluded(path) && !ws.vault.linkExists(target, null) && !candidates.has(path.toLowerCase()))
           candidates.set(path.toLowerCase(), { name: target, path });
@@ -98,7 +99,7 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
       const current = ws.editors.pathOf(view);
       if (!target) return current ? { path: current, state: view.state, current: true } : null;
       const path = ws.resolve(target, view.state.facet(editorHost)?.embeds?.pathOf(view) ?? current);
-      if (!path || !/\.md$/i.test(path)) return null;
+      if (!path || !isNoteFile(path)) return null;
       if (path === current) return { path, state: view.state, current: true };
       const state = await ws.editors.load(path);
       return state ? { path, state, current: false } : null;

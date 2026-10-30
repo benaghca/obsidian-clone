@@ -5,7 +5,7 @@ import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, Se
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { linkSpellings, markdownURL, resolveLink } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
-import { fileName, noteName } from "../paths";
+import { fileName, isNoteFile, noteName } from "../paths";
 import { createSearchVault } from "../shell/searchVault";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
@@ -165,7 +165,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     if (!q || limit <= 0) return [];
     const buckets: SearchHit[][] = [];
     for (const [path, f] of files) {
-      if (isBinary(f.content)) continue;
+      if (isBinary(f.content) || (/\.md$/i.test(path) && !isNoteFile(path))) continue;
       const bucket: SearchHit[] = [];
       const lines = f.content.split("\n");
       for (let i = 0; i < lines.length; i++) {
@@ -191,7 +191,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   const matchVault = createSearchVault();
   // Rust indexes note bodies only up to 8 MB; attachments have names but no facts.
   const searchFiles = () => Object.fromEntries([...files].map(([path, file]) => {
-    let text = /\.md$/i.test(path) && !isBinary(file.content) ? file.content : "";
+    let text = isNoteFile(path) && !isBinary(file.content) ? file.content : "";
     if (text.length * 3 > 8 * 1024 * 1024 && new TextEncoder().encode(text).length > 8 * 1024 * 1024) text = "";
     return [path, text];
   }));
@@ -206,13 +206,13 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   };
   const searchNotes = (query: string, matchCase: boolean): SearchNote[] => {
     const matches = matchVault(searchFiles(), query, matchCase);
-    return Object.keys(matches ?? {}).filter(path => /\.md$/i.test(path)).sort(pathOrder)
+    return Object.keys(matches ?? {}).filter(path => isNoteFile(path)).sort(pathOrder)
       .map(path => ({ path, count: (matches![path] as { count: number }).count }));
   };
   const searchLines = (query: string, matchCase: boolean, paths: string[], limit: number): Record<string, SearchLine[]> => {
     if (limit <= 0) return {};
     const source = searchFiles();
-    const matches = matchVault(source, query, matchCase, paths.filter(path => /\.md$/i.test(path)));
+    const matches = matchVault(source, query, matchCase, paths.filter(path => isNoteFile(path)));
     const out: Record<string, SearchLine[]> = {};
     for (const path of Object.keys(matches ?? {}).sort(pathOrder)) {
       const text = source[path].replace(/^\uFEFF/, "");
@@ -227,13 +227,13 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
 
   // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
   function linkData(wanted?: Set<string>): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
-    const notes = [...files.keys()].map((path) => ({ name: noteName(path), path }));
+    const notes = [...files.keys()].filter((path) => isNoteFile(path) || !/\.md$/i.test(path)).map((path) => ({ name: noteName(path), path }));
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
     const markdown: Record<string, string[]> = {};
     const unresolved: Record<string, string[]> = {};
     for (const [path, f] of files) {
-      if (isBinary(f.content)) continue;
+      if (isBinary(f.content) || (/\.md$/i.test(path) && !isNoteFile(path))) continue;
       const out = new Set<string>();
       const md = new Set<string>();
       const missing = new Map<string, string>();
@@ -279,7 +279,11 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
             md.add(hit);
             if (wanted?.has(hit)) (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
           }
-          else unknown(markdownURL(raw).replace(/^\.\//, "").replace(/\.md$/i, ""));
+          else {
+            let name = markdownURL(raw).replace(/^\.\//, "");
+            if (isNoteFile(name)) name = name.slice(0, -3);
+            unknown(name);
+          }
         }
       });
       if (out.size) outgoing[path] = [...out];
@@ -296,15 +300,15 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     const sources = new Set<string>();
     const data = linkData(wanted);
     for (const path of paths) for (const hit of data.backlinks[path] ?? []) sources.add(hit.from);
-    const needles = [...new Set(paths.filter((path) => /\.md$/i.test(path)).flatMap((path) => linkSpellings(noteName(path)).map((s) => s.toLowerCase())))];
+    const needles = [...new Set(paths.filter((path) => isNoteFile(path)).flatMap((path) => linkSpellings(noteName(path)).map((s) => s.toLowerCase())))];
     if (needles.length) {
       for (const [path, f] of files) {
-        if (sources.has(path) || !/\.md$/i.test(path) || isBinary(f.content)) continue;
+        if (sources.has(path) || !isNoteFile(path) || isBinary(f.content)) continue;
         const lower = f.content.toLowerCase();
         if (needles.some((needle) => lower.includes(needle))) sources.add(path);
       }
     }
-    return [...sources].filter((path) => /\.md$/i.test(path)).sort();
+    return [...sources].filter((path) => isNoteFile(path)).sort();
   }
 
   const commands: Record<string, (a: any) => unknown> = {
@@ -397,7 +401,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     properties: ({ paths }) => {
       const out: Record<string, NoteProperties> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        if (!/\.md$/i.test(path)) continue;
+        if (!isNoteFile(path)) continue;
         const split = splitFrontmatter(files.get(path)?.content ?? "");
         const props = split && readProperties(split.lines);
         if (props) out[path] = { props, lines: split!.lines };
@@ -407,7 +411,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     frontmatter: ({ paths }) => {
       const out: Record<string, string> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        const lines = path.endsWith(".md") ? files.get(path)?.content.split("\n") : undefined;
+        const lines = isNoteFile(path) ? files.get(path)?.content.split("\n") : undefined;
         const close = lines && lines[0].trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
         if (close > 0 && close <= 2000) out[path] = lines!.slice(0, close + 1).join("\n");
       }
@@ -416,7 +420,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     tags: ({ paths }) => {
       const out: Record<string, string[]> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        const content = /\.md$/i.test(path) ? files.get(path)?.content : undefined;
+        const content = isNoteFile(path) ? files.get(path)?.content : undefined;
         const tags = content ? tagsInText(content) : [];
         if (tags.length) out[path] = tags;
       }

@@ -1,3 +1,4 @@
+import { isNoteFile } from "../paths";
 import { confirmDialog } from "../shell/confirm";
 import { h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
@@ -92,7 +93,7 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
       const heads = edges.length ? Number(edges[0].fromEnd === "arrow") + Number(edges[0].toEnd !== "none") : 1;
       direction.replaceChildren(icon((["minus", "arrow-right", "move-horizontal"] as const)[heads]));
       if (edges.some(edge => edge.label)) toolbar.insertBefore(removeLabel, editButton);
-      editButton.hidden = selected.length !== 1 || !!nodes.length && !["text", "group"].includes(nodes[0].type) && !(nodes[0].type === "file" && /\.md$/i.test(nodes[0].file ?? ""));
+      editButton.hidden = selected.length !== 1 || !!nodes.length && !["text", "group"].includes(nodes[0].type) && !(nodes[0].type === "file" && isNoteFile(nodes[0].file ?? ""));
       editButton.setAttribute("aria-label", edges.length || nodes[0]?.type === "group" ? "Edit label" : "Edit");
       if (!selected.length) return;
       positions = [...nodes, ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
