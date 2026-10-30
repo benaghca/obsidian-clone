@@ -57,19 +57,21 @@ function andParts(expr: string): string[] {
   for (let i = 0; i < expr.length; i++) {
     const ch = expr[i];
     if (quote) {
-      if (ch === "\\" && quote === '"') i++;
+      if (ch === "\\") i++;
       else if (ch === quote) quote = "";
       continue;
     }
     if (ch === '"' || ch === "'") quote = ch;
     else if (ch === "(") depth++;
-    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (ch === ")") { if (--depth < 0) return []; }
+    else if (depth === 0 && expr.startsWith("||", i)) return [];
     else if (depth === 0 && expr.startsWith("&&", i)) {
       parts.push(expr.slice(start, i).trim());
       i += 1;
       start = i + 1;
     }
   }
+  if (quote || depth) return [];
   parts.push(expr.slice(start).trim());
   return parts.filter(Boolean);
 }
@@ -90,7 +92,6 @@ function callArg(expr: string, name: string): string | null {
 function needsFromExpr(expr: string): BaseNeeds {
   const need: BaseNeeds = { folders: [], tags: [] };
   for (const part of andParts(expr)) {
-    if (part.includes("||")) continue;
     const folder = callArg(part, "file.inFolder");
     if (folder !== null) {
       const trimmed = trimSlashes(folder);
@@ -127,11 +128,12 @@ export function missesPrefilter(path: string, need: BaseNeeds, text: string | nu
 }
 
 /** Every changed note is outside the base's folder/tag pre-filter, when that filter is readable. */
-export function docsOutsideFilter(paths: readonly string[], source: string, viewIndex: number, textOf: (path: string) => string | null, visible: (path: string) => boolean): boolean {
+export function docsOutsideFilter(paths: readonly string[], source: string, viewIndex: number, textOf: (path: string) => string | null, visible: (path: string) => boolean, previousTextOf: (path: string) => string | null = () => null): boolean {
   if (!paths.length || !source) return false;
   let need: BaseNeeds;
   try { need = baseNeeds(source, viewIndex); } catch { return false; }
-  return paths.every(path => missesPrefilter(path, need, textOf(path), visible(path)));
+  // A tag removal can change the total even when the row was beyond the view limit.
+  return paths.every(path => missesPrefilter(path, need, textOf(path), visible(path)) && missesPrefilter(path, need, previousTextOf(path), visible(path)));
 }
 
 export interface BaseChange {
@@ -142,6 +144,7 @@ export interface BaseChange {
   changed: string[] | null;
   /** Every path in `changed` is outside the pre-filter. */
   outside: boolean;
+  pending?: boolean;
 }
 
 export interface BaseRefresh {
@@ -157,13 +160,14 @@ export function baseChange(input: BaseChange): BaseRefresh {
   const watch = input.change === "files" || input.change === "doc" || input.change === "links";
   const reveal = input.change === "show" || input.change === "pane" || input.change === "tabs";
   if (reveal) {
+    if (!input.shown) return { deferred: input.deferred || !!input.pending, delay: null, clear: true };
     if (input.deferred && input.shown) return { deferred: false, delay: SOON_MS, clear: false };
     return { deferred: input.deferred, delay: null, clear: false };
   }
   if (!watch) return { deferred: input.deferred, delay: null, clear: false };
   if (!input.shown) return { deferred: true, delay: null, clear: true };
   if (input.change === "doc") {
-    if (input.changed && input.changed.length > 0 && input.outside) return { deferred: false, delay: null, clear: false };
+    if (input.changed && input.changed.length > 0 && input.outside) return { deferred: false, delay: input.deferred ? SOON_MS : null, clear: false };
     return { deferred: false, delay: DOC_QUIET_MS, clear: false };
   }
   return { deferred: false, delay: SOON_MS, clear: false };
@@ -325,10 +329,18 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
       if (!gone) { model = null; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
     } finally { running = false; }
   }
-  function schedule() { clearTimeout(timer); timer = window.setTimeout(() => void update(), SOON_MS); }
-  const unwatch = ws.vault.onModified(changed => { if (changed === path) reload = true; schedule(); });
   let deferred = false;
   const shown = () => el.isConnected && group.active === tab;
+  function schedule(delay = SOON_MS) {
+    clearTimeout(timer); timer = 0;
+    if (!shown()) { deferred = true; return; }
+    timer = window.setTimeout(() => {
+      timer = 0;
+      if (!shown()) { deferred = true; return; }
+      deferred = false;
+      void update();
+    }, delay);
+  }
   const openTexts = () => {
     const out = new Map<string, string>();
     for (const pane of ws.groups()) {
@@ -340,28 +352,43 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     return out;
   };
   let docSnap = openTexts();
+  // Keep the text before the first unsaved edit until its save notification.
+  const changedFrom = new Map<string, string | null>();
   const changedNotes = () => {
     const next = openTexts();
     const changed: string[] = [];
-    for (const [note, text] of next) if (docSnap.get(note) !== text) changed.push(note);
+    for (const [note, text] of next) if (docSnap.get(note) !== text) {
+      changed.push(note);
+      if (!changedFrom.has(note)) changedFrom.set(note, docSnap.get(note) ?? null);
+    }
     docSnap = next;
     return changed.length ? changed : null;
   };
+  const outside = (changed: string[], before: (note: string) => string | null) => docsOutsideFilter(changed, source, viewIndex,
+    note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null,
+    note => selected.some(entry => entry.row.file.path === note), before);
+  const unwatch = ws.vault.onModified(changed => {
+    const before = changedFrom.get(changed) ?? null;
+    changedFrom.delete(changed);
+    if (changed === path) reload = true;
+    else if (isNoteFile(changed) && outside([changed], () => before)) return;
+    schedule();
+  });
   const off = ws.on(change => {
     const changed = change === "doc" && shown() ? changedNotes() : null;
     const next = baseChange({
       change,
       shown: shown(),
       deferred,
+      pending: timer !== 0,
       changed,
-      outside: !!changed && docsOutsideFilter(changed, source, viewIndex, note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null, note => selected.some(entry => entry.row.file.path === note)),
+      outside: !!changed && outside(changed, note => changedFrom.get(note) ?? null),
     });
     deferred = next.deferred;
     if (next.delay !== null) {
-      clearTimeout(timer);
-      timer = window.setTimeout(() => void update(), next.delay);
+      schedule(next.delay);
       if (change === "show" || change === "pane" || change === "tabs") docSnap = openTexts();
-    } else if (next.clear) clearTimeout(timer);
+    } else if (next.clear) { clearTimeout(timer); timer = 0; }
   });
   void update();
   return { el, dispose() { gone = true; controls.dispose(); menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
