@@ -83,8 +83,8 @@ export interface BaseEmbed {
   path?: string;
   /** The view to show first, by name. */
   view?: string;
-  /** The note `this` is: the one the base is drawn in. */
-  host: string | null;
+  /** The note `this` is. A function is read on each evaluation, so renaming the note on screen follows. */
+  host: string | null | (() => string | null);
   /** Put a block's new YAML in the note; false when it can't be (drawn inside another embed). */
   write?(yaml: string): boolean;
 }

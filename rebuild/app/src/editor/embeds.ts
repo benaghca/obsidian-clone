@@ -302,7 +302,11 @@ export class NoteEmbedWidget extends DrawnWidget {
           }
         }
       }, () => {
-        if (!gone && mine === generation) content.replaceChildren(missingBox(`“${name}” is not created yet.`));
+        // A stale rejection must not release a newer painting. B4-FIX: let go of the Base this fill drew.
+        if (gone || mine !== generation) return;
+        if (painted) release(painted);
+        painted = null;
+        content.replaceChildren(missingBox(`“${name}” is not created yet.`));
       });
     };
     fill();
@@ -376,7 +380,9 @@ export class BaseWidget extends DrawnWidget {
     return 300;
   }
   private embed(view: EditorView, dom: HTMLElement): BaseEmbed {
-    const host = this.chain[this.chain.length - 1] ?? view.state.facet(editorHost)?.embeds?.pathOf(view) ?? null;
+    const nested = this.chain[this.chain.length - 1];
+    // B4-FIX: a rename keeps this widget. The note on screen is read when the base evaluates; a nested note stays the host.
+    const host = nested ?? (() => view.state.facet(editorHost)?.embeds?.pathOf(view) ?? null);
     if (this.yaml === null) return { path: this.path!, view: splitSubpath(this.target)[1], host };
     // A block drawn inside another embed has no place in this note's text to write to.
     const write = (yaml: string) => {

@@ -189,8 +189,8 @@ export interface BaseOptions {
   file: BaseFile;
   /** The file whose change on disk reloads the YAML (the .base file); none for a ```base block. */
   watch?: string;
-  /** The note `this` reads, by path. */
-  host: string | null;
+  /** The note `this` reads. A function is resolved on each evaluation (B4-FIX: the embed host can be renamed). */
+  host: string | null | (() => string | null);
   viewIndex: number;
   /** The view shown first, by name (![[X.base#View]]), when there is one. */
   viewName?: string;
@@ -207,6 +207,8 @@ export interface BaseOptions {
  */
 export function createBase(ws: Workspace, o: BaseOptions) {
   const { group, file } = o;
+  // B4-FIX: one path for this evaluation, read again next time. A string is the tab's own file.
+  const hostPath = (): string | null => (typeof o.host === "function" ? o.host() : o.host) ?? null;
   let viewIndex = o.viewIndex, viewName = o.viewName;
   const el = h("div", { class: "bases-view", tabindex: "0", "aria-label": "Base table" });
   const toolbar = h("div", { class: "bases-toolbar" });
@@ -340,7 +342,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         };
         const rows = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(row);
         // `this`, when the YAML reads it: its note's row (a copy, so its context has no `this` of its own), or any file's, such as the .base itself.
-        const hostFile = o.host === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === o.host)?.file ?? ws.vault.files.find(f => f.path === o.host);
+        const hostNow = hostPath();
+        const hostFile = hostNow === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === hostNow)?.file ?? ws.vault.files.find(f => f.path === hostNow);
         if (hostFile) { const host = row(hostFile); for (const r of rows) r.host = host; }
         const matches = model!.select(rows,true);model!.total=matches.length;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
@@ -417,7 +420,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     docSnap = next;
     return changed.length ? changed : null;
   };
-  const outside = (changed: string[], before: (note: string) => string | null) => !readsChanged(source, o.host, changed) && docsOutsideFilter(changed, source, viewIndex,
+  const outside = (changed: string[], before: (note: string) => string | null) => !readsChanged(source, hostPath(), changed) && docsOutsideFilter(changed, source, viewIndex,
     note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null,
     note => selected.some(entry => entry.row.file.path === note), before);
   const unwatch = ws.vault.onModified(changed => {

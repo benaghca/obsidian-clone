@@ -263,4 +263,147 @@ await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
   await run(() => ws.closeTabs(ws.layout.tabs()));
   await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'repeated close leaves no subscriptions');
   check(true, 'closing/reopening the final tab releases Bases widgets and workspace/vault subscriptions');
+
+  // Renaming the host note, then its folder, keeps both embeds on the new path.
+  const moveBase = `filters: 'file.path == this.file.path'
+formulas:
+  host: this.file.path
+  folder: this.file.folder
+views:
+  - type: table
+    name: First
+    order: [file.name, formula.host, formula.folder, status]
+  - type: table
+    name: Named
+    order: [file.name, formula.host, formula.folder, status]
+`;
+  const moveNote = `---
+status: old
+---
+Self.
+
+\`\`\`base
+filters: 'file.path == this.file.path'
+formulas:
+  host: this.file.path
+  folder: this.file.folder
+views:
+  - type: table
+    name: Self
+    order: [file.name, formula.host, formula.folder, status]
+\`\`\`
+
+![[HostMove.base#Named]]
+`;
+  const embedFacts = index => run(index => {
+    const embed = document.querySelectorAll('.bases-embed')[index];
+    const row = embed?.querySelector('tbody tr[data-path]');
+    const values = {};
+    for (const td of row?.querySelectorAll('td') ?? []) values[td.dataset.property] = td.dataset.value;
+    return { name: embed?.querySelector('.bases-view-name span')?.textContent ?? '', path: row?.dataset.path ?? '', values };
+  }, index);
+  await run(async (base, note) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('HostMove.base', base);
+    await api.createNote('Move/Rename.md', note);
+    await ws.vault.refreshFiles();
+    await ws.open('Move/Rename.md');
+  }, moveBase, moveNote);
+  await wait(async () => (await embedFacts(0)).path === 'Move/Rename.md' && (await embedFacts(1)).name === 'Named', 'rename fixture shows the host');
+  let facts = [await embedFacts(0), await embedFacts(1)];
+  assert.equal(facts[0].name, 'Self');
+  assert.deepEqual(facts[0].values, { 'file.name': 'Rename', 'formula.host': 'Move/Rename.md', 'formula.folder': 'Move', status: 'old' });
+  assert.deepEqual(facts[1].values, { 'file.name': 'Rename', 'formula.host': 'Move/Rename.md', 'formula.folder': 'Move', status: 'old' });
+  await click(await centre('.bases-embed .bases-view-name', 1));
+  await wait(() => run(() => !!document.querySelector('.bases-view-menu')), 'named view menu');
+  await menu('First');
+  await wait(async () => (await embedFacts(1)).name === 'First', 'file embed leaves the linked view');
+  await run(async () => { const { renameFile } = await import('/src/fileOps.ts'); await renameFile(ws, 'Move/Rename.md', 'Moved'); });
+  await wait(async () => (await embedFacts(0)).path === 'Move/Moved.md' && (await embedFacts(1)).path === 'Move/Moved.md', 'note rename updates both embeds');
+  facts = [await embedFacts(0), await embedFacts(1)];
+  assert.equal(facts[0].name, 'Self', 'the block keeps its view across the note rename');
+  assert.equal(facts[1].name, 'First', 'the file embed keeps the view chosen after opening');
+  assert.equal(facts[0].values['formula.host'], 'Move/Moved.md');
+  assert.equal(facts[0].values['formula.folder'], 'Move');
+  assert.equal(facts[0].values['file.name'], 'Moved');
+  assert.equal(await run(() => ws.active.path), 'Move/Moved.md');
+  await run(async () => { const { renameFile } = await import('/src/fileOps.ts'); await renameFile(ws, 'Move', 'Shifted'); });
+  await wait(async () => (await embedFacts(0)).path === 'Shifted/Moved.md' && (await embedFacts(1)).values['formula.folder'] === 'Shifted', 'folder rename updates host facts');
+  facts = [await embedFacts(0), await embedFacts(1)];
+  assert.equal(facts[0].name, 'Self');
+  assert.equal(facts[1].name, 'First');
+  assert.equal(facts[1].values['formula.host'], 'Shifted/Moved.md');
+  assert.equal(facts[1].values['file.name'], 'Moved');
+  assert.equal(await source('HostMove.base'), moveBase, 'renames do not write the .base file');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    window.b4WritePrev = api.writeNote;
+    window.b4Held = [];
+    api.writeNote = (path, text) => new Promise((resolve, reject) => b4Held.push({ path, text, resolve, reject }));
+  });
+  await run(() => {
+    const doc = ws.view.state.doc.toString(), at = doc.indexOf('status: old');
+    ws.view.dispatch({ changes: { from: at + 'status: '.length, to: at + 'status: old'.length, insert: 'fresh' } });
+  });
+  await wait(async () => (await embedFacts(0)).values.status === 'fresh' && (await embedFacts(1)).values.status === 'fresh', 'unsaved host status reaches both embeds');
+  assert.equal((await embedFacts(0)).path, 'Shifted/Moved.md');
+  assert.ok((await source('Shifted/Moved.md')).includes('status: old'), 'the host property is still unsaved');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    const prev = b4WritePrev;
+    const held = b4Held.splice(0);
+    api.writeNote = prev;
+    for (const entry of held) { try { await prev(entry.path, entry.text); entry.resolve(); } catch (error) { entry.reject(error); } }
+  });
+  const beforeClose = await run(() => b4Active.size);
+  assert.equal(beforeClose, 2);
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0 && !document.querySelector('.bases-embed')), 'closing the renamed host releases both bases');
+  check(true, 'renaming the host note and its folder keeps rows, host facts, and the chosen view');
+
+  // A failed reread of a nested note must release the Base it painted, including after a newer fill wins.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('Nested.md', '```base\nfilters: \'file.path == this.file.path\'\nviews:\n  - type: table\n    name: Inside\n    order: [file.name]\n```\n');
+    await api.createNote('Outer.md', 'Before\n\n![[Nested]]\n');
+    await ws.vault.refreshFiles();
+    await ws.open('Outer.md');
+  });
+  await wait(() => run(() => b4Active.size === 1 && document.querySelector('.bases-embed tbody tr')?.dataset.path === 'Nested.md'), 'nested base mounts');
+  const mountsBefore = await run(() => {
+    let mounts = 0;
+    const current = ws.embeds.base;
+    ws.embeds.base = (...args) => { mounts++; return current(...args); };
+    window.b4Mounts = () => mounts;
+    const read = ws.embeds.read.bind(ws.embeds);
+    window.b4Read = read;
+    let reads = 0;
+    ws.embeds.read = path => {
+      if (path !== 'Nested.md') return read(path);
+      reads++;
+      if (reads === 1) return new Promise((_, reject) => { window.b4StaleReject = reject; });
+      return read(path);
+    };
+    return mounts;
+  });
+  assert.equal(mountsBefore, 0);
+  await run(() => { ws.vault.written('Nested.md'); ws.vault.written('Nested.md'); });
+  await wait(() => run(() => b4Mounts() === 1 && b4Active.size === 1 && !!document.querySelector('.bases-embed')), 'the newer nested fill mounts one base');
+  await run(() => b4StaleReject(Error('stale')));
+  await sleep(50);
+  assert.equal(await run(() => b4Active.size), 1, 'a stale rejection does not destroy the newer base');
+  assert.equal(await run(() => b4Mounts()), 1);
+  assert.equal(await run(() => document.querySelectorAll('.bases-embed').length), 1);
+  await run(() => {
+    const read = b4Read;
+    ws.embeds.read = path => path === 'Nested.md' ? Promise.reject(Error('missing')) : read(path);
+    ws.vault.written('Nested.md');
+  });
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0 && !document.querySelector('.bases-embed') && !!document.querySelector('.markdown-embed-content')), 'a rejected nested read releases the base');
+  check(await run(() => document.querySelector('.markdown-embed-content')?.textContent.includes('is not created yet')), 'the missing-note box replaces the nested base');
+  await run(() => { ws.embeds.read = b4Read; ws.vault.written('Nested.md'); });
+  await wait(() => run(() => b4Active.size === 1 && b4Mounts() === 2 && document.querySelector('.bases-embed tbody tr')?.dataset.path === 'Nested.md'), 'the nested base mounts once more when the read recovers');
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'closing the outer note releases the recovered base');
+  check(true, 'a rejected nested-note read releases its base, and a stale rejection does not');
 });
