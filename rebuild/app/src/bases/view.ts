@@ -316,8 +316,9 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const groupedView = createGroupedView({ el, scroller, table, body, ws, group, cell, header: menus.header, createCards: createCardGrid, repaint: () => paint(true), summaryContext: () => host && model?.hostContext(host),
     collapsed: scope => { const key = `${o.watch ?? `block:${hostPath() ?? ""}`}\0${scope}`; let set = collapsedHere.get(key); if (!set) collapsedHere.set(key, set = new Set()); return set; },
     groupMenu: (event, g) => menus.groupHeading(event, g) });
-  /** Rows in hidden groups are not counted (D7); the count is set again once the groups are known. */
-  const counted = () => { if (!model) return; model.results = drawn.length - groupedView.hiddenRows(); drawToolbar(); };
+  /** Rows in hidden groups are not counted (D7). The last hidden total is only a stand-in until grouping finishes, and it must not drive the count below zero. */
+  const shownCount = () => Math.max(0, drawn.length - groupedView.hiddenRows());
+  const counted = () => { if (!model) return; model.results = shownCount(); if (!cards()) table.setAttribute("aria-rowcount", String(model.results + 1)); drawToolbar(); };
   function paint(force = false) {
     if (!model || gone || editing()) return;
     if (groupedView.paint(model, drawn, force) || cards()) return;
@@ -387,7 +388,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         const found = query ? await searched(selected, () => gone || dirty) : selected;
         if (!found) continue;
         drawn = found; drawnFrom = selected; drawnQuery = query.toLowerCase();
-        model!.results = drawn.length - groupedView.hiddenRows();table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
+        model!.results = shownCount();table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
         drawToolbar();
         const glyph = cards() ? "grid-2x2" : "table", svg = toolbar.querySelector(".bases-view-name svg");
         if (svg && !svg.classList.contains(`lucide-${glyph}`)) svg.replaceWith(icon(glyph));
@@ -438,7 +439,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     drawnFrom = selected; drawnQuery = lower;
     // The same rows (most keys while a query is still short): nothing to draw again.
     if (same) return;
-    drawn = found; model.results = drawn.length - groupedView.hiddenRows(); drawToolbar();
+    drawn = found; model.results = shownCount(); drawToolbar();
     scroller.scrollTop = 0; start = -1;
     if (!cards()) table.setAttribute("aria-rowcount", String(drawn.length + 1));
     if (await groupedView.update(model, drawn, types, stale)) { counted(); paint(true); }
