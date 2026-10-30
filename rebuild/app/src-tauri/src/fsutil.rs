@@ -151,6 +151,8 @@ fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
     let _ = sync_dir;
     let tmp = temp_path_for(path);
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+    #[cfg(test)]
+    let mut leave_temp = false;
     let write_res = (|| -> io::Result<()> {
         let permissions = match fs::metadata(path) {
             Ok(old) => Some(old.permissions()),
@@ -162,7 +164,25 @@ fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
             file.set_permissions(permissions)?;
         }
         sync_file(&file)?;
+        // A killed process stops here or after the rename. The hook exists only in test
+        // builds: release `replace` does not read it and does not branch on it.
+        #[cfg(test)]
+        if take_crash(CrashPoint::BeforeRename) {
+            leave_temp = true;
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "injected crash before rename",
+            ));
+        }
         fs::rename(&tmp, path)?;
+        #[cfg(test)]
+        if take_crash(CrashPoint::BeforeDirSync) {
+            leave_temp = true;
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "injected crash before directory sync",
+            ));
+        }
         #[cfg(unix)]
         if let Some(directory) = &directory {
             sync_file(directory)?;
@@ -171,9 +191,48 @@ fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
     })();
     drop(file);
     if write_res.is_err() {
+        // An injected crash leaves the temp for the open-time sweep, as a dead process would.
+        #[cfg(test)]
+        if leave_temp {
+            return write_res;
+        }
         let _ = fs::remove_file(&tmp);
     }
     write_res
+}
+
+/// Where a test build aborts [`atomic_write`] / [`atomic_write_durable`]. Release builds have
+/// neither the flag nor the checks.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CrashPoint {
+    /// Temp file is complete and synced. The note is still the old bytes.
+    BeforeRename,
+    /// The note is already the new bytes. The folder has not been synced.
+    BeforeDirSync,
+}
+
+#[cfg(test)]
+thread_local! {
+    static CRASH_AT: std::cell::Cell<Option<CrashPoint>> = const { std::cell::Cell::new(None) };
+}
+
+/// Arm the next write on this thread. `None` disarms it. The point fires once.
+#[cfg(test)]
+pub fn crash_at(point: Option<CrashPoint>) {
+    CRASH_AT.with(|slot| slot.set(point));
+}
+
+#[cfg(test)]
+fn take_crash(point: CrashPoint) -> bool {
+    CRASH_AT.with(|slot| {
+        if slot.get() == Some(point) {
+            slot.set(None);
+            true
+        } else {
+            false
+        }
+    })
 }
 
 #[cfg(test)]
