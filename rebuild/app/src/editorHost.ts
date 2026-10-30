@@ -8,6 +8,7 @@
 // shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
+import { mountBaseEmbed } from "./bases/embed";
 import { isolateHistory } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
 import { attachmentPaths, embedFor } from "./editor/attachments";
@@ -229,5 +230,6 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     watch(path, fn) {
       return kept(watchers, path, () => listeners()).on(fn);
     },
+    base: (parent, embed, view) => mountBaseEmbed(ws, parent, embed, view),
   };
 }

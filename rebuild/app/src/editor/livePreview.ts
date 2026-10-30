@@ -25,7 +25,7 @@ import { isNoteFile } from "../paths";
 import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
+import { BaseWidget, editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
@@ -365,7 +365,7 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     }
   }
 
-  // ![[embeds]]: an image like the one above; a note's text below the line
+  // ![[embeds]]: an image like the one above; a note's text (or a base) below the line
   // while the caret is on it (its source showing), in place of it otherwise.
   function decorateEmbed(node: SyntaxNode, target: SyntaxNode, alias: SyntaxNode | null): boolean {
     const from = node.from - 1;
@@ -380,8 +380,10 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }
-    if (/\.[a-z0-9]+$/i.test(src.split("#")[0]) && !isNoteFile(src.split("#")[0])) return false; // other files stay links
-    const widget = new NoteEmbedWidget(src, resolve(src.split("#")[0]), state.facet(embedChain));
+    const file = src.split("#")[0];
+    const base = /\.base$/i.test(file);
+    if (!base && /\.[a-z0-9]+$/i.test(file) && !isNoteFile(file)) return false; // other files stay links
+    const widget = base ? new BaseWidget(null, resolve(file), src, state.facet(embedChain)) : new NoteEmbedWidget(src, resolve(file), state.facet(embedChain));
     if (!touchesLines(from, node.to)) {
       decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
