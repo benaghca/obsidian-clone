@@ -5,6 +5,8 @@
 export const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
 /** A note's name: its file name without ".md". */
 export const noteName = (path: string) => fileName(path).replace(/\.md$/i, "");
+/** Whether a vault path is a note. `.md` matches in any case, as the vault's note list does. */
+export const isNoteFile = (path: string) => path.toLowerCase().endsWith(".md");
 /** The folder a path is in ("" at the vault root). */
 export const parentDir = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 /** A folder as typed in a setting ("/Daily/ ") as a vault path ("Daily"). */

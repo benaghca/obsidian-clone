@@ -1,9 +1,14 @@
 import type { FileEntry } from "../api";
 import type { Property } from "../editor/frontmatter";
-import { compareNames, noteName, parentDir } from "../paths";
+import { compareNames, isNoteFile, noteName, parentDir } from "../paths";
 import { compare, expression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
+
+/** Files a Base lists: notes, `.md` in any case, that are not excluded. */
+export function baseNoteFiles(files: readonly FileEntry[], excluded: (path: string) => boolean): FileEntry[] {
+  return files.filter((f) => !f.is_dir && isNoteFile(f.path) && !excluded(f.path));
+}
 const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
 export const propertyId = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export const noteKey = (key: string) => key.replace(/^note\./, "");

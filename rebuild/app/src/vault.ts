@@ -9,7 +9,7 @@ import { api, type FileEntry, isTauri, type LinkIndex } from "./api";
 import type { NoteRef } from "./editor/host";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
-import { noteName } from "./paths";
+import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
 
@@ -62,7 +62,7 @@ export class Vault {
     if (mine !== this.filesRequest) return;
     this.files = files;
     this.notes = this.files
-      .filter((f) => !f.is_dir && f.path.toLowerCase().endsWith(".md"))
+      .filter((f) => !f.is_dir && isNoteFile(f.path))
       .map((f) => ({ name: noteName(f.path), path: f.path }));
     this.changed("files");
   }

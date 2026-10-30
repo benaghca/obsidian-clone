@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import type { LinkIndex } from "../api";
 import { GRAPH, LOCAL_GRAPH, sanitize, serialize, defaults } from "../settings/schema";
-import { buildGraph, type GraphModel, neighbours, nodeColor, nodeRadius } from "./data";
+import { buildGraph, graphFileLists, type GraphModel, neighbours, nodeColor, nodeRadius } from "./data";
 import { matches, parseQuery } from "../shell/searchQuery";
 import { ALPHA_MIN, Simulation } from "./sim";
 
@@ -27,6 +27,24 @@ test("notes are nodes, resolved wikilinks and markdown links are undirected link
   expect(m.nodes.find((n) => n.label === "Someday")!.kind).toBe("unresolved");
   // Weight counts links in and out (A: out to B, C, Someday; in from B, E).
   expect(m.nodes[m.index.get("A.md")!].weight).toBe(5);
+});
+
+test("an upper-case .MD file is a note on the graph", () => {
+  const { notes: mdNotes, attachments } = graphFileLists(
+    [
+      { path: "Upper.MD", is_dir: false },
+      { path: "Note.md", is_dir: false },
+      { path: "pic.png", is_dir: false },
+      { path: "Hidden.md", is_dir: false },
+      { path: "Dir", is_dir: true },
+    ],
+    (path) => path === "Hidden.md",
+  );
+  expect(mdNotes).toEqual(["Upper.MD", "Note.md"]);
+  expect(attachments).toEqual(["pic.png"]);
+  const m = buildGraph({ notes: mdNotes, attachments, links: links({}) }, { ...base, showAttachments: true });
+  expect(m.nodes.find((n) => n.path === "Upper.MD")).toMatchObject({ kind: "note", label: "Upper" });
+  expect(m.nodes.find((n) => n.path === "pic.png")!.kind).toBe("attachment");
 });
 
 test("filters: existing files only, orphans, attachments, tags and a search", () => {

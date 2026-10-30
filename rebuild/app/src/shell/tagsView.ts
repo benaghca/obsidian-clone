@@ -5,7 +5,7 @@
 // only while the view is shown: the backend read after a vault change settles,
 // the open note on a debounce after typing.
 
-import { compareNames } from "../paths";
+import { compareNames, isNoteFile } from "../paths";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
@@ -66,7 +66,7 @@ export function createTagsView(ws: Workspace, searchFor: (query: string) => void
     const tags: string[] = [];
     // Excluded files (Settings → Files and links) don't count.
     for (const [path, list] of saved.data) if (path !== open && !ws.vault.isExcluded(path)) tags.push(...list);
-    if (open?.endsWith(".md") && !ws.vault.isExcluded(open)) tags.push(...tagsInText(ws.view.state.doc.toString()));
+    if (open && isNoteFile(open) && !ws.vault.isExcluded(open)) tags.push(...tagsInText(ws.view.state.doc.toString()));
     const tree = ordered(tagTree(tags), sort);
     const key = `${sort}\n${JSON.stringify(tree)}`;
     if (key === shown) return;
