@@ -26,6 +26,16 @@ export interface SearchHit {
   text: string;
 }
 
+export interface SearchNote {
+  path: string;
+  count: number;
+}
+
+export interface SearchLine {
+  line: number;
+  text: string;
+}
+
 export interface Backlink {
   from: string;
   line: number;
@@ -113,6 +123,9 @@ export const api = {
   /** Move to the vault's .trash, or with `permanent` remove for good. */
   deletePath: (path: string, permanent = false) => call<void>("delete_path", { path, permanent }),
   search: (query: string, limit: number) => call<SearchHit[]>("search", { query, limit }),
+  searchNotes: (query: string, matchCase = false) => call<SearchNote[]>("search_notes", { query, matchCase }),
+  searchLines: (query: string, matchCase: boolean, paths: string[], limit: number) => call<Record<string, SearchLine[]>>("search_lines", { query, matchCase, paths, limit }),
+  searchMatch: (queries: string[]) => call<string[][]>("search_match", { queries }),
   linkIndex: () => call<LinkIndex>("link_index"),
   /** Linked mentions for the requested targets only; targets with none are omitted. */
   backlinks: (paths: string[]) => call<Record<string, Backlink[]>>("backlinks", { paths }),

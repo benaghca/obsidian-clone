@@ -1,17 +1,18 @@
 import { Text } from "@codemirror/state";
 import { beforeEach, expect, it, vi } from "vitest";
-import { api, type FileEntry, type LinkIndex, type SearchHit } from "./api";
+import { api, type FileEntry, type LinkIndex, type SearchNote } from "./api";
 import { NoteEditors } from "./noteEditors";
 import { Vault } from "./vault";
 import { Workspace } from "./workspace";
 import type { Tab } from "./tabs";
-import { searchFacts } from "./shell/searchFacts";
-import { parseQuery } from "./shell/searchQuery";
+import { searchReader, searchResults } from "./shell/searchRead";
+import { createGraphSource } from "./graph/source";
+import { defaults, LOCAL_GRAPH } from "./settings/schema";
 import { vaultTags } from "./shell/vaultTags";
 import { propertyIndex } from "./shell/propertyIndex";
 
 vi.mock("./api", () => ({ api: {
-  listFiles: vi.fn(), linkIndex: vi.fn(), readNote: vi.fn(), search: vi.fn(), properties: vi.fn(), tags: vi.fn(),
+  listFiles: vi.fn(), linkIndex: vi.fn(), readNote: vi.fn(), search: vi.fn(), searchNotes: vi.fn(), searchLines: vi.fn(), searchMatch: vi.fn(), properties: vi.fn(), tags: vi.fn(),
 }, isTauri: false }));
 
 function deferred<T>() {
@@ -21,7 +22,6 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 const file = (path: string): FileEntry => ({ path, name: path, is_dir: false, mtime_ms: 1, ctime_ms: 1, size: 0 });
-const hit = (text: string): SearchHit => ({ path: "a.md", line: 1, text });
 
 beforeEach(() => vi.resetAllMocks());
 
@@ -87,21 +87,73 @@ function workspace() {
   return { ws: ws as never, change: () => listeners.forEach(fn => fn("files")) };
 }
 
-it("keys search facts by term and does not repopulate an invalidated cache", async () => {
-  const alpha = deferred<SearchHit[]>(), beta = deferred<SearchHit[]>(), newer = deferred<SearchHit[]>();
-  vi.mocked(api.search).mockReturnValueOnce(alpha.promise).mockReturnValueOnce(beta.promise).mockReturnValueOnce(newer.promise);
-  const { ws, change } = workspace(), facts = searchFacts(ws);
-  const first = facts.facts([parseQuery("alpha beta")])!;
-  beta.resolve([hit("beta")]); change();
-  const second = facts.facts([parseQuery("alpha")])!;
-  newer.resolve([hit("new alpha")]);
-  expect((await second).lines("alpha")?.get("a.md")?.[0].text).toBe("new alpha");
-  alpha.resolve([hit("old alpha")]);
-  const result = await first;
-  expect(result.lines("alpha")?.get("a.md")?.[0].text).toBe("old alpha");
-  expect(result.lines("beta")?.get("a.md")?.[0].text).toBe("beta");
-  expect((await facts.facts([parseQuery("alpha")])!).lines("alpha")?.get("a.md")?.[0].text).toBe("new alpha");
-  expect(api.search).toHaveBeenCalledTimes(3);
+it("search view sorts kept files in locale order, retaining backend tie order and exact counts", () => {
+  const files = [file("a.MD"), file("b.md"), file("c.md"), { ...file("dir"), is_dir: true }];
+  files[0].name = "Note 10"; files[1].name = "Note 2"; files[2].name = "Note 2";
+  const notes = ["a.MD", "b.md", "c.md", "dir", "missing.md"].map((path, i) => ({ path, count: i + 1 }));
+  expect(searchResults(files, notes, () => false, "alphabetical").map(n => [n.path, n.count])).toEqual([["b.md", 2], ["c.md", 3], ["a.MD", 1]]);
+  expect(searchResults(files, notes, path => path === "b.md", "alphabeticalReverse").map(n => n.path)).toEqual(["a.MD", "c.md"]);
+  files[0].mtime_ms = 2;
+  expect(searchResults(files, notes, () => false, "byModifiedTime")[0].path).toBe("a.MD");
+});
+
+it("search view drops an old reply and sends only the newest queued query after flushing saves", async () => {
+  const old = deferred<SearchNote[]>(), latest = deferred<SearchNote[]>();
+  const flush = vi.fn().mockResolvedValue(undefined), receive = vi.fn(), failed = vi.fn();
+  vi.mocked(api.searchNotes).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+  const reader = searchReader({ editors: { flush } } as never, receive, failed);
+  reader.read({ query: "a", matchCase: false, seq: 1 });
+  await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(1));
+  reader.read({ query: "al", matchCase: false, seq: 2 });
+  reader.read({ query: "Alpha", matchCase: true, seq: 3 });
+  expect(api.searchNotes).toHaveBeenCalledTimes(1);
+  old.resolve([{ path: "old.md", count: 1 }]);
+  await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
+  expect(receive).not.toHaveBeenCalled();
+  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true);
+  latest.resolve([{ path: "Upper.MD", count: 2 }]);
+  await vi.waitFor(() => expect(receive).toHaveBeenCalledWith({ query: "Alpha", matchCase: true, seq: 3 }, [{ path: "Upper.MD", count: 2 }]));
+  expect(flush).toHaveBeenCalledTimes(2);
+  expect(flush.mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(api.searchNotes).mock.invocationCallOrder[1]);
+  expect(failed).not.toHaveBeenCalled();
+});
+
+it("clearing search during the save flush cancels a pending query", async () => {
+  const saving = deferred<void>(), receive = vi.fn();
+  const reader = searchReader({ editors: { flush: () => saving.promise } } as never, receive, vi.fn());
+  reader.read({ query: "a", matchCase: false, seq: 1 });
+  reader.cancel(); saving.resolve();
+  await saving.promise; await Promise.resolve();
+  expect(api.searchNotes).not.toHaveBeenCalled();
+  expect(receive).not.toHaveBeenCalled();
+});
+
+it("graph batches only backend queries, reuses matches across options and invalidates after a vault change", async () => {
+  const flush = vi.fn().mockResolvedValue(undefined);
+  vi.mocked(api.searchMatch).mockResolvedValue([["a.md"]]);
+  vi.mocked(api.tags).mockResolvedValue({ "a.md": ["idea"] });
+  const { ws } = workspace();
+  Object.assign((ws as Workspace).editors, { flush });
+  Object.assign((ws as Workspace).vault, { links: { outgoing: {} }, isExcluded: () => false });
+  const source = createGraphSource(ws, false);
+  const cfg = { ...defaults(LOCAL_GRAPH), search: "alpha", colorGroups: [
+    { query: "alpha", color: { a: 1, rgb: 0xff0000 } },
+    { query: "file:a", color: { a: 1, rgb: 0 } },
+    { query: "", color: { a: 1, rgb: 1 } },
+  ] };
+  const facts = await source.facts(cfg);
+  expect(api.searchMatch).toHaveBeenCalledWith(["alpha"]);
+  expect(flush.mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.searchMatch).mock.invocationCallOrder[0]);
+  const built = source.build(cfg, facts, null, null);
+  expect(built.model.nodes.map(n => n.path)).toContain("a.md");
+  expect(built.groups.map(g => g.match(built.model.nodes[0]))).toEqual([true, true, true]);
+  await source.facts({ ...cfg, showTags: true });
+  expect(api.searchMatch).toHaveBeenCalledTimes(1);
+  expect(api.tags).toHaveBeenCalledTimes(1);
+  source.forget(); await source.facts(cfg);
+  expect(api.searchMatch).toHaveBeenCalledTimes(2);
+  expect(source.facts({ ...cfg, search: "file:a", colorGroups: [] })).toBeNull();
+  expect(source.facts({ ...cfg, search: "", colorGroups: [] })).toBeNull();
 });
 
 it("does not evict newer tags when an invalidated request fails later", async () => {

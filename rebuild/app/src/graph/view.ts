@@ -530,7 +530,6 @@ export function createGraphView(host: GraphHost) {
       sim.alphaTarget = 0;
     }
     if (changedIn(before, cfg, DATA_KEYS)) {
-      if (before.showTags !== cfg.showTags) source.forget();
       void rebuild();
     }
     invalidate();
@@ -547,6 +546,9 @@ export function createGraphView(host: GraphHost) {
     if (change === "links" || change === "files") {
       source.forget();
       scheduleRebuild();
+    } else if (change === "doc") {
+      // A later rebuild flushes this edit before reusing saved-query results.
+      source.forget();
     } else if (change === "show") {
       const path = ws.active.path;
       if (!local && path && path !== focusId) {

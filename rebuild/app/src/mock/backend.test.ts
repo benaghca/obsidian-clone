@@ -89,3 +89,29 @@ test("properties use the TS reference with BOM, CRLF, uppercase notes and source
     expect(await invoke("properties", { paths: [] })).toEqual({});
   } finally { vi.unstubAllGlobals(); }
 });
+
+test("search commands share the reference, cache only unchanged saved content, and page only matching notes", async () => {
+  const store = () => ({ getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("location", { search: "" }); vi.stubGlobal("sessionStorage", store()); vi.stubGlobal("localStorage", store());
+  try {
+    const { invoke } = createMockBackend();
+    await invoke("create_note", { path: "C1B/Upper.MD", content: "\ufeff---\r\nstatus: draft\r\n---\r\nc1bword c1bword\r\nlast\r" });
+    await invoke("create_note", { path: "C1B/c1bword.png", content: "c1bword" });
+    const query = "path:C1B c1bword";
+    expect(await invoke("search_notes", { query, matchCase: false })).toEqual([{ path: "C1B/Upper.MD", count: 2 }]);
+    const args = { query, matchCase: false, paths: ["C1B", "missing.md", "C1B/c1bword.png", "C1B/Upper.MD", "C1B/Upper.MD"], limit: 1 };
+    expect(await invoke("search_lines", args)).toEqual({ "C1B/Upper.MD": [{ line: 4, text: "c1bword c1bword" }] });
+    expect(await invoke("search_lines", { ...args, query: "path:C1B" })).toEqual({});
+    expect(await invoke("search_lines", { ...args, limit: 0 })).toEqual({});
+    expect(await invoke("search_lines", { ...args, query: "content:last" })).toEqual({ "C1B/Upper.MD": [{ line: 5, text: "last\r" }] });
+    expect(await invoke("search_match", { queries: [query, "", "file:c1bword.png"] })).toEqual([["C1B/Upper.MD", "C1B/c1bword.png"], [], ["C1B/c1bword.png"]]);
+    await invoke("write_note", { path: "C1B/Upper.MD", content: "c1bnew\n#c1btag\n" });
+    expect(await invoke("search_notes", { query, matchCase: false })).toEqual([]);
+    expect(await invoke("search_notes", { query: "tag:c1btag", matchCase: false })).toEqual([{ path: "C1B/Upper.MD", count: 1 }]);
+    expect(await invoke("tags", { paths: ["C1B/Upper.MD"] })).toEqual({ "C1B/Upper.MD": ["c1btag"] });
+    await invoke("rename_path", { from: "C1B/Upper.MD", to: "C1B/Renamed.md" });
+    expect(await invoke("search_notes", { query: "content:c1bnew", matchCase: false })).toEqual([{ path: "C1B/Renamed.md", count: 1 }]);
+    await invoke("delete_path", { path: "C1B" });
+    expect(await invoke("search_match", { queries: ["path:C1B"] })).toEqual([[]]);
+  } finally { vi.unstubAllGlobals(); }
+});

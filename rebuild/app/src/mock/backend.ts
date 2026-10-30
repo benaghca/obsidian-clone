@@ -1,11 +1,12 @@
 // In-memory stand-in for the Tauri backend, used only outside Tauri.
 // Implements the commands in rebuild/CONTRACT.md against sampleVault().
 
-import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
+import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, SearchHit, SearchNote, SearchLine, VaultInfo } from "../api";
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { linkSpellings, markdownURL, resolveLink } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
 import { fileName, noteName } from "../paths";
+import { createSearchVault } from "../shell/searchVault";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
@@ -187,6 +188,43 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     return hits;
   }
 
+  const matchVault = createSearchVault();
+  // Rust indexes note bodies only up to 8 MB; attachments have names but no facts.
+  const searchFiles = () => Object.fromEntries([...files].map(([path, file]) => {
+    let text = /\.md$/i.test(path) && !isBinary(file.content) ? file.content : "";
+    if (text.length * 3 > 8 * 1024 * 1024 && new TextEncoder().encode(text).length > 8 * 1024 * 1024) text = "";
+    return [path, text];
+  }));
+  const pathOrder = (a: string, b: string) => {
+    let i = 0, j = 0;
+    while (i < a.length && j < b.length) {
+      const x = a.codePointAt(i)!, y = b.codePointAt(j)!;
+      if (x !== y) return x - y;
+      i += x > 0xffff ? 2 : 1; j += y > 0xffff ? 2 : 1;
+    }
+    return a.length - b.length;
+  };
+  const searchNotes = (query: string, matchCase: boolean): SearchNote[] => {
+    const matches = matchVault(searchFiles(), query, matchCase);
+    return Object.keys(matches ?? {}).filter(path => /\.md$/i.test(path)).sort(pathOrder)
+      .map(path => ({ path, count: (matches![path] as { count: number }).count }));
+  };
+  const searchLines = (query: string, matchCase: boolean, paths: string[], limit: number): Record<string, SearchLine[]> => {
+    if (limit <= 0) return {};
+    const source = searchFiles();
+    const matches = matchVault(source, query, matchCase, paths.filter(path => /\.md$/i.test(path)));
+    const out: Record<string, SearchLine[]> = {};
+    for (const path of Object.keys(matches ?? {}).sort(pathOrder)) {
+      const text = source[path].replace(/^\uFEFF/, "");
+      const lines = text.split("\n");
+      const shown = (matches![path] as { lines: number[] }).lines.slice(0, limit).map(line => ({
+        line, text: line < lines.length && lines[line - 1].endsWith("\r") ? lines[line - 1].slice(0, -1) : lines[line - 1],
+      }));
+      if (shown.length) out[path] = shown;
+    }
+    return out;
+  };
+
   // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
   function linkData(wanted?: Set<string>): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
     const notes = [...files.keys()].map((path) => ({ name: noteName(path), path }));
@@ -347,6 +385,12 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       keepEmptyParents(path);
     },
     search: ({ query, limit }) => search(query, limit),
+    search_notes: ({ query, matchCase }) => searchNotes(query, matchCase),
+    search_lines: ({ query, matchCase, paths, limit }) => searchLines(query, matchCase, paths, limit),
+    search_match: ({ queries }) => {
+      const source = searchFiles();
+      return queries.map((query: string) => Object.keys(matchVault(source, query) ?? {}).sort(pathOrder));
+    },
     link_index: () => linkData().links,
     backlinks: ({ paths }) => paths.length ? linkData(new Set(paths)).backlinks : {},
     link_sources: ({ paths }) => linkSources(paths),
@@ -372,7 +416,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     tags: ({ paths }) => {
       const out: Record<string, string[]> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        const content = path.endsWith(".md") ? files.get(path)?.content : undefined;
+        const content = /\.md$/i.test(path) ? files.get(path)?.content : undefined;
         const tags = content ? tagsInText(content) : [];
         if (tags.length) out[path] = tags;
       }
