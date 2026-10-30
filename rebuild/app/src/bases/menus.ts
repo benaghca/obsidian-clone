@@ -16,12 +16,16 @@ import { menuInputEscape } from "./menuInput";
 import { configureView } from "./config";
 import { writeViewSetting } from "./groups";
 import { SUMMARY_NAMES, summaryFor } from "./summaries";
+import { groupMenu, hideGroup, type GroupMenuHost } from "./groupMenu";
+import { parseManual, type RowGroup } from "./groups";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
 /** Where a base's YAML is read from and written to: a .base file, or a ```base block in a note. */
 export interface BaseFile { read(): Promise<string>; write(text: string): Promise<void> }
-export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][], search: (query: string) => void, inferred: (key: string) => PropertyType) {
+/** What the Group menu reads from the drawn view (groups.ts). */
+export interface GroupState { groups(): readonly RowGroup[]; hiddenRows(): number }
+export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][], search: (query: string) => void, inferred: (key: string) => PropertyType, grouping: GroupState) {
   let writing = Promise.resolve(), gone = false;
   const save = (change: (source: string, base: Model) => string, done?: () => void, select?: (base: Model) => number) => {
     const index = current().viewIndex;
@@ -91,7 +95,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       if(name)choices[propertyId(key)]=name;
       return writeViewSetting(source,"summaries",Object.keys(choices).length?choices:undefined,b.viewIndex);
     });
-    const activeGroup=!!current().groupBy&&same(current().groupBy!.property,key);
+    const activeGroup=!!current().groupBy&&same(current().groupBy!.property,key), manual=activeGroup&&!!parseManual(current().view.groupBy);
     const summaryItems=():MenuItems=>[
       {title:"None",checked:!summaryFor(current().summaryPlan,key),action:()=>summarize()},
       ...SUMMARY_NAMES.map(name=>({title:name,checked:summaryFor(current().summaryPlan,key)?.toLowerCase()===name.toLowerCase(),action:()=>summarize(name)})),
@@ -99,7 +103,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       // A custom summary is saved by its name; `custom.` only when the name is also a built-in's.
       ...[...current().summaryPlan.custom.keys()].map(name=>{const id=SUMMARY_NAMES.some(n=>n.toLowerCase()===name.toLowerCase())?`custom.${name}`:name;return {title:`Custom: ${name}`,checked:[id,`custom.${name}`].includes(summaryFor(current().summaryPlan,key)??""),action:()=>summarize(id)};}),
     ];
-    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",submenu:summaryItems},{title:"Group by this property",icon:"group",checked:activeGroup,action:()=>group("ASC")},activeGroup&&{title:"Group A → Z",checked:current().groupBy!.direction==="ASC",action:()=>group("ASC")},activeGroup&&{title:"Group Z → A",checked:current().groupBy!.direction==="DESC",action:()=>group("DESC")},activeGroup&&{title:"Clear grouping",action:()=>group()},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",action:()=>editProperty({x:e.clientX,y:e.clientY},key)},SEPARATOR,
+    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",submenu:summaryItems},{title:"Group by this property",icon:"group",checked:activeGroup,action:()=>group("ASC")},activeGroup&&{title:"Group A → Z",checked:!manual&&current().groupBy!.direction==="ASC",action:()=>group("ASC")},activeGroup&&{title:"Group Z → A",checked:!manual&&current().groupBy!.direction==="DESC",action:()=>group("DESC")},activeGroup&&{title:"Clear grouping",action:()=>group()},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",action:()=>editProperty({x:e.clientX,y:e.clientY},key)},SEPARATOR,
       // A note property's type is the vault's (types.json), shared with the Properties block and view; file and formula columns have none to choose.
       /^(file|formula)\./.test(key)?{title:"Property type",icon:"type",disabled:true}:{title:"Property type",icon:"type",submenu:()=>typeItems(noteKey(key),inferred(key),ws.propertyHost)}],{x:e.clientX,y:e.clientY});
   }
@@ -150,6 +154,11 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       write:(local,change,done)=>save((source,b)=>writeFilters(source,change(local?b.view.filters:b.root.filters),local?b.viewIndex:undefined),done),
       keys,label:key=>current().label(key),kind,type:key=>types().get(noteKey(key))??(key==="file.size"?"number":"text")},at);
   }
+  const groupHost: GroupMenuHost = {current,groups:()=>grouping.groups(),keys,kind,type:key=>types().get(noteKey(key))??(key==="file.size"?"number":/file\.[cm]time/.test(key)?"datetime":key==="file.tags"?"tags":"text"),save:(change,done)=>save(change,done)};
+  /** A group heading's context menu. */
+  const groupHeading=(e: MouseEvent,g: RowGroup)=>showMenu([{title:"Hide group",icon:"eye-off",action:()=>hideGroup(groupHost,g)}],{x:e.clientX,y:e.clientY});
+  /** "Group · status · Manual" on the toolbar button (the detail is hidden in an embed's compact toolbar). */
+  const groupDetail=(base: Model)=>base.groupBy?`${base.label(base.groupBy.property)}${parseManual(base.view.groupBy)?" · Manual":""}`:"";
   const baseLimit=()=>{const value=current().view.limit;return typeof value==="number"?value:undefined;};
   let buttons: HTMLElement[] | null = null;
   function toolbar() {
@@ -157,6 +166,8 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
     if (buttons) {
       buttons[0].querySelector("span")!.textContent = base.name;
       buttons[1].querySelector("span")!.textContent = `${base.results} results`;
+      const hidden=grouping.hiddenRows();buttons[1].title=hidden?`${hidden} in hidden groups`:"";
+      const grouped=buttons[2].querySelector('[aria-label="Group"]')!;grouped.classList.toggle("is-active",!!base.groupBy);grouped.querySelector(".bases-group-detail")!.textContent=groupDetail(base);
       const sort=buttons[2].querySelector("button")!;sort.classList.toggle("is-active",!!base.sorts.length);
       sort.querySelector(".bases-badge")?.remove();if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
       buttons[2].querySelector('[aria-label="Filter"]')!.classList.toggle("is-active",base.filtered);
@@ -165,6 +176,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
     const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View",onclick:()=>views(view)},icon(base.type === "cards" ? "grid-2x2" : "table"),h("span",null,base.name),icon("chevrons-up-down"));
     const count=h("button",{type:"button",class:"bases-count","aria-label":"Results",onclick:()=>resultsMenu(count,baseLimit(),current().total,current().columns.map(current().label),rows(),value=>save((source,b)=>writeView(source,"limit",value,b.viewIndex)))},icon("text-align-start"),h("span",null,`${base.results} results`));
     const sort=button("Sort","arrow-up-narrow-wide",()=>sortMenu(sort));sort.classList.toggle("is-active",!!base.sorts.length);if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
+    const grouped=button("Group","group",()=>groupMenu(grouped,groupHost));grouped.classList.toggle("is-active",!!base.groupBy);grouped.append(h("span",{class:"bases-group-detail"},groupDetail(base)));
     const filter=button("Filter","list-filter",()=>filters(filter));filter.classList.toggle("is-active",base.filtered);
     const props=button("Properties","list",()=>properties(props));
     // Search: an icon that opens a text box. Typing filters the rows shown (view.ts); it writes nothing.
@@ -175,12 +187,12 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
     find.addEventListener("keydown",e=>{if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close();finder.focus();}});
     find.addEventListener("focusout",e=>{if(!find.value&&e.relatedTarget!==finder)find.hidden=true;});
     const create=button("New","plus",()=>void newRow(ws,rowSeed(current().columns,[current().root.filters,current().view.filters],types())).catch(error));
-    return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props,h("div",{class:"bases-toolbar-search"},finder,find),create)];
+    return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,grouped,filter,props,h("div",{class:"bases-toolbar-search"},finder,find),create)];
   }
   const size=(key:string,width?:number)=>save((source,b)=>{
     const sizes={...b.sizes}, id=propertyId(key);delete sizes[key];delete sizes[id];
     if(width!==undefined)sizes[id]=Math.max(40,width);
     return writeView(source,"columnSize",Object.keys(sizes).length?sizes:undefined,b.viewIndex);
   });
-  return {toolbar,header,size,order:(change:(keys:string[])=>string[])=>write("order",b=>change(b.columns)),dispose(){gone=true;}};
+  return {toolbar,header,groupHeading,size,order:(change:(keys:string[])=>string[])=>write("order",b=>change(b.columns)),dispose(){gone=true;}};
 }

@@ -210,6 +210,9 @@ export interface BaseOptions {
  */
 export function createBase(ws: Workspace, o: BaseOptions) {
   const { group, file } = o;
+  // K3: collapsed groups live on the tab the base is drawn in (its own, or the note's for an embed), never in the YAML.
+  const tab = group.active, collapsedHere = collapsedByTab.get(tab) ?? new Map<string, Set<string>>();
+  collapsedByTab.set(tab, collapsedHere);
   // B4-FIX: one path for this evaluation, read again next time. A string is the tab's own file.
   const hostPath = (): string | null => (typeof o.host === "function" ? o.host() : o.host) ?? null;
   let viewIndex = o.viewIndex, viewName = o.viewName;
@@ -243,7 +246,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
   const cards = () => model?.type === "cards";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (groupedView.rows() ?? drawn).map(entry => model!.columns.map(key => entry.context.get(key))), next => { query = next; void refilter(); }, key => inferred.get(noteKey(key)) ?? "text");
+  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (groupedView.rows() ?? drawn).map(entry => model!.columns.map(key => entry.context.get(key))), next => { query = next; void refilter(); }, key => inferred.get(noteKey(key)) ?? "text", { groups: () => groupedView.groups(), hiddenRows: () => groupedView.hiddenRows() });
   /** Draw the toolbar's buttons, once: moving them would blur the Search box. */
   const drawToolbar = () => { const items = menus.toolbar(); if (items.some((item, i) => toolbar.children[i] !== item)) toolbar.replaceChildren(...items); };
   let automatic: number[] = [];
@@ -310,7 +313,12 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     return td;
   }
   // Cards, and tables with groups or summaries, are drawn by groups.ts; a plain table is drawn below.
-  const groupedView = createGroupedView({ el, scroller, table, body, ws, group, cell, header: menus.header, createCards: createCardGrid, repaint: () => paint(true), summaryContext: () => host && model?.hostContext(host) });
+  const groupedView = createGroupedView({ el, scroller, table, body, ws, group, cell, header: menus.header, createCards: createCardGrid, repaint: () => paint(true), summaryContext: () => host && model?.hostContext(host),
+    collapsed: scope => { const key = `${o.watch ?? `block:${hostPath() ?? ""}`}\0${scope}`; let set = collapsedHere.get(key); if (!set) collapsedHere.set(key, set = new Set()); return set; },
+    groupMenu: (event, g) => menus.groupHeading(event, g) });
+  /** Rows in hidden groups are not counted (D7). The last hidden total is only a stand-in until grouping finishes, and it must not drive the count below zero. */
+  const shownCount = () => Math.max(0, drawn.length - groupedView.hiddenRows());
+  const counted = () => { if (!model) return; model.results = shownCount(); if (!cards()) table.setAttribute("aria-rowcount", String(model.results + 1)); drawToolbar(); };
   function paint(force = false) {
     if (!model || gone || editing()) return;
     if (groupedView.paint(model, drawn, force) || cards()) return;
@@ -380,14 +388,14 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         const found = query ? await searched(selected, () => gone || dirty) : selected;
         if (!found) continue;
         drawn = found; drawnFrom = selected; drawnQuery = query.toLowerCase();
-        model!.results = drawn.length;table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
+        model!.results = shownCount();table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
         drawToolbar();
         const glyph = cards() ? "grid-2x2" : "table", svg = toolbar.querySelector(".bases-view-name svg");
         if (svg && !svg.classList.contains(`lucide-${glyph}`)) svg.replaceWith(icon(glyph));
         table.hidden = cards(); el.setAttribute("aria-label", cards() ? "Base cards" : "Base table");
         if (cards()) {
           head.replaceChildren(); body.replaceChildren(); start = -1;
-          if (await groupedView.update(model!, drawn, types, () => gone || dirty)) paint(true);
+          if (await groupedView.update(model!, drawn, types, () => gone || dirty)) { counted(); paint(true); }
           continue;
         }
         table.setAttribute("aria-rowcount", String(drawn.length + 1));
@@ -411,7 +419,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         });
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
         if (!await groupedView.update(model!, drawn, types, () => gone || dirty)) continue;
-        paint(true);
+        counted(); paint(true);
       }
     } catch (error) {
       if (!gone) { model = null; groupedView.clear(); toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
@@ -431,10 +439,10 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     drawnFrom = selected; drawnQuery = lower;
     // The same rows (most keys while a query is still short): nothing to draw again.
     if (same) return;
-    drawn = found; model.results = drawn.length; drawToolbar();
+    drawn = found; model.results = shownCount(); drawToolbar();
     scroller.scrollTop = 0; start = -1;
     if (!cards()) table.setAttribute("aria-rowcount", String(drawn.length + 1));
-    if (await groupedView.update(model, drawn, types, stale)) paint(true);
+    if (await groupedView.update(model, drawn, types, stale)) { counted(); paint(true); }
   }
   let deferred = false;
   const shown = () => el.isConnected && (o.shown?.() ?? true);
@@ -509,6 +517,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
 }
 
 const viewsByTab = new WeakMap<Tab, Map<string, number>>();
+const collapsedByTab = new WeakMap<Tab, Map<string, Set<string>>>();
 /** A .base file in its own tab: `this` is the base file itself, and the tab remembers the view shown. */
 export function createBaseView(ws: Workspace, path: string, group: Group) {
   const tab = group.active;

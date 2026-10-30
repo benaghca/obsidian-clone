@@ -105,6 +105,7 @@ const ICONS = {
   "layout-list": lucide.LayoutList,
   link: lucide.Link,
   "link-2": lucide.Link2,
+  eye: lucide.Eye,
   "eye-off": lucide.EyeOff,
   "list-x": lucide.ListX,
   list: lucide.List,
