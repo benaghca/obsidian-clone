@@ -37,6 +37,8 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
   edit: (item: CanvasNode | CanvasEdge) => void, recolor: (items: (CanvasNode | CanvasEdge)[]) => void, createGroup: () => void, background: BackgroundPicker) {
   let selected: (CanvasNode | CanvasEdge)[] = [], edges: CanvasEdge[] = [], disposed = false;
   let positions: Pick<CanvasNode, "x" | "y" | "width" | "height">[] = [];
+  // Selected labels: a card label's offset inside its card (fixed while it moves), or an edge label.
+  let labels: { node?: CanvasNode; top: number; edge?: HTMLElement }[] = [];
   const zoomSelection = () => { closeMenu(); zoom(positions); };
   const toolbar = h("div", { class: "canvas-selection-menu", tabindex: "-1", role: "toolbar", "aria-label": "Selection" });
   toolbar.addEventListener("mousedown", e => e.preventDefault());
@@ -81,6 +83,14 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
   toolbar.append(keyButton(icon("trash-2"), "Remove", () => { closeMenu(); remove(); }), colorButton,
     keyButton(icon("scan-search"), "Zoom to selection\n(Shift + 2)", zoomSelection), editButton);
   world.append(toolbar);
+  /** Follow the selection as it moves: only the menu's position changes. */
+  function place() {
+    if (!selected.length) return;
+    positions = [...selected.filter((item): item is CanvasNode => !("fromNode" in item)), ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
+    const left = Math.min(...positions.map(n => n.x)), right = Math.max(...positions.map(n => n.x + n.width));
+    toolbar.style.setProperty("--canvas-menu-x", `${(left + right) / 2}px`);
+    toolbar.style.setProperty("--canvas-menu-y", `${Math.min(...positions.map(n => n.y), ...labels.map(l => l.edge ? l.edge.offsetTop - l.edge.offsetHeight / 2 : l.node!.y + l.top))}px`);
+  }
   return {
     zoom: zoomSelection,
     update(nodes: CanvasNode[], chosenEdges: CanvasEdge[] = []) {
@@ -94,14 +104,14 @@ export function selectionMenu(world: HTMLElement, allNodes: CanvasNode[], remove
       if (edges.some(edge => edge.label)) toolbar.insertBefore(removeLabel, editButton);
       editButton.hidden = selected.length !== 1 || !!nodes.length && !["text", "group"].includes(nodes[0].type) && !(nodes[0].type === "file" && /\.md$/i.test(nodes[0].file ?? ""));
       editButton.setAttribute("aria-label", edges.length || nodes[0]?.type === "group" ? "Edit label" : "Edit");
-      if (!selected.length) return;
-      positions = [...nodes, ...edges.map(edge => edgeBounds(allNodes.find(n => n.id === edge.fromNode)!, allNodes.find(n => n.id === edge.toNode)!, edge))];
-      const left = Math.min(...positions.map(n => n.x)), right = Math.max(...positions.map(n => n.x + n.width));
-      toolbar.style.setProperty("--canvas-menu-x", `${(left + right) / 2}px`);
-      const labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label, .canvas-edge-label")]
-        .filter(label => label.dataset.edgeId ? edges.some(e => e.id === label.dataset.edgeId) : nodes.some(n => n.id === label.parentElement!.dataset.nodeId));
-      toolbar.style.setProperty("--canvas-menu-y", `${Math.min(...positions.map(n => n.y), ...labels.map(label => label.dataset.edgeId ? label.offsetTop - label.offsetHeight / 2 : label.parentElement!.offsetTop + label.offsetTop))}px`);
+      labels = [...world.querySelectorAll<HTMLElement>(".canvas-group-label, .canvas-file-label, .canvas-edge-label")].flatMap((label): typeof labels => {
+        if (label.dataset.edgeId) return edges.some(e => e.id === label.dataset.edgeId) ? [{ top: 0, edge: label }] : [];
+        const node = nodes.find(n => n.id === label.parentElement!.dataset.nodeId);
+        return node ? [{ node, top: label.offsetTop }] : [];
+      });
+      place();
     },
+    place,
     dispose() { disposed = true; if (toolbar.matches(".has-active-menu") || toolbar.querySelector(".has-active-menu")) closeMenu(); toolbar.remove(); },
   };
 }

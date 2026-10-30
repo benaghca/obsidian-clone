@@ -171,7 +171,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
           }
           for (const [i, n] of affected.entries()) { n.x = before[i].x + dx; n.y = before[i].y + dy; }
         }
-        repaint(affected);
+        // The selection is the same while it moves: only reposition its menu.
+        paint(affected); menu.place();
       }, cancelled => {
         if (!cancelled && !suppress && removeOnClick) { selected.delete(node.id); selection(); }
         finish(before, cancelled);
