@@ -117,3 +117,5 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,shot,check})
  await wait(()=>run(()=>document.querySelector('.bases-count')?.textContent==='1 results'),'unsaved first tag updates base');
  console.log('PASS first unsaved tag matches an empty saved tag index');
 },{height:800,screenshots:shots.pathname});
+
+await import('./test-bases-b0.mjs');
