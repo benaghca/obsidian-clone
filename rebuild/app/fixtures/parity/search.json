@@ -1597,19 +1597,15 @@
       "expected": {
         ".MD": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "Real.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         }
       },
       "rust": "todo",
-      "note": "Without match case the folded name .md contains md, so both files match. Each is a note with its one content line and a count of 0, because a file: term has nothing to highlight. Rust keeps Real.md as a note and records .MD as an attachment {}, since the name matches and is_note_path is false. file:MD without match case, and path:.MD without match case, have that same shape."
+      "note": "Without match case the folded name .md contains md, so both files match. A file: term shows no lines and counts 0. Rust keeps Real.md as a note and records .MD as an attachment {}, since the name matches and is_note_path is false. file:MD without match case, and path:.MD without match case, have that same shape."
     },
     {
       "name": "file:MD with match case on a file named .MD",
@@ -1619,13 +1615,11 @@
       "expected": {
         ".MD": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         }
       },
       "rust": "todo",
-      "note": "Match case compares the file name as typed. .MD contains MD and Real.md does not, so only .MD matches, as a note with line 1. Rust search_notes drops .MD and Real.md does not pass, then the parity runner adds .MD as {} because the name still passes. path:.MD with match case is the same: the reference returns .MD as a note and Rust returns it as an attachment. file:md with match case agrees, because .MD does not contain the lowercase letters md."
+      "note": "Match case compares the file name as typed. .MD contains MD and Real.md does not, so only .MD matches, with no shown lines. Rust search_notes drops .MD and Real.md does not pass, then the parity runner adds .MD as {} because the name still passes. path:.MD with match case is the same: the reference returns .MD as a note and Rust returns it as an attachment. file:md with match case agrees, because .MD does not contain the lowercase letters md."
     }
   ]
 }

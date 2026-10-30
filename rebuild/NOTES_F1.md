@@ -100,3 +100,17 @@ All of these held `/tmp/grove-npm-test.lock`. Cargo used `--offline`. The regist
 Chris decides whether a file whose entire name is `.md` or `.MD` is a note. The reference says yes. `is_note_path` says no. The three `dot-name` cases stay `"rust": "todo"` until that matches. Removing the marker while Rust still differs fails `cargo test`, and making Rust match without removing the marker fails it too.
 
 The 8 MB name-only result stays a reference gap: `searchVault` has no ceiling, and the plan already calls the ceiling current behavior. The `file:` / `path:` shown-line gap belongs to the old `termsOf` path. The evaluator already matches `searchVault` there.
+
+## Follow-up after the C1-A fix
+
+Merged `rebuild/c1a-search-codex` (`bcb430d`, parent review `80a9a40`) with `git merge --no-ff`. No rebase. `search.json` merged cleanly: Codex's eight `file:` / `path:` expected values and the three `dot-name` cases are both present. Merge commit `98d40c9`.
+
+The fix makes `searchVault` return no lines for an empty term (`searchVault.ts`, the `lines` lookup), and `Plan::new` no longer asks for `""` (`index/search.rs`). `file:` and `path:` matches stay, with `lines: []` and count 0.
+
+Regenerated the three `dot-name` expected values with that `searchVault`. `secretprobe` is unchanged: both notes still show line 1. `file:md` and `file:MD` with match case now have `lines: []`. Their notes say that, instead of saying a content line is shown. `"rust": "todo"` stays on all three. Whether a file named exactly `.md` / `.MD` is a note is still open. No other case was edited.
+
+Checks, each under `flock /tmp/grove-npm-test.lock`. Cargo used `--offline`. The registry was not contacted. The full `npm test` was skipped; it runs at merge time.
+
+- `npm run build`: passed. The existing large-chunk notice is still there.
+- `npx vitest run`: 58 files, 668 tests, all passed, including `parity.test.ts` (343 tests).
+- `cargo test --offline`: 52 passed, 0 failed, 2 ignored. The corpus test passed, so the three `rust: todo` markers still differ from Rust.
