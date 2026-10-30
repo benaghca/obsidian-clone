@@ -6,7 +6,7 @@ import { fits, asType, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { formatDate } from "../settings/dateFormat";
-import { isNoteFile, isUnder, parentDir, trimSlashes } from "../paths";
+import { isNoteFile, isUnder, noteName, parentDir, trimSlashes } from "../paths";
 import { propertyValue } from "../editor/properties";
 import { TYPE_ICONS } from "../editor/propertyFields";
 import { propertyIndex } from "../shell/propertyIndex";
@@ -21,7 +21,9 @@ import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
 import type { Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
-import { createGroupedView } from "./groups";
+import { createGroupedView, runSliced, type Entry } from "./groups";
+import { searchWork, rowText } from "./search";
+import { settings } from "../settings/store";
 
 /** How long a burst of typing waits before the open base rebuilds. Matches the note save delay. */
 const DOC_QUIET_MS = 300;
@@ -222,11 +224,28 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const index = propertyIndex(ws);
   let model: ReturnType<typeof baseModel> | null = null, host: Row | undefined;
   let selected: ReturnType<ReturnType<typeof baseModel>["select"]> = [];
+  // B6: the toolbar Search box narrows the selected rows (after the limit) to `drawn`: the rows painted, counted, summarised and copied.
+  let drawn: readonly Entry[] = [], query = "", searchRun = 0, requery = false;
+  // What `drawn` was filtered from, and by which (lower-case) query: a longer query narrows `drawn` instead of every row.
+  let drawnFrom: readonly Entry[] = [], drawnQuery = "";
+  const searchText = new WeakMap<Entry, string>();
+  const textOf = (entry: Entry) => {
+    let text = searchText.get(entry);
+    if (text === undefined) searchText.set(entry, text = rowText(entry.context, model!.columns, cards() ? noteName(entry.row.file.path) : undefined));
+    return text;
+  };
+  /** The drawn rows for the current query, or null when cancelled. */
+  const searched = async (rows: readonly Entry[], cancelled: () => boolean) => {
+    try { return await runSliced(searchWork(rows, query, textOf), { cancelled }); }
+    catch (e) { if (e instanceof Error && e.name === "AbortError") return null; throw e; }
+  };
+  let types = new Map<string, PropertyType>(), inferred = new Map<string, PropertyType>();
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
-  let types = new Map<string, PropertyType>();
   const cards = () => model?.type === "cards";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (groupedView.rows() ?? selected).map(entry => model!.columns.map(key => entry.context.get(key))));
+  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (groupedView.rows() ?? drawn).map(entry => model!.columns.map(key => entry.context.get(key))), next => { query = next; void refilter(); }, key => inferred.get(noteKey(key)) ?? "text");
+  /** Draw the toolbar's buttons, once: moving them would blur the Search box. */
+  const drawToolbar = () => { const items = menus.toolbar(); if (items.some((item, i) => toolbar.children[i] !== item)) toolbar.replaceChildren(...items); };
   let automatic: number[] = [];
   function applySizes(key?: string, width?: number) {
     if (!model || !automatic.length) return;
@@ -240,8 +259,16 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     table.style.width=`${widths.reduce((sum,n)=>sum+n,0)}px`;
   }
   const controls=columnControls(head,applySizes,(key,width)=>menus.size(key,width),change=>menus.order(change),schedule);
-  const editing = () => controls.active || body.contains(document.activeElement) && document.activeElement?.matches('input:not([type="checkbox"]),[contenteditable="plaintext-only"]');
-  el.addEventListener("focusout", () => { setTimeout(() => { if (!gone && !editing()) schedule(); }, 0); });
+  const field = (node: EventTarget | null) => node instanceof Element && body.contains(node) && node.matches('input:not([type="checkbox"]),[contenteditable="plaintext-only"]');
+  const editing = () => controls.active || field(document.activeElement);
+  // Work out the rows' text while the Search box is focused, before the first key.
+  toolbar.addEventListener("focusin", e => {
+    if (!(e.target as Element).matches(".bases-search-input") || !model) return;
+    const rows = selected;
+    void runSliced((function* () { for (let i = 0; i < rows.length; i++) { textOf(rows[i]); if ((i & 255) === 255) yield; } })(), { cancelled: () => gone || running || rows !== selected }).catch(() => {});
+  });
+  // Leaving a cell's field catches up on rebuilds held back while it had focus; other focus moves (Search, toolbar buttons) change no rows.
+  el.addEventListener("focusout", e => { if (field(e.target)) setTimeout(() => { if (!gone && !editing()) schedule(); }, 0); });
   function type(key: string, value?: Value): PropertyType {
     if (key === "file.mtime" || key === "file.ctime") return "datetime";
     if (key === "file.tags") return "tags";
@@ -286,11 +313,11 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const groupedView = createGroupedView({ el, scroller, table, body, ws, group, cell, header: menus.header, createCards: createCardGrid, repaint: () => paint(true), summaryContext: () => host && model?.hostContext(host) });
   function paint(force = false) {
     if (!model || gone || editing()) return;
-    if (groupedView.paint(model, selected, force) || cards()) return;
-    const rowHeight=model.rowHeight, virtual = selected.length > 200, first = virtual ? Math.min(Math.max(0, selected.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
+    if (groupedView.paint(model, drawn, force) || cards()) return;
+    const rowHeight=model.rowHeight, virtual = drawn.length > 200, first = virtual ? Math.min(Math.max(0, drawn.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
     if (!force && first === start) return;
     start = first;
-    const end = virtual ? Math.min(selected.length, first + Math.ceil(scroller.clientHeight / rowHeight) + 16) : selected.length;
+    const end = virtual ? Math.min(drawn.length, first + Math.ceil(scroller.clientHeight / rowHeight) + 16) : drawn.length;
     const fragment = document.createDocumentFragment();
     const space = (height: number) => {
       if (!height) return;
@@ -298,8 +325,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       td.colSpan = model!.columns.length; fragment.append(h("tr", { class: "bases-spacer" }, td));
     };
     space(first * rowHeight);
-    for (let i = first; i < end; i++) fragment.append(h("tr", { "data-path": selected[i].row.file.path }, ...model.columns.map(key => cell(key, selected[i]))));
-    space((selected.length - end) * rowHeight);
+    for (let i = first; i < end; i++) fragment.append(h("tr", { "data-path": drawn[i].row.file.path }, ...model.columns.map(key => cell(key, drawn[i]))));
+    space((drawn.length - end) * rowHeight);
     body.replaceChildren(fragment);
     notice.textContent = [...model.notices].join(" · "); notice.hidden = !notice.textContent;
   }
@@ -325,8 +352,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
         if (gone || dirty) continue;
         if (editing()) { dirty = false; break; }
-        types = new Map();
-        for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) types.set(p.key, index.host.typeOf(p.key) ?? p.type);
+        types = new Map(); inferred = new Map();
+        for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) { types.set(p.key, index.host.typeOf(p.key) ?? p.type); inferred.set(p.key, p.type); }
         const linkCache = new Map<string, string | null>();
         const row = (file: FileEntry): Row => {
           const props = properties.get(file.path)?.props ?? [];
@@ -350,17 +377,20 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         if (host) for (const r of rows) r.host = host;
         const matches = model!.select(rows,true);model!.total=matches.length;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
-        model!.results = selected.length;table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
-        toolbar.replaceChildren(...menus.toolbar());
+        const found = query ? await searched(selected, () => gone || dirty) : selected;
+        if (!found) continue;
+        drawn = found; drawnFrom = selected; drawnQuery = query.toLowerCase();
+        model!.results = drawn.length;table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
+        drawToolbar();
         const glyph = cards() ? "grid-2x2" : "table", svg = toolbar.querySelector(".bases-view-name svg");
         if (svg && !svg.classList.contains(`lucide-${glyph}`)) svg.replaceWith(icon(glyph));
         table.hidden = cards(); el.setAttribute("aria-label", cards() ? "Base cards" : "Base table");
         if (cards()) {
           head.replaceChildren(); body.replaceChildren(); start = -1;
-          if (await groupedView.update(model!, selected, types, () => gone || dirty)) paint(true);
+          if (await groupedView.update(model!, drawn, types, () => gone || dirty)) paint(true);
           continue;
         }
-        table.setAttribute("aria-rowcount", String(selected.length + 1));
+        table.setAttribute("aria-rowcount", String(drawn.length + 1));
         head.replaceChildren(h("tr", null, ...model!.columns.map(key => {
           const sort = model!.sorts.find(s => noteKey(s.property) === noteKey(key));
           const th = h("th", { "data-property": key, oncontextmenu: (e: MouseEvent) => menus.header(e, key) }, h("div", { class: "bases-header" }, icon(key === "file.name" ? "info" : key.startsWith("formula.") ? "square-function" : TYPE_ICONS[type(key)], 14), h("span", null, model!.label(key)), sort ? icon(sort.direction === 1 ? "chevron-up" : "chevron-down", 14) : null));
@@ -380,12 +410,31 @@ export function createBase(ws: Workspace, o: BaseOptions) {
             return width;
         });
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
-        if (!await groupedView.update(model!, selected, types, () => gone || dirty)) continue;
+        if (!await groupedView.update(model!, drawn, types, () => gone || dirty)) continue;
         paint(true);
       }
     } catch (error) {
       if (!gone) { model = null; groupedView.clear(); toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
-    } finally { running = false; }
+    } finally {
+      running = false;
+      if (requery && !gone) { requery = false; void refilter(); }
+    }
+  }
+  /** The query changed: filter the rows already selected again, without evaluating the base. */
+  async function refilter() {
+    if (!model || running) { requery = true; return; }
+    const run = ++searchRun, stale = () => gone || running || run !== searchRun, lower = query.toLowerCase();
+    const narrows = drawnFrom === selected && drawnQuery !== "" && lower.startsWith(drawnQuery);
+    const found = await searched(narrows ? drawn : selected, stale);
+    if (!found || stale() || !model) return;
+    const same = drawnFrom === selected && found.length === drawn.length && found.every((entry, i) => entry === drawn[i]);
+    drawnFrom = selected; drawnQuery = lower;
+    // The same rows (most keys while a query is still short): nothing to draw again.
+    if (same) return;
+    drawn = found; model.results = drawn.length; drawToolbar();
+    scroller.scrollTop = 0; start = -1;
+    if (!cards()) table.setAttribute("aria-rowcount", String(drawn.length + 1));
+    if (await groupedView.update(model, drawn, types, stale)) paint(true);
   }
   let deferred = false;
   const shown = () => el.isConnected && (o.shown?.() ?? true);
@@ -448,12 +497,14 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       if (change === "show" || change === "pane" || change === "tabs") docSnap = openTexts();
     } else if (next.clear) { clearTimeout(timer); timer = 0; }
   });
+  // A new Property type (header menu, Properties view) changes cells and icons.
+  const unsettle = settings.on(file => { if (file === "types.json" || file === null) schedule(); });
   void update();
   return {
     el,
     /** Read the YAML again (a ```base block's text changed). */
     reload() { reload = true; schedule(); },
-    dispose() { gone = true; controls.dispose(); menus.dispose(); groupedView.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
+    dispose() { gone = true; controls.dispose(); menus.dispose(); groupedView.dispose(); unwatch(); off(); unsettle(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
   };
 }
 
