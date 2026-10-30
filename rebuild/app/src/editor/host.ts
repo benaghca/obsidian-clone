@@ -71,6 +71,22 @@ export interface EmbedHost {
   toggleTask(path: string, line: number): void;
   /** Call `fn` when the file changes (on disk, or saved from an editor); returns a function that stops. */
   watch(path: string, fn: () => void): () => void;
+  /** Draw a base into `parent` (bases/embed.ts); `update` gives a ```base block its new text. */
+  base?(parent: HTMLElement, embed: BaseEmbed, view: EditorView): { update(embed: BaseEmbed): void; destroy(): void };
+}
+
+/** A base drawn in a note: a ```base block's YAML, or a .base file's view (![[X.base#View]]). */
+export interface BaseEmbed {
+  /** A ```base block's YAML; absent for a .base file. */
+  yaml?: string;
+  /** The .base file. */
+  path?: string;
+  /** The view to show first, by name. */
+  view?: string;
+  /** The note `this` is: the one the base is drawn in. */
+  host: string | null;
+  /** Put a block's new YAML in the note; false when it can't be (drawn inside another embed). */
+  write?(yaml: string): boolean;
 }
 
 /** The vault's properties, as the Properties block uses them. */

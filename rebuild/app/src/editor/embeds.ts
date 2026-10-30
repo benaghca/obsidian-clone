@@ -9,15 +9,17 @@
 // Files are read through the app's EmbedHost when an embed is first drawn,
 // never per keystroke; an embed redraws when its file changes. A note
 // already being drawn further out (a note embedding itself, A ↔ B), or five
-// embeds deep, shows as a small file chip instead.
+// embeds deep, shows as a small file chip instead. A base (a ```base block,
+// or ![[X.base]] / ![[X.base#View]]) is drawn by the app (bases/embed.ts),
+// with `this` as the note it is in.
 
-import { EditorSelection, StateEffect, StateField } from "@codemirror/state";
-import type { EditorView } from "@codemirror/view";
+import { EditorSelection, StateEffect, StateField, type Text } from "@codemirror/state";
+import type { EditorView, WidgetType } from "@codemirror/view";
 import { dragPointer, h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
-import { editorHost } from "./host";
+import { type BaseEmbed, editorHost } from "./host";
 import { headingLabel, headingTarget } from "./headings";
 import { zoomImage } from "./imageZoom";
 import { DrawnWidget, editAt, editButton, isLinkEvent, onDestroy, readingMode, release, render, widgetAction } from "./render";
@@ -311,5 +313,89 @@ export class NoteEmbedWidget extends DrawnWidget {
       if (painted) release(painted);
     });
     return dom;
+  }
+}
+
+const BASE_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*base[ \t]*$/;
+const closingFence = (open: string) => new RegExp(`^ {0,3}${open[0]}{${open.length},}[ \t]*$`);
+
+/** A ```base block's YAML, from its lines (fences included); null when it is another code block. */
+export function baseBlockYaml(text: string): string | null {
+  const lines = text.split("\n");
+  const open = BASE_FENCE.exec(lines[0]);
+  if (!open) return null;
+  const body = lines.slice(1);
+  if (body.length && closingFence(open[1]).test(body[body.length - 1])) body.pop();
+  return body.map((line) => `${line}\n`).join("");
+}
+
+/** The change that puts `yaml` in place of the YAML of the ```base block starting on the line at `at`; null if there is none there. */
+export function baseBlockChange(doc: Text, at: number, yaml: string): { from: number; to: number; insert: string } | null {
+  const first = doc.lineAt(at);
+  const open = BASE_FENCE.exec(first.text);
+  if (!open) return null;
+  const close = closingFence(open[1]);
+  for (let n = first.number + 1; n <= doc.lines; n++) {
+    const line = doc.line(n);
+    if (close.test(line.text)) return { from: first.to + 1, to: line.from, insert: yaml };
+  }
+  // An unclosed block runs to the end of the note.
+  const tail = yaml.replace(/\n$/, "");
+  return first.to === doc.length ? { from: doc.length, to: doc.length, insert: `\n${tail}` } : { from: first.to + 1, to: doc.length, insert: tail };
+}
+
+const drawnBases = new WeakMap<Element, { update(embed: BaseEmbed): void }>();
+
+/** A base in a note: a ```base block (`yaml`), or a .base file (`path`, linked as `target`, "X.base#View"). */
+export class BaseWidget extends DrawnWidget {
+  constructor(
+    readonly yaml: string | null,
+    readonly path: string | null,
+    readonly target: string,
+    /** The notes it is drawn inside of (embeds.ts): `this` is the innermost, else the note on screen. */
+    readonly chain: readonly string[],
+  ) {
+    super();
+  }
+  get estimatedHeight() {
+    return 300;
+  }
+  private embed(view: EditorView, dom: HTMLElement): BaseEmbed {
+    const host = this.chain[this.chain.length - 1] ?? view.state.facet(editorHost)?.embeds?.pathOf(view) ?? null;
+    if (this.yaml === null) return { path: this.path!, view: splitSubpath(this.target)[1], host };
+    // A block drawn inside another embed has no place in this note's text to write to.
+    const write = (yaml: string) => {
+      const change = !this.chain.length && dom.isConnected ? baseBlockChange(view.state.doc, view.posAtDOM(dom), yaml) : null;
+      if (change) view.dispatch({ changes: change, userEvent: "input.base" });
+      return !!change;
+    };
+    return { yaml: this.yaml, host, write };
+  }
+  toDOM(view: EditorView) {
+    const host = view.state.facet(editorHost)?.embeds;
+    if (this.yaml === null && !this.path) return missingBox(`“${splitSubpath(this.target)[0]}” could not be found.`);
+    if (!host?.base) return missingBox("This base can't be shown here.");
+    const dom = h("div", { class: "internal-embed bases-embed" });
+    const drawn = host.base(dom, this.embed(view, dom), view);
+    if (this.yaml !== null) {
+      // "Edit this block": the caret goes to its YAML, and the source shows (blocks.ts).
+      const actions = editButton();
+      actions.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        const line = view.state.doc.lineAt(view.posAtDOM(dom));
+        editAt(view, Math.min(line.to + 1, view.state.doc.length));
+      });
+      dom.append(actions);
+    }
+    drawnBases.set(dom, drawn);
+    onDestroy(dom, () => drawn.destroy());
+    return dom;
+  }
+  /** A block whose YAML changed keeps its DOM (scroll, open menus) and reads the new YAML. */
+  updateDOM(dom: HTMLElement, view: EditorView, from: WidgetType) {
+    const drawn = drawnBases.get(dom);
+    if (!drawn || this.yaml === null || !(from instanceof BaseWidget) || from.yaml === null) return false;
+    drawn.update(this.embed(view, dom));
+    return true;
   }
 }

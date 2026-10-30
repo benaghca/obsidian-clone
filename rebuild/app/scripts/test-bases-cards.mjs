@@ -41,11 +41,6 @@ await withBrowser(async ({ run, send, click, point, move, press, fill, check }) 
     assert.fail(label);
   };
 
-  await run(async () => {
-    const { enableBaseCards } = await import('/src/bases/cards.ts');
-    enableBaseCards(window.ws);
-  });
-
   // 1. Seed notes, cover image, and a type: cards .base file
   await run(
     async (png, yaml) => {

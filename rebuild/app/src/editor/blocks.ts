@@ -1,5 +1,6 @@
-// The block widgets of Live Preview and Reading view: callouts and tables
-// drawn in place of their lines (callouts.ts, tables.ts), and %%comment%%
+// The block widgets of Live Preview and Reading view: callouts, tables and
+// ```base blocks drawn in place of their lines (callouts.ts, tables.ts,
+// embeds.ts), and %%comment%%
 // blocks hidden in Reading view. While the selection is in a
 // callout (in the focused editor) its source shows instead. Tables stay drawn.
 //
@@ -15,6 +16,7 @@ import { type EditorState, type Range, StateEffect, StateField, type Transaction
 import { Decoration, type DecorationSet, EditorView, keymap, ViewPlugin, type WidgetType } from "@codemirror/view";
 import type { Tree } from "@lezer/common";
 import { CalloutWidget, calloutHeader } from "./callouts";
+import { BaseWidget, baseBlockYaml } from "./embeds";
 import { frontmatterField } from "./frontmatter";
 import { filesChanged } from "./livePreview";
 import { embedChain, paintWith, readingMode } from "./render";
@@ -48,8 +50,10 @@ function scan(state: EditorState, from: number, to: number): Block[] {
       const text = doc.sliceString(start, end);
       let widget: WidgetType | null = null;
       const version = text.includes("![") ? files : 0;
+      const base = n.name === "FencedCode" ? baseBlockYaml(text) : null;
       if (n.name === "Table") widget = new TableWidget(text, chain, version);
       else if (n.name === "Blockquote" && calloutHeader(doc.lineAt(n.from).text)) widget = new CalloutWidget(text, chain, version);
+      else if (base !== null) widget = new BaseWidget(base, null, "", chain);
       else if (n.name !== "CommentBlock") return false;
       out.push({ from: start, to: end, widget, deco: widget ? Decoration.replace({ widget, block: true }) : hiddenBlock });
       return false;
