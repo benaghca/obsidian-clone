@@ -111,7 +111,8 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
   const coldMs = await openHost();
   const warmMs = [await openHost(), await openHost(), await openHost()];
   const openMs = Math.max(...warmMs);
-  check(openMs <= 100, `both embedded bases render within 100 ms of opening the note (cold ${coldMs.toFixed(1)} ms, warm ${warmMs.map(n => n.toFixed(1)).join(' / ')} ms)`);
+  check(coldMs <= 100, `the cold open renders both embeds within 100 ms (${coldMs.toFixed(1)} ms)`);
+  check(openMs <= 100, `warm opens render both embeds within 100 ms (${warmMs.map(n => n.toFixed(1)).join(' / ')} ms)`);
   let embeds = await state();
   assert.deepEqual(embeds.map(e => e.name), ['Same status', 'Open']);
   assert.deepEqual(embeds[0].rows, ['EmbedTest/B.md'], '```base block: status == this.status with the note at done');
