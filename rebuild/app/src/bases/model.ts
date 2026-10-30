@@ -4,6 +4,8 @@ import { compareNames, isNoteFile, noteName, parentDir } from "../paths";
 import { parseDate } from "./dates";
 import { expression, isFormulaError, testExpression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
+import { parseGroupBy } from "./groups";
+import { parseSummaryPlan } from "./summaries";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
 
 /** Files a Base lists: notes, `.md` in any case, that are not excluded. */
@@ -61,6 +63,7 @@ export function baseModel(source: string, viewIndex = 0) {
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
   if (view.type != null && view.type !== "table" && view.type !== "cards") throw Error(`Unsupported view type: ${String(view.type)}`);
+  const groupBy = parseGroupBy(view.groupBy), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
     try { return expression(source); } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
@@ -142,5 +145,5 @@ export function baseModel(source: string, viewIndex = 0) {
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
   const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
-  return { type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { groupBy, summaryPlan, type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }
