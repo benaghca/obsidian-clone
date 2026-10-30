@@ -358,11 +358,18 @@ fn a_racing_writer_never_leaves_a_torn_note() {
     let mut edits = 0u64;
     let allowed = [old.as_bytes(), other.as_bytes(), edited.as_bytes()];
     let mut torn = None;
+    let mut operation_error = None;
     let mut reads = 0;
     while edits < 20 && started.elapsed() < std::time::Duration::from_secs(20) {
         // Sample while the writer is active, not just after it stops: a later good
         // replacement must not conceal a torn intermediate note.
-        let got = fs::read(&path).unwrap();
+        let got = match fs::read(&path) {
+            Ok(got) => got,
+            Err(error) => {
+                operation_error = Some(error.to_string());
+                break;
+            }
+        };
         reads += 1;
         if !allowed.contains(&got.as_slice()) {
             torn = Some(got);
@@ -374,11 +381,22 @@ fn a_racing_writer_never_leaves_a_torn_note() {
             continue;
         }
         seen = now;
-        let _ = vault.set_property("Note.md", &edit, false);
+        match vault.set_property("Note.md", &edit, false) {
+            Ok(
+                EditResult::Done { .. }
+                | EditResult::Unchanged { .. }
+                | EditResult::Conflict { .. },
+            ) => {}
+            other => {
+                operation_error = Some(format!("unexpected edit result: {other:?}"));
+                break;
+            }
+        }
         edits += 1;
     }
     stop.store(true, Ordering::Relaxed);
     let wrote = writer.join().unwrap();
+    assert!(operation_error.is_none(), "{operation_error:?}");
     assert!(torn.is_none(), "torn intermediate note: {torn:?}");
     assert!(
         edits >= 20 && wrote >= 20,
