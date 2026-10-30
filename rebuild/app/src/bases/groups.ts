@@ -22,7 +22,7 @@ export function parseGroupBy(value: Yaml | undefined, notices?: Set<string>): Gr
   if (typeof value !== "object" || Array.isArray(value) || typeof value.property !== "string" || !value.property.trim()) throw Error("groupBy requires a property and ASC or DESC direction");
   const direction = value.direction ?? "ASC";
   if (direction !== "ASC" && direction !== "DESC") notices?.add(`Unsupported group direction: ${String(direction)}`);
-  const extra = Object.keys(value).filter(key => key !== "property" && key !== "direction");
+  const extra = Object.keys(value).filter(key => key !== "property" && key !== "direction" && key !== "order" && key !== "hidden");
   if (extra.length) notices?.add(`Unsupported groupBy settings: ${extra.join(", ")}`);
   return { property: value.property, direction: direction === "DESC" ? "DESC" : "ASC" };
 }
