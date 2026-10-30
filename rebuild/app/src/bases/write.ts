@@ -64,6 +64,8 @@ function yamlBlock(key: string, value: Yaml, level: number, eol: string): string
   if (value === null || typeof value !== "object" || !Object.keys(value).length) return `${pad}${yamlString(key)}: ${scalar(value)}${eol}`;
   const children = Array.isArray(value) ? value.map(v => {
     if (v === null || typeof v !== "object") return `${pad}  - ${scalar(v)}${eol}`;
+    // A list inside a list (a list-valued group in groupBy.order) is a flow list: yaml.ts reads no nested block lists.
+    if (Array.isArray(v)) return `${pad}  - [${v.map(x => typeof x === "string" && /[,[\]{}]/.test(x) ? JSON.stringify(x) : scalar(x)).join(", ")}]${eol}`;
     const block = Object.entries(v).map(([k, child]) => yamlBlock(k, child, level + 4, eol)).join("");
     return `${pad}  - ${block.slice(level + 4)}`;
   }).join("") : Object.entries(value).map(([k, v]) => yamlBlock(k, v, level + 2, eol)).join("");

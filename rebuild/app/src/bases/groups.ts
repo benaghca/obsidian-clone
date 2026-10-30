@@ -14,7 +14,8 @@ import { summarizeAsync, type SummaryResults } from "./summaries";
 
 export interface Entry { row: Row; context: Context }
 export interface GroupBy { property: string; direction: "ASC" | "DESC" }
-export interface RowGroup { id: string; value: Value; label: string; rows: Entry[]; order?: number; error?: Error }
+/** `added`: a Manual group no note has (yet); `hidden`: unticked in Manual (KANBAN_PLAN §2.2). */
+export interface RowGroup { id: string; value: Value; label: string; rows: Entry[]; order?: number; error?: Error; added?: boolean; hidden?: boolean }
 export interface SliceOptions { cancelled?: () => boolean; budgetMs?: number; yieldTask?: () => Promise<void>; onSlice?: (ms: number) => void }
 export function parseGroupBy(value: Yaml | undefined): GroupBy | null {
   if (value == null) return null;
@@ -131,6 +132,65 @@ export async function runSliced<T>(work: Generator<void, T>, options: SliceOptio
     }
   } finally { work.return(undefined as T); }
 }
+/** Manual order (KANBAN_PLAN §3.1): `groupBy.order` and `groupBy.hidden`, as group ids (valueKey) with the YAML each came from. */
+export interface Manual { order: string[]; hidden: Set<string>; entries: Map<string, Yaml>; notices: string[] }
+export const MANUAL_LIMIT = 1000;
+/** A YAML entry's group id: the key its value groups under. Lists group by their items' text, as note lists do. */
+function entryId(entry: Yaml): string | null {
+  if (entry !== null && typeof entry === "object" && !Array.isArray(entry)) return null;
+  try { return valueKey(Array.isArray(entry) ? entry.map(item => item === null ? "" : typeof item === "object" ? JSON.stringify(item) : String(item)) : entry); }
+  catch { return null; }
+}
+/** Manual order, or null when `groupBy` has no `order` list (automatic). Unreadable entries are skipped with a notice and stay on disk. */
+export function parseManual(groupBy: Yaml | undefined): Manual | null {
+  const config = groupBy !== null && typeof groupBy === "object" && !Array.isArray(groupBy) ? groupBy : {};
+  if (config.order == null) return null;
+  const manual: Manual = { order: [], hidden: new Set(), entries: new Map(), notices: [] };
+  const read = (name: "order" | "hidden", add: (id: string) => void) => {
+    const list = config[name];
+    if (list == null) return;
+    if (!Array.isArray(list)) { manual.notices.push(`groupBy.${name} must be a list`); return; }
+    if (list.length > MANUAL_LIMIT) manual.notices.push(`groupBy.${name}: only the first ${MANUAL_LIMIT} groups are used`);
+    for (const entry of list.slice(0, MANUAL_LIMIT)) {
+      const id = entryId(entry);
+      if (id === null) { manual.notices.push(`groupBy.${name}: an entry can't be read`); continue; }
+      if (!manual.entries.has(id)) manual.entries.set(id, entry);
+      add(id);
+    }
+  };
+  read("order", id => { if (!manual.order.includes(id)) manual.order.push(id); });
+  read("hidden", id => manual.hidden.add(id));
+  return manual;
+}
+/**
+ * Every group in Manual order: the listed ones first, then the rest in automatic order.
+ * A listed value no note has is an empty `added` group; hidden ones are flagged, not removed.
+ * A text entry that matches no group's key may name a group by its label (a formula's link or date).
+ */
+export function arrangeGroups(groups: readonly RowGroup[], manual: Manual | null): RowGroup[] {
+  if (!manual) return groups as RowGroup[];
+  const byId = new Map(groups.map(g => [g.id, g]));
+  let byLabel: Map<string, RowGroup> | null = null;
+  const find = (id: string) => {
+    const hit = byId.get(id);
+    if (hit) return hit;
+    const entry = manual.entries.get(id);
+    if (typeof entry !== "string") return undefined;
+    byLabel ??= new Map(groups.map(g => [g.label, g]));
+    return byLabel.get(entry);
+  };
+  const hidden = new Set<RowGroup>(), placed = new Set<RowGroup>(), out: RowGroup[] = [];
+  for (const id of manual.hidden) { const g = find(id); if (g) hidden.add(g); }
+  const put = (g: RowGroup) => { placed.add(g); out.push(hidden.has(g) || (g.added && manual.hidden.has(g.id)) ? { ...g, hidden: true } : g); };
+  for (const id of manual.order) {
+    const g = find(id);
+    if (g) { if (!placed.has(g)) put(g); continue; }
+    const value: Value = (() => { const e = manual.entries.get(id) ?? null; return Array.isArray(e) ? e.map(String) : typeof e === "object" ? null : e; })();
+    put({ id, value, label: id === "empty" ? "Empty" : displayValue(value), rows: [], added: true });
+  }
+  for (const g of groups) if (!placed.has(g)) put(g);
+  return out;
+}
 export const groupRows = (entries: readonly Entry[], config: GroupBy | null) => runSync(groupWork(entries, config));
 export const groupRowsAsync = (entries: readonly Entry[], config: GroupBy | null, options?: SliceOptions) => runSliced(groupWork(entries, config), options);
 
@@ -180,12 +240,17 @@ export interface GroupedHost {
   createCards: typeof import("./cards")["createCardGrid"];
   onSlice?: (ms: number) => void;
   summaryContext?: () => Context | undefined;
+  /** The collapsed groups for a view and grouping (`<view name>\0<property>`), kept by the host (per tab, KANBAN_PLAN §3.3). */
+  collapsed?: (scope: string) => Set<string>;
+  /** A group heading's context menu (Hide group). */
+  groupMenu?: (event: MouseEvent, group: RowGroup) => void;
 }
 /** Shared, virtualized presentation. The host retains its normal unconfigured fast path. */
 export function createGroupedView(host: GroupedHost) {
   const root = h("div", { class: "bases-b5-root" });
   root.hidden = true; host.scroller.append(root);
-  let model: Model | null = null, selected: readonly Entry[] = [], groups: RowGroup[] = [], types = new Map<string, PropertyType>();
+  // `automatic`: the groups in automatic order, all of them (the Group menu arranges them again); `groups`: those drawn, in order.
+  let model: Model | null = null, selected: readonly Entry[] = [], automatic: RowGroup[] = [], groups: RowGroup[] = [], hiddenRows = 0, types = new Map<string, PropertyType>();
   let summaries: SummaryResults = { all: new Map(), groups: new Map() }, generation = 0, busy = false, gone = false;
   let footer: HTMLTableSectionElement | null = null, prefix = new Float64Array(1), layoutKey = "", revision = 0, painted = "";
   let cols = 1, cardHeight = 0, pitch = 0;
@@ -223,7 +288,7 @@ export function createGroupedView(host: GroupedHost) {
   function heading(g: RowGroup) {
     const id = idOf(g), shut = collapsed.has(id);
     const button = h("button", { type: "button", class: "bases-b5-toggle", "data-group-id": g.id, title: g.error?.message, "aria-expanded": String(!shut), "aria-label": `${g.label} (${g.rows.length})`,
-      onfocusout: (event: FocusEvent) => event.stopPropagation() }, icon(shut ? "chevron-right" : "chevron-down", 14), h("span", null, g.label), h("span", { class: "bases-b5-count" }, String(g.rows.length)));
+      onfocusout: (event: FocusEvent) => event.stopPropagation(), oncontextmenu: (event: MouseEvent) => { if (host.groupMenu) { event.preventDefault(); host.groupMenu(event, g); } } }, icon(shut ? "chevron-right" : "chevron-down", 14), h("span", null, g.label), h("span", { class: "bases-b5-count" }, String(g.rows.length)));
     return pressable(button, event => {
       event.stopPropagation(); shut ? collapsed.delete(id) : collapsed.add(id); revision++; layoutKey = ""; host.repaint();
     });
@@ -318,8 +383,17 @@ export function createGroupedView(host: GroupedHost) {
     }
     for (const [id, item] of grids) if (!active.has(id)) { item.grid.dispose(); item.section.remove(); grids.delete(id); }
   }
+  /** Alt+Shift+Up collapses every group, Alt+Shift+Down expands them (not while typing in a field). */
+  const keys = (event: KeyboardEvent) => {
+    if (!event.altKey || !event.shiftKey || (event.key !== "ArrowUp" && event.key !== "ArrowDown") || !model?.groupBy || busy) return;
+    if ((event.target as Element).closest?.("input,textarea,[contenteditable]:not([contenteditable=\"false\"])")) return;
+    event.preventDefault();
+    if (event.key === "ArrowUp") for (const g of groups) collapsed.add(idOf(g)); else collapsed.clear();
+    revision++; layoutKey = ""; host.repaint();
+  };
+  host.el.addEventListener("keydown", keys);
   function clear() {
-    generation++; busy = false; focusedGroup = undefined; model = null; selected = []; groups = []; clearNotices(); clearGrids();
+    generation++; busy = false; focusedGroup = undefined; model = null; selected = []; automatic = []; groups = []; hiddenRows = 0; clearNotices(); clearGrids();
     footer?.remove(); footer = null; root.hidden = true; host.table.hidden = false; layoutKey = "";
     host.el.classList.remove("bases-b5-cards"); host.el.setAttribute("aria-busy", "false");
   }
@@ -331,16 +405,20 @@ export function createGroupedView(host: GroupedHost) {
       const options: SliceOptions = { cancelled: () => gone || token !== generation || obsolete(), onSlice: host.onSlice };
       try {
         if (next.type !== "cards" && !next.groupBy && !next.summaryPlan.selected.size) {
-          model = null; selected = rows; clearGrids(); footer?.remove(); footer = null; root.hidden = true; host.el.classList.remove("bases-b5-cards"); busy = false; host.el.setAttribute("aria-busy", "false"); return true;
+          model = null; selected = rows; automatic = []; groups = []; hiddenRows = 0; clearGrids(); footer?.remove(); footer = null; root.hidden = true; host.el.classList.remove("bases-b5-cards"); busy = false; host.el.setAttribute("aria-busy", "false"); return true;
         }
         if (rows.length > 200 && (next.groupBy || next.summaryPlan.selected.size)) await yieldFrame();
         const grouped = await groupRowsAsync(rows, next.groupBy, options);
-        const computed = await summarizeAsync(rows, grouped, next.summaryPlan, options, host.summaryContext?.());
+        // Manual order and hidden groups (K3). Hidden groups' rows are not drawn, counted, summarised or copied (D7).
+        const manual = next.groupBy ? parseManual(next.view.groupBy) : null, all = arrangeGroups(grouped, manual), shown = manual ? all.filter(g => !g.hidden) : all;
+        const hidden = all.length === shown.length ? 0 : all.reduce((sum, g) => sum + (g.hidden ? g.rows.length : 0), 0);
+        const computed = await summarizeAsync(hidden ? shown.flatMap(g => g.rows) : rows, shown, next.summaryPlan, options, host.summaryContext?.());
         if (options.cancelled!()) return false;
         rememberFocus();
-        model = next; selected = rows; groups = grouped; summaries = computed; types = propertyTypes; layoutKey = ""; clearGrids();
-        const scope = `${next.viewIndex}:${next.groupBy?.property}`;
-        collapsed = collapsedViews.get(scope) ?? new Set(); collapsedViews.set(scope, collapsed);
+        model = next; selected = rows; automatic = grouped; groups = shown; hiddenRows = hidden; summaries = computed; types = propertyTypes; layoutKey = ""; clearGrids();
+        const scope = `${next.name}\0${next.groupBy?.property}`;
+        collapsed = host.collapsed?.(scope) ?? collapsedViews.get(scope) ?? new Set(); if (!host.collapsed) collapsedViews.set(scope, collapsed);
+        for (const message of manual?.notices ?? []) if (addedNotices.size < 20) addedNotices.add(message);
         host.el.classList.toggle("bases-b5-cards", next.type === "cards");
         root.hidden = next.type !== "cards"; footer?.remove(); footer = null;
         if (next.summaryPlan.selected.size && next.type === "table") { footer = h("tfoot", { class: "bases-b5-foot" }, summaryRow(computed.all, "all")); host.table.append(footer); }
@@ -370,8 +448,12 @@ export function createGroupedView(host: GroupedHost) {
       }
       showNotices(); return true;
     },
-    dispose() { gone = true; clear(); host.scroller.removeEventListener("contextmenu", contextMenu); root.remove(); },
+    dispose() { gone = true; clear(); host.scroller.removeEventListener("contextmenu", contextMenu); host.el.removeEventListener("keydown", keys); root.remove(); },
     /** The rows in the order they are drawn, for Copy and Export CSV: by group when grouped. */
     rows: (): readonly Entry[] | null => model?.groupBy ? groups.flatMap(g => g.rows) : null,
+    /** Every group of the last rebuild, in automatic order (the Group menu arranges them). */
+    groups: (): readonly RowGroup[] => automatic,
+    /** Rows in hidden groups: left out of the result count (D7). */
+    hiddenRows: () => hiddenRows,
   };
 }
