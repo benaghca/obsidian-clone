@@ -33,6 +33,20 @@ describe("Bases tables", () => {
     expect(base.select(rows).map(r=>r.row.file.name)).toEqual(["D","A"]);
     for(const direction of ["ASC","DESC"]) expect(baseModel(`views:\n  - sort:\n      - property: priority\n        direction: ${direction}`).select(rows).at(-1)?.row.file.name).toBe("C");
   });
+  it("never lets a filter that fails on a row match it, in any tree", () => {
+    const names = (source: string) => baseModel(source).select(rows).map(r => r.row.file.name);
+    expect(names(`filters: 'file.inFolder(note.where)'`)).toEqual([]);
+    expect(names(`filters: '-file.name < 0'`)).toEqual([]);
+    expect(names(`views:\n  - filters:\n      not:\n        - '-file.name < 0'\n`)).toEqual([]);
+    // "or" stops at its first match, like || inside one expression: only B gets past the failing leaf.
+    expect(names(`filters:\n  or:\n    - 'priority == 2'\n    - '-file.name < 0'\n`)).toEqual(["B"]);
+    expect(names(`filters:\n  or:\n    - '-file.name < 0'\n    - 'priority == 2'\n`)).toEqual([]);
+    expect(names(`filters:\n  and:\n    - 'priority == 9'\n    - '-file.name < 0'\n`)).toEqual([]);
+    // Filters that don't fail keep working, including on rows with missing values.
+    expect(names(`filters: 'priority > 2'`)).toEqual(["A", "D"]);
+    expect(names(`filters: '!(priority > 2)'`)).toEqual(["B", "C"]);
+    expect(names(`filters: 'note.missing.lower() == "a"'`)).toEqual([]);
+  });
   it("handles or trees, canonical display names, formulas and unsupported expressions", () => {
     const base = baseModel(`filters:\n  or:\n    - 'priority == 2'\n    - 'file.name == "A"'\nformulas:\n  unsupported: 'bad()'\n  self: 'formula.self'\nproperties:\n  note.priority:\n    displayName: Rank\nviews:\n  - order:\n      - formula.unsupported\n`);
     const selected = base.select(rows);

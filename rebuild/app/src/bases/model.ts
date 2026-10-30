@@ -1,7 +1,7 @@
 import type { FileEntry } from "../api";
 import type { Property } from "../editor/frontmatter";
 import { compareNames, isNoteFile, noteName, parentDir } from "../paths";
-import { compare, expression, type Context, type Expression, type Value } from "./expression";
+import { compare, expression, isFormulaError, testExpression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
 
@@ -35,7 +35,15 @@ export function baseModel(source: string, viewIndex = 0) {
       notices.add("Unsupported filter tree"); return () => false;
     }
     const [op, children] = entries[0], nodes = (children as Yaml[]).map(tree);
-    return c => op === "and" ? nodes.every(n => n(c)) : op === "or" ? nodes.some(n => n(c)) : !nodes.some(n => n(c));
+    // A failed child fails the whole tree (an error value is truthy, and "not" must not turn it into a match).
+    return c => {
+      for (const n of nodes) {
+        const v = n(c);
+        if (isFormulaError(v)) return v;
+        if (op === "and" ? !v : !!v) return op === "or";
+      }
+      return op !== "or";
+    };
   };
   const global = tree(root.filters), local = tree(view.filters);
   const formulas = new Map(Object.entries(mapping(root.formulas)).map(([k, v]) => [k, compile(v)]));
@@ -77,7 +85,7 @@ export function baseModel(source: string, viewIndex = 0) {
     return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");
   };
   function select(rows: Row[], unlimited = false) {
-    const found = rows.map(row => ({ row, context: context(row) })).filter(r => global(r.context) && local(r.context));
+    const found = rows.map(row => ({ row, context: context(row) })).filter(r => testExpression(global, r.context) && testExpression(local, r.context));
     found.sort((a, b) => {
       for (const sort of sorts) {
         const x = a.context.get(sort.property), y = b.context.get(sort.property);
