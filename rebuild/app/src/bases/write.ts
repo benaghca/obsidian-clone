@@ -70,17 +70,31 @@ function yamlBlock(key: string, value: Yaml, level: number, eol: string): string
   return `${pad}${yamlString(key)}:${eol}${children}`;
 }
 export function writeFilters(source: string, value: Yaml, viewIndex?: number): string {
-  if (viewIndex !== undefined) return writeView(source, "filters", value, viewIndex);
+  return viewIndex !== undefined ? writeView(source, "filters", value, viewIndex) : writeTop(source, "filters", value);
+}
+/**
+ * Replace (or, undefined, remove) a top-level block. A new `filters` goes
+ * first, a new `properties` before `views` (or last).
+ */
+export function writeTop(source: string, key: "filters" | "properties", value: Yaml | undefined): string {
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
-  const at = lines.findIndex(line => /^(?:filters|"filters"|'filters')\s*:/.test(line));
-  if (at < 0) return yamlBlock("filters", value, 0, eol) + source;
+  const at = lines.findIndex(line => new RegExp(`^\uFEFF?(?:${key}|"${key}"|'${key}')\\s*:`).test(line));
+  let block = value === undefined ? "" : yamlBlock(key, value, 0, eol);
+  if (at < 0) {
+    if (!block) return source;
+    if (key === "filters") return block + source;
+    const views = lines.findIndex(line => /^\uFEFF?(?:views|"views"|'views')\s*:/.test(line));
+    if (views < 0) return source + (source && !source.endsWith("\n") ? eol : "") + block;
+    const bom = lines[views].startsWith("\uFEFF") ? "\uFEFF" : "";
+    return lines.slice(0, views).join("") + bom + block + lines[views].slice(bom.length) + lines.slice(views + 1).join("");
+  }
   let stop = at + 1, last = stop;
   while (stop < lines.length && (/^ +\S/.test(lines[stop]) || !lines[stop].trim() || lines[stop].trimStart().startsWith("#"))) {
     if (lines[stop].trim() && !lines[stop].trimStart().startsWith("#")) last = stop + 1;
     stop++;
   }
-  let block = yamlBlock("filters", value, 0, eol);
+  if (block && lines[at].startsWith("\uFEFF")) block = "\uFEFF" + block;
   if (last === lines.length && !source.endsWith("\n")) block = block.slice(0, -eol.length);
   return lines.slice(0, at).join("") + block + lines.slice(last).join("");
 }

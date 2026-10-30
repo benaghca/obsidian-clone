@@ -1,17 +1,18 @@
-import { TYPE_ICONS } from "../editor/propertyFields";
+import { TYPE_ICONS, typeItems } from "../editor/propertyFields";
 import type { PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import { closeMenu, SEPARATOR, showMenu, type MenuItems } from "../shell/menu";
 import type { Workspace } from "../workspace";
 import { baseModel, noteKey, propertyId } from "./model";
-import { addView, writeFilters, writeView, type Sort } from "./write";
+import { addView, writeFilters, writeTop, writeView, type Sort } from "./write";
 import { filterMenu } from "./filterMenu";
 import { drag, dropSlot, reordered } from "./drag";
 import { resultsMenu } from "./results";
 import { newRow, rowSeed } from "./newRow";
 import type { Value } from "./expression";
-import { mapping } from "./yaml";
+import { mapping, type Yaml } from "./yaml";
+import { menuInputEscape } from "./menuInput";
 import { configureView } from "./config";
 import { writeViewSetting } from "./groups";
 import { SUMMARY_NAMES, summaryFor } from "./summaries";
@@ -20,7 +21,7 @@ const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
 /** Where a base's YAML is read from and written to: a .base file, or a ```base block in a note. */
 export interface BaseFile { read(): Promise<string>; write(text: string): Promise<void> }
-export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][]) {
+export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][], search: (query: string) => void, inferred: (key: string) => PropertyType) {
   let writing = Promise.resolve(), gone = false;
   const save = (change: (source: string, base: Model) => string, done?: () => void, select?: (base: Model) => number) => {
     const index = current().viewIndex;
@@ -98,7 +99,30 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       // A custom summary is saved by its name; `custom.` only when the name is also a built-in's.
       ...[...current().summaryPlan.custom.keys()].map(name=>{const id=SUMMARY_NAMES.some(n=>n.toLowerCase()===name.toLowerCase())?`custom.${name}`:name;return {title:`Custom: ${name}`,checked:[id,`custom.${name}`].includes(summaryFor(current().summaryPlan,key)??""),action:()=>summarize(id)};}),
     ];
-    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",submenu:summaryItems},{title:"Group by this property",icon:"group",checked:activeGroup,action:()=>group("ASC")},activeGroup&&{title:"Group A → Z",checked:current().groupBy!.direction==="ASC",action:()=>group("ASC")},activeGroup&&{title:"Group Z → A",checked:current().groupBy!.direction==="DESC",action:()=>group("DESC")},activeGroup&&{title:"Clear grouping",action:()=>group()},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",disabled:true},SEPARATOR,{title:"Property type",icon:"type",disabled:true}],{x:e.clientX,y:e.clientY});
+    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",submenu:summaryItems},{title:"Group by this property",icon:"group",checked:activeGroup,action:()=>group("ASC")},activeGroup&&{title:"Group A → Z",checked:current().groupBy!.direction==="ASC",action:()=>group("ASC")},activeGroup&&{title:"Group Z → A",checked:current().groupBy!.direction==="DESC",action:()=>group("DESC")},activeGroup&&{title:"Clear grouping",action:()=>group()},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",action:()=>editProperty({x:e.clientX,y:e.clientY},key)},SEPARATOR,
+      // A note property's type is the vault's (types.json), shared with the Properties block and view; file and formula columns have none to choose.
+      /^(file|formula)\./.test(key)?{title:"Property type",icon:"type",disabled:true}:{title:"Property type",icon:"type",submenu:()=>typeItems(noteKey(key),inferred(key),ws.propertyHost)}],{x:e.clientX,y:e.clientY});
+  }
+  /** The column's display name (`properties.<id>.displayName` in the YAML); empty gives back the default. */
+  function editProperty(at:{x:number;y:number},key:string) {
+    const label=current().label(key);
+    const input=h("input",{type:"text","aria-label":"Display name",placeholder:label,value:label,spellcheck:"false"});
+    let done=false;
+    const commit=()=>{
+      const name=input.value.trim();if(done||name===current().label(key))return;done=true;
+      save((source,b)=>{
+        const props={...mapping(b.root.properties)},id=[propertyId(key),key,noteKey(key)].find(k=>Object.hasOwn(props,k))??propertyId(key),config={...mapping(props[id])};
+        if(name)config.displayName=name;else delete config.displayName;
+        if(Object.keys(config).length)props[id]=config;else delete props[id];
+        return writeTop(source,"properties",Object.keys(props).length?props as Yaml:undefined);
+      });
+    };
+    input.addEventListener("blur",commit);
+    input.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();commit();closeMenu();}});
+    const content=h("div",{class:"bases-results-limit bases-edit-property",onclick:(e:MouseEvent)=>e.stopPropagation()},h("span",null,"Display name"),input);
+    const cleanup=menuInputEscape(content);
+    showMenu([{title:"Display name",content}],at,{className:"bases-edit-property-menu"});
+    if(!content.isConnected)cleanup();else{input.focus();input.select();}
   }
   function views(at: HTMLElement) {
     const configure=()=>configureView(at,current(),(key,value)=>save((source,b)=>writeView(source,key,value,b.viewIndex)),()=>draw(true));
@@ -143,8 +167,15 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
     const sort=button("Sort","arrow-up-narrow-wide",()=>sortMenu(sort));sort.classList.toggle("is-active",!!base.sorts.length);if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
     const filter=button("Filter","list-filter",()=>filters(filter));filter.classList.toggle("is-active",base.filtered);
     const props=button("Properties","list",()=>properties(props));
+    // Search: an icon that opens a text box. Typing filters the rows shown (view.ts); it writes nothing.
+    const find=h("input",{type:"search",class:"bases-search-input",placeholder:"Search...","aria-label":"Search results",spellcheck:"false"});find.hidden=true;
+    const close=()=>{if(find.value)search(find.value="");find.hidden=true;finder.classList.remove("is-active");};
+    const finder=h("button",{type:"button",class:"bases-search-toggle","aria-label":"Search",onclick:(e:MouseEvent)=>{e.stopPropagation();if(find.hidden){find.hidden=false;find.focus();}else if(find.value)find.focus();else close();}},icon("search"));
+    find.addEventListener("input",()=>{finder.classList.toggle("is-active",!!find.value);search(find.value);});
+    find.addEventListener("keydown",e=>{if(e.key==="Escape"){e.preventDefault();e.stopPropagation();close();finder.focus();}});
+    find.addEventListener("focusout",e=>{if(!find.value&&e.relatedTarget!==finder)find.hidden=true;});
     const create=button("New","plus",()=>void newRow(ws,rowSeed(current().columns,[current().root.filters,current().view.filters],types())).catch(error));
-    return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props,create)];
+    return buttons = [view,count,h("div",{class:"bases-toolbar-actions"},sort,filter,props,h("div",{class:"bases-toolbar-search"},finder,find),create)];
   }
   const size=(key:string,width?:number)=>save((source,b)=>{
     const sizes={...b.sizes}, id=propertyId(key);delete sizes[key];delete sizes[id];
