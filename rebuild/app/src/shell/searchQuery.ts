@@ -17,7 +17,7 @@
 // per term, the tags per note, the properties per note. Pure, tested on its
 // own.
 
-import { compareNames, fileName, isUnder } from "../paths";
+import { compareNames, fileName, isUnder, noteName } from "../paths";
 import type { Span } from "./mentions";
 
 export type Field = "any" | "content" | "file" | "path" | "tag";
@@ -287,8 +287,7 @@ export function matches(path: string, q: Query | null, facts: Facts): boolean {
     case "tag":
       return (facts.tags?.get(path) ?? []).some((t) => isUnder(t.toLowerCase(), q.text));
     case "any":
-      // `.md` in any case is the extension, not part of the name. `noteName` only strips a lowercase `.md`.
-      if (fileName(folded).replace(/\.md$/i, "").includes(q.text)) return true;
+      if (noteName(folded).includes(q.text)) return true;
   }
   return !!facts.lines(q.text)?.get(path)?.length;
 }
