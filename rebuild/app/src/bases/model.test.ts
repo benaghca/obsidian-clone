@@ -47,6 +47,13 @@ describe("Bases tables", () => {
     expect(names(`filters: '!(priority > 2)'`)).toEqual(["B", "C"]);
     expect(names(`filters: 'note.missing.lower() == "a"'`)).toEqual([]);
   });
+  it("sorts empties last both ways, ISO dates by time, date-like text by code unit, other text by locale", () => {
+    const text = (name: string, v: string): Row => ({ ...row(name), props: [{ key: "p", type: "text", value: v, line: 0, count: 1 }] });
+    const mixed = [text("a", "2024-01-05T10:00"), text("b", ""), text("c", "2024-01-05"), text("d", "2024-13-40"), text("e", "2024-01-05 notes"), text("f", "Banana"), text("g", "apple"), row("h")];
+    const order = (direction: string) => baseModel(`views:\n  - sort:\n      - property: p\n        direction: ${direction}\n`).select(mixed).map(r => r.row.file.name).join("");
+    expect(order("ASC")).toBe("ceadgfbh");
+    expect(order("DESC")).toBe("fgdaecbh");
+  });
   it("handles or trees, canonical display names, formulas and unsupported expressions", () => {
     const base = baseModel(`filters:\n  or:\n    - 'priority == 2'\n    - 'file.name == "A"'\nformulas:\n  unsupported: 'bad()'\n  self: 'formula.self'\nproperties:\n  note.priority:\n    displayName: Rank\nviews:\n  - order:\n      - formula.unsupported\n`);
     const selected = base.select(rows);
