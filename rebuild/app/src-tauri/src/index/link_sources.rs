@@ -7,6 +7,7 @@
 //! escaped with a backslash. There is no note cap and no hit cap. The match is
 //! the spelling itself, in any case, not a search for each word on its own.
 use super::{display_name, is_note_path, Index};
+use regex::Regex;
 use std::collections::BTreeSet;
 
 impl Index {
@@ -17,7 +18,7 @@ impl Index {
         if wanted.is_empty() {
             return Vec::new();
         }
-        let needles = mention_needles(&wanted);
+        let mentions = Mentions::new(mention_needles(&wanted));
         let mut sources = BTreeSet::new();
         for (from, node) in &self.files {
             if node.is_dir || !is_note_path(from) {
@@ -27,7 +28,7 @@ impl Index {
                 self.resolve(from, &link.target)
                     .is_some_and(|target| wanted.contains(target.as_str()))
             });
-            if linked || mentions(&node.note.lines, &needles) {
+            if linked || mentions.in_lines(&node.note.lines) {
                 sources.insert(from.clone());
             }
         }
@@ -38,19 +39,19 @@ impl Index {
 /// Lower-cased spellings of each requested note's name. A path that is not a
 /// note adds none. The same spelling from two notes is kept once.
 fn mention_needles(paths: &BTreeSet<&str>) -> Vec<String> {
-    let mut out = Vec::new();
+    let mut out = BTreeSet::new();
     for path in paths {
         let Some(name) = note_name(path) else {
             continue;
         };
         for spelling in spellings(&name) {
             let low = spelling.to_lowercase();
-            if !low.is_empty() && !out.iter().any(|have| have == &low) {
-                out.push(low);
+            if !low.is_empty() {
+                out.insert(low);
             }
         }
     }
-    out
+    out.into_iter().collect()
 }
 
 fn note_name(path: &str) -> Option<String> {
@@ -100,15 +101,36 @@ fn encode_dest(path: &str, escaped: bool) -> String {
     out
 }
 
-fn mentions(lines: &[super::parse::Line], needles: &[String]) -> bool {
-    if needles.is_empty() {
-        return false;
+/// Whether any line holds one of the spellings. One regex of the escaped
+/// spellings scans each line once (a 500-note folder is 1,000 spellings);
+/// a plain loop is the fallback if that regex would be too large to build.
+enum Mentions {
+    None,
+    Any(Regex),
+    Each(Vec<String>),
+}
+
+impl Mentions {
+    fn new(needles: Vec<String>) -> Self {
+        if needles.is_empty() {
+            return Mentions::None;
+        }
+        let pattern: Vec<String> = needles.iter().map(|n| regex::escape(n)).collect();
+        match Regex::new(&pattern.join("|")) {
+            Ok(re) => Mentions::Any(re),
+            Err(_) => Mentions::Each(needles),
+        }
     }
-    lines.iter().any(|line| {
-        needles
-            .iter()
-            .any(|needle| line.lower.contains(needle.as_str()))
-    })
+
+    fn in_lines(&self, lines: &[super::parse::Line]) -> bool {
+        match self {
+            Mentions::None => false,
+            Mentions::Any(re) => lines.iter().any(|line| re.is_match(&line.lower)),
+            Mentions::Each(needles) => lines
+                .iter()
+                .any(|line| needles.iter().any(|n| line.lower.contains(n.as_str()))),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -212,10 +234,13 @@ mod tests {
 
     #[test]
     fn an_upper_case_extension_uses_the_note_name() {
-        let idx = notes(&[("Other.md", "see FOO in the text")]);
+        let idx = notes(&[
+            ("Other.md", "see FOO in the text"),
+            ("Src.MD", "\u{feff}first\r\n[[Foo]]\r\n"),
+        ]);
         assert_eq!(
             idx.link_sources(&["Foo.MD".into()]),
-            vec!["Other.md".to_string()]
+            vec!["Other.md".to_string(), "Src.MD".to_string()]
         );
     }
 }
