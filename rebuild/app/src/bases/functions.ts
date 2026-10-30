@@ -31,16 +31,25 @@ export class FormulaFile {
   constructor(readonly context: Context) { Object.freeze(this); }
   toString() { return text(this.context.get("file.path")); }
 }
-export interface Runtime { now: number; step(): void }
-export function runtime(now = Date.now()): Runtime {
-  let left = 100_000;
-  return { now, step() { if (--left < 0) throw Error("Formula work limit exceeded"); } };
+export interface Runtime { left: number; time: number | undefined; clock: () => number; step(): void }
+/** The clock is read at most once, at the first now()/today(): most expressions never pay for it. */
+export function runtime(clock: number | (() => number) = Date.now): Runtime {
+  return typeof clock === "number" ? new Work(() => clock) : new Work(clock);
 }
+class Work implements Runtime {
+  left = 100_000;
+  time: number | undefined = undefined;
+  constructor(readonly clock: () => number) {}
+  step() { if (--this.left < 0) throw Error("Formula work limit exceeded"); }
+}
+const nowOf = (rt: Runtime) => rt.time ??= rt.clock();
 export const isFormulaError = (value: unknown): value is FormulaError => value instanceof FormulaError;
 export const isEmpty = (v: Value) => v === null || v === "" || Array.isArray(v) && !v.length;
 /** Preserve the original interpreter's boolean coercion (in particular, arrays are truthy). */
 export function truthy(v: Value): boolean { checked(v); return !!v; }
 export function checked(v: Value | undefined): Value {
+  // Fast path for the common values: this runs on every node of every row.
+  if (v === null || typeof v === "boolean" || typeof v === "number" && Number.isFinite(v) || typeof v === "string" && v.length <= 100_000) return v;
   if (v === undefined) return null;
   if (v instanceof FormulaError) throw v;
   if (typeof v === "number" && !Number.isFinite(v)) throw Error("Number is not finite");
@@ -141,8 +150,8 @@ export function globalFunction(name: string, args: Value[], context: Context, rt
   const v = args[0];
   switch (name) {
     case "if": return truthy(v) ? args[1] : args[2]; // The AST evaluates this lazily.
-    case "now": return new FormulaDate(rt.now);
-    case "today": return today(rt.now);
+    case "now": return new FormulaDate(nowOf(rt));
+    case "today": return today(nowOf(rt));
     case "date": { if (v === null) return null; const out = date(v); if (!out) throw Error("Expected an ISO date or timestamp"); return out; }
     case "duration": { if (v === null) return null; const out = typeof v === "number" ? parseDuration(v) : duration(v); if (!out) throw Error("Invalid duration"); return out; }
     case "list": return args;

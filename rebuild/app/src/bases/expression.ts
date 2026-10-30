@@ -223,7 +223,7 @@ export function expression(source: string): Expression {
   try { node = new Parser(tokenize(source), source.length).parse(); }
   catch (error) { throw failure(error, "parse"); }
   const read: Expression = context => {
-    try { return checked(evaluate(node, context, runtime(context.now?.() ?? Date.now()))); }
+    try { return checked(evaluate(node, context, runtime(context.now ? () => context.now!() : Date.now))); }
     catch (error) { return failure(error, "evaluate"); }
   };
   const keys = Object.freeze([...dependencies(node)]);
