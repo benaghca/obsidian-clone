@@ -52,6 +52,7 @@ pub(super) fn parse_note(content: &str) -> Note {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
     let mut links = Vec::new();
     let mut lines = Vec::new();
+    let no_links = !content.contains("[[") && !content.contains("](");
     // The open code fence's marker and length, while inside one.
     let mut fence: Option<(u8, usize)> = None;
     for (idx, line) in content.lines().enumerate() {
@@ -59,6 +60,7 @@ pub(super) fn parse_note(content: &str) -> Note {
             lower: line.to_lowercase(),
             text: line.to_string(),
         });
+        if no_links { continue; }
         if let Some((marker, len)) = fence {
             if fence_close(line, marker, len) {
                 fence = None;
@@ -125,7 +127,8 @@ fn fence_close(line: &str, marker: u8, len: usize) -> bool {
     bytes.len() >= len && bytes.iter().all(|b| *b == marker)
 }
 
-fn blank_inline_code(line: &str) -> String {
+fn blank_inline_code(line: &str) -> std::borrow::Cow<'_, str> {
+    if !line.contains('`') { return line.into(); }
     let chars: Vec<char> = line.chars().collect();
     let mut out = chars.clone();
     let mut i = 0;
@@ -162,7 +165,7 @@ fn blank_inline_code(line: &str) -> String {
             i = end;
         }
     }
-    out.into_iter().collect()
+    out.into_iter().collect::<String>().into()
 }
 
 pub(super) fn wiki_targets(line: &str) -> Vec<String> {

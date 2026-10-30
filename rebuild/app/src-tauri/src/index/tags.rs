@@ -19,8 +19,10 @@ const LINE_BREAKS: [char; 3] = ['\r', '\u{2028}', '\u{2029}'];
 /// Every tag in a note's text, without the `#`, in order: its frontmatter `tags:` / `tag:`
 /// values, then the `#tags` in its body outside fenced and inline code. Repeats are kept.
 pub(super) fn note_tags(text: &str) -> Vec<String> {
+    let no_body_tags = !text.contains('#');
     let lines: Vec<&str> = text
         .split('\n')
+        .take(if no_body_tags { MAX_FRONTMATTER_LINES + 1 } else { usize::MAX })
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .collect();
     let mut out = Vec::new();
@@ -35,6 +37,7 @@ pub(super) fn note_tags(text: &str) -> Vec<String> {
         frontmatter_tags(&lines[1..close], &mut out);
         body = close + 1;
     }
+    if no_body_tags { return out; }
     let mut fence = None;
     for line in &lines[body..] {
         if step_fence(&mut fence, line) || !line.contains('#') {
