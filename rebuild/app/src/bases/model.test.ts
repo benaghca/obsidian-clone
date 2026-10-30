@@ -19,8 +19,8 @@ describe("Bases expressions", () => {
     expect(expression('missing < today()')(ctx)).toBe(false);
     expect(expression('true || false && false')(ctx)).toBe(true);
   });
-  it("rejects unsupported calls even in skipped branches, this and trailing syntax", () => {
-    for (const s of ['true || unknown()', 'this.file.name', 'priority.constructor()', 'file.unknown', 'priority + 1','if(true, 1)', 'status == "a" garbage']) expect(() => expression(s)).toThrow();
+  it("rejects unsupported calls even in skipped branches and trailing syntax", () => {
+    for (const s of ['true || unknown()', 'priority.constructor()', 'file.unknown', 'if(true, 1)', 'status == "a" garbage']) expect(() => expression(s)).toThrow();
   });
 });
 function row(name: string, n?: number): Row {
@@ -32,6 +32,27 @@ describe("Bases tables", () => {
     const base = baseModel(`filters: 'file.inFolder("BaseTest")'\nviews:\n  - type: table\n    filters:\n      not:\n        - 'priority == 2'\n        - 'file.name == "X"'\n    order:\n      - priority\n    sort:\n      - property: priority\n        direction: DESC\n      - property: file.name\n        direction: DESC\n    limit: 2\n`);
     expect(base.select(rows).map(r=>r.row.file.name)).toEqual(["D","A"]);
     for(const direction of ["ASC","DESC"]) expect(baseModel(`views:\n  - sort:\n      - property: priority\n        direction: ${direction}`).select(rows).at(-1)?.row.file.name).toBe("C");
+  });
+  it("never lets a filter that fails on a row match it, in any tree", () => {
+    const names = (source: string) => baseModel(source).select(rows).map(r => r.row.file.name);
+    expect(names(`filters: 'file.inFolder(note.where)'`)).toEqual([]);
+    expect(names(`filters: '-file.name < 0'`)).toEqual([]);
+    expect(names(`views:\n  - filters:\n      not:\n        - '-file.name < 0'\n`)).toEqual([]);
+    // "or" stops at its first match, like || inside one expression: only B gets past the failing leaf.
+    expect(names(`filters:\n  or:\n    - 'priority == 2'\n    - '-file.name < 0'\n`)).toEqual(["B"]);
+    expect(names(`filters:\n  or:\n    - '-file.name < 0'\n    - 'priority == 2'\n`)).toEqual([]);
+    expect(names(`filters:\n  and:\n    - 'priority == 9'\n    - '-file.name < 0'\n`)).toEqual([]);
+    // Filters that don't fail keep working, including on rows with missing values.
+    expect(names(`filters: 'priority > 2'`)).toEqual(["A", "D"]);
+    expect(names(`filters: '!(priority > 2)'`)).toEqual(["B", "C"]);
+    expect(names(`filters: 'note.missing.lower() == "a"'`)).toEqual([]);
+  });
+  it("sorts empties last both ways, ISO dates by time, date-like text by code unit, other text by locale", () => {
+    const text = (name: string, v: string): Row => ({ ...row(name), props: [{ key: "p", type: "text", value: v, line: 0, count: 1 }] });
+    const mixed = [text("a", "2024-01-05T10:00"), text("b", ""), text("c", "2024-01-05"), text("d", "2024-13-40"), text("e", "2024-01-05 notes"), text("f", "Banana"), text("g", "apple"), row("h")];
+    const order = (direction: string) => baseModel(`views:\n  - sort:\n      - property: p\n        direction: ${direction}\n`).select(mixed).map(r => r.row.file.name).join("");
+    expect(order("ASC")).toBe("ceadgfbh");
+    expect(order("DESC")).toBe("fgdaecbh");
   });
   it("handles or trees, canonical display names, formulas and unsupported expressions", () => {
     const base = baseModel(`filters:\n  or:\n    - 'priority == 2'\n    - 'file.name == "A"'\nformulas:\n  unsupported: 'bad()'\n  self: 'formula.self'\nproperties:\n  note.priority:\n    displayName: Rank\nviews:\n  - order:\n      - formula.unsupported\n`);

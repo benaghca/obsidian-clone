@@ -1,7 +1,8 @@
 import type { FileEntry } from "../api";
 import type { Property } from "../editor/frontmatter";
 import { compareNames, isNoteFile, noteName, parentDir } from "../paths";
-import { compare, expression, type Context, type Expression, type Value } from "./expression";
+import { parseDate } from "./dates";
+import { expression, isFormulaError, testExpression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
 export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
 
@@ -13,7 +14,44 @@ const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctim
 export const propertyId = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export const noteKey = (key: string) => key.replace(/^note\./, "");
 export const ROW_HEIGHTS:Record<string,number> = {"":30,medium:60,tall:120,extra:240};
-const canonical = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
+const canonicalKeys = new Map<string, string>();
+const canonical = (key: string) => {
+  let out = canonicalKeys.get(key);
+  if (out === undefined) {
+    if (canonicalKeys.size > 10_000) canonicalKeys.clear();
+    canonicalKeys.set(key, (out = /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`));
+  }
+  return out;
+};
+/** One file fact of a row, worked out only when a filter, formula or column asks for it. */
+function fileFact(row: Row, key: string): Value {
+  const f = row.file;
+  switch (key) {
+    case "file.name": return noteName(f.path);
+    case "file.path": return f.path;
+    case "file.folder": return parentDir(f.path);
+    case "file.ext": return "md";
+    case "file.tags": return row.tags;
+    case "file.mtime": return new Date(f.mtime_ms).toISOString();
+    case "file.ctime": return new Date(f.ctime_ms).toISOString();
+    case "file.size": return f.size;
+    default: return null;
+  }
+}
+const DATE_LIKE = /^\d{4}-\d{2}-\d{2}/;
+interface SortKey { missing: boolean; value: Value; time?: number; dateLike: boolean; text: string }
+function sortKey(value: Value): SortKey {
+  const missing = value === null || value === "" || Array.isArray(value) && !value.length;
+  const dateLike = typeof value === "string" && DATE_LIKE.test(value);
+  return { missing, value, dateLike, time: dateLike ? parseDate(value as string)?.time : undefined, text: String(value ?? "") };
+}
+/** The table's order between two values that are both filled: numbers, ISO dates, then text by locale. */
+function compareKeys(a: SortKey, b: SortKey): number {
+  const x = a.value, y = b.value;
+  if (typeof x === "number" && typeof y === "number") return x - y;
+  if (a.dateLike && b.dateLike) return a.time !== undefined && b.time !== undefined ? a.time - b.time : x! < y! ? -1 : x! > y! ? 1 : 0;
+  return compareNames(a.text, b.text);
+}
 export function baseModel(source: string, viewIndex = 0) {
   const root = readYaml(source), notices = new Set<string>();
   if (root.views != null && !Array.isArray(root.views)) throw Error("views must be a list");
@@ -35,7 +73,15 @@ export function baseModel(source: string, viewIndex = 0) {
       notices.add("Unsupported filter tree"); return () => false;
     }
     const [op, children] = entries[0], nodes = (children as Yaml[]).map(tree);
-    return c => op === "and" ? nodes.every(n => n(c)) : op === "or" ? nodes.some(n => n(c)) : !nodes.some(n => n(c));
+    // A failed child fails the whole tree (an error value is truthy, and "not" must not turn it into a match).
+    return c => {
+      for (const n of nodes) {
+        const v = n(c);
+        if (isFormulaError(v)) return v;
+        if (op === "and" ? !v : !!v) return op === "or";
+      }
+      return op !== "or";
+    };
   };
   const global = tree(root.filters), local = tree(view.filters);
   const formulas = new Map(Object.entries(mapping(root.formulas)).map(([k, v]) => [k, compile(v)]));
@@ -60,9 +106,7 @@ export function baseModel(source: string, viewIndex = 0) {
         value = formulas.get(key.slice(8))?.(ctx) ?? null;
         active.delete(key);
       } else if (key.startsWith("file.")) {
-        const f = row.file;
-        value = ({ "file.name": noteName(f.path), "file.path": f.path, "file.folder": parentDir(f.path), "file.ext": "md", "file.tags": row.tags,
-          "file.mtime": new Date(f.mtime_ms).toISOString(), "file.ctime": new Date(f.ctime_ms).toISOString(), "file.size": f.size } as Record<string, Value>)[key] ?? null;
+        value = fileFact(row, key);
       } else {
         const p = row.props.find(p => p.key === noteKey(key));
         if (p && p.type !== "unknown") value = p.type === "number" && p.value !== "" ? Number(p.value) : p.value;
@@ -77,19 +121,21 @@ export function baseModel(source: string, viewIndex = 0) {
     return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");
   };
   function select(rows: Row[], unlimited = false) {
-    const found = rows.map(row => ({ row, context: context(row) })).filter(r => global(r.context) && local(r.context));
-    found.sort((a, b) => {
-      for (const sort of sorts) {
-        const x = a.context.get(sort.property), y = b.context.get(sort.property);
-        const missing = (v: Value) => v === null || v === "" || Array.isArray(v) && !v.length;
-        if (missing(x) !== missing(y)) return missing(x) ? 1 : -1;
-        const dates = typeof x === "string" && typeof y === "string" && /^\d{4}-\d{2}-\d{2}/.test(x) && /^\d{4}-\d{2}-\d{2}/.test(y);
-        const diff = typeof x === "number" && typeof y === "number" ? x - y : dates ? compare(x, y) ?? 0 : compareNames(String(x ?? ""), String(y ?? ""));
-        if (diff) return diff * sort.direction;
+    const found = rows.map(row => ({ row, context: context(row) })).filter(r => testExpression(global, r.context) && testExpression(local, r.context));
+    // Each row's sort values are read and parsed once, not on every comparison.
+    const keyed = found.map(r => ({ r, keys: sorts.map(sort => sortKey(r.context.get(sort.property))), name: noteName(r.row.file.path) }));
+    keyed.sort((a, b) => {
+      for (let i = 0; i < sorts.length; i++) {
+        const x = a.keys[i], y = b.keys[i];
+        // Empties go last in either direction.
+        if (x.missing !== y.missing) return x.missing ? 1 : -1;
+        const diff = compareKeys(x, y);
+        if (diff) return diff * sorts[i].direction;
       }
-      return compareNames(noteName(a.row.file.path), noteName(b.row.file.path)) || compareNames(a.row.file.path, b.row.file.path);
+      return compareNames(a.name, b.name) || compareNames(a.r.row.file.path, b.r.row.file.path);
     });
-    return !unlimited && typeof view.limit === "number" ? found.slice(0, view.limit) : found;
+    const sorted = keyed.map(k => k.r);
+    return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
   }
   return { rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }
