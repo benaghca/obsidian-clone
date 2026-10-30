@@ -43,13 +43,23 @@ it("parses grouping by view and rejects malformed configurations", () => {
   expect(parseGroupBy({ property: "p", direction: "backward" }, notices)).toEqual({ property: "p", direction: "ASC" });
   expect([...notices]).toEqual(["Unsupported group direction: backward"]);
   notices.clear();
-  expect(parseGroupBy({ property: "p", direction: "DESC", order: ["todo"], hidden: ["done"] }, notices)).toEqual({ property: "p", direction: "DESC" });
-  expect([...notices]).toEqual(["Unsupported groupBy settings: order, hidden"]);
+  const manual: Yaml = { property: "p", direction: "DESC", order: ["todo"], hidden: ["done"] };
+  expect(parseGroupBy(manual, notices)).toEqual({ property: "p", direction: "DESC" });
+  expect([...notices]).toEqual([]);
+  expect(manual).toEqual({ property: "p", direction: "DESC", order: ["todo"], hidden: ["done"] });
+  notices.clear();
+  expect(parseGroupBy({ property: "p", direction: "DESC", order: ["todo"], hidden: ["done"], width: 3 }, notices)).toEqual({ property: "p", direction: "DESC" });
+  expect([...notices]).toEqual(["Unsupported groupBy settings: width"]);
   expect(parseGroupBy({ property: "p", direction: "backward", order: ["todo"] })).toEqual({ property: "p", direction: "ASC" });
   expect(parseGroupBy({ property: "p", direction: null })).toEqual({ property: "p", direction: "ASC" });
   const opened = baseModel('views:\n  - groupBy:\n      property: p\n      direction: backward\n      order:\n        - todo\n      hidden:\n        - done\n  - type: table\n    name: Table\n');
   expect(opened.groupBy).toEqual({ property: "p", direction: "ASC" });
-  expect([...opened.notices]).toEqual(["Unsupported group direction: backward", "Unsupported groupBy settings: order, hidden"]);
+  expect([...opened.notices]).toEqual(["Unsupported group direction: backward"]);
+  const stored = opened.view.groupBy;
+  if (stored == null || typeof stored !== "object" || Array.isArray(stored)) throw new Error("groupBy was dropped");
+  expect(stored.order).toEqual(["todo"]);
+  expect(stored.hidden).toEqual(["done"]);
+  expect(stored.direction).toBe("backward");
   expect(baseModel('views:\n  - groupBy:\n      property: p\n      direction: backward\n      order:\n        - todo\n      hidden:\n        - done\n  - type: table\n    name: Table\n', 1).notices.size).toBe(0);
 });
 it("yields and cancels large group work, with identical synchronous order", async () => {
