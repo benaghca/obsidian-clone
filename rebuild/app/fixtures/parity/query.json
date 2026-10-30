@@ -1,0 +1,1046 @@
+{
+  "about": "Parse trees from parseQuery. input is the query string. expected is the tree, or null when there is nothing to search for. matchCase defaults to false.",
+  "typescript": "parseQuery in src/shell/searchQuery.ts",
+  "rust": "todo",
+  "cases": [
+    {
+      "name": "only spaces",
+      "input": "  ",
+      "expected": null,
+      "note": "Nothing to search for. The search view shows nothing; an empty graph colour group matches every node."
+    },
+    {
+      "name": "a phrase and a negation",
+      "input": "a \"b c\" -d",
+      "expected": {
+        "op": "and",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "b c",
+            "field": "any"
+          },
+          {
+            "op": "not",
+            "part": {
+              "op": "term",
+              "text": "d",
+              "field": "any"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "an operator group",
+      "input": "file:(a OR b)",
+      "expected": {
+        "op": "or",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "file"
+          },
+          {
+            "op": "term",
+            "text": "b",
+            "field": "file"
+          }
+        ]
+      }
+    },
+    {
+      "name": "a stray closing paren",
+      "input": "a ) b",
+      "expected": {
+        "op": "and",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "b",
+            "field": "any"
+          }
+        ]
+      },
+      "note": "A stray ) is skipped."
+    },
+    {
+      "name": "ORANGE is a word",
+      "input": "ORANGE OR",
+      "expected": {
+        "op": "term",
+        "text": "orange",
+        "field": "any"
+      },
+      "note": "OR is the operator only as a whole word, and a trailing OR is dropped."
+    },
+    {
+      "name": "a url is a word",
+      "input": "https://example.com",
+      "expected": {
+        "op": "term",
+        "text": "https://example.com",
+        "field": "any"
+      }
+    },
+    {
+      "name": "https://x.com is a word",
+      "input": "https://x.com",
+      "expected": {
+        "op": "term",
+        "text": "https://x.com",
+        "field": "any"
+      }
+    },
+    {
+      "name": "an unclosed quote",
+      "input": "\"unclosed phrase",
+      "expected": {
+        "op": "term",
+        "text": "unclosed phrase",
+        "field": "any"
+      },
+      "note": "An unclosed quote runs to the end of the query."
+    },
+    {
+      "name": "an unclosed paren",
+      "input": "(a OR b",
+      "expected": {
+        "op": "or",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "b",
+            "field": "any"
+          }
+        ]
+      },
+      "note": "An unclosed ( closes at the end of the query."
+    },
+    {
+      "name": "only a closing paren",
+      "input": ")",
+      "expected": null,
+      "note": "A stray ) is skipped, so this is nothing to search for."
+    },
+    {
+      "name": "a closing bracket outside a property",
+      "input": "]",
+      "expected": {
+        "op": "term",
+        "text": "]",
+        "field": "any"
+      },
+      "note": "] ends a word only inside a property, so on its own it is the word ]."
+    },
+    {
+      "name": "OR at the start",
+      "input": "OR a",
+      "expected": {
+        "op": "term",
+        "text": "a",
+        "field": "any"
+      },
+      "note": "A leading OR is dropped."
+    },
+    {
+      "name": "OR at the end",
+      "input": "a OR",
+      "expected": {
+        "op": "term",
+        "text": "a",
+        "field": "any"
+      },
+      "note": "A trailing OR is dropped."
+    },
+    {
+      "name": "OR beside OR",
+      "input": "a OR OR b",
+      "expected": {
+        "op": "or",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "b",
+            "field": "any"
+          }
+        ]
+      },
+      "note": "An empty OR arm is dropped."
+    },
+    {
+      "name": "negated OR",
+      "input": "-OR",
+      "expected": null,
+      "note": "Negating the OR token is dropped, so there is nothing to search for."
+    },
+    {
+      "name": "a dash alone",
+      "input": "-",
+      "expected": {
+        "op": "term",
+        "text": "-",
+        "field": "any"
+      },
+      "note": "A dash at the end of the query is the word -, not a negation."
+    },
+    {
+      "name": "a dash before a space",
+      "input": "- a",
+      "expected": {
+        "op": "and",
+        "parts": [
+          {
+            "op": "term",
+            "text": "-",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          }
+        ]
+      },
+      "note": "A dash before a space is the word -."
+    },
+    {
+      "name": "a double negation",
+      "input": "--a",
+      "expected": {
+        "op": "not",
+        "part": {
+          "op": "not",
+          "part": {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          }
+        }
+      }
+    },
+    {
+      "name": "an upper-case operator",
+      "input": "File:x",
+      "expected": {
+        "op": "term",
+        "text": "x",
+        "field": "file"
+      },
+      "note": "Operator names are matched in any case."
+    },
+    {
+      "name": "an unknown operator",
+      "input": "foo:bar",
+      "expected": {
+        "op": "term",
+        "text": "foo:bar",
+        "field": "any"
+      },
+      "note": "An unknown operator is one word. Grove has no regex search, so /abc/ is a word too."
+    },
+    {
+      "name": "task: is a word",
+      "input": "task:x",
+      "expected": {
+        "op": "term",
+        "text": "task:x",
+        "field": "any"
+      },
+      "note": "Grove has no task: operator; this is the word task:x. Obsidian's search help (help.obsidian.md/plugins/search) lists task:, block: and section:. No Obsidian result is recorded; that page was not re-checked for this corpus."
+    },
+    {
+      "name": "slashes are not a regex",
+      "input": "/abc/",
+      "expected": {
+        "op": "term",
+        "text": "/abc/",
+        "field": "any"
+      },
+      "note": "A slash-wrapped word is not a regex."
+    },
+    {
+      "name": "a negated term in an operator group",
+      "input": "file:(a OR -b)",
+      "expected": {
+        "op": "or",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "file"
+          },
+          {
+            "op": "not",
+            "part": {
+              "op": "term",
+              "text": "b",
+              "field": "file"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "file: inside line:",
+      "input": "line:(file:x)",
+      "expected": {
+        "op": "line",
+        "part": {
+          "op": "term",
+          "text": "x",
+          "field": "file"
+        }
+      },
+      "note": "Parsed as a line group whose term is file:. A file term is not looked up in the text, so the group matches no line."
+    },
+    {
+      "name": "an empty tag",
+      "input": "tag:#",
+      "expected": {
+        "op": "term",
+        "text": "",
+        "field": "tag"
+      },
+      "note": "The # is stripped after the empty check, so the term's text is empty. It is not null. No stored tag is under an empty name, so a search matches nothing."
+    },
+    {
+      "name": "a tag with a slash",
+      "input": "tag:#A/B",
+      "expected": {
+        "op": "term",
+        "text": "a/b",
+        "field": "tag"
+      },
+      "note": "A tag term is lower case and loses one leading #."
+    },
+    {
+      "name": "slashes trimmed off a path",
+      "input": "path:/Projects/",
+      "expected": {
+        "op": "term",
+        "text": "projects",
+        "field": "path"
+      },
+      "note": "Leading and trailing slashes are stripped off a path term."
+    },
+    {
+      "name": "a path that is only a slash",
+      "input": "path:/",
+      "expected": {
+        "op": "term",
+        "text": "",
+        "field": "path"
+      },
+      "note": "The slash is stripped after the empty check, so the term's text is empty. It is not null. Every path contains the empty string, so a search matches every file."
+    },
+    {
+      "name": "an empty path quote",
+      "input": "path:\"\"",
+      "expected": null,
+      "note": "The quoted path is empty, so there is nothing to search for."
+    },
+    {
+      "name": "a property by name",
+      "input": "[status]",
+      "expected": {
+        "op": "prop",
+        "key": "status",
+        "value": null
+      }
+    },
+    {
+      "name": "a quoted property key",
+      "input": "[\"my key\":x]",
+      "expected": {
+        "op": "prop",
+        "key": "my key",
+        "value": {
+          "op": "term",
+          "text": "x",
+          "field": "any"
+        }
+      }
+    },
+    {
+      "name": "a property value that is a group",
+      "input": "[a:(b OR c)]",
+      "expected": {
+        "op": "prop",
+        "key": "a",
+        "value": {
+          "op": "or",
+          "parts": [
+            {
+              "op": "term",
+              "text": "b",
+              "field": "any"
+            },
+            {
+              "op": "term",
+              "text": "c",
+              "field": "any"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "a property closed by an inner bracket",
+      "input": "[a:[b:c] d]",
+      "expected": {
+        "op": "prop",
+        "key": "a",
+        "value": {
+          "op": "and",
+          "parts": [
+            {
+              "op": "prop",
+              "key": "b",
+              "value": {
+                "op": "term",
+                "text": "c",
+                "field": "any"
+              }
+            },
+            {
+              "op": "term",
+              "text": "d]",
+              "field": "any"
+            }
+          ]
+        }
+      },
+      "note": "The inner property clears the in-property state, so the ] after d is part of the word d]."
+    },
+    {
+      "name": "a wikilink is not a property",
+      "input": "[[wikilink]]",
+      "expected": {
+        "op": "term",
+        "text": "[[wikilink]]",
+        "field": "any"
+      },
+      "note": "A second [ is not a property, and ] does not end a word outside one, so this is one word."
+    },
+    {
+      "name": "a property with an empty key",
+      "input": "[ :x]",
+      "expected": null,
+      "note": "The key trims to empty, so the property is dropped and there is nothing to search for."
+    },
+    {
+      "name": "NUL inside the query",
+      "input": "a \u0000 b",
+      "expected": {
+        "op": "term",
+        "text": "a",
+        "field": "any"
+      },
+      "note": "The top-level group stops at U+0000, so only a is read. b is never parsed."
+    },
+    {
+      "name": "a tab between words",
+      "input": "a\tb",
+      "expected": {
+        "op": "and",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "b",
+            "field": "any"
+          }
+        ]
+      },
+      "note": "A tab is whitespace, so this is two terms."
+    },
+    {
+      "name": "an ideographic space between words",
+      "input": "a　b",
+      "expected": {
+        "op": "and",
+        "parts": [
+          {
+            "op": "term",
+            "text": "a",
+            "field": "any"
+          },
+          {
+            "op": "term",
+            "text": "b",
+            "field": "any"
+          }
+        ]
+      },
+      "note": "U+3000 is whitespace, so this is two terms."
+    },
+    {
+      "name": "a BOM trimmed off a term",
+      "input": "﻿alpha",
+      "expected": {
+        "op": "term",
+        "text": "alpha",
+        "field": "any"
+      },
+      "note": "U+FEFF is whitespace and trim removes it, so the term is alpha."
+    },
+    {
+      "name": "match case keeps the word",
+      "input": "Alpha",
+      "matchCase": true,
+      "expected": {
+        "op": "term",
+        "text": "Alpha",
+        "field": "any"
+      }
+    },
+    {
+      "name": "match case still lowers a tag",
+      "input": "tag:Idea",
+      "matchCase": true,
+      "expected": {
+        "op": "term",
+        "text": "idea",
+        "field": "tag"
+      },
+      "note": "Tag text is lower case even with Match case. The property key is too; the value stays as typed."
+    },
+    {
+      "name": "match case lowers the key only",
+      "input": "[Status:Draft]",
+      "matchCase": true,
+      "expected": {
+        "op": "prop",
+        "key": "status",
+        "value": {
+          "op": "term",
+          "text": "Draft",
+          "field": "any"
+        }
+      },
+      "note": "The property key is lower case. The value stays as typed."
+    },
+    {
+      "name": "64 levels of (",
+      "input": "((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
+      "expected": {
+        "op": "term",
+        "text": "a",
+        "field": "any"
+      },
+      "note": "64 levels still parse. The parens wrap one term, so the tree is that term."
+    },
+    {
+      "name": "65 levels of (",
+      "input": "(((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((((a)))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))))",
+      "expected": null,
+      "note": "Deeper than 64 levels of (, - or [property] is nothing to search for."
+    },
+    {
+      "name": "64 levels of -",
+      "input": "----------------------------------------------------------------a",
+      "expected": {
+        "op": "not",
+        "part": {
+          "op": "not",
+          "part": {
+            "op": "not",
+            "part": {
+              "op": "not",
+              "part": {
+                "op": "not",
+                "part": {
+                  "op": "not",
+                  "part": {
+                    "op": "not",
+                    "part": {
+                      "op": "not",
+                      "part": {
+                        "op": "not",
+                        "part": {
+                          "op": "not",
+                          "part": {
+                            "op": "not",
+                            "part": {
+                              "op": "not",
+                              "part": {
+                                "op": "not",
+                                "part": {
+                                  "op": "not",
+                                  "part": {
+                                    "op": "not",
+                                    "part": {
+                                      "op": "not",
+                                      "part": {
+                                        "op": "not",
+                                        "part": {
+                                          "op": "not",
+                                          "part": {
+                                            "op": "not",
+                                            "part": {
+                                              "op": "not",
+                                              "part": {
+                                                "op": "not",
+                                                "part": {
+                                                  "op": "not",
+                                                  "part": {
+                                                    "op": "not",
+                                                    "part": {
+                                                      "op": "not",
+                                                      "part": {
+                                                        "op": "not",
+                                                        "part": {
+                                                          "op": "not",
+                                                          "part": {
+                                                            "op": "not",
+                                                            "part": {
+                                                              "op": "not",
+                                                              "part": {
+                                                                "op": "not",
+                                                                "part": {
+                                                                  "op": "not",
+                                                                  "part": {
+                                                                    "op": "not",
+                                                                    "part": {
+                                                                      "op": "not",
+                                                                      "part": {
+                                                                        "op": "not",
+                                                                        "part": {
+                                                                          "op": "not",
+                                                                          "part": {
+                                                                            "op": "not",
+                                                                            "part": {
+                                                                              "op": "not",
+                                                                              "part": {
+                                                                                "op": "not",
+                                                                                "part": {
+                                                                                  "op": "not",
+                                                                                  "part": {
+                                                                                    "op": "not",
+                                                                                    "part": {
+                                                                                      "op": "not",
+                                                                                      "part": {
+                                                                                        "op": "not",
+                                                                                        "part": {
+                                                                                          "op": "not",
+                                                                                          "part": {
+                                                                                            "op": "not",
+                                                                                            "part": {
+                                                                                              "op": "not",
+                                                                                              "part": {
+                                                                                                "op": "not",
+                                                                                                "part": {
+                                                                                                  "op": "not",
+                                                                                                  "part": {
+                                                                                                    "op": "not",
+                                                                                                    "part": {
+                                                                                                      "op": "not",
+                                                                                                      "part": {
+                                                                                                        "op": "not",
+                                                                                                        "part": {
+                                                                                                          "op": "not",
+                                                                                                          "part": {
+                                                                                                            "op": "not",
+                                                                                                            "part": {
+                                                                                                              "op": "not",
+                                                                                                              "part": {
+                                                                                                                "op": "not",
+                                                                                                                "part": {
+                                                                                                                  "op": "not",
+                                                                                                                  "part": {
+                                                                                                                    "op": "not",
+                                                                                                                    "part": {
+                                                                                                                      "op": "not",
+                                                                                                                      "part": {
+                                                                                                                        "op": "not",
+                                                                                                                        "part": {
+                                                                                                                          "op": "not",
+                                                                                                                          "part": {
+                                                                                                                            "op": "not",
+                                                                                                                            "part": {
+                                                                                                                              "op": "not",
+                                                                                                                              "part": {
+                                                                                                                                "op": "not",
+                                                                                                                                "part": {
+                                                                                                                                  "op": "not",
+                                                                                                                                  "part": {
+                                                                                                                                    "op": "not",
+                                                                                                                                    "part": {
+                                                                                                                                      "op": "not",
+                                                                                                                                      "part": {
+                                                                                                                                        "op": "term",
+                                                                                                                                        "text": "a",
+                                                                                                                                        "field": "any"
+                                                                                                                                      }
+                                                                                                                                    }
+                                                                                                                                  }
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            }
+                                                                                                                          }
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              }
+                                                                                                            }
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "note": "64 negations still parse."
+    },
+    {
+      "name": "65 levels of -",
+      "input": "-----------------------------------------------------------------a",
+      "expected": null,
+      "note": "The 65th negation is past the limit of 64, so the query is nothing to search for."
+    },
+    {
+      "name": "64 levels of [a:",
+      "input": "[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:x]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+      "expected": {
+        "op": "prop",
+        "key": "a",
+        "value": {
+          "op": "prop",
+          "key": "a",
+          "value": {
+            "op": "prop",
+            "key": "a",
+            "value": {
+              "op": "prop",
+              "key": "a",
+              "value": {
+                "op": "prop",
+                "key": "a",
+                "value": {
+                  "op": "prop",
+                  "key": "a",
+                  "value": {
+                    "op": "prop",
+                    "key": "a",
+                    "value": {
+                      "op": "prop",
+                      "key": "a",
+                      "value": {
+                        "op": "prop",
+                        "key": "a",
+                        "value": {
+                          "op": "prop",
+                          "key": "a",
+                          "value": {
+                            "op": "prop",
+                            "key": "a",
+                            "value": {
+                              "op": "prop",
+                              "key": "a",
+                              "value": {
+                                "op": "prop",
+                                "key": "a",
+                                "value": {
+                                  "op": "prop",
+                                  "key": "a",
+                                  "value": {
+                                    "op": "prop",
+                                    "key": "a",
+                                    "value": {
+                                      "op": "prop",
+                                      "key": "a",
+                                      "value": {
+                                        "op": "prop",
+                                        "key": "a",
+                                        "value": {
+                                          "op": "prop",
+                                          "key": "a",
+                                          "value": {
+                                            "op": "prop",
+                                            "key": "a",
+                                            "value": {
+                                              "op": "prop",
+                                              "key": "a",
+                                              "value": {
+                                                "op": "prop",
+                                                "key": "a",
+                                                "value": {
+                                                  "op": "prop",
+                                                  "key": "a",
+                                                  "value": {
+                                                    "op": "prop",
+                                                    "key": "a",
+                                                    "value": {
+                                                      "op": "prop",
+                                                      "key": "a",
+                                                      "value": {
+                                                        "op": "prop",
+                                                        "key": "a",
+                                                        "value": {
+                                                          "op": "prop",
+                                                          "key": "a",
+                                                          "value": {
+                                                            "op": "prop",
+                                                            "key": "a",
+                                                            "value": {
+                                                              "op": "prop",
+                                                              "key": "a",
+                                                              "value": {
+                                                                "op": "prop",
+                                                                "key": "a",
+                                                                "value": {
+                                                                  "op": "prop",
+                                                                  "key": "a",
+                                                                  "value": {
+                                                                    "op": "prop",
+                                                                    "key": "a",
+                                                                    "value": {
+                                                                      "op": "prop",
+                                                                      "key": "a",
+                                                                      "value": {
+                                                                        "op": "prop",
+                                                                        "key": "a",
+                                                                        "value": {
+                                                                          "op": "prop",
+                                                                          "key": "a",
+                                                                          "value": {
+                                                                            "op": "prop",
+                                                                            "key": "a",
+                                                                            "value": {
+                                                                              "op": "prop",
+                                                                              "key": "a",
+                                                                              "value": {
+                                                                                "op": "prop",
+                                                                                "key": "a",
+                                                                                "value": {
+                                                                                  "op": "prop",
+                                                                                  "key": "a",
+                                                                                  "value": {
+                                                                                    "op": "prop",
+                                                                                    "key": "a",
+                                                                                    "value": {
+                                                                                      "op": "prop",
+                                                                                      "key": "a",
+                                                                                      "value": {
+                                                                                        "op": "prop",
+                                                                                        "key": "a",
+                                                                                        "value": {
+                                                                                          "op": "prop",
+                                                                                          "key": "a",
+                                                                                          "value": {
+                                                                                            "op": "prop",
+                                                                                            "key": "a",
+                                                                                            "value": {
+                                                                                              "op": "prop",
+                                                                                              "key": "a",
+                                                                                              "value": {
+                                                                                                "op": "prop",
+                                                                                                "key": "a",
+                                                                                                "value": {
+                                                                                                  "op": "prop",
+                                                                                                  "key": "a",
+                                                                                                  "value": {
+                                                                                                    "op": "prop",
+                                                                                                    "key": "a",
+                                                                                                    "value": {
+                                                                                                      "op": "prop",
+                                                                                                      "key": "a",
+                                                                                                      "value": {
+                                                                                                        "op": "prop",
+                                                                                                        "key": "a",
+                                                                                                        "value": {
+                                                                                                          "op": "prop",
+                                                                                                          "key": "a",
+                                                                                                          "value": {
+                                                                                                            "op": "prop",
+                                                                                                            "key": "a",
+                                                                                                            "value": {
+                                                                                                              "op": "prop",
+                                                                                                              "key": "a",
+                                                                                                              "value": {
+                                                                                                                "op": "prop",
+                                                                                                                "key": "a",
+                                                                                                                "value": {
+                                                                                                                  "op": "prop",
+                                                                                                                  "key": "a",
+                                                                                                                  "value": {
+                                                                                                                    "op": "prop",
+                                                                                                                    "key": "a",
+                                                                                                                    "value": {
+                                                                                                                      "op": "prop",
+                                                                                                                      "key": "a",
+                                                                                                                      "value": {
+                                                                                                                        "op": "prop",
+                                                                                                                        "key": "a",
+                                                                                                                        "value": {
+                                                                                                                          "op": "prop",
+                                                                                                                          "key": "a",
+                                                                                                                          "value": {
+                                                                                                                            "op": "prop",
+                                                                                                                            "key": "a",
+                                                                                                                            "value": {
+                                                                                                                              "op": "prop",
+                                                                                                                              "key": "a",
+                                                                                                                              "value": {
+                                                                                                                                "op": "prop",
+                                                                                                                                "key": "a",
+                                                                                                                                "value": {
+                                                                                                                                  "op": "prop",
+                                                                                                                                  "key": "a",
+                                                                                                                                  "value": {
+                                                                                                                                    "op": "prop",
+                                                                                                                                    "key": "a",
+                                                                                                                                    "value": {
+                                                                                                                                      "op": "prop",
+                                                                                                                                      "key": "a",
+                                                                                                                                      "value": {
+                                                                                                                                        "op": "term",
+                                                                                                                                        "text": "x",
+                                                                                                                                        "field": "any"
+                                                                                                                                      }
+                                                                                                                                    }
+                                                                                                                                  }
+                                                                                                                                }
+                                                                                                                              }
+                                                                                                                            }
+                                                                                                                          }
+                                                                                                                        }
+                                                                                                                      }
+                                                                                                                    }
+                                                                                                                  }
+                                                                                                                }
+                                                                                                              }
+                                                                                                            }
+                                                                                                          }
+                                                                                                        }
+                                                                                                      }
+                                                                                                    }
+                                                                                                  }
+                                                                                                }
+                                                                                              }
+                                                                                            }
+                                                                                          }
+                                                                                        }
+                                                                                      }
+                                                                                    }
+                                                                                  }
+                                                                                }
+                                                                              }
+                                                                            }
+                                                                          }
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "note": "64 nested properties still parse."
+    },
+    {
+      "name": "65 levels of [a:",
+      "input": "[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:[a:x]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]",
+      "expected": null,
+      "note": "The 65th nested property is past the limit of 64, so the query is nothing to search for."
+    }
+  ]
+}

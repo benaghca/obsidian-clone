@@ -34,10 +34,26 @@ export type Query =
 
 const FIELDS = new Set(["file", "path", "tag", "line", "content"]);
 
+/** Deeper than this many `(`, negating `-`, or `[property]` is nothing to search for. Rust would overflow its stack. */
+const QUERY_DEPTH = 64;
+
 /** The query, or null when there is nothing to search for. */
 export function parseQuery(input: string, matchCase = false): Query | null {
   let at = 0;
+  let depth = 0;
+  let tooDeep = false;
   const fold = (text: string) => (matchCase ? text : text.toLowerCase());
+  const enter = () => {
+    if (depth >= QUERY_DEPTH) {
+      tooDeep = true;
+      return false;
+    }
+    depth++;
+    return true;
+  };
+  const leave = () => {
+    depth--;
+  };
   /** Inside [property:...], where "]" ends a word. */
   let inProperty = false;
   const peek = () => input[at];
@@ -78,19 +94,40 @@ export function parseQuery(input: string, matchCase = false): Query | null {
     }
     if (peek() === "-" && at + 1 < input.length && !/\s/.test(input[at + 1])) {
       at++;
+      if (!enter()) return null;
       const q = unary(field);
+      leave();
       return q && q !== "OR" ? { op: "not", part: q } : null;
     }
     if (peek() === "(") {
       at++;
-      return group(")", field);
+      if (!enter()) return null;
+      const q = group(")", field);
+      leave();
+      return q;
     }
-    if (peek() === "[" && input[at + 1] !== "[") return property();
+    if (peek() === "[" && input[at + 1] !== "[") {
+      if (!enter()) {
+        at++; // the '[' , or the group loop would see it again
+        return null;
+      }
+      const q = property();
+      leave();
+      return q;
+    }
     const op = /^([a-z]+):/i.exec(input.slice(at));
     if (op && FIELDS.has(op[1].toLowerCase())) {
       at += op[0].length;
       const name = op[1].toLowerCase();
-      const inner = peek() === "(" ? (at++, group(")", "any")) : term(fold(word()), "any");
+      let inner: Query | null;
+      if (peek() === "(") {
+        at++;
+        if (!enter()) inner = null;
+        else {
+          inner = group(")", "any");
+          leave();
+        }
+      } else inner = term(fold(word()), "any");
       if (!inner) return null;
       return name === "line" ? { op: "line", part: inner } : scoped(inner, name as Field);
     }
@@ -111,7 +148,8 @@ export function parseQuery(input: string, matchCase = false): Query | null {
     key = key.trim();
     return key ? { op: "prop", key: key.toLowerCase(), value } : null;
   };
-  return group("\u0000", "any");
+  const parsed = group("\u0000", "any");
+  return tooDeep ? null : parsed;
 }
 
 const all = (parts: Query[]): Query | null => (parts.length > 1 ? { op: "and", parts } : (parts[0] ?? null));
@@ -166,6 +204,24 @@ export function needs(q: Query | null): { tags: boolean; props: boolean } {
 export interface Line {
   line: number;
   text: string;
+}
+
+/**
+ * The lines a term survives on, in order. The backend already requires every
+ * whitespace-separated word on the line, in any case. A phrase (the term
+ * contains a space) or Match case then has to contain the term whole.
+ * Name hits are not text lines; the caller drops those.
+ */
+export function termLines(lines: readonly Line[], term: string, matchCase = false): Line[] {
+  const words = term.split(/\s+/).filter(Boolean).map((word) => word.toLowerCase());
+  const needle = matchCase ? term : term.toLowerCase();
+  const phrase = matchCase || term.includes(" ");
+  return lines.filter((line) => {
+    const lower = line.text.toLowerCase();
+    if (words.length && !words.every((word) => lower.includes(word))) return false;
+    if (phrase && !(matchCase ? line.text : lower).includes(needle)) return false;
+    return true;
+  });
 }
 
 export interface Facts {
