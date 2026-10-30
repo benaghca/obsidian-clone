@@ -219,6 +219,14 @@
       "Emoji.md": [
         "a 😀 b"
       ]
+    },
+    "dot-name": {
+      ".MD": [
+        "secretprobe"
+      ],
+      "Real.md": [
+        "secretprobe also"
+      ]
     }
   },
   "cases": [
@@ -1626,6 +1634,64 @@
         }
       },
       "note": "An emoji in a term is a substring, like any other character."
+    },
+    {
+      "name": "a file named .MD matches its text",
+      "vault": "dot-name",
+      "input": "secretprobe",
+      "expected": {
+        ".MD": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        },
+        "Real.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "rust": "todo",
+      "note": "The whole name is .MD. searchVault treats any path ending in .md, in any case, as a note, so both files match on line 1. Rust is_note_path requires the basename to be longer than 3 characters, so .MD is not a note and only Real.md is returned. Match case is the same split. Rust was not changed."
+    },
+    {
+      "name": "file:md on a file named .MD",
+      "vault": "dot-name",
+      "input": "file:md",
+      "expected": {
+        ".MD": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        },
+        "Real.md": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "rust": "todo",
+      "note": "Without match case the folded name .md contains md, so both files match. Each is a note with its one content line and a count of 0, because a file: term has nothing to highlight. Rust keeps Real.md as a note and records .MD as an attachment {}, since the name matches and is_note_path is false. file:MD without match case, and path:.MD without match case, have that same shape."
+    },
+    {
+      "name": "file:MD with match case on a file named .MD",
+      "vault": "dot-name",
+      "input": "file:MD",
+      "matchCase": true,
+      "expected": {
+        ".MD": {
+          "count": 0,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "rust": "todo",
+      "note": "Match case compares the file name as typed. .MD contains MD and Real.md does not, so only .MD matches, as a note with line 1. Rust search_notes drops .MD and Real.md does not pass, then the parity runner adds .MD as {} because the name still passes. path:.MD with match case is the same: the reference returns .MD as a note and Rust returns it as an attachment. file:md with match case agrees, because .MD does not contain the lowercase letters md."
     }
   ]
 }
