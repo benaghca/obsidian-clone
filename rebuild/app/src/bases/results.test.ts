@@ -3,7 +3,7 @@ vi.mock("../fileOps",()=>({newNote:vi.fn()}));
 vi.mock("../editor/clipboard",()=>({writeClipboard:vi.fn()}));
 import {writeView} from "./write";
 import {rowSeed} from "./newRow";
-import {tableTsv} from "./results";
+import {csvExport,csvFilename,tableCsv,tableTsv} from "./results";
 const source='# head\nfilters: \'status != "done"\'\nviews:\n  - type: table\n    name: "One"\n    limit: 3\n    # retained\n  - type: table\n    name: Other\n# tail\n';
 it("edits or clears only the selected limit, preserving comments, views, quotes and CRLF",()=>{
  expect(writeView(source,'limit',2)).toBe(source.replace('limit: 3','limit: 2'));
@@ -19,4 +19,15 @@ it("seeds native frontmatter through the existing writer and skips file/formula 
 it("copies all visible result values as TSV without DOM truncation",()=>{
  expect(tableTsv(['Task','status','Due date','priority'],[['Task A','open','2000-01-01',3],['Task E','',null,null]])).toBe('Task\tstatus\tDue date\tpriority\nTask A\topen\t2000-01-01\t3\nTask E\t\t\t');
  expect(tableTsv(['tags','active','text'],[[['a','b'],false,'a\tb\n"c"']])).toBe('tags\tactive\ttext\na, b\tfalse\t"a\tb\n""c"""');
+});
+it("exports the same cells as CSV and names the download from the view",()=>{
+ expect(tableCsv(['Task','status','Due date','priority'],[['Task A','open','2000-01-01',3],['Task E','',null,null]])).toBe('Task,status,Due date,priority\nTask A,open,2000-01-01,3\nTask E,,,');
+ expect(tableCsv(['tags','active','text'],[[['a','b'],false,'a\tb\n"c"']])).toBe('tags,active,text\n"a, b",false,"a\tb\n""c"""');
+ expect(tableCsv(['say'],[['he said "hi",\r\nthen']])).toBe('say\n"he said ""hi"",\r\nthen"');
+ expect(csvFilename('By due')).toBe('By due.csv');
+ expect(csvFilename('By due.CSV')).toBe('By due.csv');
+ expect(csvFilename('a/b:c*?"<>|')).toBe('a b c.csv');
+ expect(csvFilename('  ')).toBe('Results.csv');
+ expect(csvFilename(null)).toBe('Results.csv');
+ expect(csvExport(['Task'],[['A']],'By due')).toEqual({title:'Export CSV...',icon:'file-down',filename:'By due.csv',text:'Task\nA'});
 });
