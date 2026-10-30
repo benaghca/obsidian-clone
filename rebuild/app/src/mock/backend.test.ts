@@ -75,6 +75,26 @@ test("link_sources finds resolved links and each rename spelling, with no folder
   } finally { vi.unstubAllGlobals(); }
 });
 
+test("one link snapshot still prefers the note beside the linking note", async () => {
+  const store = () => ({ getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("location", { search: "" });
+  vi.stubGlobal("sessionStorage", store());
+  vi.stubGlobal("localStorage", store());
+  try {
+    const { invoke } = createMockBackend();
+    for (const [path, content] of [
+      ["Near/Plan.md", "plan"],
+      ["Far/Plan.md", "plan"],
+      ["Near/From.md", "[[plan]] and [far](../Far/Plan.md)"],
+      ["Root.md", "[[Plan]]"],
+    ]) await invoke("create_note", { path, content });
+    const index = await invoke<LinkIndex>("link_index");
+    expect(index.outgoing["Near/From.md"]).toEqual(["Near/Plan.md"]);
+    expect(index.markdown?.["Near/From.md"]).toEqual(["Far/Plan.md"]);
+    expect(index.outgoing["Root.md"]).toEqual(["Near/Plan.md"]);
+  } finally { vi.unstubAllGlobals(); }
+});
+
 test("properties use the TS reference with BOM, CRLF, uppercase notes and source-only omissions", async () => {
   const store = () => ({ getItem: () => null, setItem: () => {} });
   vi.stubGlobal("location", { search: "" }); vi.stubGlobal("sessionStorage", store()); vi.stubGlobal("localStorage", store());
