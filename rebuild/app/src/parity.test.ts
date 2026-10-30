@@ -7,6 +7,7 @@ import { readProperties, splitFrontmatter } from "./editor/frontmatter";
 import { tagsInText, wikilinkTargets } from "./shell/linksTags";
 import { parseQuery } from "./shell/searchQuery";
 import { searchVault } from "./shell/searchVault";
+import { editProperty, type PropertyEdit } from "./editor/propertyEdit";
 
 interface Case {
   name: string;
@@ -20,6 +21,7 @@ interface Case {
   vault?: string;
   /** Both query and search. Default false when omitted. */
   matchCase?: boolean;
+  edit?: PropertyEdit;
 }
 
 interface Corpus {
@@ -54,6 +56,7 @@ function vaultFiles(corpus: Corpus, name: string): Record<string, string> {
 
 /** The TypeScript function each corpus file checks, by file name. A new file needs an entry here (and in parity.rs). */
 const RUNNERS: Record<string, (input: string, c: Case, corpus: Corpus) => unknown> = {
+  "property-edits": (input, c) => { const { change, ...result } = editProperty(input, c.edit!); const { props: _props, mtime_ms: _mtime, ...summary } = result as typeof result & { props?: unknown; mtime_ms?: number }; return { ...summary, text: change ? input.slice(0, change.from) + change.insert + input.slice(change.to) : input }; },
   tags: (input) => tagsInText(input),
   links: (input) => wikilinkTargets(input),
   properties: (input) => propertiesOf(input),
@@ -61,7 +64,7 @@ const RUNNERS: Record<string, (input: string, c: Case, corpus: Corpus) => unknow
   search: (input, c, corpus) => searchVault(vaultFiles(corpus, c.vault!), input, c.matchCase === true),
 };
 
-const KEYS = new Set(["name", "input", "expected", "rust", "ts", "obsidian", "note", "vault", "matchCase"]);
+const KEYS = new Set(["name", "input", "expected", "rust", "ts", "obsidian", "note", "vault", "matchCase", "edit"]);
 const FILE_KEYS = new Set(["about", "typescript", "rust", "cases", "vaults"]);
 
 const files = import.meta.glob<Corpus>("../fixtures/parity/*.json", { eager: true, import: "default" });

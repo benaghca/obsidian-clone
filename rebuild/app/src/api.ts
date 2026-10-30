@@ -3,6 +3,7 @@
 // an in-memory mock vault instead, so the front end runs on its own.
 
 import type { Property } from "./editor/frontmatter";
+import type { EditResult, PropertyEdit } from "./editor/propertyEdit";
 import { isExternalUrl } from "./links/external";
 
 export interface VaultInfo {
@@ -138,6 +139,7 @@ export const api = {
   /** Each note's frontmatter block (`---` lines included), for `paths` or every note; notes without one are left out. */
   frontmatter: (paths?: string[]) => call<Record<string, string>>("frontmatter", { paths: paths ?? null }),
   properties: (paths?: string[]) => call<Record<string, NoteProperties>>("properties", { paths: paths ?? null }),
+  setProperty: (path: string, edit: PropertyEdit, dryRun = false) => call<EditResult>("set_property", { path, edit, dryRun }),
   /** Each note's saved tags (`tagsInText`), for `paths` or every note; notes without tags are left out. */
   tags: (paths?: string[]) => call<Record<string, string[]>>("tags", { paths: paths ?? null }),
   /** A settings file from the vault's .grove folder (null if there is none yet). */

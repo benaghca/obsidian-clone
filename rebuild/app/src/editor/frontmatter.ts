@@ -336,7 +336,7 @@ export function yamlString(s: string): string {
 const yamlKey = (key: string) => (/^[^\s#\-?:,[\]{}&*!|>'"%@`][^:]*$/.test(key) && key === key.trim() && !/\s#/.test(key) ? key : JSON.stringify(key));
 
 /** A property's lines as Grove writes them (Obsidian's style: lists as `  - item` lines). */
-function formatProperty(key: string, type: PropertyType, value: Property["value"]): string {
+export function formatProperty(key: string, type: PropertyType, value: Property["value"]): string {
   const k = yamlKey(key);
   if (Array.isArray(value)) return value.length ? [`${k}:`, ...value.map((v) => `  - ${yamlString(v)}`)].join("\n") : `${k}: []`;
   if (typeof value === "boolean") return `${k}: ${value}`;

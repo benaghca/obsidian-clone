@@ -17,6 +17,7 @@
 //! existing path is refused) and then opens it the same way as `open_vault`.
 
 mod config;
+mod edit;
 mod fsutil;
 mod index;
 mod lockdown;
@@ -90,6 +91,7 @@ pub fn run() {
             list_files,
             read_note,
             read_file_bytes,
+            set_property,
             write_note,
             write_file_bytes,
             create_note,
@@ -208,6 +210,33 @@ fn write_note(
         _ => false,
     });
     Ok(())
+}
+
+/// Fresh-file property CAS, off the GTK thread; only real writes notify other windows.
+#[tauri::command(async)]
+fn set_property(
+    window: tauri::Window,
+    state: State<'_, AppState>,
+    path: String,
+    edit: edit::PropertyEdit,
+    dry_run: Option<bool>,
+) -> Result<edit::EditResult, String> {
+    let dry_run = dry_run.unwrap_or(false);
+    let result = with_vault(&state, |v| v.set_property(&path, &edit, dry_run))?;
+    if !dry_run && result.done() {
+        let change = model::VaultChanged {
+            kind: model::ChangeKind::Modify,
+            paths: vec![path],
+        };
+        let me = window.label().to_owned();
+        let _ = window.emit_filter("vault-changed", change, |target| match target {
+            tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => {
+                *label != me
+            }
+            _ => false,
+        });
+    }
+    Ok(result)
 }
 
 /// A new file's bytes (a pasted image or a dropped file). JSON array of numbers, at most 20 MB.
