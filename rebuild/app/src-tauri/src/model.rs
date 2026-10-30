@@ -89,3 +89,16 @@ pub fn push_change(out: &mut Vec<VaultChanged>, kind: ChangeKind, paths: Vec<Str
         out.push(VaultChanged { kind, paths });
     }
 }
+
+/// One search-view result; the frontend owns sorting and exclusions.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchNote {
+    pub path: String,
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SearchLine {
+    pub line: u32,
+    pub text: String,
+}

@@ -377,3 +377,138 @@ fn names_ending_in_multibyte_characters_are_not_notes() {
     let idx = Index::from_notes(&[("a😀", ""), ("b😀.md", "[[a😀]]\n")]);
     assert_eq!(idx.resolve("b😀.md", "a😀").as_deref(), Some("a😀"));
 }
+
+#[test]
+fn query_search_tracks_mutations_and_uppercase_notes() {
+    let dir = tmp_dir("search-mutations");
+    let mut idx = Index::from_notes(&[(
+        "old/A.MD",
+        "---\nstatus: draft\n---\n#Project/Alpha garden\n",
+    )]);
+    assert_eq!(
+        idx.search_notes("tag:project [status:draft]", false)[0].path,
+        "old/A.MD"
+    );
+    let body = "---\nstatus: done\n---\n#Other river river\n";
+    idx.upsert_note(&dir.path, "old/A.MD", body, Stamp::sized(body.len()));
+    assert!(idx
+        .search_notes("garden OR tag:project OR [status:draft]", false)
+        .is_empty());
+    assert_eq!(idx.search_notes("river", false)[0].count, 2);
+    idx.relocate("old", "new");
+    assert!(idx.search_notes("path:old", false).is_empty());
+    assert_eq!(
+        idx.search_notes("path:new [status:done]", false)[0].path,
+        "new/A.MD"
+    );
+    idx.relocate("new/A.MD", "new/picture.png");
+    assert!(idx.search_notes("river", false).is_empty());
+    assert_eq!(
+        idx.search_match(&["file:png".into(), "river".into()]),
+        vec![vec!["new/picture.png"], vec![]]
+    );
+    idx.remove_tree("new");
+    assert_eq!(
+        idx.search_match(&["-garden".into()]),
+        vec![Vec::<String>::new()]
+    );
+}
+
+#[test]
+fn query_search_orders_paths_and_limits_only_passing_note_lines() {
+    let idx = Index::from_notes(&[
+        ("z.MD", "garden\ngarden garden\ngarden\n"),
+        ("a/A.md", "Garden\n"),
+        ("B.md", "else\n"),
+        ("garden.png", "garden\n"),
+        ("garden.canvas", "garden\n"),
+    ]);
+    assert_eq!(
+        idx.search_notes("garden", false)
+            .iter()
+            .map(|n| (n.path.as_str(), n.count))
+            .collect::<Vec<_>>(),
+        [("a/A.md", 1), ("z.MD", 4)]
+    );
+    let paths = [
+        "z.MD",
+        "missing.md",
+        "a",
+        "B.md",
+        "garden.png",
+        "a/A.md",
+        "z.MD",
+    ]
+    .map(String::from);
+    let lines = idx.search_lines("garden", false, &paths, 2);
+    assert_eq!(
+        serde_json::to_value(&lines).unwrap(),
+        json!({
+            "a/A.md": [{"line":1,"text":"Garden"}],
+            "z.MD": [{"line":1,"text":"garden"},{"line":2,"text":"garden garden"}]
+        })
+    );
+    assert!(idx.search_lines("garden", false, &paths, 0).is_empty());
+    assert!(idx
+        .search_lines("Garden", true, &paths, 5)
+        .get("z.MD")
+        .is_none());
+    assert_eq!(
+        idx.search_match(&["garden".into(), "".into(), "file:png".into()]),
+        vec![
+            vec!["a/A.md", "garden.canvas", "garden.png", "z.MD"],
+            vec![],
+            vec!["garden.png"]
+        ]
+    );
+}
+
+#[test]
+fn query_search_empty_deep_and_large_notes_are_safe() {
+    let mut idx = Index::from_notes(&[("normal.md", "garden\n")]);
+    idx.insert_file(
+        "huge Garden.MD",
+        Stamp::sized(MAX_INDEX_BYTES as usize + 1),
+        || panic!("large note must not be read"),
+    );
+    for query in [
+        String::new(),
+        "   ".into(),
+        format!("{}garden{}", "(".repeat(65), ")".repeat(65)),
+        "(".repeat(100_000),
+    ] {
+        assert!(idx.search_notes(&query, false).is_empty());
+        assert!(idx
+            .search_lines(&query, false, &["normal.md".into()], 5)
+            .is_empty());
+        assert_eq!(idx.search_match(&[query]), vec![Vec::<String>::new()]);
+    }
+    let found = idx.search_notes("garden", false);
+    assert_eq!(found.iter().map(|n| n.count).collect::<Vec<_>>(), [0, 1]);
+    assert!(idx
+        .search_notes("content:garden", false)
+        .iter()
+        .all(|n| n.path != "huge Garden.MD"));
+    assert!(idx
+        .search_lines("file:huge", false, &["huge Garden.MD".into()], 5)
+        .is_empty());
+}
+
+#[test]
+fn query_search_counts_overlaps_adjacencies_and_unicode() {
+    let idx = Index::from_notes(&[("counts.md", "star warsstar 😀😀 İSTANBUL\n")]);
+    for (query, count) in [
+        ("star OR \"star wars\"", 2),
+        ("😀", 2),
+        ("😀 OR 😀😀", 1),
+        ("i̇stanbul", 1),
+    ] {
+        assert_eq!(idx.search_notes(query, false)[0].count, count, "{query}");
+    }
+    let props = Index::from_notes(&[("props.md", "\u{feff}---\r\nstatus: draft\r\n---\r\nbody\r")]);
+    assert_eq!(
+        serde_json::to_value(props.search_lines("[status:draft]", false, &["props.md".into()], 5))
+            .unwrap(),
+        json!({"props.md":[{"line":2,"text":"status: draft"}]})
+    );
+}

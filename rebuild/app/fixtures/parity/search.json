@@ -1,7 +1,7 @@
 {
   "about": "Which files a query matches in a small vault, with each note's match count and every shown line number. An attachment that matches maps to {}. null means the query has nothing to search for. Keys are a map: order is not part of the result.",
   "typescript": "searchVault in src/shell/searchVault.ts, over parseQuery, matches, shownLines and matchCount",
-  "rust": "todo",
+  "rust": "Index::search_notes + search_lines + passes (index/search.rs)",
   "vaults": {
     "obsidian-1.14.4": {
       "A.md": [

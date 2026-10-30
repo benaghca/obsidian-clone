@@ -47,7 +47,7 @@ Required: `name`, `input` and `expected`. Optional: `rust`, `ts`, `obsidian`, `n
 | `links.json` | `wikilinkTargets` (`src/shell/linksTags.ts`) | `parse_note` (`index/parse.rs`), its non-markdown links |
 | `properties.json` | `splitFrontmatter` + `readProperties` (`src/editor/frontmatter.ts`); the runner drops `line` and `count` | `note_properties` (`index/props.rs`); the runner drops `line` and `count` |
 | `query.json` | `parseQuery` (`src/shell/searchQuery.ts`) | `parse_query` (`index/query.rs`) |
-| `search.json` | `searchVault` (`src/shell/searchVault.ts`) | none yet (plan step 4). Top-level `"rust": "todo"` |
+| `search.json` | `searchVault` (`src/shell/searchVault.ts`) | `Index::search_notes` + `search_lines` + `passes` (`index/search.rs`) |
 
 `properties.json`: `input` is a note's text. The runner joins a line array with `\n`, then calls `splitFrontmatter`. No frontmatter, or one longer than 2,000 lines, is `null`. Otherwise it calls `readProperties` on the lines between the fences and keeps `key`, `type`, and `value`. `null` from `readProperties` (the block is shown as source) is `null` too. An empty `---\n---\n` is `[]`. `line` and `count` are where the property sits in the editor, so they are not in `expected`.
 

@@ -10,29 +10,33 @@ use std::path::Path;
 
 /// The Rust function each corpus file checks, by file name. `None`: no Rust implementation yet,
 /// and the file must say `"rust": "todo"`. A new file needs an entry here (and in parity.test.ts).
-fn runner(file: &str) -> Option<fn(&str, &Map<String, Value>) -> Value> {
+fn runner(file: &str) -> Option<fn(&str, &Map<String, Value>, &Map<String, Value>) -> Value> {
     match file {
         "links" => Some(wikilink_targets),
         "tags" => Some(note_tags),
         "properties" => Some(properties),
         "query" => Some(parse_query),
-        // No Rust search evaluator yet (plan step 4). The file must say `"rust": "todo"`.
-        "search" => None,
+        "search" => Some(search),
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
 }
 
-fn parse_query(input: &str, case: &Map<String, Value>) -> Value {
+fn parse_query(input: &str, case: &Map<String, Value>, _: &Map<String, Value>) -> Value {
     let match_case = case.get("matchCase").and_then(Value::as_bool) == Some(true);
     serde_json::to_value(super::query::parse_query(input, match_case)).unwrap()
 }
 
-fn properties(input: &str, _: &Map<String, Value>) -> Value {
-    let Some(note) = super::props::note_properties(input) else { return Value::Null };
-    note.props.into_iter().map(|p| serde_json::json!({ "key": p.key, "type": p.kind, "value": p.value })).collect()
+fn properties(input: &str, _: &Map<String, Value>, _: &Map<String, Value>) -> Value {
+    let Some(note) = super::props::note_properties(input) else {
+        return Value::Null;
+    };
+    note.props
+        .into_iter()
+        .map(|p| serde_json::json!({ "key": p.key, "type": p.kind, "value": p.value }))
+        .collect()
 }
 
-fn note_tags(input: &str, _: &Map<String, Value>) -> Value {
+fn note_tags(input: &str, _: &Map<String, Value>, _: &Map<String, Value>) -> Value {
     parse_note(input)
         .tags
         .into_iter()
@@ -40,13 +44,67 @@ fn note_tags(input: &str, _: &Map<String, Value>) -> Value {
         .collect()
 }
 
-fn wikilink_targets(input: &str, _: &Map<String, Value>) -> Value {
+fn wikilink_targets(input: &str, _: &Map<String, Value>, _: &Map<String, Value>) -> Value {
     parse_note(input)
         .links
         .into_iter()
         .filter(|l| !l.markdown)
         .map(|l| Value::String(l.target))
         .collect()
+}
+
+/// Exercise the command core, retaining attachment matches for the shared TS reference.
+fn search(input: &str, case: &Map<String, Value>, corpus: &Map<String, Value>) -> Value {
+    let match_case = case.get("matchCase").and_then(Value::as_bool) == Some(true);
+    let Some(query) = super::query::parse_query(input, match_case) else {
+        return Value::Null;
+    };
+    let Some(vault) = case
+        .get("vault")
+        .and_then(Value::as_str)
+        .and_then(|name| corpus.get("vaults")?.get(name)?.as_object())
+    else {
+        return Value::Null;
+    };
+    let owned: Vec<_> = vault
+        .iter()
+        .filter_map(|(path, text)| {
+            let text = match text {
+                Value::String(s) => s.clone(),
+                Value::Array(lines) => lines
+                    .iter()
+                    .map(Value::as_str)
+                    .collect::<Option<Vec<_>>>()?
+                    .join("\n"),
+                _ => return None,
+            };
+            Some((path.as_str(), text))
+        })
+        .collect();
+    let notes: Vec<_> = owned.iter().map(|(p, text)| (*p, text.as_str())).collect();
+    let index = super::Index::from_notes(&notes);
+    let matched = index.search_notes(input, match_case);
+    let paths: Vec<_> = matched.iter().map(|n| n.path.clone()).collect();
+    let lines = index.search_lines(input, match_case, &paths, u32::MAX);
+    let mut out = Map::new();
+    for note in matched {
+        let shown: Vec<_> = lines
+            .get(&note.path)
+            .into_iter()
+            .flatten()
+            .map(|l| l.line)
+            .collect();
+        out.insert(
+            note.path,
+            serde_json::json!({"count": note.count, "lines": shown}),
+        );
+    }
+    for (path, _) in notes {
+        if !super::is_note_path(path) && index.passes(path, &query, match_case) {
+            out.insert(path.to_string(), serde_json::json!({}));
+        }
+    }
+    Value::Object(out)
 }
 
 const KEYS: [&str; 9] = [
@@ -185,7 +243,7 @@ fn check(file: &str, corpus: &Value) -> Vec<String> {
             continue;
         };
         let Some(run) = run else { continue };
-        let actual = run(&input, case);
+        let actual = run(&input, case, corpus);
         let todo = case.get("rust").is_some();
         if todo && actual == *expected {
             problems.push(format!("{at}: now matches; remove its \"rust\": \"todo\""));
@@ -238,7 +296,7 @@ fn todo_markers_are_checked() {
 }
 
 #[test]
-fn search_vault_names_are_checked_without_a_runner() {
+fn search_vault_names_are_checked() {
     let bad_text = serde_json::json!({
         "about": "", "typescript": "", "rust": "todo",
         "vaults": { "one": { "A.md": ["alpha"], "N.md": 1 } },
@@ -257,7 +315,7 @@ fn search_vault_names_are_checked_without_a_runner() {
         "vaults": { "one": { "A.md": ["alpha", "beta"], "B.md": "one line" } },
         "cases": [
             { "name": "bad", "vault": "missing", "input": "a", "expected": null },
-            { "name": "ok", "vault": "one", "matchCase": true, "input": "a", "expected": {} },
+            { "name": "ok", "vault": "one", "matchCase": true, "input": "a", "expected": {"A.md":{"count":3,"lines":[1,2]}} },
             { "name": "flag", "vault": "one", "matchCase": "yes", "input": "a", "expected": {} },
             { "name": "none", "input": "a", "expected": null }
         ]
