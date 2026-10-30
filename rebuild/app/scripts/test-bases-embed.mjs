@@ -37,6 +37,8 @@ Middle line.
 
 Last line.
 `;
+// B5 in an embed: a custom summary reading `this`, grouping added from the header menu.
+const GROUPED = `# Grouped\n\n\`\`\`base\nfilters: 'file.inFolder("EmbedTest")'\nsummaries:\n  where: 'this.file.name + ": " + count'\nviews:\n  - type: table\n    name: Grouped\n    order: [file.name, status]\n    summaries:\n      file.name: where\n\`\`\`\n\nAfter.\n`;
 const SCROLL = `# Scroll\n\n\`\`\`base\nfilters: 'file.inFolder("EmbedBig")'\nviews:\n  - type: table\n    name: Big\n    order: [file.name, n]\n\`\`\`\n\nAfter.\n`;
 
 await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
@@ -59,7 +61,7 @@ await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
     const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }, title));
   // CodeMirror measures on its next frame: settled within a second, or the mismatch is real.
-  const geometry = async label => {
+  const geometry = async (label, needle = 'Same status') => {
     const measure = () => run(() => [...ws.view.contentDOM.children].map(el => {
       const style = getComputedStyle(el);
       const pos = ws.view.posAtDOM(el, 0);
@@ -71,10 +73,10 @@ await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
       assert.ok(Math.abs(row.delta) <= 1, `${label}: ${JSON.stringify(row)}`);
       assert.deepEqual(row.margin, [0, 0], `${label}: direct child vertical margins: ${row.text}`);
     }
-    check(rows.some(r => r.text.includes('Same status')), `${label}: every line and the embedded base within 1px of CodeMirror's heights; no vertical margins`);
+    check(rows.some(r => r.text.includes(needle)), `${label}: every line and the embedded base within 1px of CodeMirror's heights; no vertical margins`);
   };
 
-  await run(async (base, host, scroll) => {
+  await run(async (base, host, scroll, grouped) => {
     const { api } = await import('/src/api.ts');
     window.b4Active = new Set(); window.b4Subscriptions = new Set();
     const mount = ws.embeds.base;
@@ -93,6 +95,7 @@ await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
     await api.createNote('Embed.base', base);
     await api.createNote('Host.md', host);
     await api.createNote('Scroll.md', scroll);
+    await api.createNote('Grouped.md', grouped);
     await api.createNote('Elsewhere.md', '# Elsewhere\n');
     await ws.vault.refreshFiles(); await ws.vault.refreshLinks();
     window.b4Writes = [];
@@ -102,7 +105,7 @@ await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
     const index = propertyIndex(ws), notes = index.notes;
     window.b4Meter = { calls: 0 };
     index.notes = (...args) => { if (new Error().stack.includes('/src/bases/view.ts')) b4Meter.calls++; return notes(...args); };
-  }, EMBED_BASE, HOST, SCROLL);
+  }, EMBED_BASE, HOST, SCROLL, GROUPED);
 
   // 1. Opening the note draws both embeds, with `this` as the note: cold (first property read), then warm.
   const openHost = () => run(async () => {
@@ -223,6 +226,30 @@ await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
   await wait(async () => (await state()).filter(e => e.count).length === 2, 'reading view embeds');
   await geometry('reading');
   await run(() => ws.setMode('live'));
+
+  // 12. Groups and summaries work in a block: `this` in a custom summary is the note,
+  // "Group by this property" writes into the block, and collapsing a group writes nothing.
+  await run(() => ws.open('Grouped.md'));
+  await wait(() => run(() => document.querySelector('.bases-embed .bases-count span')?.textContent === '3 results'), 'grouped embed');
+  await wait(() => run(() => document.querySelector('.bases-embed tfoot [data-property="file.name"]')?.dataset.value === 'Grouped: 3'), 'custom summary reads this');
+  await click(await centre('.bases-embed th[data-property="status"]'), 'right');
+  await menu('Group by this property');
+  await wait(() => run(() => ws.view.state.doc.toString().includes('      file.name: where\n    groupBy:\n      property: note.status\n      direction: ASC\n```')), 'groupBy written into the block');
+  await wait(() => run(() => document.querySelectorAll('.bases-embed .bases-b5-heading').length === 3), 'group headings in the embed');
+  const headings = await run(() => [...document.querySelectorAll('.bases-embed .bases-b5-toggle')].map(b => b.getAttribute('aria-label')));
+  assert.deepEqual([...headings].sort(), ['Xopen (1)', 'done (1)', 'open (1)'].sort());
+  assert.equal(await run(() => document.querySelector('.bases-embed tfoot [data-property="file.name"]').dataset.value), 'Grouped: 3');
+  // The menu's change to the block is saved with the note after its usual pause; collapsing adds no write.
+  await wait(async () => (await source('Grouped.md')).includes('    groupBy:'), 'the note saves its block');
+  await sleep(400);
+  const groupedDoc = await run(() => ws.view.state.doc.toString()), writes = (await run(() => b4Writes)).length;
+  await click(`.bases-embed .bases-b5-toggle[aria-label="${headings[0]}"]`);
+  await wait(() => run(() => document.querySelectorAll('.bases-embed tbody tr[data-path]').length === 2), 'a group collapses');
+  await sleep(400);
+  assert.equal(await run(() => ws.view.state.doc.toString()), groupedDoc, 'collapsing leaves the block alone');
+  assert.equal((await run(() => b4Writes)).length, writes, 'collapsing writes nothing');
+  await geometry('grouped embed', 'Grouped');
+  check(true, 'an embedded block groups from its header menu, sums with `this`, and collapses without writes');
 
   // 11. A 1,000-row embed scrolls inside its capped box, virtualised, with no frame over 20 ms.
   await run(() => ws.open('Scroll.md'));
