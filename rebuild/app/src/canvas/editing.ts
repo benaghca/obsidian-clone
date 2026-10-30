@@ -1,3 +1,4 @@
+import { isNoteFile } from "../paths";
 import { dragPointer, h } from "../shell/dom";
 import { settings } from "../settings/store";
 import { closeMenu, showMenu, SEPARATOR } from "../shell/menu";
@@ -208,7 +209,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     if (node && !selected.has(node.id)) { selected.clear(); selectedEdges.clear(); selected.add(node.id); selection(); }
     if (!selected.size && !selectedEdges.size) return;
     e.preventDefault(); e.stopPropagation();
-    const editable = node && (node.type === "group" || node.type === "text" || node.type === "file" && /\.md$/i.test(node.file ?? ""));
+    const editable = node && (node.type === "group" || node.type === "text" || node.type === "file" && isNoteFile(node.file ?? ""));
     const writable = !canvasReadOnly.has(el);
     showMenu([
       { title: "Zoom to selection", icon: "scan-search", action: menu.zoom },

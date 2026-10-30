@@ -17,6 +17,7 @@ import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { createNote, fileSettings } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
+import { fileName, isNoteFile } from "./paths";
 import { loadTab, type SavedTab, type SavedWorkspace, saveTab } from "./savedLayout";
 import { type CaretPlace, type Group, linkTabs, type OpenWhere, parseViewEntry, pushBack, stepHistory, type Tab, tabFollowsMove, tabForgets, unlinkTab, type ViewType } from "./tabs";
 import { Vault } from "./vault";
@@ -532,7 +533,9 @@ export class Workspace {
     if (!path) {
       if (!name) return;
       // A link to a note that doesn't exist yet: create it (a bare name goes where new notes go).
-      let file = name.replace(/%20/g, " ").replace(/\.md$/i, "");
+      let file = name.replace(/%20/g, " ");
+      if (isNoteFile(file)) file = file.slice(0, -3);
+      else if (fileName(file).toLowerCase() === ".md") return;
       if (!file.includes("/")) {
         const folder = fileSettings.newNoteFolder();
         file = folder ? `${folder}/${file}` : file;

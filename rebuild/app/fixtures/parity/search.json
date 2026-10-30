@@ -219,6 +219,14 @@
       "Emoji.md": [
         "a 😀 b"
       ]
+    },
+    "dot-name": {
+      ".MD": [
+        "secretprobe"
+      ],
+      "Real.md": [
+        "secretprobe also"
+      ]
     }
   },
   "cases": [
@@ -1560,6 +1568,43 @@
         }
       },
       "note": "An emoji in a term is a substring, like any other character."
+    },
+    {
+      "name": "a file named .MD matches its text",
+      "vault": "dot-name",
+      "input": "secretprobe",
+      "expected": {
+        "Real.md": {
+          "count": 1,
+          "lines": [
+            1
+          ]
+        }
+      },
+      "note": "The whole name is .MD, so it is not a note. The word is in its bytes and in Real.md. Only Real.md matches, on line 1. Match case is the same."
+    },
+    {
+      "name": "file:md on a file named .MD",
+      "vault": "dot-name",
+      "input": "file:md",
+      "expected": {
+        ".MD": {},
+        "Real.md": {
+          "count": 0,
+          "lines": []
+        }
+      },
+      "note": "Without match case the folded name .md contains md, so both files match. .MD is an attachment {}, and Real.md is a note with no shown lines. file:MD without match case, and path:.MD without match case, have that same shape."
+    },
+    {
+      "name": "file:MD with match case on a file named .MD",
+      "vault": "dot-name",
+      "input": "file:MD",
+      "matchCase": true,
+      "expected": {
+        ".MD": {}
+      },
+      "note": "Match case compares the file name as typed. .MD contains MD and Real.md does not, so only .MD matches, as an attachment. path:.MD with match case is the same. file:md with match case matches only Real.md, because .MD does not contain the lowercase letters md."
     }
   ]
 }

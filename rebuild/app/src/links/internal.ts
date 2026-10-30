@@ -3,7 +3,7 @@
 // finds its note, and rewriting the links to a note when it is renamed
 // ("Automatically update internal links"). Free of the DOM.
 
-import { fileName, parentDir } from "../paths";
+import { fileName, isNoteFile, parentDir } from "../paths";
 
 export interface NoteLike {
   name: string;
@@ -18,7 +18,7 @@ export interface LinkStyle {
   wikilinks: boolean;
 }
 
-const stripMd = (path: string) => path.replace(/\.md$/i, "");
+const stripMd = (path: string) => (isNoteFile(path) ? path.slice(0, -3) : path);
 const nameOf = (path: string) => stripMd(fileName(path));
 
 /** `to` relative to the folder `fromDir` ("../Other/Note.md"). */
@@ -105,7 +105,7 @@ export function resolveLink(target: string, from: string | null, notes: NoteLike
   const byPath = new Map(notes.map((n) => [n.path.toLowerCase(), n.path]));
   // A note's path with or without its ".md"; any other file (an image in an embed) by its full name.
   const find = (path: string | null) => (path === null ? undefined : (byPath.get(`${path}.md`.toLowerCase()) ?? byPath.get(path.toLowerCase())));
-  const bare = withMd === t ? t.slice(0, -3) : t;
+  const bare = isNoteFile(t) ? t.slice(0, -3) : t;
   const fromDir = parentDir(from ?? "");
   if (t.startsWith("./") || t.startsWith("../")) return find(normalise(`${fromDir}/${bare}`)) ?? null;
   const exact = find(bare);
