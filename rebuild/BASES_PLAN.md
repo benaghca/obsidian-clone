@@ -25,8 +25,8 @@ Written 2026-10-29 on `rebuild/bases-plan-claude` (from `rebuild/integration` `2
   4. Summaries;
   5. embedding.
 
-  List view, the property-type menu and Rust-side evaluation come later, and the Rust part only if it's measured to be needed.
-- **Rows stay evaluated in TypeScript.** Their data already comes from Rust: properties (Step 3), tags (Step 1) and the link index. Evaluating in TypeScript keeps unsaved edits in open notes visible, as today, and avoids a second copy of a whole expression language. A Rust pre-filter is planned only if the 5,000-note numbers in §6 miss their targets.
+  List view and the property-type menu come later. A Rust pre-filter (B7) follows B5 as a real task (Chris, 2026-10-29).
+- **Rows stay evaluated in TypeScript.** Their data already comes from Rust: properties (Step 3), tags (Step 1) and the link index. Evaluating in TypeScript keeps unsaved edits in open notes visible, as today, and avoids a second copy of a whole expression language. A Rust pre-filter (B7) narrows the rows first, after B5 (D5).
 - **Decisions for Chris (§1):** which table layout (three mockups), whether embedding comes before or after Group by and Summaries, and how faithful to stay to Obsidian's toolbar.
 
 ## 1. Decisions for Chris
@@ -37,7 +37,7 @@ Written 2026-10-29 on `rebuild/bases-plan-claude` (from `rebuild/integration` `2
 | D2 | **Card view** (`cards.png`) | A cover from an image property (none if unset), the title, then the view's properties as label/value rows. | As drawn. Cover images are loaded lazily, only for visible cards. |
 | D3 | **Filter editor** (`filter.png`) | Obsidian's structure (All views / This view, nested any/all/none groups, `where property operator value`), plus a **Formula** switch per group that shows and edits the same filter as one expression. | As drawn. The formula line matters because the visual rows can't express everything the language can. |
 | D4 | **Order of the big pieces** | Embedding in notes, before or after Group by + Summaries | **After the formula language, alongside Group by.** Embedding needs `this` (formula work), and it touches the editor, which is a different file set, so it can run in parallel (§8). |
-| D5 | **Rust for rows** | Never; a pre-filter only if measured; or port all evaluation | **A pre-filter only if measured** (§5). |
+| D5 | **Rust for rows** | Never; a pre-filter only if measured; or port all evaluation | **Decided by Chris (2026-10-29): plan the Rust pre-filter B7 as a real task, after B5** (§5; RUST_PERF_PLAN.md P7). Evaluation of the full expression stays in TS. |
 
 ## 2. What exists today (verified in the code)
 
@@ -96,7 +96,6 @@ Written 2026-10-29 on `rebuild/bases-plan-claude` (from `rebuild/integration` `2
 - Drag-to-reorder rows in a sorted view (Obsidian doesn't do it either).
 - Formulas over other bases.
 - Relation and backlink columns beyond `file.backlinks`.
-- A Rust pre-filter (§5), only if measured.
 
 ## 4. The `.base` format we read and write
 
@@ -124,7 +123,7 @@ Written 2026-10-29 on `rebuild/bases-plan-claude` (from `rebuild/integration` `2
 - **One evaluator.** A Rust port of the whole language means two evaluators and a parity burden on every new function.
 - **Speed.** Today's numbers (§6) say TS opens 5,000 notes in 50 ms warm. Only re-evaluation (about 50 ms) needs work, and B0 cuts how often it runs before any Rust is considered.
 
-**The planned Rust step is a pre-filter, and only if §6's 5,000-note targets are missed.** Rust would evaluate the index-friendly leaves of the global and view filters (`file.inFolder`, `file.hasTag`, a property's existence or a literal equality) over its index and return the candidate paths. TS would then evaluate the full filter on those candidates only. That leaves a single expression language, with Rust answering a few leaf questions. A small parity corpus (`fixtures/parity/bases-leaves.json`) would hold both to the same answers.
+**The planned Rust step is a pre-filter (B7, after B5; D5).** At 20,000 and 50,000 notes re-evaluation takes 58 and 163 ms (RUST_PERF_PLAN.md §3.2), well over §6's 30 ms. Rust would evaluate the index-friendly leaves of the global and view filters (`file.inFolder`, `file.hasTag`, a property's existence or a literal equality) over its index and return the candidate paths. TS would then evaluate the full filter on those candidates only. That leaves a single expression language, with Rust answering a few leaf questions. A small parity corpus (`fixtures/parity/bases-leaves.json`) would hold both to the same answers.
 
 ## 6. Performance targets (5,000 notes)
 
@@ -183,7 +182,7 @@ Sizes: big (Claude or Codex, about 500 lines or more), medium (Gemini, 150–400
 | **B4** Embedding in notes | Claude | B1 merged (for `this`) | new `bases/embed.ts`, `editor/embeds.ts` (code-block and `![[x.base]]` hooks), `bases/view.ts` (split the tab into a reusable view + tab wrapper) | Big |
 | **B5** Group by + Summaries | Codex | B1 merged (custom summary formulas), B2 merged (cards share grouping) | new `bases/groups.ts`, new `bases/summaries.ts`, `bases/menus.ts` (header menu), `model.ts` (groupBy/summaries parse) | Big |
 | **B6** Search box, header "Edit property…" / "Property type ›" | Gemini | B4 merged (`view.ts` split) | `bases/menus.ts` toolbar, `bases/view.ts` row filter | Medium |
-| **B7** Rust pre-filter (only if §6 misses) | Codex | B5 merged + a re-measure | new `index/bases.rs`, one command, `fixtures/parity/bases-leaves.json` | Medium |
+| **B7** Rust pre-filter (a real task; RUST_PERF_PLAN.md P7) | Codex | B5 merged; RUST_PERF_PLAN P2 merged | new `index/bases.rs`, one command, `fixtures/parity/bases-leaves.json` | Medium |
 | **Reviews** | Grok reviews B2/B4/B6; Claude reviews B1/B5; Codex reviews B4 | | | |
 
 **Order:**
@@ -191,7 +190,7 @@ Sizes: big (Claude or Codex, about 500 lines or more), medium (Gemini, 150–400
 ```text
 wave 1 (parallel): B0 (Grok, first) · B1 (Codex) · B2 (Gemini) · B3 (Grok; Export CSV now, fuzz once B1 lands)
 wave 2 (parallel): B4 (Claude) · B5 (Codex)      — B4 owns view.ts/editor, B5 owns groups/summaries/menus
-wave 3:            B6 (Gemini) · re-measure §6 → B7 only if needed
+wave 3:            B6 (Gemini) · B7 (Codex, after B5 and RUST_PERF_PLAN P2)
 ```
 
 **Shared-file conflicts:**
