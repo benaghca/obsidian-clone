@@ -11,7 +11,7 @@ import { vaultTags } from "./shell/vaultTags";
 import { propertyIndex } from "./shell/propertyIndex";
 
 vi.mock("./api", () => ({ api: {
-  listFiles: vi.fn(), linkIndex: vi.fn(), readNote: vi.fn(), search: vi.fn(), frontmatter: vi.fn(), tags: vi.fn(),
+  listFiles: vi.fn(), linkIndex: vi.fn(), readNote: vi.fn(), search: vi.fn(), properties: vi.fn(), tags: vi.fn(),
 }, isTauri: false }));
 
 function deferred<T>() {
@@ -33,13 +33,14 @@ it("keeps newer file and link refreshes when older replies arrive last", async (
   const changed = vi.fn(), vault = new Vault(changed, async () => {});
   const first = Promise.all([vault.refreshFiles(), vault.refreshLinks()]);
   const second = Promise.all([vault.refreshFiles(), vault.refreshLinks()]);
-  newFiles.resolve([file("new.md")]);
+  newFiles.resolve([file("new.md"), file("Upper.MD")]);
   const links = { outgoing: { "new.md": ["target.md"] } };
   newLinks.resolve(links);
   await second;
   oldFiles.resolve([file("old.md")]); oldLinks.resolve({ outgoing: {} });
   await first;
-  expect(vault.notes.map(n => n.path)).toEqual(["new.md"]);
+  expect(vault.notes.map(n => n.path)).toEqual(["new.md", "Upper.MD"]);
+  expect(vault.notes[1].name).toBe("Upper");
   expect(vault.links).toBe(links);
   expect(changed.mock.calls).toEqual([["files"], ["links"]]);
 });
@@ -117,15 +118,15 @@ it("does not evict newer tags when an invalidated request fails later", async ()
 });
 
 it("serializes property reads and re-reads a note changed during the first read", async () => {
-  const old = deferred<Record<string, string>>();
-  vi.mocked(api.frontmatter).mockReturnValueOnce(old.promise).mockResolvedValue({ "a.md": "---\nstatus: new\n---" });
+  const old = deferred<Record<string, import("./api").NoteProperties>>();
+  vi.mocked(api.properties).mockReturnValueOnce(old.promise).mockResolvedValue({ "a.md": { props: [{ key: "status", type: "text", value: "new", line: 0, count: 1 }], lines: ["status: new"] } });
   const { ws } = workspace(), index = propertyIndex(ws);
   const first = index.notes();
   expect(index.notes()).toBe(first);
   (ws as { vault: { files: FileEntry[] } }).vault.files[0].mtime_ms = 2;
-  old.resolve({ "a.md": "---\nstatus: old\n---" }); await first;
+  old.resolve({ "a.md": { props: [{ key: "status", type: "text", value: "old", line: 0, count: 1 }], lines: ["status: old"] } }); await first;
   expect((await index.notes()).get("a.md")?.props[0].value).toBe("new");
-  expect(api.frontmatter).toHaveBeenCalledTimes(2);
+  expect(api.properties).toHaveBeenCalledTimes(2);
 });
 
 function navigationHost() {

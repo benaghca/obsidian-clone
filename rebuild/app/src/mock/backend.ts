@@ -1,7 +1,8 @@
 // In-memory stand-in for the Tauri backend, used only outside Tauri.
 // Implements the commands in rebuild/CONTRACT.md against sampleVault().
 
-import type { Backlink, FileEntry, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
+import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
+import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { markdownURL, resolveLink } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
 import { fileName, noteName } from "../paths";
@@ -330,6 +331,16 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     search: ({ query, limit }) => search(query, limit),
     link_index: () => linkData().links,
     backlinks: ({ paths }) => paths.length ? linkData(new Set(paths)).backlinks : {},
+    properties: ({ paths }) => {
+      const out: Record<string, NoteProperties> = {};
+      for (const path of (paths as string[] | null) ?? [...files.keys()]) {
+        if (!/\.md$/i.test(path)) continue;
+        const split = splitFrontmatter(files.get(path)?.content ?? "");
+        const props = split && readProperties(split.lines);
+        if (props) out[path] = { props, lines: split!.lines };
+      }
+      return out;
+    },
     frontmatter: ({ paths }) => {
       const out: Record<string, string> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {

@@ -97,10 +97,8 @@
     {
       "name": "BOM before frontmatter",
       "input": "﻿---\ntags: [a]\n---\n#b",
-      "expected": ["b"],
-      "rust": "todo",
-      "obsidian": ["a", "b"],
-      "note": "TS: frontmatter must start with ---, and a BOM comes first. Rust's parse_note strips a BOM before it reads tags, so Rust gives [a, b], as did the search-based tag reader the app used before step 1 (its lines and frontmatter came from Rust). Obsidian likely reads the frontmatter. Verify."
+      "expected": ["a", "b"],
+      "note": "A UTF-8 BOM before the opening --- is skipped so the frontmatter tags are read, matching Rust's parse_note and Obsidian."
     },
     { "name": "nested tag four deep", "input": "#a/b/c/d", "expected": ["a/b/c/d"], "note": "Obsidian nested tags are slash-separated to any depth. Same list." },
     { "name": "digits with a slash are a tag", "input": "#2024/02 #123/456", "expected": ["2024/02", "123/456"], "note": "A slash is a non-numerical character, so this is a tag even though each side is digits. #1984 alone is not. Obsidian agrees." },

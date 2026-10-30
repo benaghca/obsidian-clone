@@ -65,10 +65,10 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,shot,check})
  await open('Invalid.base');assert.match(await run(()=>document.querySelector('.bases-view').textContent),/Unable to open base/);
  // Metadata saves/add/rename/delete update the existing table, not the base file.
  await open('Tasks.base');
- await run(async()=>{const {api}=await import('/src/api.ts');window.baseReads=[];const read=api.frontmatter;api.frontmatter=paths=>{window.baseReads.push(paths);return read(paths);};});
+ await run(async()=>{const {api}=await import('/src/api.ts');window.baseReads=[];const read=api.properties;api.properties=paths=>{window.baseReads.push(paths);return read(paths);};});
  await run(async()=>{const {api}=await import('/src/api.ts');await api.writeNote('BaseTest/Task A.md','---\nstatus: done\npriority: 3\n---\n# Task A\n');ws.vault.written('BaseTest/Task A.md');});
  await wait(async()=>!(await rows()).includes('BaseTest/Task A.md'),'changed filter updates');
- assert.deepEqual(await run(()=>window.baseReads),[['BaseTest/Task A.md']],'a changed note only rereads its own indexed frontmatter');
+ assert.deepEqual(await run(()=>window.baseReads),[['BaseTest/Task A.md']],'a changed note only rereads its own indexed properties');
  await run(async()=>{const {api}=await import('/src/api.ts');await api.createNote('BaseTest/Added.md','---\nstatus: open\npriority: 9\n---\nAdded\n');await ws.vault.refreshFiles();});
  await wait(async()=>(await rows())[0]==='BaseTest/Added.md','new note updates');
  await run(async()=>{const {api}=await import('/src/api.ts');await api.renamePath('BaseTest/Added.md','BaseTest/Renamed.md');await ws.vault.refreshFiles();});

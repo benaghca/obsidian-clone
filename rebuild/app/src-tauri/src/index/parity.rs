@@ -14,12 +14,16 @@ fn runner(file: &str) -> Option<fn(&str) -> Value> {
     match file {
         "links" => Some(wikilink_targets),
         "tags" => Some(note_tags),
-        // No Rust properties yet (plan step 3). The file must say `"rust": "todo"`.
-        "properties" => None,
+        "properties" => Some(properties),
         // No Rust query parser or search evaluator yet (plan step 4). Both files must say `"rust": "todo"`.
         "query" | "search" => None,
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
+}
+
+fn properties(input: &str) -> Value {
+    let Some(note) = super::props::note_properties(input) else { return Value::Null };
+    note.props.into_iter().map(|p| serde_json::json!({ "key": p.key, "type": p.kind, "value": p.value })).collect()
 }
 
 fn note_tags(input: &str) -> Value {

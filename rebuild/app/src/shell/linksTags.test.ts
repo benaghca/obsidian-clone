@@ -6,6 +6,12 @@ test("wikilink targets skip fenced code and keep repeats", () => {
   expect(wikilinkTargets(text)).toEqual(["A", "B", "A", "C"]);
 });
 
+test("wikilink targets handle escaped pipes, brackets in targets, and ^ without #", () => {
+  expect(wikilinkTargets("| [[Note\\|alias]] | [[Outside\\|alias]] |")).toEqual(["Note", "Outside"]);
+  expect(wikilinkTargets("[[C#^abc]] and [[C^abc]]")).toEqual(["C", "C^abc"]);
+  expect(wikilinkTargets("[[a[b]] [[[Note]]] [[a\\[b]]")).toEqual(["a[b", "[Note", "a\\[b"]);
+});
+
 test("wikilink targets follow CommonMark fence rules and skip inline code", () => {
   const text = [
     "[[Start]] `[[InSingle]]` ``[[InDouble]] ` [[StillInDouble]]`` `unclosed [[AfterUnclosed]]",
@@ -83,4 +89,16 @@ test("frontmatter tags: list, inline list and plain forms, with or without #", (
 test("tagsInText adds frontmatter tags and doesn't read # inside it as tags", () => {
   const text = "---\ntags: [front]\nnote: \"see #notatag\"\n---\n#body\n```\n#code\n```";
   expect(tagsInText(text)).toEqual(["front", "body"]);
+});
+
+test("frontmatterTags and tagsInText skip a leading UTF-8 BOM", () => {
+  // BOM + frontmatter tags
+  expect(frontmatterTags("\uFEFF---\ntags: [a]\n---\n#b")).toEqual({ tags: ["a"], end: 3 });
+  expect(tagsInText("\uFEFF---\ntags: [a]\nnote: #notatag\n---\n#b")).toEqual(["a", "b"]);
+  // BOM + no frontmatter
+  expect(frontmatterTags("\uFEFF#body\n")).toEqual({ tags: [], end: 0 });
+  expect(tagsInText("\uFEFF#body\n")).toEqual(["body"]);
+  // A BOM not at the start does not open frontmatter
+  expect(frontmatterTags("x\uFEFF---\ntags: [a]\n---\n#b")).toEqual({ tags: [], end: 0 });
+  expect(tagsInText("x\uFEFF---\ntags: [a]\n---\n#b")).toEqual(["b"]);
 });

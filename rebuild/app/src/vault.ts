@@ -62,7 +62,7 @@ export class Vault {
     if (mine !== this.filesRequest) return;
     this.files = files;
     this.notes = this.files
-      .filter((f) => !f.is_dir && f.path.endsWith(".md"))
+      .filter((f) => !f.is_dir && f.path.toLowerCase().endsWith(".md"))
       .map((f) => ({ name: noteName(f.path), path: f.path }));
     this.changed("files");
   }

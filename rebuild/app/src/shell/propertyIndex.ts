@@ -1,14 +1,14 @@
 // Every note's properties across the vault, for the All properties view,
 // the Properties block's suggestions and search's [property] terms. Built
-// the first time one of them asks, from the backend's `frontmatter`
-// command (only the frontmatter lines, never a note's body), and kept per
+// the first time one of them asks, from the backend's `properties`
+// command (parsed properties and their frontmatter lines, never a note's body), and kept per
 // note while its modified time stays the same: after a save, or a
 // vault-changed from outside (both mark the file modified), only that note
 // is read again. Notes open in an editor are read from it, so unsaved
 // edits count. Excluded files (Settings → Files and links) are left out.
 
-import { api } from "../api";
-import { fixedType, type Property, type PropertyType, readFrontmatter, readProperties, splitFrontmatter, STORED_TYPES } from "../editor/frontmatter";
+import { api, type NoteProperties } from "../api";
+import { fixedType, type PropertyType, readFrontmatter, STORED_TYPES } from "../editor/frontmatter";
 import type { PropertyHost } from "../editor/host";
 import { compareNames } from "../paths";
 import { settings } from "../settings/store";
@@ -16,11 +16,7 @@ import { kept, perWorkspace } from "../memo";
 import type { Workspace } from "../workspace";
 import { vaultTags } from "./vaultTags";
 
-export interface NoteProperties {
-  props: Property[];
-  /** The frontmatter's lines (between the `---` lines), for showing a property's line. */
-  lines: string[];
-}
+export type { NoteProperties } from "../api";
 
 export interface PropertyName {
   key: string;
@@ -37,11 +33,6 @@ const BY_STORED = Object.fromEntries(Object.entries(STORED_TYPES).map(([type, st
 /** The type chosen for a property name in this vault (types.json), or null: automatic, from its value. */
 const chosenType = (key: string): PropertyType | null => fixedType(key) ?? BY_STORED[settings.propertyTypes[key]] ?? null;
 
-const parse = (lines: string[]): NoteProperties | null => {
-  const props = readProperties(lines);
-  return props ? { props, lines } : null;
-};
-
 /** The workspace's properties index (one for every view that needs it). */
 export const propertyIndex = perWorkspace((ws: Workspace) => {
   const cache = new Map<string, { mtime: number; entry: NoteProperties | null }>();
@@ -53,10 +44,9 @@ export const propertyIndex = perWorkspace((ws: Workspace) => {
     const stale = notes.map((n) => n.path).filter((p) => !ws.editors.isLoaded(p) && cache.get(p)?.mtime !== mtimes.get(p));
     if (stale.length) {
       // Most of the vault (the first read): ask for everything in one go.
-      const blocks = await api.frontmatter(stale.length > notes.length / 2 ? undefined : stale);
+      const blocks = await api.properties(stale.length > notes.length / 2 ? undefined : stale);
       for (const path of stale) {
-        const split = blocks[path] ? splitFrontmatter(blocks[path]) : null;
-        cache.set(path, { mtime: mtimes.get(path) ?? 0, entry: split && parse(split.lines) });
+        cache.set(path, { mtime: mtimes.get(path) ?? 0, entry: blocks[path] ?? null });
       }
     }
     const known = new Set(notes.map((n) => n.path));

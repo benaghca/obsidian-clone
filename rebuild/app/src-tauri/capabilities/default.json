@@ -25,6 +25,8 @@
     "allow-link-index",
     "allow-backlinks",
     "allow-frontmatter",
+    "allow-tags",
+    "allow-properties",
     "allow-read-config",
     "allow-write-config",
     "allow-open-note-window",
