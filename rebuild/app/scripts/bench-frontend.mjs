@@ -1,10 +1,9 @@
 #!/usr/bin/env node
-// Times the page's tag read, one search-view query and one link refresh
-// against the browser mock's synthetic vault (mock/sampleVault.ts,
+// Times the page's tag read, one search-view query (plus JSON.parse and
+// exclusion/sort of a 5,000-entry [{ path, count }] payload) and one link
+// refresh against the browser mock's synthetic vault (mock/sampleVault.ts,
 // `?synthetic=n`, default 5000). The mock is the same one `npm run dev`
-// loads. There is no IPC and no JSON.parse: the figures are the work the
-// page does once the objects are in hand, plus how large those objects are
-// when stringified.
+// loads.
 //
 //   node scripts/bench-frontend.mjs [n]
 //
@@ -73,8 +72,8 @@ try {
   const { api } = await load("api.ts");
   const { Vault } = await load("vault.ts");
   const { vaultTags } = await load("shell/vaultTags.ts");
-  const { searchFacts } = await load("shell/searchFacts.ts");
-  const { parseQuery, matchingNotes } = await load("shell/searchQuery.ts");
+  const { searchResults } = await load("shell/searchRead.ts");
+  const { parseQuery } = await load("shell/searchQuery.ts");
 
   const setupStarted = performance.now();
   const vault = new Vault(() => {}, async () => {});
@@ -88,12 +87,22 @@ try {
   };
   const query = parseQuery("garden");
   if (!query) throw new Error("garden did not parse");
+  const notesJson = JSON.stringify(
+    vault.notes.slice(-n).map((note, i) => ({ path: note.path, count: (i % 40) + 1 })),
+  );
+  const notesJsonBytes = Buffer.byteLength(notesJson);
 
   const tagMs = [];
   let tagNotes = 0;
   let tagUses = 0;
   const searchMs = [];
   let searchMatches = 0;
+  let searchTotal = 0;
+  let searchNotesBytes = 0;
+  let searchLinesBytes = 0;
+  const parseMs = [];
+  const page5kMs = [];
+  let page5kNotes = 0;
   const linkMs = [];
   let linkBytes = 0;
   let outgoingNotes = 0;
@@ -106,12 +115,24 @@ try {
     tagNotes = tags.size;
     tagUses = [...tags.values()].reduce((sum, list) => sum + list.length, 0);
 
-    searchFacts(ws).forget();
     started = performance.now();
-    const facts = await searchFacts(ws).facts([query], false, false);
-    const found = matchingNotes(vault.notes, query, facts, () => false);
+    const rawNotes = await api.searchNotes("garden", false);
+    const found = searchResults(vault.files, rawNotes, (path) => vault.isExcluded(path), "alphabetical");
+    const lines = await api.searchLines("garden", false, found.slice(0, 50).map((note) => note.path), 5);
     searchMs.push(performance.now() - started);
     searchMatches = found.length;
+    searchTotal = found.reduce((sum, note) => sum + note.count, 0);
+    searchNotesBytes = Buffer.byteLength(JSON.stringify(rawNotes));
+    searchLinesBytes = Buffer.byteLength(JSON.stringify(lines));
+
+    started = performance.now();
+    const parsedNotes = JSON.parse(notesJson);
+    const parsedAt = performance.now();
+    const sorted5k = searchResults(vault.files, parsedNotes, (path) => vault.isExcluded(path), "alphabetical");
+    const sortedAt = performance.now();
+    parseMs.push(parsedAt - started);
+    page5kMs.push(sortedAt - started);
+    page5kNotes = sorted5k.length;
 
     started = performance.now();
     await vault.refreshLinks();
@@ -133,6 +154,15 @@ try {
     search_ms: list(searchMs),
     search_median_ms: Number(median(searchMs).toFixed(1)),
     search_matches: searchMatches,
+    search_total: searchTotal,
+    search_notes_json_bytes: searchNotesBytes,
+    search_lines_json_bytes: searchLinesBytes,
+    search_parse_5k_ms: list(parseMs),
+    search_parse_5k_median_ms: Number(median(parseMs).toFixed(1)),
+    search_page_5k_ms: list(page5kMs),
+    search_page_5k_median_ms: Number(median(page5kMs).toFixed(1)),
+    search_parse_5k_bytes: notesJsonBytes,
+    search_page_5k_notes: page5kNotes,
     link_refresh_ms: list(linkMs),
     link_refresh_median_ms: Number(median(linkMs).toFixed(1)),
     link_json_bytes: linkBytes,

@@ -56,7 +56,7 @@ Release search time sits inside section 1's range. Debug search sits on the top 
 
 ## Front end (the mock, in Node)
 
-`node scripts/bench-frontend.mjs 5000` from `rebuild/app`. This loads the real `vaultTags.read`, the search view's query path (`searchFacts` + `matchingNotes`, term `garden`), and `Vault.refreshLinks` through Vite, with `location.search` set to `?synthetic=5000`. That is the dev-page mock: `syntheticVault(5000)` plus the small sample vault (5,007 notes, 5,017 files). No webview, no IPC, no `JSON.parse`. Three runs, caches dropped between them. Median:
+Step 0.2 measured `node scripts/bench-frontend.mjs 5000` from `rebuild/app`. That run loaded `vaultTags.read`, the search view path (`searchFacts` + `matchingNotes`, term `garden`), and `Vault.refreshLinks` through Vite, with `location.search` set to `?synthetic=5000`. That is the dev-page mock: `syntheticVault(5000)` plus the small sample vault (5,007 notes, 5,017 files). No webview, no IPC, and that run did not time `JSON.parse`. The script no longer calls `searchFacts` or `matchingNotes`; the Step 4 section records what it measures now. Three runs, caches dropped between them. Median:
 
 | Work | Median | Runs | What came back |
 |---|---|---|---|
@@ -95,12 +95,27 @@ Measured 2026-10-29 on the same `/tmp/grove-bench-5000` vault (`sha256` `5b03c1b
 | `search_lines("meeting", first 50 paths, limit 5)` | `false` | 50 | 250 lines | **0.08** (`0.2,0.1,0.1`) | **1.05** (`1.2,1.0,1.0`) | 13.1× | 26,385 (26.4 KB) |
 | `search_match(["meeting", "tag:project/alpha", "path:\"Folder 01\""])` | `false` | `5000,346,200` | — | **12.7** (`13.5,12.7,12.5`) | **50.4** (`50.9,50.4,49.6`) | 4.0× | 213,470 (0.21 MB) |
 
+### Front end (`node scripts/bench-frontend.mjs 5000`, after C1-B)
+
+Measured on the 5,007-note (`5,017`-file) mock vault (`?synthetic=5000` plus sample files), replacing the old `searchFacts` + `matchingNotes` path with `api.searchNotes("garden", false)` → `searchResults` (known-file + exclusion filter + `compareFiles("alphabetical")` sort) → `api.searchLines("garden", false, first 50 paths, 5)`, and timing `JSON.parse` plus `searchResults` on a 5,000-entry `[{ path, count }]` JSON string:
+
+| Work | Before (step 0.2) | After (Step 4, C1-B) | Runs (after) | Payload / notes |
+|---|---|---|---|---|
+| Search view query `garden` (mock) | 5.7 ms (`6.5, 5.3, 5.7 ms`; `searchFacts` + `matchingNotes`, no exact counts or 50-row line read) | **13.4 ms** (`api.searchNotes` + exclusion/sort + `api.searchLines` for 50 paths) | `22.7, 13.4, 12.7 ms` | 1,900 notes, exact total `2,950`; `91,971 B` notes (`48.4 B/note`) + `4,162 B` lines (50 paths) |
+| `JSON.parse` of 5,000-entry `[{ path, count }]` | — | **0.4 ms** | `0.4, 0.4, 0.4 ms` | `248,894 B` (`49.8 B/note`, 5,000 synthetic notes) |
+| Page work (`JSON.parse` + exclusion + sort, 5,000 notes) | 7.4 ms (`compareNames` sort alone, §7) | **4.5 ms** (synthetic 5k) / **6.5 ms** (`gen-vault` 5k `meeting`, `NOTES_C1B.md`) | `4.5, 4.5, 4.2 ms` / `6.5, 6.5, 6.4 ms` | `248,894 B` (synthetic 5k) / `292,520 B` (`58.5 B/note`, `/tmp/grove-bench-5000` `meeting`, total `131,948`) |
+| `vaultTags.read()` (Step 1 `api.tags`) | 25 ms (`42, 25, 23 ms`) | **10.9 ms** | `19.4, 10.9, 10.0 ms` | 5,007 notes, 10,996 tag uses |
+| `refreshLinks()` (Step 2 `link_index`) | 7.9 s (`8.3, 7.9, 7.7 s`, 2.25 MB) | **7.8 s** | `8.4, 7.8, 7.6 s` | `639,766 B` (0.64 MB without backlinks); 3,946 notes with outgoing links |
+
+In `bench-frontend.mjs`, `api.searchNotes` and `api.searchLines` run the JS mock (`searchVault`) in the same Node process, and the new path counts all 2,950 occurrences across 1,900 notes plus fetches 50 note rows (work the old 5.7 ms `searchFacts` + `matchingNotes` path did not do). On the first run (`22.7 ms`), `createSearchVault` splits and caches note lines; subsequent runs (`13.4, 12.7 ms`) reuse the split lines as Rust's in-memory `Index` does. In the Tauri app, `search_notes` and `search_lines` run in Rust off the main thread (`19.8 ms` + `0.08 ms` release on `/tmp/grove-bench-5000`), leaving only `JSON.parse` + exclusion + sort (`4.5–6.5 ms` for 5,000 results) and DOM updates on the page thread.
+
 ### Against `STEP4_SEARCH_PLAN.md` §7 targets and D5
 
 - **Backend `search_notes` ≤ 30 ms (release):** **Met** for all 10 queries (1.9–28.8 ms; `meeting` is 19.8 ms).
 - **`search_lines` (50 paths, limit 5) ≤ 5 ms / ≤ 40 KB:** **Met** (0.08 ms release / 1.05 ms debug, 26.4 KB).
 - **`search_match` (3 queries) ≤ 50 ms / ≤ 0.6 MB:** **Met** (12.7 ms release / 50.4 ms debug, 0.21 MB).
-- **Exact counts:** **Met** (`meeting` returns exact `131,948` occurrences across 5,000 notes instead of stopping at the old 20,500-line cap).
+- **Page per keystroke (`JSON.parse` + exclusion + sort, 5,000 results) ≤ 15 ms:** **Met** (**4.5 ms** median on `bench-frontend.mjs 5000`'s `248,894 B` 5,000-note payload, of which `JSON.parse` is **0.4 ms**; **6.5 ms** median on `/tmp/grove-bench-5000`'s `292,520 B` `search_notes("meeting")` payload). Even with D2's ~50–58.5 B/note `{ path, count }` object array, `JSON.parse` is well under 1 ms and total JS page work is under half of the 15 ms target (excluding IPC and WebKitGTK DOM paint).
+- **Exact counts:** **Met** (`meeting` returns exact `131,948` occurrences across 5,000 notes instead of stopping at the old 20,500-line cap; `garden` on the mock returns exact `2,950` across 1,900 notes).
 - **Payload size (D2):** **Missed**, on both caps, with the specified `{ path, count }` shape. An all-match query is `292,520 B` (0.29 MB), over the ≤ 0.25 MB cap. `alpha` (2,376 notes) is `136,624 B`, over the ≤ 100 KB guide for about 2,000 notes. The measured average is **58.5 B/note** (`292,520 / 5,000`), above the ~45 B/note estimate. Paths look like `Folder 00/Sub 0/alpha river 0.md`. The same answer is about 9.4× smaller than the old single-term 3.01 MB payload (`292,520 B` plus the 50-row `26,385 B`). `search_notes` time still meets ≤ 30 ms. This bench does not change the wire shape.
 - **Debug vs release (D5):** **Not inside 3×, and not entirely inside 3–5×.** Full-scan ratios in the table are about 2.3–6.1×. `line:(garden river)` is 6.1× (176.5 ms debug). `garden river` is 5.4×. `search_lines` is 13.1× because both sides are about a millisecond (0.08 ms release, 1.05 ms debug). Grove's own crate compiles at `opt-level = 0` in debug while dependencies compile at `opt-level = 2`. Release is the target. No profile change in this branch.
 
