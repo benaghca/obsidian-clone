@@ -45,7 +45,9 @@ pub fn normalize_rel(rel: &str) -> Result<String, String> {
         || rel.contains('\\')
         || rel.contains('\0')
         || rel.contains(':')
-        || rel.split('/').any(|c| c.is_empty() || c == "." || c == ".." || ignored_component(c))
+        || rel
+            .split('/')
+            .any(|c| c.is_empty() || c == "." || c == ".." || ignored_component(c))
     {
         return Err(format!("invalid path: {rel}"));
     }
@@ -121,18 +123,96 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
             fs::create_dir_all(parent)?;
         }
     }
+    #[cfg(unix)]
+    let directory = fs::File::open(
+        path.parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new(".")),
+    )?;
     let tmp = temp_path_for(path);
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     let write_res = (|| -> io::Result<()> {
-        let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
+        let permissions = match fs::metadata(path) {
+            Ok(old) => Some(old.permissions()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
         file.write_all(bytes)?;
-        file.sync_all()?;
+        if let Some(permissions) = permissions {
+            file.set_permissions(permissions)?;
+        }
+        sync_file(&file)?;
         fs::rename(&tmp, path)?;
+        #[cfg(unix)]
+        sync_file(&directory)?;
         Ok(())
     })();
+    drop(file);
     if write_res.is_err() {
         let _ = fs::remove_file(&tmp);
     }
     write_res
+}
+
+#[cfg(test)]
+thread_local! { static SYNC_TIME: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) }; }
+#[cfg(test)]
+pub fn sync_time() -> std::time::Duration {
+    SYNC_TIME.with(|v| v.get())
+}
+fn sync_file(file: &fs::File) -> io::Result<()> {
+    #[cfg(test)]
+    let start = std::time::Instant::now();
+    let result = file.sync_all();
+    #[cfg(test)]
+    SYNC_TIME.with(|v| v.set(v.get() + start.elapsed()));
+    result
+}
+/// Unix exposes directory fsync; std has no equivalent on other targets.
+fn sync_parent(path: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        let parent = path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or(Path::new("."));
+        sync_file(&fs::File::open(parent)?)?;
+    }
+    #[cfg(not(unix))]
+    let _ = path;
+    Ok(())
+}
+
+/// Remove abandoned write temps without following links or deleting active writes.
+/// Each live process owns temps bearing its PID; startup never steals those files.
+pub fn sweep_temps(root: &Path) -> io::Result<usize> {
+    let mut removed = 0;
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if kind.is_dir() {
+            if ![".obsidian", ".git", ".trash"].contains(&name.as_ref()) {
+                removed += sweep_temps(&entry.path())?;
+            }
+        } else if kind.is_file() && name.ends_with(TEMP_MARK) {
+            let base = name.trim_end_matches(TEMP_MARK).trim_end_matches('.');
+            let pid = base.rsplit('.').nth(1).and_then(|s| s.parse::<u32>().ok());
+            let live = pid.is_some_and(|p| {
+                p == std::process::id()
+                    || cfg!(target_os = "linux") && Path::new("/proc").join(p.to_string()).exists()
+            });
+            if !live {
+                fs::remove_file(entry.path())?;
+                removed += 1;
+            }
+        }
+    }
+    if removed > 0 {
+        sync_parent(&root.join("cleanup"))?;
+    }
+    Ok(removed)
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
@@ -251,6 +331,22 @@ mod tests {
             "temp files left behind: {names:?}"
         );
         assert_eq!(names, vec!["nested".to_string(), "note.md".to_string()]);
+    }
+
+    #[test]
+    fn failed_atomic_replace_cleans_its_temp_and_preserves_the_destination() {
+        let dir = tmp_dir("atomic-failure");
+        let destination = dir.path.join("folder.md");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("kept"), "unchanged").unwrap();
+        assert!(atomic_write(&destination, b"new").is_err());
+        assert_eq!(
+            fs::read_to_string(destination.join("kept")).unwrap(),
+            "unchanged"
+        );
+        assert!(walk_names(&dir.path)
+            .iter()
+            .all(|name| !name.contains(TEMP_MARK)));
     }
 
     #[test]
