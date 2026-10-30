@@ -56,7 +56,7 @@ Release search time sits inside section 1's range. Debug search sits on the top 
 
 ## Front end (the mock, in Node)
 
-`node scripts/bench-frontend.mjs 5000` from `rebuild/app`. This loads the real `vaultTags.read`, the search view's query path (`searchFacts` + `matchingNotes`, term `garden`), and `Vault.refreshLinks` through Vite, with `location.search` set to `?synthetic=5000`. That is the dev-page mock: `syntheticVault(5000)` plus the small sample vault (5,007 notes, 5,017 files). No webview, no IPC, no `JSON.parse`. Three runs, caches dropped between them. Median:
+Step 0.2 measured `node scripts/bench-frontend.mjs 5000` from `rebuild/app`. That run loaded `vaultTags.read`, the search view path (`searchFacts` + `matchingNotes`, term `garden`), and `Vault.refreshLinks` through Vite, with `location.search` set to `?synthetic=5000`. That is the dev-page mock: `syntheticVault(5000)` plus the small sample vault (5,007 notes, 5,017 files). No webview, no IPC, and that run did not time `JSON.parse`. The script no longer calls `searchFacts` or `matchingNotes`; the Step 4 section records what it measures now. Three runs, caches dropped between them. Median:
 
 | Work | Median | Runs | What came back |
 |---|---|---|---|
