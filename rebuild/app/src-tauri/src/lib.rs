@@ -25,7 +25,7 @@ mod vault;
 mod watch;
 
 use crate::index::NoteProperties;
-use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, VaultInfo};
+use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
 use std::sync::{mpsc, Mutex};
@@ -97,6 +97,9 @@ pub fn run() {
             rename_path,
             delete_path,
             search,
+            search_notes,
+            search_lines,
+            search_match,
             link_index,
             backlinks,
             link_sources,
@@ -327,6 +330,39 @@ fn properties(
     paths: Option<Vec<String>>,
 ) -> Result<BTreeMap<String, NoteProperties>, String> {
     with_vault(&state, |v| Ok(v.index.properties(paths.as_deref())))
+}
+
+/// Matching notes and exact occurrence counts, in vault path order.
+#[tauri::command(async)]
+fn search_notes(
+    state: State<'_, AppState>,
+    query: String,
+    match_case: bool,
+) -> Result<Vec<SearchNote>, String> {
+    with_vault(&state, |v| Ok(v.index.search_notes(&query, match_case)))
+}
+
+/// A separately evaluated page of shown lines; paths no longer matching are omitted.
+#[tauri::command(async)]
+fn search_lines(
+    state: State<'_, AppState>,
+    query: String,
+    match_case: bool,
+    paths: Vec<String>,
+    limit: u32,
+) -> Result<BTreeMap<String, Vec<SearchLine>>, String> {
+    with_vault(&state, |v| {
+        Ok(v.index.search_lines(&query, match_case, &paths, limit))
+    })
+}
+
+/// Graph filter/colour-group matches, including attachments but never folders.
+#[tauri::command(async)]
+fn search_match(
+    state: State<'_, AppState>,
+    queries: Vec<String>,
+) -> Result<Vec<Vec<String>>, String> {
+    with_vault(&state, |v| Ok(v.index.search_match(&queries)))
 }
 
 #[cfg(test)]

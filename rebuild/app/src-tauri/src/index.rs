@@ -9,6 +9,7 @@ mod parse;
 mod props;
 pub use props::NoteProperties;
 mod query;
+mod search;
 mod tags;
 mod backlinks;
 mod link_sources;
