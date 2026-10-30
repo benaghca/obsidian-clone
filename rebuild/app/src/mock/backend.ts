@@ -3,7 +3,7 @@
 
 import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, SearchHit, SearchNote, SearchLine, VaultInfo } from "../api";
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
-import { linkSpellings, markdownURL, resolveLink } from "../links/internal";
+import { linkResolver, linkSpellings, markdownURL } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
 import { fileName, isNoteFile, noteName } from "../paths";
 import { createSearchVault } from "../shell/searchVault";
@@ -228,6 +228,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
   function linkData(wanted?: Set<string>): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
     const notes = [...files.keys()].filter((path) => isNoteFile(path) || !/\.md$/i.test(path)).map((path) => ({ name: noteName(path), path }));
+    const resolve = linkResolver(notes);
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
     const markdown: Record<string, string[]> = {};
@@ -263,7 +264,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
         }
         for (const m of scan.matchAll(WIKILINK)) {
           const name = m[1].trim();
-          const target = resolveLink(name, path, notes);
+          const target = resolve(name, path);
           if (!target) {
             unknown(name);
             continue;
@@ -274,7 +275,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
         for (const m of scan.matchAll(MDLINK)) {
           const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
           if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
-          const hit = resolveLink(raw, path, notes);
+          const hit = resolve(raw, path);
           if (hit) {
             md.add(hit);
             if (wanted?.has(hit)) (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });

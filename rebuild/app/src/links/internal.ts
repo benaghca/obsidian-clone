@@ -92,17 +92,51 @@ function normalise(path: string): string | null {
   return out.join("/");
 }
 
+interface NoteIndex {
+  length: number;
+  /** Lowercase path to the original path. Two paths that differ only by case: the later one wins. */
+  byPath: Map<string, string>;
+  /** `note.name`, lowercased, in the order the notes appear. */
+  byName: Map<string, NoteLike[]>;
+}
+
+const noteIndexes = new WeakMap<NoteLike[], NoteIndex>();
+
+/**
+ * One path and name index for a file snapshot. Callers pass the same array for
+ * every link in that snapshot (the mock link index, a rename, the open vault's
+ * notes). Building the path map inside each lookup was the cold-open stall.
+ * A later push or pop builds the index again; replacing the array always does.
+ */
+function indexNotes(notes: NoteLike[]): NoteIndex {
+  const cached = noteIndexes.get(notes);
+  if (cached && cached.length === notes.length) return cached;
+  const byPath = new Map<string, string>();
+  const byName = new Map<string, NoteLike[]>();
+  for (const n of notes) {
+    byPath.set(n.path.toLowerCase(), n.path);
+    const key = n.name.toLowerCase();
+    const group = byName.get(key);
+    if (group) group.push(n);
+    else byName.set(key, [n]);
+  }
+  const index = { length: notes.length, byPath, byName };
+  noteIndexes.set(notes, index);
+  return index;
+}
+
 /**
  * The note a link target points at, as Obsidian resolves it: a path from the
  * vault folder, a path from the linking note's folder, or a note name (any
  * case; with clashes the one nearest the linking note's folder wins).
  * Markdown link destinations may be percent-encoded.
+ * `index` belongs to `notes` (see `indexNotes`).
  */
-export function resolveLink(target: string, from: string | null, notes: NoteLike[]): string | null {
+function resolveIndexed(notes: NoteLike[], index: NoteIndex, target: string, from: string | null): string | null {
   const t = bareTarget(target);
   if (!t) return null;
   const withMd = /\.md$/i.test(t) ? t : `${t}.md`;
-  const byPath = new Map(notes.map((n) => [n.path.toLowerCase(), n.path]));
+  const byPath = index.byPath;
   // A note's path with or without its ".md"; any other file (an image in an embed) by its full name.
   const find = (path: string | null) => (path === null ? undefined : (byPath.get(`${path}.md`.toLowerCase()) ?? byPath.get(path.toLowerCase())));
   const bare = isNoteFile(t) ? t.slice(0, -3) : t;
@@ -113,15 +147,24 @@ export function resolveLink(target: string, from: string | null, notes: NoteLike
   if (t.includes("/")) {
     const hit = find(normalise(`${fromDir}/${bare}`));
     if (hit) return hit;
-    // A partial path: any note (or file) whose path ends with it.
+    // A partial path: any note (or file) whose path ends with it. First in the snapshot wins.
     const tails = [`/${withMd.toLowerCase()}`, `/${t.toLowerCase()}`];
     return notes.find((n) => tails.some((tail) => `/${n.path.toLowerCase()}`.endsWith(tail)))?.path ?? null;
   }
   const name = nameOf(withMd).toLowerCase();
-  const matches = notes.filter((n) => n.name.toLowerCase() === name);
+  const matches = index.byName.get(name) ?? [];
   if (matches.length <= 1) return matches[0]?.path ?? null;
   // Several notes share the name: the one in the linking note's folder, else the shallowest.
   return (matches.find((n) => parentDir(n.path) === fromDir) ?? [...matches].sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0]).path;
+}
+
+/** Resolve every target against one snapshot. The index is built once for `notes`. */
+export function linkResolver(notes: NoteLike[]): (target: string, from: string | null) => string | null {
+  return (target, from) => resolveIndexed(notes, indexNotes(notes), target, from);
+}
+
+export function resolveLink(target: string, from: string | null, notes: NoteLike[]): string | null {
+  return resolveIndexed(notes, indexNotes(notes), target, from);
 }
 
 /**
