@@ -387,9 +387,15 @@ mod tests {
         fs::write(&path, "old").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
         atomic_write(&path, b"one").unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
         atomic_write_durable(&path, b"two").unwrap();
-        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
         assert_eq!(fs::read_to_string(&path).unwrap(), "two");
         assert!(walk_names(&dir.path)
             .iter()
