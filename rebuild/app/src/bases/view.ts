@@ -19,6 +19,8 @@ import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
 import type { Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
+import { createGroupedView } from "./groups"; // B5 presentation hook; B4 owns this host.
+import { createCardGrid } from "./cards"; // B5 delegates the existing renderer.
 
 /** How long a burst of typing waits before the open base rebuilds. Matches the note save delay. */
 const DOC_QUIET_MS = 300;
@@ -249,8 +251,10 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     } else td.textContent = String(value);
     return td;
   }
+  const groupedView = createGroupedView({ el, scroller, table, body, ws, group, cell, header: menus.header, createCards: createCardGrid, repaint: () => paint(true) }); // B5
   function paint(force = false) {
     if (!model || gone || editing()) return;
+    if (groupedView.paint(model, selected, force)) return; // B5: grouped virtualization owns the body.
     const rowHeight=model.rowHeight, virtual = selected.length > 200, first = virtual ? Math.min(Math.max(0, selected.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
     if (!force && first === start) return;
     start = first;
@@ -323,10 +327,11 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
             return width;
         });
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
+        if (!await groupedView.update(model!, selected, types, () => gone || dirty)) continue; // B5: sliced aggregation, cancellable.
         paint(true);
       }
     } catch (error) {
-      if (!gone) { model = null; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
+      if (!gone) { groupedView.clear(); /* B5 */ model = null; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
     } finally { running = false; }
   }
   let deferred = false;
@@ -391,5 +396,5 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     } else if (next.clear) { clearTimeout(timer); timer = 0; }
   });
   void update();
-  return { el, dispose() { gone = true; controls.dispose(); menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
+  return { el, dispose() { gone = true; groupedView.dispose(); /* B5 */ controls.dispose(); menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
 }

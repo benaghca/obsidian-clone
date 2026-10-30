@@ -119,3 +119,4 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,shot,check})
 },{height:800,screenshots:shots.pathname});
 
 await import('./test-bases-b0.mjs');
+await import('./test-bases-groups.mjs');

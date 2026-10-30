@@ -14,6 +14,8 @@ import { newRow, rowSeed } from "./newRow";
 import type { Value } from "./expression";
 import { mapping } from "./yaml";
 import { configureView } from "./config";
+import { writeViewSetting } from "./groups";
+import { SUMMARY_NAMES, summaryFor } from "./summaries";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
@@ -81,7 +83,20 @@ export function baseMenus(ws: Workspace, path: string, current: () => Model, typ
   function header(e: MouseEvent,key: string) {
     e.preventDefault();
     const sort=(direction:Sort["direction"])=>write("sort",b=>[{property:key,direction},...sortsOf(b).filter(s=>!same(s.property,key))]);
-    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",disabled:true},{title:"Group by this property",icon:"group",disabled:true},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",disabled:true},SEPARATOR,{title:"Property type",icon:"type",disabled:true}],{x:e.clientX,y:e.clientY});
+    const group=(direction?: "ASC"|"DESC")=>save((source,b)=>writeViewSetting(source,"groupBy",direction?{property:propertyId(key),direction}:undefined,b.viewIndex));
+    const summarize=(name?:string)=>save((source,b)=>{
+      const choices={...mapping(b.view.summaries)};delete choices[key];delete choices[propertyId(key)];delete choices[noteKey(key)];
+      if(name)choices[propertyId(key)]=name;
+      return writeViewSetting(source,"summaries",Object.keys(choices).length?choices:undefined,b.viewIndex);
+    });
+    const activeGroup=!!current().groupBy&&same(current().groupBy!.property,key);
+    const summaryItems=():MenuItems=>[
+      {title:"None",checked:!summaryFor(current().summaryPlan,key),action:()=>summarize()},
+      ...SUMMARY_NAMES.map(name=>({title:name,checked:summaryFor(current().summaryPlan,key)?.toLowerCase()===name.toLowerCase(),action:()=>summarize(name)})),
+      current().summaryPlan.custom.size>0&&SEPARATOR,
+      ...[...current().summaryPlan.custom.keys()].map(name=>({title:`Custom: ${name}`,checked:summaryFor(current().summaryPlan,key)===`custom.${name}`,action:()=>summarize(`custom.${name}`)})),
+    ];
+    showMenu([{title:"Hide column",icon:"eye-off",action:()=>hide(key)},{title:"Summarize...",icon:"sigma",submenu:summaryItems},{title:"Group by this property",icon:"group",checked:activeGroup,action:()=>group("ASC")},activeGroup&&{title:"Group A → Z",checked:current().groupBy!.direction==="ASC",action:()=>group("ASC")},activeGroup&&{title:"Group Z → A",checked:current().groupBy!.direction==="DESC",action:()=>group("DESC")},activeGroup&&{title:"Clear grouping",action:()=>group()},SEPARATOR,{title:"Sort A → Z",icon:"arrow-down-a-z",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===1),action:()=>sort("ASC")},{title:"Sort Z → A",icon:"arrow-up-z-a",checked:current().sorts.some(s=>same(s.property,key)&&s.direction===-1),action:()=>sort("DESC")},current().sorts.some(s=>same(s.property,key)) && {title:"Clear sort",icon:"list-x",danger:true,action:()=>write("sort",b=>sortsOf(b).filter(s=>!same(s.property,key)))},SEPARATOR,{title:"Edit property...",icon:"pen-line",disabled:true},SEPARATOR,{title:"Property type",icon:"type",disabled:true}],{x:e.clientX,y:e.clientY});
   }
   function views(at: HTMLElement) {
     const configure=()=>configureView(at,current(),(key,value)=>save((source,b)=>writeView(source,key,value,b.viewIndex)),()=>draw(true));
