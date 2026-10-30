@@ -13,7 +13,7 @@ const clamp = (scale: number) => Math.max(1 / 16, Math.min(2, scale));
 export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void) {
   let state = canvasViewports.get(tab);
   if (state?.path !== path) state = undefined;
-  let bounds: Bounds | null = null, width = 0, height = 0, frame = 0;
+  let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "";
   let space = false, dragging = false, suppressClick = false;
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
@@ -32,6 +32,12 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     if (!state || !width || !height) return;
     const { cx, cy, scale } = state;
     const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
+    canvasViewports.set(tab, state);
+    // A card drag redraws with the same viewport on every move. Writing a rule
+    // of the adopted sheet, even with the same value, restyles the whole page.
+    const key = `${x} ${y} ${scale} ${width} ${height}`;
+    if (key === drawn) return;
+    drawn = key;
     controlSize.setProperty("--canvas-inverse-scale", String(1 / scale));
     // Only the toolbar needs viewport bounds; keep pan/zoom out of child DOM.
     for (const [side, value] of [["left", (10 - x) / scale], ["right", (width - 10 - x) / scale], ["top", (10 - y) / scale], ["bottom", (height - 10 - y) / scale]] as const)
@@ -42,7 +48,6 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     while (grid < 10) grid *= 2;
     el.style.backgroundSize = `${grid}px ${grid}px`;
     el.style.backgroundPosition = `${x}px ${y}px`;
-    canvasViewports.set(tab, state);
   }
   const schedule = () => { frame ||= requestAnimationFrame(draw); };
   function fit(next = bounds, max = 1) {

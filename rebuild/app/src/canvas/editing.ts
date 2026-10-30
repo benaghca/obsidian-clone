@@ -4,6 +4,7 @@ import { settings } from "../settings/store";
 import { closeMenu, showMenu, SEPARATOR } from "../shell/menu";
 import { canvasReadOnly, selectionMenu } from "./controls";
 import type { BackgroundPicker } from "./groups";
+import { alignTargets, guidesFor, snapOffset, type Guide } from "./align";
 import { closestSide, type CanvasEdge, type CanvasNode, type Side } from "./model";
 
 const geometry = ["x", "y", "width", "height"] as const;
@@ -13,7 +14,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   commit: (changed: CanvasNode[], deleted?: Set<string>, changedEdges?: CanvasEdge[], deletedEdges?: Set<string>, added?: CanvasNode[]) => void,
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
-  history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker) {
+  history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker,
+  guides: (list: Guide[], radius: number) => void) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -141,6 +143,13 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       const before = affected.map(n => ({ ...n }));
       const origin = before.find(n => n.id === node.id)!;
       const scale = new DOMMatrix(getComputedStyle(world).transform).a;
+      // Alignment: the other cards' edges and centers, sorted once for the whole drag.
+      const targets = alignTargets(nodes.filter(n => !affected.includes(n)));
+      const within = 6 / scale;
+      const left0 = Math.min(...before.map(n => n.x)), top0 = Math.min(...before.map(n => n.y));
+      const span = { width: Math.max(...before.map(n => n.x + n.width)) - left0, height: Math.max(...before.map(n => n.y + n.height)) - top0 };
+      let shown = "";
+      const show = (list: Guide[]) => { const key = JSON.stringify(list); if (key !== shown) { shown = key; guides(list, 3 / scale); } };
       cancel = dragPointer(e, el, move => {
         let dx = (move.clientX - e.clientX) / scale, dy = (move.clientY - e.clientY) / scale;
         if (!suppress && Math.hypot(move.clientX - e.clientX, move.clientY - e.clientY) < 3) return;
@@ -148,32 +157,49 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         if (!side && move.shiftKey) { if (Math.abs(dx) >= Math.abs(dy)) dy = 0; else dx = 0; }
         const step = move.altKey || !settings.get("canvas.json").snapToGrid ? 1 : 20;
         const snap = (v: number) => Math.round(v / step) * step;
+        const align = !move.altKey && settings.get("canvas.json").snapToObjects;
+        const found: Guide[] = [];
         if (side) {
           const old = before[0];
-          let left = old.x, top = old.y, right = old.x + old.width, bottom = old.y + old.height;
-          if (side.includes("left")) left = Math.min(right - 50, snap(old.x + dx));
-          if (side.includes("right")) right = Math.max(left + 50, snap(old.x + old.width + dx));
-          if (side.includes("top")) top = Math.min(bottom - 50, snap(old.y + dy));
-          if (side.includes("bottom")) bottom = Math.max(top + 50, snap(old.y + old.height + dy));
-          Object.assign(node, { x: left, y: top, width: right - left, height: bottom - top });
+          const edge = { left: old.x, top: old.y, right: old.x + old.width, bottom: old.y + old.height };
+          if (side.includes("left")) edge.left = snap(old.x + dx);
+          if (side.includes("right")) edge.right = snap(old.x + old.width + dx);
+          if (side.includes("top")) edge.top = snap(old.y + dy);
+          if (side.includes("bottom")) edge.bottom = snap(old.y + old.height + dy);
+          // Only the dragged edges align: 0 is the start edge, 1 the end edge.
+          const stops = (start: string, end: string) => [...side.includes(start) ? [0] : [], ...side.includes(end) ? [1] : []];
+          const box = () => ({ x: edge.left, y: edge.top, width: edge.right - edge.left, height: edge.bottom - edge.top });
+          if (align) for (const [axis, start, end] of [["x", "left", "right"], ["y", "top", "bottom"]] as const) {
+            const offset = snapOffset(box(), axis, targets, within, stops(start, end));
+            if (side.includes(start)) edge[start] += offset; else if (side.includes(end)) edge[end] += offset;
+          }
+          if (side.includes("left")) edge.left = Math.min(edge.right - 50, edge.left);
+          if (side.includes("right")) edge.right = Math.max(edge.left + 50, edge.right);
+          if (side.includes("top")) edge.top = Math.min(edge.bottom - 50, edge.top);
+          if (side.includes("bottom")) edge.bottom = Math.max(edge.top + 50, edge.bottom);
+          if (align) found.push(...guidesFor(box(), "x", targets, stops("left", "right")), ...guidesFor(box(), "y", targets, stops("top", "bottom")));
+          Object.assign(node, box());
         } else {
           dx = dx === 0 ? 0 : snap(origin.x + dx) - origin.x;
           dy = dy === 0 ? 0 : snap(origin.y + dy) - origin.y;
-          if (!move.altKey && settings.get("canvas.json").snapToObjects) {
-            for (const [axis, size] of [["x", "width"], ["y", "height"]] as const) {
+          if (align) {
+            // The whole moving selection (a group with its cards) aligns as one box.
+            const box = { x: left0 + dx, y: top0 + dy, ...span };
+            for (const axis of ["x", "y"] as const) {
               if (move.shiftKey && (axis === "x" ? dx === 0 : dy === 0)) continue;
-              let best = 5 / scale, offset = 0;
-              for (const other of nodes) if (!affected.includes(other)) for (const edge of [0, .5, 1]) for (const at of [0, .5, 1]) {
-                const delta = other[axis] + other[size] * edge - (origin[axis] + (axis === "x" ? dx : dy) + origin[size] * at);
-                if (Math.abs(delta) < best) { best = Math.abs(delta); offset = delta; }
-              }
+              const offset = snapOffset(box, axis, targets, within);
+              box[axis] += offset;
               if (axis === "x") dx += offset; else dy += offset;
             }
+            found.push(...guidesFor(box, "x", targets), ...guidesFor(box, "y", targets));
           }
           for (const [i, n] of affected.entries()) { n.x = before[i].x + dx; n.y = before[i].y + dy; }
         }
-        repaint(affected);
+        show(found);
+        // The selection is the same while it moves: only reposition its menu.
+        paint(affected); menu.place();
       }, cancelled => {
+        show([]);
         if (!cancelled && !suppress && removeOnClick) { selected.delete(node.id); selection(); }
         finish(before, cancelled);
       }, false);

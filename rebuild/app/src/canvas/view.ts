@@ -24,6 +24,7 @@ import { groupBackground } from "./groups";
 import { editNoteCard } from "./note";
 import { editCanvasLabel } from "./labels";
 import { edgeCurve, readCanvas, type CanvasEdge } from "./model";
+import type { Guide } from "./align";
 
 const NS = "http://www.w3.org/2000/svg";
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>, ...children: SVGElement[]) {
@@ -119,7 +120,15 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const { nodes, edges } = readCanvas(source);
     const bounds = boundsOf();
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
-    world.append(drawing);
+    // Alignment guides while a card is dragged: lines in board units, dots sized for the zoom.
+    const guideLayer = svg("svg", { class: "canvas-guides", overflow: "visible" });
+    world.append(drawing, guideLayer);
+    const showGuides = (guides: Guide[], radius: number) => guideLayer.replaceChildren(...guides.flatMap(g => {
+      const point = (along: number) => g.axis === "y" ? [along, g.at] : [g.at, along];
+      const [x1, y1] = point(g.from), [x2, y2] = point(g.to);
+      return [svg("line", { x1: String(x1), y1: String(y1), x2: String(x2), y2: String(y2) }),
+        ...g.dots.map(dot => { const [cx, cy] = point(dot); return svg("circle", { cx: String(cx), cy: String(cy), r: String(radius) }); })];
+    }));
     const edits = new Map<string, (line?: number, refresh?: () => void) => void>();
     const backgrounds = new Map<string, () => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
@@ -358,7 +367,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           updateEdge(record); refresh();
         }
       });
-    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el))));
+    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);
