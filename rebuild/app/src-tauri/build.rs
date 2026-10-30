@@ -19,6 +19,7 @@ fn main() {
             "search",
             "link_index",
             "backlinks",
+            "link_sources",
             "frontmatter",
             "tags",
             "properties",

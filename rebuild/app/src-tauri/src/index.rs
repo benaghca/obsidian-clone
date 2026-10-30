@@ -10,6 +10,7 @@ mod props;
 pub use props::NoteProperties;
 mod tags;
 mod backlinks;
+mod link_sources;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]

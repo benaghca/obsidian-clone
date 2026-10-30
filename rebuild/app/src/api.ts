@@ -116,6 +116,12 @@ export const api = {
   linkIndex: () => call<LinkIndex>("link_index"),
   /** Linked mentions for the requested targets only; targets with none are omitted. */
   backlinks: (paths: string[]) => call<Record<string, Backlink[]>>("backlinks", { paths }),
+  /**
+   * Notes that might link to `paths`: resolved links, plus text that mentions
+   * one of their names (bare, `%20`, `encodeDest`, or escaped parentheses).
+   * Fetch this before `renamePath`. No note cap and no hit cap.
+   */
+  linkSources: (paths: string[]) => call<string[]>("link_sources", { paths }),
   /** Each note's frontmatter block (`---` lines included), for `paths` or every note; notes without one are left out. */
   frontmatter: (paths?: string[]) => call<Record<string, string>>("frontmatter", { paths: paths ?? null }),
   properties: (paths?: string[]) => call<Record<string, NoteProperties>>("properties", { paths: paths ?? null }),

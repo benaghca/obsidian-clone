@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-link-sources"
+description = "Enables the link_sources command without any pre-configured scope."
+commands.allow = ["link_sources"]
+
+[[permission]]
+identifier = "deny-link-sources"
+description = "Denies the link_sources command without any pre-configured scope."
+commands.deny = ["link_sources"]
