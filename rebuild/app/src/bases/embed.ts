@@ -11,7 +11,7 @@ import type { BaseFile } from "./menus";
 import { baseFile, createBase } from "./view";
 
 export function mountBaseEmbed(ws: Workspace, parent: HTMLElement, embed: BaseEmbed, view: EditorView) {
-  let yaml = embed.yaml ?? "", write = embed.write;
+  let yaml = embed.yaml ?? "", write = embed.write, host = embed.host;
   const block: BaseFile = {
     read: async () => yaml,
     async write(text) {
@@ -23,7 +23,8 @@ export function mountBaseEmbed(ws: Workspace, parent: HTMLElement, embed: BaseEm
     group: ws.editors.groupOfView(view) ?? ws.activeGroup,
     file: embed.path ? baseFile(ws, embed.path) : block,
     watch: embed.path,
-    host: embed.host,
+    // Pass the resolver through. Evaluating it here would freeze the path from before a rename.
+    host: () => typeof host === "function" ? host() : host,
     viewIndex: 0,
     viewName: embed.view || undefined,
   });
@@ -31,6 +32,7 @@ export function mountBaseEmbed(ws: Workspace, parent: HTMLElement, embed: BaseEm
   return {
     update(next: BaseEmbed) {
       write = next.write;
+      host = next.host;
       if (next.yaml === undefined || next.yaml === yaml) return;
       yaml = next.yaml;
       base.reload();

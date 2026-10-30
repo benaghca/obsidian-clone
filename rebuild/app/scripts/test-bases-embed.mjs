@@ -41,7 +41,7 @@ Last line.
 const GROUPED = `# Grouped\n\n\`\`\`base\nfilters: 'file.inFolder("EmbedTest")'\nsummaries:\n  where: 'this.file.name + ": " + count'\nviews:\n  - type: table\n    name: Grouped\n    order: [file.name, status]\n    summaries:\n      file.name: where\n\`\`\`\n\nAfter.\n`;
 const SCROLL = `# Scroll\n\n\`\`\`base\nfilters: 'file.inFolder("EmbedBig")'\nviews:\n  - type: table\n    name: Big\n    order: [file.name, n]\n\`\`\`\n\nAfter.\n`;
 
-await withBrowser(async ({ run, send, click, move, press, check }) => {
+await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
   const wait = async (test, label) => { for (let i = 0; i < 150; i++) { if (await test()) return; await sleep(20); } assert.fail(label); };
   const source = path => run(async p => { const { api } = await import('/src/api.ts'); return api.readNote(p); }, path);
   // Embeds in document order: [0] the ```base block, [1] ![[Embed.base#Open]].
@@ -78,6 +78,18 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
 
   await run(async (base, host, scroll, grouped) => {
     const { api } = await import('/src/api.ts');
+    window.b4Active = new Set(); window.b4Subscriptions = new Set();
+    const mount = ws.embeds.base;
+    ws.embeds.base = (...args) => { const item = mount(...args); b4Active.add(item); return { ...item, destroy() { b4Active.delete(item); item.destroy(); } }; };
+    for (const [object, method] of [[ws, 'on'], [ws.vault, 'onModified']]) {
+      const listen = object[method].bind(object);
+      object[method] = fn => {
+        const own = new Error().stack.split('\n')[2]?.includes('/src/bases/view.ts');
+        if (own) b4Subscriptions.add(fn);
+        const off = listen(fn);
+        return () => { b4Subscriptions.delete(fn); off(); };
+      };
+    }
     for (const [n, s] of [['A', 'open'], ['B', 'done'], ['C', 'open']]) await api.createNote(`EmbedTest/${n}.md`, `---\nstatus: ${s}\npriority: ${n.charCodeAt(0) - 64}\n---\n# ${n}\n`);
     for (let i = 0; i < 1000; i++) await api.createNote(`EmbedBig/${String(i).padStart(4, '0')}.md`, `---\nn: ${i}\n---\n`);
     await api.createNote('Embed.base', base);
@@ -182,6 +194,16 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
   check(await run(() => document.querySelectorAll('.bases-embed')[0].b4Kept === true), 'the block embed keeps its DOM through its own write');
   assert.equal(await source('Embed.base'), EMBED_BASE);
   check(true, 'a toolbar write in a ```base block changes only the block in the note');
+  // Undo/redo must preserve unsaved prose and update the live block rather than its old snapshot.
+  await run(() => { ws.view.dispatch({ selection: { anchor: ws.view.state.doc.length } }); ws.view.focus(); });
+  await chord('z');
+  await wait(() => run(before => ws.view.state.doc.toString() === before, blockBefore), 'undo restores only the block edit');
+  assert.ok(blockBefore.includes('xxxxx'), 'the prior unsaved prose is retained');
+  await chord('y');
+  await wait(() => run(after => ws.view.state.doc.toString() === after, blockAfter), 'redo restores the block edit');
+  await run(() => ws.view.contentDOM.blur());
+  await wait(async () => (await state()).filter(e => e.count).length === 2, 'block remounts after history');
+  check(true, 'block toolbar undo/redo preserves unsaved prose and refreshes the embed');
 
   // 8. The file embed's own write goes to Embed.base, into the view it shows (Open again: the note was reopened).
   await click(await centre('.bases-embed th[data-property="file.name"]', 1), 'right');
@@ -250,4 +272,165 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
   await wait(() => run(top => document.querySelector('.bases-embed .bases-scroll').scrollTop > top, scroll.top), 'the wheel scrolls the embed');
   check(true, 'the wheel scrolls the embed');
   console.log('B4_METRICS', JSON.stringify({ coldMs, warmMs, typingMax, duringBurst: during, afterQuiet: after, scrollMax: scroll.max, box }));
+
+  const indented = 'Intro\n\n  ```base\n  filters: \'file.inFolder("EmbedTest")\'\n  views:\n    - type: table\n      order: [file.name]\n  ```\n\nAfter\n';
+  await run(async text => { const { api } = await import('/src/api.ts'); await api.createNote('Indented.md', text); await ws.vault.refreshFiles(); await ws.open('Indented.md'); }, indented);
+  await wait(() => run(() => document.querySelector('.bases-count span')?.textContent === '3 results'), 'indented fence renders');
+  await click(await centre('.bases-embed th[data-property="file.name"]'), 'right'); await menu('Sort Z → A');
+  const sortedIndent = indented.replace('      order: [file.name]\n', '      order: [file.name]\n      sort:\n        - property: file.name\n          direction: DESC\n');
+  await wait(() => run(expected => ws.view.state.doc.toString() === expected, sortedIndent), 'indented fence write preserves surrounding bytes');
+  check(true, 'indented base fences render and retain their indentation on toolbar writes');
+
+  // Closing the final note must destroy its widgets, not keep a live base in a hidden editor.
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'closing all tabs disposes every base and subscription');
+  assert.equal(await run(() => ws.view.contentDOM.querySelectorAll('.bases-embed').length), 0);
+  await run(() => ws.open('Scroll.md'));
+  await wait(() => run(() => b4Active.size === 1 && document.querySelector('.bases-count span')?.textContent === '1000 results'), 'reopening reconstructs the saved editor widgets');
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'repeated close leaves no subscriptions');
+  check(true, 'closing/reopening the final tab releases Bases widgets and workspace/vault subscriptions');
+
+  // Renaming the host note, then its folder, keeps both embeds on the new path.
+  const moveBase = `filters: 'file.path == this.file.path'
+formulas:
+  host: this.file.path
+  folder: this.file.folder
+views:
+  - type: table
+    name: First
+    order: [file.name, formula.host, formula.folder, status]
+  - type: table
+    name: Named
+    order: [file.name, formula.host, formula.folder, status]
+`;
+  const moveNote = `---
+status: old
+---
+Self.
+
+\`\`\`base
+filters: 'file.path == this.file.path'
+formulas:
+  host: this.file.path
+  folder: this.file.folder
+views:
+  - type: table
+    name: Self
+    order: [file.name, formula.host, formula.folder, status]
+\`\`\`
+
+![[HostMove.base#Named]]
+`;
+  const embedFacts = index => run(index => {
+    const embed = document.querySelectorAll('.bases-embed')[index];
+    const row = embed?.querySelector('tbody tr[data-path]');
+    const values = {};
+    for (const td of row?.querySelectorAll('td') ?? []) values[td.dataset.property] = td.dataset.value;
+    return { name: embed?.querySelector('.bases-view-name span')?.textContent ?? '', path: row?.dataset.path ?? '', values };
+  }, index);
+  await run(async (base, note) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('HostMove.base', base);
+    await api.createNote('Move/Rename.md', note);
+    await ws.vault.refreshFiles();
+    await ws.open('Move/Rename.md');
+  }, moveBase, moveNote);
+  await wait(async () => (await embedFacts(0)).path === 'Move/Rename.md' && (await embedFacts(1)).name === 'Named', 'rename fixture shows the host');
+  let facts = [await embedFacts(0), await embedFacts(1)];
+  assert.equal(facts[0].name, 'Self');
+  assert.deepEqual(facts[0].values, { 'file.name': 'Rename', 'formula.host': 'Move/Rename.md', 'formula.folder': 'Move', status: 'old' });
+  assert.deepEqual(facts[1].values, { 'file.name': 'Rename', 'formula.host': 'Move/Rename.md', 'formula.folder': 'Move', status: 'old' });
+  await click(await centre('.bases-embed .bases-view-name', 1));
+  await wait(() => run(() => !!document.querySelector('.bases-view-menu')), 'named view menu');
+  await menu('First');
+  await wait(async () => (await embedFacts(1)).name === 'First', 'file embed leaves the linked view');
+  await run(async () => { const { renameFile } = await import('/src/fileOps.ts'); await renameFile(ws, 'Move/Rename.md', 'Moved'); });
+  await wait(async () => (await embedFacts(0)).path === 'Move/Moved.md' && (await embedFacts(1)).path === 'Move/Moved.md', 'note rename updates both embeds');
+  facts = [await embedFacts(0), await embedFacts(1)];
+  assert.equal(facts[0].name, 'Self', 'the block keeps its view across the note rename');
+  assert.equal(facts[1].name, 'First', 'the file embed keeps the view chosen after opening');
+  assert.equal(facts[0].values['formula.host'], 'Move/Moved.md');
+  assert.equal(facts[0].values['formula.folder'], 'Move');
+  assert.equal(facts[0].values['file.name'], 'Moved');
+  assert.equal(await run(() => ws.active.path), 'Move/Moved.md');
+  await run(async () => { const { renameFile } = await import('/src/fileOps.ts'); await renameFile(ws, 'Move', 'Shifted'); });
+  await wait(async () => (await embedFacts(0)).path === 'Shifted/Moved.md' && (await embedFacts(1)).values['formula.folder'] === 'Shifted', 'folder rename updates host facts');
+  facts = [await embedFacts(0), await embedFacts(1)];
+  assert.equal(facts[0].name, 'Self');
+  assert.equal(facts[1].name, 'First');
+  assert.equal(facts[1].values['formula.host'], 'Shifted/Moved.md');
+  assert.equal(facts[1].values['file.name'], 'Moved');
+  assert.equal(await source('HostMove.base'), moveBase, 'renames do not write the .base file');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    window.b4WritePrev = api.writeNote;
+    window.b4Held = [];
+    api.writeNote = (path, text) => new Promise((resolve, reject) => b4Held.push({ path, text, resolve, reject }));
+  });
+  await run(() => {
+    const doc = ws.view.state.doc.toString(), at = doc.indexOf('status: old');
+    ws.view.dispatch({ changes: { from: at + 'status: '.length, to: at + 'status: old'.length, insert: 'fresh' } });
+  });
+  await wait(async () => (await embedFacts(0)).values.status === 'fresh' && (await embedFacts(1)).values.status === 'fresh', 'unsaved host status reaches both embeds');
+  assert.equal((await embedFacts(0)).path, 'Shifted/Moved.md');
+  assert.ok((await source('Shifted/Moved.md')).includes('status: old'), 'the host property is still unsaved');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    const prev = b4WritePrev;
+    const held = b4Held.splice(0);
+    api.writeNote = prev;
+    for (const entry of held) { try { await prev(entry.path, entry.text); entry.resolve(); } catch (error) { entry.reject(error); } }
+  });
+  const beforeClose = await run(() => b4Active.size);
+  assert.equal(beforeClose, 2);
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0 && !document.querySelector('.bases-embed')), 'closing the renamed host releases both bases');
+  check(true, 'renaming the host note and its folder keeps rows, host facts, and the chosen view');
+
+  // A failed reread of a nested note must release the Base it painted, including after a newer fill wins.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('Nested.md', '```base\nfilters: \'file.path == this.file.path\'\nviews:\n  - type: table\n    name: Inside\n    order: [file.name]\n```\n');
+    await api.createNote('Outer.md', 'Before\n\n![[Nested]]\n');
+    await ws.vault.refreshFiles();
+    await ws.open('Outer.md');
+  });
+  await wait(() => run(() => b4Active.size === 1 && document.querySelector('.bases-embed tbody tr')?.dataset.path === 'Nested.md'), 'nested base mounts');
+  const mountsBefore = await run(() => {
+    let mounts = 0;
+    const current = ws.embeds.base;
+    ws.embeds.base = (...args) => { mounts++; return current(...args); };
+    window.b4Mounts = () => mounts;
+    const read = ws.embeds.read.bind(ws.embeds);
+    window.b4Read = read;
+    let reads = 0;
+    ws.embeds.read = path => {
+      if (path !== 'Nested.md') return read(path);
+      reads++;
+      if (reads === 1) return new Promise((_, reject) => { window.b4StaleReject = reject; });
+      return read(path);
+    };
+    return mounts;
+  });
+  assert.equal(mountsBefore, 0);
+  await run(() => { ws.vault.written('Nested.md'); ws.vault.written('Nested.md'); });
+  await wait(() => run(() => b4Mounts() === 1 && b4Active.size === 1 && !!document.querySelector('.bases-embed')), 'the newer nested fill mounts one base');
+  await run(() => b4StaleReject(Error('stale')));
+  await sleep(50);
+  assert.equal(await run(() => b4Active.size), 1, 'a stale rejection does not destroy the newer base');
+  assert.equal(await run(() => b4Mounts()), 1);
+  assert.equal(await run(() => document.querySelectorAll('.bases-embed').length), 1);
+  await run(() => {
+    const read = b4Read;
+    ws.embeds.read = path => path === 'Nested.md' ? Promise.reject(Error('missing')) : read(path);
+    ws.vault.written('Nested.md');
+  });
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0 && !document.querySelector('.bases-embed') && !!document.querySelector('.markdown-embed-content')), 'a rejected nested read releases the base');
+  check(await run(() => document.querySelector('.markdown-embed-content')?.textContent.includes('is not created yet')), 'the missing-note box replaces the nested base');
+  await run(() => { ws.embeds.read = b4Read; ws.vault.written('Nested.md'); });
+  await wait(() => run(() => b4Active.size === 1 && b4Mounts() === 2 && document.querySelector('.bases-embed tbody tr')?.dataset.path === 'Nested.md'), 'the nested base mounts once more when the read recovers');
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'closing the outer note releases the recovered base');
+  check(true, 'a rejected nested-note read releases its base, and a stale rejection does not');
 });

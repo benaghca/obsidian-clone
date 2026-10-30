@@ -31,6 +31,23 @@ describe("a ```base block's YAML", () => {
     expect(apply("```base\n```", 0, "a: 1\n")).toBe("```base\na: 1\n```");
     expect(apply(note, 0, "a: 1\n")).toBeNull();
   });
+  it("removes only the opening fence's indentation and restores it on writes", () => {
+    for (const indent of [" ", "  ", "   "]) {
+      const source = `${indent}~~~~base\n${indent}views:\n${indent}  - type: table\n${indent}~~~~~`;
+      expect(baseBlockYaml(source)).toBe("views:\n  - type: table\n");
+      expect(baseBlockYaml(`${indent}~~~base\n x: 1\n${indent}~~~`)).toBe("x: 1\n");
+      const doc = Text.of(["Intro", ...source.split("\n"), "After"]);
+      const change = baseBlockChange(doc, 6, "views:\n  - name: New\n")!;
+      const next = doc.replace(change.from, change.to, Text.of(change.insert.split("\n"))).toString();
+      expect(next).toBe(`Intro\n${indent}~~~~base\n${indent}views:\n${indent}  - name: New\n${indent}~~~~~\nAfter`);
+    }
+  });
+  it("keeps mixed fence/content indentation, blank spaces and the closing fence intact", () => {
+    const source = "   ```base\n# retained\n  \nviews:\n     - name: Old\n   ```\nAfter";
+    const doc = Text.of(source.split("\n"));
+    const change = baseBlockChange(doc, 0, "# retained\n\nviews:\n  - name: New")!;
+    expect(doc.replace(change.from, change.to, Text.of(change.insert.split("\n"))).toString()).toBe(source.replace("name: Old", "name: New"));
+  });
 });
 
 describe("`this` in a base", () => {
