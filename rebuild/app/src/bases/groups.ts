@@ -173,18 +173,6 @@ export function writeViewSetting(source: string, key: "groupBy" | "summaries", v
 type Model = ReturnType<typeof baseModel>;
 type Grid = ReturnType<typeof import("./cards")["createCardGrid"]>;
 const HEADER = 32, FOOTER = 44;
-const styles = `
-.bases-b5-root{position:relative;min-width:0}
-.bases-b5-section{position:absolute;left:0;right:0}
-.bases-b5-heading td{height:32px;padding:0;background:var(--background-secondary)}
-.bases-b5-toggle{display:flex;align-items:center;gap:6px;border:0;border-radius:0;background:var(--background-secondary);color:var(--text-normal);width:100%;height:32px;padding:4px 8px;font:inherit;text-align:left;cursor:pointer;overflow:hidden}
-.bases-b5-toggle svg{flex:none;width:14px;height:14px}.bases-b5-toggle span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.bases-b5-count{color:var(--text-muted);margin-left:4px}
-.bases-b5-summary td,.bases-b5-summary-cell{height:44px;padding:4px 8px;background:var(--background-primary-alt);box-sizing:border-box;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.bases-b5-summary-label{display:block;font-size:10px;line-height:14px;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis}.bases-b5-summary-value{display:block;font-size:13px;line-height:20px;overflow:hidden;text-overflow:ellipsis}
-.bases-b5-foot td{position:sticky;bottom:0;z-index:1;border-top:1px solid var(--background-modifier-border)}
-.bases-b5-card-summary{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(100px,1fr);height:44px;overflow:auto;border-top:1px solid var(--background-modifier-border)}
-.bases-b5-error{color:var(--text-error)}
-`;
 export interface GroupedHost {
   el: HTMLElement; scroller: HTMLElement; table: HTMLTableElement; body: HTMLTableSectionElement;
   ws: Workspace; group: Group; cell: (key: string, entry: Entry) => HTMLTableCellElement; repaint: () => void;
@@ -195,8 +183,8 @@ export interface GroupedHost {
 }
 /** Shared, virtualized presentation. The host retains its normal unconfigured fast path. */
 export function createGroupedView(host: GroupedHost) {
-  const root = h("div", { class: "bases-b5-root" }), style = h("style", null, styles);
-  root.hidden = true; host.scroller.append(root); host.el.append(style);
+  const root = h("div", { class: "bases-b5-root" });
+  root.hidden = true; host.scroller.append(root);
   let model: Model | null = null, selected: readonly Entry[] = [], groups: RowGroup[] = [], types = new Map<string, PropertyType>();
   let summaries: SummaryResults = { all: new Map(), groups: new Map() }, generation = 0, busy = false, gone = false;
   let footer: HTMLTableSectionElement | null = null, prefix = new Float64Array(1), layoutKey = "", revision = 0, painted = "";
@@ -382,6 +370,8 @@ export function createGroupedView(host: GroupedHost) {
       }
       showNotices(); return true;
     },
-    dispose() { gone = true; clear(); host.scroller.removeEventListener("contextmenu", contextMenu); root.remove(); style.remove(); },
+    dispose() { gone = true; clear(); host.scroller.removeEventListener("contextmenu", contextMenu); root.remove(); },
+    /** The rows in the order they are drawn, for Copy and Export CSV: by group when grouped. */
+    rows: (): readonly Entry[] | null => model?.groupBy ? groups.flatMap(g => g.rows) : null,
   };
 }

@@ -224,7 +224,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   let types = new Map<string, PropertyType>();
   const cards = () => model?.type === "cards";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => selected.map(entry => model!.columns.map(key => entry.context.get(key))));
+  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (groupedView.rows() ?? selected).map(entry => model!.columns.map(key => entry.context.get(key))));
   let automatic: number[] = [];
   function applySizes(key?: string, width?: number) {
     if (!model || !automatic.length) return;

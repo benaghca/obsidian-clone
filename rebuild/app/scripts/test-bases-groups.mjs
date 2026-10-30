@@ -20,6 +20,10 @@ await withBrowser(async ({ run, click, point, move, send, press, fill, check }) 
   assert.equal(await run(() => document.querySelector('tfoot [data-property="done"]').dataset.value), '2');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="due"]').dataset.value), '2024-01-01');
   assert.equal(await run(() => document.querySelector('tfoot [data-property="tags"]').dataset.value), '2');
+  // Copy (and Export CSV, from the same rows) lists rows in the order the groups draw them.
+  await send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
+  await click('.bases-count'); await menu('Copy to clipboard');
+  assert.deepEqual(await run(async () => (await navigator.clipboard.readText()).split('\n').slice(1).map(line => line.split('\t')[0])), ['C', 'A', 'B', 'D'], 'copied rows follow the groups');
   await click('.bases-b5-heading button[aria-label="Open (2)"]');
   assert.equal(await run(() => !!document.querySelector('tbody tr[data-path="B5/A.md"]')), false);
   await press('Enter');
@@ -36,9 +40,9 @@ await withBrowser(async ({ run, click, point, move, send, press, fill, check }) 
   check(true, 'table groups, empty-last order, collapse, typed summaries and cell-edit totals');
   await click('th[data-property="points"]', 'right');
   await menu('Summarize...'); await menu('Custom: span');
-  await wait(async () => (await read()).includes('note.points: custom.span'), 'custom summary saved');
+  await wait(async () => (await read()).includes('note.points: span'), 'custom summary saved');
   const oldBlock = '    summaries:\n      file.name: Count\n      points: Sum\n      done: Checked\n      due: Earliest\n      tags: Unique\n';
-  const newBlock = '    summaries:\n      file.name: Count\n      done: Checked\n      due: Earliest\n      tags: Unique\n      note.points: custom.span\n';
+  const newBlock = '    summaries:\n      file.name: Count\n      done: Checked\n      due: Earliest\n      tags: Unique\n      note.points: span\n';
   const customized = source.replace(oldBlock, newBlock);
   assert.equal(await read(), customized, 'only the summary block changes');
   await wait(async () => await ready() && await run(() => document.querySelector('tfoot [data-property="points"]')?.dataset.value === '3'), 'B1 custom summary shown');
