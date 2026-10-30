@@ -4,7 +4,7 @@ vi.hoisted(() => {
   (globalThis as unknown as { window: unknown }).window = globalThis;
 });
 
-import { baseChange, baseNeeds, docsOutsideFilter, missesPrefilter, type BaseChange } from "./view";
+import { baseChange, baseNeeds, docsOutsideFilter, missesPrefilter, readsChanged, type BaseChange } from "./view";
 
 const tasks = `filters:
   and:
@@ -141,4 +141,13 @@ it("retains pending work across an outside edit and reveals deferred work on an 
   run.advance(200);
   expect(run.updates).toBe(1);
   expect(baseChange({ change: "doc", shown: true, deferred: true, changed: ["Other.md"], outside: true })).toEqual({ deferred: false, delay: 20, clear: false });
+});
+
+it("rebuilds an embedded base that reads `this` when its note changes, even outside its folder", () => {
+  const source = `filters:\n  and:\n    - file.inFolder("BaseTest")\n    - 'status == this.status'\n`;
+  expect(docsOutsideFilter(["Host.md"], source, 0, () => "", () => false)).toBe(true);
+  expect(readsChanged(source, "Host.md", ["Host.md"])).toBe(true);
+  expect(readsChanged(source, "Host.md", ["Other.md"])).toBe(false);
+  expect(readsChanged(source, null, ["Host.md"])).toBe(false);
+  expect(readsChanged(tasks, "Host.md", ["Host.md"])).toBe(false);
 });

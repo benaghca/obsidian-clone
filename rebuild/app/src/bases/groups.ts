@@ -174,7 +174,6 @@ type Model = ReturnType<typeof baseModel>;
 type Grid = ReturnType<typeof import("./cards")["createCardGrid"]>;
 const HEADER = 32, FOOTER = 44;
 const styles = `
-.bases-b5-table-host{display:contents}
 .bases-b5-root{position:relative;min-width:0}
 .bases-b5-section{position:absolute;left:0;right:0}
 .bases-b5-heading td{height:32px;padding:0;background:var(--background-secondary)}
@@ -197,9 +196,6 @@ export interface GroupedHost {
 /** Shared, virtualized presentation. The host retains its normal unconfigured fast path. */
 export function createGroupedView(host: GroupedHost) {
   const root = h("div", { class: "bases-b5-root" }), style = h("style", null, styles);
-  // A presentation-owned table host keeps the legacy direct-child B2 adapter
-  // from mounting a second renderer. CardGrid itself is reused below.
-  const tableHost = h("div", { class: "bases-b5-table-host" }); host.table.replaceWith(tableHost); tableHost.append(host.table);
   root.hidden = true; host.scroller.append(root); host.el.append(style);
   let model: Model | null = null, selected: readonly Entry[] = [], groups: RowGroup[] = [], types = new Map<string, PropertyType>();
   let summaries: SummaryResults = { all: new Map(), groups: new Map() }, generation = 0, busy = false, gone = false;
@@ -346,9 +342,6 @@ export function createGroupedView(host: GroupedHost) {
       host.el.setAttribute("aria-busy", "true");
       const options: SliceOptions = { cancelled: () => gone || token !== generation || obsolete(), onSlice: host.onSlice };
       try {
-        const viewIcon = host.el.querySelector(".bases-view-name svg"), glyph = next.type === "cards" ? "grid-2x2" : "table";
-        if (viewIcon && !viewIcon.classList.contains(`lucide-${glyph}`)) viewIcon.replaceWith(icon(glyph));
-        host.table.hidden = next.type === "cards"; host.el.setAttribute("aria-label", next.type === "cards" ? "Base cards" : "Base table");
         if (next.type !== "cards" && !next.groupBy && !next.summaryPlan.selected.size) {
           model = null; selected = rows; clearGrids(); footer?.remove(); footer = null; root.hidden = true; host.el.classList.remove("bases-b5-cards"); busy = false; host.el.setAttribute("aria-busy", "false"); return true;
         }

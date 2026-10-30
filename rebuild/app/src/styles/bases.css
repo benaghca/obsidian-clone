@@ -119,3 +119,19 @@
 .bases-config-header button { display: flex; border: 0; padding: 2px; background: transparent; color: var(--text-muted); cursor: pointer; }
 .bases-config label { display: flex; flex-direction: column; gap: 6px; }
 .bases-config input, .bases-config select { width: 100%; height: 28px; padding: 4px 6px; font: inherit; color: var(--text-normal); border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); }
+
+/* A base drawn in a note (bases/embed.ts): the tab's view, at a capped height
+   that scrolls inside. A ```base block is a direct child of .cm-content, so
+   it has padding, never vertical margins. The toolbar's actions show icons only. */
+.bases-embed { display: block; position: relative; padding: 4px 0; font-size: 13px; line-height: normal; white-space: normal; --bases-embed-height: 400px; }
+.bases-embed .bases-view { flex: none; overflow: visible; }
+.bases-embed .bases-toolbar { margin: 0 0 4px; }
+.bases-embed:has(> .embed-actions) .bases-toolbar { padding-right: 32px; }
+.bases-embed .bases-toolbar-actions { gap: 2px; }
+.bases-embed .bases-toolbar-actions button { font-size: 0; gap: 0; }
+.bases-embed .bases-toolbar-actions .bases-badge { font-size: 11px; margin-left: 2px; }
+.bases-embed .bases-scroll { flex: none; max-height: var(--bases-embed-height); contain: content; }
+.bases-embed:hover > .embed-actions { opacity: 1; }
+/* No caret buffers around it (in Reading view they sit inside the line's text span). */
+.cm-line .cm-widgetBuffer:has(+ .bases-embed),
+.cm-line .bases-embed + .cm-widgetBuffer { display: none; }

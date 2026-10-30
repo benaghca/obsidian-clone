@@ -6,7 +6,7 @@ import { expression, isFormulaError, testExpression, type Context, type Expressi
 import { mapping, readYaml, type Yaml } from "./yaml";
 import { parseGroupBy } from "./groups";
 import { parseSummaryPlan } from "./summaries";
-export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
+export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean; /** The note `this` reads: the one a base is embedded in, or the base file in its own tab. */ host?: Row }
 
 /** Files a Base lists: notes, `.md` in any case, that are not excluded. */
 export function baseNoteFiles(files: readonly FileEntry[], excluded: (path: string) => boolean): FileEntry[] {
@@ -116,9 +116,12 @@ export function baseModel(source: string, viewIndex = 0) {
       }
       values.set(key, value); return value;
     };
-    const ctx: Context = { get, hasLink: row.hasLink, hasTag: tag => { tag = tag.replace(/^#/, ""); return row.tags.some(t => t.replace(/^#/, "") === tag || t.replace(/^#/, "").startsWith(tag + "/")); } };
+    const ctx: Context = { get, hasLink: row.hasLink, hasTag: tag => { tag = tag.replace(/^#/, ""); return row.tags.some(t => t.replace(/^#/, "") === tag || t.replace(/^#/, "").startsWith(tag + "/")); }, this: row.host ? hostContext(row.host) : null };
     return ctx;
   };
+  // Every row shares one host context, so `this.formula.x` is worked out once.
+  const hosts = new WeakMap<Row, Context>();
+  const hostContext = (host: Row) => { let c = hosts.get(host); if (!c) hosts.set(host, c = context(host)); return c; };
   const label = (key: string) => {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
     return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");
@@ -145,5 +148,5 @@ export function baseModel(source: string, viewIndex = 0) {
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
   const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
-  return { groupBy, summaryPlan, type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  return { groupBy, summaryPlan, type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
 }
