@@ -2,7 +2,7 @@
 import { yamlString } from "../editor/frontmatter";
 import { type Yaml } from "./yaml";
 export interface Sort { property: string; direction: "ASC" | "DESC" }
-export function writeView(source: string, key: "order" | "sort" | "filters" | "columnSize" | "limit" | "name" | "rowHeight", value: Yaml | Sort[] | undefined, viewIndex = 0): string {
+export function writeView(source: string, key: "order" | "sort" | "filters" | "columnSize" | "limit" | "name" | "rowHeight" | "type", value: Yaml | Sort[] | undefined, viewIndex = 0): string {
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const text = (i: number) => lines[i].replace(/\r?\n$/, "");
@@ -51,7 +51,7 @@ export function writeView(source: string, key: "order" | "sort" | "filters" | "c
   function block(level: number) {
     const pad = " ".repeat(level);
     if (value === undefined) return "";
-    if (["limit","columnSize","filters","name","rowHeight"].includes(key)) return yamlBlock(key,value as Yaml,level,eol);
+    if (["limit","columnSize","filters","name","rowHeight","type"].includes(key)) return yamlBlock(key,value as Yaml,level,eol);
     if (!(value as Yaml[]).length) return `${pad}${key}: []${eol}`;
     return `${pad}${key}:${eol}` + (value as (string | Sort)[]).map(item => typeof item === "string" ? `${pad}  - ${yamlString(item)}${eol}` : `${pad}  - property: ${yamlString(item.property)}${eol}${pad}    direction: ${item.direction}${eol}`).join("");
   }

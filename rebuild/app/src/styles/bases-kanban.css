@@ -1,0 +1,32 @@
+/* Kanban (KANBAN_PLAN §2.1, design A). Sizes match kanban.ts's KANBAN constants and
+   kanbanCardHeight(): the scroll and paint paths never measure. No transitions or animations. */
+.bases-kanban { position: relative; flex: 1; min-height: 0; min-width: 0; overflow-x: auto; overflow-y: hidden; overflow-anchor: none; outline: none; display: flex; flex-direction: column; }
+.bases-kanban[hidden] { display: none; }
+.bases-kanban-prompt { display: none; align-items: center; gap: 8px; flex: none; position: sticky; left: 0; padding: 8px 12px 0; color: var(--text-muted); font-size: 13px; }
+.bases-kanban.is-ungrouped .bases-kanban-prompt { display: flex; }
+.bases-kanban-prompt button { display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 8px; border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary); color: var(--text-normal); font: inherit; cursor: pointer; --icon-size: 14px; }
+.bases-kanban-track { position: relative; flex: 1; min-height: 0; }
+.bases-kanban-col { position: absolute; top: 12px; bottom: 12px; display: flex; flex-direction: column; box-sizing: border-box; border: 1px solid var(--background-modifier-border); border-radius: 8px; background: var(--background-primary-alt); contain: strict; }
+.bases-kanban-head { display: flex; align-items: center; gap: 6px; flex: none; height: 36px; box-sizing: border-box; padding: 0 4px 0 12px; font-size: 13px; font-weight: 600; color: var(--text-normal); --icon-size: 14px; }
+.bases-kanban-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bases-kanban-count { flex: none; color: var(--text-faint); font-weight: 400; font-variant-numeric: tabular-nums; }
+.bases-kanban-add { margin-left: auto; }
+.bases-kanban-head button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-faint); cursor: pointer; }
+.bases-kanban-head button:hover { background: var(--background-modifier-hover); color: var(--text-normal); }
+.bases-kanban-body { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overflow-anchor: none; padding: 0 8px; }
+.bases-kanban-cards { position: relative; margin-bottom: 8px; }
+.bases-kanban-card { position: absolute; top: 0; left: 0; right: 0; height: var(--bases-kanban-card-height); box-sizing: border-box; overflow: hidden; contain: layout paint style; padding: 8px 10px; border: 1px solid var(--background-modifier-border); border-radius: 6px; background: var(--background-primary); cursor: pointer; font-size: 12px; outline: none; }
+.bases-kanban-card:hover { border-color: var(--background-modifier-border-hover); }
+.bases-kanban-card:focus-visible { box-shadow: 0 0 0 2px var(--interactive-accent); }
+.bases-kanban-cover { height: var(--bases-kanban-cover-height); margin: -8px -10px 8px; background: var(--background-secondary); overflow: hidden; }
+.bases-kanban-cover img { display: block; width: 100%; height: 100%; }
+.bases-kanban-title { height: 20px; line-height: 20px; font-size: 13px; font-weight: 600; color: var(--text-normal); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bases-kanban-title + .bases-kanban-prop { margin-top: 4px; }
+.bases-kanban-prop { display: flex; align-items: center; gap: 8px; height: 20px; color: var(--text-muted); white-space: nowrap; overflow: hidden; }
+.bases-kanban-key { flex: none; width: 64px; color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; }
+.bases-kanban-value { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.bases-kanban-value input { margin: 0; }
+.bases-kanban-value .property-pill { flex: none; }
+.bases-kanban-empty { margin: 4px 0; height: 64px; display: flex; align-items: center; justify-content: center; border: 1px dashed var(--background-modifier-border); border-radius: 6px; color: var(--text-faint); font-size: 12px; }
+/* In a note the board has a fixed height (the B4 cap), so the editor's line geometry never moves. */
+.bases-embed .bases-kanban { flex: none; height: var(--bases-embed-height); }

@@ -116,6 +116,7 @@ const ICONS = {
   loader: lucide.Loader,
   lock: lucide.Lock,
   "grid-2x2": lucide.Grid2x2,
+  "square-kanban": lucide.SquareKanban,
   group: lucide.Group,
   "align-start-vertical": lucide.AlignStartVertical,
   "scan-line": lucide.ScanLine,

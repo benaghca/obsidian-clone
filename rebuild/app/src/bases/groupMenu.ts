@@ -46,7 +46,7 @@ export function withManual(groupBy: Record<string, Yaml>, order?: Yaml[], hidden
 }
 
 /** Write Manual order from the file as it is now: `edit` gets every group in its current order (hidden ones flagged). */
-function writeManual(host: GroupMenuHost, edit: (all: RowGroup[]) => { order: RowGroup[]; hidden: RowGroup[] }, done?: () => void) {
+export function writeManual(host: GroupMenuHost, edit: (all: RowGroup[]) => { order: RowGroup[]; hidden: RowGroup[] }, done?: () => void) {
   host.save((source, base) => {
     if (!base.groupBy || noteKey(base.groupBy.property) !== noteKey(host.current().groupBy?.property ?? "")) return source;
     const manual = parseManual(base.view.groupBy), next = edit(arrangeGroups(host.groups(), manual));
