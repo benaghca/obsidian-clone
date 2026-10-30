@@ -1,7 +1,7 @@
 {
   "about": "Parse trees from parseQuery. input is the query string. expected is the tree, or null when there is nothing to search for. matchCase defaults to false.",
   "typescript": "parseQuery in src/shell/searchQuery.ts",
-  "rust": "todo",
+  "rust": "parse_query in src-tauri/src/index/query.rs",
   "cases": [
     {
       "name": "only spaces",

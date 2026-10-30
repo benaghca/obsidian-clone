@@ -10,23 +10,29 @@ use std::path::Path;
 
 /// The Rust function each corpus file checks, by file name. `None`: no Rust implementation yet,
 /// and the file must say `"rust": "todo"`. A new file needs an entry here (and in parity.test.ts).
-fn runner(file: &str) -> Option<fn(&str) -> Value> {
+fn runner(file: &str) -> Option<fn(&str, &Map<String, Value>) -> Value> {
     match file {
         "links" => Some(wikilink_targets),
         "tags" => Some(note_tags),
         "properties" => Some(properties),
-        // No Rust query parser or search evaluator yet (plan step 4). Both files must say `"rust": "todo"`.
-        "query" | "search" => None,
+        "query" => Some(parse_query),
+        // No Rust search evaluator yet (plan step 4). The file must say `"rust": "todo"`.
+        "search" => None,
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
 }
 
-fn properties(input: &str) -> Value {
+fn parse_query(input: &str, case: &Map<String, Value>) -> Value {
+    let match_case = case.get("matchCase").and_then(Value::as_bool) == Some(true);
+    serde_json::to_value(super::query::parse_query(input, match_case)).unwrap()
+}
+
+fn properties(input: &str, _: &Map<String, Value>) -> Value {
     let Some(note) = super::props::note_properties(input) else { return Value::Null };
     note.props.into_iter().map(|p| serde_json::json!({ "key": p.key, "type": p.kind, "value": p.value })).collect()
 }
 
-fn note_tags(input: &str) -> Value {
+fn note_tags(input: &str, _: &Map<String, Value>) -> Value {
     parse_note(input)
         .tags
         .into_iter()
@@ -34,7 +40,7 @@ fn note_tags(input: &str) -> Value {
         .collect()
 }
 
-fn wikilink_targets(input: &str) -> Value {
+fn wikilink_targets(input: &str, _: &Map<String, Value>) -> Value {
     parse_note(input)
         .links
         .into_iter()
@@ -179,7 +185,7 @@ fn check(file: &str, corpus: &Value) -> Vec<String> {
             continue;
         };
         let Some(run) = run else { continue };
-        let actual = run(&input);
+        let actual = run(&input, case);
         let todo = case.get("rust").is_some();
         if todo && actual == *expected {
             problems.push(format!("{at}: now matches; remove its \"rust\": \"todo\""));
@@ -281,8 +287,8 @@ fn search_vault_names_are_checked_without_a_runner() {
     );
 
     let query = serde_json::json!({
-        "about": "", "typescript": "", "rust": "todo",
-        "cases": [{ "name": "cased", "matchCase": true, "input": "A", "expected": { "op": "term" } }]
+        "about": "", "typescript": "", "rust": "",
+        "cases": [{ "name": "cased", "matchCase": true, "input": "A", "expected": { "op": "term", "text": "A", "field": "any" } }]
     });
     let query_problems = check("query", &query);
     assert!(query_problems.is_empty(), "{query_problems:#?}");
