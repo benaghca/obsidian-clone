@@ -1,98 +1,88 @@
-# K1: search parity corpus
+# K1: Format check and hardening
 
-On `rebuild/k1-search-grok`, 2026-10-29. Local commits only. Nothing pushed.
+Built on `rebuild/kanban-k1-grok`, from `eb02c47` (the Kanban plan on integration `f112151`). Nothing was pushed.
 
-## What changed
+- `d7ec637` Accept unknown Bases layouts and group settings
+- this notes file
 
-Two commits on top of `ca2cac0`.
+## In short
 
-- `ab19829` Add the search parity corpus and the vault reference. 9 files, +53010 / −116.
-- `fa16171` Limit query depth, strip .MD from names, and skip a leading BOM. 4 files, +59 / −21.
+- No Obsidian-saved `.base` was in the worktree, and the only help page cited in `KANBAN_PLAN.md` §1 names no YAML keys. Section 3.1 was not renamed. The names there stay Grove's guess, and the plan now says so.
+- `parseGroupBy` no longer throws on an unknown `direction` or on extra keys. It adds a notice and still returns a usable group (`ASC` when the direction is not `ASC` or `DESC`). A groupBy that is not a mapping, or that has no property, still throws the old message.
+- An unknown view `type` (including `kanban`, until K4) opens that view with the notice "This layout isn't supported yet". The view still uses the table renderer. Another view in the same file does not get the notice. `views` that is not a list still throws.
 
-Net against the parent of `ab19829`:
+## What changed (+38 / −7)
 
-| File | Added | Removed |
-| --- | ---: | ---: |
-| `rebuild/app/fixtures/parity/README.md` | 14 | 3 |
-| `rebuild/app/fixtures/parity/query.json` | 51056 | 0 |
-| `rebuild/app/fixtures/parity/search.json` | 1631 | 0 |
-| `rebuild/app/src-tauri/src/index/parity.rs` | 128 | 4 |
-| `rebuild/app/src/parity.test.ts` | 38 | 7 |
-| `rebuild/app/src/shell/searchFacts.ts` | 9 | 4 |
-| `rebuild/app/src/shell/searchQuery.test.ts` | 10 | 98 |
-| `rebuild/app/src/shell/searchQuery.ts` | 63 | 6 |
-| `rebuild/app/src/shell/searchVault.ts` | 105 | 0 |
+| File | Lines | What |
+|---|---|---|
+| `rebuild/app/src/bases/groups.ts` | +7 / −3 | `parseGroupBy` only. Optional `notices` set. Unknown direction and extra keys become notices. |
+| `rebuild/app/src/bases/model.ts` | +2 / −2 | The view-type check adds the layout notice instead of throwing, and passes `notices` into `parseGroupBy`. |
+| `rebuild/app/src/bases/groups.test.ts` | +13 / −1 | Unknown direction, extra keys, and a sibling view. Malformed groupBy still throws. |
+| `rebuild/app/src/bases/model.test.ts` | +15 / −1 | `type: map` and `type: kanban` open; the other view's notices stay empty. `views: table` still throws. |
+| `rebuild/KANBAN_PLAN.md` | +1 | §3.1 records the key check. No key was renamed. |
 
-`query.json` is about 1.1 MB because one case is a 10,000-word and-tree. It has 49 parse cases. `search.json` has 82 cases over 7 vaults: `obsidian-1.14.4`, `match-case`, `names`, `tags`, `props`, `text`, `unicode`.
+Nothing else. `writeViewSetting`, arrange, collapse, `menus.ts`, `view.ts`, and the `GroupBy` type are unchanged. `order` and `hidden` are not parsed.
 
-## Corpus
+## Keys: confirmed vs Grove's guess
 
-Both new files have top-level `"rust": "todo"`. The Rust runner checks that the JSON is well-formed and that each search `vault` names a vault. It does not parse queries or evaluate search. The `query` and `search` runners in `parity.rs` stay `None`.
+Relied on `KANBAN_PLAN.md` §1 only. That section quotes Obsidian's public Views page (`https://help.obsidian.md/bases/views`, which 301s to `https://obsidian.md/help/bases/views`), read by the plan on 2026-10-30. No network was used, and no Obsidian code or assets. The quoted page describes Kanban and Manual behaviour and names no YAML keys. No Obsidian-saved `.base` was available (D2).
 
-Both runners and `fixtures/parity/README.md` accept three new keys: file-level `vaults`, case `vault` (required on a search case), and `matchCase` (boolean, default false). Unknown keys still fail the runners.
+**Confirmed by that page:** none of the key names.
 
-`expected` is today's TypeScript. There are no `obsidian` result objects. The note on `task:x` cites `help.obsidian.md/plugins/search` from prior knowledge for operators Grove does not implement (`task:`, `block:`, `section:`). That page was not fetched, and no Obsidian result was invented. `/abc/` is recorded as the word `/abc/`.
+**Grove's own format today** (this code and its tests, not checked against Obsidian):
 
-The cases that used to live in `searchQuery.test.ts` (the 25 `search()` assertions, path query, shown lines, parse trees, and the eight `counts()` cases) are in the corpus. The unit file keeps `explainQuery`, `termsOf`, `highlightsOf`, `matchingNotes`, `propertyLine`, `spansOf`, and the overlap `matchCount` check.
+- `type: table` and `type: cards`
+- `groupBy.property` (a non-blank string)
+- `groupBy.direction`: `ASC` or `DESC`. Omitted, or YAML `null`, stays `ASC` with no notice.
 
-## Reference
+**Still Grove's guess** (left as drawn in §3.1):
 
-`searchVault` searches `{ path: text }`. A note is a path matching `/\.md$/i`, so `Upper.MD` is a note. A non-note that passes is an attachment and maps to `{}`: no lines, tags, or properties. A query that parses to nothing returns null. `matches` treats a null query as every file; the search view must show nothing, so `searchVault` returns null first.
+- `type: kanban`
+- `groupBy.order` (present means Manual)
+- `groupBy.hidden`
 
-Lines follow Rust `str::lines`. Split on `\n`, drop a final empty piece, and drop a `\r` only when it was the character before `\n`. A trailing `\r` with no `\n` stays. That split was checked with `rustc` against `str::lines` for `""`, `"\n"`, `"a\n"`, `"a\n\n"`, `"\r"`, `"hello\r"`, `"a\r\n"`, and `"a\r\nb\r"`. A query cannot contain `\r` or U+FEFF, because both are JavaScript `\s` and `trim` removes them. The corpus sees the kept CR by matching `hello` in `Bare.md`, whose text is `hello` plus `\r`.
+## Decisions
 
-Properties come from `splitFrontmatter` on those lines plus `readProperties`. Values are stringified; an array value is mapped per item. Tags come from `tagsInText` on the same source text. `propertyLine` adds 2 to the frontmatter body line index. Paths are sorted with the default JavaScript sort. Content lines and per-term hits are cached.
+- **Unknown direction is a notice, then `ASC`.** The old throw was `groupBy requires a property and ASC or DESC direction` for a bad direction as well as for a missing property. A file Obsidian saved with another direction word would not open. The property check still throws, so a broken groupBy does not become a silent "no grouping". `desc` is not `DESC`. The notice is `Unsupported group direction: …`.
+- **Extra keys are one notice, in key order, and are not read.** `Unsupported groupBy settings: order, hidden` for the §3.1 shape. Grouping by `property` still works. K3 owns parsing `order` and `hidden`. Until that lands, a Manual block shows this notice. K3 should stop listing the keys it reads.
+- **The second argument is optional.** Callers that do not pass a set still do not throw. `baseModel` passes the view's notice set, the same set `parseSummaryPlan` already uses.
+- **Unknown layout uses one fixed sentence.** `This layout isn't supported yet`. It does not include the type name. The in-memory `type` stays `"table" | "cards"`, so a `kanban` view opens as a table with that notice. K4 owns adding `kanban` to the union and the renderer. `menus.ts` still greys any type other than table or cards; that menu was not part of K1.
+- **One view at a time.** `baseModel(source, viewIndex)` builds notices for the selected view only. A map or kanban view does not mark its sibling table view.
 
-`termLines` in `searchQuery.ts` is the phrase filter that used to sit in `searchFacts.ts`. Each word must occur, compared in lower case. The whole phrase is required when Match case is on or the term contains a space. A tab is whitespace for the word split and is not a space, so a tab-separated term skips the phrase check unless Match case is on. `"a  b"` still requires the contiguous phrase. `searchFacts` still drops hits at line 0 or below, groups by path, calls `termLines`, and drops a path whose lines come back empty. The old unit tests handed `facts.lines` a word list and did not require the contiguous phrase. The corpus uses the real rule: `"star wars"` matches `A.md` line 8 and misses `wars star reversed`.
+## Before and after
 
-`photo` matches `photo.png` because the name test only strips `.md`. The mock searches canvas JSON as text. This reference does not. That is a note on the case, not an `obsidian` value.
+The changed work is one parse per `baseModel`, not the select or group loop. Measured with a Vite `ssrLoadModule` script in `/tmp` (not committed): 200 warm-up calls, then 7 runs of 4,000 calls. The table is the median of those 7 totals, and the slowest of 50 single calls after the change.
 
-While the fixtures were generated, the old name-sets (`alpha` → A, B, C, Props, Roadmap, and the rest of the moved assertions) were checked against `tagsInText`. The generator was deleted before `ab19829`.
+| Case | Before (4,000 calls) | After (4,000 calls) | Slowest single call after |
+|---|---|---|---|
+| `baseModel`, grouped `DESC` | 10.594 ms (2.65 µs each) | 10.550 ms (2.64 µs) | 0.009 ms |
+| `baseModel`, extra `order` / `hidden` | 14.204 ms (3.55 µs) | 14.890 ms (3.72 µs) | 0.018 ms |
+| `parseGroupBy`, valid | 0.120 ms (0.030 µs) | 0.114 ms (0.028 µs) | 0.008 ms |
+| `parseGroupBy`, extra keys | 0.113 ms (0.028 µs) | 0.144 ms (0.036 µs) | 0.007 ms |
+| `parseGroupBy`, direction `backward` | 9.010 ms (2.25 µs, threw) | 0.142 ms (0.036 µs, notice) | 0.007 ms |
+| `baseModel`, `type: kanban` | 18.274 ms (4.57 µs, threw) | 10.224 ms (2.56 µs, notice) | 0.004 ms |
+| `baseModel`, `type: map` then the sibling | 17.432 ms (4.36 µs; the throw skipped the sibling) | 17.260 ms (4.32 µs; both views built) | 0.060 ms |
 
-## The three TypeScript changes
+No single call was near the 50 ms main-thread budget. The valid grouped path is the same before and after. Unknown direction and `type: kanban` got faster because they no longer throw.
 
-The first commit stored these as `"ts": "todo"`, with `expected` set to the new behavior, so the runner asserted that today's result still differed. The second commit implements them and removes the five markers.
+P12's existing benches (`bench-bases-groups`, `bench-bases-search`, `bench-frontend`) were not run. They time select, grouping, search, and the frontend on a 50,000-note vault, and the browser half needs the shared browser. This change does not sit on that path: `parseGroupBy` runs once when the model is built. The numbers above are the before/after for the lines K1 owns.
 
-1. Depth 64. `parseQuery` counts `(`, a negating `-`, a property `[`, and the `(` after an operator such as `file:(...)`. The top-level group is not counted. `[[wikilink]]` is not a property. Deeper than 64 is nothing to search for, which keeps a Rust port off a stack overflow. The opening token is consumed before a failed enter returns, so the group loop cannot see that token again. 64 parentheses unwrap to the term `a`. 64 negations and 64 nested `[a:` properties still parse. 65 of each is null.
+## Checks
 
-2. The name test for field `any` is `fileName(folded).replace(/\.md$/i, "")`. It lives in `matches` only. `paths.ts` `noteName` still strips a lowercase `.md`. `is_note_path` already accepts `.md` in any case and was not edited. With Match case off, the path is folded, so `.MD` was already removed by the lowercase strip, and `upper` still matches `Upper.MD`. With Match case on, `MD` does not match `Upper.MD` (the body has no `MD`). `Upper` still matches the stem. `file:md` still matches every note, including `Upper.MD`, because `file:` uses the file name.
+From `rebuild/app`:
 
-3. `searchVault` drops one leading U+FEFF before it splits lines, reads tags, or reads properties. `linksTags.ts` and `frontmatter.ts` are unchanged. `splitFrontmatter` already trims U+FEFF, so `[status:bomdraft]` matched before this skip. `tagsInText` requires the text to start with `---`, so `tag:bomtag` matches only after the skip. The shown term is `#bomtag`, which the note does not contain, so the match is count 0 and lines `[]`. `bombody` stays line 5, because the BOM is a prefix of line 1.
+- `npm run build` passed. The existing Vite warning about a chunk over 1,000 kB is unchanged.
+- `flock /tmp/grove-npm-test.lock npm test` passed (`EXIT:0`). Vitest: 67 files, 1,110 tests. Browser scripts and `posttest` passed, including geometry, cards, embeds, and search. No timing flake, so nothing was rerun. Embed cold open 24.0 ms.
+- `npm run audit:offline` passed: 175 source files. No registry and no new package.
 
-## Parser facts recorded from today's TypeScript
+From `rebuild/app/src-tauri`, both with `--offline` (crates.io was not contacted):
 
-These were measured by running `parseQuery` and `searchVault`, then locked in by the parity tests.
+- `cargo build --offline`: dev profile, cache hit, 0.14 s.
+- `cargo test --offline`: 58 passed, 0 failed, 2 ignored (`bench_vault`, `bench_search_commands`).
 
-- A NUL stops the top-level group, whose stop character is `\u0000`. `a \u0000 b` is the term `a`.
-- `tag:#` is an empty tag term. The empty check runs before `#` is stripped. It matches no stored tag.
-- `path:/` is an empty path term after the slashes are stripped. Every path contains the empty string, so every file matches. `path:""` is null, because the text is empty before `term()`.
-- `tag:a/` does not match a tag stored as `a`. The stored tag drops a trailing slash; the query term keeps it. `tag:a` matches Slash.md.
-- `[a:[b:c] d]` keeps the word `d]`. The inner property clears the in-property flag on the way out, so `]` does not end that word.
-- `[[wikilink]]` is one word. `]` ends a word only inside a property. A stray `)` outside a property is skipped.
-- `--a` is not(not(a)). `- a` and a lone `-` are the word `-`.
-- `OR a` drops the leading OR. `a OR` drops the trailing OR. `a OR OR b` is or(a, b). `-OR` is null. `ORANGE OR` is the word `orange`.
-- `"İstanbul".toLowerCase()` is `i` plus U+0307. `"Σ".toLowerCase()` is `σ`, and `"ΑΣ".toLowerCase()` is `ας`, so a match-case term `Σ` matches a line that is `Σ` and misses a line that is `ΑΣ`. `"ẞ".toLowerCase()` is `ß`. Kelvin `K` lowercases to `k`. `é` (U+00E9) is a different string from `e` plus U+0301.
-- A repeated property key makes `readProperties` return null, so `[status]` misses Dup.md. An empty `status:` is the value `""`, and `[status]` matches it.
+Screenshot dirs under `rebuild/round*-shots` were restored before the commit and were not committed.
 
-## Left open
+## Open questions for Chris
 
-- Rust still has no query parser and no search evaluation. Both files stay `"rust": "todo"`. Q1, C1, B1, and F1 are later jobs. No bench, and no differential fuzz.
-- `noteName` in `paths.ts` still strips only a lowercase `.md`. Search is the only caller that strips `.MD`. A global change was out of scope. Worth a decision if other surfaces should treat `Upper.MD` the same way.
-- `tagsInText` still requires its input to start with `---`. Search skips one leading BOM before calling it. The tag index does not. `linksTags.ts` was left alone.
-- No Obsidian result was verified in this session. An `obsidian` value needs a recorded run.
-
-## Tests
-
-From `rebuild/app`, after the behavior change and with the five `"ts": "todo"` markers removed:
-
-- `npx tsc --noEmit`: exit 0.
-- `npx vitest run src/parity.test.ts src/shell/searchQuery.test.ts src/readOrdering.test.ts`: 3 files, 360 tests passed (parity 341, searchQuery 6, readOrdering 13).
-
-After `fa16171`:
-
-- `npm run build`: passed.
-- `npm test` under `flock /tmp/grove-npm-test.lock`: exit 0. Browser discovery 4 passed, 0 failed. Vitest 58 files, 660 tests passed. The canvas timing check passed on the first run: `300-card drag frames under 20ms (max 16.8ms, 48 intervals)`. No rerun. Posttest `test-bases-config.mjs` passed (`Configure view: frame 1, max 16.8ms`).
-- `npm run audit:offline`: passed, 166 source files.
-- From `rebuild/app/src-tauri`, `cargo build --offline` and `cargo test --offline`: both passed. `grove_lib` 45 passed, 1 ignored (`index::bench::bench_vault`), the binary 0, doc-tests 0. The registry was not contacted. The same offline cache served `cargo test --offline --lib index::parity` before the first commit: 3 passed (corpus, todo markers, vault names).
-
-Screenshot fixtures the suite rewrote under `rebuild/round*-shots` were restored with `git checkout` and are not in these commits. No bench numbers. B1 is a later job.
+- A `.base` saved by Obsidian 1.14, with a Kanban view and a Manual group order (one group hidden, one added), is still the way to confirm or replace `type: kanban`, `groupBy.order`, and `groupBy.hidden`. Until that file exists, K3 should treat those names as Grove's guess.
+- K4 should clear the layout notice for `kanban` when that layout exists, and leave it for types Grove still does not draw (`map`, and anything else).
