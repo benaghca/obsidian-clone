@@ -3,7 +3,7 @@
 // Each goes to the backend first; then the editors and the open tabs follow
 // (Workspace.followMove, Workspace.forget).
 
-import { api, type Backlink, type FileEntry } from "./api";
+import { api, type FileEntry } from "./api";
 import type { ViewMode } from "./editor/editor";
 import type { NoteRef } from "./editor/host";
 import { fileName, isUnder, movedPath, parentDir } from "./paths";
@@ -22,8 +22,8 @@ export const fileSettings = {
   confirmDelete: (_path: string): Promise<boolean> => Promise.resolve(true),
   /** Asked before merging one note into another; false cancels. */
   confirmMerge: (_from: string, _into: string): Promise<boolean> => Promise.resolve(true),
-  /** Told after a move, with the notes and backlink snapshot from before it (to update links). */
-  renamed: (_from: string, _to: string, _before: NoteRef[], _backlinks: Record<string, Backlink[]>) => {},
+  /** Told after a move, with the notes and link-source paths from before it (to update links). */
+  renamed: (_from: string, _to: string, _before: NoteRef[], _sources: readonly string[]) => {},
 };
 
 export async function createNote(ws: Workspace, path: string, content = ""): Promise<FileEntry> {
@@ -124,15 +124,14 @@ async function relocate(ws: Workspace, from: string, to: string) {
   const under = (p: string) => isUnder(p, from);
   await ws.editors.flush(under);
   const before = ws.vault.notes;
-  // The backend resolves links against the new paths as soon as renamePath returns.
-  // Snapshot every moved note first; otherwise old-name links can disappear.
+  // Old-name links can stop resolving as soon as renamePath returns.
   const targets = before.filter((n) => under(n.path)).map((n) => n.path);
-  const backlinks = targets.length ? await api.backlinks(targets) : {};
+  const sources = targets.length ? await api.linkSources(targets) : [];
   await api.renamePath(from, to);
   const swap = (p: string) => movedPath(p, from, to);
   ws.editors.move(under, swap);
   await ws.followMove(swap);
-  fileSettings.renamed(from, to, before, backlinks);
+  fileSettings.renamed(from, to, before, sources);
 }
 
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */

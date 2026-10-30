@@ -284,6 +284,83 @@ fn bench_vault() {
         median(&search_ms)
     );
 
+    for (query, match_case) in [
+        ("meeting", false),
+        ("alpha", false),
+        ("zzz", false),
+        ("garden river", false),
+        ("\"garden path\"", false),
+        ("meeting -garden (river OR stone)", false),
+        ("tag:project", false),
+        ("[tags:meeting]", false),
+        ("line:(garden river)", false),
+        ("Meeting", true),
+    ] {
+        let mut samples = Vec::with_capacity(RUNS);
+        let mut bytes = 0usize;
+        let mut matched_notes = 0usize;
+        let mut total = 0u64;
+        for _ in 0..RUNS {
+            let started = Instant::now();
+            let found = idx.search_notes(query, match_case);
+            bytes = json_len(&found);
+            samples.push(elapsed_ms(started));
+            matched_notes = found.len();
+            total = found.iter().map(|n| u64::from(n.count)).sum();
+        }
+        println!(
+            "GROVE_BENCH search_notes_ms query={query:?} match_case={match_case} ms={} median={:.1} json_bytes={bytes} notes={matched_notes} total={total}",
+            ms_list(&samples),
+            median(&samples)
+        );
+    }
+
+    let first_50: Vec<String> = idx
+        .search_notes("meeting", false)
+        .into_iter()
+        .take(50)
+        .map(|n| n.path)
+        .collect();
+    let mut lines_ms = Vec::with_capacity(RUNS);
+    let mut lines_bytes = 0usize;
+    let mut lines_notes = 0usize;
+    let mut lines_count = 0usize;
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        let found = idx.search_lines("meeting", false, &first_50, 5);
+        lines_bytes = json_len(&found);
+        lines_ms.push(elapsed_ms(started));
+        lines_notes = found.len();
+        lines_count = found.values().map(Vec::len).sum();
+    }
+    println!(
+        "GROVE_BENCH search_lines_ms={} median={:.2} json_bytes={lines_bytes} notes={lines_notes} lines={lines_count}",
+        ms_list(&lines_ms),
+        median(&lines_ms)
+    );
+
+    let match_queries = ["meeting", "tag:project/alpha", "path:\"Folder 01\""].map(String::from);
+    let mut match_ms = Vec::with_capacity(RUNS);
+    let mut match_bytes = 0usize;
+    let mut match_counts = Vec::new();
+    for _ in 0..RUNS {
+        let started = Instant::now();
+        let found = idx.search_match(&match_queries);
+        match_bytes = json_len(&found);
+        match_ms.push(elapsed_ms(started));
+        match_counts = found.iter().map(Vec::len).collect();
+    }
+    let match_notes = match_counts
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    println!(
+        "GROVE_BENCH search_match_ms={} median={:.1} json_bytes={match_bytes} notes={match_notes}",
+        ms_list(&match_ms),
+        median(&match_ms)
+    );
+
     // Serialize alone, search not included. Step 0.4 compares this debug
     // figure with a dev profile that optimizes serde_json.
     let hash_hits = idx.search("#", TAG_LIMIT);

@@ -338,7 +338,7 @@ fileSettings.confirmMerge = async (from, into) => {
   if (r.dontAskAgain) settings.set("note-composer.json", "askBeforeMerging", false);
   return r.ok;
 };
-fileSettings.renamed = (from, to, before, backlinks) => {
+fileSettings.renamed = (from, to, before, sources) => {
   const ask = appSettings().alwaysUpdateLinks
     ? null
     : async (links: number, notes: number) => {
@@ -352,7 +352,7 @@ fileSettings.renamed = (from, to, before, backlinks) => {
         if (r.dontAskAgain) settings.set("app.json", "alwaysUpdateLinks", true);
         return r.ok;
       };
-  void updateLinks(ws, from, to, before, backlinks, ws.linkStyle(), ask).catch((err) => console.warn("Could not update links", err));
+  void updateLinks(ws, from, to, before, sources, ws.linkStyle(), ask).catch((err) => console.warn("Could not update links", err));
 };
 
 /** A core plugin turned on or off: its views, ribbon buttons, status bar items and hints follow. */

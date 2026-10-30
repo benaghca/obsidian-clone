@@ -12,6 +12,7 @@ mod query;
 mod search;
 mod tags;
 mod backlinks;
+mod link_sources;
 #[cfg(test)]
 mod bench;
 #[cfg(test)]

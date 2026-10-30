@@ -7,7 +7,7 @@
 // Pure and free of the DOM, so it is tested on its own.
 
 import type { LinkIndex } from "../api";
-import { noteName } from "../paths";
+import { isNoteFile, noteName } from "../paths";
 
 export type NodeKind = "note" | "attachment" | "tag" | "unresolved";
 
@@ -34,6 +34,18 @@ export interface GraphModel {
   links: GraphLink[];
   /** Node index by id. */
   index: Map<string, number>;
+}
+
+/** Notes and attachments for the graph. A `.MD` file is a note. Excluded files are left out. */
+export function graphFileLists(files: readonly { is_dir: boolean; path: string }[], excluded: (path: string) => boolean): { notes: string[]; attachments: string[] } {
+  const notes: string[] = [];
+  const attachments: string[] = [];
+  for (const f of files) {
+    if (f.is_dir || excluded(f.path)) continue;
+    if (isNoteFile(f.path)) notes.push(f.path);
+    else attachments.push(f.path);
+  }
+  return { notes, attachments };
 }
 
 interface GraphSource {

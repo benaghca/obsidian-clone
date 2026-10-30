@@ -130,3 +130,22 @@ Everything else merges cleanly. I checked these exact resolutions on a scratch c
 - **Q1 and C1-A:** split words with `is_js_space`, and lower-case with Rust `to_lowercase`. Both were checked equal to JS for every code point (STEP4_SEARCH_PLAN §9).
 - **Q1:** keep the token-consumed-then-refused shape of `enter()` exactly. A port that recurses before checking depth would bring back the stack overflow.
 - **C1-B:** the mock should call `searchVault` (it isn't wired in yet; K1 left the mock alone, as the outline said).
+
+## K1 fix check
+
+VERDICT: OK. Both review items are fixed as proposed, and the merge with integration keeps both sides. Nothing more is needed before K1 merges.
+
+Checked `rebuild/k1-search-grok` at `cacf8d0`: `e428c6f` (a `--no-ff` merge of `rebuild/integration` `2bb6aeb`, no rebase), `449a87d` (the fixes) and `cacf8d0` (`NOTES_K1F.md`). Read-only. The tests ran on a `git archive` copy of `cacf8d0` in my scratchpad.
+
+- **`index/parity.rs`, merge resolution:** `runner()` has Step 3's `"properties" => Some(properties)` plus K1's comment and `"query" | "search" => None`. The old step 3 `None` and its comment are gone. Step 3's `properties` runner function and K1's `search_vault_names_are_checked_without_a_runner` test are both present. This is the resolution the review gave.
+- **`fixtures/parity/README.md`, merge resolution:** the file table keeps integration's `properties.json` row (`note_properties` in `index/props.rs`) and adds K1's `query.json` and `search.json` rows. The rest of the README keeps K1's new key docs.
+- **Fix 1:** the `"10,000 words"` case is gone (`449a87d`, −50,010 lines). `query.json` is now 48 cases and 52 KB, down from 1.1 MB. `searchQuery.test.ts` has the proposed unit test, character for character, with no time limit.
+- **Fix 2:** `matches` uses `noteName(folded)` again, the stale comment is gone, and `noteName` is back in the `../paths` import, exactly as in the patch.
+- **Tests on `cacf8d0`:**
+  - `npx tsc --noEmit` exits 0;
+  - `vitest run src/parity.test.ts src/shell/searchQuery.test.ts src/mock/backend.test.ts`: 349 passed, including `Upper.MD by name, match case` and the new 10,000-word test;
+  - `cargo test --offline --lib`: 48 passed, 1 ignored.
+
+  Grok's full `npm test`, build and audit runs are in `NOTES_K1F.md`.
+
+**One thing to know when merging.** `33524d2` committed the first version of this review to the K1 branch as `rebuild/NOTES_K1-REVIEW.md`. It is identical to this file as it was before this section was added. Once K1 is in integration, this worktree's uncommitted copy (with this section) will collide with the committed one on the next pull. Keep this longer version: commit it on top, or append this section to the committed file.

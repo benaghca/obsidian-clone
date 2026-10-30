@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readYaml } from "./yaml";
 import { expression, type Context } from "./expression";
-import { baseModel, type Row } from "./model";
+import { baseModel, baseNoteFiles, type Row } from "./model";
 const ctx: Context = { get: k => ({ priority: 3, due: "2000-01-01", tags: ["work"], status: "open", "file.folder": "BaseTest/Sub" })[k] ?? null, hasTag: t => t === "work", hasLink: t => t === "Task A" };
 describe("Bases YAML", () => {
   it("reads nested list mappings, comments and quoted expression punctuation", () => {
@@ -46,6 +46,16 @@ describe("Bases tables", () => {
     expect(() => baseModel('views: table')).toThrow();
     expect(() => baseModel('views:\n  - type: cards')).toThrow();
   });
+});
+
+it("lists an upper-case .MD file as a Base row", () => {
+  const file = (path: string, is_dir = false) => ({ path, name: path.slice(path.lastIndexOf("/") + 1), is_dir, mtime_ms: 1, ctime_ms: 1, size: 1 });
+  const notes = baseNoteFiles([file("Upper.MD"), file("Note.md"), file("pic.png"), file("Hidden.md"), file("Dir", true)], (path) => path === "Hidden.md");
+  expect(notes.map((f) => f.path)).toEqual(["Upper.MD", "Note.md"]);
+  const rows: Row[] = notes.map((f) => ({ file: f, props: [], tags: [], hasLink: () => false }));
+  const selected = baseModel("").select(rows);
+  expect(selected.map((r) => r.context.get("file.name"))).toEqual(["Note", "Upper"]);
+  expect(selected.find((r) => r.row.file.path === "Upper.MD")!.context.get("file.name")).toBe("Upper");
 });
 
 it("keeps custom note names literal alongside native file labels",()=>{

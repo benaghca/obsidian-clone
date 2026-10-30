@@ -8,9 +8,8 @@
 import type { GraphSettings } from "../settings/schema";
 import { searchFacts, type VaultFacts } from "../shell/searchFacts";
 import { type Facts, matches, parseQuery } from "../shell/searchQuery";
-import { isNoteFile } from "../paths";
 import type { Workspace } from "../workspace";
-import { buildGraph, type GraphModel, type GraphNode } from "./data";
+import { buildGraph, graphFileLists, type GraphModel, type GraphNode } from "./data";
 
 /** A colour group: the notes it matches take its colour. */
 export interface ColorRule {
@@ -46,13 +45,7 @@ export function createGraphSource(ws: Workspace, local: boolean) {
       const { query, groups } = queriesOf(cfg);
       const known = facts ?? NOTHING;
       const tags = facts?.tags;
-      const notes: string[] = [];
-      const attachments: string[] = [];
-      for (const f of ws.vault.files) {
-        if (f.is_dir || ws.vault.isExcluded(f.path)) continue;
-        if (isNoteFile(f.path)) notes.push(f.path);
-        else attachments.push(f.path);
-      }
+      const { notes, attachments } = graphFileLists(ws.vault.files, (path) => ws.vault.isExcluded(path));
       let include = query ? (path: string) => path === center || matches(path, query, known) : undefined;
       if (shown) {
         const base = include;

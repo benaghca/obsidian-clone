@@ -5,7 +5,7 @@ import { fits, asType, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { formatDate } from "../settings/dateFormat";
-import { isNoteFile, parentDir } from "../paths";
+import { parentDir } from "../paths";
 import { propertyValue } from "../editor/properties";
 import { TYPE_ICONS } from "../editor/propertyFields";
 import { propertyIndex } from "../shell/propertyIndex";
@@ -16,7 +16,7 @@ import type { Workspace } from "../workspace";
 import { baseMenus } from "./menus";
 import { columnControls } from "./columns";
 import { cellEditor } from "./cells";
-import { baseModel, noteKey, propertyId, type Row } from "./model";
+import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
 import type { Value } from "./expression";
 
 const viewsByTab = new WeakMap<Tab, Map<string, number>>();
@@ -131,7 +131,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         types = new Map();
         for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) types.set(p.key, index.host.typeOf(p.key) ?? p.type);
         const linkCache = new Map<string, string | null>();
-        const rows: Row[] = ws.vault.files.filter(f => !f.is_dir && isNoteFile(f.path) && !ws.vault.isExcluded(f.path)).map(file => {
+        const rows: Row[] = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(file => {
           const props = properties.get(file.path)?.props ?? [];
           let allTags = tags.get(file.path) ?? props.filter(p => p.type === "tags").flatMap(p => Array.isArray(p.value) ? p.value : [String(p.value)]);
           // Loaded notes include unsaved tags, using the same fenced-code-aware reader as the Tags view.

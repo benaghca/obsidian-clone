@@ -3,7 +3,7 @@
 
 import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, SearchHit, VaultInfo } from "../api";
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
-import { markdownURL, resolveLink } from "../links/internal";
+import { linkSpellings, markdownURL, resolveLink } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
 import { fileName, isNoteFile, noteName } from "../paths";
 import { sampleVault, syntheticVault } from "./sampleVault";
@@ -255,6 +255,24 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     return { links: { outgoing, markdown, unresolved }, backlinks };
   }
 
+  /** Notes that might link to `paths`. Same rules as Rust `link_sources`. */
+  function linkSources(paths: string[]): string[] {
+    if (!paths.length) return [];
+    const wanted = new Set(paths);
+    const sources = new Set<string>();
+    const data = linkData(wanted);
+    for (const path of paths) for (const hit of data.backlinks[path] ?? []) sources.add(hit.from);
+    const needles = [...new Set(paths.filter((path) => isNoteFile(path)).flatMap((path) => linkSpellings(noteName(path)).map((s) => s.toLowerCase())))];
+    if (needles.length) {
+      for (const [path, f] of files) {
+        if (sources.has(path) || !isNoteFile(path) || isBinary(f.content)) continue;
+        const lower = f.content.toLowerCase();
+        if (needles.some((needle) => lower.includes(needle))) sources.add(path);
+      }
+    }
+    return [...sources].filter((path) => isNoteFile(path)).sort();
+  }
+
   const commands: Record<string, (a: any) => unknown> = {
     open_vault: ({ path }) => persistVault(String(path ?? "")),
     // A new folder name only. The parent and "already exists" checks that
@@ -335,6 +353,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     search: ({ query, limit }) => search(query, limit),
     link_index: () => linkData().links,
     backlinks: ({ paths }) => paths.length ? linkData(new Set(paths)).backlinks : {},
+    link_sources: ({ paths }) => linkSources(paths),
     properties: ({ paths }) => {
       const out: Record<string, NoteProperties> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {

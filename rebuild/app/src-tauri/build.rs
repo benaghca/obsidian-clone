@@ -22,6 +22,7 @@ fn main() {
             "search_match",
             "link_index",
             "backlinks",
+            "link_sources",
             "frontmatter",
             "tags",
             "properties",

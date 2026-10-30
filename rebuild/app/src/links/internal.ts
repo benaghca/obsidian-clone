@@ -42,6 +42,16 @@ function linkPath(target: string, from: string | null, notes: NoteLike[], format
 /** Markdown destinations; renames can retain backslash-escaped parentheses. */
 export const encodeDest = (path: string, escaped = false) => path.replace(/%/g, "%25").replace(/ /g, "%20").replace(/\(/g, escaped ? "\\(" : "%28").replace(/\)/g, escaped ? "\\)" : "%29");
 
+/**
+ * Spellings of a note name that a rename looks for in other notes: the bare
+ * name, spaces written as `%20`, parentheses escaped with a backslash, and
+ * both `encodeDest` forms. The same spelling is kept once.
+ */
+export function linkSpellings(name: string): string[] {
+  if (!name) return [];
+  return [...new Set([name, name.replace(/ /g, "%20"), name.replace(/[()]/g, "\\$&"), encodeDest(name), encodeDest(name, true)])];
+}
+
 /** Backslash escapes in a Markdown destination are syntax, not part of the URL. */
 export const markdownURL = (text: string) => text.replace(/\\([\\()])/g, "$1");
 

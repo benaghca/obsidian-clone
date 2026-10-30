@@ -5,9 +5,16 @@ describe("paths", () => {
   it("names and folders", () => {
     expect(fileName("A/B/Note.md")).toBe("Note.md");
     expect(noteName("A/B/Note.md")).toBe("Note");
+    expect(noteName("Folder/Upper.MD")).toBe("Upper");
     expect(noteName("pic.png")).toBe("pic.png");
     expect(noteName("Upper.MD")).toBe("Upper");
     expect(noteName(".MD")).toBe(".MD");
+    expect(isNoteFile("Note.md")).toBe(true);
+    expect(isNoteFile("Upper.MD")).toBe(true);
+    expect(isNoteFile("a.Md")).toBe(true);
+    expect(isNoteFile("photo.png")).toBe(false);
+    expect(isNoteFile("Board.canvas")).toBe(false);
+    expect(isNoteFile("readme.markdown")).toBe(false);
     expect(parentDir("A/B/Note.md")).toBe("A/B");
     expect(parentDir("Note.md")).toBe("");
     expect(trimSlashes(" /Daily/notes/ ")).toBe("Daily/notes");

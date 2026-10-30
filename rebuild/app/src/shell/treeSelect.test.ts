@@ -39,12 +39,13 @@ test("a note drop writes one suggester link per line and embeds other files", ()
     { name: "Note", path: "Folder/Note.md" },
     { name: "photo.png", path: "photo.png" },
     { name: "photo.png", path: "Attachments/photo.png" },
+    { name: "Upper", path: "Upper.MD" },
   ];
   const style = { format: "shortest" as const, wikilinks: true };
   const linkTo = (target: string, from: string | null) => formatLink(target, from, notes, style);
   const isDir = (path: string) => path === "Projects";
-  expect(dropLinkText(["Note.md", "Folder/Note.md", "Attachments/photo.png", "Projects"], isDir, "Daily/Today.md", linkTo)).toBe(
-    "[[Note]]\n[[Folder/Note]]\n![[Attachments/photo.png]]",
+  expect(dropLinkText(["Note.md", "Folder/Note.md", "Upper.MD", "Attachments/photo.png", "Projects"], isDir, "Daily/Today.md", linkTo)).toBe(
+    "[[Note]]\n[[Folder/Note]]\n[[Upper]]\n![[Attachments/photo.png]]",
   );
   expect(dropLinkText(["Projects"], isDir, "Daily/Today.md", linkTo)).toBe("");
 });
