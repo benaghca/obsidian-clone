@@ -1,29 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explainQuery, type Facts, highlightsOf, matchCount, matchingNotes, parseQuery, pathQuery, propertyLine, spansOf, termsOf } from "./searchQuery";
-
-// Enough of the old vault for matchingNotes. Parse trees and search results live in fixtures/parity.
-const VAULT: Record<string, string> = {
-  "A.md": "---\nstatus: done\nproject: Grove\ntags: [gamma]\n---\nAlpha line here\nanother line with beta\nstar wars is a phrase\nwars star reversed\n#inline-tag",
-  "B.md": "---\nstatus: in progress\ncategory:\n  - one\n  - two\n---\nalpha beta on one line",
-  "C.md": "No frontmatter here. alpha only.",
-  "Props.md": "---\ntags:\n  - alpha\n  - beta\nstatus: draft\n---\nBody text with five words.",
-  "Projects/Roadmap.md": "---\nstatus: draft\n---\nThe roadmap mentions alpha and gamma.",
-};
-
-/** Lines for the one term matchingNotes asks about. The corpus applies the real phrase rule. */
-const facts: Facts = {
-  lines(term) {
-    const out = new Map<string, { line: number; text: string }[]>();
-    if (term !== "alpha") return out;
-    for (const [path, text] of Object.entries(VAULT)) {
-      const hits = text.split("\n").flatMap((line, i) => (line.toLowerCase().includes(term) ? [{ line: i + 1, text: line }] : []));
-      if (hits.length) out.set(path, hits);
-    }
-    return out;
-  },
-};
-
-const names = (path: string) => path.replace(/^.*\//, "").replace(/\.md$/, "");
+import { explainQuery, highlightsOf, matchCount, parseQuery, pathQuery, propertyLine, spansOf, termsOf } from "./searchQuery";
 
 describe("search query", () => {
   it("explains a query in one sentence", () => {
@@ -50,10 +26,7 @@ describe("search query", () => {
     expect(highlightsOf(parseQuery('"star wars" alpha -beta file:x [status:draft]'))).toEqual(["star wars", "alpha", "draft"]);
   });
 
-  it("builds the results: matching notes by name less excluded ones, a property's line, every match highlighted", () => {
-    const notes = Object.keys(VAULT).map((path) => ({ path, name: names(path) }));
-    const found = matchingNotes(notes, parseQuery("alpha")!, facts, (path) => path.startsWith("Projects/"));
-    expect(found.map((n) => n.name)).toEqual(["A", "B", "C", "Props"]);
+  it("finds a property's line and highlights every match", () => {
     const fm = { props: [{ key: "Status", line: 0 }, { key: "tags", line: 1 }], lines: ["Status: draft", "tags: [x]"] };
     expect(propertyLine(fm, "tags")).toEqual({ line: 3, text: "tags: [x]" });
     expect(propertyLine(fm, "status")).toEqual({ line: 2, text: "Status: draft" });
@@ -64,6 +37,13 @@ describe("search query", () => {
       { from: 10, to: 15 },
       { from: 20, to: 25 },
     ]);
+  });
+
+  it("treats a negated term removed by field scoping as nothing to search for", () => {
+    for (const query of ["file:(-tag:#)", "file:(path:(-tag:#))", "path:(-path:/)"]) {
+      expect(parseQuery(query)).toBeNull();
+      expect(explainQuery(parseQuery(query))).toBe("");
+    }
   });
 
   it("writes Search in folder's path: as Obsidian does", () => {

@@ -115,19 +115,29 @@ export const foldIn = (folded: Set<string>, key: string) => (on: boolean) => voi
  * the page just after they are painted), then a "Show N more" row that adds
  * four pages more.
  */
-export function pagedRows<T>(into: HTMLElement, items: T[], row: (item: T) => Node, page: number, now = page) {
+export function pagedRows<T>(into: HTMLElement, items: T[], row: (item: T) => Node, page: number, now = page, before?: (items: T[]) => Promise<boolean | void>) {
   const more = h("div", { class: "search-result-more" });
   let shown = 0;
-  const showMore = (n: number) => {
-    more.before(...items.slice(shown, shown + n).map(row));
-    shown = Math.min(items.length, shown + n);
-    more.textContent = `Show ${(items.length - shown).toLocaleString()} more`;
-    more.hidden = shown >= items.length;
+  let busy = false;
+  const showMore = async (n: number) => {
+    if (busy) return;
+    busy = true;
+    try {
+      const batch = items.slice(shown, shown + n);
+      if (before && await before(batch) === false) return;
+      if (more.parentNode !== into) return;
+      more.before(...batch.map(row));
+      shown += batch.length;
+      more.textContent = `Show ${(items.length - shown).toLocaleString()} more`;
+      more.hidden = shown >= items.length;
+    } finally { busy = false; }
   };
-  more.addEventListener("click", () => showMore(page * 4));
+  const append = (n: number) => showMore(n).catch(err => console.error("Could not read result rows", err));
+  more.addEventListener("click", () => void append(page * 4));
   into.append(more);
-  showMore(now);
-  if (now < page) afterPaint(() => more.isConnected && shown === now && showMore(page - now));
+  void append(now).then(() => {
+    if (now < page) afterPaint(() => more.isConnected && shown === now && void append(page - now));
+  });
 }
 
 /** A line with the columns in `spans` highlighted, as search results show them. */

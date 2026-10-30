@@ -1,27 +1,19 @@
-// The search view in the left sidebar, with Obsidian's search syntax
-// (searchQuery.ts). The query is parsed once per change; the backend is
-// asked only about its terms (searchFacts.ts keeps their lines until the
-// vault changes) and each note is then matched in memory. Laid out as
-// Obsidian 1.14.4's (observed): a Match case toggle and a filled clear
-// button in the field; Search settings opens labeled toggles; "N results"
-// stays beside a round "..." menu and the sort order. Each matching note
-// folds away its lines (the first five). ArrowDown lands on the file row
-// first. A note's count is worked out when its row is drawn, and the total
-// just after the results are painted, so counting never holds up a key.
+// The search view: Rust matches saved notes and counts every occurrence;
+// the page sorts/excludes them, reads shown lines for drawn rows, and highlights.
 
+import { api, type SearchNote, type SearchLine } from "../api";
 import { writeClipboard } from "../editor/clipboard";
-import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
-import { kept } from "../memo";
+import { noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import { dropdown, toggle } from "../settings/controls";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon, moreOptionsGlyph } from "./icons";
-import { showMenu } from "./menu";
-import { searchFacts, type VaultFacts } from "./searchFacts";
-import { explainQuery, highlightsOf, matchCount, matchingNotes, parseQuery, propertyLine, shownLines, spansOf } from "./searchQuery";
-import { afterPaint, bindResultKeys, hitColumns, highlighted, linesAround, noteText, pagedRows, resultGroup } from "./sideView";
+import { showMenu, type MenuEntry } from "./menu";
+import { searchReader, searchResults, type SearchRequest } from "./searchRead";
+import { explainQuery, highlightsOf, parseQuery, spansOf } from "./searchQuery";
+import { bindResultKeys, hitColumns, highlighted, linesAround, noteText, pagedRows, resultGroup } from "./sideView";
 
 const LINES = 5;
 const PAGE = 50;
@@ -59,8 +51,18 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
       role: "button",
       "aria-label": "More options",
       onclick: () => {
-        const text = copied.map((n) => `${n.name}\n${n.lines.map((line) => `\t${line}`).join("\n")}`).join("\n\n");
-        showMenu([{ title: "Copy search results", icon: "copy", disabled: !copied.length, action: () => writeClipboard(text) }], count);
+        const snapshot = copied;
+        let text = "";
+        const item: MenuEntry = { title: "Copy search results", icon: "copy", disabled: true, action: () => writeClipboard(text) };
+        const refresh = showMenu([item], count);
+        if (snapshot?.notes.length) {
+          void api.searchLines(snapshot.query, snapshot.matchCase, snapshot.notes.map(n => n.path), LINES).then(lines => {
+            if (snapshot.seq !== seq) return;
+            text = snapshot.notes.map(n => `${noteName(n.path)}\n${(lines[n.path] ?? []).map(line => `\t${line.text}`).join("\n")}`).join("\n\n");
+            item.disabled = false;
+            refresh?.();
+          }).catch(err => console.error("Could not read search results for copying", err));
+        }
       },
     },
     countLabel,
@@ -78,7 +80,7 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
   const closedRows = new Set<string>();
   const rowKey = (path: string, line: number) => `${path}:${line}`;
   const wantsContext = (path: string, line: number) => (moreContext ? !closedRows.has(rowKey(path, line)) : openedRows.has(rowKey(path, line)));
-  let copied: { name: string; lines: string[] }[] = [];
+  let copied: (SearchRequest & { notes: SearchNote[] }) | null = null;
   const settingRow = (name: string, onChange: (on: boolean) => void) =>
     h("div", { class: "search-settings-row" }, h("div", { class: "search-settings-name" }, name), toggle(false, onChange, name));
   const panel = h(
@@ -128,38 +130,40 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
     void run();
   }
 
-  async function run() {
+  const reader = searchReader(ws, render, (request, error) => {
+    if (request.seq !== seq) return;
+    console.error("Could not search notes", error);
+    countLabel.textContent = "0 results";
+    results.replaceChildren(h("div", { class: "pane-empty" }, "Could not read search results."));
+  });
+
+  function run() {
     const mine = ++seq;
-    const q = parseQuery(input.value, matchCase);
-    clear.hidden = !input.value;
+    const query = input.value;
+    const q = parseQuery(query, matchCase);
+    clear.hidden = !query;
+    copied = null;
     if (explain) explainEl.textContent = q ? explainQuery(q) : "Enter a search to explain it.";
     if (!q) {
+      reader.cancel();
       countLabel.textContent = "";
-      copied = [];
       results.replaceChildren();
       return;
     }
-    const facts: VaultFacts = (await searchFacts(ws).facts([q], false, matchCase)) ?? { lines: () => undefined, matchCase };
+    reader.read({ query, matchCase, seq: mine });
+  }
+
+  function render(request: SearchRequest, notes: SearchNote[]) {
+    const { seq: mine, query, matchCase: caseSensitive } = request;
     if (mine !== seq) return;
-    let found = matchingNotes(ws.vault.notes, q, facts, ws.vault.isExcluded);
-    if (sort !== "alphabetical") {
-      const entries = new Map(ws.vault.files.map((f) => [f.path, f]));
-      const inOrder = compareFiles(sort);
-      found = found.map((n) => entries.get(n.path)!).filter(Boolean).sort(inOrder);
-    }
+    const q = parseQuery(query, caseSensitive)!;
+    const found = searchResults(ws.vault.files, notes, path => ws.vault.isExcluded(path), sort);
     if (collapse) for (const n of found) collapsed.add(n.path);
-    const needText = moreContext || openedRows.size > 0;
-    if (needText) {
-      texts.clear();
-      await Promise.all(found.map(async (n) => texts.set(n.path, await noteText(ws, n.path))));
-      if (mine !== seq) return;
-    }
+    texts.clear();
     const words = highlightsOf(q);
-    const lines = (path: string) => shownLines(path, q, facts, (key) => propertyLine(facts.notes?.get(path), key));
-    const counts = new Map<string, number>();
-    const countOf = (path: string, shown?: ReturnType<typeof lines>) => kept(counts, path, () => matchCount(shown ?? lines(path), words, matchCase));
+    const lines = new Map<string, SearchLine[]>();
     const matchRow = (path: string, hit: { line: number; text: string }) => {
-      const spans = spansOf(hit.text, words, matchCase);
+      const spans = spansOf(hit.text, words, caseSensitive);
       const around = wantsContext(path, hit.line) ? linesAround(texts.get(path) ?? "", hit.line) : { before: "", after: "" };
       const open = wantsContext(path, hit.line) && !!(around.before || around.after);
       const chevron = h(
@@ -188,26 +192,30 @@ export function createSearchView(ws: Workspace): { el: HTMLElement; search(query
         chevron,
       );
     };
-    const row = ({ path }: { path: string }) => {
-      const shown = lines(path);
-      const n = countOf(path, shown);
+    const row = ({ path, count: n }: SearchNote) => {
+      const shown = lines.get(path) ?? [];
       const matches = h("div", { class: "search-result-file-matches" }, ...shown.slice(0, LINES).map((hit) => matchRow(path, hit)));
       const result = resultGroup(path, matches, n ? n.toLocaleString() : null, collapsed, (event) => void ws.open(path, { where: whereFromEvent(event) }));
       if (!shown.length) matches.remove();
       return result;
     };
-    copied = found.map((n) => ({ name: noteName(n.path), lines: lines(n.path).slice(0, LINES).map((hit) => hit.text) }));
+    copied = { ...request, notes: found };
+    const total = found.reduce((sum, n) => sum + n.count, 0);
+    countLabel.textContent = `${total.toLocaleString()} result${total === 1 ? "" : "s"}`;
     results.replaceChildren();
     if (!found.length) {
-      countLabel.textContent = "0 results";
       results.append(h("div", { class: "pane-empty" }, "No matches found."));
       return;
     }
-    pagedRows(results, found, row, PAGE, AT_ONCE);
-    afterPaint(() => {
-      if (mine !== seq) return;
-      const total = found.reduce((sum, n) => sum + countOf(n.path), 0);
-      countLabel.textContent = `${total.toLocaleString()} result${total === 1 ? "" : "s"}`;
+    pagedRows(results, found, row, PAGE, AT_ONCE, async batch => {
+      const shown = await api.searchLines(query, caseSensitive, batch.map(n => n.path), LINES);
+      if (mine !== seq) return false;
+      if (moreContext || openedRows.size > 0) {
+        await Promise.all(batch.filter(n => (shown[n.path] ?? []).some(hit => wantsContext(n.path, hit.line)))
+          .map(async n => { const text = await noteText(ws, n.path); if (mine === seq) texts.set(n.path, text); }));
+      }
+      if (mine !== seq) return false;
+      for (const n of batch) lines.set(n.path, shown[n.path] ?? []);
     });
   }
 

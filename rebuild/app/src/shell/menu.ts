@@ -117,6 +117,16 @@ class Menu {
     return row;
   }
 
+  /** Reflect changed disabled flags while a menu is already open. */
+  refresh() {
+    this.rows.forEach((row, i) => {
+      const item = this.items[i];
+      if (!row || item === SEPARATOR) return;
+      row.classList.toggle("is-disabled", !!item.disabled);
+      row.setAttribute("aria-disabled", String(!!item.disabled));
+    });
+  }
+
   select(i: number) {
     if (i === this.selected) return;
     this.rows[this.selected]?.classList.remove("selected");
@@ -295,6 +305,7 @@ export function showMenu(items: MenuItems, at: MenuAnchor, opts: MenuOptions = {
   document.addEventListener("pointerdown", onPress, true);
   window.addEventListener("blur", closeMenu);
   window.addEventListener("resize", closeMenu);
+  return () => menu.refresh();
 }
 
 // A searchable picker beneath a control inside the root's custom content row.

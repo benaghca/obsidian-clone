@@ -15,6 +15,23 @@ export interface NoteMatch {
   lines: number[];
 }
 
+interface NoteFacts {
+  text: string;
+  lines?: Line[];
+  tags?: string[];
+  front?: { props: NonNullable<ReturnType<typeof readProperties>>; lines: string[]; values: Map<string, string[]> } | null;
+}
+
+/** The browser mock reuses parsed facts while a file's saved content is unchanged. */
+export function createSearchVault() {
+  const cache = new Map<string, NoteFacts>();
+  return (files: Readonly<Record<string, string>>, query: string, matchCase = false, paths?: readonly string[]) => {
+    for (const path of cache.keys()) if (!(path in files)) cache.delete(path);
+    const selected = paths ? Object.fromEntries(paths.filter(p => p in files).map(p => [p, files[p]])) : files;
+    return searchVault(selected, query, matchCase, cache);
+  };
+}
+
 /**
  * Lines as Rust's `str::lines` splits them. Split on `\n`, drop a final
  * empty piece, and drop a `\r` only when it was the character before `\n`.
@@ -35,26 +52,25 @@ export function searchVault(
   files: Readonly<Record<string, string>>,
   query: string,
   matchCase = false,
+  cache = new Map<string, NoteFacts>(),
 ): Record<string, NoteMatch | Record<string, never>> | null {
   const q = parseQuery(query, matchCase);
   if (!q) return null;
 
-  // One leading BOM is not part of the note, so line 1 can be `---` and tagsInText sees the frontmatter.
-  const source = (path: string) => {
+  const factsOf = (path: string): NoteFacts => {
     const text = files[path];
+    let data = cache.get(path);
+    if (!data || data.text !== text) cache.set(path, data = { text });
+    return data;
+  };
+  const source = (path: string) => {
+    const text = factsOf(path).text;
     return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   };
   const paths = Object.keys(files).sort();
-  const notes = paths.filter((path) => isNoteFile(path));
-  const byPath = new Map<string, Line[]>();
-  const content = (path: string): Line[] => {
-    let lines = byPath.get(path);
-    if (!lines) {
-      lines = rustLines(source(path)).map((text, i) => ({ line: i + 1, text }));
-      byPath.set(path, lines);
-    }
-    return lines;
-  };
+  const notes = paths.filter(path => isNoteFile(path));
+  const content = (path: string): Line[] => factsOf(path).lines ??=
+    rustLines(source(path)).map((text, i) => ({ line: i + 1, text }));
 
   const byTerm = new Map<string, Map<string, Line[]>>();
   const lines = (term: string) => {
@@ -78,17 +94,20 @@ export function searchVault(
   const fronts = new Map<string, { props: readonly { key: string; line: number }[]; lines: readonly string[] }>();
   if (want.tags || want.props) {
     for (const path of notes) {
-      const text = source(path);
-      if (tags) tags.set(path, tagsInText(text));
+      const data = factsOf(path);
+      if (tags) tags.set(path, data.tags ??= tagsInText(source(path)));
       if (!props) continue;
-      const body = splitFrontmatter(rustLines(text));
-      if (!body) continue;
-      const read = readProperties(body.lines);
-      if (!read) continue;
-      const byKey = new Map<string, string[]>();
-      for (const p of read) byKey.set(p.key.toLowerCase(), Array.isArray(p.value) ? p.value.map(String) : [String(p.value)]);
-      props.set(path, byKey);
-      fronts.set(path, { props: read, lines: body.lines });
+      if (data.front === undefined) {
+        const body = splitFrontmatter(rustLines(source(path)));
+        const read = body && readProperties(body.lines);
+        data.front = body && read ? {
+          props: read, lines: body.lines,
+          values: new Map(read.map(p => [p.key.toLowerCase(), Array.isArray(p.value) ? p.value.map(String) : [String(p.value)]])),
+        } : null;
+      }
+      if (!data.front) continue;
+      props.set(path, data.front.values);
+      fronts.set(path, data.front);
     }
   }
 

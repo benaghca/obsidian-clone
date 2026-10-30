@@ -17,7 +17,7 @@
 // per term, the tags per note, the properties per note. Pure, tested on its
 // own.
 
-import { compareNames, fileName, isUnder, noteName } from "../paths";
+import { fileName, isUnder, noteName } from "../paths";
 import type { Span } from "./mentions";
 
 export type Field = "any" | "content" | "file" | "path" | "tag";
@@ -164,8 +164,12 @@ function scoped(q: Query, field: Field): Query | null {
   switch (q.op) {
     case "term":
       return term(q.text, field);
-    case "not":
-      return { op: "not", part: scoped(q.part, field)! };
+    case "not": {
+      // Re-scoping an empty tag/path can remove its term. Rust returns None
+      // here; keep the TS parser from creating an invalid null-child query.
+      const part = scoped(q.part, field);
+      return part ? { op: "not", part } : null;
+    }
     case "and":
     case "or":
       return { op: q.op, parts: q.parts.map((p) => scoped(p, field)!).filter(Boolean) };
@@ -316,11 +320,6 @@ export function highlightsOf(q: Query | null, out = new Set<string>()): string[]
     else if (textOf(l)) out.add(textOf(l)!);
   }
   return [...out].sort((a, b) => b.length - a.length);
-}
-
-/** The notes that pass a query, by name as Obsidian sorts results; excluded files are left out. */
-export function matchingNotes<N extends { name: string; path: string }>(notes: readonly N[], q: Query, facts: Facts, excluded: (path: string) => boolean): N[] {
-  return notes.filter((n) => !excluded(n.path) && matches(n.path, q, facts)).sort((a, b) => compareNames(a.name, b.name));
 }
 
 /** A property's line (1-based in the note) in a note's frontmatter lines, for showing it as a result. */
