@@ -495,7 +495,7 @@ impl crate::vault::Vault {
                 return Ok(prepared.result);
             }
             let updated = prepared.text.as_ref().expect("done edit has text");
-            if let Err(error) = fsutil::atomic_write(&full, updated.as_bytes()) {
+            if let Err(error) = fsutil::atomic_write_durable(&full, updated.as_bytes()) {
                 // A directory-fsync error can occur after rename. Reconcile whichever
                 // bytes are now present; leave watcher echo unsuppressed on errors.
                 self.index.refresh_path(&self.root, &rel);

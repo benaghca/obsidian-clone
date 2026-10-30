@@ -116,19 +116,39 @@ pub fn config_file(root: &Path, name: &str) -> Result<PathBuf, String> {
     Ok(full)
 }
 
-/// Write `bytes` via a temp file in the same directory, then rename over `path`.
+/// Write `bytes` via a temp file in the same directory, then rename over `path`, keeping the
+/// old file's permissions. The file is synced before the rename.
 pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace(path, bytes, false)
+}
+
+/// [`atomic_write`], then the folder is synced as well, so the rename itself survives a power
+/// loss (KANBAN_PLAN §4.3). That doubles a write's cost on a real disk (about 4 → 9 ms on
+/// btrfs), so only `set_property`, which runs off the GTK thread, uses it; note and settings
+/// saves run on the main thread and keep the plain write.
+pub fn atomic_write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    replace(path, bytes, true)
+}
+
+fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
         }
     }
+    // Opened before the rename: a folder that can't be opened must fail before the note changes.
     #[cfg(unix)]
-    let directory = fs::File::open(
-        path.parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(Path::new(".")),
-    )?;
+    let directory = if sync_dir {
+        Some(fs::File::open(
+            path.parent()
+                .filter(|p| !p.as_os_str().is_empty())
+                .unwrap_or(Path::new(".")),
+        )?)
+    } else {
+        None
+    };
+    #[cfg(not(unix))]
+    let _ = sync_dir;
     let tmp = temp_path_for(path);
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     let write_res = (|| -> io::Result<()> {
@@ -144,7 +164,9 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
         sync_file(&file)?;
         fs::rename(&tmp, path)?;
         #[cfg(unix)]
-        sync_file(&directory)?;
+        if let Some(directory) = &directory {
+            sync_file(directory)?;
+        }
         Ok(())
     })();
     drop(file);
@@ -351,6 +373,24 @@ mod tests {
             fs::read_to_string(destination.join("kept")).unwrap(),
             "unchanged"
         );
+        assert!(walk_names(&dir.path)
+            .iter()
+            .all(|name| !name.contains(TEMP_MARK)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn plain_and_durable_writes_keep_the_old_files_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp_dir("atomic-mode");
+        let path = dir.path.join("note.md");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        atomic_write(&path, b"one").unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        atomic_write_durable(&path, b"two").unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o640);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "two");
         assert!(walk_names(&dir.path)
             .iter()
             .all(|name| !name.contains(TEMP_MARK)));
