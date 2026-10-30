@@ -54,3 +54,43 @@ Chromium handles a stylesheet change incrementally, so its absolute times are sm
 
 - **Pan and zoom still write the adopted stylesheet on every frame,** because the viewport really changes then. If panning also feels slow in the app, the next step is to put the four `--canvas-view-*` bounds on the toolbar element itself, the only thing that uses them, instead of on a stylesheet rule.
 - **Please re-test dragging in the release build.** The numbers above come from Chromium.
+
+## Part 2: alignment guides
+
+Chris: "It also doesn't have the alignment helpers on the canvas." The reference was his screenshot of Obsidian (`.obsidian-align-ref.png`, behaviour only; no Obsidian code or assets were used). When a dragged card lines up with another, a thin accent line joins them (corner to corner along aligned edges, center to center for aligned middles), with small dots where it touches each card, and the card snaps into place.
+
+Grove already snapped a dragged card to other cards' edges and centers ("Snap to objects", on by default, `editing.ts`), but it drew nothing, only looked at the card under the pointer, and scanned the whole board on every move. Now:
+
+- **What lines up.** The moving box is the whole selection: one card, a multi-selection, or a group with its cards. Its left, center and right are checked against every other card's and group's left, center and right, and the same for top, middle and bottom. It snaps when within **6 screen pixels**, which is 6 ÷ zoom in board units, so it feels the same at any zoom. Before, it was 5 board units, measured from the pressed card only.
+- **Guides.** While dragging, an accent-coloured line is drawn for each alignment, with a dot at each touching corner or center. The line is 1 screen pixel at any zoom (`vector-effect: non-scaling-stroke`) and the dots are 3 screen pixels. They are drawn in a new `svg.canvas-guides` layer on the board, only when the set of guides changes, and removed on drop or Esc.
+- **Turning it off.** Hold **Alt** for a drag. Alt already turned off grid snapping and object snapping (Canvas help: "Disable snapping while dragging: Alt"), so it was the natural key, and Ctrl stays free. The "Snap to objects" setting still turns it off for good. Shift's axis lock still applies, and the locked axis doesn't snap.
+- **Resize** aligns too, for the edge being dragged only: dragging a card's bottom edge level with a neighbour's bottom snaps and shows that guide. The 50 × 50 minimum size still wins over a snap.
+- **Speed.** When a drag starts, the other cards' edges and centers are put into one sorted list per axis (3 per card). Each frame is then a binary search for each of the moving box's three lines, O(log n), instead of the old scan of every card. All of it runs inside the same per-frame update as part 1. Unknown node types without a size are skipped, so they can't break the sorted lists.
+
+**Files:**
+
+| File | Change |
+|---|---|
+| `canvas/align.ts` (new) | `alignTargets`, `snapOffset`, `guidesFor` (pure) |
+| `canvas/align.test.ts` (new) | 6 unit tests |
+| `canvas/editing.ts` | The drag and resize use it; guides are cleared on drop |
+| `canvas/view.ts` | Guide layer, passed in as the new last argument of `canvasEditing` |
+| `styles/canvas.css` | Three lines of guide styles |
+| `scripts/test-canvas-drag-work.mjs` | Headless alignment checks |
+
+**Tests:**
+- **Unit (`align.test.ts`):** snapping within and outside the distance, center to center, the nearer of two candidates, the distance scaling with zoom, size-less boxes skipped, guide geometry (top edges joined corner to corner with four dots; centers joined with two), a resized edge, and 300 cards.
+- **Headless (`test-canvas-drag-work.mjs`):** with grid snapping off, card B is dragged until its top is 3 units below card A's top. During the drag, a horizontal guide at A's top shows (plus the middle and bottom ones, since the cards are the same height), the corners get dots, and B snaps to `top: 10px`. On the drop, the guides clear and `y: 10` is saved. With Alt held, there are no guides and no snap (`y: -7`).
+
+**Checks for part 2:**
+- **`npm run build`:** passed. **`npm run audit:offline`:** passed (167 source files).
+- **`flock /tmp/grove-npm-test.lock npm test`:** passed in one run (exit 0), with no reruns.
+  - Browser discovery: 4/4. Vitest: 59 files, 675 tests.
+  - Every browser script passed, plus `posttest`. The 300-card timings still pass: drag max 16.8 ms; pan and zoom; edge create and reconnect 16.8 ms; explorer drag 16.8 ms.
+  - The drag-work counts are unchanged: 0 rule writes, 0 menu changes, 0 layout reads per move.
+- **`flock … cargo test --offline`:** 54 passed, 1 ignored.
+- **Screenshots:** restored.
+
+**Left for later:**
+- **Off-screen cards.** Guides compare against every card on the board, not only the visible ones. The sorted lists keep that cheap, but a far-away card can produce a guide that runs off-screen. Limiting targets to the viewport would need the viewport bounds passed in from navigation.
+- **Equal spacing.** There is no "same gap" guide (equal spacing between three cards). The screenshot didn't show one.

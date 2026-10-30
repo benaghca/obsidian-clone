@@ -12,6 +12,9 @@
 /* A drag cursor surface avoids restyling every Markdown child on large boards. */
 .canvas-view.is-explorer-dragging::after { content: ""; position: absolute; inset: 0; z-index: 3; cursor: grabbing; }
 .canvas-edges { position: absolute; width: 1px; height: 1px; pointer-events: none; z-index: 1; }
+.canvas-guides { position: absolute; width: 1px; height: 1px; pointer-events: none; z-index: 3; }
+.canvas-guides line { stroke: var(--interactive-accent); stroke-width: 1px; vector-effect: non-scaling-stroke; }
+.canvas-guides circle { fill: var(--interactive-accent); }
 .canvas-node {
   position: absolute;
   border: 1px solid var(--background-modifier-border);
