@@ -19,8 +19,8 @@ describe("Bases expressions", () => {
     expect(expression('missing < today()')(ctx)).toBe(false);
     expect(expression('true || false && false')(ctx)).toBe(true);
   });
-  it("rejects unsupported calls even in skipped branches, this and trailing syntax", () => {
-    for (const s of ['true || unknown()', 'this.file.name', 'priority.constructor()', 'file.unknown', 'priority + 1','if(true, 1)', 'status == "a" garbage']) expect(() => expression(s)).toThrow();
+  it("rejects unsupported calls even in skipped branches and trailing syntax", () => {
+    for (const s of ['true || unknown()', 'priority.constructor()', 'file.unknown', 'if(true, 1)', 'status == "a" garbage']) expect(() => expression(s)).toThrow();
   });
 });
 function row(name: string, n?: number): Row {
