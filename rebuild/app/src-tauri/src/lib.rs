@@ -99,6 +99,7 @@ pub fn run() {
             search,
             link_index,
             backlinks,
+            link_sources,
             frontmatter,
             properties,
             tags,
@@ -292,6 +293,12 @@ fn backlinks(
     paths: Vec<String>,
 ) -> Result<BTreeMap<String, Vec<Backlink>>, String> {
     with_vault(&state, |v| Ok(v.index.backlinks(&paths)))
+}
+
+/// Notes that might link to `paths`, for a rename. Fetched before `rename_path`.
+#[tauri::command(async)]
+fn link_sources(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
+    with_vault(&state, |v| Ok(v.index.link_sources(&paths)))
 }
 
 /// Each note's frontmatter block (only `paths`' when given), for the properties index.

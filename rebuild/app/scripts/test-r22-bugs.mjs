@@ -40,18 +40,8 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
   check(!indexed.unresolved.some((name) => name.includes('\\')), `escaped destination is not stored with a backslash, got ${JSON.stringify(indexed.unresolved)}`);
 
   await run(async () => {
-    // Exercise the search fallback too: omit these notes from the pre-rename snapshot.
-    const { api } = await import('/src/api.ts');
-    const original = api.backlinks;
-    api.backlinks = async paths => {
-      const found = await original(paths);
-      if (found['Projects/a(b).md']) found['Projects/a(b).md'] = found['Projects/a(b).md'].filter(b => !['SearchOnly.md', 'PercentOnly.md'].includes(b.from));
-      return found;
-    };
-    try {
-      const { renameFile } = await import('/src/fileOps.ts');
-      await renameFile(ws, 'Projects/a(b).md', 'c(d)');
-    } finally { api.backlinks = original; }
+    const { renameFile } = await import('/src/fileOps.ts');
+    await renameFile(ws, 'Projects/a(b).md', 'c(d)');
   });
   let renamed = null;
   for (let i = 0; i < 20; i++) {
@@ -66,8 +56,8 @@ await withBrowser(async ({ send, run, click, press, chord }) => {
   check(!renamed.hidden.includes('a\\(b\\)'), `a note whose only link is escaped is renamed, got ${JSON.stringify(renamed.hidden)}`);
 
   check(renamed.hidden.includes('[see](c\\(d\\).md)'), 'rename retains the backslash-escaped destination style');
-  check(renamed.search.includes('[see](c\\(d\\).md)'), 'search finds a note containing only an escaped destination without index help');
-  check(renamed.percent.includes('[see](c%28d%29.md)'), 'search finds a note containing only a percent-encoded destination without index help');
+  check(renamed.search.includes('[see](c\\(d\\).md)'), 'link sources finds a note containing only an escaped destination');
+  check(renamed.percent.includes('[see](c%28d%29.md)'), 'link sources finds a note containing only a percent-encoded destination');
 
   for (const mode of ['live', 'source']) {
     await run(async mode => {

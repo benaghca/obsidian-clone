@@ -24,6 +24,7 @@
     "allow-search",
     "allow-link-index",
     "allow-backlinks",
+    "allow-link-sources",
     "allow-frontmatter",
     "allow-tags",
     "allow-properties",

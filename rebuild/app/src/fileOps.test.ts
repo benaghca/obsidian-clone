@@ -3,7 +3,7 @@ import { api } from "./api";
 import { fileSettings, moveFile, renameFile } from "./fileOps";
 import type { Workspace } from "./workspace";
 
-vi.mock("./api", () => ({ api: { renamePath: vi.fn().mockResolvedValue(undefined), backlinks: vi.fn().mockResolvedValue({}) } }));
+vi.mock("./api", () => ({ api: { renamePath: vi.fn().mockResolvedValue(undefined), linkSources: vi.fn().mockResolvedValue([]) } }));
 const flush = vi.fn().mockResolvedValue(undefined);
 const moved = vi.fn();
 const ws = {
@@ -72,7 +72,7 @@ test("a move uses the existing editor, tab and link-following path", async () =>
   expect(api.renamePath).toHaveBeenCalledWith("A/Unique.md", "B/Unique.md");
   expect(moved).toHaveBeenCalledOnce();
   expect(moving.followMove).toHaveBeenCalledOnce();
-  expect(renamed).toHaveBeenCalledWith("A/Unique.md", "B/Unique.md", moving.vault.notes, {});
+  expect(renamed).toHaveBeenCalledWith("A/Unique.md", "B/Unique.md", moving.vault.notes, []);
   renamed.mockRestore();
 });
 
@@ -83,31 +83,31 @@ test("case-only folder renames remain valid with the relocation guard", async ()
 });
 
 
-test("snapshots every moved note before rename and passes the same snapshot after followMove", async () => {
+test("asks for every moved note's link sources before rename and passes that list after followMove", async () => {
   const moving = movingWorkspace();
   moving.vault.notes = Array.from({ length: 25 }, (_, i) => ({ path: `A/Note${i}.md`, name: `Note${i}` }));
   moving.vault.notes.push({ path: "Outside.md", name: "Outside" });
   const before = moving.vault.notes;
-  let release!: (value: Record<string, never[]>) => void;
-  const snapshot = { "A/Note0.md": [] };
-  vi.mocked(api.backlinks).mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
+  let release!: (value: string[]) => void;
+  const sources = ["Outside.md", "A/Note1.md"];
+  vi.mocked(api.linkSources).mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
   const renamed = vi.spyOn(fileSettings, "renamed");
   const movingNote = moveFile(moving, "A", "B");
   await Promise.resolve();
-  expect(api.backlinks).toHaveBeenCalledWith(before.slice(0, 25).map(n => n.path));
+  expect(api.linkSources).toHaveBeenCalledWith(before.slice(0, 25).map(n => n.path));
   expect(api.renamePath).not.toHaveBeenCalled();
-  release(snapshot);
+  release(sources);
   await movingNote;
-  expect(renamed).toHaveBeenCalledWith("A", "B/A 2", before, snapshot);
-  expect(vi.mocked(api.backlinks).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.renamePath).mock.invocationCallOrder[0]);
+  expect(renamed).toHaveBeenCalledWith("A", "B/A 2", before, sources);
+  expect(vi.mocked(api.linkSources).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(api.renamePath).mock.invocationCallOrder[0]);
   expect(vi.mocked(moving.followMove).mock.invocationCallOrder[0]).toBeLessThan(renamed.mock.invocationCallOrder[0]);
   renamed.mockRestore();
 });
 
-test("a failed backlink snapshot aborts before any path is renamed", async () => {
+test("a failed link-source read aborts before any path is renamed", async () => {
   const moving = movingWorkspace();
   moving.vault.notes = [{ path: "A/Note.md", name: "Note" }];
-  vi.mocked(api.backlinks).mockRejectedValueOnce(new Error("snapshot unavailable"));
+  vi.mocked(api.linkSources).mockRejectedValueOnce(new Error("snapshot unavailable"));
   await expect(moveFile(moving, "A/Note.md", "B")).rejects.toThrow("snapshot unavailable");
   expect(api.renamePath).not.toHaveBeenCalled();
   expect(moved).not.toHaveBeenCalled();
