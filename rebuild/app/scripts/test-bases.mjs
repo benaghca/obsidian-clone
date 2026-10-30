@@ -110,7 +110,12 @@ await withBrowser(async({run,send,click,point,move,press,chord,fill,shot,check})
  });
  await wait(()=>run(()=>document.querySelector('.bases-count')?.textContent==='0 results'),'empty saved tag index');
  await click('.cm-content .cm-line');await press('End');await send('Input.insertText',{text:' #newtag'});
+ assert.equal(await run(()=>document.querySelector('.bases-count')?.textContent),'0 results','a keystroke does not rebuild the base');
+ assert.equal(await run(async()=>{const {api}=await import('/src/api.ts');return api.readNote('Fresh.md');}),'# Fresh\n','a keystroke has not saved yet');
+ await sleep(50);
+ assert.equal(await run(()=>document.querySelector('.bases-count')?.textContent),'0 results','typing stays quiet past the old 20ms debounce');
  await wait(()=>run(()=>document.querySelector('.bases-count')?.textContent==='1 results'),'unsaved first tag updates base');
- assert.equal(await run(async()=>{const {api}=await import('/src/api.ts');return api.readNote('Fresh.md');}),'# Fresh\n','tag matched before the editor saved it');
  console.log('PASS first unsaved tag matches an empty saved tag index');
 },{height:800,screenshots:shots.pathname});
+
+await import('./test-bases-b0.mjs');
