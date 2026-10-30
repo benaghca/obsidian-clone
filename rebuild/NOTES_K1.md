@@ -2,6 +2,8 @@
 
 Built on `rebuild/kanban-k1-grok`, from `eb02c47` (the Kanban plan on integration `f112151`). Nothing was pushed.
 
+This path used to be the search-parity notes from 2026-10-29. That text is unchanged in `rebuild/NOTES_K1-SEARCH.md`. `NOTES_K1-REVIEW.md` still reviews that search work.
+
 - `d7ec637` Accept unknown Bases layouts and group settings
 - this notes file
 
