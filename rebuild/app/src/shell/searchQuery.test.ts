@@ -39,6 +39,13 @@ describe("search query", () => {
     expect([...termsOf(parseQuery('alpha -beta tag:#x line:(c "d e") file:f [p:q]'))]).toEqual(["alpha", "beta", "#x", "c", "d e"]);
   });
 
+  it("parses a 10,000-word query into one and of every word", () => {
+    const q = parseQuery(Array.from({ length: 10_000 }, (_, i) => `w${i}`).join(" "));
+    expect(q?.op).toBe("and");
+    expect(q && "parts" in q && q.parts.length).toBe(10_000);
+    expect(q && "parts" in q && q.parts[9_999]).toEqual({ op: "term", text: "w9999", field: "any" });
+  });
+
   it("highlights the words that were looked for, not the ones excluded", () => {
     expect(highlightsOf(parseQuery('"star wars" alpha -beta file:x [status:draft]'))).toEqual(["star wars", "alpha", "draft"]);
   });
