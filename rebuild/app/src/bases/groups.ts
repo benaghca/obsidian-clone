@@ -17,10 +17,14 @@ export interface GroupBy { property: string; direction: "ASC" | "DESC" }
 /** `added`: a Manual group no note has (yet); `hidden`: unticked in Manual (KANBAN_PLAN §2.2). */
 export interface RowGroup { id: string; value: Value; label: string; rows: Entry[]; order?: number; error?: Error; added?: boolean; hidden?: boolean }
 export interface SliceOptions { cancelled?: () => boolean; budgetMs?: number; yieldTask?: () => Promise<void>; onSlice?: (ms: number) => void }
-export function parseGroupBy(value: Yaml | undefined): GroupBy | null {
+export function parseGroupBy(value: Yaml | undefined, notices?: Set<string>): GroupBy | null {
   if (value == null) return null;
-  if (typeof value !== "object" || Array.isArray(value) || typeof value.property !== "string" || !value.property.trim() || !["ASC", "DESC"].includes(String(value.direction ?? "ASC"))) throw Error("groupBy requires a property and ASC or DESC direction");
-  return { property: value.property, direction: value.direction === "DESC" ? "DESC" : "ASC" };
+  if (typeof value !== "object" || Array.isArray(value) || typeof value.property !== "string" || !value.property.trim()) throw Error("groupBy requires a property and ASC or DESC direction");
+  const direction = value.direction ?? "ASC";
+  if (direction !== "ASC" && direction !== "DESC") notices?.add(`Unsupported group direction: ${String(direction)}`);
+  const extra = Object.keys(value).filter(key => key !== "property" && key !== "direction");
+  if (extra.length) notices?.add(`Unsupported groupBy settings: ${extra.join(", ")}`);
+  return { property: value.property, direction: direction === "DESC" ? "DESC" : "ASC" };
 }
 
 /** Typed structural keys shared by grouping and Unique; bounded like formula output. */
