@@ -161,6 +161,7 @@ views:
     image: cover            # optional cover, cards' existing keys (imageFit, imageAspectRatio)
 ```
 
+- **K1 check (2026-10-30).** The Views page in §1 names no YAML keys, and no Obsidian-saved `.base` was available, so nothing in the block above was renamed. Still Grove's guess: `type: kanban`, `groupBy.order`, `groupBy.hidden`, and "an `order` key means Manual". Already Grove's own format, not confirmed from Obsidian: `type: table` or `cards`, `groupBy.property`, and `groupBy.direction` of `ASC` or `DESC`.
 - **Manual lives inside `groupBy`.** Changing the group property (Group menu or header menu) rewrites the whole `groupBy` block, so a stale manual order can never apply to a different property. Going back to automatic order is the same writer with `order` and `hidden` left out.
 - **Group identity.** Each entry is the group's value as a YAML scalar: plain text, number, `true`/`false`, a date as `2026-11-03`, `null` for No value, and a list as a block list for list-valued groups. An entry matches a group when `valueKey(entry) === group.id`. That is the same encoding grouping already uses, so `2026-11-03`, a quoted `"2026-11-03"` and a date value all match one group, as they group together today.
 - **Validation.** `order` and `hidden` must be lists. An entry that can't be read (a mapping, for example) is ignored with a notice and kept on disk. Duplicates count once. More than 1,000 entries gives a notice, and only the first 1,000 are used.

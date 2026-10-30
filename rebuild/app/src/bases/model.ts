@@ -62,8 +62,8 @@ export function baseModel(source: string, viewIndex = 0) {
   const first = views[viewIndex];
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
-  if (view.type != null && view.type !== "table" && view.type !== "cards") throw Error(`Unsupported view type: ${String(view.type)}`);
-  const groupBy = parseGroupBy(view.groupBy), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
+  if (view.type != null && view.type !== "table" && view.type !== "cards") notices.add("This layout isn't supported yet");
+  const groupBy = parseGroupBy(view.groupBy, notices), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
     try { return expression(source); } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
