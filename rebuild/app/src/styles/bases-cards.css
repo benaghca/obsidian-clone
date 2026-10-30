@@ -1,0 +1,86 @@
+.bases-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--bases-card-size, 220px), 1fr));
+  gap: 16px;
+  padding: 16px;
+  align-content: start;
+  box-sizing: border-box;
+}
+.bases-card {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--background-primary-alt);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  transition: border-color 80ms ease;
+}
+.bases-card:hover,
+.bases-card:focus-visible {
+  border-color: var(--background-modifier-border-hover);
+  outline: none;
+}
+.bases-card-cover {
+  height: var(--bases-card-cover-height, 110px);
+  background: var(--background-secondary);
+  position: relative;
+  overflow: hidden;
+  flex: none;
+}
+.bases-card-image {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+.bases-card-body {
+  padding: 10px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+.bases-card-title {
+  color: var(--text-normal);
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 20px;
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bases-card-body > .bases-card-title:last-child {
+  margin-bottom: 0;
+}
+.bases-card-prop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.bases-card-key {
+  color: var(--text-faint);
+  width: 56px;
+  flex: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bases-card-value {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+.bases-card-value .property-pill {
+  flex: none;
+}

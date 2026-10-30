@@ -65,7 +65,65 @@ describe("Bases tables", () => {
     expect(base.notices.size).toBe(2);
     expect(baseModel("").columns).toEqual(["file.name"]);
     expect(() => baseModel('views: table')).toThrow();
-    expect(() => baseModel('views:\n  - type: cards')).toThrow();
+    expect(() => baseModel('views:\n  - type: map')).toThrow();
+  });
+  it("parses cards view type and card layout options with defaults", async () => {
+    (globalThis as Record<string, unknown>).window ??= {};
+    (globalThis as Record<string, unknown>).document ??= { body: {}, addEventListener() {}, createElement: () => ({ style: {}, setAttribute() {}, append() {}, addEventListener() {}, classList: { add() {}, toggle() {} } }) };
+    (globalThis as Record<string, unknown>).MutationObserver ??= class { observe() {} disconnect() {} };
+    const { cardLayout } = await import("./cards");
+    const def = baseModel("views:\n  - type: cards\n    name: Cards\n");
+    expect(def.type).toBe("cards");
+    expect(def.name).toBe("Cards");
+    expect(def.cardSize).toBe(220);
+    expect(def.image).toBeNull();
+    expect(def.imageFit).toBe("cover");
+    expect(def.imageAspectRatio).toBe(0.5);
+
+    const custom = baseModel(
+      "views:\n  - type: cards\n    cardSize: 280\n    image: note.cover\n    imageFit: contain\n    imageAspectRatio: 0.75\n",
+    );
+    expect(custom.type).toBe("cards");
+    expect(custom.cardSize).toBe(280);
+    expect(custom.image).toBe("note.cover");
+    expect(custom.imageFit).toBe("contain");
+    expect(custom.imageAspectRatio).toBe(0.75);
+
+    expect(baseModel("views:\n  - type: cards\n    cardSize: small\n").cardSize).toBe(160);
+    expect(baseModel("views:\n  - type: cards\n    cardSize: large\n").cardSize).toBe(320);
+
+    const smallGrid = cardLayout({
+      count: 12,
+      width: 960,
+      height: 500,
+      scrollTop: 0,
+      cardSize: 220,
+      propCount: 3,
+      coverHeight: 110,
+    });
+    expect(smallGrid.virtual).toBe(false);
+    expect(smallGrid.cols).toBe(4);
+    expect(smallGrid.firstIndex).toBe(0);
+    expect(smallGrid.endIndex).toBe(12);
+    expect(smallGrid.topSpace).toBe(0);
+    expect(smallGrid.bottomSpace).toBe(0);
+
+    const largeGrid = cardLayout({
+      count: 1000,
+      width: 960,
+      height: 500,
+      scrollTop: 4000,
+      cardSize: 220,
+      propCount: 3,
+      coverHeight: 110,
+    });
+    expect(largeGrid.virtual).toBe(true);
+    expect(largeGrid.cols).toBe(4);
+    expect(largeGrid.firstIndex).toBeGreaterThan(0);
+    expect(largeGrid.endIndex - largeGrid.firstIndex).toBeLessThanOrEqual(30);
+    expect(largeGrid.topSpace + (largeGrid.endRow - largeGrid.firstRow) * largeGrid.rowPitch + largeGrid.bottomSpace).toBe(
+      largeGrid.totalRows * largeGrid.rowPitch,
+    );
   });
 });
 
