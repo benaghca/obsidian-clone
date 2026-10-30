@@ -77,13 +77,18 @@ export function equalValues(a: Value, b: Value, rt = runtime(), depth = 0, empty
   if (a instanceof FormulaLink && b instanceof FormulaLink) return a.path === b.path;
   return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => equalValues(v, b[i], rt, depth + 1, emptyEquivalent));
 }
+const AVERAGE_MONTH = 30.436875 * 86_400_000;
 /** Empty/incompatible values have no order. ISO date strings remain comparable to file facts. */
 export function compareValues(a: Value, b: Value): number | null {
   checked(a); checked(b);
   if (isEmpty(a) || isEmpty(b)) return null;
   if (typeof a === "number" && typeof b === "number") return a - b;
   if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
-  if (a instanceof FormulaDuration && b instanceof FormulaDuration) return a.months === b.months ? (a.days - b.days) * 86_400_000 + a.milliseconds - b.milliseconds : null;
+  // A duration compares with duration text ("1 week"), so `now() - file.mtime > "1 week"` works.
+  const ua = a instanceof FormulaDuration ? a : b instanceof FormulaDuration && typeof a === "string" ? parseDuration(a) : null;
+  const ub = b instanceof FormulaDuration ? b : a instanceof FormulaDuration && typeof b === "string" ? parseDuration(b) : null;
+  // Months have no fixed length; ordering (not equality) uses the average Gregorian month.
+  if (ua && ub) return (ua.months - ub.months) * AVERAGE_MONTH + (ua.days - ub.days) * 86_400_000 + ua.milliseconds - ub.milliseconds;
   const da = a instanceof FormulaDate || typeof a === "string" ? date(a) : null;
   const db = b instanceof FormulaDate || typeof b === "string" ? date(b) : null;
   if (da && db) return da.time - db.time;

@@ -58,6 +58,19 @@ describe("methods and value properties", () => {
   ])("%s", (_name, source, expected) => expect(run(source as string)).toEqual(expected));
 });
 
+describe("duration order", () => {
+  it.each([
+    ['duration("1 month") > duration("1 day")', true],
+    ['duration("1 month") > duration("40d")', false],
+    ['duration("1 year") > duration("11M")', true],
+    ['duration("1 month") == duration("30d")', false],
+    ['(now() - "2024-01-01") > "1 week"', true],
+    ['(now() - "2024-01-30") < "2d"', true],
+    ['"1 week" > now() - "2024-01-30"', true],
+    ['duration("1d") > "soon"', false],
+  ])("%s", (source, expected) => expect(run(source)).toBe(expected));
+});
+
 describe("file functions", () => {
   it.each([
     ["hasTag", "file.hasTag('work')", true], ["hasTag hash", "file.hasTag('#work')", true], ["hasTag missing", "file.hasTag('absent')", false],
