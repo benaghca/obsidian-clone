@@ -215,12 +215,21 @@ pub enum CrashPoint {
 #[cfg(test)]
 thread_local! {
     static CRASH_AT: std::cell::Cell<Option<CrashPoint>> = const { std::cell::Cell::new(None) };
+    static EXIT_ON_CRASH: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Arm the next write on this thread. `None` disarms it. The point fires once.
 #[cfg(test)]
 pub fn crash_at(point: Option<CrashPoint>) {
     CRASH_AT.with(|slot| slot.set(point));
+    EXIT_ON_CRASH.with(|slot| slot.set(false));
+}
+
+/// Child-process tests stop without unwinding, cleanup, or returning to the writer.
+#[cfg(test)]
+pub fn crash_process_at(point: CrashPoint) {
+    crash_at(Some(point));
+    EXIT_ON_CRASH.with(|slot| slot.set(true));
 }
 
 #[cfg(test)]
@@ -228,6 +237,9 @@ fn take_crash(point: CrashPoint) -> bool {
     CRASH_AT.with(|slot| {
         if slot.get() == Some(point) {
             slot.set(None);
+            if EXIT_ON_CRASH.with(|slot| slot.replace(false)) {
+                std::process::exit(86);
+            }
             true
         } else {
             false

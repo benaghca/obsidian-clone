@@ -19,7 +19,7 @@ const { editProperty } = await import("../src/editor/propertyEdit.ts");
 
 const SEED = 0x6b37;
 const count = Number(process.env.K7_FUZZ_CASES || 48);
-const hugeBytes = Number(process.env.K7_FUZZ_HUGE_BYTES || 65536);
+const hugeBytes = Number(process.env.K7_FUZZ_HUGE_BYTES || 1048576);
 
 function mulberry32(seed) {
   let a = seed >>> 0;
@@ -205,7 +205,7 @@ function randomCase(rng, i) {
   const bom = rng() < 0.3;
   const marker = `K7BODY-r${i}`;
   const kind = pick(rng, ["text", "flow", "block", "number", "check", "date", "between", "dup", "hash", "conflict", "remove", "same", "missing"]);
-  const keep = kind !== "missing";
+  const keep = true;
   const lines = [];
   if (kind === "between") lines.push("status: todo", "# leave this", "keep: same");
   else if (kind === "dup") lines.push("status: one", "Status: two", "keep: same");
@@ -230,9 +230,19 @@ function randomCase(rng, i) {
   else if (kind === "remove") edit = { key: "status", expect: lines[0], to: null };
   else if (kind === "same") edit = { key: "status", expect: lines[0], to: typed("text", lines[0].slice("status: ".length)) };
   else if (kind === "between") edit = { key: "status", expect: "status: todo", to: typed("text", "doing") };
-  else edit = { key: "status", expect: lines[0], to: typed("text", "board") };
-  return { name: `rand-${i}-${kind}`, input, edit, keep };
+  else edit = { key: "status", expect: lines[0], to: typed("text", pick(rng, ["board", "it's fine", 'say "hi"', "a: b", "a # b", "[x]", "true", "2026-02-02", "héllo 🌟", "line\nbreak"])) };
+  const expected = ["dup", "hash"].includes(kind) ? "refused" : kind === "same" ? "unchanged"
+    : kind === "conflict" ? (lines[0] === "status: later" ? "unchanged" : "conflict") : "done";
+  return { name: `rand-${i}-${kind}`, input, edit, keep, expected };
 }
+
+// Expected outcomes keep differential agreement from accepting two matching refusals.
+const expected = { "comment-in-value": "refused", "duplicate-keys": "refused",
+  "number-refused": "refused", conflict: "conflict", unchanged: "unchanged" };
+for (const entry of forced) entry.expected = expected[entry.name] ?? "done";
+forced.find(entry => entry.name === "huge").expected = new TextEncoder().encode(forced.find(entry => entry.name === "huge").input).length > 16 * 1024 * 1024 ? "refused" : "done";
+forced.push({ name: "huge-frontmatter", input: doc(["status: todo", ...Array(2001).fill("# retained"), "keep: same"], { body: "K7BODY-lines\n" }),
+  edit: { key: "status", expect: "status: todo", to: typed("text", "doing") }, keep: true, expected: "refused" });
 
 const rng = mulberry32(SEED);
 const extra = Math.max(0, count - forced.length);
@@ -240,11 +250,24 @@ const cases = [...forced, ...Array.from({ length: extra }, (_, i) => randomCase(
 
 const report = cases.map(entry => {
   const result = editProperty(entry.input, entry.edit);
+  if (result.status !== entry.expected || result.status === "done" && !result.change || result.status !== "done" && result.change) {
+    throw new Error(`K7_FUZZ_FAIL ${entry.name} expected ${entry.expected}, got ${result.status} (change=${!!result.change})`);
+  }
   const text = result.status === "done" && result.change
     ? entry.input.slice(0, result.change.from) + result.change.insert + entry.input.slice(result.change.to)
     : entry.input;
+  if (result.status === "done" && result.before !== null) {
+    const eol = entry.input.includes("\r\n") ? "\r\n" : "\n";
+    const before = result.before.replaceAll("\n", eol), at = entry.input.indexOf(before);
+    if (at < 0) throw new Error(`K7_FUZZ_FAIL ${entry.name} missing source span`);
+    const after = result.after === null ? "" : result.after.replaceAll("\n", eol);
+    const end = at + before.length + (result.after === null ? eol.length : 0);
+    if (text !== entry.input.slice(0, at) + after + entry.input.slice(end)) {
+      throw new Error(`K7_FUZZ_FAIL ${entry.name} changed bytes outside property`);
+    }
+  }
   const marker = entry.input.match(/K7BODY-\S+/)?.[0];
-  if (!marker || text.split(marker).length !== 2) {
+  if (!marker || text.split(marker).length !== 2 || !text.endsWith(entry.input.slice(entry.input.indexOf(marker)))) {
     console.error(`K7_FUZZ_FAIL ${entry.name} lost body marker`);
     process.exit(1);
   }
@@ -252,7 +275,7 @@ const report = cases.map(entry => {
     console.error(`K7_FUZZ_FAIL ${entry.name} BOM changed`);
     process.exit(1);
   }
-  if (entry.keep && entry.input.includes("keep: same") && !text.includes("keep: same")) {
+  if (entry.keep && entry.input.includes("keep: same") && !text.includes(entry.input.match(/keep: same(?:\r?\n|$)/)[0])) {
     console.error(`K7_FUZZ_FAIL ${entry.name} rewrote a sibling property`);
     process.exit(1);
   }

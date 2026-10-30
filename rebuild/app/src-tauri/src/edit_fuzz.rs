@@ -108,7 +108,11 @@ fn temps(dir: &Path) -> Vec<PathBuf> {
             let entry = entry.unwrap();
             if entry.file_type().unwrap().is_dir() {
                 stack.push(entry.path());
-            } else if entry.file_name().to_string_lossy().contains(fsutil::TEMP_MARK) {
+            } else if entry
+                .file_name()
+                .to_string_lossy()
+                .contains(fsutil::TEMP_MARK)
+            {
                 found.push(entry.path());
             }
         }
@@ -143,18 +147,34 @@ fn crash_before_rename_keeps_the_old_note_and_the_sweep_removes_the_temp() {
     let dir = scratch("rename");
     let mut vault = open_note(&dir.path, OLD);
     let edit = text_edit("status: todo", "doing");
-    let new_text = edit_property(OLD, &edit).text.expect("the edit itself is valid");
+    let new_text = edit_property(OLD, &edit)
+        .text
+        .expect("the edit itself is valid");
     assert_ne!(new_text, OLD);
     fsutil::crash_at(Some(CrashPoint::BeforeRename));
     let err = vault.set_property("Note.md", &edit, false).unwrap_err();
     assert!(err.contains("injected crash before rename"), "{err}");
     assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), OLD);
     let left = temps(&dir.path);
-    assert_eq!(left.len(), 1, "the killed write leaves its own temp: {left:?}");
-    assert_eq!(fs::read_to_string(&left[0]).unwrap(), new_text, "the temp is the whole new note, not a prefix");
-    assert_eq!(fsutil::sweep_temps(&dir.path).unwrap(), 0, "a live process still owns this temp");
+    assert_eq!(
+        left.len(),
+        1,
+        "the killed write leaves its own temp: {left:?}"
+    );
+    assert_eq!(
+        fs::read_to_string(&left[0]).unwrap(),
+        new_text,
+        "the temp is the whole new note, not a prefix"
+    );
+    assert_eq!(
+        fsutil::sweep_temps(&dir.path).unwrap(),
+        0,
+        "a live process still owns this temp"
+    );
     assert!(left[0].exists());
-    let dead = left[0].with_file_name(dead_temp_name(&left[0].file_name().unwrap().to_string_lossy()));
+    let dead = left[0].with_file_name(dead_temp_name(
+        &left[0].file_name().unwrap().to_string_lossy(),
+    ));
     fs::rename(&left[0], &dead).unwrap();
     assert_eq!(fsutil::sweep_temps(&dir.path).unwrap(), 1);
     assert!(!dead.exists());
@@ -164,7 +184,10 @@ fn crash_before_rename_keeps_the_old_note_and_the_sweep_removes_the_temp() {
         status_of(&vault.set_property("Note.md", &edit, false).unwrap()),
         "done"
     );
-    assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), new_text);
+    assert_eq!(
+        fs::read_to_string(dir.path.join("Note.md")).unwrap(),
+        new_text
+    );
     assert!(temps(&dir.path).is_empty());
 }
 
@@ -174,14 +197,106 @@ fn crash_before_directory_sync_keeps_the_new_note_and_leaves_no_temp() {
     let dir = scratch("dirsync");
     let mut vault = open_note(&dir.path, OLD);
     let edit = text_edit("status: todo", "doing");
-    let new_text = edit_property(OLD, &edit).text.expect("the edit itself is valid");
+    let new_text = edit_property(OLD, &edit)
+        .text
+        .expect("the edit itself is valid");
     fsutil::crash_at(Some(CrashPoint::BeforeDirSync));
     let err = vault.set_property("Note.md", &edit, false).unwrap_err();
-    assert!(err.contains("injected crash before directory sync"), "{err}");
-    assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), new_text);
-    assert!(temps(&dir.path).is_empty(), "the rename already consumed the temp");
+    assert!(
+        err.contains("injected crash before directory sync"),
+        "{err}"
+    );
+    assert_eq!(
+        fs::read_to_string(dir.path.join("Note.md")).unwrap(),
+        new_text
+    );
+    assert!(
+        temps(&dir.path).is_empty(),
+        "the rename already consumed the temp"
+    );
     assert_eq!(fsutil::sweep_temps(&dir.path).unwrap(), 0);
-    assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), new_text);
+    assert_eq!(
+        fs::read_to_string(dir.path.join("Note.md")).unwrap(),
+        new_text
+    );
+}
+
+// Only the parent below invokes this test, in a new process with its own scratch path.
+#[test]
+#[ignore]
+fn crash_child() {
+    let Some(path) = std::env::var_os("K7_CRASH_CHILD") else {
+        return;
+    };
+    let path = PathBuf::from(path);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/k7-scratch")
+        .canonicalize()
+        .unwrap();
+    assert!(path.canonicalize().unwrap().starts_with(root));
+    let mut vault = Vault::open(path).unwrap();
+    let point = match std::env::var("K7_CRASH_POINT").unwrap().as_str() {
+        "rename" => CrashPoint::BeforeRename,
+        "dirsync" => CrashPoint::BeforeDirSync,
+        _ => panic!("invalid child crash point"),
+    };
+    fsutil::crash_process_at(point);
+    let _ = vault.set_property("Note.md", &text_edit("status: todo", "doing"), false);
+    panic!("child did not exit at its armed crash point");
+}
+
+#[test]
+fn killed_writer_is_old_or_new_and_reopen_sweeps_only_its_dead_temp() {
+    for point in ["rename", "dirsync"] {
+        let dir = scratch(point);
+        fs::write(dir.path.join("Note.md"), OLD).unwrap();
+        let lookalikes = ["notes.grove-tmp", ".x.grove-tmp", ".a.1.x.grove-tmp"];
+        let live = format!(".live.md.{}.1.grove-tmp", std::process::id());
+        for name in lookalikes.iter().copied().chain([live.as_str()]) {
+            fs::write(dir.path.join(name), b"keep these exact bytes").unwrap();
+        }
+        let exit = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "edit_fuzz::crash_child", "--ignored"])
+            .env("K7_CRASH_CHILD", &dir.path)
+            .env("K7_CRASH_POINT", point)
+            .output()
+            .unwrap();
+        assert_eq!(
+            exit.status.code(),
+            Some(86),
+            "child: {}",
+            String::from_utf8_lossy(&exit.stderr)
+        );
+        let new = edit_property(OLD, &text_edit("status: todo", "doing"))
+            .text
+            .unwrap();
+        let expected = if point == "rename" { OLD } else { &new };
+        assert_eq!(
+            fs::read(dir.path.join("Note.md")).unwrap(),
+            expected.as_bytes()
+        );
+        let dead: Vec<_> = temps(&dir.path)
+            .into_iter()
+            .filter(|p| !lookalikes.iter().any(|n| p.ends_with(n)) && !p.ends_with(&live))
+            .collect();
+        assert_eq!(dead.len(), usize::from(point == "rename"));
+        for temp in &dead {
+            assert_eq!(fs::read(temp).unwrap(), new.as_bytes());
+        }
+        // Unlike the in-process error simulation, this uses the real child's dead PID.
+        let _reopened = Vault::open(dir.path.clone()).unwrap();
+        assert!(dead.iter().all(|p| !p.exists()));
+        assert_eq!(
+            fs::read(dir.path.join("Note.md")).unwrap(),
+            expected.as_bytes()
+        );
+        for name in lookalikes.iter().copied().chain([live.as_str()]) {
+            assert_eq!(
+                fs::read(dir.path.join(name)).unwrap(),
+                b"keep these exact bytes"
+            );
+        }
+    }
 }
 
 #[test]
@@ -208,7 +323,9 @@ fn a_racing_writer_never_leaves_a_torn_note() {
     let old = "---\nstatus: todo\nkeep: same\n---\nK7BODY-A\n";
     let other = "---\nstatus: other\nkeep: same\n---\nK7BODY-B\n";
     let edit = text_edit("status: todo", "doing");
-    let edited = edit_property(old, &edit).text.expect("edit of the original");
+    let edited = edit_property(old, &edit)
+        .text
+        .expect("edit of the original");
     fs::write(&path, old).unwrap();
     let mut vault = Vault::open(dir.path.clone()).unwrap();
     let stop = Arc::new(AtomicBool::new(false));
@@ -220,7 +337,11 @@ fn a_racing_writer_never_leaves_a_torn_note() {
         let mut wrote = 0u64;
         let mut n = 0u64;
         while !flag.load(Ordering::Relaxed) {
-            let bytes = if n % 2 == 0 { old.as_bytes() } else { other.as_bytes() };
+            let bytes = if n % 2 == 0 {
+                old.as_bytes()
+            } else {
+                other.as_bytes()
+            };
             if fsutil::atomic_write(&raced, bytes).is_ok() {
                 wrote += 1;
                 tick.fetch_add(1, Ordering::Relaxed);
@@ -235,7 +356,18 @@ fn a_racing_writer_never_leaves_a_torn_note() {
     let started = std::time::Instant::now();
     let mut seen = 0u64;
     let mut edits = 0u64;
-    while edits < 20 && started.elapsed() < std::time::Duration::from_secs(3) {
+    let allowed = [old.as_bytes(), other.as_bytes(), edited.as_bytes()];
+    let mut torn = None;
+    let mut reads = 0;
+    while edits < 20 && started.elapsed() < std::time::Duration::from_secs(20) {
+        // Sample while the writer is active, not just after it stops: a later good
+        // replacement must not conceal a torn intermediate note.
+        let got = fs::read(&path).unwrap();
+        reads += 1;
+        if !allowed.contains(&got.as_slice()) {
+            torn = Some(got);
+            break;
+        }
         let now = generations.load(Ordering::Relaxed);
         if now == seen {
             thread::yield_now();
@@ -247,12 +379,12 @@ fn a_racing_writer_never_leaves_a_torn_note() {
     }
     stop.store(true, Ordering::Relaxed);
     let wrote = writer.join().unwrap();
+    assert!(torn.is_none(), "torn intermediate note: {torn:?}");
     assert!(
         edits >= 20 && wrote >= 20,
         "the race did not overlap: {edits} edits, {wrote} racer writes"
     );
     let got = fs::read(&path).unwrap();
-    let allowed = [old.as_bytes(), other.as_bytes(), edited.as_bytes()];
     assert!(
         allowed.iter().any(|candidate| *candidate == got.as_slice()),
         "torn or mixed note ({} bytes): {:?}",
@@ -260,7 +392,7 @@ fn a_racing_writer_never_leaves_a_torn_note() {
         String::from_utf8_lossy(&got)
     );
     assert!(temps(&dir.path).is_empty());
-    eprintln!("K7_RACE racer_writes={wrote}");
+    eprintln!("K7_RACE racer_writes={wrote} reads={reads}");
 }
 
 #[derive(Deserialize)]
@@ -308,7 +440,14 @@ fn differential_fuzz_matches_the_typescript_reference() {
     let file: FuzzFile = serde_json::from_slice(&out.stdout).expect("fuzz JSON");
     assert!(file.cases.len() >= 26, "the fixed corpus is missing cases");
     let names: Vec<_> = file.cases.iter().map(|c| c.name.as_str()).collect();
-    for required in ["bom", "crlf", "flow-list", "comment-in-value", "duplicate-keys", "huge"] {
+    for required in [
+        "bom",
+        "crlf",
+        "flow-list",
+        "comment-in-value",
+        "duplicate-keys",
+        "huge",
+    ] {
         assert!(names.contains(&required), "missing {required}");
     }
     for case in &file.cases {
@@ -329,14 +468,26 @@ fn differential_fuzz_matches_the_typescript_reference() {
             );
         }
         match &prepared.result {
-            EditResult::Done { before, after, .. } | EditResult::Unchanged { before, after, .. } => {
+            EditResult::Done { before, after, .. }
+            | EditResult::Unchanged { before, after, .. } => {
                 opt_pair("before", &case.name, &case.before, before);
                 opt_pair("after", &case.name, &case.after, after);
             }
-            EditResult::Conflict { current } => opt_pair("current", &case.name, &case.current, current),
-            EditResult::Refused { reason } => assert_eq!(case.reason.as_deref(), Some(reason.as_str()), "{}", case.name),
+            EditResult::Conflict { current } => {
+                opt_pair("current", &case.name, &case.current, current)
+            }
+            EditResult::Refused { reason } => assert_eq!(
+                case.reason.as_deref(),
+                Some(reason.as_str()),
+                "{}",
+                case.name
+            ),
         }
-        if let Some(marker) = case.input.split_whitespace().find(|w| w.starts_with("K7BODY-")) {
+        if let Some(marker) = case
+            .input
+            .split_whitespace()
+            .find(|w| w.starts_with("K7BODY-"))
+        {
             assert_eq!(rust_text.matches(marker).count(), 1, "{} body", case.name);
         }
     }
