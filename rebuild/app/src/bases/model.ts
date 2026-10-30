@@ -22,7 +22,7 @@ export function baseModel(source: string, viewIndex = 0) {
   const first = views[viewIndex];
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
-  if (view.type != null && view.type !== "table") throw Error(`Unsupported view type: ${String(view.type)}`);
+  if (view.type != null && view.type !== "table" && view.type !== "cards") throw Error(`Unsupported view type: ${String(view.type)}`);
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
     try { return expression(source); } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
@@ -91,5 +91,10 @@ export function baseModel(source: string, viewIndex = 0) {
     });
     return !unlimited && typeof view.limit === "number" ? found.slice(0, view.limit) : found;
   }
-  return { rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
+  const type: "table" | "cards" = view.type === "cards" ? "cards" : "table";
+  const cardSize = typeof view.cardSize === "number" && Number.isFinite(view.cardSize) ? Math.max(80, Math.min(800, Math.round(view.cardSize))) : ({ small: 160, medium: 220, large: 320 } as Record<string, number>)[String(view.cardSize ?? "")] ?? 220;
+  const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
+  const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
+  const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
+  return { type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices };
 }
