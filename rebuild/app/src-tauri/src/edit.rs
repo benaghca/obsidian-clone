@@ -800,14 +800,32 @@ mod tests {
     fn sweep_on_open_removes_abandoned_temps_but_not_live_or_unrelated_files() {
         let dir = tmp_dir("k2-sweep");
         fs::create_dir_all(dir.path.join("nested/.grove")).unwrap();
-        fs::write(dir.path.join("nested/.grove/old.grove-tmp"), "old").unwrap();
+        // A dead process's temp, in atomic_write's exact name format (u32::MAX is never a live PID).
+        let old = format!(
+            "nested/.grove/.workspace.json.{}.123{}",
+            u32::MAX,
+            fsutil::TEMP_MARK
+        );
+        fs::write(dir.path.join(&old), "old").unwrap();
         let live = format!(".note.md.{}.123{}", std::process::id(), fsutil::TEMP_MARK);
         fs::write(dir.path.join(&live), "active").unwrap();
-        fs::write(dir.path.join("keep.grove-tmp.md"), "keep").unwrap();
+        // Files that merely end in the marker are not Grove's temps: never deleted.
+        let unrelated = [
+            "keep.grove-tmp.md",
+            "notes.grove-tmp",
+            ".x.grove-tmp",
+            ".a.1.x.grove-tmp",
+            ".a.+1.2.grove-tmp",
+        ];
+        for name in unrelated {
+            fs::write(dir.path.join(name), "keep").unwrap();
+        }
         let _vault = Vault::open(dir.path.clone()).unwrap();
-        assert!(!dir.path.join("nested/.grove/old.grove-tmp").exists());
+        assert!(!dir.path.join(&old).exists());
         assert!(dir.path.join(&live).exists());
-        assert!(dir.path.join("keep.grove-tmp.md").exists());
+        for name in unrelated {
+            assert!(dir.path.join(name).exists(), "{name} kept");
+        }
     }
     #[test]
     #[ignore]

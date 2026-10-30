@@ -196,13 +196,9 @@ pub fn sweep_temps(root: &Path) -> io::Result<usize> {
             if ![".obsidian", ".git", ".trash"].contains(&name.as_ref()) {
                 removed += sweep_temps(&entry.path())?;
             }
-        } else if kind.is_file() && name.ends_with(TEMP_MARK) {
-            let base = name.trim_end_matches(TEMP_MARK).trim_end_matches('.');
-            let pid = base.rsplit('.').nth(1).and_then(|s| s.parse::<u32>().ok());
-            let live = pid.is_some_and(|p| {
-                p == std::process::id()
-                    || cfg!(target_os = "linux") && Path::new("/proc").join(p.to_string()).exists()
-            });
+        } else if let Some(pid) = kind.is_file().then(|| temp_owner(&name)).flatten() {
+            let live = pid == std::process::id()
+                || cfg!(target_os = "linux") && Path::new("/proc").join(pid.to_string()).exists();
             if !live {
                 fs::remove_file(entry.path())?;
                 removed += 1;
@@ -213,6 +209,17 @@ pub fn sweep_temps(root: &Path) -> io::Result<usize> {
         sync_parent(&root.join("cleanup"))?;
     }
     Ok(removed)
+}
+
+/// The process that made a temp, when `name` is exactly [`temp_path_for`]'s
+/// `.{name}.{pid}.{nanos}.grove-tmp`. Any other file is not Grove's and is never swept.
+fn temp_owner(name: &str) -> Option<u32> {
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let (rest, nanos) = name.strip_suffix(TEMP_MARK)?.rsplit_once('.')?;
+    let (rest, pid) = rest.rsplit_once('.')?;
+    (rest.len() > 1 && rest.starts_with('.') && digits(nanos) && digits(pid))
+        .then(|| pid.parse().ok())
+        .flatten()
 }
 
 fn temp_path_for(path: &Path) -> PathBuf {
