@@ -244,17 +244,18 @@ export function createCardGrid(ws: Workspace, group: Group, scroller: HTMLElemen
     const hasViewport = scrollerRect.height > 0 && scrollerRect.width > 0;
     const cards = el.querySelectorAll<HTMLElement>(".bases-card");
     for (const card of cards) {
-      if (covers.has(card)) continue;
       const idx = Number(card.dataset.index ?? "-1");
-      if (idx < 0) continue;
-      const row = Math.floor(idx / lastLayout.cols);
-      const inRowRange = row >= lastLayout.visibleStartRow && row < lastLayout.visibleEndRow;
-      if (!inRowRange) continue;
-      if (hasViewport) {
+      const row = idx >= 0 ? Math.floor(idx / lastLayout.cols) : -1;
+      let visible = row >= lastLayout.visibleStartRow && row < lastLayout.visibleEndRow;
+      if (visible && hasViewport) {
         const rect = card.getBoundingClientRect();
-        if (rect.height > 0 && (rect.bottom <= scrollerRect.top || rect.top >= scrollerRect.bottom)) continue;
+        if (rect.height > 0 && (rect.bottom <= scrollerRect.top || rect.top >= scrollerRect.bottom)) visible = false;
       }
-      loadCoverForCard(card);
+      if (!visible) {
+        if (covers.has(card)) releaseCover(card);
+        continue;
+      }
+      if (!covers.has(card)) loadCoverForCard(card);
     }
   }
 
@@ -423,9 +424,9 @@ export function attachCardsToBaseView(el: HTMLElement, ws: Workspace, path: stri
     if (!model || !toolbar) return;
     const viewBtn = toolbar.querySelector<HTMLElement>(".bases-view-name");
     const firstSvg = viewBtn?.querySelector("svg");
-    if (viewBtn && firstSvg) {
-      firstSvg.replaceWith(icon(model.type === "cards" ? "grid-2x2" : "table"));
-    }
+    const glyph = model.type === "cards" ? "grid-2x2" : "table";
+    // Replacing an icon that is already right mutates the toolbar and schedules another update.
+    if (viewBtn && firstSvg && !firstSvg.classList.contains(`lucide-${glyph}`)) firstSvg.replaceWith(icon(glyph));
   }
 
   async function update() {
@@ -519,12 +520,11 @@ export function attachCardsToBaseView(el: HTMLElement, ws: Workspace, path: stri
   });
   resize.observe(scroller);
 
-  // Re-sync whenever the host table updates its tbody or toolbar view name changes.
+  // The host rebuilds the toolbar when its results change. The table body also
+  // changes on every virtual scroll, which is not a new result set.
   const hostObserver = new MutationObserver(() => {
     if (!gone) schedule();
   });
-  const tbody = table.querySelector("tbody");
-  if (tbody) hostObserver.observe(tbody, { childList: true });
   hostObserver.observe(toolbar, { childList: true, subtree: true, characterData: true });
 
   const unwatch = ws.vault.onModified((changed) => {
@@ -596,8 +596,6 @@ export function enableBaseCards(ws: Workspace) {
   ws.on((event) => {
     if (event === "tabs" || event === "layout" || event === "show") syncPanes();
   });
-  const observer = new MutationObserver(() => syncPanes());
-  observer.observe(document.body, { childList: true, subtree: true });
   syncPanes();
 }
 
