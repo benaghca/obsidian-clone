@@ -35,6 +35,9 @@ impl Vault {
             return Err(format!("not a folder: {}", root.display()));
         }
         let root = root.canonicalize().map_err(|e| e.to_string())?;
+        if let Err(error) = fsutil::sweep_temps(&root) {
+            eprintln!("Could not clean abandoned Grove temp files: {error}");
+        }
         let index = Index::scan(&root)?;
         Ok(Self {
             root,
@@ -318,7 +321,7 @@ impl Vault {
         out
     }
 
-    fn mark_own(&mut self, rel: &str) {
+    pub(crate) fn mark_own(&mut self, rel: &str) {
         let now = Instant::now();
         self.gc_own_writes(now);
         self.own_writes.insert(rel.to_string(), now + OWN_WRITE);

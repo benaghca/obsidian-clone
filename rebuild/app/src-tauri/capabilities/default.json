@@ -16,6 +16,7 @@
     "allow-read-note",
     "allow-read-file-bytes",
     "allow-write-note",
+    "allow-set-property",
     "allow-write-file-bytes",
     "allow-create-note",
     "allow-create-folder",

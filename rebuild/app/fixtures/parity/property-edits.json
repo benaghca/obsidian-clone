@@ -1,0 +1,1798 @@
+{
+  "about": "K2 safe property CAS edits; expected bytes are authored independently of either edit engine.",
+  "typescript": "editor/propertyEdit.ts",
+  "rust": "src-tauri/src/edit.rs",
+  "cases": [
+    {
+      "name": "plain text",
+      "input": "---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "single quote",
+      "input": "---\nstatus: 'todo'\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: 'todo'",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: 'todo'",
+        "after": "status: 'doing'",
+        "text": "---\nstatus: 'doing'\n---\nbody\n"
+      }
+    },
+    {
+      "name": "double quote",
+      "input": "---\nstatus: \"todo\"\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: \"todo\"",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: \"todo\"",
+        "after": "status: \"doing\"",
+        "text": "---\nstatus: \"doing\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "single quote escaping",
+      "input": "---\nstatus: 'todo'\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: 'todo'",
+        "to": {
+          "type": "text",
+          "value": "isn't ready"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: 'todo'",
+        "after": "status: 'isn''t ready'",
+        "text": "---\nstatus: 'isn''t ready'\n---\nbody\n"
+      }
+    },
+    {
+      "name": "double quote escaping",
+      "input": "---\nstatus: \"todo\"\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: \"todo\"",
+        "to": {
+          "type": "text",
+          "value": "a\"b\\c"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: \"todo\"",
+        "after": "status: \"a\\\"b\\\\c\"",
+        "text": "---\nstatus: \"a\\\"b\\\\c\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "plain becomes quoted bool",
+      "input": "---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "true"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: \"true\"",
+        "text": "---\nstatus: \"true\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "plain becomes quoted number",
+      "input": "---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "012"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: \"012\"",
+        "text": "---\nstatus: \"012\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "plain becomes quoted hash",
+      "input": "---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "a # b"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: \"a # b\"",
+        "text": "---\nstatus: \"a # b\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "plain becomes quoted colon",
+      "input": "---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "a: b"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: \"a: b\"",
+        "text": "---\nstatus: \"a: b\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "single quote newline falls back",
+      "input": "---\nstatus: 'todo'\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: 'todo'",
+        "to": {
+          "type": "text",
+          "value": "a\nb"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: 'todo'",
+        "after": "status: \"a\\nb\"",
+        "text": "---\nstatus: \"a\\nb\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "empty scalar keeps key",
+      "input": "---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status:",
+        "text": "---\nstatus:\n---\nbody\n"
+      }
+    },
+    {
+      "name": "quoted empty clears",
+      "input": "---\nstatus: \"todo\"\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: \"todo\"",
+        "to": {
+          "type": "text",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: \"todo\"",
+        "after": "status:",
+        "text": "---\nstatus:\n---\nbody\n"
+      }
+    },
+    {
+      "name": "number",
+      "input": "---\nn: 2\n---\nbody\n",
+      "edit": {
+        "key": "n",
+        "expect": "n: 2",
+        "to": {
+          "type": "number",
+          "value": "-3.5"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "n: 2",
+        "after": "n: -3.5",
+        "text": "---\nn: -3.5\n---\nbody\n"
+      }
+    },
+    {
+      "name": "number zero",
+      "input": "---\nn: 2\n---\nbody\n",
+      "edit": {
+        "key": "n",
+        "expect": "n: 2",
+        "to": {
+          "type": "number",
+          "value": "0"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "n: 2",
+        "after": "n: 0",
+        "text": "---\nn: 0\n---\nbody\n"
+      }
+    },
+    {
+      "name": "number clear",
+      "input": "---\nn: 2\n---\nbody\n",
+      "edit": {
+        "key": "n",
+        "expect": "n: 2",
+        "to": {
+          "type": "number",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "n: 2",
+        "after": "n:",
+        "text": "---\nn:\n---\nbody\n"
+      }
+    },
+    {
+      "name": "quoted number becomes typed",
+      "input": "---\nn: \"2\"\n---\nbody\n",
+      "edit": {
+        "key": "n",
+        "expect": "n: \"2\"",
+        "to": {
+          "type": "number",
+          "value": "3"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "n: \"2\"",
+        "after": "n: 3",
+        "text": "---\nn: 3\n---\nbody\n"
+      }
+    },
+    {
+      "name": "checkbox true",
+      "input": "---\ndone: false\n---\nbody\n",
+      "edit": {
+        "key": "done",
+        "expect": "done: false",
+        "to": {
+          "type": "checkbox",
+          "value": true
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "done: false",
+        "after": "done: true",
+        "text": "---\ndone: true\n---\nbody\n"
+      }
+    },
+    {
+      "name": "checkbox false",
+      "input": "---\ndone: true\n---\nbody\n",
+      "edit": {
+        "key": "done",
+        "expect": "done: true",
+        "to": {
+          "type": "checkbox",
+          "value": false
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "done: true",
+        "after": "done: false",
+        "text": "---\ndone: false\n---\nbody\n"
+      }
+    },
+    {
+      "name": "checkbox clear",
+      "input": "---\ndone: true\n---\nbody\n",
+      "edit": {
+        "key": "done",
+        "expect": "done: true",
+        "to": {
+          "type": "checkbox",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "done: true",
+        "after": "done:",
+        "text": "---\ndone:\n---\nbody\n"
+      }
+    },
+    {
+      "name": "date",
+      "input": "---\ndue: 2026-10-30\n---\nbody\n",
+      "edit": {
+        "key": "due",
+        "expect": "due: 2026-10-30",
+        "to": {
+          "type": "date",
+          "value": "2026-11-03"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "due: 2026-10-30",
+        "after": "due: 2026-11-03",
+        "text": "---\ndue: 2026-11-03\n---\nbody\n"
+      }
+    },
+    {
+      "name": "date single quote",
+      "input": "---\ndue: '2026-10-30'\n---\nbody\n",
+      "edit": {
+        "key": "due",
+        "expect": "due: '2026-10-30'",
+        "to": {
+          "type": "date",
+          "value": "2026-11-03"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "due: '2026-10-30'",
+        "after": "due: '2026-11-03'",
+        "text": "---\ndue: '2026-11-03'\n---\nbody\n"
+      }
+    },
+    {
+      "name": "date double quote",
+      "input": "---\ndue: \"2026-10-30\"\n---\nbody\n",
+      "edit": {
+        "key": "due",
+        "expect": "due: \"2026-10-30\"",
+        "to": {
+          "type": "date",
+          "value": "2026-11-03"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "due: \"2026-10-30\"",
+        "after": "due: \"2026-11-03\"",
+        "text": "---\ndue: \"2026-11-03\"\n---\nbody\n"
+      }
+    },
+    {
+      "name": "datetime",
+      "input": "---\ndue: 2026-10-30T09:00\n---\nbody\n",
+      "edit": {
+        "key": "due",
+        "expect": "due: 2026-10-30T09:00",
+        "to": {
+          "type": "datetime",
+          "value": "2026-11-03T10:30"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "due: 2026-10-30T09:00",
+        "after": "due: 2026-11-03T10:30",
+        "text": "---\ndue: 2026-11-03T10:30\n---\nbody\n"
+      }
+    },
+    {
+      "name": "date clear",
+      "input": "---\ndue: 2026-10-30\n---\nbody\n",
+      "edit": {
+        "key": "due",
+        "expect": "due: 2026-10-30",
+        "to": {
+          "type": "date",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "due: 2026-10-30",
+        "after": "due:",
+        "text": "---\ndue:\n---\nbody\n"
+      }
+    },
+    {
+      "name": "block list indent two",
+      "input": "---\nitems:\n  - a\n  - b\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n  - a\n  - b",
+        "to": {
+          "type": "list",
+          "value": [
+            "c",
+            "d"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n  - a\n  - b",
+        "after": "items:\n  - c\n  - d",
+        "text": "---\nitems:\n  - c\n  - d\n---\nbody\n"
+      }
+    },
+    {
+      "name": "block list indent zero",
+      "input": "---\nitems:\n- a\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n- a",
+        "to": {
+          "type": "list",
+          "value": [
+            "c",
+            "d"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n- a",
+        "after": "items:\n- c\n- d",
+        "text": "---\nitems:\n- c\n- d\n---\nbody\n"
+      }
+    },
+    {
+      "name": "block list indent four",
+      "input": "---\nitems:\n    - a\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n    - a",
+        "to": {
+          "type": "list",
+          "value": [
+            "c"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n    - a",
+        "after": "items:\n    - c",
+        "text": "---\nitems:\n    - c\n---\nbody\n"
+      }
+    },
+    {
+      "name": "block list tabs",
+      "input": "---\nitems:\n\t- a\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n\t- a",
+        "to": {
+          "type": "list",
+          "value": [
+            "c"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n\t- a",
+        "after": "items:\n\t- c",
+        "text": "---\nitems:\n\t- c\n---\nbody\n"
+      }
+    },
+    {
+      "name": "flow list style",
+      "input": "---\nitems: [a, b]\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items: [a, b]",
+        "to": {
+          "type": "list",
+          "value": [
+            "c",
+            "d"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items: [a, b]",
+        "after": "items: [c, d]",
+        "text": "---\nitems: [c, d]\n---\nbody\n"
+      }
+    },
+    {
+      "name": "flow list quoting",
+      "input": "---\nitems: [a]\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items: [a]",
+        "to": {
+          "type": "list",
+          "value": [
+            "true",
+            "a, b",
+            "a # b"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items: [a]",
+        "after": "items: [\"true\", \"a, b\", \"a # b\"]",
+        "text": "---\nitems: [\"true\", \"a, b\", \"a # b\"]\n---\nbody\n"
+      }
+    },
+    {
+      "name": "list scalar target",
+      "input": "---\nitems: [a]\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items: [a]",
+        "to": {
+          "type": "list",
+          "value": "urgent"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items: [a]",
+        "after": "items: [urgent]",
+        "text": "---\nitems: [urgent]\n---\nbody\n"
+      }
+    },
+    {
+      "name": "block list clear",
+      "input": "---\nitems:\n  - a\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n  - a",
+        "to": {
+          "type": "list",
+          "value": []
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n  - a",
+        "after": "items: []",
+        "text": "---\nitems: []\n---\nbody\n"
+      }
+    },
+    {
+      "name": "flow list clear",
+      "input": "---\nitems: [a]\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items: [a]",
+        "to": {
+          "type": "list",
+          "value": []
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items: [a]",
+        "after": "items: []",
+        "text": "---\nitems: []\n---\nbody\n"
+      }
+    },
+    {
+      "name": "list empty string clears",
+      "input": "---\nitems: [a]\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items: [a]",
+        "to": {
+          "type": "list",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items: [a]",
+        "after": "items: []",
+        "text": "---\nitems: []\n---\nbody\n"
+      }
+    },
+    {
+      "name": "tags fixed type",
+      "input": "---\ntags: [a]\n---\nbody\n",
+      "edit": {
+        "key": "tags",
+        "expect": "tags: [a]",
+        "to": {
+          "type": "tags",
+          "value": [
+            "b",
+            "c"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "tags: [a]",
+        "after": "tags: [b, c]",
+        "text": "---\ntags: [b, c]\n---\nbody\n"
+      }
+    },
+    {
+      "name": "aliases block",
+      "input": "---\naliases:\n- a\n---\nbody\n",
+      "edit": {
+        "key": "aliases",
+        "expect": "aliases:\n- a",
+        "to": {
+          "type": "aliases",
+          "value": [
+            "new alias"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "aliases:\n- a",
+        "after": "aliases:\n- new alias",
+        "text": "---\naliases:\n- new alias\n---\nbody\n"
+      }
+    },
+    {
+      "name": "tags scalar becomes block",
+      "input": "---\ntags: a\n---\nbody\n",
+      "edit": {
+        "key": "tags",
+        "expect": "tags: a",
+        "to": {
+          "type": "tags",
+          "value": "b"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "tags: a",
+        "after": "tags:\n  - b",
+        "text": "---\ntags:\n  - b\n---\nbody\n"
+      }
+    },
+    {
+      "name": "cssclasses list",
+      "input": "---\ncssclasses: [a]\n---\nbody\n",
+      "edit": {
+        "key": "cssclasses",
+        "expect": "cssclasses: [a]",
+        "to": {
+          "type": "list",
+          "value": [
+            "b"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "cssclasses: [a]",
+        "after": "cssclasses: [b]",
+        "text": "---\ncssclasses: [b]\n---\nbody\n"
+      }
+    },
+    {
+      "name": "quoted key preserved",
+      "input": "---\n\"my: key\": todo\n---\nbody\n",
+      "edit": {
+        "key": "my: key",
+        "expect": "\"my: key\": todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "\"my: key\": todo",
+        "after": "\"my: key\": doing",
+        "text": "---\n\"my: key\": doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "single quoted key preserved",
+      "input": "---\n'status': todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "'status': todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "'status': todo",
+        "after": "'status': doing",
+        "text": "---\n'status': doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "key spacing preserved",
+      "input": "---\nstatus   : todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status   : todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status   : todo",
+        "after": "status   : doing",
+        "text": "---\nstatus   : doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "case insensitive key CAS",
+      "input": "---\nStatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "Status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "Status: todo",
+        "after": "Status: doing",
+        "text": "---\nStatus: doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "BOM preserved",
+      "input": "﻿---\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "﻿---\nstatus: doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "CRLF preserved",
+      "input": "---\r\nstatus: todo\r\n---\r\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\r\nstatus: doing\r\n---\r\nbody\n"
+      }
+    },
+    {
+      "name": "BOM CRLF together",
+      "input": "﻿---\r\nstatus: todo\r\n---\r\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "﻿---\r\nstatus: doing\r\n---\r\nbody\n"
+      }
+    },
+    {
+      "name": "body no final newline",
+      "input": "---\nstatus: todo\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---\nbody"
+      }
+    },
+    {
+      "name": "Unicode body and property",
+      "input": "---\nstatus: café\n---\nCafé 🌻\r\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: café",
+        "to": {
+          "type": "text",
+          "value": "日本語"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: café",
+        "after": "status: 日本語",
+        "text": "---\nstatus: 日本語\n---\nCafé 🌻\r\n"
+      }
+    },
+    {
+      "name": "Unicode property name",
+      "input": "---\n状態: todo\n---\nbody\n",
+      "edit": {
+        "key": "状態",
+        "expect": "状態: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "状態: todo",
+        "after": "状態: doing",
+        "text": "---\n状態: doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "other properties and comments kept",
+      "input": "---\n# keep\nother: \"x\"\n\nstatus: todo\n---\nbody\n",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\n# keep\nother: \"x\"\n\nstatus: doing\n---\nbody\n"
+      }
+    },
+    {
+      "name": "empty number",
+      "input": "---\nn:\n---\nbody\n",
+      "edit": {
+        "key": "n",
+        "expect": "n:",
+        "to": {
+          "type": "number",
+          "value": "3"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "n:",
+        "after": "n: 3",
+        "text": "---\nn: 3\n---\nbody\n"
+      }
+    },
+    {
+      "name": "empty checkbox",
+      "input": "---\ndone:\n---\nbody\n",
+      "edit": {
+        "key": "done",
+        "expect": "done:",
+        "to": {
+          "type": "checkbox",
+          "value": true
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "done:",
+        "after": "done: true",
+        "text": "---\ndone: true\n---\nbody\n"
+      }
+    },
+    {
+      "name": "empty list",
+      "input": "---\nitems:\n---\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:",
+        "to": {
+          "type": "list",
+          "value": [
+            "x"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:",
+        "after": "items:\n  - x",
+        "text": "---\nitems:\n  - x\n---\nbody\n"
+      }
+    },
+    {
+      "name": "missing property",
+      "input": "---\nother: 1\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": "---\nother: 1\nstatus: doing\n---\nbody"
+      }
+    },
+    {
+      "name": "no frontmatter",
+      "input": "body",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---\nbody"
+      }
+    },
+    {
+      "name": "empty note",
+      "input": "",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---\n"
+      }
+    },
+    {
+      "name": "BOM no frontmatter",
+      "input": "﻿body",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": "﻿---\nstatus: doing\n---\nbody"
+      }
+    },
+    {
+      "name": "empty frontmatter",
+      "input": "---\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---\nbody"
+      }
+    },
+    {
+      "name": "fence with spaces",
+      "input": " --- \nother: 1\n --- \nbody",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": " --- \nother: 1\nstatus: doing\n --- \nbody"
+      }
+    },
+    {
+      "name": "new property CRLF",
+      "input": "---\r\nother: 1\r\n---\r\nbody",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status: doing",
+        "text": "---\r\nother: 1\r\nstatus: doing\r\n---\r\nbody"
+      }
+    },
+    {
+      "name": "missing clear scalar",
+      "input": "body",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": ""
+        }
+      },
+      "expected": {
+        "status": "unchanged",
+        "before": null,
+        "after": null,
+        "text": "body"
+      }
+    },
+    {
+      "name": "missing clear list",
+      "input": "body",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "list",
+          "value": []
+        }
+      },
+      "expected": {
+        "status": "unchanged",
+        "before": null,
+        "after": null,
+        "text": "body"
+      }
+    },
+    {
+      "name": "missing removal",
+      "input": "body",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": null
+      },
+      "expected": {
+        "status": "unchanged",
+        "before": null,
+        "after": null,
+        "text": "body"
+      }
+    },
+    {
+      "name": "retry exact target",
+      "input": "---\nstatus: doing\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "unchanged",
+        "before": "status: doing",
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---"
+      }
+    },
+    {
+      "name": "property conflict",
+      "input": "---\nstatus: review\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "conflict",
+        "current": "status: review",
+        "text": "---\nstatus: review\n---\nbody"
+      }
+    },
+    {
+      "name": "missing conflict",
+      "input": "body",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "conflict",
+        "current": null,
+        "text": "body"
+      }
+    },
+    {
+      "name": "unexpected existing conflict",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "conflict",
+        "current": "status: todo",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "undo exact quotes",
+      "input": "---\nstatus: doing\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": "status: doing",
+        "to": {
+          "lines": "status: 'todo'"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: doing",
+        "after": "status: 'todo'",
+        "text": "---\nstatus: 'todo'\n---\nbody"
+      }
+    },
+    {
+      "name": "undo removal",
+      "input": "---\nstatus: doing\nother: x\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": "status: doing",
+        "to": null
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: doing",
+        "after": null,
+        "text": "---\nother: x\n---\nbody"
+      }
+    },
+    {
+      "name": "undo restore missing empty",
+      "input": "---\nother: x\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "lines": "status:"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "status:",
+        "text": "---\nother: x\nstatus:\n---\nbody"
+      }
+    },
+    {
+      "name": "undo restore missing block list",
+      "input": "body",
+      "edit": {
+        "key": "tags",
+        "expect": null,
+        "to": {
+          "lines": "tags:\n- a\n- b"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "tags:\n- a\n- b",
+        "text": "---\ntags:\n- a\n- b\n---\nbody"
+      }
+    },
+    {
+      "name": "no newline after closing fence",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\nstatus: doing\n---"
+      }
+    },
+    {
+      "name": "mixed endings per line",
+      "input": "﻿---\r\nother: x\nitems:\r\n- a\n---\r\nbody\n",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n- a",
+        "to": {
+          "type": "list",
+          "value": [
+            "b",
+            "c"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n- a",
+        "after": "items:\n- b\n- c",
+        "text": "﻿---\r\nother: x\nitems:\r\n- b\r\n- c\n---\r\nbody\n"
+      }
+    },
+    {
+      "name": "duplicate exact",
+      "input": "---\nstatus: a\nstatus: b\n---",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Frontmatter is not safely editable",
+        "text": "---\nstatus: a\nstatus: b\n---"
+      }
+    },
+    {
+      "name": "duplicate case",
+      "input": "---\nStatus: a\nstatus: b\n---",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Frontmatter is not safely editable",
+        "text": "---\nStatus: a\nstatus: b\n---"
+      }
+    },
+    {
+      "name": "unclosed",
+      "input": "---\nstatus: a",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Frontmatter is not safely editable",
+        "text": "---\nstatus: a"
+      }
+    },
+    {
+      "name": "opener only",
+      "input": "---",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Frontmatter is not safely editable",
+        "text": "---"
+      }
+    },
+    {
+      "name": "unplaceable",
+      "input": "---\nno colon\n---",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Frontmatter is not safely editable",
+        "text": "---\nno colon\n---"
+      }
+    },
+    {
+      "name": "too many lines",
+      "input": "---\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n---",
+      "edit": {
+        "key": "status",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Frontmatter is not safely editable",
+        "text": "---\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n#x\n---"
+      }
+    },
+    {
+      "name": "value comment",
+      "input": "---\nstatus: todo # keep\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo # keep",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Property is not safely editable",
+        "text": "---\nstatus: todo # keep\n---"
+      }
+    },
+    {
+      "name": "nested map",
+      "input": "---\nstatus:\n  nested: value\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status:\n  nested: value",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Property is not safely editable",
+        "text": "---\nstatus:\n  nested: value\n---"
+      }
+    },
+    {
+      "name": "anchor",
+      "input": "---\nstatus: &a todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: &a todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Property is not safely editable",
+        "text": "---\nstatus: &a todo\n---"
+      }
+    },
+    {
+      "name": "block scalar",
+      "input": "---\nstatus: |\n  todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: |\n  todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Property is not safely editable",
+        "text": "---\nstatus: |\n  todo\n---"
+      }
+    },
+    {
+      "name": "odd number",
+      "input": "---\nstatus: 012\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: 012",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Property is not safely editable",
+        "text": "---\nstatus: 012\n---"
+      }
+    },
+    {
+      "name": "list comment",
+      "input": "---\nstatus:\n  - todo # keep\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status:\n  - todo # keep",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Property is not safely editable",
+        "text": "---\nstatus:\n  - todo # keep\n---"
+      }
+    },
+    {
+      "name": "two raw properties",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "lines": "status: doing\nx: y"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "wrong raw key",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "lines": "other: doing"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "raw comment",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "lines": "status: doing # x"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "raw trailing line",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "lines": "status: doing\n"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "raw CR",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "lines": "status: doing\r"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "bad number",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "number",
+          "value": "1e3"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "number bool",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "number",
+          "value": true
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "checkbox string",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "checkbox",
+          "value": "true"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "text list",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": [
+            "x"
+          ]
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "unknown type",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "unknown",
+          "value": "x"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "bad date",
+      "input": "---\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "date",
+          "value": "tomorrow"
+        }
+      },
+      "expected": {
+        "status": "refused",
+        "reason": "Invalid target property",
+        "text": "---\nstatus: todo\n---"
+      }
+    },
+    {
+      "name": "unknown other property kept",
+      "input": "---\nother: &a 1\nstatus: todo\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\nother: &a 1\nstatus: doing\n---\nbody"
+      }
+    },
+    {
+      "name": "new key needs quotes",
+      "input": "body",
+      "edit": {
+        "key": "a: b",
+        "expect": null,
+        "to": {
+          "type": "text",
+          "value": "x"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": null,
+        "after": "\"a: b\": x",
+        "text": "---\n\"a: b\": x\n---\nbody"
+      }
+    },
+    {
+      "name": "property removed preserves blank comments",
+      "input": "---\n# keep\nstatus: todo\n\n# after\nother: x\n---\nbody",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": null
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": null,
+        "text": "---\n# keep\n\n# after\nother: x\n---\nbody"
+      }
+    },
+    {
+      "name": "mixed existing list endings",
+      "input": "---\r\nitems:\n- a\r\n---\r\nbody",
+      "edit": {
+        "key": "items",
+        "expect": "items:\n- a",
+        "to": {
+          "type": "list",
+          "value": [
+            "b",
+            "c"
+          ]
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "items:\n- a",
+        "after": "items:\n- b\n- c",
+        "text": "---\r\nitems:\n- b\r\n- c\r\n---\r\nbody"
+      }
+    },
+    {
+      "name": "last allowed frontmatter line",
+      "input": "---\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\nstatus: todo\n---",
+      "edit": {
+        "key": "status",
+        "expect": "status: todo",
+        "to": {
+          "type": "text",
+          "value": "doing"
+        }
+      },
+      "expected": {
+        "status": "done",
+        "before": "status: todo",
+        "after": "status: doing",
+        "text": "---\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\n#\nstatus: doing\n---"
+      }
+    }
+  ]
+}

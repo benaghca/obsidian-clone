@@ -65,6 +65,8 @@ Keys are compared as a map. Order is not part of the result. Line numbers are en
 
 ## Adding cases
 
+`property-edits.json` adds an `edit` object (`{key, expect, to}`) to each note-text case. The expected result contains status and exact normalized property lines (or refusal/conflict details), plus the complete resulting `text`. Both runners omit transport-only `mtime_ms` and parsed `props`; focused tests separately check returned metadata. Expected output bytes are authored independently of the edit engines. The pure TS reference supplies UTF-16 editor offsets, while the Rust twin splices UTF-8 byte offsets; both must yield these same strings, including BOM and mixed line endings. No todo markers are used for property edits.
+
 1. Add the case with `expected` set to what the TS function returns. Run `npx vitest run src/parity.test.ts`: a wrong `expected` fails there.
 2. Run `cargo test parity` in `src-tauri`. If the case fails there, add `"rust": "todo"`.
 3. If you believe Obsidian does something else, add `obsidian` and a `note` that says how you know, or that it is unverified.

@@ -17,8 +17,18 @@ fn runner(file: &str) -> Option<fn(&str, &Map<String, Value>, &Map<String, Value
         "properties" => Some(properties),
         "query" => Some(parse_query),
         "search" => Some(search),
+        "property-edits" => Some(property_edits),
         _ => panic!("{file}.json: no runner; add one to parity.rs"),
     }
+}
+
+fn property_edits(input: &str, case: &Map<String, Value>, _: &Map<String, Value>) -> Value {
+    let edit = serde_json::from_value(case["edit"].clone()).expect("valid edit fixture");
+    let prepared = crate::edit::edit_property(input, &edit);
+    let mut result = serde_json::to_value(prepared.result).unwrap();
+    let object = result.as_object_mut().unwrap(); object.remove("props"); object.remove("mtime_ms");
+    object.insert("text".into(), Value::String(prepared.text.unwrap_or_else(|| input.to_string())));
+    result
 }
 
 fn parse_query(input: &str, case: &Map<String, Value>, _: &Map<String, Value>) -> Value {
@@ -107,7 +117,7 @@ fn search(input: &str, case: &Map<String, Value>, corpus: &Map<String, Value>) -
     Value::Object(out)
 }
 
-const KEYS: [&str; 9] = [
+const KEYS: [&str; 10] = [
     "name",
     "input",
     "expected",
@@ -117,6 +127,7 @@ const KEYS: [&str; 9] = [
     "note",
     "vault",
     "matchCase",
+    "edit",
 ];
 const FILE_KEYS: [&str; 5] = ["about", "typescript", "rust", "cases", "vaults"];
 

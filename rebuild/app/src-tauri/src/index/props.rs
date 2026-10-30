@@ -2,11 +2,11 @@
 //! This intentionally ports Grove's conservative YAML subset, not a general YAML reader.
 use super::{is_note_path, Index};
 use regex::Regex;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::OnceLock;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PropertyType {
     Text,
@@ -20,7 +20,7 @@ pub enum PropertyType {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum PropertyValue {
     Text(String),
@@ -75,7 +75,7 @@ fn is_space(c: char) -> bool {
                 | '\u{feff}'
     )
 }
-fn trim(s: &str) -> &str {
+pub(crate) fn trim(s: &str) -> &str {
     s.trim_matches(is_space)
 }
 const SPACE: &str = r"\t\n\x0b\x0c\r \u{a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}";
@@ -117,26 +117,76 @@ fn patterns() -> &'static Patterns {
 /// An absent/unclosed/overlong block or unplaceable YAML is None; an empty block is Some([]).
 /// Split on LF and strip exactly one trailing CR, independently of parse.rs's search lines.
 pub(super) fn note_properties(text: &str) -> Option<NoteProperties> {
+    frontmatter(text).ok().flatten().map(|fm| fm.properties)
+}
+
+/// Byte offsets and the original per-line ending; no scanning/copying the body.
+pub(crate) struct SourceLine<'a> {
+    pub text: &'a str,
+    pub start: usize,
+    pub end: usize,
+    pub eol: &'a str,
+}
+pub(crate) struct Frontmatter<'a> {
+    pub open: SourceLine<'a>,
+    pub close: SourceLine<'a>,
+    pub lines: Vec<SourceLine<'a>>,
+    pub properties: NoteProperties,
+}
+fn source_line(text: &str, start: usize) -> SourceLine<'_> {
+    let tail = &text[start..];
+    let lf = tail.find('\n').map(|n| start + n);
+    let (content, end, eol) = match lf {
+        Some(n) if text[..n].ends_with('\r') => (n - 1, n + 1, "\r\n"),
+        Some(n) => (n, n + 1, "\n"),
+        None => (text.len(), text.len(), ""),
+    };
+    SourceLine {
+        text: &text[start..content],
+        start,
+        end,
+        eol,
+    }
+}
+/// None is ordinary body text; Err is present but unsafe/unclosed frontmatter.
+pub(crate) fn frontmatter(text: &str) -> Result<Option<Frontmatter<'_>>, &'static str> {
+    let open = source_line(text, if text.starts_with('\u{feff}') { 3 } else { 0 });
+    if trim(open.text) != "---" {
+        return Ok(None);
+    }
+    let mut at = open.end;
     let mut lines = Vec::new();
-    for (n, raw) in text.split('\n').enumerate() {
-        let line = raw.strip_suffix('\r').unwrap_or(raw);
-        if n == 0 && trim(line) != "---" {
-            return None;
+    for _ in 1..=2000 {
+        if open.eol.is_empty() {
+            break;
         }
-        if n > 0 && trim(line) == "---" {
-            return Some(NoteProperties {
-                props: read_properties(&lines)?,
+        let line = source_line(text, at);
+        if trim(line.text) == "---" {
+            let raw: Vec<_> = lines
+                .iter()
+                .map(|l: &SourceLine<'_>| l.text.to_string())
+                .collect();
+            let props = read_properties(&raw).ok_or("Frontmatter is not safely editable")?;
+            return Ok(Some(Frontmatter {
+                open,
+                close: line,
                 lines,
-            });
+                properties: NoteProperties { props, lines: raw },
+            }));
         }
-        if n > 0 {
-            lines.push(line.to_string());
-        }
-        if n + 1 > 2000 {
-            return None;
+        at = line.end;
+        let done = line.eol.is_empty();
+        lines.push(line);
+        if done {
+            break;
         }
     }
-    None
+    Err("Frontmatter is not safely editable")
+}
+pub(crate) fn key_prefix(line: &str) -> Option<&str> {
+    let m = patterns().key.captures(line)?.get(1)?;
+    let colon = m.end() + line[m.end()..].find(':')?;
+    Some(&line[..colon])
 }
 
 #[derive(PartialEq)]
@@ -361,7 +411,7 @@ fn property(key: String, inline: Option<&str>, rest: &[String], line: usize) -> 
     }
 }
 
-fn read_properties(lines: &[String]) -> Option<Vec<Property>> {
+pub(crate) fn read_properties(lines: &[String]) -> Option<Vec<Property>> {
     let mut props = Vec::new();
     let mut keys = HashSet::new();
     let mut i = 0;

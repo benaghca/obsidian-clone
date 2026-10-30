@@ -3,6 +3,7 @@
 
 import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, SearchHit, SearchNote, SearchLine, VaultInfo } from "../api";
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
+import { editProperty, type PropertyEdit } from "../editor/propertyEdit";
 import { linkResolver, linkSpellings, markdownURL } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
 import { fileName, isNoteFile, noteName } from "../paths";
@@ -399,6 +400,17 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     link_index: () => linkData().links,
     backlinks: ({ paths }) => paths.length ? linkData(new Set(paths)).backlinks : {},
     link_sources: ({ paths }) => linkSources(paths),
+    set_property: ({ path, edit, dryRun }) => {
+      const target = path as string;
+      const bad = badPath(target), file = files.get(target);
+      if (bad) return { status: "refused", reason: bad };
+      if (!isNoteFile(target)) return { status: "refused", reason: "Not a note" };
+      if (!file) return { status: "refused", reason: "Note not found" };
+      if (isBinary(file.content)) return { status: "refused", reason: "Note is not UTF-8" };
+      const { change, ...result } = editProperty(file.content, edit as PropertyEdit);
+      if (result.status === "done" && change && !dryRun) put(target, file.content.slice(0, change.from) + change.insert + file.content.slice(change.to));
+      return result.status === "done" || result.status === "unchanged" ? { ...result, mtime_ms: files.get(target)!.mtime } : result;
+    },
     properties: ({ paths }) => {
       const out: Record<string, NoteProperties> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {

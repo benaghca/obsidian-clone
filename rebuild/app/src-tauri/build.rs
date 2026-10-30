@@ -11,6 +11,7 @@ fn main() {
             "read_note",
             "read_file_bytes",
             "write_note",
+            "set_property",
             "write_file_bytes",
             "create_note",
             "create_folder",
