@@ -37,8 +37,20 @@ it("parses grouping by view and rejects malformed configurations", () => {
   expect(baseModel('views:\n  - groupBy:\n      property: note.status\n      direction: DESC\n').groupBy).toEqual({ property: "note.status", direction: "DESC" });
   expect(baseModel('views:\n  - name: A\n  - groupBy:\n      property: p\n', 1).groupBy).toEqual({ property: "p", direction: "ASC" });
   expect(parseGroupBy(undefined)).toBeNull();
-  const invalids: Yaml[] = [true, "p", [], {}, { property: "" }, { property: "p", direction: "backward" }];
+  const invalids: Yaml[] = [true, "p", [], {}, { property: "" }, { property: "  " }];
   for (const invalid of invalids) expect(() => parseGroupBy(invalid)).toThrow(/groupBy/);
+  const notices = new Set<string>();
+  expect(parseGroupBy({ property: "p", direction: "backward" }, notices)).toEqual({ property: "p", direction: "ASC" });
+  expect([...notices]).toEqual(["Unsupported group direction: backward"]);
+  notices.clear();
+  expect(parseGroupBy({ property: "p", direction: "DESC", order: ["todo"], hidden: ["done"] }, notices)).toEqual({ property: "p", direction: "DESC" });
+  expect([...notices]).toEqual(["Unsupported groupBy settings: order, hidden"]);
+  expect(parseGroupBy({ property: "p", direction: "backward", order: ["todo"] })).toEqual({ property: "p", direction: "ASC" });
+  expect(parseGroupBy({ property: "p", direction: null })).toEqual({ property: "p", direction: "ASC" });
+  const opened = baseModel('views:\n  - groupBy:\n      property: p\n      direction: backward\n      order:\n        - todo\n      hidden:\n        - done\n  - type: table\n    name: Table\n');
+  expect(opened.groupBy).toEqual({ property: "p", direction: "ASC" });
+  expect([...opened.notices]).toEqual(["Unsupported group direction: backward", "Unsupported groupBy settings: order, hidden"]);
+  expect(baseModel('views:\n  - groupBy:\n      property: p\n      direction: backward\n      order:\n        - todo\n      hidden:\n        - done\n  - type: table\n    name: Table\n', 1).notices.size).toBe(0);
 });
 it("yields and cancels large group work, with identical synchronous order", async () => {
   const rows = entries(Array.from({ length: 3000 }, (_, i) => i % 37));

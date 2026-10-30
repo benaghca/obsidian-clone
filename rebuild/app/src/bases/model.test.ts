@@ -64,8 +64,22 @@ describe("Bases tables", () => {
     expect(selected[0].context.get("formula.self")).toBe(null);
     expect(base.notices.size).toBe(2);
     expect(baseModel("").columns).toEqual(["file.name"]);
+    expect(baseModel("").notices.size).toBe(0);
     expect(() => baseModel('views: table')).toThrow();
-    expect(() => baseModel('views:\n  - type: map')).toThrow();
+    const unsupported = 'views:\n  - type: map\n    name: Map\n  - type: table\n    name: Table\n';
+    const map = baseModel(unsupported);
+    expect(map.type).toBe("table");
+    expect(map.name).toBe("Map");
+    expect([...map.notices]).toEqual(["This layout isn't supported yet"]);
+    const sibling = baseModel(unsupported, 1);
+    expect(sibling.name).toBe("Table");
+    expect(sibling.notices.size).toBe(0);
+    const kanban = baseModel('views:\n  - type: kanban\n    name: Board\n');
+    expect(kanban.type).toBe("table");
+    expect(kanban.name).toBe("Board");
+    expect([...kanban.notices]).toEqual(["This layout isn't supported yet"]);
+    expect(baseModel('views:\n  - type: table\n').notices.size).toBe(0);
+    expect(baseModel('views:\n  - type: cards\n').notices.size).toBe(0);
   });
   it("parses cards view type and card layout options with defaults", async () => {
     (globalThis as Record<string, unknown>).window ??= {};
