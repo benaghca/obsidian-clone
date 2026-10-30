@@ -13,7 +13,7 @@ import { api, type Backlink, type SearchHit } from "../api";
 import { updateNoteText } from "../fileOps";
 import { kept } from "../memo";
 import { noteBacklinks } from "../links/backlinks";
-import { compareFiles, noteName, SORT_ORDERS, type SortOrder } from "../paths";
+import { compareFiles, isNoteFile, noteName, SORT_ORDERS, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
 import { h, iconButton } from "./dom";
 import { icon } from "./icons";
@@ -248,7 +248,7 @@ export function createBacklinksView(ws: Workspace, pathOf: () => string | null =
     if (seq !== unlinkedSeq || pathOf() !== path) return; // superseded
     const mentions: Mention[] = [];
     for (const hit of hits) {
-      if (hit.line === 0 || hit.path === path || !hit.path.endsWith(".md") || ws.vault.isExcluded(hit.path)) continue;
+      if (hit.line === 0 || hit.path === path || !isNoteFile(hit.path) || ws.vault.isExcluded(hit.path)) continue;
       // One row per mention, so Link wraps that occurrence and leaves the others.
       for (const span of mentionSpans(hit.text, title)) {
         mentions.push({ from: hit.path, line: hit.line, text: hit.text, count: 1, spans: () => [span] });

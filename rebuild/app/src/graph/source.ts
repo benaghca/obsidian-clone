@@ -8,6 +8,7 @@
 import type { GraphSettings } from "../settings/schema";
 import { searchFacts, type VaultFacts } from "../shell/searchFacts";
 import { type Facts, matches, parseQuery } from "../shell/searchQuery";
+import { isNoteFile } from "../paths";
 import type { Workspace } from "../workspace";
 import { buildGraph, type GraphModel, type GraphNode } from "./data";
 
@@ -49,7 +50,7 @@ export function createGraphSource(ws: Workspace, local: boolean) {
       const attachments: string[] = [];
       for (const f of ws.vault.files) {
         if (f.is_dir || ws.vault.isExcluded(f.path)) continue;
-        if (f.path.endsWith(".md")) notes.push(f.path);
+        if (isNoteFile(f.path)) notes.push(f.path);
         else attachments.push(f.path);
       }
       let include = query ? (path: string) => path === center || matches(path, query, known) : undefined;

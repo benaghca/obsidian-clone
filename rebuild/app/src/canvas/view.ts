@@ -9,7 +9,7 @@ import { editorHost } from "../editor/host";
 import { readingMode, release, render } from "../editor/render";
 import { isExternalUrl, isNotePath } from "../links/external";
 import { resolveLink } from "../links/internal";
-import { noteName } from "../paths";
+import { isNoteFile, noteName } from "../paths";
 import { h } from "../shell/dom";
 import type { Group, Tab } from "../tabs";
 import { whereFromEvent } from "../tabs";
@@ -236,7 +236,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         cleanups.push(() => held?.release()); refreshFile();
         continue;
       }
-      if (node.type === "file" && !/\.md$/i.test(node.file ?? "")) {
+      if (node.type === "file" && !isNoteFile(node.file ?? "")) {
         content.textContent = node.file ? `Unsupported file: ${node.file}` : "File not found";
         continue;
       }

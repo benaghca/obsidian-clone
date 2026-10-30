@@ -7,6 +7,7 @@
 // Pure and free of the DOM, so it is tested on its own.
 
 import type { LinkIndex } from "../api";
+import { noteName } from "../paths";
 
 export type NodeKind = "note" | "attachment" | "tag" | "unresolved";
 
@@ -69,7 +70,7 @@ interface GraphOptions {
   local?: LocalOptions;
 }
 
-const nameOf = (path: string) => path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/i, "");
+const nameOf = noteName;
 const tagId = (tag: string) => `#${tag.toLowerCase()}`;
 const missingId = (name: string) => `?${name.toLowerCase()}`;
 

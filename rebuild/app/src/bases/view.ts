@@ -5,7 +5,7 @@ import { fits, asType, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { formatDate } from "../settings/dateFormat";
-import { parentDir } from "../paths";
+import { isNoteFile, parentDir } from "../paths";
 import { propertyValue } from "../editor/properties";
 import { TYPE_ICONS } from "../editor/propertyFields";
 import { propertyIndex } from "../shell/propertyIndex";
@@ -131,7 +131,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         types = new Map();
         for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) types.set(p.key, index.host.typeOf(p.key) ?? p.type);
         const linkCache = new Map<string, string | null>();
-        const rows: Row[] = ws.vault.files.filter(f => !f.is_dir && f.path.endsWith(".md") && !ws.vault.isExcluded(f.path)).map(file => {
+        const rows: Row[] = ws.vault.files.filter(f => !f.is_dir && isNoteFile(f.path) && !ws.vault.isExcluded(f.path)).map(file => {
           const props = properties.get(file.path)?.props ?? [];
           let allTags = tags.get(file.path) ?? props.filter(p => p.type === "tags").flatMap(p => Array.isArray(p.value) ? p.value : [String(p.value)]);
           // Loaded notes include unsaved tags, using the same fenced-code-aware reader as the Tags view.

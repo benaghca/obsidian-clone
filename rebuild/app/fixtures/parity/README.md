@@ -57,7 +57,7 @@ The editor's `readFrontmatter` also requires the first line to start with `---` 
 
 `search.json`: `input` is a query string, run by `searchVault` against `vaults[vault]`. `expected` is an object keyed by each file that passes:
 
-- a note (path ending in `.md`, any case) maps to `{ "count": n, "lines": [shown line numbers, all of them] }`;
+- a note (file name ends in `.md`, any case, with characters before that; a file named `.md` is not a note) maps to `{ "count": n, "lines": [shown line numbers, all of them] }`;
 - an attachment maps to `{}` (no lines, tags or properties);
 - `null` means the query has nothing to search for. The search view shows nothing for that. The graph treats it as every file, and does not call `searchVault`.
 

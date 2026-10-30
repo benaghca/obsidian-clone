@@ -114,3 +114,29 @@ Checks, each under `flock /tmp/grove-npm-test.lock`. Cargo used `--offline`. The
 - `npm run build`: passed. The existing large-chunk notice is still there.
 - `npx vitest run`: 58 files, 668 tests, all passed, including `parity.test.ts` (343 tests).
 - `cargo test --offline`: 52 passed, 0 failed, 2 ignored. The corpus test passed, so the three `rust: todo` markers still differ from Rust.
+
+## A file named .md is not a note
+
+Chris decided this on 2026-10-29 at 8:15 PM PT. A file whose whole name is `.md` or `.MD` is not a note. The name has to have characters before the extension. Rust already used that rule. TypeScript now uses it too. The "Open" section above is the question as it stood; this section is the decision.
+
+`isNoteFile` (`paths.ts:12–15`) matches `is_note_path` (`index.rs:532–536`). The basename is longer than 3 characters, and the last three characters are `.md` in any ASCII case. `.md` and `.MD` fail that test. `Upper.MD`, `a.md`, and `..md` pass. `noteName` (`paths.ts:18–21`) drops those three characters only when `isNoteFile` says the path is a note, the same way `strip_md` does (`index.rs:592–598`). A file named `.MD` keeps the label `.MD`.
+
+`searchVault` takes its note list from `isNoteFile`. A nameless `.md` file that still passes `file:` or `path:` is an attachment, recorded as `{}`. The same helper is what the file list, graph, bases rows, tags, backlinks, menus, the sidebar extension badge, hover preview, canvas file cards, live-preview embeds, and the mock backend use. A link whose target is exactly `.md` does not create a note (`workspace.ts` `openLink`, `editorHost.ts` `linkCandidates`), and a target that already ends in `.md` is not given a second `.md`.
+
+A few call sites used to require a case-sensitive `.md`. They now treat `Upper.MD` as a note: graph membership (`graph/source.ts`), bases rows (`bases/view.ts`), tags in the open note (`tagsView.ts`), the file menu (`menus.ts`), unlinked mentions (`backlinksView.ts`), and the mock `frontmatter` and `tags` commands. The sidebar badge no longer labels `Upper.MD` with an extension. A nameless `.md` file does get that badge. `settings/sections.ts` still strips a case-sensitive `.md` from paths that are already in `vault.notes`. That list already contained `Upper.MD`, and the extension was already left on there. Rust is unchanged. `searchQuery.ts` is unchanged.
+
+The three `dot-name` cases in `search.json` no longer carry `"rust": "todo"`. Their expected values are the shared result:
+
+- `secretprobe`, match case off or on: only `Real.md`, count 1, line 1.
+- `file:md` with match case off: `.MD` is `{}`, and `Real.md` is a note with `lines: []`. `file:MD` and `path:.MD` without match case have that shape.
+- `file:MD` with match case on: only `.MD`, as `{}`. `path:.MD` with match case is the same. `file:md` with match case matches only `Real.md`.
+
+`fixtures/parity/README.md` now says a note's file name has characters before `.md`. `paths.test.ts` checks `isNoteFile` and `noteName` for `Upper.MD` and `.MD`.
+
+Checks, each under `flock /tmp/grove-npm-test.lock`. Cargo used `--offline`. The registry was not contacted. Both builds kept the existing large-chunk notice.
+
+- `npm run build`: passed.
+- `npm test`: vitest 58 files, 669 tests, all passed, including `parity.test.ts` (343 tests) and the new `isNoteFile` test. Browser discovery, geometry, and the browser scripts passed on the first run. The 300-card drag check was max 16.8 ms. The 1000-row Bases scroll was max 16.8 ms. `posttest` (`test-bases-config.mjs`) passed.
+- `npm run audit:offline`: passed, 166 source files plus dist, CSP, capabilities, and dependencies.
+- `cargo build --offline`: passed (`Finished dev profile` in 1.76s, no fetch).
+- `cargo test --offline`: 52 passed, 0 failed, 2 ignored. `index::parity::corpus` passed with the three markers removed.

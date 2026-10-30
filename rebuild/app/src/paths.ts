@@ -1,10 +1,24 @@
-// Vault paths and note names: vault-relative, forward slashes, notes end in
-// ".md". Free of the DOM and of the workspace, so any module can use them.
+// Vault paths and note names: vault-relative, forward slashes. A note's file
+// name ends in ".md", in any case, and has characters before that. Free of
+// the DOM and of the workspace, so any module can use them.
 
 /** The last part of a path ("Folder/Note.md" → "Note.md"). */
 export const fileName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
-/** A note's name: its file name without ".md". */
-export const noteName = (path: string) => fileName(path).replace(/\.md$/i, "");
+
+/**
+ * A markdown note, same rule as Rust `is_note_path`. The file name ends in
+ * `.md` in any case, and something comes before that. `.md` and `.MD` are not notes.
+ */
+export function isNoteFile(path: string): boolean {
+  const base = fileName(path);
+  return base.length > 3 && base.slice(-3).toLowerCase() === ".md";
+}
+
+/** A note's name: its file name without ".md". Any other file keeps its name. */
+export const noteName = (path: string) => {
+  const base = fileName(path);
+  return isNoteFile(base) ? base.slice(0, -3) : base;
+};
 /** The folder a path is in ("" at the vault root). */
 export const parentDir = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 /** A folder as typed in a setting ("/Daily/ ") as a vault path ("Daily"). */

@@ -5,7 +5,7 @@ import type { Backlink, FileEntry, NoteProperties, Invoke, LinkIndex, Listen, Se
 import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { markdownURL, resolveLink } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
-import { fileName, noteName } from "../paths";
+import { fileName, isNoteFile, noteName } from "../paths";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
@@ -164,7 +164,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     if (!q || limit <= 0) return [];
     const buckets: SearchHit[][] = [];
     for (const [path, f] of files) {
-      if (isBinary(f.content)) continue;
+      if (isBinary(f.content) || (/\.md$/i.test(path) && !isNoteFile(path))) continue;
       const bucket: SearchHit[] = [];
       const lines = f.content.split("\n");
       for (let i = 0; i < lines.length; i++) {
@@ -189,13 +189,13 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
 
   // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
   function linkData(wanted?: Set<string>): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
-    const notes = [...files.keys()].map((path) => ({ name: noteName(path), path }));
+    const notes = [...files.keys()].filter((path) => isNoteFile(path) || !/\.md$/i.test(path)).map((path) => ({ name: noteName(path), path }));
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
     const markdown: Record<string, string[]> = {};
     const unresolved: Record<string, string[]> = {};
     for (const [path, f] of files) {
-      if (isBinary(f.content)) continue;
+      if (isBinary(f.content) || (/\.md$/i.test(path) && !isNoteFile(path))) continue;
       const out = new Set<string>();
       const md = new Set<string>();
       const missing = new Map<string, string>();
@@ -241,7 +241,11 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
             md.add(hit);
             if (wanted?.has(hit)) (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
           }
-          else unknown(markdownURL(raw).replace(/^\.\//, "").replace(/\.md$/i, ""));
+          else {
+            let name = markdownURL(raw).replace(/^\.\//, "");
+            if (isNoteFile(name)) name = name.slice(0, -3);
+            unknown(name);
+          }
         }
       });
       if (out.size) outgoing[path] = [...out];
@@ -334,7 +338,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     properties: ({ paths }) => {
       const out: Record<string, NoteProperties> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        if (!/\.md$/i.test(path)) continue;
+        if (!isNoteFile(path)) continue;
         const split = splitFrontmatter(files.get(path)?.content ?? "");
         const props = split && readProperties(split.lines);
         if (props) out[path] = { props, lines: split!.lines };
@@ -344,7 +348,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     frontmatter: ({ paths }) => {
       const out: Record<string, string> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        const lines = path.endsWith(".md") ? files.get(path)?.content.split("\n") : undefined;
+        const lines = isNoteFile(path) ? files.get(path)?.content.split("\n") : undefined;
         const close = lines && lines[0].trim() === "---" ? lines.findIndex((l, i) => i > 0 && l.trim() === "---") : -1;
         if (close > 0 && close <= 2000) out[path] = lines!.slice(0, close + 1).join("\n");
       }
@@ -353,7 +357,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     tags: ({ paths }) => {
       const out: Record<string, string[]> = {};
       for (const path of (paths as string[] | null) ?? [...files.keys()]) {
-        const content = path.endsWith(".md") ? files.get(path)?.content : undefined;
+        const content = isNoteFile(path) ? files.get(path)?.content : undefined;
         const tags = content ? tagsInText(content) : [];
         if (tags.length) out[path] = tags;
       }
