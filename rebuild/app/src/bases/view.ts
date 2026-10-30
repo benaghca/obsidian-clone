@@ -5,7 +5,7 @@ import { fits, asType, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { formatDate } from "../settings/dateFormat";
-import { parentDir } from "../paths";
+import { isNoteFile, isUnder, parentDir, trimSlashes } from "../paths";
 import { propertyValue } from "../editor/properties";
 import { TYPE_ICONS } from "../editor/propertyFields";
 import { propertyIndex } from "../shell/propertyIndex";
@@ -18,6 +18,156 @@ import { columnControls } from "./columns";
 import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
 import type { Value } from "./expression";
+import { mapping, readYaml, type Yaml } from "./yaml";
+
+/** How long a burst of typing waits before the open base rebuilds. Matches the note save delay. */
+const DOC_QUIET_MS = 300;
+const SOON_MS = 20;
+
+export interface BaseNeeds { folders: string[]; tags: string[] }
+
+/** Folder and tag facts an AND filter requires. An OR or NOT adds none: those are not safe to skip. */
+export function baseNeeds(source: string, viewIndex: number): BaseNeeds {
+  const root = readYaml(source);
+  const views = Array.isArray(root.views) && root.views.length ? root.views : [{}];
+  const view = mapping(views[Math.max(0, Math.min(viewIndex, views.length - 1))]);
+  const global = gatherNeeds(root.filters);
+  const local = gatherNeeds(view.filters);
+  return { folders: [...global.folders, ...local.folders], tags: [...global.tags, ...local.tags] };
+}
+
+function gatherNeeds(filter: Yaml | undefined): BaseNeeds {
+  if (typeof filter === "string") return needsFromExpr(filter);
+  if (filter == null || typeof filter !== "object" || Array.isArray(filter)) return { folders: [], tags: [] };
+  const entries = Object.entries(filter);
+  if (entries.length !== 1 || !Array.isArray(entries[0][1]) || entries[0][0] !== "and") return { folders: [], tags: [] };
+  const need: BaseNeeds = { folders: [], tags: [] };
+  for (const child of entries[0][1] as Yaml[]) {
+    const part = gatherNeeds(child);
+    need.folders.push(...part.folders);
+    need.tags.push(...part.tags);
+  }
+  return need;
+}
+
+/** Top-level `&&` parts, ignoring `&&` inside quotes or parentheses. */
+function andParts(expr: string): string[] {
+  const parts: string[] = [];
+  let start = 0, depth = 0, quote = "";
+  for (let i = 0; i < expr.length; i++) {
+    const ch = expr[i];
+    if (quote) {
+      if (ch === "\\" && quote === '"') i++;
+      else if (ch === quote) quote = "";
+      continue;
+    }
+    if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "(") depth++;
+    else if (ch === ")") depth = Math.max(0, depth - 1);
+    else if (depth === 0 && expr.startsWith("&&", i)) {
+      parts.push(expr.slice(start, i).trim());
+      i += 1;
+      start = i + 1;
+    }
+  }
+  parts.push(expr.slice(start).trim());
+  return parts.filter(Boolean);
+}
+
+function callArg(expr: string, name: string): string | null {
+  const match = new RegExp(`^${name.replaceAll(".", "\\.")}\\(\\s*("(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*')\\s*\\)$`).exec(expr);
+  if (!match) return null;
+  const token = match[1];
+  if (token[0] === '"') {
+    try {
+      const value = JSON.parse(token);
+      return typeof value === "string" ? value : null;
+    } catch { return null; }
+  }
+  return token.slice(1, -1).replace(/\\(['\\])/g, "$1");
+}
+
+function needsFromExpr(expr: string): BaseNeeds {
+  const need: BaseNeeds = { folders: [], tags: [] };
+  for (const part of andParts(expr)) {
+    if (part.includes("||")) continue;
+    const folder = callArg(part, "file.inFolder");
+    if (folder !== null) {
+      const trimmed = trimSlashes(folder);
+      if (trimmed) need.folders.push(trimmed);
+      continue;
+    }
+    const tag = callArg(part, "file.hasTag");
+    if (tag !== null) {
+      const trimmed = tag.replace(/^#/, "");
+      if (trimmed) need.tags.push(trimmed);
+    }
+  }
+  return need;
+}
+
+/**
+ * True when `path` cannot be a row of this base, or already isn't and still
+ * fails a required tag. Typing cannot move a file into a folder. A missing
+ * tag is only decisive when the row is not already on screen (adding the tag,
+ * or removing it from a visible row, still rebuilds).
+ */
+export function missesPrefilter(path: string, need: BaseNeeds, text: string | null, visible: boolean): boolean {
+  if (!need.folders.length && !need.tags.length) return false;
+  if (need.folders.some(folder => !isUnder(parentDir(path), folder))) return true;
+  if (!need.tags.length) return false;
+  if (text === null) return false;
+  const tags = tagsInText(text);
+  const has = (want: string) => tags.some(tag => {
+    const name = tag.replace(/^#/, "");
+    return name === want || name.startsWith(`${want}/`);
+  });
+  if (need.tags.every(has)) return false;
+  return !visible;
+}
+
+/** Every changed note is outside the base's folder/tag pre-filter, when that filter is readable. */
+export function docsOutsideFilter(paths: readonly string[], source: string, viewIndex: number, textOf: (path: string) => string | null, visible: (path: string) => boolean): boolean {
+  if (!paths.length || !source) return false;
+  let need: BaseNeeds;
+  try { need = baseNeeds(source, viewIndex); } catch { return false; }
+  return paths.every(path => missesPrefilter(path, need, textOf(path), visible(path)));
+}
+
+export interface BaseChange {
+  change: string;
+  shown: boolean;
+  deferred: boolean;
+  /** Notes whose text just changed, or null when this event isn't a known edit. */
+  changed: string[] | null;
+  /** Every path in `changed` is outside the pre-filter. */
+  outside: boolean;
+}
+
+export interface BaseRefresh {
+  deferred: boolean;
+  /** Wait this long, then rebuild. Null leaves any pending rebuild as it is. */
+  delay: number | null;
+  /** Cancel a rebuild that was waiting because the base is hidden. */
+  clear: boolean;
+}
+
+/** Doc edits wait out a quiet period. A hidden base waits until it is shown. An outside edit is skipped. */
+export function baseChange(input: BaseChange): BaseRefresh {
+  const watch = input.change === "files" || input.change === "doc" || input.change === "links";
+  const reveal = input.change === "show" || input.change === "pane" || input.change === "tabs";
+  if (reveal) {
+    if (input.deferred && input.shown) return { deferred: false, delay: SOON_MS, clear: false };
+    return { deferred: input.deferred, delay: null, clear: false };
+  }
+  if (!watch) return { deferred: input.deferred, delay: null, clear: false };
+  if (!input.shown) return { deferred: true, delay: null, clear: true };
+  if (input.change === "doc") {
+    if (input.changed && input.changed.length > 0 && input.outside) return { deferred: false, delay: null, clear: false };
+    return { deferred: false, delay: DOC_QUIET_MS, clear: false };
+  }
+  return { deferred: false, delay: SOON_MS, clear: false };
+}
 
 const viewsByTab = new WeakMap<Tab, Map<string, number>>();
 export function createBaseView(ws: Workspace, path: string, group: Group) {
@@ -175,9 +325,44 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
       if (!gone) { model = null; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
     } finally { running = false; }
   }
-  function schedule() { clearTimeout(timer); timer = window.setTimeout(() => void update(), 20); }
+  function schedule() { clearTimeout(timer); timer = window.setTimeout(() => void update(), SOON_MS); }
   const unwatch = ws.vault.onModified(changed => { if (changed === path) reload = true; schedule(); });
-  const off = ws.on(change => { if (["files", "doc", "links"].includes(change)) schedule(); });
+  let deferred = false;
+  const shown = () => el.isConnected && group.active === tab;
+  const openTexts = () => {
+    const out = new Map<string, string>();
+    for (const pane of ws.groups()) {
+      const note = pane.active.path;
+      if (!note || !isNoteFile(note) || !ws.editors.isLoaded(note)) continue;
+      const text = ws.editors.doc(note)?.toString();
+      if (text !== undefined) out.set(note, text);
+    }
+    return out;
+  };
+  let docSnap = openTexts();
+  const changedNotes = () => {
+    const next = openTexts();
+    const changed: string[] = [];
+    for (const [note, text] of next) if (docSnap.get(note) !== text) changed.push(note);
+    docSnap = next;
+    return changed.length ? changed : null;
+  };
+  const off = ws.on(change => {
+    const changed = change === "doc" && shown() ? changedNotes() : null;
+    const next = baseChange({
+      change,
+      shown: shown(),
+      deferred,
+      changed,
+      outside: !!changed && docsOutsideFilter(changed, source, viewIndex, note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null, note => selected.some(entry => entry.row.file.path === note)),
+    });
+    deferred = next.deferred;
+    if (next.delay !== null) {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => void update(), next.delay);
+      if (change === "show" || change === "pane" || change === "tabs") docSnap = openTexts();
+    } else if (next.clear) clearTimeout(timer);
+  });
   void update();
   return { el, dispose() { gone = true; controls.dispose(); menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
 }
