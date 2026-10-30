@@ -67,7 +67,7 @@ fn is_tag_char(c: char) -> bool {
 }
 
 /// JavaScript's `\s` (and what its `trim()` removes).
-fn is_js_space(c: char) -> bool {
+pub(super) fn is_js_space(c: char) -> bool {
     matches!(
         c,
         '\t' | '\n' | '\u{b}' | '\u{c}' | '\r' | ' ' | '\u{a0}' | '\u{1680}' | '\u{2000}'
@@ -81,7 +81,7 @@ fn is_js_space(c: char) -> bool {
     )
 }
 
-fn js_trim(s: &str) -> &str {
+pub(super) fn js_trim(s: &str) -> &str {
     s.trim_matches(is_js_space)
 }
 

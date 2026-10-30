@@ -8,6 +8,7 @@
 mod parse;
 mod props;
 pub use props::NoteProperties;
+mod query;
 mod tags;
 mod backlinks;
 #[cfg(test)]
