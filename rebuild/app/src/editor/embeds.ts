@@ -326,7 +326,9 @@ export function baseBlockYaml(text: string): string | null {
   if (!open) return null;
   const body = lines.slice(1);
   if (body.length && closingFence(open[1]).test(body[body.length - 1])) body.pop();
-  return body.map((line) => `${line}\n`).join("");
+  const indent = /^ */.exec(lines[0])![0].length;
+  const unindent = new RegExp(`^ {0,${indent}}`);
+  return body.map((line) => `${line.replace(unindent, "")}\n`).join("");
 }
 
 /** The change that puts `yaml` in place of the YAML of the ```base block starting on the line at `at`; null if there is none there. */
@@ -334,14 +336,27 @@ export function baseBlockChange(doc: Text, at: number, yaml: string): { from: nu
   const first = doc.lineAt(at);
   const open = BASE_FENCE.exec(first.text);
   if (!open) return null;
+  const indent = /^ */.exec(first.text)![0], unindent = new RegExp(`^ {0,${indent.length}}`);
+  const replace = (from: number, to: number, text: string) => {
+    const raw = doc.sliceString(from, to).split("\n"), old = raw.map(line => line.replace(unindent, "")), next = text.split("\n");
+    // CommonMark permits content indented less than its fence. Keep unchanged
+    // lines byte-exact, including blank-line spaces, and use the content's indent
+    // for newly inserted YAML rather than blindly adding the fence's indent.
+    let spaces = indent.length, a = 0, b = 0;
+    for (let i = 0; i < raw.length; i++) if (raw[i].trim()) spaces = Math.min(spaces, raw[i].length - old[i].length);
+    while (a < old.length && a < next.length && old[a] === next[a]) a++;
+    while (b < old.length - a && b < next.length - a && old[old.length - 1 - b] === next[next.length - 1 - b]) b++;
+    const insert = [...raw.slice(0, a), ...next.slice(a, next.length - b).map(line => line ? (line.startsWith(" ") ? indent : " ".repeat(spaces)) + line : ""), ...(b ? raw.slice(-b) : [])].join("\n");
+    return { from, to, insert };
+  };
   const close = closingFence(open[1]);
   for (let n = first.number + 1; n <= doc.lines; n++) {
     const line = doc.line(n);
-    if (close.test(line.text)) return { from: first.to + 1, to: line.from, insert: yaml };
+    if (close.test(line.text)) return replace(first.to + 1, line.from, yaml && !yaml.endsWith("\n") ? `${yaml}\n` : yaml);
   }
   // An unclosed block runs to the end of the note.
   const tail = yaml.replace(/\n$/, "");
-  return first.to === doc.length ? { from: doc.length, to: doc.length, insert: `\n${tail}` } : { from: first.to + 1, to: doc.length, insert: tail };
+  return first.to === doc.length ? { from: doc.length, to: doc.length, insert: `\n${tail.replace(/^(?=.)/gm, indent)}` } : replace(first.to + 1, doc.length, tail);
 }
 
 const drawnBases = new WeakMap<Element, { update(embed: BaseEmbed): void }>();

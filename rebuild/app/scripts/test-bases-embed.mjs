@@ -39,7 +39,7 @@ Last line.
 `;
 const SCROLL = `# Scroll\n\n\`\`\`base\nfilters: 'file.inFolder("EmbedBig")'\nviews:\n  - type: table\n    name: Big\n    order: [file.name, n]\n\`\`\`\n\nAfter.\n`;
 
-await withBrowser(async ({ run, send, click, move, press, check }) => {
+await withBrowser(async ({ run, send, click, move, press, chord, check }) => {
   const wait = async (test, label) => { for (let i = 0; i < 150; i++) { if (await test()) return; await sleep(20); } assert.fail(label); };
   const source = path => run(async p => { const { api } = await import('/src/api.ts'); return api.readNote(p); }, path);
   // Embeds in document order: [0] the ```base block, [1] ![[Embed.base#Open]].
@@ -76,6 +76,18 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
 
   await run(async (base, host, scroll) => {
     const { api } = await import('/src/api.ts');
+    window.b4Active = new Set(); window.b4Subscriptions = new Set();
+    const mount = ws.embeds.base;
+    ws.embeds.base = (...args) => { const item = mount(...args); b4Active.add(item); return { ...item, destroy() { b4Active.delete(item); item.destroy(); } }; };
+    for (const [object, method] of [[ws, 'on'], [ws.vault, 'onModified']]) {
+      const listen = object[method].bind(object);
+      object[method] = fn => {
+        const own = new Error().stack.split('\n')[2]?.includes('/src/bases/view.ts');
+        if (own) b4Subscriptions.add(fn);
+        const off = listen(fn);
+        return () => { b4Subscriptions.delete(fn); off(); };
+      };
+    }
     for (const [n, s] of [['A', 'open'], ['B', 'done'], ['C', 'open']]) await api.createNote(`EmbedTest/${n}.md`, `---\nstatus: ${s}\npriority: ${n.charCodeAt(0) - 64}\n---\n# ${n}\n`);
     for (let i = 0; i < 1000; i++) await api.createNote(`EmbedBig/${String(i).padStart(4, '0')}.md`, `---\nn: ${i}\n---\n`);
     await api.createNote('Embed.base', base);
@@ -179,6 +191,16 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
   check(await run(() => document.querySelectorAll('.bases-embed')[0].b4Kept === true), 'the block embed keeps its DOM through its own write');
   assert.equal(await source('Embed.base'), EMBED_BASE);
   check(true, 'a toolbar write in a ```base block changes only the block in the note');
+  // Undo/redo must preserve unsaved prose and update the live block rather than its old snapshot.
+  await run(() => { ws.view.dispatch({ selection: { anchor: ws.view.state.doc.length } }); ws.view.focus(); });
+  await chord('z');
+  await wait(() => run(before => ws.view.state.doc.toString() === before, blockBefore), 'undo restores only the block edit');
+  assert.ok(blockBefore.includes('xxxxx'), 'the prior unsaved prose is retained');
+  await chord('y');
+  await wait(() => run(after => ws.view.state.doc.toString() === after, blockAfter), 'redo restores the block edit');
+  await run(() => ws.view.contentDOM.blur());
+  await wait(async () => (await state()).filter(e => e.count).length === 2, 'block remounts after history');
+  check(true, 'block toolbar undo/redo preserves unsaved prose and refreshes the embed');
 
   // 8. The file embed's own write goes to Embed.base, into the view it shows (Open again: the note was reopened).
   await click(await centre('.bases-embed th[data-property="file.name"]', 1), 'right');
@@ -223,4 +245,22 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
   await wait(() => run(top => document.querySelector('.bases-embed .bases-scroll').scrollTop > top, scroll.top), 'the wheel scrolls the embed');
   check(true, 'the wheel scrolls the embed');
   console.log('B4_METRICS', JSON.stringify({ coldMs, warmMs, typingMax, duringBurst: during, afterQuiet: after, scrollMax: scroll.max, box }));
+
+  const indented = 'Intro\n\n  ```base\n  filters: \'file.inFolder("EmbedTest")\'\n  views:\n    - type: table\n      order: [file.name]\n  ```\n\nAfter\n';
+  await run(async text => { const { api } = await import('/src/api.ts'); await api.createNote('Indented.md', text); await ws.vault.refreshFiles(); await ws.open('Indented.md'); }, indented);
+  await wait(() => run(() => document.querySelector('.bases-count span')?.textContent === '3 results'), 'indented fence renders');
+  await click(await centre('.bases-embed th[data-property="file.name"]'), 'right'); await menu('Sort Z → A');
+  const sortedIndent = indented.replace('      order: [file.name]\n', '      order: [file.name]\n      sort:\n        - property: file.name\n          direction: DESC\n');
+  await wait(() => run(expected => ws.view.state.doc.toString() === expected, sortedIndent), 'indented fence write preserves surrounding bytes');
+  check(true, 'indented base fences render and retain their indentation on toolbar writes');
+
+  // Closing the final note must destroy its widgets, not keep a live base in a hidden editor.
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'closing all tabs disposes every base and subscription');
+  assert.equal(await run(() => ws.view.contentDOM.querySelectorAll('.bases-embed').length), 0);
+  await run(() => ws.open('Scroll.md'));
+  await wait(() => run(() => b4Active.size === 1 && document.querySelector('.bases-count span')?.textContent === '1000 results'), 'reopening reconstructs the saved editor widgets');
+  await run(() => ws.closeTabs(ws.layout.tabs()));
+  await wait(() => run(() => b4Active.size === 0 && b4Subscriptions.size === 0), 'repeated close leaves no subscriptions');
+  check(true, 'closing/reopening the final tab releases Bases widgets and workspace/vault subscriptions');
 });

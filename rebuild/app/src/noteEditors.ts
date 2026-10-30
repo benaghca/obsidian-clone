@@ -186,7 +186,7 @@ export class NoteEditors {
       }
       this.applyMode(pane.view, tab.mode);
       this.applyConfig(pane.view);
-    }
+    } else pane.view.setState(createNoteState({ doc: "", host: this.host, extensions: this.mirrorKeys }));
     this.events.shown(group, path);
     if (path && pane.scroller) {
       const top = memoryOf(tab, path)?.scrollTop;
