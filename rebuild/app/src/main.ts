@@ -55,7 +55,6 @@ import { createSidedocks } from "./shell/sidedock";
 import { fileName, noteName, parentDir, trimSlashes } from "./paths";
 import { tabTitle } from "./tabs";
 import { readStored, store } from "./storage";
-import { enableBaseCards } from "./bases/cards";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
@@ -120,8 +119,6 @@ const searchVault = (query: string) => {
   docks.setCollapsed("left", false);
 };
 const panes = createPanes(ws, () => menus, { searchTag: (tag) => searchVault(`tag:${tag}`) });
-// After the panes, so a "tabs" event has already inserted .bases-view.
-enableBaseCards(ws);
 const sidebar = createSidebar(ws, bookmarks, () => menus);
 const rightSidebar = createRightSidebar(
   ws,

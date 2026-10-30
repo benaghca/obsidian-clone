@@ -4,7 +4,7 @@ import { compareNames, isNoteFile, noteName, parentDir } from "../paths";
 import { parseDate } from "./dates";
 import { expression, isFormulaError, testExpression, type Context, type Expression, type Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
-export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean }
+export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLink(link: string): boolean; /** The note `this` reads: the one a base is embedded in, or the base file in its own tab. */ host?: Row }
 
 /** Files a Base lists: notes, `.md` in any case, that are not excluded. */
 export function baseNoteFiles(files: readonly FileEntry[], excluded: (path: string) => boolean): FileEntry[] {
@@ -113,9 +113,12 @@ export function baseModel(source: string, viewIndex = 0) {
       }
       values.set(key, value); return value;
     };
-    const ctx: Context = { get, hasLink: row.hasLink, hasTag: tag => { tag = tag.replace(/^#/, ""); return row.tags.some(t => t.replace(/^#/, "") === tag || t.replace(/^#/, "").startsWith(tag + "/")); } };
+    const ctx: Context = { get, hasLink: row.hasLink, hasTag: tag => { tag = tag.replace(/^#/, ""); return row.tags.some(t => t.replace(/^#/, "") === tag || t.replace(/^#/, "").startsWith(tag + "/")); }, this: row.host ? hostContext(row.host) : null };
     return ctx;
   };
+  // Every row shares one host context, so `this.formula.x` is worked out once.
+  const hosts = new WeakMap<Row, Context>();
+  const hostContext = (host: Row) => { let c = hosts.get(host); if (!c) hosts.set(host, c = context(host)); return c; };
   const label = (key: string) => {
     const config = mapping(mapping(root.properties)[canonical(key)] ?? mapping(root.properties)[key] ?? mapping(root.properties)[noteKey(key)]);
     return typeof config.displayName === "string" ? config.displayName : (key.startsWith("file.") ? FILE_LABELS[key] : undefined) ?? key.replace(/^(note|formula)\./, "");

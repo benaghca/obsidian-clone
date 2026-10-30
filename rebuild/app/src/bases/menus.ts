@@ -1,4 +1,3 @@
-import { api } from "../api";
 import { TYPE_ICONS } from "../editor/propertyFields";
 import type { PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
@@ -17,13 +16,15 @@ import { configureView } from "./config";
 type Model = ReturnType<typeof baseModel>;
 const same = (a: string, b: string) => noteKey(a) === noteKey(b);
 const sortsOf = (base: Model): Sort[] => base.sorts.map(s => ({property:s.property,direction:s.direction === 1 ? "ASC" : "DESC"}));
-export function baseMenus(ws: Workspace, path: string, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][]) {
+/** Where a base's YAML is read from and written to: a .base file, or a ```base block in a note. */
+export interface BaseFile { read(): Promise<string>; write(text: string): Promise<void> }
+export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, types: () => Map<string, PropertyType>, error: (e: unknown) => void, changed: (index?: number) => Promise<void>, rows: () => Value[][]) {
   let writing = Promise.resolve(), gone = false;
   const save = (change: (source: string, base: Model) => string, done?: () => void, select?: (base: Model) => number) => {
     const index = current().viewIndex;
     writing = writing.then(async () => {
-      const source = await api.readNote(path), base = baseModel(source, index), next = change(source, base);
-      if (next !== source) { await api.writeNote(path, next); ws.vault.written(path); }
+      const source = await file.read(), base = baseModel(source, index), next = change(source, base);
+      if (next !== source) await file.write(next);
       if (!gone) { await changed(select?.(base)); done?.(); }
     }).catch(error);
   };

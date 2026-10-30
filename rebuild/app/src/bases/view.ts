@@ -1,6 +1,7 @@
-// A first table view. Only the visible rows have DOM; source YAML
-// is read once, and the existing property index supplies changed note metadata.
-import { api } from "../api";
+// A base's view: its toolbar and its table (or cards.ts's grid), drawn in a
+// tab (createBaseView) or in a note (embed.ts). Only the visible rows have DOM;
+// source YAML is read once, and the existing property index supplies changed note metadata.
+import { api, type FileEntry } from "../api";
 import { fits, asType, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
@@ -13,7 +14,8 @@ import { vaultTags } from "../shell/vaultTags";
 import { tagsInText } from "../shell/linksTags";
 import { whereFromEvent, type Group, type Tab } from "../tabs";
 import type { Workspace } from "../workspace";
-import { baseMenus } from "./menus";
+import { baseMenus, type BaseFile } from "./menus";
+import { createCardGrid } from "./cards";
 import { columnControls } from "./columns";
 import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
@@ -136,6 +138,9 @@ export function docsOutsideFilter(paths: readonly string[], source: string, view
   return paths.every(path => missesPrefilter(path, need, textOf(path), visible(path)) && missesPrefilter(path, need, previousTextOf(path), visible(path)));
 }
 
+/** The base reads `this` and the note it is changed: that rebuilds even when the note is outside the base's folder or tag. */
+export const readsChanged = (source: string, host: string | null, changed: readonly string[]) => host !== null && changed.includes(host) && /\bthis\b/.test(source);
+
 export interface BaseChange {
   change: string;
   shown: boolean;
@@ -173,12 +178,36 @@ export function baseChange(input: BaseChange): BaseRefresh {
   return { deferred: false, delay: SOON_MS, clear: false };
 }
 
-const viewsByTab = new WeakMap<Tab, Map<string, number>>();
-export function createBaseView(ws: Workspace, path: string, group: Group) {
-  const tab = group.active;
-  if (!viewsByTab.has(tab)) viewsByTab.set(tab, new Map());
-  const memory = viewsByTab.get(tab)!;
-  let viewIndex = memory.get(path) ?? 0;
+/** A .base file as the place a base's YAML is read from and written to. */
+export const baseFile = (ws: Workspace, path: string): BaseFile => ({
+  read: () => api.readNote(path),
+  async write(text) { await api.writeNote(path, text); ws.vault.written(path); },
+});
+
+export interface BaseOptions {
+  group: Group;
+  file: BaseFile;
+  /** The file whose change on disk reloads the YAML (the .base file); none for a ```base block. */
+  watch?: string;
+  /** The note `this` reads, by path. */
+  host: string | null;
+  viewIndex: number;
+  /** The view shown first, by name (![[X.base#View]]), when there is one. */
+  viewName?: string;
+  /** Whether it is showing, besides being in the document: a hidden base waits until it is shown (B0). */
+  shown?(): boolean;
+  /** The view shown changed. */
+  remember?(index: number): void;
+}
+
+/**
+ * A base's toolbar and its table or cards: the tab's content (createBaseView),
+ * and what a note draws for a ```base block or ![[X.base]] (embed.ts).
+ * Rows are built and filtered again only through `schedule` (B0's rules).
+ */
+export function createBase(ws: Workspace, o: BaseOptions) {
+  const { group, file } = o;
+  let viewIndex = o.viewIndex, viewName = o.viewName;
   const el = h("div", { class: "bases-view", tabindex: "0", "aria-label": "Base table" });
   const toolbar = h("div", { class: "bases-toolbar" });
   const notice = h("div", { class: "bases-notice", role: "status" });
@@ -186,14 +215,17 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
   const columns = h("colgroup");
   const table = h("table", { class: "bases-table", "aria-label": "Results" });
   const head = h("thead"), body = h("tbody");
-  table.append(columns, head, body); scroller.append(table); el.append(toolbar, notice, scroller);
+  const grid = createCardGrid(ws, group, scroller);
+  grid.el.hidden = true;
+  table.append(columns, head, body); scroller.append(table, grid.el); el.append(toolbar, notice, scroller);
   const index = propertyIndex(ws);
   let model: ReturnType<typeof baseModel> | null = null;
   let selected: ReturnType<ReturnType<typeof baseModel>["select"]> = [];
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
   let types = new Map<string, PropertyType>();
+  const cards = () => model?.type === "cards";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, path, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; memory.set(path, index); scroller.scrollTop = 0; } reload = true; await update(); }, () => selected.map(entry => model!.columns.map(key => entry.context.get(key))));
+  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => selected.map(entry => model!.columns.map(key => entry.context.get(key))));
   let automatic: number[] = [];
   function applySizes(key?: string, width?: number) {
     if (!model || !automatic.length) return;
@@ -250,7 +282,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     return td;
   }
   function paint(force = false) {
-    if (!model || gone || editing()) return;
+    if (!model || gone || editing() || cards()) return;
     const rowHeight=model.rowHeight, virtual = selected.length > 200, first = virtual ? Math.min(Math.max(0, selected.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
     if (!force && first === start) return;
     start = first;
@@ -267,8 +299,8 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     body.replaceChildren(fragment);
     notice.textContent = [...model.notices].join(" · "); notice.hidden = !notice.textContent;
   }
-  scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; paint(); }); }, { passive: true });
-  const resize = new ResizeObserver(() => { if(!controls.active)applySizes();paint(true); }); resize.observe(scroller);
+  scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; if (cards()) grid.onScroll(); else paint(); }); }, { passive: true });
+  const resize = new ResizeObserver(() => { if (cards()) return grid.onResize(); if(!controls.active)applySizes();paint(true); }); resize.observe(scroller);
   async function update() {
     dirty = true;
     if (running) return;
@@ -276,7 +308,14 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     try {
       while (dirty && !gone) {
         dirty = false;
-        if (reload || !model) { reload = false; source = await api.readNote(path); model = baseModel(source, viewIndex); viewIndex = model.viewIndex; memory.set(path, viewIndex); }
+        if (reload || !model) {
+          reload = false; source = await file.read(); model = baseModel(source, viewIndex);
+          // ![[X.base#View]] picks its view by name once; later the toolbar's choice stands.
+          const named = viewName === undefined ? -1 : model.views.findIndex(v => mapping(v).name === viewName);
+          viewName = undefined;
+          if (named >= 0 && named !== model.viewIndex) model = baseModel(source, named);
+          viewIndex = model.viewIndex; o.remember?.(viewIndex);
+        }
         const properties = await index.notes();
         const needsTags = /file\.(?:tags|hasTag)/.test(source);
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
@@ -285,7 +324,7 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         types = new Map();
         for (const { props } of properties.values()) for (const p of props) if (!types.has(p.key)) types.set(p.key, index.host.typeOf(p.key) ?? p.type);
         const linkCache = new Map<string, string | null>();
-        const rows: Row[] = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(file => {
+        const row = (file: FileEntry): Row => {
           const props = properties.get(file.path)?.props ?? [];
           let allTags = tags.get(file.path) ?? props.filter(p => p.type === "tags").flatMap(p => Array.isArray(p.value) ? p.value : [String(p.value)]);
           // Loaded notes include unsaved tags, using the same fenced-code-aware reader as the Tags view.
@@ -298,11 +337,25 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
             const target = linkCache.get(cacheKey), links = ws.vault.links;
             return !!target && [...links.outgoing[file.path] ?? [], ...links.markdown?.[file.path] ?? []].includes(target);
           } };
-        });
+        };
+        const rows = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(row);
+        // `this`, when the YAML reads it: its note's row (a copy, so its context has no `this` of its own), or any file's, such as the .base itself.
+        const hostFile = o.host === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === o.host)?.file ?? ws.vault.files.find(f => f.path === o.host);
+        if (hostFile) { const host = row(hostFile); for (const r of rows) r.host = host; }
         const matches = model!.select(rows,true);model!.total=matches.length;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
         model!.results = selected.length;table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
         toolbar.replaceChildren(...menus.toolbar());
+        const glyph = cards() ? "grid-2x2" : "table", svg = toolbar.querySelector(".bases-view-name svg");
+        if (svg && !svg.classList.contains(`lucide-${glyph}`)) svg.replaceWith(icon(glyph));
+        table.hidden = cards(); grid.el.hidden = !cards(); el.setAttribute("aria-label", cards() ? "Base cards" : "Base table");
+        if (cards()) {
+          head.replaceChildren(); body.replaceChildren(); start = -1;
+          grid.render(model!, selected, types, true);
+          notice.textContent = [...model!.notices].join(" · "); notice.hidden = !notice.textContent;
+          continue;
+        }
+        grid.clear();
         table.setAttribute("aria-rowcount", String(selected.length + 1));
         head.replaceChildren(h("tr", null, ...model!.columns.map(key => {
           const sort = model!.sorts.find(s => noteKey(s.property) === noteKey(key));
@@ -326,11 +379,11 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
         paint(true);
       }
     } catch (error) {
-      if (!gone) { model = null; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
+      if (!gone) { model = null; grid.clear(); grid.el.hidden = true; table.hidden = false; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
     } finally { running = false; }
   }
   let deferred = false;
-  const shown = () => el.isConnected && group.active === tab;
+  const shown = () => el.isConnected && (o.shown?.() ?? true);
   function schedule(delay = SOON_MS) {
     clearTimeout(timer); timer = 0;
     if (!shown()) { deferred = true; return; }
@@ -364,13 +417,13 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     docSnap = next;
     return changed.length ? changed : null;
   };
-  const outside = (changed: string[], before: (note: string) => string | null) => docsOutsideFilter(changed, source, viewIndex,
+  const outside = (changed: string[], before: (note: string) => string | null) => !readsChanged(source, o.host, changed) && docsOutsideFilter(changed, source, viewIndex,
     note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null,
     note => selected.some(entry => entry.row.file.path === note), before);
   const unwatch = ws.vault.onModified(changed => {
     const before = changedFrom.get(changed) ?? null;
     changedFrom.delete(changed);
-    if (changed === path) reload = true;
+    if (changed === o.watch) reload = true;
     else if (isNoteFile(changed) && outside([changed], () => before)) return;
     schedule();
   });
@@ -391,5 +444,19 @@ export function createBaseView(ws: Workspace, path: string, group: Group) {
     } else if (next.clear) { clearTimeout(timer); timer = 0; }
   });
   void update();
-  return { el, dispose() { gone = true; controls.dispose(); menus.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); } };
+  return {
+    el,
+    /** Read the YAML again (a ```base block's text changed). */
+    reload() { reload = true; schedule(); },
+    dispose() { gone = true; controls.dispose(); menus.dispose(); grid.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
+  };
+}
+
+const viewsByTab = new WeakMap<Tab, Map<string, number>>();
+/** A .base file in its own tab: `this` is the base file itself, and the tab remembers the view shown. */
+export function createBaseView(ws: Workspace, path: string, group: Group) {
+  const tab = group.active;
+  if (!viewsByTab.has(tab)) viewsByTab.set(tab, new Map());
+  const memory = viewsByTab.get(tab)!;
+  return createBase(ws, { group, file: baseFile(ws, path), watch: path, host: path, viewIndex: memory.get(path) ?? 0, remember: index => memory.set(path, index), shown: () => group.active === tab });
 }
