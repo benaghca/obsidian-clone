@@ -140,3 +140,25 @@ Checks, each under `flock /tmp/grove-npm-test.lock`. Cargo used `--offline`. The
 - `npm run audit:offline`: passed, 166 source files plus dist, CSP, capabilities, and dependencies.
 - `cargo build --offline`: passed (`Finished dev profile` in 1.76s, no fetch).
 - `cargo test --offline`: 52 passed, 0 failed, 2 ignored. `index::parity::corpus` passed with the three markers removed.
+
+## Catch-up merge
+
+Merged `rebuild/integration` (`2f82a1f`) with `git merge --no-edit`. No rebase. Merge commit `360665b`. Integration brings K1, Q1, Step 5, the upper-case `.MD` cleanup, C1-A, and B1. The nameless-file rule stays: one `isNoteFile`, and every caller uses it.
+
+Five conflicts:
+
+- `paths.ts`. Both sides defined the helper. The result is the Rust rule: the basename is longer than 3 characters and ends in `.md` in any case. `noteName` strips those three characters only when `isNoteFile` says the path is a note, so a file named `.MD` keeps that label. Integration's `path.toLowerCase().endsWith(".md")` would have counted `.md` as a note.
+- `paths.test.ts`. Kept integration's any-case checks (`Upper.MD`, `a.Md`, `Board.canvas`, `readme.markdown`) and the nameless `.md` / `.MD` checks, including `noteName(".MD")` staying `.MD`.
+- `graph/source.ts`. Took integration's `graphFileLists` instead of the inline loop. That helper calls `isNoteFile`, so a nameless file is an attachment.
+- `graph/data.ts`. Kept `graphFileLists` and `noteName` for node labels.
+- `bases/view.ts`. Took integration's `baseNoteFiles`. It filters with `isNoteFile`. The inline filter was dropped.
+
+`searchVault.ts` and `search.json` did not conflict. Search still classifies notes with `isNoteFile`, and the three `dot-name` cases are unchanged. `mock/backend.ts` merged cleanly. Its new `linkSources` used `/\.md$/i`, which counts a nameless file as a note. Those three filters now call `isNoteFile`, matching Rust `link_sources` (`index/link_sources.rs`), which uses `is_note_path`. Integration's settings path list uses `noteName`, so `Upper.MD` is suggested as `Upper`.
+
+Checks, each under `flock /tmp/grove-npm-test.lock`. Cargo used `--offline`. The registry was not contacted. Both builds kept the existing large-chunk notice.
+
+- `npm run build`: passed.
+- `npm test`: vitest 58 files, 673 tests, all passed, including `parity.test.ts` (343). Browser scripts passed on the first run. The 300-card drag check was max 16.8 ms. The 1000-row Bases scroll was max 16.7 ms. `posttest` (`test-bases-config.mjs`) passed.
+- `npm run audit:offline`: passed, 166 source files plus dist, CSP, capabilities, and dependencies.
+- `cargo build --offline`: passed (`Finished dev profile` in 6.69s, no fetch).
+- `cargo test --offline`: 58 passed, 0 failed, 2 ignored. `index::parity::corpus` passed.
