@@ -66,3 +66,33 @@ All checks ran under `flock /tmp/grove-npm-test.lock`:
 ## 4. Left Open
 
 - The `scripts/bench-frontend.mjs` half of B1 waits for C1-B (frontend switch-over to `api.searchNotes` / `api.searchLines`).
+
+---
+
+## Bases B1: error and `this` API hand-off (Codex, 2026-10-29)
+
+This section concerns Bases B1, independently of the Rust search benchmarks above. Per Chris's scope decision, `bases/model.ts` and `bases/view.ts` are untouched here: Grok's B0 and Gemini's B2 own those files now. The following wiring lands after their merges. The evaluator APIs and unit tests are ready; visible error cells and toolbar notices are **not yet wired** by this branch.
+
+### Compiler and model wiring
+
+- Import `compileFormula`, `FormulaError`, `isFormulaError`, `testExpression`, `compare` and the value types from `./expression`. `expression(source)` remains the strict compiler for filter editors: syntax/unsupported-call failures throw a `FormulaError`. `compileFormula(source)` instead returns a callable even for a parse failure; its `.error` contains that failure before any rows exist. Both compilers return evaluation failures as `FormulaError` values. `.error` describes only a compile failure, never a previous row's runtime failure.
+- Replace the formula-column compiler's catch-and-return-null path with `compileFormula`. Add a notice containing the formula name and `.error.message` immediately, including when the base has zero rows. Non-string YAML formula definitions should likewise produce an explicit parse error value/notice instead of null.
+- Keep the per-row cache and active-formula set. On a cycle, return `new FormulaError("Circular formula: " + key)` rather than null; cache errors like other values. The evaluator propagates dependency errors unchanged. Use `try/finally` around the active-set bookkeeping. Record runtime errors once per formula/message, with a bounded notice count; rebuild those runtime notices for each selection so resolved errors disappear. Evaluate displayed formula columns as needed even when a formula is absent from the filter/sort.
+- Replace raw truthiness in `select()` and every `and`/`or`/`not` tree leaf. Error objects are truthy in JavaScript. `testExpression(compiled, context)` excludes an error-valued row; a caller that also needs a notice should evaluate once, check `isFormulaError(value)`, record it, then apply the normal boolean conversion. Carry a filter-tree failure explicitly until the outer boundary so `not` cannot turn a failed child into a match. Preserve lazy tree branches.
+- Sort errors as missing values, last in either direction. Use `compare` for typed dates/durations as well as primitive comparisons; guard errors before calling it (it deliberately throws for error inputs). Retain the existing name/path tie-break and text collation.
+
+### Cells and notices in the view
+
+- In `cell()`, check `isFormulaError(value)` before type inference, property editing, list formatting or generic display. Render a read-only `#ERROR!` cell with the message in its title/accessibility text. Use `textContent`/DOM text nodes, never formula-generated HTML. Do not send errors into `displayValue`: that helper propagates them.
+- The existing `model.notices` and `.bases-notice` status element can carry a one-line, deduplicated formula notice. Refresh it after evaluating displayed columns, including an empty result set. Runtime cell errors should not replace the entire base with "Unable to open base".
+- Handle `FormulaDate` (epoch `.time`, `.dateOnly`), `FormulaDuration` and `FormulaLink` explicitly. `displayValue` provides bounded plain text for valid values; `String(date)` is a local ISO date for date-only values and a UTC ISO datetime otherwise. A link's `.path`/optional `.display` are data: reuse Grove's internal-link resolution and modifier-click behavior. Formula/file values stay read-only. Copy/export callers should choose explicit error/date/link text rather than silently dropping errors.
+
+### Supplying `this` and file facts
+
+- `Context` still requires `get(key)`, `hasTag(tag)` and `hasLink(link)`. It adds optional `this?: Context | null`, `hasProperty?(key)` and `now?(): number`. The evaluator samples `now` once per expression invocation, so repeated `now()`/`today()` calls agree. A selection-wide clock can be supplied by the model when consistency across rows is needed.
+- Supply the embedding note's context as `rowContext.this`, independently of the result row. This enables `this.status`, `this.note["My key"]`, `this.formula.x`, `this.file.name` and `this.file.hasTag(...)`/`asLink(...)`. Bare `this` is a file value. An absent host evaluates to null; the evaluator never guesses a host or reads files. B4 should pass the embedding note explicitly through the future reusable view/model API. A standalone tab must also choose its host policy explicitly.
+- Implement `hasProperty` using actual property-key existence, including null/empty/unknown values. The optional compatibility fallback checks non-null getter results and cannot distinguish an absent key from a present null property. Use the same open-editor overlay and tag/link rules for the host as for a row.
+- Getter keys are the existing plain/note/formula/file ids; the host receives `file.name`, not `this.file.name`. `Expression.dependencies` is a frozen, conservative list of getter dependencies; host keys have a `this.` prefix. `.usesThis` flags host dependencies. Both branches of lazy expressions are included. File methods report their implicit fact (`file.tags`, `file.links`, `file.folder`, `file.properties` or `file.path`). Metadata performs no reads and can guide caller prefetching.
+- The file whitelist now accepts `links`, `backlinks`, `embeds`, `properties` in addition to the existing facts. The caller must supply their values; today's model returns null for the new facts. Outgoing facts can use the current link index; backlinks must retain the existing on-demand command policy, with caller-side caching/loading. The evaluator performs no I/O. `hasLink` and `hasTag` continue to delegate to caller callbacks.
+
+Integration verification after B0/B2: add model tests for parse errors with zero rows, per-row evaluation errors, cycles, failed/negated filters, error sorting, host isolation and resolved-notice clearing; then browser tests for error cell text/title, toolbar notice, valid typed values/links, and the later embedded-host path. This branch's unit tests cover the evaluator side of these contracts. See `NOTES_BASES-B1.md` for language semantics and validation results.
