@@ -1,4 +1,4 @@
-// A base's view: its toolbar and its table (or cards.ts's grid), drawn in a
+// A base's view: its toolbar and its table (or, through groups.ts, its cards and groups), drawn in a
 // tab (createBaseView) or in a note (embed.ts). Only the visible rows have DOM;
 // source YAML is read once, and the existing property index supplies changed note metadata.
 import { api, type FileEntry } from "../api";
@@ -21,6 +21,7 @@ import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
 import type { Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
+import { createGroupedView } from "./groups";
 
 /** How long a burst of typing waits before the open base rebuilds. Matches the note save delay. */
 const DOC_QUIET_MS = 300;
@@ -215,17 +216,15 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const columns = h("colgroup");
   const table = h("table", { class: "bases-table", "aria-label": "Results" });
   const head = h("thead"), body = h("tbody");
-  const grid = createCardGrid(ws, group, scroller);
-  grid.el.hidden = true;
-  table.append(columns, head, body); scroller.append(table, grid.el); el.append(toolbar, notice, scroller);
+  table.append(columns, head, body); scroller.append(table); el.append(toolbar, notice, scroller);
   const index = propertyIndex(ws);
-  let model: ReturnType<typeof baseModel> | null = null;
+  let model: ReturnType<typeof baseModel> | null = null, host: Row | undefined;
   let selected: ReturnType<ReturnType<typeof baseModel>["select"]> = [];
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
   let types = new Map<string, PropertyType>();
   const cards = () => model?.type === "cards";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
-  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => selected.map(entry => model!.columns.map(key => entry.context.get(key))));
+  const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (groupedView.rows() ?? selected).map(entry => model!.columns.map(key => entry.context.get(key))));
   let automatic: number[] = [];
   function applySizes(key?: string, width?: number) {
     if (!model || !automatic.length) return;
@@ -281,8 +280,11 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     } else td.textContent = String(value);
     return td;
   }
+  // Cards, and tables with groups or summaries, are drawn by groups.ts; a plain table is drawn below.
+  const groupedView = createGroupedView({ el, scroller, table, body, ws, group, cell, header: menus.header, createCards: createCardGrid, repaint: () => paint(true), summaryContext: () => host && model?.hostContext(host) });
   function paint(force = false) {
-    if (!model || gone || editing() || cards()) return;
+    if (!model || gone || editing()) return;
+    if (groupedView.paint(model, selected, force) || cards()) return;
     const rowHeight=model.rowHeight, virtual = selected.length > 200, first = virtual ? Math.min(Math.max(0, selected.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
     if (!force && first === start) return;
     start = first;
@@ -299,8 +301,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     body.replaceChildren(fragment);
     notice.textContent = [...model.notices].join(" · "); notice.hidden = !notice.textContent;
   }
-  scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; if (cards()) grid.onScroll(); else paint(); }); }, { passive: true });
-  const resize = new ResizeObserver(() => { if (cards()) return grid.onResize(); if(!controls.active)applySizes();paint(true); }); resize.observe(scroller);
+  scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; paint(); }); }, { passive: true });
+  const resize = new ResizeObserver(() => { if(!cards()&&!controls.active)applySizes();paint(true); }); resize.observe(scroller);
   async function update() {
     dirty = true;
     if (running) return;
@@ -341,21 +343,20 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         const rows = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(row);
         // `this`, when the YAML reads it: its note's row (a copy, so its context has no `this` of its own), or any file's, such as the .base itself.
         const hostFile = o.host === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === o.host)?.file ?? ws.vault.files.find(f => f.path === o.host);
-        if (hostFile) { const host = row(hostFile); for (const r of rows) r.host = host; }
+        host = hostFile && row(hostFile);
+        if (host) for (const r of rows) r.host = host;
         const matches = model!.select(rows,true);model!.total=matches.length;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
         model!.results = selected.length;table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
         toolbar.replaceChildren(...menus.toolbar());
         const glyph = cards() ? "grid-2x2" : "table", svg = toolbar.querySelector(".bases-view-name svg");
         if (svg && !svg.classList.contains(`lucide-${glyph}`)) svg.replaceWith(icon(glyph));
-        table.hidden = cards(); grid.el.hidden = !cards(); el.setAttribute("aria-label", cards() ? "Base cards" : "Base table");
+        table.hidden = cards(); el.setAttribute("aria-label", cards() ? "Base cards" : "Base table");
         if (cards()) {
           head.replaceChildren(); body.replaceChildren(); start = -1;
-          grid.render(model!, selected, types, true);
-          notice.textContent = [...model!.notices].join(" · "); notice.hidden = !notice.textContent;
+          if (await groupedView.update(model!, selected, types, () => gone || dirty)) paint(true);
           continue;
         }
-        grid.clear();
         table.setAttribute("aria-rowcount", String(selected.length + 1));
         head.replaceChildren(h("tr", null, ...model!.columns.map(key => {
           const sort = model!.sorts.find(s => noteKey(s.property) === noteKey(key));
@@ -376,10 +377,11 @@ export function createBase(ws: Workspace, o: BaseOptions) {
             return width;
         });
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
+        if (!await groupedView.update(model!, selected, types, () => gone || dirty)) continue;
         paint(true);
       }
     } catch (error) {
-      if (!gone) { model = null; grid.clear(); grid.el.hidden = true; table.hidden = false; toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
+      if (!gone) { model = null; groupedView.clear(); toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
     } finally { running = false; }
   }
   let deferred = false;
@@ -448,7 +450,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     el,
     /** Read the YAML again (a ```base block's text changed). */
     reload() { reload = true; schedule(); },
-    dispose() { gone = true; controls.dispose(); menus.dispose(); grid.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
+    dispose() { gone = true; controls.dispose(); menus.dispose(); groupedView.dispose(); unwatch(); off(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
   };
 }
 

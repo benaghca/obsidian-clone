@@ -135,3 +135,18 @@
 /* No caret buffers around it (in Reading view they sit inside the line's text span). */
 .cm-line .cm-widgetBuffer:has(+ .bases-embed),
 .cm-line .bases-embed + .cm-widgetBuffer { display: none; }
+
+/* Group by and Summaries (groups.ts). */
+.bases-b5-root { position: relative; min-width: 0; }
+.bases-b5-section { position: absolute; left: 0; right: 0; }
+.bases-b5-heading td { height: 32px; padding: 0; background: var(--background-secondary); }
+.bases-b5-toggle { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 0; background: var(--background-secondary); color: var(--text-normal); width: 100%; height: 32px; padding: 4px 8px; font: inherit; text-align: left; cursor: pointer; overflow: hidden; }
+.bases-b5-toggle svg { flex: none; width: 14px; height: 14px; }
+.bases-b5-toggle span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bases-b5-count { color: var(--text-muted); margin-left: 4px; }
+.bases-b5-summary td, .bases-b5-summary-cell { height: 44px; padding: 4px 8px; background: var(--background-primary-alt); box-sizing: border-box; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.bases-b5-summary-label { display: block; font-size: 10px; line-height: 14px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.bases-b5-summary-value { display: block; font-size: 13px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; }
+.bases-b5-foot td { position: sticky; bottom: 0; z-index: 1; border-top: 1px solid var(--background-modifier-border); }
+.bases-b5-card-summary { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(100px,1fr); height: 44px; overflow: auto; border-top: 1px solid var(--background-modifier-border); }
+.bases-b5-error { color: var(--text-error); }
