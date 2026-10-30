@@ -420,12 +420,7 @@
       "expected": {
         "Projects/Roadmap.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4
-          ]
+          "lines": []
         }
       }
     },
@@ -436,9 +431,7 @@
       "expected": {
         "Daily/2026-10-21.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         }
       }
     },
@@ -449,12 +442,7 @@
       "expected": {
         "Projects/Roadmap.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4
-          ]
+          "lines": []
         }
       }
     },
@@ -703,9 +691,6 @@
         "Projects/Roadmap.md": {
           "count": 1,
           "lines": [
-            1,
-            2,
-            3,
             4
           ]
         }
@@ -718,12 +703,7 @@
       "expected": {
         "Projects/Roadmap.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4
-          ]
+          "lines": []
         }
       },
       "note": "pathQuery adds a trailing space. It does not add a term."
@@ -750,69 +730,31 @@
       "expected": {
         "A.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7,
-            8,
-            9,
-            10
-          ]
+          "lines": []
         },
         "B.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7
-          ]
+          "lines": []
         },
         "C.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "Daily/2026-10-21.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "Gamma file.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "Projects/Roadmap.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4
-          ]
+          "lines": []
         },
         "Props.md": {
           "count": 0,
-          "lines": [
-            1,
-            2,
-            3,
-            4,
-            5,
-            6,
-            7
-          ]
+          "lines": []
         }
       },
       "note": "The extension is part of the file name, so file:md matches every note."
@@ -832,15 +774,11 @@
         "Board.canvas": {},
         "Note.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "Upper.MD": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "photo.png": {}
       },
@@ -995,15 +933,11 @@
       "expected": {
         "Note.md": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         },
         "Upper.MD": {
           "count": 0,
-          "lines": [
-            1
-          ]
+          "lines": []
         }
       },
       "note": "file: uses the file name, extension included. Without Match case the path is folded, so Upper.MD matches. An attachment whose name has no md does not."

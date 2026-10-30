@@ -227,13 +227,8 @@ impl<'q> Plan<'q> {
         let mut all = Vec::new();
         leaves(q, false, &mut all);
         for (query, negated) in all {
-            // shownLines asks facts.lines("") for file/path leaves. searchVault
-            // returns every line for it: preserve that quirk, even with count 0.
-            let term = if matches!(query, Query::Term { .. }) {
-                Some(plan.add(&text_of(query).unwrap_or(Cow::Borrowed(""))))
-            } else {
-                None
-            };
+            // file: and path: leaves have no text to look for, so they show no lines.
+            let term = text_of(query).map(|text| plan.add(&text));
             plan.leaves.push(Leaf {
                 query,
                 negated,
@@ -433,8 +428,10 @@ impl<'a, 'q> Evaluation<'a, 'q> {
                     }
                 }
                 _ => {
-                    for &i in self.term_lines(leaf.term.expect("term leaf")) {
-                        out[i] = Some(note.lines[i].text.as_str());
+                    if let Some(id) = leaf.term {
+                        for &i in self.term_lines(id) {
+                            out[i] = Some(note.lines[i].text.as_str());
+                        }
                     }
                 }
             }

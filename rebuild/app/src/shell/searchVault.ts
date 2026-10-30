@@ -58,6 +58,8 @@ export function searchVault(
 
   const byTerm = new Map<string, Map<string, Line[]>>();
   const lines = (term: string) => {
+    // file: and path: leaves ask for "" (shownLines). The app never fetches lines for them, so they show none.
+    if (!term) return undefined;
     let found = byTerm.get(term);
     if (!found) {
       found = new Map();
