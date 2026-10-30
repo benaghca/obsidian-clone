@@ -16,7 +16,7 @@ import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
 import { newBase } from "../bases/new";
 import { copyNote, deleteFile, fileSettings, moveFile, newCanvas, newFolder } from "../fileOps";
-import { noteName, systemPath } from "../paths";
+import { isNoteFile, noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
 import { confirmDialog } from "./confirm";
@@ -123,7 +123,7 @@ export function createMenus(host: MenuHost) {
         deleteItem(path),
       ];
     }
-    const isNote = path.endsWith(".md");
+    const isNote = isNoteFile(path);
     const isCanvas = /\.canvas$/i.test(path);
     return [
       ...(isNote || isCanvas ? [...openFile(path), openInNewWindow(path)] : []),

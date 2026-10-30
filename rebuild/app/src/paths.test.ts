@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { compareFiles, compareNames, fileName, isUnder, movedPath, noteName, parentDir, SORT_ORDERS, type SortOrder, systemPath, trimSlashes } from "./paths";
+import { compareFiles, compareNames, fileName, isNoteFile, isUnder, movedPath, noteName, parentDir, SORT_ORDERS, type SortOrder, systemPath, trimSlashes } from "./paths";
 
 describe("paths", () => {
   it("names and folders", () => {
     expect(fileName("A/B/Note.md")).toBe("Note.md");
     expect(noteName("A/B/Note.md")).toBe("Note");
+    expect(noteName("Folder/Upper.MD")).toBe("Upper");
     expect(noteName("pic.png")).toBe("pic.png");
+    expect(isNoteFile("Note.md")).toBe(true);
+    expect(isNoteFile("Upper.MD")).toBe(true);
+    expect(isNoteFile("a.Md")).toBe(true);
+    expect(isNoteFile("photo.png")).toBe(false);
+    expect(isNoteFile("Board.canvas")).toBe(false);
+    expect(isNoteFile("readme.markdown")).toBe(false);
     expect(parentDir("A/B/Note.md")).toBe("A/B");
     expect(parentDir("Note.md")).toBe("");
     expect(trimSlashes(" /Daily/notes/ ")).toBe("Daily/notes");

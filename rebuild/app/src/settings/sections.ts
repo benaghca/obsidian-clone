@@ -8,7 +8,7 @@
 import { version } from "../../package.json";
 import { commands } from "../commands";
 import { writeClipboard } from "../editor/clipboard";
-import { systemPath, trimSlashes } from "../paths";
+import { noteName, parentDir, systemPath, trimSlashes } from "../paths";
 import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import type { Workspace } from "../workspace";
@@ -87,7 +87,11 @@ function textRow<F extends FileName, K extends Key<F>>(file: F, key: K, name: st
 
 /** A <datalist> of the vault's folders or notes, for path fields. */
 function pathList(ws: Workspace, id: string, kind: "folder" | "note"): HTMLElement {
-  const paths = kind === "folder" ? ws.vault.files.filter((f) => f.is_dir).map((f) => f.path) : ws.vault.notes.map((n) => n.path.replace(/\.md$/, ""));
+  const paths = kind === "folder" ? ws.vault.files.filter((f) => f.is_dir).map((f) => f.path) : ws.vault.notes.map((n) => {
+    const dir = parentDir(n.path);
+    const name = noteName(n.path);
+    return dir ? `${dir}/${name}` : name;
+  });
   return h("datalist", { id }, ...paths.sort().map((p) => h("option", { value: p })));
 }
 

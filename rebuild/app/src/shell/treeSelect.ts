@@ -1,7 +1,7 @@
 // Explorer multi-select and the link text a drop into a note inserts.
 // Free of the DOM. Link text uses the same formatter as the suggester.
 
-import { isUnder, parentDir } from "../paths";
+import { isNoteFile, isUnder, parentDir } from "../paths";
 
 /**
  * Alt-click toggles one row into the selection. Shift-click extends it.
@@ -56,7 +56,7 @@ export function dropLinkText(
 ): string {
   return paths
     .filter((path) => !isDir(path))
-    .map((path) => (path.toLowerCase().endsWith(".md") ? "" : "!") + linkTo(path, from))
+    .map((path) => (isNoteFile(path) ? "" : "!") + linkTo(path, from))
     .join("\n");
 }
 
