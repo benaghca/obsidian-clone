@@ -58,12 +58,15 @@ await withBrowser(async ({ run, send, click, move, press, check }) => {
     const el = [...document.querySelectorAll('.menu-item')].find(el => el.querySelector('.menu-item-title')?.textContent === title);
     const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }, title));
+  // CodeMirror measures on its next frame: settled within a second, or the mismatch is real.
   const geometry = async label => {
-    const rows = await run(() => [...ws.view.contentDOM.children].map(el => {
+    const measure = () => run(() => [...ws.view.contentDOM.children].map(el => {
       const style = getComputedStyle(el);
       const pos = ws.view.posAtDOM(el, 0);
       return { text: el.textContent.slice(0, 40), margin: [parseFloat(style.marginTop), parseFloat(style.marginBottom)], delta: ws.view.documentTop + ws.view.lineBlockAt(pos).top - el.getBoundingClientRect().top };
     }));
+    let rows = await measure();
+    for (let i = 0; i < 50 && rows.some(r => Math.abs(r.delta) > 1); i++) { await sleep(20); rows = await measure(); }
     for (const row of rows) {
       assert.ok(Math.abs(row.delta) <= 1, `${label}: ${JSON.stringify(row)}`);
       assert.deepEqual(row.margin, [0, 0], `${label}: direct child vertical margins: ${row.text}`);
