@@ -112,5 +112,17 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,shot})=>{
   const cancelled=await run(()=>cz0Measure);check(cancelled.cancelled&&cancelled.steps<300,'Escape cancels the debug measurement before 300 steps');
   await press('Escape');await sleep(40);
   check(await run(async()=>{const{api}=await import('/src/api.ts');return JSON.parse(await api.readNote('Small.canvas')).nodes[0].text==='Small';}),'Debug measurement and cancellation never save the canvas');
-  await run(()=>ws.open('Welcome.md'));check(await run(()=>!grove.isAvailable(grove.get('canvas:measure-zoom'))),'Debug zoom command is unavailable outside a canvas');
+  const beforeLeave=await state();
+  await run(()=>{window.cz0Measure=grove.get('canvas:measure-zoom').run();});
+  for(let i=0;i<40&&near((await state()).s,beforeLeave.s);i++)await sleep(25);
+  check(!near((await state()).s,beforeLeave.s),'measurement changes zoom before the canvas is left');
+  await run(()=>ws.open('Welcome.md'));
+  const leftReport=await run(()=>cz0Measure);
+  check(leftReport.cancelled&&leftReport.steps<300,'leaving the canvas cancels the measurement');
+  await press('Escape');await sleep(40);
+  check(await run(()=>!grove.isAvailable(grove.get('canvas:measure-zoom'))),'Debug zoom command is unavailable outside a canvas');
+  await run(()=>ws.open('Small.canvas'));await sleep(200);
+  const returned=await state();
+  check(near(beforeLeave.s,returned.s)&&near(beforeLeave.x,returned.x)&&near(beforeLeave.y,returned.y),'leaving mid-measure restores the live viewport ('+JSON.stringify(beforeLeave)+' -> '+JSON.stringify(returned)+')');
+  check(await run(async()=>{const{api}=await import('/src/api.ts');return JSON.parse(await api.readNote('Small.canvas')).nodes[0].text==='Small';}),'leaving mid-measure does not save the canvas');
 }, {height:800,screenshots:new URL('../../round23-shots/',import.meta.url).pathname});

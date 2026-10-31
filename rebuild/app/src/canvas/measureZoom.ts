@@ -32,9 +32,13 @@ export async function measureZoom(el: HTMLElement, tab: Tab, current: () => bool
     await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
   } finally {
     cancelAnimationFrame(frame); observer?.disconnect(); abort.abort(); running = false;
-    if (el.isConnected && current() && canvasViewports.has(tab)) {
-      Object.assign(canvasViewports.get(tab)!, saved);
-      el.dispatchEvent(new WheelEvent("wheel", { cancelable: true, ctrlKey: true }));
+    // Tab switch destroys this element and keeps the tab's viewport. Write the
+    // saved one back either way; a later open reads the map. Redraw only if
+    // this element is still on screen.
+    const live = canvasViewports.get(tab);
+    if (live) {
+      Object.assign(live, saved);
+      if (el.isConnected) el.dispatchEvent(new WheelEvent("wheel", { cancelable: true, ctrlKey: true }));
     }
   }
   const sorted = gaps.toSorted((a, b) => a - b), percentile = (p: number) => sorted.length ? sorted[Math.floor((sorted.length - 1) * p)].toFixed(1) : "unavailable";
