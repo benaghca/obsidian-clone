@@ -14,6 +14,8 @@ import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { showMenu } from "../shell/menu";
 import { propertyIndex } from "../shell/propertyIndex";
+import { tagsInText } from "../shell/linksTags";
+import { vaultTags } from "../shell/vaultTags";
 import { whereFromEvent, type Group } from "../tabs";
 import type { Workspace } from "../workspace";
 import { resolveCoverPath } from "./cards";
@@ -124,6 +126,15 @@ export function createKanban(host: KanbanHost) {
     }
     return lo;
   }
+  async function tagFacts(entry: Entry, key: string) {
+    if (!/^(tags|tag)$/i.test(key)) return;
+    vaultTags(ws).forget();
+    const path = entry.row.file.path, doc = ws.editors.doc(path);
+    // The body may still contain a tag removed from frontmatter. Never subtract
+    // frontmatter tags from the combined set: ask the fresh index (or live editor).
+    const tags = doc ? tagsInText(doc.toString()) : (await api.tags([path]))[path] ?? [];
+    entry.row = { ...entry.row, tags };
+  }
   /** Mutate one entry, splice only its source/target arrays and repaint those windows. */
   function patch(entry: Entry, metadata: NoteProperties) {
     if (!model) return;
@@ -141,11 +152,14 @@ export function createKanban(host: KanbanHost) {
       const c = mounted.get(g.id); if (!c) continue;
       const node = c.cards.get(entry.row.file.path); if (node) { release(node); node.remove(); c.cards.delete(entry.row.file.path); }
       c.el.querySelector(".bases-kanban-count")!.textContent = g.rows.length.toLocaleString("en-US");
+      c.el.setAttribute("aria-label", `${labelOf(g)}, ${g.rows.length} notes`);
       c.inner.style.height = `${g.rows.length ? g.rows.length * pitch - KANBAN.cardGap : 0}px`;
-      if (c.inner.parentNode !== c.body) c.body.replaceChildren(c.inner);
+      if (!g.rows.length) c.body.replaceChildren(h("div", { class: "bases-kanban-empty" }, `Drop here to set ${keyOf()} to ${labelOf(g)}`));
+      else if (c.inner.parentNode !== c.body) c.body.replaceChildren(c.inner);
       fill(c, true);
     }
     host.count(columns.reduce((sum, g) => sum + g.rows.length, 0)); roving();
+    if (target) focusCard(columns.indexOf(target), target.rows.indexOf(entry));
     return { selected: !!target };
   }
   async function historyReplay(back: boolean) {
@@ -155,12 +169,24 @@ export function createKanban(host: KanbanHost) {
     try {
       const record = await history().replay(back, async (path, edit, dry) => {
         const result = await writeProperty(ws, path, edit, dry);
-        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) patch(entry, result.props); }
+        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) { await tagFacts(entry, edit.key).catch(() => {}); patch(entry, result.props); } }
         return result;
       }, prepared => {
         if (model !== m) return;
         pendingWrites++; previewed = true;
-        for (const { op, result } of prepared) { const entry = entries.get(op.path), prior = info.get(op.path); if (entry && prior && (result.status === "done" || result.status === "unchanged")) { restore.push({ entry, info: prior }); patch(entry, result.props); } }
+        for (const { op, result } of prepared) {
+          if (result.status !== "done" && result.status !== "unchanged") continue;
+          const entry = entries.get(op.path) ?? (op.row && { row: op.row, context: m!.context(op.row) });
+          if (!entry) continue;
+          let prior = info.get(op.path);
+          if (!prior) {
+            const restored = editProperty(`---\n${result.props.lines.join("\n")}\n---\n`, { key: op.key, expect: result.after, to: result.before === null ? null : { lines: result.before } });
+            if (restored.status === "done" || restored.status === "unchanged") prior = restored.props;
+          }
+          if (prior) restore.push({ entry, info: prior });
+          entries.set(op.path, entry);
+          patch(entry, result.props);
+        }
       }, async (record, undo) => {
         const order = record.order!; let done = false;
         await host.groupHost().save((source) => {
@@ -191,7 +217,8 @@ export function createKanban(host: KanbanHost) {
             if (result.status === "conflict") ws.vault.written(path);
             throw Error(result.status === "conflict" ? `${noteName(path)} changed since the board was drawn (${edit.key} is now ${result.current ?? "No value"}). Not moved.` : result.reason);
           }
-          hist.push({ label, ops: [{ path, key: edit.key, before: result.before, after: result.after }] });
+          if (model === m && /^(tags|tag)$/i.test(edit.key)) { await tagFacts(entry, edit.key).catch(() => {}); const current = patch(entry, result.props); if (patched && current) patched.selected = current.selected; }
+          hist.push({ label, ops: [{ path, key: edit.key, before: result.before, after: result.after, row: entry.row }] });
           if (!gone && model?.name === m.name) announce(`${label}${patched?.selected ? "" : " · it no longer matches this view's filters"}`, true);
         } catch (e) { if (!gone) { if (model === m) patch(entry, prior); announce(e instanceof Error ? e.message : String(e)); } } finally { finishedWrite(); }
       });
@@ -359,7 +386,7 @@ export function createKanban(host: KanbanHost) {
     el.tabIndex = drawn ? -1 : 0;
   }
   el.addEventListener("scroll", () => { scrollX = el.scrollLeft; frame ||= requestAnimationFrame(() => { frame = 0; paintBoard(); }); }, { passive: true });
-  const moves = installMoves({ el, columns: () => columns, reason, slot, move,
+  const moves = installMoves({ el, property: keyOf, columns: () => columns, reason, slot, move,
     geometry: () => ({ width, pitch, cardHeight, viewport: viewWidth, height: viewHeight, scrollX }),
     scrollX(value) { const next = Math.max(0, Math.min(Math.max(0, trackWidth(columns.length, width) - viewWidth), value)); if (next !== scrollX) { scrollX = next; el.scrollLeft = next; } },
     scrollY(ci, value) { const g = columns[ci]; if (!g) return 0; const top = scrollTops.get(g.id) ?? 0; if (value === undefined) return top; const next = Math.max(0, Math.min(Math.max(0, g.rows.length * pitch - bodyHeight()), value)); if (next !== top) { scrollTops.set(g.id, next); const c = mounted.get(g.id); if (c) c.body.scrollTop = next; } return next; },
@@ -445,12 +472,11 @@ export function createKanban(host: KanbanHost) {
      * Group `rows` (the drawn, searched rows) into the board's columns. `selected` (the rows before
      * Search) decides which columns exist, so a search empties columns instead of removing them.
      */
-    async update(next: Model, rows: readonly Entry[], propertyTypes: Map<string, PropertyType>, obsolete: () => boolean, selected: readonly Entry[] = rows): Promise<boolean> {
+    async update(next: Model, rows: readonly Entry[], propertyTypes: Map<string, PropertyType>, obsolete: () => boolean, selected: readonly Entry[] = rows, metadata: Map<string, NoteProperties> = info): Promise<boolean> {
       if (pendingWrites) return false;
       const token = ++generation, options: SliceOptions = { cancelled: () => gone || pendingWrites > 0 || token !== generation || obsolete() };
       try {
         const by = next.groupBy;
-        const metadata = await propertyIndex(ws).notes();
         const grouped = await groupRowsAsync(rows, by, options);
         const groups = selected === rows ? grouped : columnsOf?.model === next && columnsOf.rows === selected ? columnsOf.groups : await groupRowsAsync(selected, by, options);
         if (options.cancelled!()) return false;

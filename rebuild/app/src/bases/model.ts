@@ -111,7 +111,9 @@ export function baseModel(source: string, viewIndex = 0) {
       } else if (key.startsWith("file.")) {
         value = fileFact(row, key);
       } else {
-        const p = row.props.find(p => p.key === noteKey(key));
+        const name = noteKey(key);
+        // CAS preserves the written key's case; read that same property after a move.
+        const p = row.props.find(p => p.key === name) ?? row.props.find(p => p.key.toLowerCase() === name.toLowerCase());
         if (p && p.type !== "unknown") value = p.type === "number" && p.value !== "" ? Number(p.value) : p.value;
       }
       values.set(key, value); return value;

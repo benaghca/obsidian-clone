@@ -12,6 +12,7 @@ it("infers the note type, keeps list/quote style, empties instead of removing, a
  expect(editProperty(text,propertyMove("status",info,null))).toMatchObject({status:"done",after:"status:"});
  expect(editProperty(text,propertyMove("tags",info,null))).toMatchObject({status:"done",after:"tags: []"});
  expect(()=>propertyMove("status",info,"nope","number")).toThrow();
+ expect(propertyMove("due",{props:[],lines:[]},"2026-11-03").to).toMatchObject({type:"date"});
  expect(()=>inspectDocument("---\nx: 1\nx: 2\n---","x")).toThrow();
  expect(readOnlyReason("this.status")).toContain("can't be moved");expect(readOnlyReason("file.folder")).toContain("can't be moved");expect(readOnlyReason("formula.f")).toContain("can't be moved");
 });

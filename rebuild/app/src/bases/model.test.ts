@@ -158,3 +158,8 @@ it("lists an upper-case .MD file as a Base row", () => {
 it("keeps custom note names literal alongside native file labels",()=>{
  const base=baseModel("");expect(base.label("constructor")).toBe("constructor");expect(base.label("__proto__")).toBe("__proto__");expect(base.label("file.ctime")).toBe("created time");
 });
+it("reads a moved property's preserved key spelling consistently with CAS",()=>{
+ const model=baseModel('views:\n  - groupBy:\n      property: status\n');
+ const row:Row={file:{path:'A.md',name:'A.md',is_dir:false,size:0,mtime_ms:0,ctime_ms:0},props:[{key:'Status',type:'text',value:'doing',line:0,count:1}],tags:[],hasLink:()=>false};
+ expect(model.context(row).get('status')).toBe('doing');expect(model.select([row])[0].context.get('note.STATUS')).toBe('doing');
+});

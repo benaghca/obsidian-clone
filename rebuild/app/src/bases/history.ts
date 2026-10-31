@@ -2,7 +2,8 @@
 import type { EditResult, PropertyEdit } from "../editor/propertyEdit";
 import type { Tab } from "../tabs";
 import type { Yaml } from "./yaml";
-export interface MoveOp { path: string; key: string; before: string | null; after: string | null }
+import type { Row } from "./model";
+export interface MoveOp { path: string; key: string; before: string | null; after: string | null; /** Bounded with the 100 records, for immediate Undo after a filter hid the row. */ row?: Row }
 export interface MoveRecord { label: string; ops: MoveOp[]; order?: { index: number; view: string; before: Yaml | undefined; after: Yaml | undefined } }
 export type WriteProperty = (path: string, edit: PropertyEdit, dryRun?: boolean) => Promise<EditResult>;
 type Preview = (ops: { op: MoveOp; result: EditResult }[]) => void;
@@ -23,12 +24,16 @@ export async function replay(record: MoveRecord, undo: boolean, write: WriteProp
   for (const op of ops) { const result = await write(op.path, reverseEdit(op, undo), true); success(result, op.path); prepared.push({ op, result }); }
   preview?.(prepared);
   const done: MoveOp[] = [];
+  let inFlight: MoveOp | undefined;
   try {
-    for (const op of ops) { const result = await write(op.path, reverseEdit(op, undo)); success(result, op.path); if (result.status === "done") done.push(op); }
+    for (const op of ops) { inFlight = op; const result = await write(op.path, reverseEdit(op, undo)); inFlight = undefined; success(result, op.path); if (result.status === "done") done.push(op); }
   } catch (error) {
     const left: string[] = [];
+    // A transport/fsync error can arrive after rename. CAS compensation is also safe
+    // if this attempt actually wrote nothing: the old target is already unchanged.
+    if (inFlight) done.push(inFlight);
     for (const op of done.reverse()) try { success(await write(op.path, reverseEdit(op, !undo)), op.path); } catch { left.push(op.path); }
-    throw Error(`${String(error)}${left.length ? ` · Left changed: ${left.join(", ")}` : ""}`);
+    throw Error(`${String(error)}${left.length ? ` · Left changed or unconfirmed: ${left.join(", ")}` : ""}`);
   }
 }
 export function createMoveHistory() {

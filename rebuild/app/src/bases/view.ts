@@ -401,7 +401,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         table.hidden = cards(); scroller.hidden = kanban(); board.el.hidden = !kanban(); el.setAttribute("aria-label", cards() ? "Base cards" : kanban() ? "Base board" : "Base table");
         if (kanban()) {
           head.replaceChildren(); body.replaceChildren(); start = -1; groupedView.clear();
-          if (await board.update(model!, drawn, types, () => gone || dirty, selected)) { counted(); paint(true); }
+          if (await board.update(model!, drawn, types, () => gone || dirty, selected, properties)) { counted(); paint(true); }
           continue;
         }
         board.clear();

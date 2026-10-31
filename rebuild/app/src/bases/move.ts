@@ -12,7 +12,7 @@ import "../styles/bases-kanban-move.css";
 export const readOnlyReason = (key: string | undefined) => !key ? "Choose a note property to move cards" : /^(formula|file|this)\./.test(key) ? `Grouped by ${key.startsWith("formula.") ? "a formula" : key.startsWith("file.") ? "a file fact" : "this note"}: cards can't be moved` : "";
 export function propertyMove(key: string, info: NoteProperties, target: Value, chosen?: PropertyType): PropertyEdit {
   const p = info.props.find(p => p.key.toLowerCase() === key.toLowerCase());
-  const type = chosen ?? (p?.type !== "unknown" ? p?.type : undefined) ?? (Array.isArray(target) ? "list" : typeof target === "number" ? "number" : typeof target === "boolean" ? "checkbox" : "text");
+  const type = chosen ?? (p?.type !== "unknown" ? p?.type : undefined) ?? (Array.isArray(target) ? "list" : typeof target === "number" ? "number" : typeof target === "boolean" ? "checkbox" : typeof target === "string" && /^\d{4}-\d{2}-\d{2}/.test(target) ? target.includes("T") ? "datetime" : "date" : "text");
   const empty = isEmpty(target), list = ["list", "tags", "aliases"].includes(type);
   const value = empty ? list ? [] : "" : list ? Array.isArray(target) ? target : [target] : type === "number" ? String(target) : target;
   if (p?.type === "unknown") throw Error("Property is not safely editable");
@@ -45,6 +45,7 @@ export async function writeProperty(ws: Workspace, path: string, edit: PropertyE
 
 export interface MoveSurface {
   el: HTMLElement;
+  property(): string;
   columns(): readonly RowGroup[];
   geometry(): { width: number; pitch: number; cardHeight: number; viewport: number; height: number; scrollX: number };
   scrollX(value: number): void;
@@ -64,12 +65,12 @@ export function installMoves(board: MoveSurface) {
   const waiting: (() => void)[] = [];
   const settled = () => { if (!tracking && !picked) waiting.splice(0).forEach(resolve => resolve()); };
   let picked: { entry: Entry; column: number } | null = null;
-  const say = (column: number) => { const g = board.columns()[column]; if (g) board.announce(`Drop to set ${g.label === "Empty" ? "No value" : g.label}. Space to drop, Escape to cancel.`); };
+  const say = (column: number) => { const g = board.columns()[column]; if (g) board.announce(`Drop to set ${board.property()} to ${g.id === "empty" ? "No value" : g.label}. Space to drop, Escape to cancel.`); };
   board.el.addEventListener("click", e => { if (suppressClick) { e.preventDefault(); e.stopImmediatePropagation(); suppressClick = false; } }, { ...options, capture: true });
   board.el.addEventListener("pointerdown", e => {
     suppressClick = false;
     if (e.button !== 0 || (e.target as Element).closest("button,input,a")) return;
-    suppressClick = false; cancel?.(); picked = null;
+    cancel?.(); picked = null;
     const card = (e.target as Element).closest<HTMLElement>(".bases-kanban-card"), head = (e.target as Element).closest<HTMLElement>(".bases-kanban-head");
     if (!card && !head) return;
     const entry = card ? board.entry(card.dataset.path!) : undefined;
@@ -78,18 +79,19 @@ export function installMoves(board: MoveSurface) {
     if (from < 0 || !entry && board.columns().length > 1000) return;
     const startX = e.clientX, startY = e.clientY;
     let x = startX, y = startY, ghost: HTMLElement | null = null, line: HTMLElement | null = null, raf = 0, to = from, rect: DOMRect, origin: DOMRect, geo: ReturnType<MoveSurface["geometry"]>, lastColumn: HTMLElement | null = null;
-    const source = card ?? head!, slots = new Map<number, number>();
+    const source = card ?? head!, preparedGhost = source.cloneNode(true) as HTMLElement, slots = new Map<number, number>();
+    if (entry) slots.set(from, Number(source.dataset.index));
     const render = () => {
       const columns = board.columns(), scroll = board.geometry().scrollX;
       to = Math.max(0, Math.min(columns.length - 1, Math.floor((x - rect.left + scroll - KANBAN.pad) / (geo.width + KANBAN.gap))));
       if (x < rect.left || x > rect.left + geo.viewport || y < rect.top || y > rect.bottom) to = -1;
       ghost!.style.transform = `translate3d(${x - startX}px,${y - startY}px,0)`;
       const col = to < 0 ? null : board.el.querySelector<HTMLElement>(`[data-group-id=${CSS.escape(columns[to].id)}]`);
-      if (col !== lastColumn) { lastColumn?.classList.remove("is-drop-target"); col?.classList.add("is-drop-target"); lastColumn = col; if (to >= 0) say(to); }
+      if (col !== lastColumn) { lastColumn?.classList.remove("is-drop-target"); col?.classList.add("is-drop-target"); lastColumn = col; if (to >= 0) { if (entry) say(to); else board.announce(`Drop to move this column to position ${to + 1}`); } }
       line!.hidden = to < 0;
       if (to >= 0) {
         const top = entry ? rect.top + KANBAN.pad + KANBAN.head + 1 + (slots.get(to) ?? (slots.set(to, board.slot(entry, to)), slots.get(to)!)) * geo.pitch - board.scrollY(to) : rect.top + KANBAN.pad;
-        line!.style.transform = `translate3d(${rect.left + KANBAN.pad + to * (geo.width + KANBAN.gap) - scroll + (entry ? KANBAN.side : 0)}px,${Math.max(rect.top + KANBAN.pad + KANBAN.head, Math.min(rect.bottom - KANBAN.pad, top))}px,0)`;
+        line!.style.transform = `translate3d(${rect.left + KANBAN.pad + to * (geo.width + KANBAN.gap) - scroll + (entry ? KANBAN.side : 0)}px,${entry ? Math.max(rect.top + KANBAN.pad + KANBAN.head, Math.min(rect.bottom - KANBAN.pad, top)) : rect.top + KANBAN.pad}px,0)`;
       }
     };
     const tick = () => {
@@ -104,10 +106,11 @@ export function installMoves(board: MoveSurface) {
       x = event.clientX; y = event.clientY;
       if (!ghost && Math.hypot(x - startX, y - startY) >= 4) {
         geo = board.geometry(); const root = board.el.getBoundingClientRect(), top = board.el.querySelector(".bases-kanban-track")!.getBoundingClientRect().top; rect = new DOMRect(root.left, top, geo.viewport, geo.height); origin = source.getBoundingClientRect();
-        ghost = source.cloneNode(true) as HTMLElement; ghost.classList.add("bases-move-ghost"); ghost.removeAttribute("tabindex"); ghost.setAttribute("aria-hidden", "true");
+        ghost = preparedGhost; ghost.classList.add("bases-move-ghost"); ghost.removeAttribute("tabindex"); ghost.setAttribute("aria-hidden", "true");
         Object.assign(ghost.style, { left: `${origin.left}px`, top: `${origin.top}px`, width: `${origin.width}px`, height: `${origin.height}px`, transform: "none" });
         ghost.style.setProperty("--bases-kanban-card-height", `${geo.cardHeight}px`);
-        line = h("div", { class: "bases-move-line", style: `width:${entry ? geo.width - KANBAN.side * 2 : 3}px;height:${entry ? 3 : geo.height}px` });
+        ghost.style.setProperty("--bases-kanban-cover-height", getComputedStyle(source).getPropertyValue("--bases-kanban-cover-height"));
+        line = h("div", { class: "bases-move-line", style: `width:${entry ? geo.width - KANBAN.side * 2 : 3}px;height:${entry ? 3 : geo.height - KANBAN.pad * 2}px` });
         document.body.append(ghost, line); source.classList.add("is-moving"); tick();
       }
     }, (cancelled, event) => {

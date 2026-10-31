@@ -29,6 +29,11 @@ describe("board CAS history", () => {
     let preview=false,writes=0;
     await expect(replay(record,true,async()=>({status:"conflict",current:"changed"}),()=>{preview=true;})).rejects.toThrow();expect(preview).toBe(false);
     const batch={label:"batch",ops:[record.ops[0],{...record.ops[0],path:"b.md"}]};
-    await expect(replay(batch,false,async(_path,edit,dry)=>{if(!dry&&++writes>1)return {status:"conflict",current:"other"};return {status:"done",before:edit.expect,after:null,props:{props:[],lines:[]},mtime_ms:0};})).rejects.toThrow("Left changed: a.md");
+    await expect(replay(batch,false,async(_path,edit,dry)=>{if(!dry&&++writes>1)return {status:"conflict",current:"other"};return {status:"done",before:edit.expect,after:null,props:{props:[],lines:[]},mtime_ms:0};})).rejects.toThrow("Left changed or unconfirmed: a.md");
   });
+});
+it("compensates a transport error after an uncertain rename with CAS",async()=>{
+ let text="---\nstatus: 'todo'\n---\nbody", first=true;
+ await expect(replay(record,false,async(_path,edit,dry)=>{const r=editProperty(text,edit);if(!dry&&r.status==="done"&&r.change){text=text.slice(0,r.change.from)+r.change.insert+text.slice(r.change.to);if(first){first=false;throw Error("sync failed after rename");}}return r;})).rejects.toThrow("sync failed");
+ expect(text).toBe("---\nstatus: 'todo'\n---\nbody");
 });
