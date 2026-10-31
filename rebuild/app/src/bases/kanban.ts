@@ -68,11 +68,13 @@ export function createKanban(host: KanbanHost) {
   const finishedWrite = () => { if (--pendingWrites === 0) waitingWrites.splice(0).forEach(resolve => resolve()); };
   let scrollX = 0, info = new Map<string, NoteProperties>(), checking = new Map<string, Promise<void>>(), reasons = new Map<string, string>();
   let entries = new Map<string, Entry>();
-  // Props this board painted for a write it made. The view skips its rebuild only when the re-read still matches.
-  const own = new Map<string, NoteProperties["props"]>();
+  // Props this board painted for a write it made, and the loaded note's text at that moment.
+  // The view skips its rebuild only when the re-read still matches both.
+  const own = new Map<string, { props: NoteProperties["props"]; text: string | null }>();
   function markOwn(path: string) {
     const props = entries.get(path)?.row.props;
-    if (props) own.set(path, props);
+    if (!props) return;
+    own.set(path, { props, text: ws.editors.doc(path)?.toString() ?? null });
   }
   const live = h("div", { class: "bases-move-live", role: "status", "aria-live": "polite" });
   const message = h("span"), undoButton = h("button", { type: "button", onclick: () => void historyReplay(true) }, "Undo");
@@ -492,7 +494,9 @@ export function createKanban(host: KanbanHost) {
   }
   return {
     el,
-    ownProps(path: string) { return own.has(path) ? entries.get(path)?.row.props ?? own.get(path) : undefined; },
+    ownProps(path: string) { const marked = own.get(path); return marked ? entries.get(path)?.row.props ?? marked.props : undefined; },
+    /** Text of a loaded note at `markOwn`, or null when the note was closed. Undefined when this board did not write it. */
+    ownText(path: string) { return own.has(path) ? own.get(path)!.text : undefined; },
     paintedProps(path: string) { return entries.get(path)?.row.props; },
     consumeOwn(path: string) { own.delete(path); },
     acceptMetadata(path: string, metadata: NoteProperties) { info.set(path, metadata); },

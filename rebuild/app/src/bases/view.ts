@@ -176,7 +176,7 @@ export interface OwnWriteQuery {
   links: boolean;
   /** This board recorded the path and has not reconciled it yet. */
   own: boolean;
-  /** The save that follows an own write we already skipped, not a new edit. */
+  /** The editor save that follows an own write we already skipped, and only when that note's text is unchanged. */
   echo: boolean;
   readsThis: boolean;
   readsOther: boolean;
@@ -406,7 +406,8 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const ECHO_MS = 500;
   const reconcile = { full: 0, skip: 0, lastMs: 0 };
   Object.assign(el, { reconcile });
-  const echoed = new Map<string, number>();
+  // Armed only for a loaded note, and only with the text the skip already saw. A closed note has no later save to absorb.
+  const echoed = new Map<string, { at: number; text: string }>();
   let changedPaths = new Set<string>(), changeOther = false, changeLinks = false, changeDoc = false;
   const notePaths = (paths: readonly string[]) => { for (const path of paths) changedPaths.add(path); };
   const takeNotice = () => {
@@ -415,9 +416,9 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     return notice;
   };
   const echoLive = (path: string) => {
-    const at = echoed.get(path);
-    if (at === undefined) return false;
-    if (performance.now() - at > ECHO_MS) { echoed.delete(path); return false; }
+    const row = echoed.get(path);
+    if (!row) return false;
+    if (performance.now() - row.at > ECHO_MS || ws.editors.doc(path)?.toString() !== row.text) { echoed.delete(path); return false; }
     return true;
   };
   /** Skip select and regroup when this board already painted its own write. */
@@ -445,11 +446,18 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     if (gone || dirty || reload) return false;
     const painted = board.paintedProps(path) ?? own;
     if (!painted || !sameProperties(properties.get(path)?.props, painted)) { echoed.clear(); return false; }
+    // Typing into the open note during the doc quiet window changes the text after the write. That is a real edit.
+    const snap = own !== undefined ? board.ownText(path) : echoed.get(path)?.text;
+    if (snap != null && ws.editors.doc(path)?.toString() !== snap) { echoed.clear(); return false; }
     const fresh = properties.get(path);
     if (fresh) board.acceptMetadata(path, fresh);
     board.consumeOwn(path);
     if (echo) echoed.delete(path);
-    else echoed.set(path, performance.now());
+    else {
+      const live = ws.editors.doc(path)?.toString();
+      if (live !== undefined) echoed.set(path, { at: performance.now(), text: live });
+      else echoed.delete(path);
+    }
     reconcile.skip++;
     reconcile.lastMs = performance.now() - started;
     return true;
@@ -656,7 +664,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     } else if (next.clear) { clearTimeout(timer); timer = 0; }
   });
   // A new Property type (header menu, Properties view) changes cells and icons.
-  const unsettle = settings.on(file => { if (file === "types.json" || file === null) schedule(); });
+  const unsettle = settings.on(file => { if (file === "types.json" || file === null) { changeOther = true; schedule(); } });
   void update();
   return {
     el,
