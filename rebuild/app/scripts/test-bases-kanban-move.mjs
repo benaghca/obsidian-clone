@@ -173,10 +173,10 @@ await withBrowser(async({run,point,send,press,check})=>{
  await sleep(200);
  await run(()=>{window.k5col=document.querySelector('.bases-kanban-col');});
  await press('z',2);
- await wait(()=>run(sel=>window.k5col?.isConnected===false&&document.activeElement?.matches(sel),card('KQ/A.md')),'undo rebuild keeps focus');
+ await wait(async()=>/status: 'todo'/.test(await read('KQ/A.md'))&&await run(sel=>window.k5col?.isConnected===true&&document.activeElement?.matches(sel)&&document.querySelector('.bases-view').reconcile.skip>0,card('KQ/A.md')),'undo keeps focus without rebuilding');
  await press('z',10);
  await wait(async()=>/status: 'doing'/.test(await read('KQ/A.md')),'redo without clicking the board again');
- check(true,'A second Ctrl+Z still reaches the board after undo rebuilds it');
+ check(true,'A second Ctrl+Z still reaches the board after undo skips the rebuild');
  await run(async()=>{await k5api.deletePath('KQ/A.md',true);await ws.vault.refreshFiles();});
  await wait(()=>run(sel=>!document.querySelector(sel),card('KQ/A.md')),'deleted card leaves');
  await run(()=>document.querySelector('.bases-kanban').focus());
@@ -263,6 +263,76 @@ await withBrowser(async({run,point,send,press,check})=>{
  }
 });
 
+// K6: an own write skips the rebuild; another file, or a re-read that disagrees, does not.
+if (!process.argv.includes("--perf-only")) await withBrowser(async ({ run, press, check }) => {
+ const wait = async (test, label, n = 400) => { for (let i = 0; i < n; i++) { if (await test()) return; await sleep(25); } assert.fail(label); };
+ const read = path => run(async path => { const { api } = await import('/src/api.ts'); return api.readNote(path); }, path);
+ const board = `filters: 'file.inFolder("K6")'\nviews:\n  - type: kanban\n    name: Board\n    order: [file.name, status]\n    groupBy:\n      property: status\n      order: [todo, doing, review, done]\n    sort:\n      - property: file.name\n        direction: ASC\n`;
+ const links = `filters: 'file.inFolder("K6")'\nformulas:\n  n: file.backlinks.length\nviews:\n  - type: kanban\n    name: Links\n    order: [file.name, formula.n]\n    groupBy:\n      property: status\n      order: [todo, doing, review, done]\n    sort:\n      - property: file.name\n`;
+ const at = (path, id) => run((path, id) => document.querySelector(`.bases-kanban-col[data-group-id='s:"${id}"'] .bases-kanban-card[data-path='${path}']`) !== null, path, id);
+ await run(async (board, links) => {
+  const { api } = await import('/src/api.ts');
+  await api.createNote('K6/A.md', '---\nstatus: todo\nkeep: same\n---\nbody A\n');
+  await api.createNote('K6/B.md', '---\nstatus: todo\nkeep: same\n---\nbody B\n');
+  await api.createNote('K6/E.md', '---\nstatus: doing\nkeep: same\n---\nbody E\n');
+  await api.createNote('K6/C.md', '---\nstatus: review\nkeep: same\n---\nbody C\n');
+  await api.createNote('K6/D.md', '---\nstatus: done\nkeep: same\n---\nbody D\n');
+  await api.createNote('K6.base', board);
+  await api.createNote('K6Links.base', links);
+  await ws.vault.refreshFiles();
+  await ws.open('K6.base');
+  const original = api.setProperty;
+  api.setProperty = async (...args) => {
+   const result = await original(...args);
+   if (window.k6diverge && !args[2]) {
+    window.k6diverge = false;
+    await api.writeNote(args[0], '---\nstatus: done\nkeep: same\n---\nbody A\n');
+   }
+   return result;
+  };
+ }, board, links);
+ await wait(() => run(() => document.querySelector('.bases-kanban-card[data-path="K6/A.md"]')?.classList.contains('is-movable')), 'K6 board');
+ const keyboard = async (path, steps) => {
+  await run(path => document.querySelector(`.bases-kanban-card[data-path='${path}']`).focus(), path);
+  await press(' ');
+  for (let i = 0; i < Math.abs(steps); i++) await press(steps > 0 ? 'ArrowRight' : 'ArrowLeft');
+  await press(' ');
+ };
+ const snap = () => run(() => { window.k6cols = [...document.querySelectorAll('.bases-kanban-col')]; return { ...document.querySelector('.bases-view').reconcile }; });
+ let before = await snap();
+ await keyboard('K6/A.md', 1);
+ await wait(() => run(skip => document.querySelector('.bases-view').reconcile.skip > skip, before.skip), 'own write skipped the rebuild');
+ await sleep(250);
+ const own = await run(() => document.querySelector('.bases-view').reconcile);
+ check(own.full === before.full && await run(() => k6cols.every(el => el.isConnected)), 'own write keeps the columns mounted');
+ assert.match(await read('K6/A.md'), /status: doing\n/);
+ assert.match(await read('K6/A.md'), /body A\n/);
+ check(await at('K6/A.md', 'doing'), 'own write leaves the card in the column it painted');
+ await run(() => ws.vault.refreshLinks());
+ await sleep(400);
+ check(await run(full => k6cols.every(el => el.isConnected) && document.querySelector('.bases-view').reconcile.full === full, own.full), 'a link refresh does not rebuild a board that does not read links');
+ before = await snap();
+ await run(async () => {
+  const { api } = await import('/src/api.ts');
+  await api.writeNote('K6/B.md', '---\nstatus: review\nkeep: same\n---\nbody B\n');
+  ws.vault.written('K6/B.md');
+ });
+ await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'another file still rebuilds');
+ check(await run(() => k6cols.some(el => !el.isConnected)) && await at('K6/B.md', 'review'), 'another file remounts columns');
+ before = await snap();
+ await run(() => { window.k6diverge = true; });
+ await keyboard('K6/A.md', 1);
+ await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'a disagreed re-read still rebuilds');
+ await wait(() => at('K6/A.md', 'done'), 'disagreed re-read shows the note that was written');
+ assert.match(await read('K6/A.md'), /status: done\n/);
+ await run(() => ws.open('K6Links.base'));
+ await wait(() => run(() => document.querySelector('.bases-kanban-card[data-path="K6/B.md"]')?.classList.contains('is-movable')), 'backlinks board');
+ before = await snap();
+ await keyboard('K6/B.md', 1);
+ await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'file.backlinks still rebuilds an own write');
+ check(await run(() => k6cols.some(el => !el.isConnected)), 'file.backlinks remounts columns');
+});
+
 // P4/P5/P7: 10,000 balanced notes, transform-only drag across three columns with auto-scroll.
 await withBrowser(async({run,send,point,press,check})=>{
  const wait=async(test,label,n=800)=>{for(let i=0;i<n;i++){if(await test())return;await sleep(10);}assert.fail(label);};
@@ -284,7 +354,12 @@ await withBrowser(async({run,send,point,press,check})=>{
   window.addEventListener('pointermove',()=>{if(k5p.active)k5p.events.push(performance.now()-k5p.t);});
   let last=performance.now();k5p.raf=requestAnimationFrame(function tick(t){if(k5p.active)k5p.frames.push(t-last);last=t;k5p.raf=requestAnimationFrame(tick);});
   k5p.obs=new PerformanceObserver(list=>{if(k5p.active)k5p.long.push(...list.getEntries().map(e=>e.duration));else if(k5p.up)k5p.dropLong.push(...list.getEntries().map(e=>e.duration));});k5p.obs.observe({type:'longtask'});
-  const originalProperties=k5api.properties;k5api.properties=async(...args)=>{const result=await originalProperties(...args);const value=result['KP/00000.md']?.props.find(p=>p.key==='status')?.value;if(k5p.up&&value==='done')k5p.propsFresh=performance.now();if(window.k5hist?.start&&value===k5hist.target)k5hist.fresh=performance.now();return result;};
+  const armK6=()=>requestAnimationFrame(()=>{
+   if(k5p.propsFresh&&!k5p.reconciled&&document.querySelector('.bases-kanban-col[data-group-id=\'s:"done"\'] .bases-kanban-card[data-path="KP/00000.md"]'))k5p.reconciled=performance.now();
+   if(window.k5hist?.fresh&&!window.k5hist.reconciled&&document.querySelector(`.bases-kanban-col[data-group-id='s:"${k5hist.target}"'] .bases-kanban-card[data-path="KP/00000.md"]`))k5hist.reconciled=performance.now();
+  });
+  const originalProperties=k5api.properties;k5api.properties=async(...args)=>{const result=await originalProperties(...args);const value=result['KP/00000.md']?.props.find(p=>p.key==='status')?.value;if(k5p.up&&value==='done')k5p.propsFresh=performance.now();if(window.k5hist?.start&&value===k5hist.target)k5hist.fresh=performance.now();armK6();return result;};
+  window.k5reconBefore={...document.querySelector('.bases-view').reconcile};
   k5p.mutations=new MutationObserver(records=>{if(records.some(r=>[...r.removedNodes].some(n=>n.classList?.contains('bases-kanban-col'))))requestAnimationFrame(()=>{if(k5p.propsFresh)k5p.reconciled=performance.now();if(window.k5hist?.fresh)k5hist.reconciled=performance.now();});});k5p.mutations.observe(document.querySelector('.bases-kanban-track'),{childList:true,subtree:true});
   const originalWrite=k5api.setProperty;k5api.setProperty=async(...args)=>{const r=await originalWrite(...args);if(!args[2])k5p.saved=performance.now();return r;};
   window.addEventListener('pointerup',()=>{k5p.up=performance.now();requestAnimationFrame(()=>{k5p.paint=performance.now();k5p.painted=!!document.querySelector('.bases-kanban-col[data-group-id=\'s:"done"\'] .bases-kanban-card[data-path="KP/00000.md"]');});},{capture:true});
@@ -301,7 +376,9 @@ await withBrowser(async({run,send,point,press,check})=>{
  await send('Input.dispatchMouseEvent',{type:'mouseReleased',...end,button:'left',clickCount:1});
  await wait(()=>run(()=>k5p.paint&&k5p.saved&&k5p.reconciled),'drop painted, saved and reconciled');
  const drop=await run(()=>({paint:k5p.paint-k5p.up,saved:k5p.saved-k5p.up,reconciled:k5p.reconciled-k5p.up,painted:k5p.painted,long:k5p.dropLong}));console.log('K5_P5',JSON.stringify(drop));assert.equal(drop.painted,true);assert.ok(drop.paint<=20&&drop.saved<=100&&drop.reconciled<=100);assert.deepEqual(drop.long,[]);
- // Normal full reconciliation (K6 owns skipping it) must finish within the same 100 ms budget.
+ const recon=await run(()=>{const now=document.querySelector('.bases-view').reconcile;return{full:now.full,skip:now.skip,beforeFull:k5reconBefore.full,beforeSkip:k5reconBefore.skip};});
+ assert.equal(recon.full,recon.beforeFull,'own drop does not full-rebuild');assert.ok(recon.skip>=recon.beforeSkip+1,JSON.stringify(recon));
+ // The card is already in its column. K6 skips the remount; the budget is unchanged.
  await wait(()=>run(()=>document.querySelector('.bases-move-notice')?.textContent.includes('Moved "00000" to done')),'drop completed');
  await sleep(120);
  // Bring the moved row (sorted first in done) into view for keyboard Undo and Redo.
@@ -312,7 +389,9 @@ await withBrowser(async({run,send,point,press,check})=>{
   const result=await run(()=>({paint:k5hist.paint-k5hist.start,saved:k5p.saved-k5hist.start,reconciled:k5hist.reconciled-k5hist.start,frames:k5hist.frames}));assert.ok(result.paint<=20&&result.saved<=100&&result.reconciled<=100,JSON.stringify(result));assert.equal(result.frames,1,JSON.stringify(result));return result;
  };
  const saved=await run(()=>k5api.readNote('KP/00000.md'));assert.ok(saved.startsWith('\uFEFF---\r\n')&&saved.endsWith('body 0\r\n')&&saved.includes('status: done\r\n'));
- const undo=await historyMeasure(true,'todo');await sleep(120);const redo=await historyMeasure(false,'done');console.log('K5_P7',JSON.stringify({undo,redo}));await run(()=>{k5p.obs.disconnect();k5p.mutations.disconnect();});
+ const undo=await historyMeasure(true,'todo');await sleep(120);const redo=await historyMeasure(false,'done');console.log('K5_P7',JSON.stringify({undo,redo}));
+ assert.equal(await run(()=>document.querySelector('.bases-view').reconcile.full),recon.beforeFull,'undo and redo do not full-rebuild');
+ await run(()=>{k5p.obs.disconnect();k5p.mutations.disconnect();});
  // Navigating away during an auto-scroll drag cancels it and any detached column fill.
  const leaving=await point('.bases-kanban-card[data-path="KP/00000.md"]');
  const other=await point('.bases-kanban-col[data-group-id=\'s:"review"\'] .bases-kanban-body');other.y=bounds.bottom-5;
