@@ -104,7 +104,14 @@ export function installHoverPreviews(ws: Workspace) {
 
   const hoverModifier = (event: { ctrlKey: boolean; metaKey: boolean }) =>
     /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
-  let pointerX = 0, pointerY = 0, pointerSeen = false;
+  let pointerX = 0, pointerY = 0, pointerSeen = false, buttons = 0;
+  const rememberButtons = (event: PointerEvent) => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    buttons = event.buttons;
+  };
+  document.addEventListener("pointerdown", rememberButtons, { capture: true, passive: true });
+  document.addEventListener("pointerup", rememberButtons, { capture: true, passive: true });
+  document.addEventListener("pointercancel", rememberButtons, { capture: true, passive: true });
 
   function inspect(x: number, y: number, modified: boolean, el: HTMLElement | null) {
     if (!el || typeof el.closest !== "function") return leave();
@@ -176,6 +183,7 @@ export function installHoverPreviews(ws: Workspace) {
     pointerX = event.clientX;
     pointerY = event.clientY;
     pointerSeen = true;
+    buttons = event.buttons;
     // A drag or pan owns the pointer. Don't start a preview under it.
     if (event.buttons && !popup && !pending) return;
     const raw = event.target as HTMLElement | null;
@@ -183,7 +191,8 @@ export function installHoverPreviews(ws: Workspace) {
   }, { capture: true, passive: true });
   // Ctrl (Cmd on macOS) while the pointer is already still, with no further move.
   document.addEventListener("keydown", (event) => {
-    if (!pointerSeen || event.repeat) return;
+    // Same rule as the move path: a drag already owns the pointer.
+    if (!pointerSeen || event.repeat || buttons) return;
     const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control";
     if (event.key !== modifier) return;
     inspect(pointerX, pointerY, true, document.elementFromPoint(pointerX, pointerY) as HTMLElement | null);
