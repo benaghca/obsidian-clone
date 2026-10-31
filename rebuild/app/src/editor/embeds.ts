@@ -258,13 +258,16 @@ export class NoteEmbedWidget extends DrawnWidget {
     const [name, sub] = splitSubpath(this.target);
     const { path, chain } = this;
     const open = () => host?.openLink(this.target, false, view);
-    if ((!path || !embeds) && !this.preview) return missingBox(`“${name}” is not created yet. Click to create.`, open);
+    // Canvas cards paint this outside a CodeMirror view, so linkAt cannot see the
+    // source. Clicks still follow data-href only; this attribute is for hover.
+    const tag = (el: HTMLElement) => { el.dataset.embedHref = this.target; return el; };
+    if ((!path || !embeds) && !this.preview) return tag(missingBox(`“${name}” is not created yet. Click to create.`, open));
     if (!this.preview && path && embeds && embedStopped(path, embeds.pathOf(view), chain)) {
-      return h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path));
+      return tag(h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path)));
     }
     const content = h("div", { class: "markdown-embed-content" });
     const link = h("div", { class: "markdown-embed-link clickable-icon", "aria-label": "Open link", onclick: open }, icon("maximize-2"));
-    const dom = h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub && !this.preview ? "" : noteName(path ?? name)), content, link);
+    const dom = tag(h("span", { class: "internal-embed markdown-embed" }, h("div", { class: "markdown-embed-title" }, sub && !this.preview ? "" : noteName(path ?? name)), content, link));
     if (!path || !embeds) {
       content.append(missingBox(`“${name}” is not created yet. Click to create.`, open));
       return dom;

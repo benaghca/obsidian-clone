@@ -182,6 +182,9 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     }
     for (const node of nodes) {
       const card = h("div", { class: `canvas-node canvas-node-${node.type}`, "data-node-id": node.id });
+      // Hover resolves links from this note, or from the canvas file for a text card.
+      if (node.type === "text") card.dataset.path = path;
+      else if (node.type === "file" && isNoteFile(node.file ?? "")) card.dataset.path = node.file!;
       Object.assign(card.style, { left: `${node.x}px`, top: `${node.y}px`, width: `${node.width}px`, height: `${node.height}px` });
       if (node.color) card.classList.add("is-colored");
       card.style.setProperty("--canvas-color", color(node.color));
