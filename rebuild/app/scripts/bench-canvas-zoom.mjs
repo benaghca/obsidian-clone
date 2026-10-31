@@ -50,6 +50,7 @@ await withBrowser(async driver => {
     await sleep(500);
     for (const kind of ['wheel', 'pinch', 'pan']) {
       await click('.canvas-controls .lucide-maximize'); await sleep(250);
+      while (await run(() => !!window.__canvasProbe?.().pending)) await sleep(20);
       const half = kind === 'pinch' ? count <= 300 ? 150 : 60 : 12;
       const steps = half * 2, interval = kind === 'pinch' ? 8 : 16;
       const center = await run(() => { const r = document.querySelector('.canvas-view').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });

@@ -147,13 +147,19 @@ export function canvasEdges(world: HTMLElement, drawing: SVGSVGElement, edges: C
   return { place, get: (id: string) => records.get(id),
     mode(next: boolean, zoom: number, view?: Box) {
       const same = initialized && titles === next && band === zoom;
-      const key = view ? `${view.x}/${view.y}/${view.width}/${view.height}` : "", moved = key !== lastView; lastView = key; if (moved) paths.clear();
-      if (view) {
-        viewport = { x: view.x - view.width / 4, y: view.y - view.height / 4, width: view.width * 1.5, height: view.height * 1.5 };
-        Object.assign(drawing.style, { left: `${viewport.x}px`, top: `${viewport.y}px`, width: `${viewport.width}px`, height: `${viewport.height}px`, overflow: "hidden" });
-        drawing.setAttribute("viewBox", `${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`);
-      } else viewport = undefined;
+      // Ignore floating-point noise from a zoom out-and-back; transforms retain
+      // full precision. Rewriting even an identical SVG viewBox dirties its raster.
+      const key = view ? [view.x,view.y,view.width,view.height].map(v => v.toFixed(2)).join("/") : "", moved = key !== lastView;
       if (same && !moved) return;
+      lastView = key;
+      if (moved) {
+        paths.clear();
+        if (view) {
+          viewport = { x: view.x - view.width / 4, y: view.y - view.height / 4, width: view.width * 1.5, height: view.height * 1.5 };
+          Object.assign(drawing.style, { left: `${viewport.x}px`, top: `${viewport.y}px`, width: `${viewport.width}px`, height: `${viewport.height}px`, overflow: "hidden" });
+          drawing.setAttribute("viewBox", `${viewport.x} ${viewport.y} ${viewport.width} ${viewport.height}`);
+        } else viewport = undefined;
+      }
       const switchMode = !initialized || titles !== next; initialized = true; titles = next; band = zoom;
       if (switchMode || moved) rebuild(true);
       else { for (const item of records.values()) queue(item, () => { for (const el of [item.line, item.hit, ...item.ends]) size(el); }); for (const p of batches) queue(p, () => size(p.line), 8); }

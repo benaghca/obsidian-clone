@@ -38,3 +38,12 @@ test("a mode reversal cancels obsolete weighted construction rather than delayin
   drawing.mode(true,-4);expect(work.stats().pending).toBeLessThan(1100);flush();
   expect(svg.children.filter(el=>el.classes.has("canvas-edge-batch"))).toHaveLength(16);expect(drawing.get("0")).toBeUndefined();drawing.dispose();
 });
+
+test("an unchanged or floating-point-equivalent viewport does not dirty SVG or rebuild batches",()=>{
+ const {drawing,work,svg,flush}=setup(),box={x:-1000,y:-1000,width:4000,height:4000};drawing.mode(true,-4,box);flush();
+ const write=vi.spyOn(svg,"setAttribute");
+ drawing.mode(true,-4,box);drawing.mode(true,-4,{...box,x:box.x+1e-10});
+ expect(write).not.toHaveBeenCalled();expect(work.stats().pending).toBe(0);
+ drawing.mode(true,-5,box);flush();expect(write).not.toHaveBeenCalled();
+ drawing.mode(true,-5,{...box,x:box.x+100});expect(write).toHaveBeenCalledOnce();expect(work.stats().pending).toBeGreaterThan(0);drawing.dispose();
+});
