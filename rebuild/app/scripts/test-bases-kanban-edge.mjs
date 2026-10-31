@@ -177,12 +177,23 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
     await ws.open('KE.base');
     window.kEdgeWrites = [];
     window.kEdgeSlow = false;
+    window.kEdgeInFlight = 0;
+    window.kEdgeKeys = 0;
     const original = api.setProperty;
     api.setProperty = async (...args) => {
       if (!args[2]) kEdgeWrites.push(args[0]);
-      if (!args[2] && window.kEdgeSlow) await new Promise(r => setTimeout(r, 40));
+      if (!args[2] && window.kEdgeSlow) {
+        window.kEdgeInFlight++;
+        try {
+          await new Promise(r => setTimeout(r, 40));
+          return await original(...args);
+        } finally { window.kEdgeInFlight--; }
+      }
       return original(...args);
     };
+    window.addEventListener('keydown', e => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) window.kEdgeKeys++;
+    }, true);
   }, notes, source, other);
   await wait(() => run(() => document.querySelector('.bases-kanban-card[data-path="KE/Alpha.md"]')?.classList.contains('is-movable')), 'board');
   await installCsv();
@@ -266,9 +277,8 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
   await press('Home');
   for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'PageDown', code: 'PageDown', windowsVirtualKeyCode: 34 });
   assert.equal(await activePath(), 'KE/Needle.md', 'PageDown');
-  await press('Home');
   for (const type of ['keyDown', 'keyUp']) await send('Input.dispatchKeyEvent', { type, key: 'PageUp', code: 'PageUp', windowsVirtualKeyCode: 33 });
-  assert.equal(await activePath(), 'KE/Alpha.md', 'PageUp');
+  assert.equal(await activePath(), 'KE/Alpha.md', 'PageUp from the last card');
   await press('ArrowRight');
   assert.equal(await activePath(), 'KE/Beta.md');
   await press('ArrowLeft');
@@ -300,7 +310,9 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
   }
   assert.match(await read('KE/Delta.md'), /status: waiting/);
   await run(() => document.querySelector('.bases-kanban').focus());
-  for (let i = 0; i < steps.length; i++) await press('z', 2);
+  for (let i = 0; i < steps.length - 1; i++) await press('z', 2);
+  await wait(async () => /status: doing/.test(await read('KE/Delta.md')), 'three undos leave Delta in doing');
+  await press('z', 2);
   await wait(async () => await read('KE/Delta.md') === delta0, 'Delta bytes restored');
   await wait(async () => await colOf('KE/Delta.md') === 's:"todo"', 'Delta back in todo');
   check(true, 'Alt+Right walks onto the empty waiting column; the same number of undos restores the note');
@@ -310,11 +322,26 @@ await withBrowser(async ({ run, click, point, send, press, chord, check }) => {
   await press('ArrowRight', 1);
   await wait(async () => /status: doing/.test(await read('KE/Alpha.md')), 'Alpha moved');
   await wait(undoReady, 'Alpha undo ready');
-  await run(() => { window.kEdgeSlow = true; document.querySelector('.bases-kanban').focus(); });
+  const writesBefore = await writes();
+  await run(() => { window.kEdgeKeys = 0; window.kEdgeSlow = true; document.querySelector('.bases-kanban').focus(); });
   const storm = [false, false, true, false, true, true];
   for (const redo of storm) await press('z', redo ? 10 : 2);
-  await wait(async () => /status: doing/.test(await read('KE/Alpha.md')) && (await colOf('KE/Alpha.md')) === 's:"doing"', 'storm settled on doing');
+  // Undo, undo, redo, undo, redo, redo nets back to doing, which is also the start.
+  // Wait until the six keys have been applied, or that coincidence passes a dropped queue.
+  let drained = null, last = null;
+  for (let i = 0; i < 80 && !drained; i++) {
+    last = await run((writesBefore) => ({
+      keys: window.kEdgeKeys,
+      flight: window.kEdgeInFlight,
+      writes: window.kEdgeWrites.length - writesBefore,
+      notice: document.querySelector('.bases-move-notice')?.textContent ?? '',
+    }), writesBefore);
+    if (last.keys >= 6 && last.flight === 0 && last.writes === 4 && /Redid/.test(last.notice)) drained = last;
+    else await sleep(25);
+  }
   await run(() => { window.kEdgeSlow = false; });
+  assert.ok(drained, `storm did not apply four writes (${JSON.stringify(last)})`);
+  assert.equal(await colOf('KE/Alpha.md'), 's:"doing"');
   assert.ok((await read('KE/Alpha.md')).endsWith('body alpha\n'));
   check(true, 'Six queued undo/redo keypresses settle on the net redo');
 

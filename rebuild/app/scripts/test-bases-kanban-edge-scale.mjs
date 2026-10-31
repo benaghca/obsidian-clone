@@ -159,12 +159,15 @@ views:
   assert.ok(dom1 > 0 && dom1 <= 80, `list mounts ${dom1} after the round trip`);
   const wheel2 = await point('.bases-scroll');
   await move(wheel2);
+  const top2 = await run(() => document.querySelector('.bases-scroll').scrollTop);
   const again = await watch('list scroll', async () => {
     for (let t = 0; t < 12; t++) {
       await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheel2, deltaX: 0, deltaY: 4000 });
       await sleep(25);
     }
   });
+  const top3 = await run(() => document.querySelector('.bases-scroll').scrollTop);
   assert.ok(again.max <= 25, `second scroll max frame ${again.max.toFixed(1)}ms`);
+  assert.ok(top3 > top2, `second scroll moved (${Math.round(top2)} -> ${Math.round(top3)})`);
   check(true, 'List, board and table switch on 10,000 notes without a long task, then the list still scrolls');
 }, { height: 900 });
