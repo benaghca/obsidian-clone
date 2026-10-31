@@ -1,0 +1,96 @@
+/* Static canvas-zoom mockups in Grove's dark theme (tokens from src/styles/theme.css). Not app code. */
+:root {
+  --accent-h: 172; --accent-s: 55%;
+  --interactive-accent: hsl(var(--accent-h), var(--accent-s), 39%);
+  --background-primary: #1c1c1c; --background-primary-alt: #232323; --background-secondary: #282828;
+  --border: #333333; --border-hover: #3f3f3f; --border-focus: #555555;
+  --text-normal: #dadada; --text-muted: #b3b3b3; --text-faint: #666666;
+  --color-red: #fb464c; --color-orange: #e9973f; --color-yellow: #e0de71; --color-green: #44cf6e; --color-cyan: #53dfdd; --color-purple: #a882ff;
+  /* Proposed canvas tokens: the card is one step raised from the canvas. */
+  --canvas-card-fill: #262626; --canvas-card-border: #3d3d3d;
+  --font: "Noto Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: #141414; color: var(--text-normal); font: 13px/1.4 var(--font); padding: 14px 18px; overflow: hidden; }
+h1 { font-size: 16px; font-weight: 600; margin: 0 0 10px; }
+svg.i { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.75; fill: none; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+svg.i.tiny { width: 12px; height: 12px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 400px); gap: 16px; margin-bottom: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(2, 600px); gap: 24px; }
+.strip { display: grid; grid-template-columns: repeat(5, 240px); gap: 7px; }
+.cell .head { color: var(--text-muted); font-size: 12px; margin-bottom: 4px; font-weight: 600; }
+.cell .note { color: var(--text-faint); font-size: 12px; margin-top: 6px; line-height: 1.45; }
+.legend { color: var(--text-muted); font-size: 12px; max-width: 1230px; margin: 4px 0 0; line-height: 1.5; }
+
+/* The board. */
+.board { position: relative; overflow: hidden; border-radius: 6px; background-color: var(--background-primary);
+  background-image: radial-gradient(circle at .7px .7px, var(--border) .7px, transparent .7px); }
+.board .zoom { position: absolute; right: 6px; bottom: 4px; color: var(--text-faint); font-size: 11px; }
+.edges { position: absolute; inset: 0; pointer-events: none; }
+.edges path { fill: none; stroke: var(--border-focus); }
+.card { position: absolute; border-radius: 8px; }
+.world { transform-origin: 0 0; position: absolute; left: 0; top: 0; overflow: hidden; border-radius: 8px; }
+.world .body { padding: 16px; font-size: 16px; line-height: 1.5; color: var(--text-normal); }
+.world .note-title { font-size: 25.9px; font-weight: 700; line-height: 1.2; margin-bottom: 8px; }
+.world h2 { font-size: 22px; margin: 0 0 8px; } .world h3 { font-size: 19px; margin: 10px 0 6px; } .world p { margin: 0 0 8px; }
+.world a { color: var(--interactive-accent); text-decoration: underline; }
+.world .li { margin-left: 8px; } .world .box { display: inline-block; width: 13px; height: 13px; border: 1.5px solid var(--text-muted); border-radius: 3px; margin-right: 8px; vertical-align: -1px; }
+.world .img, .lod .img { position: absolute; inset: 0; } .img svg { width: 100%; height: 100%; display: block; border-radius: 7px; }
+.world .pdf { padding: 16px; font-size: 16px; color: var(--text-muted); display: flex; flex-direction: column; gap: 6px; }
+.flabel { position: absolute; bottom: 100%; margin-bottom: 2px; color: var(--text-faint); white-space: nowrap; overflow: hidden; max-width: 100%; }
+
+/* Today: the card fill is the canvas colour and the 1px border scales with the board. */
+.today .card { background: var(--background-primary); border: 1px solid var(--border); }
+.today .card.colored { border-color: color-mix(in srgb, var(--c) 70%, transparent); }
+.today .card.colored .world { background: color-mix(in srgb, var(--c) 7%, transparent); }
+.today .card.group { background: color-mix(in srgb, var(--c) 7%, transparent); border-color: var(--border); }
+.today .glabel { position: absolute; bottom: 100%; margin-bottom: 2px; left: -1px; border-radius: 3px; line-height: 1; color: var(--c); background: color-mix(in srgb, var(--c) 10%, transparent); white-space: nowrap; }
+/* Today's borders are 1 world px: thinner than a pixel once zoomed out. */
+.today .card { border-width: 0; box-shadow: 0 0 0 .5px var(--border); }
+.today .card.colored { box-shadow: 0 0 0 .5px color-mix(in srgb, var(--c) 50%, transparent); }
+
+/* Proposed: raised fill, 1px screen border at every zoom, coloured cards with a full colour border. */
+.proposed .card { background: var(--canvas-card-fill); box-shadow: 0 0 0 1px var(--canvas-card-border), 0 1px 2px rgb(0 0 0 / 30%); }
+.proposed .card.colored { background: color-mix(in srgb, var(--c) 12%, var(--canvas-card-fill)); box-shadow: 0 0 0 1.5px var(--c), 0 1px 2px rgb(0 0 0 / 30%); }
+.proposed .card.group { background: color-mix(in srgb, var(--c) 6%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 55%, transparent); }
+.proposed .glabel { position: absolute; bottom: 100%; margin-bottom: 4px; left: 0; padding: 2px 7px; border-radius: 4px; line-height: 1.2; font-weight: 600; color: var(--c); background: color-mix(in srgb, var(--c) 16%, var(--background-primary)); white-space: nowrap; }
+.proposed .card.file:not(.lod) .world, .proposed .card.text:not(.lod) .world, .proposed .card.link:not(.lod) .world { background: transparent; }
+
+/* Zoomed-out (LOD) cards. */
+.lod { display: flex; overflow: hidden; }
+.lod .t { font-size: 13px; font-weight: 700; line-height: 1.25; color: var(--text-normal); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.lod.A { align-items: center; justify-content: center; padding: 6px; text-align: center; }
+.lod.B, .lod.C { flex-direction: column; padding: 6px 8px; gap: 6px; }
+.lod .t.left { text-align: left; display: flex; gap: 5px; align-items: flex-start; }
+.lod.B .t.left { display: -webkit-box; }
+.lod.C .t.left svg { margin-top: 2px; color: var(--text-muted); }
+.lod .t.one { -webkit-line-clamp: 1; }
+.lod .hint { display: flex; flex-direction: column; gap: 6px; }
+.lod .hint i { display: block; height: 5px; border-radius: 3px; background: rgb(255 255 255 / 7%); }
+.lod .hint i:nth-child(2n) { width: 70%; } .lod .hint i:nth-child(3n) { width: 85%; }
+
+/* Threshold band. */
+.band { margin: 14px 0 8px; position: relative; height: 54px; width: 1230px; }
+.band .bar { display: flex; height: 22px; border-radius: 4px; overflow: hidden; font-size: 11px; font-weight: 600; }
+.band .bar span { display: flex; align-items: center; padding-left: 8px; }
+.band .full { width: 55%; background: #2c3a37; } .band .title { width: 33%; background: #33302a; } .band .box { width: 12%; background: #2d2a33; }
+.band .marks span { position: absolute; top: 26px; font-size: 11px; color: var(--text-muted); white-space: nowrap; border-left: 1px solid var(--text-faint); padding-left: 4px; }
+.band .marks .up { top: 40px; }
+table.types { border-collapse: collapse; width: 1230px; font-size: 12px; }
+.types th, .types td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+.types th { color: var(--text-muted); font-weight: 600; }
+
+/* Ctrl+drag and menus. */
+.selbox { position: absolute; border: 1px solid var(--interactive-accent); background: color-mix(in srgb, var(--interactive-accent) 10%, transparent); }
+.drawbox { position: absolute; border: 3px solid var(--interactive-accent); border-radius: 2px; background: color-mix(in srgb, var(--interactive-accent) 12%, transparent); }
+.menu { position: absolute; min-width: 190px; padding: 4px; border: 1px solid var(--border-hover); border-radius: 6px; background: var(--background-secondary); box-shadow: 0 6px 24px rgb(0 0 0 / 35%); }
+.menu .mi { display: flex; align-items: center; gap: 10px; height: 26px; padding: 0 10px; border-radius: 4px; color: var(--text-normal); font-size: 13px; }
+.menu .mi svg { color: var(--text-muted); }
+.menu .mi.off { color: var(--text-faint); } .menu .mi.off svg { color: var(--text-faint); }
+.menu .mi:first-child { background: rgb(255 255 255 / 6%); }
+.menu .chk { margin-left: auto; display: flex; }
+.menu .sep { height: 1px; margin: 4px 6px; background: var(--border-hover); }
+.cursor { position: absolute; width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 14px solid #fff; transform: rotate(-30deg); transform-origin: 0 0; }
+.nothing { position: absolute; left: 180px; top: 100px; width: 300px; color: var(--text-faint); font-size: 12px; }
