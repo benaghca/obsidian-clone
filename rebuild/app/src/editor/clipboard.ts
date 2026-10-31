@@ -21,6 +21,38 @@ const selectedText = (view: EditorView) =>
 /** Put text on the clipboard (a code block's copy button, Copy path, Copy URL). */
 export const writeClipboard = (text: string) => void navigator.clipboard.writeText(text).catch((err) => console.warn("Grove could not write the clipboard", err));
 
+/**
+ * Plain text the way the editor context menu reads the clipboard: the native
+ * paste command first, then the async clipboard API. The paste event is
+ * consumed so it is not inserted into a focused editor as well.
+ */
+export function readClipboardText(): Promise<string> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (text: string) => {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener("paste", onPaste, true);
+      resolve(text);
+    };
+    const onPaste = (event: ClipboardEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      finish(event.clipboardData?.getData("text/plain") ?? "");
+    };
+    document.addEventListener("paste", onPaste, true);
+    let commanded = false;
+    try { commanded = document.execCommand("paste"); } catch { commanded = false; }
+    if (settled) return;
+    document.removeEventListener("paste", onPaste, true);
+    if (commanded) { finish(""); return; }
+    void navigator.clipboard.readText().then(finish, (err) => {
+      console.warn("Grove could not read the clipboard", err);
+      finish("");
+    });
+  });
+}
+
 /** Copy an image as PNG (the image menu's "Copy image"). */
 export async function copyImage(img: HTMLImageElement) {
   const canvas = document.createElement("canvas");

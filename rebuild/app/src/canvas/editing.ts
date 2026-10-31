@@ -15,7 +15,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
   history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker,
-  guides: (list: Guide[], radius: number) => void) {
+  guides: (list: Guide[], radius: number) => void, openBoardMenu: (x: number, y: number) => void) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -228,8 +228,26 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       }, () => { box.remove(); cancel = undefined; }, false);
     }
   }, { signal: events.signal });
+  // The card a title-mode double-click just framed, when that zoom stayed zoomed out.
+  let titleZoom: { id: string; scale: number } | undefined;
   el.addEventListener("dblclick", e => {
-    if (!e.isTrusted || canvasReadOnly.has(el) || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    if (!e.isTrusted || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    // Zoomed out, a double-click zooms to the card instead of opening a tiny editor.
+    // The next one, still on that framing, edits. A card too large to pass 55% never
+    // leaves title mode, so the scale is what tells the second click from the first.
+    // A group's label still edits.
+    const card = nodes.find(n => n.type !== "group" && n.id === (e.target as Element).closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    if (card && world.classList.contains("is-zoomed-out")) {
+      e.preventDefault(); e.stopPropagation();
+      const scale = new DOMMatrix(getComputedStyle(world).transform).a;
+      if (titleZoom?.id === card.id && Math.abs(titleZoom.scale - scale) < 1e-4 && !canvasReadOnly.has(el)) { titleZoom = undefined; edit(card, selection); return; }
+      zoom([card]);
+      const next = new DOMMatrix(getComputedStyle(world).transform).a;
+      titleZoom = world.classList.contains("is-zoomed-out") ? { id: card.id, scale: next } : undefined;
+      return;
+    }
+    titleZoom = undefined;
+    if (canvasReadOnly.has(el)) return;
     const edge = edges.find(edge => edge.id === (pressedLabel ?? (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId));
     if (edge) { e.preventDefault(); e.stopPropagation(); edit(edge, selection); }
     const label = (e.target as Element).closest<HTMLElement>(".canvas-group-label");
@@ -238,7 +256,15 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   }, { capture: true, signal: events.signal });
   el.addEventListener("contextmenu", e => {
     if ((e.target as Element).closest(".is-editing, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
-    const node = nodes.find(n => n.id === (e.target as Element).closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    const target = e.target as Element;
+    const node = nodes.find(n => n.id === target.closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    // Empty board, including a click that merely has a selection. Edges and labels keep the selection menu.
+    if (!node && !target.closest("[data-edge-id]")) {
+      e.preventDefault(); e.stopPropagation();
+      openBoardMenu(e.clientX, e.clientY);
+      context = document.querySelector(".canvas-context-menu");
+      return;
+    }
     if (node && !selected.has(node.id)) { selected.clear(); selectedEdges.clear(); selected.add(node.id); selection(); }
     if (!selected.size && !selectedEdges.size) return;
     e.preventDefault(); e.stopPropagation();

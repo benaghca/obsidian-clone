@@ -1,3 +1,4 @@
+import { noteName } from "../paths";
 // Tolerant display projection; document.ts patches the original records on edit.
 export interface CanvasNode {
   id: string;
@@ -43,6 +44,23 @@ export function readCanvas(text: string): { nodes: CanvasNode[]; edges: CanvasEd
   const ids = new Set(nodes.map(n => n.id));
   const edges = (Array.isArray(data.edges) ? data.edges : []).filter(e => record(e) && typeof e.id === "string" && ids.has(e.fromNode as string) && ids.has(e.toNode as string)) as CanvasEdge[];
   return { nodes, edges };
+}
+// What a card shows when zoomed out: a note's name (and heading), a link's host, or a
+// text card's first heading, else its first line (outside code blocks), without
+// Markdown marks. No rendering.
+export function canvasTitle(node: CanvasNode): string {
+  if (node.type === "file") return `${noteName(node.file ?? "")}${node.subpath ? ` › ${node.subpath.replace(/^#/, "")}` : ""}`;
+  if (node.type === "link") { try { return new URL(node.url ?? "").host || node.url!; } catch { return node.url ?? ""; } }
+  let fenced = false, first: string | undefined;
+  for (const line of (node.text ?? "").split("\n")) {
+    if (/^ {0,3}(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    if (/^ {0,3}#{1,6}[ \t]/.test(line)) { first = line; break; }
+    if (first === undefined && line.trim()) first = line;
+  }
+  return (first ?? "").trim().replace(/^(#{1,6}|>+|[-*+](?: \[.\])?|\d+[.)])\s+/, "")
+    .replace(/!?\[\[([^\]|]*)(?:\|([^\]]*))?\]\]/g, (_, target: string, alias?: string) => alias || target)
+    .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\*\*|__|~~|==|[*`]/g, "").trim();
 }
 const vectors: Record<Side, [number, number]> = { top: [0, -1], right: [1, 0], bottom: [0, 1], left: [-1, 0] };
 const sideOf = (s: unknown, fallback: Side): Side => typeof s === "string" && Object.hasOwn(vectors, s) ? s as Side : fallback;

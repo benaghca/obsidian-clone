@@ -10,20 +10,43 @@ interface Viewport { path: string; cx: number; cy: number; scale: number }
 export const canvasViewports = new WeakMap<Tab, Viewport>();
 const clamp = (scale: number) => Math.max(1 / 16, Math.min(2, scale));
 
-// Zoom bands: quarter octaves from 1/16x to 2x. Handles and edge hit areas keep their
-// screen size through one band rule each, chosen by an attribute on the world when a
-// zoom settles. One static sheet for every canvas: a pan or zoom frame writes no
-// stylesheet, since a stylesheet change restyles the page (all of it in WebKit).
+// Zoom bands: quarter octaves from 1/16x to 2x. Card borders, titles, group labels,
+// edges and handles keep their screen size through one band rule each, chosen by an
+// attribute on the world when a zoom settles. One static sheet for every canvas: a pan
+// or zoom frame writes no stylesheet, since a stylesheet change restyles the page (all
+// of it in WebKit). The rules set --canvas-inverse-scale on these elements only, never
+// on a card, so no card or its Markdown is restyled.
 // A selector list, not :is(), which matched about 1.6x slower per band change.
 const BANDS = { min: -16, max: 4 };
 export const zoomBand = (scale: number) => Math.max(BANDS.min, Math.min(BANDS.max, Math.round(Math.log2(scale) * 4)));
+// Title mode starts below 45% and ends above 55%, so a wobble at the threshold never
+// flickers. Its highest band is -3 (55%); a card's title band of -2 means "never".
+// A ctrl-wheel delta arrives as float32, so a zoom aimed at either edge lands a few
+// billionths off. Snap that onto the edge; one notch is about 0.2%.
+const TITLE_EPS = 1e-6;
+const titleEdge = (scale: number) => Math.abs(scale - .45) <= TITLE_EPS ? .45 : Math.abs(scale - .55) <= TITLE_EPS ? .55 : scale;
+const titleMode = (scale: number, now: boolean) => { const zoom = titleEdge(scale); return now ? zoom <= .55 : zoom < .45; };
+const TITLE_MAX = -2;
+// The band below which a card is under 26px tall or 50px wide on screen: its title
+// is hidden and it shows as a box. Undefined when the title always fits.
+export function titleBand(width: number, height: number) {
+  const band = Math.ceil(Math.log2(Math.max(26 / height, 50 / width)) * 4);
+  return band > BANDS.min ? Math.min(band, TITLE_MAX) : undefined;
+}
 let bandSheet: CSSStyleSheet | undefined;
 function installBands() {
   if (bandSheet) return;
   bandSheet = new CSSStyleSheet();
   const rules = [];
-  for (let band = BANDS.min; band <= BANDS.max; band++)
-    rules.push(`${[" > .canvas-node > .canvas-node-connection-point", " > .canvas-edge-end", " .canvas-edge-hit"].map(handle => `.canvas-world[data-zoom-band="${band}"]${handle}`).join(", ")} { --canvas-inverse-scale: ${2 ** (-band / 4)}; }`);
+  const sized = [" > .canvas-node > .canvas-node-ring", " > .canvas-node > .canvas-node-connection-point", " > .canvas-node > .canvas-node-title",
+    " > .canvas-node-group > .canvas-group-label", " > .canvas-edge-end", " > .canvas-edges > .canvas-edge", " .canvas-edge-hit"];
+  for (let band = BANDS.min; band <= BANDS.max; band++) {
+    const world = `.canvas-world[data-zoom-band="${band}"]`;
+    rules.push(`${sized.map(element => world + element).join(", ")} { --canvas-inverse-scale: ${2 ** (-band / 4)}; }`);
+    const small = [];
+    for (let title = band + 1; title <= TITLE_MAX; title++) small.push(`${world} > .canvas-node[data-title-band="${title}"] > .canvas-node-title`);
+    if (small.length) rules.push(`${small.join(", ")} { display: none; }`);
+  }
   bandSheet.replaceSync(rules.join("\n"));
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, bandSheet];
 }
@@ -35,18 +58,23 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   if (state?.path !== path) state = undefined;
   let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false, flushBand = false;
   let rect: DOMRect | undefined, menu: HTMLElement | undefined, styled: HTMLElement | undefined;
-  let space = false, dragging = false, suppressClick = false;
+  let space = false, dragging = false, suppressClick = false, titles = false;
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
   installBands();
-  const applyBand = (scale: number) => { clearTimeout(settle); settle = 0; world.dataset.zoomBand = String(zoomBand(scale)); };
-  const postponeBand = () => { clearTimeout(settle); settle = window.setTimeout(() => { settle = 0; if (state) world.dataset.zoomBand = String(zoomBand(state.scale)); }, SETTLE_MS); };
+  // Title mode changes with the band, at settle: one class on the world.
+  const applyBand = (scale: number) => {
+    clearTimeout(settle); settle = 0;
+    world.dataset.zoomBand = String(zoomBand(scale));
+    titles = titleMode(scale, titles); world.classList.toggle("is-zoomed-out", titles);
+  };
+  const postponeBand = () => { clearTimeout(settle); settle = window.setTimeout(() => { settle = 0; if (state) applyBand(state.scale); }, SETTLE_MS); };
   // Wheel and pinch wait out the 120ms settle, including wheels that no longer
   // change the scale (the zoom cap). Buttons, fit, zoom-to-selection, resize and
   // the first draw apply the band now. A pan does neither, so that frame stays a
   // transform change while the zoom's timer is still running.
   function syncBand(scale: number, wheel: boolean, flush: boolean, first: boolean) {
-    if (world.dataset.zoomBand === String(zoomBand(scale))) { if (flush || wheel) { clearTimeout(settle); settle = 0; } return; }
+    if (world.dataset.zoomBand === String(zoomBand(scale)) && titles === titleMode(scale, titles)) { if (flush || wheel) { clearTimeout(settle); settle = 0; } return; }
     if (wheel && !flush) postponeBand();
     else if (flush || first) applyBand(scale);
   }

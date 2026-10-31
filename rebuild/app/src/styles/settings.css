@@ -568,6 +568,12 @@
   color: var(--text-normal);
   overflow-wrap: anywhere;
 }
+.modal.mod-confirm .modal-content > .setting-input {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 8px;
+}
 .modal.mod-confirm .modal-close-button {
   position: absolute;
   top: 8px;
