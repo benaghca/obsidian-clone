@@ -75,3 +75,27 @@ On that tree, with `node_modules` linked from this worktree and no install: `vit
 - Configure view still shows Row height for a list. The list does not use `rowHeight`. There is no separator field. A separator already in the file is kept.
 - A list view with `summaries:` does not draw a summary row. The table view of the same base still does, and that footer follows the search. Copy uses the shown groups, collapsed groups included, hidden groups left out.
 - Ctrl+Z undoes a card move when the board is focused. The list view does not take that key.
+
+## K8-SYNC
+
+Two local merges on `rebuild/k8-review-grok`. Nothing pushed. `rebuild/kanban-k8-grok` is still `d4ed57c`.
+
+`git merge --no-ff c0ad2bf` is `2a1ee59` ("Merge integration c0ad2bf into the K8 review."). Parents `ca2a968` and `c0ad2bf`. The only conflict was `rebuild/app/package.json`. The resolution keeps integration's `test` script (`test-canvas-zoom-trace.mjs` beside discovery, `test-canvas-board-menu.mjs` after the groups script) and K8's `posttest`, which runs `test-bases-list.mjs` before the property-edit fuzz. No duplicate script entries. JSON parses.
+
+`git merge --no-ff rebuild/cz5-review-grok` is `61ff0ad` ("Merge CZ5 review into the K8 review."). Parents `2a1ee59` and `ea25870`. The only conflict was `rebuild/app/package.json` again. CZ5 inserts `node scripts/test-canvas-create.mjs` immediately after `node scripts/test-canvas-board-menu.mjs` and before `node scripts/test-r27i.mjs`. Its `posttest` does not include the list script. The resolution keeps both: that create script in `test`, and `test-bases-list.mjs` still in `posttest`. 59 `test` steps, 9 `posttest` steps, each unique. JSON parses (`name` grove). No test ceiling was edited.
+
+`editing.ts`, `view.ts`, and `canvas.css` auto-merged. The result still has the zoomed-out title double-click (`titleZoom`) and CZ5's empty-canvas Ctrl/Cmd drag (`openCreateMenu`, `.canvas-create`, wheel blocked for the life of the box). `cards.ts` and `hoverPreview.ts` came from CZ5 with no conflict. No conflict markers remain in those files.
+
+List scroll, same locked suite as the checks below (`scripts/test-bases-list.mjs` in posttest). Plan slack is a scroll frame p95 of 20ms. The samples sit on one 60fps frame, same as the review's locked run (10k p95 16.7, max 16.8, top 279218, 45 rows, no long task).
+
+| Check | This run |
+|---|---|
+| List, 1,000, warm open | 10.5 ms, 36 rows |
+| List, 1,000, scroll | max 16.8, p95 16.7, 45 rows, top 27218, no long task |
+| List, 10,000, cold open | 37.1 ms, no long task, 36 rows |
+| List, 10,000, warm open | 17.6, 14.5, 14.1 (median 14.5), no long task |
+| List, 10,000, scroll | p95 16.7, max 16.8, 45 rows, top 279218, no long task |
+
+From `rebuild/app`: `npm run build` exit 0 (the existing chunk-size warning on the main bundle remains), `npm run audit:offline` passed (186 source files), `flock /tmp/grove-npm-test.lock npm test` exit 0. The command's wall time was 1094 s, including a wait while another suite held the lock. Vitest 73 files, 1245 tests, including 444 parity cases, then the browser scripts and posttest. 300-card drag max 16.8 ms. Table 1,000-row scroll max 16.8 ms. B0 5,000-row typing frames 16.7 ms, 0 rebuilds during the burst. No timing flake needed a rerun. From `rebuild/app/src-tauri`: `cargo build --offline` exit 0 and `cargo test --offline` 73 passed, 4 ignored. Screenshots under `rebuild/round*-shots/` were restored and are not in this commit. Headless Chromium only.
+
+The items under Left open are unchanged. This sync does not edit the list layout.
