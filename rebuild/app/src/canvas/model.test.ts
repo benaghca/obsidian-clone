@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { closestSide, edgeCurve, readCanvas } from "./model";
+import { canvasTitle, closestSide, edgeCurve, readCanvas } from "./model";
 
 test("projects damaged and future canvases without modifying the input", () => {
   for (const source of ["", "{", "{}", "null", "[]", '{"nodes":[null,{}, {"id":"future","type":"future"}],"edges":[null]}']) expect(readCanvas(source)).toEqual({ nodes: [], edges: [] });
@@ -39,4 +39,16 @@ test("connection sides snap to the nearest border, including the center tie", ()
   expect(closestSide(n, 210, 120)).toBe("top");
   for (const [x, y, side] of [[102, 100, "left"], [318, 100, "right"], [180, 52, "top"], [180, 188, "bottom"]] as const)
     expect(closestSide(n, x, y)).toBe(side);
+});
+
+test("zoomed-out titles come from the card without rendering it", () => {
+  const card = (fields: object) => canvasTitle({ id: "a", type: "text", x: 0, y: 0, width: 1, height: 1, ...fields });
+  expect(card({ text: "Intro line\n\n## **Plan** for [[Trip|the trip]]\nbody" })).toBe("Plan for the trip");
+  expect(card({ text: "\n- [ ] Buy `oats` and [lemons](https://example.com)\n" })).toBe("Buy oats and lemons");
+  expect(card({ text: "```sh\n# not a heading\n```\nFirst ==real== line" })).toBe("First real line");
+  expect(card({ text: "" })).toBe("");
+  expect(card({ type: "file", file: "Daily/2026-03-21.md", subpath: "#Morning" })).toBe("2026-03-21 › Morning");
+  expect(card({ type: "file", file: "Docs/Lease.pdf" })).toBe("Lease.pdf");
+  expect(card({ type: "link", url: "https://jsoncanvas.org/spec/1.0/" })).toBe("jsoncanvas.org");
+  expect(card({ type: "link", url: "not a url" })).toBe("not a url");
 });

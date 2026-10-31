@@ -84,6 +84,19 @@ describe("Bases tables", () => {
     const kanban = baseModel('views:\n  - type: kanban\n    name: Board\n');
     expect(kanban.type).toBe("kanban");
     expect(kanban.notices.size).toBe(0);
+    // K8: List is a layout of its own. Markers and the separator are read only for that layout.
+    const list = baseModel('views:\n  - type: list\n    name: List\n    markers: numbers\n    separator: " | "\n');
+    expect(list.type).toBe("list");
+    expect(list.name).toBe("List");
+    expect(list.listMarkers).toBe("numbers");
+    expect(list.listSeparator).toBe(" | ");
+    expect(list.notices.size).toBe(0);
+    const fallback = baseModel('views:\n  - type: list\n    markers: spiral\n    indentProperties: true\n');
+    expect(fallback.listMarkers).toBe("bullets");
+    expect([...fallback.notices]).toEqual(["Unsupported list markers: spiral", "Indent properties isn't supported yet"]);
+    const ignored = baseModel('views:\n  - type: table\n    markers: numbers\n    indentProperties: true\n');
+    expect(ignored.notices.size).toBe(0);
+    expect(ignored.listMarkers).toBe("bullets");
   });
   it("parses cards view type and card layout options with defaults", async () => {
     (globalThis as Record<string, unknown>).window ??= {};

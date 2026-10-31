@@ -54,6 +54,21 @@ function compareKeys(a: SortKey, b: SortKey): number {
   if (a.dateLike && b.dateLike) return a.time !== undefined && b.time !== undefined ? a.time - b.time : x! < y! ? -1 : x! > y! ? 1 : 0;
   return compareNames(a.text, b.text);
 }
+/** Toolbar and view-menu icon. List uses Lucide `list`, the icon on the public Views page. */
+export const viewGlyph = (type: string): "table" | "grid-2x2" | "square-kanban" | "list" =>
+  type === "list" ? "list" : type === "cards" ? "grid-2x2" : type === "kanban" ? "square-kanban" : "table";
+
+/** Grove's key is `markers` (the public List page names no YAML). `numbered` and `bullet` are accepted too. */
+function parseListMarkers(raw: Yaml, notices: Set<string>): "bullets" | "numbers" | "none" {
+  if (raw == null || raw === "") return "bullets";
+  const text = String(raw);
+  if (text === "numbers" || text === "number" || text === "numbered" || text === "ordered") return "numbers";
+  if (text === "none" || text === "unmarked") return "none";
+  if (text === "bullets" || text === "bullet" || text === "unordered") return "bullets";
+  notices.add(`Unsupported list markers: ${text}`);
+  return "bullets";
+}
+
 export function baseModel(source: string, viewIndex = 0) {
   const root = readYaml(source), notices = new Set<string>();
   if (root.views != null && !Array.isArray(root.views)) throw Error("views must be a list");
@@ -62,7 +77,7 @@ export function baseModel(source: string, viewIndex = 0) {
   const first = views[viewIndex];
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
-  if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban") notices.add("This layout isn't supported yet");
+  if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban" && view.type !== "list") notices.add("This layout isn't supported yet");
   const groupBy = parseGroupBy(view.groupBy, notices), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
@@ -145,10 +160,14 @@ export function baseModel(source: string, viewIndex = 0) {
     const sorted = keyed.map(k => k.r);
     return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
   }
-  const type: "table" | "cards" | "kanban" = view.type === "cards" || view.type === "kanban" ? view.type : "table";
+  const type: "table" | "cards" | "kanban" | "list" = view.type === "cards" || view.type === "kanban" || view.type === "list" ? view.type : "table";
+  const listMarkers = type === "list" ? parseListMarkers(view.markers ?? view.marker ?? view.listMarkers, notices) : "bullets";
+  // The public List page: the separator defaults to a comma. A space follows it, matching the inline line that page describes.
+  const listSeparator = type === "list" && typeof (view.separator ?? view.propertySeparator) === "string" ? String(view.separator ?? view.propertySeparator) : ", ";
+  if (type === "list" && [view.indentProperties, view.nestedProperties].some(v => v === true || v === "true")) notices.add("Indent properties isn't supported yet");
   const cardSize = typeof view.cardSize === "number" && Number.isFinite(view.cardSize) ? Math.max(80, Math.min(800, Math.round(view.cardSize))) : ({ small: 160, medium: 220, large: 320 } as Record<string, number>)[String(view.cardSize ?? "")] ?? 220;
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
   const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
-  return { context, groupBy, summaryPlan, type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
+  return { context, groupBy, summaryPlan, type, listMarkers, listSeparator, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
 }

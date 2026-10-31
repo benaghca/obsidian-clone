@@ -17,9 +17,10 @@ import type { Workspace } from "../workspace";
 import { baseMenus, type BaseFile } from "./menus";
 import { createCardGrid } from "./cards";
 import { createKanban } from "./kanban";
+import { createList } from "./list";
 import { columnControls } from "./columns";
 import { cellEditor } from "./cells";
-import { baseModel, baseNoteFiles, noteKey, propertyId, type Row } from "./model";
+import { baseModel, baseNoteFiles, noteKey, propertyId, viewGlyph, type Row } from "./model";
 import type { Value } from "./expression";
 import { mapping, readYaml, type Yaml } from "./yaml";
 import { createGroupedView, runSliced, type Entry } from "./groups";
@@ -292,7 +293,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const searchText = new WeakMap<Entry, string>();
   const textOf = (entry: Entry) => {
     let text = searchText.get(entry);
-    if (text === undefined) searchText.set(entry, text = rowText(entry.context, model!.columns, cards() || kanban() ? noteName(entry.row.file.path) : undefined));
+    if (text === undefined) searchText.set(entry, text = rowText(entry.context, model!.columns, cards() || kanban() || isList() ? noteName(entry.row.file.path) : undefined));
     return text;
   };
   /** The drawn rows for the current query, or null when cancelled. */
@@ -302,7 +303,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   };
   let types = new Map<string, PropertyType>(), inferred = new Map<string, PropertyType>();
   let source = "", reload = true, gone = false, running = false, dirty = false, timer = 0, frame = 0, start = -1;
-  const cards = () => model?.type === "cards", kanban = () => model?.type === "kanban";
+  const cards = () => model?.type === "cards", kanban = () => model?.type === "kanban", isList = () => model?.type === "list";
   const error = (e: unknown) => { notice.hidden = false; notice.textContent = e instanceof Error ? e.message : String(e); };
   const menus = baseMenus(ws, file, () => model!, () => types, error, async (index?: number) => { if (index !== undefined) { viewIndex = index; o.remember?.(index); scroller.scrollTop = 0; } reload = true; await update(); }, () => (layout().rows() ?? drawn).map(entry => model!.columns.map(key => entry.context.get(key))), next => { query = next; void refilter(); }, key => inferred.get(noteKey(key)) ?? "text", { groups: () => layout().groups(), hiddenRows: () => layout().hiddenRows() });
   /** Draw the toolbar's buttons, once: moving them would blur the Search box. */
@@ -377,13 +378,15 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   // K4: a Kanban view is drawn by the board, beside the scroller; table and cards by groupedView.
   const board = createKanban({ ws, group, groupHost: () => menus.groupHost, scope: () => o.watch ?? blockScope(hostPath() ?? "", source), count: value => { if (model) { model.results = value; drawToolbar(); } }, matches: entry => !query || query.toLowerCase().split(/\s+/).filter(Boolean).every(term => rowText(entry.context, model!.columns, noteName(entry.row.file.path)).includes(term)), openGroupMenu: () => toolbar.querySelector<HTMLElement>('[aria-label="Group"]')?.click(), error });
   el.append(board.el);
-  const layout = () => kanban() ? board : groupedView;
+  // K8: list rows share the table's scroller. Group headings use K3's collapsed set.
+  const listPane = createList({ ws, group, el, scroller, collapsed: scope => { const key = `${o.watch ?? `block:${hostPath() ?? ""}`}\0${scope}`; let set = collapsedHere.get(key); if (!set) collapsedHere.set(key, set = new Set()); return set; }, groupMenu: (event, g) => menus.groupHeading(event, g), repaint: () => paint(true) });
+  const layout = () => kanban() ? board : isList() ? listPane : groupedView;
   /** Rows in hidden groups are not counted (D7). The last hidden total is only a stand-in until grouping finishes, and it must not drive the count below zero. */
   const shownCount = () => Math.max(0, drawn.length - layout().hiddenRows());
-  const counted = () => { if (!model) return; model.results = shownCount(); if (!cards()) table.setAttribute("aria-rowcount", String(model.results + 1)); drawToolbar(); };
+  const counted = () => { if (!model) return; model.results = shownCount(); if (!cards() && !isList()) table.setAttribute("aria-rowcount", String(model.results + 1)); drawToolbar(); };
   function paint(force = false) {
     if (!model || gone || editing()) return;
-    if (layout().paint(model, drawn, force) || cards() || kanban()) return;
+    if (layout().paint(model, drawn, force) || cards() || kanban() || isList()) return;
     const rowHeight=model.rowHeight, virtual = drawn.length > 200, first = virtual ? Math.min(Math.max(0, drawn.length - Math.ceil(scroller.clientHeight / rowHeight)), Math.max(0, Math.floor((scroller.scrollTop - 30) / rowHeight) - 8)) : 0;
     if (!force && first === start) return;
     start = first;
@@ -401,7 +404,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     notice.textContent = [...model.notices].join(" · "); notice.hidden = !notice.textContent;
   }
   scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; paint(); }); }, { passive: true });
-  const resize = new ResizeObserver(() => { if(!cards()&&!controls.active)applySizes();paint(true); }); resize.observe(scroller);
+  const resize = new ResizeObserver(() => { if(!cards()&&!isList()&&!controls.active)applySizes();paint(true); }); resize.observe(scroller);
   // Own-write reconcile (K6). `lastMs` is the update work, not the scheduling delay.
   const ECHO_MS = 500;
   const reconcile = { full: 0, skip: 0, lastMs: 0 };
@@ -519,17 +522,23 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         drawn = found; drawnFrom = selected; drawnQuery = query.toLowerCase();
         model!.results = shownCount();table.style.setProperty("--bases-row-height",`${model!.rowHeight}px`);
         drawToolbar();
-        const glyph = cards() ? "grid-2x2" : kanban() ? "square-kanban" : "table", svg = toolbar.querySelector(".bases-view-name svg");
+        const glyph = viewGlyph(model!.type), svg = toolbar.querySelector(".bases-view-name svg");
         if (svg && !svg.classList.contains(`lucide-${glyph}`)) svg.replaceWith(icon(glyph));
-        table.hidden = cards(); scroller.hidden = kanban(); board.el.hidden = !kanban(); el.setAttribute("aria-label", cards() ? "Base cards" : kanban() ? "Base board" : "Base table");
+        table.hidden = cards() || isList(); scroller.hidden = kanban(); board.el.hidden = !kanban(); listPane.el.hidden = !isList(); el.setAttribute("aria-label", isList() ? "Base list" : cards() ? "Base cards" : kanban() ? "Base board" : "Base table");
         if (kanban()) {
-          head.replaceChildren(); body.replaceChildren(); start = -1; groupedView.clear();
+          head.replaceChildren(); body.replaceChildren(); start = -1; groupedView.clear(); listPane.clear();
           // False means a gesture or a write owns the board. Try again once it has finished, or the external edit that started this pass is dropped.
           if (await board.update(model!, drawn, types, () => gone || dirty, selected, properties)) { counted(); paint(true); board.restoreFocus(); }
           else if (!gone) dirty = true;
           continue;
         }
         board.clear();
+        if (isList()) {
+          head.replaceChildren(); body.replaceChildren(); start = -1; groupedView.clear(); table.hidden = true;
+          if (await listPane.update(model!, drawn, types, () => gone || dirty)) { counted(); paint(true); }
+          continue;
+        }
+        listPane.clear();
         if (cards()) {
           head.replaceChildren(); body.replaceChildren(); start = -1;
           if (await groupedView.update(model!, drawn, types, () => gone || dirty)) { counted(); paint(true); }
@@ -565,7 +574,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         }
       }
     } catch (error) {
-      if (!gone) { model = null; groupedView.clear(); board.clear(); toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
+      if (!gone) { model = null; groupedView.clear(); board.clear(); listPane.clear(); toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
     } finally {
       running = false;
       if (requery && !gone) { requery = false; void refilter(); }
@@ -590,6 +599,10 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       board.top();
       if (await board.update(model, drawn, types, stale, selected)) { counted(); paint(true); board.restoreFocus(); }
       else if (!stale()) schedule();
+      return;
+    }
+    if (isList()) {
+      if (await listPane.update(model, drawn, types, stale)) { counted(); paint(true); }
       return;
     }
     if (!cards()) table.setAttribute("aria-rowcount", String(drawn.length + 1));
@@ -670,7 +683,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     el,
     /** Read the YAML again (a ```base block's text changed). */
     reload() { reload = true; schedule(); },
-    dispose() { gone = true; controls.dispose(); menus.dispose(); groupedView.dispose(); board.dispose(); unwatch(); off(); unsettle(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
+    dispose() { gone = true; controls.dispose(); menus.dispose(); groupedView.dispose(); board.dispose(); listPane.dispose(); unwatch(); off(); unsettle(); resize.disconnect(); clearTimeout(timer); cancelAnimationFrame(frame); el.remove(); },
   };
 }
 
