@@ -43,6 +43,7 @@ Nested body.
 Later body.
 
 #zzledge-body
+\`#zzledge-code\`
 
 \`\`\`
 #zzledge-no
@@ -204,7 +205,7 @@ Code \`[[ZzledgeTarget]]\`.
   check(!!blockLink, 'the block ref is a rendered wikilink');
   await click(blockLink);
   await wait(() => run(() => ws.active.path === 'ZzledgeTarget.md'), 'block ref opens the target');
-  check(await run(() => ws.view.state.doc.sliceString(ws.view.state.selection.main.head, ws.view.state.selection.main.head + 40).includes('Section body')), 'the block ref lands on the paragraph');
+  check(await run(() => ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text.startsWith('Section body')), 'the block ref lands on the paragraph');
 
   await run(() => { ws.setMode('live'); return ws.open('ZzledgeScratch.md'); });
   await sleep(80);
@@ -286,6 +287,7 @@ Code \`[[ZzledgeTarget]]\`.
   await wait(() => run(() => !!document.querySelector('.tag-pane-tag[title="#zzledge/alpha"]')), 'tags pane listed the frontmatter tag');
   const tagText = await run(() => [...document.querySelectorAll('.tag-pane-tag')].map((el) => el.getAttribute('title')));
   check(tagText.includes('#zzledge/alpha') && tagText.includes('#zzledge/live') && tagText.includes('#zzledge-body'), `saved and body tags are listed (${tagText.filter((tag) => tag?.includes('zzledge')).join(' ')})`);
+  check(target.includes('`#zzledge-code`'), 'the target note plants an inline-code tag');
   check(!tagText.includes('#zzledge-no') && !tagText.includes('#zzledge-code'), 'a fenced tag and an inline-code tag are absent');
   await click('.tag-pane-tag[title="#zzledge/alpha"]');
   await wait(() => run(() => document.querySelector('.search-input')?.value === 'tag:#zzledge/alpha'), 'clicking a tag searches for it');

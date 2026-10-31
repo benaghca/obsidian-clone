@@ -190,8 +190,9 @@ try {
   check(embedSection(sectionNote, "second")?.line === second.line, "heading embeds are case-insensitive");
   check(embedSection(sectionNote, "Missing") === null, "a missing heading is a null section");
   check(embedSection(sectionNote, "^zzbid")?.text === "body", "an inline block id embeds the paragraph without the id");
-  check(embedSection("^zzbid\n\npara", "^zzbid") === null, "a standalone block id on the first line has no paragraph");
-  const firstId = headingPos(EditorState.create({ doc: "^zzbid" }).doc, "^zzbid");
+  const firstBlock = "^zzbid\n\npara\n";
+  check(embedSection(firstBlock, "^zzbid") === null, "a standalone block id on the first line has no paragraph");
+  const firstId = headingPos(EditorState.create({ doc: firstBlock }).doc, "^zzbid");
   check(firstId === 0, `navigation still finds a first-line block id (${firstId})`);
   if (firstId === 0) bug("embed-first-line-block", "embedSection returns null for a standalone block id on line 1, while headingPos returns 0. An embed of that block says it is missing; following the link lands on the id line.");
   check(embedSection("para\n\n^zzbid\n", "^zzbid")?.text === "para", "a standalone block id embeds the paragraph above it");
