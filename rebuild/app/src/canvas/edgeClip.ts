@@ -60,3 +60,21 @@ export function clippedEdge(curve: ReturnType<typeof edgeCurve>, box: Box): stri
   }
   return (path+" "+clippedLine(curve.end,curve.q,box)).trim();
 }
+
+/** Candidate cells follow the curve, rather than scanning its often huge box. */
+export function edgeTiles(curve: ReturnType<typeof edgeCurve>, viewport: Box, cell: number): Box[] {
+  const tiles = new Map<string,Box>();
+  function visit(p: Point,c: Point,d: Point,q: Point,depth=0) {
+    const points=[p,c,d,q],left=Math.max(viewport.x,Math.min(...points.map(p=>p[0]))),right=Math.min(viewport.x+viewport.width,Math.max(...points.map(p=>p[0]))),top=Math.max(viewport.y,Math.min(...points.map(p=>p[1]))),bottom=Math.min(viewport.y+viewport.height,Math.max(...points.map(p=>p[1])));
+    if(left>right||top>bottom)return;
+    if(depth<24&&(right-left>cell||bottom-top>cell)) { const [a,b]=split(p,c,d,q,.5);visit(...a as [Point,Point,Point,Point],depth+1);visit(...b as [Point,Point,Point,Point],depth+1);return; }
+    const x=Math.floor(left/cell),y=Math.floor(top/cell),endX=Math.floor(right/cell),endY=Math.floor(bottom/cell);
+    if(![x,y,endX,endY].every(Number.isSafeInteger)||(endX-x+1)*(endY-y+1)>4096){tiles.set("fallback",viewport);return;}
+    for(let i=x;i<=endX;i++)for(let j=y;j<=endY;j++) {
+      const bx=Math.max(viewport.x,i*cell),by=Math.max(viewport.y,j*cell);
+      tiles.set(`${i}/${j}`,{x:bx,y:by,width:Math.min(viewport.x+viewport.width,(i+1)*cell)-bx,height:Math.min(viewport.y+viewport.height,(j+1)*cell)-by});
+    }
+  }
+  visit(curve.p,curve.p,curve.start,curve.start);visit(curve.start,curve.c,curve.d,curve.end);visit(curve.end,curve.end,curve.q,curve.q);
+  return [...tiles.values()];
+}

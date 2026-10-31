@@ -16,15 +16,18 @@ import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { canvasReadOnly } from "./controls";
 import { canvasCards, editTextCard } from "./cards";
-import { canvasNavigation, titleBand } from "./navigation";
+import { canvasNavigation } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
 import { spaceCardBody } from "./spacing";
 import { groupBackground } from "./groups";
 import { editNoteCard } from "./note";
 import { editCanvasLabel } from "./labels";
-import { canvasTitle, edgeCurve, readCanvas, type CanvasEdge, type CanvasNode } from "./model";
+import { canvasTitle, edgeCurve, readCanvas, type CanvasEdge } from "./model";
 import type { Guide } from "./align";
+import { canvasWork } from "./work";
+import { canvasBodies } from "./bodies";
+import { canvasEdges } from "./edges";
 
 const NS = "http://www.w3.org/2000/svg";
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>, ...children: SVGElement[]) {
@@ -52,12 +55,6 @@ function withoutBlockIds(text: string) {
     return "";
   });
 }
-// Zoomed out, a card too small on screen for its title shows as a box (navigation.ts).
-function sizeTitle(card: HTMLElement, node: CanvasNode) {
-  const band = titleBand(node.width, node.height)?.toString();
-  if (band === card.dataset.titleBand) return;
-  if (band === undefined) delete card.dataset.titleBand; else card.dataset.titleBand = band;
-}
 export function createCanvasView(ws: Workspace, path: string, group: Group, tab: Tab) {
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
   const world = h("div", { class: "canvas-world" });
@@ -66,7 +63,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   let undo: string[] = [], redo: string[] = [];
   let writing = Promise.resolve();
   let stopText: ((paint?: boolean) => void) | undefined;
-  let selectAfterDraw: string | undefined, editAfterDraw: string | undefined;
+  let selectAfterDraw: string | undefined, editAfterDraw: string | undefined, building = false, cancelAutoEdit = 0;
   function save() {
     clearTimeout(timer); timer = 0;
     const text = source;
@@ -122,14 +119,20 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     source = text; undo = []; redo = [];
     draw();
   }
-  function draw() {
+  async function draw() {
     clear();
-    const mine = ++generation;
+    const mine = ++generation; building = true;
     const selectedId = selectAfterDraw, editId = editAfterDraw;
     selectAfterDraw = editAfterDraw = undefined;
     let startEditor: (() => void) | undefined;
     const { nodes, edges } = readCanvas(source);
     const bounds = boundsOf();
+    const work = canvasWork(), bodies = canvasBodies(nodes, work, () => navigation.snapshot());
+    let built = false;
+    const contexts = new Map<string, { view: EditorView; refs: number }>();
+    const hosts = new Map<string, typeof host>();
+    cleanups.push(() => { work.dispose(); bodies.dispose(); for (const context of contexts.values()) context.view.destroy(); contexts.clear(); });
+    navigation.loaded(bounds);
     const drawing = svg("svg", { class: "canvas-edges", overflow: "visible" });
     // Alignment guides while a card is dragged: lines in board units, dots sized for the zoom.
     const guideLayer = svg("svg", { class: "canvas-guides", overflow: "visible" });
@@ -143,39 +146,17 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const edits = new Map<string, (line?: number, refresh?: () => void) => void>();
     const backgrounds = new Map<string, () => void>();
     const byId = new Map(nodes.map(n => [n.id, n]));
-    const updateEdges: { edge: CanvasEdge; line: SVGPathElement; hit: SVGPathElement; ends: HTMLElement[]; marker: SVGMarkerElement; label?: HTMLElement }[] = [];
-    function place(item: typeof updateEdges[number], curve: ReturnType<typeof edgeCurve>) {
-      item.line.setAttribute("d", curve.path); item.hit.setAttribute("d", curve.path);
-      [curve.p, curve.q].forEach((p, i) => Object.assign(item.ends[i].style, { left: `${p[0]}px`, top: `${p[1]}px` }));
-      if (item.label) { item.label.style.left = `${curve.x}px`; item.label.style.top = `${curve.y}px`; }
-    }
-    function addEdge(edge: CanvasEdge, i: number) {
-      const line = svg("path", { class: "canvas-edge", "data-edge-id": edge.id, fill: "none", stroke: color(edge.color), "stroke-width": "2" });
-      const hit = svg("path", { class: "canvas-edge-hit", "data-edge-id": edge.id, fill: "none", stroke: color(edge.color) });
-      drawing.append(svg("g", {}, hit));
-      const marker = arrowMarker(`canvas-arrow-${group.id}-${mine}-${i}`, color(edge.color));
-      drawing.append(marker);
-      drawing.append(line);
-      const ends = ["from", "to"].map(end => h("div", { class: "canvas-edge-end", "data-edge-id": edge.id, "data-edge-end": end, "aria-label": `Reconnect ${end} end` }));
-      world.append(...ends);
-      const update: typeof updateEdges[number] = { edge, line, hit, ends, marker };
-      updateEdges.push(update);
-      updateEdge(update);
-    }
-    function updateEdge(update: typeof updateEdges[number]) {
-      const { edge, line, hit, marker } = update;
-      for (const path of [line, hit]) path.setAttribute("stroke", color(edge.color));
-      for (const key of ["fill", "stroke"]) marker.firstElementChild!.setAttribute(key, color(edge.color));
-      for (const [end, enabled] of [["start", edge.fromEnd === "arrow"], ["end", edge.toEnd !== "none"]] as const)
-        line.setAttribute(`marker-${end}`, enabled ? `url(#${marker.id})` : "none");
-      if (typeof edge.label === "string" && edge.label) {
-        if (!update.label) { update.label = h("div", { class: "canvas-edge-label", "data-edge-id": edge.id }); world.append(update.label); }
-        update.label.textContent = edge.label;
-      }
-      else { update.label?.remove(); update.label = undefined; }
-      place(update, edgeCurve(byId.get(edge.fromNode)!, byId.get(edge.toNode)!, edge));
-    }
-    edges.forEach(addEdge);
+    const edgeDrawing = canvasEdges(world, drawing, edges, byId, work, color);
+    cleanups.push(() => edgeDrawing.dispose());
+    navigation.watch(() => {
+      if (gone || mine !== generation) return;
+      const view = navigation.snapshot(); if (!view) return;
+      bodies.update(); edgeDrawing.mode(view.titles, view.band, view);
+      if (built) work.resume();
+    }, () => work.pause());
+    let chunk = performance.now();
+    const shells = document.createDocumentFragment(), shellCards = new Map<string, HTMLElement>();
+    let earlyEditor: HTMLElement | undefined;
     const preview = svg("path", { fill: "none", "stroke-width": "2" });
     const previewArrow = arrowMarker(`canvas-preview-${group.id}-${mine}`, color());
     const previewGroup = svg("g", { class: "canvas-edge-preview" }, previewArrow, preview);
@@ -191,7 +172,13 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       preview.setAttribute("marker-start", edge.fromEnd === "arrow" ? `url(#${previewArrow.id})` : "none");
       preview.setAttribute("marker-end", edge.toEnd !== "none" ? `url(#${previewArrow.id})` : "none");
     }
-    for (const node of nodes) {
+    const buildOrder = editId ? [...nodes.filter(n => n.id === editId), ...nodes.filter(n => n.id !== editId)] : nodes;
+    for (const node of buildOrder) {
+      if (performance.now() - chunk > 4) {
+        await new Promise<void>(resolve => { const channel = new MessageChannel(); channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve(); }; channel.port2.postMessage(null); });
+        if (gone || mine !== generation) return;
+        chunk = performance.now();
+      }
       const card = h("div", { class: `canvas-node canvas-node-${node.type}`, "data-node-id": node.id });
       // Hover resolves links from this note, or from the canvas file for a text card.
       if (node.type === "text") card.dataset.path = path;
@@ -201,11 +188,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       card.style.setProperty("--canvas-color", color(node.color));
       // The zoom bands size this ring, not the card, so a band change never restyles a card.
       card.append(h("div", { class: "canvas-node-ring" }));
-      world.append(card);
+      shells.append(card); shellCards.set(node.id, card);
       let refreshFile = () => {};
-      if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => {
-        queueMicrotask(() => { if (!gone && mine === generation) refreshFile(); });
-      }));
       if (node.type === "group") {
         const backdrop = h("div", { class: "canvas-group-background" }); card.append(backdrop);
         let held: ReturnType<typeof ws.embeds.image> | undefined, heldPath: string | undefined;
@@ -233,6 +217,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           });
         };
         edits.set(node.id, edit); if (node.id === editId) startEditor = edit;
+        bodies.add(node, card);
         continue;
       }
       if (node.type === "file" || node.type === "link") card.append(h("div", { class: "canvas-file-label" }, node.type === "link" ? node.url ?? "" : canvasTitle(node)));
@@ -241,14 +226,14 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       // Title mode shows an image itself; every other card shows this instead of its body.
       const image = node.type === "file" && IMAGE_EXT.test(node.file ?? "");
       const title = h("div", { class: "canvas-node-title" }, image ? "" : canvasTitle(node));
-      if (image) card.classList.add("is-image"); else { card.append(title); sizeTitle(card, node); }
+      if (image) card.classList.add("is-image"); else card.append(title);
       if (node.type === "link") {
         const url = node.url ?? "";
         const link = h("a", { class: "cm-link cm-rendered-link", role: "link", tabindex: "0" }, url);
         const open = () => { if (isExternalUrl(url)) void api.openExternal(url).catch(console.warn); };
         link.addEventListener("click", e => { if (e.isTrusted) open(); });
         link.addEventListener("keydown", e => { if (e.isTrusted && e.key === "Enter") open(); });
-        content.append(link);
+        bodies.add(node, card, { element: content, ensure() { if (!content.firstChild) content.append(link); }, release() { content.replaceChildren(); }, ready: () => !!content.firstChild });
         continue;
       }
       if (image) {
@@ -259,16 +244,19 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           held?.release(); const current = held = ws.embeds.image(node.file!);
           void current.url.then(url => { if (!gone && mine === generation && held === current) img.src = url; }, () => { if (!gone && mine === generation && held === current) img.removeAttribute("src"); });
         };
-        cleanups.push(() => held?.release()); refreshFile();
+        let unwatchImage = () => {};
+        const drop = () => { unwatchImage(); unwatchImage = () => {}; held?.release(); held = undefined; img.removeAttribute("src"); };
+        bodies.add(node, card, { element: content, ensure() { if (!held) { unwatchImage = ws.embeds.watch(node.file!, () => work.add(img, () => { if (bodies.wanted(node)) refreshFile(); else drop(); })); refreshFile(); } }, release: drop, ready: () => !!held });
+        cleanups.push(drop);
         continue;
       }
       if (node.type === "file" && !isNoteFile(node.file ?? "")) {
-        content.textContent = node.file ? `Unsupported file: ${node.file}` : "File not found";
+        bodies.add(node, card, { element: content, ensure() { content.textContent = node.file ? `Unsupported file: ${node.file}` : "File not found"; }, release() { content.replaceChildren(); }, ready: () => !!content.textContent });
         continue;
       }
       const origin = node.type === "file" ? node.file! : path;
       const resolve = (href: string) => resolveLink(href, origin, ws.vault.files.filter(f => !f.is_dir));
-      const cardHost = {
+      const cardHost = hosts.get(origin) ?? {
         ...host, contextMenu: undefined, properties: undefined,
         formatLink: (target: string, _view: EditorView, display?: string, subpath?: string) => ws.linkTo(target, origin, display, subpath),
         linkExists: (href: string) => !!resolve(href),
@@ -278,8 +266,16 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         },
         embeds: { ...ws.embeds, pathOf: () => origin, resolve: (href: string) => resolve(href), toggleTask: () => {} },
       };
-      const context = new EditorView({ state: EditorState.create({ extensions: [EditorState.readOnly.of(true), readingMode.of(true), editorHost.of(cardHost)] }) });
-      cleanups.push(() => context.destroy());
+      hosts.set(origin, cardHost);
+      let context: { view: EditorView; refs: number } | undefined;
+      const contextView = () => {
+        if (!context) {
+          context = contexts.get(origin);
+          if (!context) { context = { view: new EditorView({ state: EditorState.create({ extensions: [EditorState.readOnly.of(true), readingMode.of(true), editorHost.of(cardHost)] }) }), refs: 0 }; contexts.set(origin, context); }
+          context.refs++;
+        }
+        return context.view;
+      };
       content.addEventListener("click", event => {
         const link = (event.target as Element).closest<HTMLElement>("[data-href]");
         if (!event.isTrusted || !link || card.classList.contains("is-editing")) return;
@@ -288,24 +284,33 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         if (isNotePath(href) || href.startsWith("#")) cardHost.openLink(href, whereFromEvent(event));
         else if (isExternalUrl(href)) void api.openExternal(href).catch(console.warn);
       });
-      let painted: ReturnType<typeof render> | undefined;
-      cleanups.push(() => { if (painted) release(painted); });
+      let painted: ReturnType<typeof render> | undefined, prepared = false;
+      let requested = false, request = 0, unwatch = () => {};
+      const drop = () => {
+        request++; requested = false; prepared = false; unwatch(); unwatch = () => {};
+        if (painted) { release(painted); painted = undefined; }
+        if (context && --context.refs === 0) { context.view.destroy(); contexts.delete(origin); }
+        context = undefined;
+        if (content.firstChild && !card.classList.contains("is-editing")) content.replaceChildren();
+      };
+      cleanups.push(drop);
       const paint = (source: string) => {
         if (gone || mine !== generation || card.classList.contains("is-editing")) return;
+        if (painted) { release(painted); painted = undefined; }
         const shown = embedPart(source, node.type === "file" ? node.subpath?.replace(/^#/, "") ?? "" : "");
-        if (!shown) { content.textContent = `Unable to find “${node.subpath}” in “${node.file}”.`; return; }
-        if (painted) release(painted);
+        if (!shown) { content.textContent = `Unable to find “${node.subpath}” in “${node.file}”.`; prepared = true; bodies.ready(node); return; }
         content.replaceChildren(); content.classList.add("is-reading-mode");
-        painted = render(content, node.type === "file" ? withoutBlockIds(shown.text) : shown.text, context, [origin], () => {});
+        painted = render(content, node.type === "file" ? withoutBlockIds(shown.text) : shown.text, contextView(), [origin], () => {});
         spaceCardBody(content, painted.state);
         if (node.type === "file") content.prepend(h("div", { class: "canvas-note-title" }, noteName(node.file!)));
         content.querySelectorAll<HTMLInputElement>('input[type="checkbox"]').forEach(input => input.disabled = true);
+        prepared = true; bodies.ready(node);
       };
       if (node.type === "text") {
-        paint(node.text ?? "");
         const edit = () => {
           if (canvasReadOnly.has(el) || card.classList.contains("is-editing")) return;
           stopText?.();
+          if (content.parentElement !== card) card.append(content);
           if (painted) { release(painted); painted = undefined; }
           let checkpoint = false;
           stopText = editTextCard(card, content, node.text ?? "", cardHost, text => {
@@ -324,6 +329,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         const edit = (line = 1) => {
           if (canvasReadOnly.has(el) || card.classList.contains("is-editing")) return;
           stopText?.();
+          if (content.parentElement !== card) card.append(content);
           if (painted) { release(painted); painted = undefined; }
           stopText = editNoteCard(card, content, ws, group, origin, node.subpath, line, repaint => {
             stopText = undefined; if (repaint) refreshFile();
@@ -337,42 +343,65 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         });
         refreshFile = () => {
           if (card.classList.contains("is-editing")) return;
-          void ws.embeds.read(origin).then(paint, () => { if (!gone && mine === generation && !card.classList.contains("is-editing")) content.textContent = `File not found: ${origin}`; });
+          drop(); if (bodies.wanted(node)) ensure();
         };
-        refreshFile();
       }
+      const ensure = () => {
+        if (prepared || requested || card.classList.contains("is-editing")) return;
+        requested = true;
+        if (node.type === "text") { paint(node.text ?? ""); return; }
+        const token = ++request;
+        unwatch = ws.embeds.watch(origin, () => queueMicrotask(() => { if (!gone && mine === generation) refreshFile(); }));
+        void ws.embeds.read(origin).then(text => work.add(content, () => {
+          if (gone || mine !== generation || token !== request) return;
+          requested = false;
+          if (bodies.wanted(node)) paint(text); else drop();
+        }), () => work.add(content, () => {
+          if (!gone && mine === generation && token === request) { requested = false; prepared = true; content.textContent = `File not found: ${origin}`; bodies.ready(node); }
+        }));
+      };
+      bodies.add(node, card, { element: content, ensure, release: drop, ready: () => prepared });
+      if (node.id === editId && startEditor && cancelAutoEdit !== mine) { earlyEditor = card; world.append(card); bodies.update(); startEditor(); startEditor = undefined; }
     }
-    const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
+    // Construct off-DOM, then expose bounded chunks across rendering frames.
+    // fonts.ready is read only by the few lazily acquired shared contexts.
+    for (let i = 0; i < nodes.length; i += 512) {
+      const fragment = document.createDocumentFragment();
+      for (const node of nodes.slice(i, i + 512)) { bodies.prepare(node); const card = shellCards.get(node.id)!; if (card.parentNode === shells) fragment.append(card); }
+      world.insertBefore(fragment, earlyEditor?.parentNode === world ? earlyEditor : null);
+      if (nodes.length > 512) await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      if (gone || mine !== generation) return;
+    }
+    const cards = shellCards;
     cleanups.push(canvasEditing(el, world, nodes, edges, changed => {
       const ids = new Set(changed.map(n => n.id));
       for (const n of changed) {
         const card = cards.get(n.id)!;
         Object.assign(card.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
-        if (n.type !== "group" && !card.classList.contains("is-image")) sizeTitle(card, n);
         card.classList.toggle("is-colored", !!n.color); card.style.setProperty("--canvas-color", color(n.color)); backgrounds.get(n.id)?.();
       }
-      for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
-        place(item, edgeCurve(byId.get(item.edge.fromNode)!, byId.get(item.edge.toNode)!, item.edge));
+      bodies.changed(changed); edgeDrawing.changed(ids);
       navigation.loaded(boundsOf());
     }, (nodes, deleted, changedEdges, deletedEdges, added = []) => {
       const next = editCanvas(source, nodes, deleted, added, changedEdges, deletedEdges);
       if (next === source) return;
       undo.push(source); redo = [];
+      if (nodes.length) edgeDrawing.settle();
       for (const edge of changedEdges ?? []) {
-        const item = updateEdges.find(item => item.edge.id === edge.id);
-        if (item) { Object.assign(item.edge, edge); updateEdge(item); }
-        else { edges.push(edge); addEdge(edge, edges.length - 1); }
+        const existing = edges.find(item => item.id === edge.id);
+        if (existing) Object.assign(existing, edge); else edges.push(edge);
+        edgeDrawing.update(existing ?? edge);
       }
       if (added.length) { selectAfterDraw = added[0].id; editAfterDraw = added[0].id; }
       changed(next, !!deleted?.size || !!deletedEdges?.size || !!added.length);
     }, previewEdge, cardActions.connect, history, nodes => navigation.zoomTo(nodes), (item, refresh) => {
       if (!("fromNode" in item)) { edits.get(item.id)?.(undefined, refresh); return; }
       if (canvasReadOnly.has(el)) return;
-      const record = updateEdges.find(record => record.edge.id === item.id)!;
+      const record = edgeDrawing.get(item.id); if (!record) return;
       if (record.label?.classList.contains("is-editing")) return;
       stopText?.();
       const label = record.label ?? h("div", { class: "canvas-edge-label", "data-edge-id": item.id });
-      record.label = label; world.append(label); place(record, edgeCurve(byId.get(item.fromNode)!, byId.get(item.toNode)!, item));
+      record.label = label; world.append(label); edgeDrawing.place(record);
       label.textContent = item.label ?? "";
       label.setAttribute("aria-label", "Edge label");
       stopText = editCanvasLabel(label, (value, save) => {
@@ -382,15 +411,29 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
             item.label = value; undo.push(source); redo = [];
             changed(editCanvas(source, [], undefined, [], [item]));
           }
-          updateEdge(record); refresh();
+          edgeDrawing.update(item); refresh();
         }
       });
-    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides, openBoardMenu));
-    startEditor?.();
+    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides, openBoardMenu, ids => edgeDrawing.select(ids)));
+    built = true; building = false;
+    const view = navigation.snapshot(); if (view) { bodies.update(); edgeDrawing.mode(view.titles, view.band, view); }
+    work.resume();
+    if (import.meta.env.DEV) {
+      const dev = window as unknown as { __canvasProbe?: () => unknown }, probe = () => ({ contexts: contexts.size, ...bodies.stats(), ...work.stats(), built });
+      dev.__canvasProbe = probe; cleanups.push(() => { if (dev.__canvasProbe === probe) delete dev.__canvasProbe; });
+    }
+    if (cancelAutoEdit !== mine) startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);
     navigation.updateHistory(undo.some(text => text !== source), redo.some(text => text !== source));
   }
+  // Large-board construction yields, but Escape/board Undo must not disappear
+  // into that interval. A new empty card's editor is installed before yielding.
+  el.addEventListener("keydown", event => {
+    if (!building || (event.target as Element).closest(".cm-editor,input,textarea,[contenteditable=true]")) return;
+    if (event.key === "Escape") { cancelAutoEdit = generation; event.preventDefault(); event.stopPropagation(); }
+    else if ((event.ctrlKey || event.metaKey) && ["z","y"].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation(); history(event.shiftKey || event.key.toLowerCase() === "y"); }
+  }, true);
   const flush = () => { if (timer) save(); };
   window.addEventListener("beforeunload", flush);
   const unwatch = ws.vault.onModified(changed => { if (changed === path && !notifying) { clearTimeout(timer); timer = 0; void load(); } });
