@@ -68,6 +68,14 @@ export function createKanban(host: KanbanHost) {
   const finishedWrite = () => { if (--pendingWrites === 0) waitingWrites.splice(0).forEach(resolve => resolve()); };
   let scrollX = 0, info = new Map<string, NoteProperties>(), checking = new Map<string, Promise<void>>(), reasons = new Map<string, string>();
   let entries = new Map<string, Entry>();
+  // Props this board painted for a write it made, and the loaded note's text at that moment.
+  // The view skips its rebuild only when the re-read still matches both.
+  const own = new Map<string, { props: NoteProperties["props"]; text: string | null }>();
+  function markOwn(path: string) {
+    const props = entries.get(path)?.row.props;
+    if (!props) return;
+    own.set(path, { props, text: ws.editors.doc(path)?.toString() ?? null });
+  }
   const live = h("div", { class: "bases-move-live", role: "status", "aria-live": "polite" });
   const message = h("span"), undoButton = h("button", { type: "button", onclick: () => void historyReplay(true) }, "Undo");
   const notice = h("div", { class: "bases-move-notice", role: "status" }, message, undoButton);
@@ -200,7 +208,7 @@ export function createKanban(host: KanbanHost) {
       }
       const record = await hist.replay(back, async (path, edit, dry) => {
         const result = await writeProperty(ws, path, edit, dry);
-        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) { await tagFacts(entry, edit.key).catch(() => {}); patch(entry, result.props); } }
+        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) { await tagFacts(entry, edit.key).catch(() => {}); patch(entry, result.props); markOwn(path); } }
         return result;
       }, preview, async (record, undo) => {
         const order = record.order!; let done = false;
@@ -235,6 +243,7 @@ export function createKanban(host: KanbanHost) {
             throw Error(result.status === "conflict" ? `${noteName(path)} changed since the board was drawn (${edit.key} is now ${result.current ?? "No value"}). Not moved.` : result.reason);
           }
           if (/^(tags|tag)$/i.test(edit.key)) { await tagFacts(entry, edit.key).catch(() => {}); if (model === m) { const current = patch(entry, result.props); if (patched && current) patched.selected = current.selected; } }
+          if (model === m) markOwn(path);
           hist.push({ label, ops: [{ path, key: edit.key, before: result.before, after: result.after, row: entry.row, tagsBefore }] });
           if (!gone && model?.name === m.name) announce(`${label}${patched?.selected ? "" : " · it no longer matches this view's filters"}`, true);
         } catch (e) { if (!gone) { if (model === m) patch(entry, prior); announce(e instanceof Error ? e.message : String(e)); } } finally { finishedWrite(); }
@@ -480,10 +489,17 @@ export function createKanban(host: KanbanHost) {
     generation++;
     for (const id of [...mounted.keys()]) unmount(id);
     model = null; automatic = []; all = []; columns = []; hiddenRows = 0; columnsOf = null;
+    own.clear();
     track.style.width = "0px";
   }
   return {
     el,
+    ownProps(path: string) { const marked = own.get(path); return marked ? entries.get(path)?.row.props ?? marked.props : undefined; },
+    /** Text of a loaded note at `markOwn`, or null when the note was closed. Undefined when this board did not write it. */
+    ownText(path: string) { return own.has(path) ? own.get(path)!.text : undefined; },
+    paintedProps(path: string) { return entries.get(path)?.row.props; },
+    consumeOwn(path: string) { own.delete(path); },
+    acceptMetadata(path: string, metadata: NoteProperties) { info.set(path, metadata); },
     clear,
     async idle() {
       // Recheck after the gesture: a drop queues its write in the same turn the gesture settles.
@@ -501,6 +517,7 @@ export function createKanban(host: KanbanHost) {
     async update(next: Model, rows: readonly Entry[], propertyTypes: Map<string, PropertyType>, obsolete: () => boolean, selected: readonly Entry[] = rows, metadata: Map<string, NoteProperties> = info): Promise<boolean> {
       // A gesture that began while this refresh was already reading must keep its card, ghost and drop.
       if (pendingWrites || moves.active()) return false;
+      own.clear();
       const token = ++generation, options: SliceOptions = { cancelled: () => gone || pendingWrites > 0 || moves.active() || token !== generation || obsolete() };
       try {
         const by = next.groupBy;
