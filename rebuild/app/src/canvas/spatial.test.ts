@@ -17,3 +17,8 @@ test("huge groups and a sparse fit do not walk the empty world", () => {
   expect(index.query({ x: 0, y: 0, width: 10, height: 10 })).toEqual([group]);
   index.remove(group); expect(index.query({ x: 0, y: 0, width: 10, height: 10 })).toEqual([]);
 });
+
+test("unsafe bucket integers cannot trap insertion or queries in a non-advancing loop",()=>{
+  const index=new CanvasSpatial<{x:number;y:number;width:number;height:number}>(),node={x:1e100,y:-1e100,width:100,height:100};
+  index.update(node);expect(index.query(node)).toEqual([node]);index.remove(node);expect(index.query(node)).toEqual([]);
+});
