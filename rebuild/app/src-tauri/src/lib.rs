@@ -49,11 +49,8 @@ pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
 }
 
 pub fn run() {
-    // WebKitGTK's DMA-BUF renderer crashes on some Wayland compositors (Hyprland: "Error 71 (Protocol error)").
     #[cfg(target_os = "linux")]
-    if std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
-        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
-    }
+    graphics_env();
     tauri::Builder::default()
         // Only the front end's own trusted-click handler may open links. The
         // plugin's injected page script would also send any <a target=_blank>
@@ -116,6 +113,47 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running grove");
+}
+
+/// Keeps WebKitGTK's GPU (DMA-BUF) renderer on where it works. Without it WebKit paints every
+/// frame on the CPU: zooming a one-card canvas took a whole core and fell below 60 fps
+/// (rebuild/WEBKIT_PERF_NOTES.md).
+///
+/// On Wayland, NVIDIA's EGL turns on explicit sync for the window's surface. GTK 3 then commits
+/// a plain buffer there with no sync point, and Hyprland closes the connection ("Error 71
+/// (Protocol error)": "Missing acquire timeline"). So explicit sync is turned off instead; only
+/// NVIDIA's driver reads that variable. Under X11 the renderer could not make its buffers on
+/// NVIDIA, so it stays off there. A variable the user has already set wins.
+#[cfg(target_os = "linux")]
+fn graphics_env() {
+    let default = |name: &str, value: &str| {
+        if std::env::var_os(name).is_none() {
+            std::env::set_var(name, value);
+        }
+    };
+    let display = std::env::var_os("WAYLAND_DISPLAY").unwrap_or_default();
+    if gdk_uses_wayland(!display.is_empty(), &std::env::var("GDK_BACKEND").unwrap_or_default()) {
+        default("__NV_DISABLE_EXPLICIT_SYNC", "1");
+    } else {
+        default("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+}
+
+/// GDK tries the backends in `GDK_BACKEND` order (`*` or unset: Wayland first).
+#[cfg(target_os = "linux")]
+fn gdk_uses_wayland(has_display: bool, backend: &str) -> bool {
+    has_display && matches!(backend.split(',').next().unwrap_or("").trim(), "" | "*" | "wayland")
+}
+
+#[cfg(all(test, target_os = "linux"))]
+#[test]
+fn gdk_backend_choice() {
+    assert!(gdk_uses_wayland(true, ""));
+    assert!(gdk_uses_wayland(true, "wayland,x11,*"));
+    assert!(gdk_uses_wayland(true, "*"));
+    assert!(!gdk_uses_wayland(true, "x11"));
+    assert!(!gdk_uses_wayland(true, "x11,wayland"));
+    assert!(!gdk_uses_wayland(false, "wayland"));
 }
 
 fn fallback_config_dir() -> std::path::PathBuf {
