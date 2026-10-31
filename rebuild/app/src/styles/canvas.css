@@ -1,8 +1,11 @@
+/* Cards sit one step above the canvas. Light: a #fafafa canvas under white cards. */
+.canvas-view { --canvas-background: var(--background-primary-alt); --canvas-card-background: var(--background-primary); }
+.theme-dark .canvas-view { --canvas-background: var(--background-primary); --canvas-card-background: #262626; }
 .canvas-view {
   position: relative;
   overflow: hidden;
   scrollbar-gutter: auto;
-  background-color: var(--background-primary);
+  background-color: var(--canvas-background);
   background-image: radial-gradient(circle at .7px .7px, var(--background-modifier-border) .7px, transparent .7px);
   padding: 0;
   user-select: none;
@@ -16,17 +19,29 @@
 .canvas-guides line { stroke: var(--interactive-accent); stroke-width: 1px; vector-effect: non-scaling-stroke; }
 .canvas-guides circle { fill: var(--interactive-accent); }
 .canvas-node {
+  --canvas-ring: var(--background-modifier-border-hover);
   position: absolute;
-  border: 1px solid var(--background-modifier-border);
+  border: 1px solid var(--canvas-ring);
   z-index: 2;
   border-radius: 8px;
-  background: var(--background-primary);
+  background: var(--canvas-card-background);
   box-shadow: 0 .5px 1px .5px rgb(0 0 0 / 10%);
 }
 .canvas-node.is-colored {
-  border-color: color-mix(in srgb, var(--canvas-color) 70%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--canvas-color) 70%, transparent), 0 .5px 1px .5px rgb(0 0 0 / 10%);
+  --canvas-ring: var(--canvas-color);
+  background: color-mix(in srgb, var(--canvas-color) 12%, var(--canvas-card-background));
 }
+/* The 1px border is layout (geometry tests rely on it). Zoomed out, this ring around it
+   keeps the edge 1px on screen; a coloured card's stays 1.5px. Its own element, so a
+   zoom band restyles it and not the card (which would restyle the card's children).
+   Fixed radii, not inherit: an inherited value keeps the browser from reusing styles,
+   which made each restyle several times dearer. */
+.canvas-node-ring {
+  position: absolute; inset: -1px; border-radius: 8px; pointer-events: none;
+  box-shadow: 0 0 0 calc(max(0, var(--canvas-inverse-scale) - 1) * 1px) var(--canvas-ring);
+}
+.canvas-node.is-colored:where(:not(.canvas-node-group)) > .canvas-node-ring { box-shadow: 0 0 0 calc(max(.5, 1.5 * var(--canvas-inverse-scale) - 1) * 1px) var(--canvas-ring); }
+.canvas-node.is-selected > .canvas-node-ring { box-shadow: 0 0 0 calc(max(1, var(--canvas-inverse-scale)) * 2px) var(--interactive-accent); }
 /* Bodies scroll only on a selected or edited card. Hundreds of scroll containers
    make every zoom frame's layer update grow with the board; the wheel pans anyway. */
 .canvas-node-content {
@@ -34,19 +49,23 @@
   inset: 0;
   overflow: hidden;
   padding: 16px;
-  border-radius: inherit;
+  border-radius: 7px;
   font-size: 16px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .canvas-node:is(.is-selected, .is-editing) > .canvas-node-content { overflow: auto; }
-.canvas-node.is-colored > .canvas-node-content { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); }
 .canvas-node-content img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.canvas-node-file:has(> .canvas-node-content > img) > .canvas-node-content { padding: 0; overflow: hidden; }
-.canvas-node-group { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); z-index: auto; }
+.canvas-node.is-image > .canvas-node-content { padding: 0; overflow: hidden; }
+.canvas-node-group, .canvas-node-group.is-colored {
+  --canvas-ring: color-mix(in srgb, var(--canvas-color) 55%, transparent);
+  background: color-mix(in srgb, var(--canvas-color) 7%, transparent);
+  z-index: auto;
+}
 .canvas-group-label:empty { display: none; }
 .canvas-group-label.is-editing { display: block; min-width: 12px; cursor: auto; user-select: text; outline: 2px solid var(--interactive-accent); }
-.canvas-node-group:not(.is-colored) > .canvas-group-label { background: color-mix(in srgb, var(--canvas-color) 10%, transparent); color: var(--text-muted); }
+.canvas-node-group:not(.is-colored) > .canvas-group-label { color: var(--text-muted); }
+/* Zoomed out, the label grows from its corner to stay about 14px on screen. */
 .canvas-group-label {
   z-index: 2;
   position: absolute;
@@ -54,11 +73,14 @@
   left: -1px;
   padding: 4px 8px;
   border-radius: 4px;
-  background: color-mix(in srgb, var(--canvas-color) 10%, transparent);
+  background: color-mix(in srgb, var(--canvas-color) 16%, var(--canvas-background));
   color: var(--canvas-color);
   font-size: 22.5px;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
+  transform: scale(max(1, var(--canvas-inverse-scale) * 14 / 22.5));
+  transform-origin: 0 100%;
 }
 .canvas-edge-label {
   will-change: transform;
@@ -158,7 +180,9 @@
 .canvas-node-connection-point:hover::after, .canvas-edge-end:hover::after { opacity: 1; }
 .canvas-edge-hit { pointer-events: stroke; stroke-width: calc(24px * var(--canvas-inverse-scale, 1)); stroke-opacity: 0; cursor: pointer; }
 .canvas-edge-hit.is-selected { stroke-opacity: .12; }
-.canvas-edge.is-selected { stroke-width: 5.5; }
+/* Edges stay about 1.5px on screen when zoomed out. */
+.canvas-edge { stroke-width: calc(max(2, 1.5 * var(--canvas-inverse-scale)) * 1px); }
+.canvas-edge.is-selected { stroke-width: calc(max(5.5, 4 * var(--canvas-inverse-scale)) * 1px); }
 .canvas-edge-end { display: none; cursor: grab; z-index: 3; }
 .canvas-edge-end.is-selected { display: block; transform: scale(var(--canvas-inverse-scale, 1)) translate(-50%, -50%); }
 .canvas-edge-label { cursor: pointer; }
@@ -185,3 +209,22 @@
 .canvas-node-content.is-reading-mode > .canvas-list.cm-list-line { position: relative; padding-left: 27.5px; }
 .canvas-list.cm-list-line .cm-list-bullet,
 .canvas-list.cm-list-line .cm-list-number { position: absolute; left: 8px; top: 50%; transform: translateY(-50%); }
+
+/* Title mode, below 45% zoom (navigation.ts): bodies are neither laid out nor painted,
+   and each card shows its title at about 13px on screen. Images stay pictures, and a
+   card being edited never switches. */
+.canvas-node-title { display: none; }
+.canvas-world.is-zoomed-out > .canvas-node > .canvas-node-title {
+  display: -webkit-box; position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%;
+  padding: 0 .6em; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+  font-size: calc(13px * var(--canvas-inverse-scale)); font-weight: 700; line-height: 1.25; text-align: center;
+  overflow-wrap: anywhere; color: var(--text-normal); pointer-events: none;
+}
+.canvas-world.is-zoomed-out > .canvas-node > .canvas-node-title:empty,
+.canvas-world.is-zoomed-out > .canvas-node.is-editing > .canvas-node-title,
+.canvas-world.is-zoomed-out > .canvas-node > .canvas-file-label,
+.canvas-world.is-zoomed-out > .canvas-edge-label:not(.is-editing) { display: none; }
+.canvas-world.is-zoomed-out > .canvas-node:not(.is-editing, .is-image) > .canvas-node-content { content-visibility: hidden; }
+@supports not (content-visibility: hidden) {
+  .canvas-world.is-zoomed-out > .canvas-node:not(.is-editing, .is-image) > .canvas-node-content { display: none; }
+}

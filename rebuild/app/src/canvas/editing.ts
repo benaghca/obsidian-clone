@@ -229,7 +229,12 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     }
   }, { signal: events.signal });
   el.addEventListener("dblclick", e => {
-    if (!e.isTrusted || canvasReadOnly.has(el) || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    if (!e.isTrusted || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    // Zoomed out, a double-click zooms to the card instead of opening a tiny editor;
+    // the next one edits. A group's label still edits.
+    const card = nodes.find(n => n.type !== "group" && n.id === (e.target as Element).closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    if (card && world.classList.contains("is-zoomed-out")) { e.preventDefault(); e.stopPropagation(); zoom([card]); return; }
+    if (canvasReadOnly.has(el)) return;
     const edge = edges.find(edge => edge.id === (pressedLabel ?? (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId));
     if (edge) { e.preventDefault(); e.stopPropagation(); edit(edge, selection); }
     const label = (e.target as Element).closest<HTMLElement>(".canvas-group-label");
