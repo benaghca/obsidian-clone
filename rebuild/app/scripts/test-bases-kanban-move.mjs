@@ -31,6 +31,20 @@ if (!process.argv.includes("--perf-only")) await withBrowser(async ({run,click,p
  assert.equal(await run(()=>document.querySelector('.bases-kanban-card[data-path="KM/Unsafe.md"]').classList.contains('is-movable')),false);
  await wait(()=>run(()=>!document.querySelector('.bases-kanban-card[data-path="KM/Duplicate.md"]').classList.contains('is-movable')),'duplicate disabled');
  check(true,'Escape writes nothing; commented and duplicate frontmatter have no grab cursor');
+ // Leaving keyboard pickup must release queued refreshes, without a property write.
+ for(const leave of ['Tab','focus','pointer','blur']) {
+  await focus('KM/B.md');await press(' ');await press('ArrowRight');
+  const writesBefore=await run(()=>k5calls.filter(c=>!c.dry).length);
+  if(leave==='Tab')await press('Tab');
+  else if(leave==='focus')await run(()=>document.querySelector('.bases-kanban-add').focus());
+  else if(leave==='pointer')await click('.bases-kanban-label');
+  else await run(()=>window.dispatchEvent(new Event('blur')));
+  await wait(()=>run(()=>document.querySelector('.bases-move-notice').textContent.includes('Move cancelled')),`${leave} cancels pickup`);
+  await run(async name=>{await k5api.createNote(`KM/Focus-${name}.md`,'---\nstatus: todo\n---\nbody');await ws.vault.refreshFiles();},leave);
+  await wait(()=>at(`KM/Focus-${leave}.md`,'todo'),`refresh after ${leave}`);
+  assert.equal(await run(()=>k5calls.filter(c=>!c.dry).length),writesBefore);
+ }
+ check(true,'Tab, focus departure, pointer and window blur cancel keyboard pickup and release refresh');
  // Optimistic pointer move happens while disk is deliberately delayed.
  await run(()=>{window.k5delay=180;});
  const from=await point(card('KM/D.md')), to=await point(`${col('review')} .bases-kanban-body`);

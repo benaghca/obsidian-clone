@@ -68,12 +68,14 @@ export function installMoves(board: MoveSurface) {
   const waiting: (() => void)[] = [];
   const settled = () => { if (!tracking && !picked) waiting.splice(0).forEach(resolve => resolve()); };
   let picked: { entry: Entry; column: number } | null = null;
+  const cancelPicked = () => { if (picked) { picked = null; settled(); board.announce("Move cancelled"); } };
   const say = (column: number) => { const g = board.columns()[column]; if (g) board.announce(`Drop to set ${board.property()} to ${g.id === "empty" ? "No value" : g.label}. Space to drop, Escape to cancel.`); };
   board.el.addEventListener("click", e => { if (suppressClick) { e.preventDefault(); e.stopImmediatePropagation(); suppressClick = false; } }, { ...options, capture: true });
   board.el.addEventListener("pointerdown", e => {
     suppressClick = false;
+    cancelPicked();
     if (e.button !== 0 || (e.target as Element).closest("button,input,a")) return;
-    cancel?.(); picked = null;
+    cancel?.();
     const card = (e.target as Element).closest<HTMLElement>(".bases-kanban-card"), head = (e.target as Element).closest<HTMLElement>(".bases-kanban-head");
     if (!card && !head) return;
     const entry = card ? board.entry(card.dataset.path!) : undefined;
@@ -131,9 +133,10 @@ export function installMoves(board: MoveSurface) {
     if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase())) { e.preventDefault(); e.stopPropagation(); board.undo(e.key.toLowerCase() === "z" && !e.shiftKey); return; }
     const card = (e.target as Element).closest<HTMLElement>(".bases-kanban-card");
     if (picked) {
-      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); picked = null; settled(); board.announce("Move cancelled"); }
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelPicked(); }
+      else if (e.key === "Tab") cancelPicked();
       else if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) { e.preventDefault(); e.stopPropagation(); picked.column = Math.max(0, Math.min(board.columns().length - 1, picked.column + (["ArrowLeft", "ArrowUp"].includes(e.key) ? -1 : 1))); say(picked.column); }
-      else if (e.key === " ") { e.preventDefault(); e.stopPropagation(); board.move(picked.entry, picked.column); picked = null; settled(); }
+      else if (e.key === " ") { e.preventDefault(); e.stopPropagation(); const drop = picked; picked = null; board.move(drop.entry, drop.column); settled(); }
       return;
     }
     if (!card) return;
@@ -145,5 +148,7 @@ export function installMoves(board: MoveSurface) {
       else { picked = { entry, column }; say(column); }
     }
   }, { ...options, capture: true });
-  return { idle: () => !tracking && !picked ? Promise.resolve() : new Promise<void>(resolve => waiting.push(resolve)), cancel() { cancel?.(); picked = null; settled(); }, dispose() { cancel?.(); abort.abort(); picked = null; settled(); } };
+  board.el.addEventListener("focusout", e => { if (picked && (e.relatedTarget as Element | null)?.closest?.<HTMLElement>(".bases-kanban-card")?.dataset.path !== picked.entry.row.file.path) cancelPicked(); }, options);
+  window.addEventListener("blur", cancelPicked, options);
+  return { async idle() { while (tracking || picked) await new Promise<void>(resolve => waiting.push(resolve)); }, cancel() { cancel?.(); cancelPicked(); settled(); }, dispose() { cancel?.(); cancelPicked(); abort.abort(); settled(); } };
 }

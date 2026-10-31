@@ -164,6 +164,7 @@ export function createKanban(host: KanbanHost) {
     return { selected: !!target };
   }
   async function historyReplay(back: boolean) {
+    moves.cancel();
     const m = model, hist = history();
     let previewed = false;
     const restore = new Map<string, { entry: Entry; info: NoteProperties; tags: string[] }>();
