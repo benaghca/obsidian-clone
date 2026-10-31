@@ -19,6 +19,8 @@ mod bench;
 mod parity;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod search_props_edge;
 
 use crate::fsutil::{self, is_ignored_rel};
 use crate::model::{FileEntry, LinkIndex, SearchHit};
