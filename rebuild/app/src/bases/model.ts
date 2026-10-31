@@ -111,7 +111,9 @@ export function baseModel(source: string, viewIndex = 0) {
       } else if (key.startsWith("file.")) {
         value = fileFact(row, key);
       } else {
-        const p = row.props.find(p => p.key === noteKey(key));
+        const name = noteKey(key);
+        // CAS preserves the written key's case; read that same property after a move.
+        const p = row.props.find(p => p.key === name) ?? row.props.find(p => p.key.toLowerCase() === name.toLowerCase());
         if (p && p.type !== "unknown") value = p.type === "number" && p.value !== "" ? Number(p.value) : p.value;
       }
       values.set(key, value); return value;
@@ -148,5 +150,5 @@ export function baseModel(source: string, viewIndex = 0) {
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
   const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
-  return { groupBy, summaryPlan, type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
+  return { context, groupBy, summaryPlan, type, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
 }

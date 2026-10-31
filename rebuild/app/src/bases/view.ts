@@ -204,6 +204,12 @@ export interface BaseOptions {
   remember?(index: number): void;
 }
 
+/** One ```base block. The text is the identity, so a remount of the same block keeps its undo stack and a different block in the note does not take it. */
+function blockScope(host: string, source: string) {
+  let hash = 5381;
+  for (let i = 0; i < source.length; i++) hash = Math.imul(33, hash) ^ source.charCodeAt(i);
+  return `block:${host}:${(hash >>> 0).toString(36)}`;
+}
 /**
  * A base's toolbar and its table or cards: the tab's content (createBaseView),
  * and what a note draws for a ```base block or ![[X.base]] (embed.ts).
@@ -318,7 +324,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     collapsed: scope => { const key = `${o.watch ?? `block:${hostPath() ?? ""}`}\0${scope}`; let set = collapsedHere.get(key); if (!set) collapsedHere.set(key, set = new Set()); return set; },
     groupMenu: (event, g) => menus.groupHeading(event, g) });
   // K4: a Kanban view is drawn by the board, beside the scroller; table and cards by groupedView.
-  const board = createKanban({ ws, group, groupHost: () => menus.groupHost, openGroupMenu: () => toolbar.querySelector<HTMLElement>('[aria-label="Group"]')?.click(), error });
+  const board = createKanban({ ws, group, groupHost: () => menus.groupHost, scope: () => o.watch ?? blockScope(hostPath() ?? "", source), count: value => { if (model) { model.results = value; drawToolbar(); } }, matches: entry => !query || query.toLowerCase().split(/\s+/).filter(Boolean).every(term => rowText(entry.context, model!.columns, noteName(entry.row.file.path)).includes(term)), openGroupMenu: () => toolbar.querySelector<HTMLElement>('[aria-label="Group"]')?.click(), error });
   el.append(board.el);
   const layout = () => kanban() ? board : groupedView;
   /** Rows in hidden groups are not counted (D7). The last hidden total is only a stand-in until grouping finishes, and it must not drive the count below zero. */
@@ -352,6 +358,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     try {
       while (dirty && !gone) {
         dirty = false;
+        await board.idle(); if (gone) break;
         if (reload || !model) {
           reload = false; source = await file.read(); model = baseModel(source, viewIndex);
           // ![[X.base#View]] picks its view by name once; later the toolbar's choice stands.
@@ -400,7 +407,9 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         table.hidden = cards(); scroller.hidden = kanban(); board.el.hidden = !kanban(); el.setAttribute("aria-label", cards() ? "Base cards" : kanban() ? "Base board" : "Base table");
         if (kanban()) {
           head.replaceChildren(); body.replaceChildren(); start = -1; groupedView.clear();
-          if (await board.update(model!, drawn, types, () => gone || dirty, selected)) { counted(); paint(true); }
+          // False means a gesture or a write owns the board. Try again once it has finished, or the external edit that started this pass is dropped.
+          if (await board.update(model!, drawn, types, () => gone || dirty, selected, properties)) { counted(); paint(true); board.restoreFocus(); }
+          else if (!gone) dirty = true;
           continue;
         }
         board.clear();
@@ -452,7 +461,14 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     if (same) return;
     drawn = found; model.results = shownCount(); drawToolbar();
     scroller.scrollTop = 0; start = -1;
-    if (kanban()) { board.top(); if (await board.update(model, drawn, types, stale, selected)) { counted(); paint(true); } return; }
+    if (kanban()) {
+      await board.idle();
+      if (stale() || !model) return;
+      board.top();
+      if (await board.update(model, drawn, types, stale, selected)) { counted(); paint(true); board.restoreFocus(); }
+      else if (!stale()) schedule();
+      return;
+    }
     if (!cards()) table.setAttribute("aria-rowcount", String(drawn.length + 1));
     if (await groupedView.update(model, drawn, types, stale)) { counted(); paint(true); }
   }
