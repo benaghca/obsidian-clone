@@ -1,6 +1,10 @@
-// One delayed, local page preview, shared by editors and sidebar results.
+// One delayed, local page preview, shared by editors, sidebar results and canvas cards.
 // A detached read-only view supplies NoteEmbedWidget's rendering context;
 // no view, file read or syntax lookup is created until an eligible hover.
+// Canvas clicks call preventDefault on pointerdown, and WebKitGTK can keep
+// suppressing the compatibility mousemove after that. Pointer events are not
+// suppressed, so the hover listens to those. The popover is appended to the
+// body in viewport coordinates so a canvas world's transform cannot scale or clip it.
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { NoteEmbedWidget, splitSubpath } from "../editor/embeds";
@@ -68,6 +72,8 @@ export function installHoverPreviews(ws: Workspace) {
     popup = h("div", { class: "hover-popover is-reading-mode", role: "dialog", "aria-label": "Page preview" }, dom);
     popup.addEventListener("mouseenter", cancel);
     popup.addEventListener("mouseleave", leave);
+    popup.addEventListener("pointerenter", cancel);
+    popup.addEventListener("pointerleave", leave);
     popup.addEventListener("click", (event) => {
       const link = (event.target as Element).closest<HTMLElement>("[data-href]");
       if (!link || !event.isTrusted) return;
@@ -77,6 +83,7 @@ export function installHoverPreviews(ws: Workspace) {
       if (local) context.state.facet(editorHost)!.openLink(href, event.ctrlKey || event.metaKey ? "tab" : false);
       else { host.openUrl(href); close(); }
     });
+    // Body, not the card: the canvas world is transformed and overflow-hidden.
     document.body.append(popup);
     const toRight = side && innerWidth - side.right >= side.left;
     if (side) popup.style.width = `${Math.max(0, Math.min(popup.offsetWidth, (toRight ? innerWidth - side.right : side.left) - 14))}px`;
@@ -95,11 +102,14 @@ export function installHoverPreviews(ws: Workspace) {
     dispose = () => { size.disconnect(); widget.destroy(dom); context.destroy(); };
   }
 
-  document.addEventListener("mousemove", (event) => {
-    const el = event.target as HTMLElement;
+  const hoverModifier = (event: { ctrlKey: boolean; metaKey: boolean }) =>
+    /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
+  let pointerX = 0, pointerY = 0, pointerSeen = false;
+
+  function inspect(x: number, y: number, modified: boolean, el: HTMLElement | null) {
+    if (!el || typeof el.closest !== "function") return leave();
     if (popup?.contains(el)) return cancel();
     const view = EditorView.findFromDOM(el);
-    const modified = /Mac|iPhone|iPad/.test(navigator.platform) ? event.metaKey : event.ctrlKey;
     const allowed = modified || !!view?.state.facet(readingMode);
     if (!allowed && !popup) return leave();
     const sidebar = el.closest<HTMLElement>("[data-preview-path]");
@@ -107,7 +117,7 @@ export function installHoverPreviews(ws: Workspace) {
     let target = sidebar?.dataset.previewPath ?? link?.dataset.href;
     let rect = (sidebar ?? link)?.getBoundingClientRect();
     if (!target && view) {
-      const pos = view.posAtCoords({ x: event.clientX, y: event.clientY });
+      const pos = view.posAtCoords({ x, y });
       const found = pos === null ? null : linkAt(view.state, pos);
       if (found?.kind === "internal") {
         target = found.target;
@@ -139,6 +149,10 @@ export function installHoverPreviews(ws: Workspace) {
       document.addEventListener("input", close, { capture: true, signal });
       document.addEventListener("scroll", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
       document.addEventListener("mousedown", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
+      // A canvas click preventDefault's pointerdown, which can swallow the mousedown that used to dismiss.
+      document.addEventListener("pointerdown", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
+      // Ctrl+wheel zooms the canvas without scrolling, so a wheel has to dismiss on its own.
+      document.addEventListener("wheel", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
       window.addEventListener("blur", close, { signal });
       window.addEventListener("resize", close, { signal });
     }
@@ -146,6 +160,27 @@ export function installHoverPreviews(ws: Workspace) {
       pending = 0;
       show(target!, from, source, rect!, sidebar?.closest(".workspace-split.mod-sidedock")?.getBoundingClientRect());
     }, 350);
+  }
+
+  document.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    pointerX = event.clientX;
+    pointerY = event.clientY;
+    pointerSeen = true;
+    // A drag or pan owns the pointer. Don't start a preview under it.
+    if (event.buttons && !popup && !pending) return;
+    const raw = event.target as HTMLElement | null;
+    inspect(event.clientX, event.clientY, hoverModifier(event), raw && typeof raw.closest === "function" ? raw : null);
+  }, { capture: true, passive: true });
+  // Ctrl (Cmd on macOS) while the pointer is already still, with no further move.
+  document.addEventListener("keydown", (event) => {
+    if (!pointerSeen || event.repeat) return;
+    const modifier = /Mac|iPhone|iPad/.test(navigator.platform) ? "Meta" : "Control";
+    if (event.key !== modifier) return;
+    inspect(pointerX, pointerY, true, document.elementFromPoint(pointerX, pointerY) as HTMLElement | null);
   });
-  document.addEventListener("mouseout", (event) => { if (!event.relatedTarget) leave(); });
+  document.addEventListener("pointerout", (event) => {
+    if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
+    if (!event.relatedTarget) leave();
+  }, { capture: true });
 }
