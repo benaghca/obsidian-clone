@@ -23,3 +23,8 @@ it("uses one editor transaction for unsaved loaded text and never calls the disk
  expect((await writeProperty(ws,"A.md",edit,true)).status).toBe("done");expect(change).not.toHaveBeenCalled();
  expect((await writeProperty(ws,"A.md",edit)).status).toBe("done");expect(change).toHaveBeenCalledWith("A.md",expect.objectContaining({userEvent:"input.property",scrollIntoView:false}));expect(disk).not.toHaveBeenCalled();disk.mockRestore();
 });
+it("switches to the editor if the note loads while the native API is being resolved",async()=>{
+ const text="---\nstatus: todo\n---\nunsaved",change=vi.fn(),disk=vi.spyOn(api,"setProperty");
+ const ws={editors:{isLoaded:vi.fn().mockReturnValueOnce(false).mockReturnValue(true),doc:()=>({toString:()=>text}),change},vault:{written:vi.fn()}} as unknown as Workspace;
+ expect((await writeProperty(ws,"A.md",propertyMove("status",inspectDocument(text,"status"),"doing"))).status).toBe("done");expect(change).toHaveBeenCalledTimes(1);expect(disk).not.toHaveBeenCalled();disk.mockRestore();
+});

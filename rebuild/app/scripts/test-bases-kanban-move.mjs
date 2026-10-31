@@ -1,7 +1,7 @@
 // K5: native pointer/keys, CAS races, loaded editors, history, embeds and P4/P5/P7.
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
-await withBrowser(async ({run,click,point,send,press,check})=>{
+if (!process.argv.includes("--perf-only")) await withBrowser(async ({run,click,point,move,send,press,check})=>{
  const wait=async(test,label,n=400)=>{for(let i=0;i<n;i++){if(await test())return;await sleep(25);}assert.fail(label);};
  const read=path=>run(async path=>{const {api}=await import('/src/api.ts');return api.readNote(path);},path);
  const source=`filters: 'file.inFolder("KM")'\nviews:\n  - type: kanban\n    name: Board\n    order: [file.name, status]\n    groupBy:\n      property: status\n      direction: ASC\n      order: [todo, doing, review, done, null]\n    sort:\n      - property: file.name\n        direction: ASC\n`;
@@ -15,15 +15,15 @@ await withBrowser(async ({run,click,point,send,press,check})=>{
   await api.createNote('KM/Duplicate.md','---\nstatus: todo\nstatus: doing\n---\nbody\n');
   await api.createNote('KM.base',source);await ws.vault.refreshFiles();await ws.open('KM.base');
   window.k5api=api;window.k5original=api.setProperty;window.k5calls=[];
-  api.setProperty=async(...args)=>{k5calls.push({path:args[0],edit:args[1],dry:!!args[2],at:performance.now()});if(!args[2]&&window.k5delay)await new Promise(r=>setTimeout(r,k5delay));if(!args[2]&&window.k5conflict){window.k5conflict=false;await api.writeNote(args[0],'---\nstatus: external\nkeep: same\n---\nexternal body\n');}if(!args[2]&&window.k5refuse)return {status:'refused',reason:'Simulated write refusal'};return k5original(...args);};
+  api.setProperty=async(...args)=>{k5calls.push({path:args[0],edit:args[1],dry:!!args[2],at:performance.now()});if(args[2]&&window.k5dryDelay)await new Promise(r=>setTimeout(r,k5dryDelay));if(!args[2]&&window.k5delay)await new Promise(r=>setTimeout(r,k5delay));if(!args[2]&&window.k5conflict){window.k5conflict=false;await api.writeNote(args[0],'---\nstatus: external\nkeep: same\n---\nexternal body\n');}if(!args[2]&&window.k5refuse)return {status:'refused',reason:'Simulated write refusal'};return k5original(...args);};
  },source);
  await wait(()=>at('KM/A.md','todo'),'board');
  const focus=async path=>{await run(path=>document.querySelector(`.bases-kanban-card[data-path='${path}']`).focus(),path);};
  const keyboard=async(path,steps)=>{await focus(path);await press(' ');for(let i=0;i<Math.abs(steps);i++)await press(steps>0?'ArrowRight':'ArrowLeft');await press(' ');};
  await keyboard('KM/A.md',1);await wait(async()=>/status: 'doing'/.test(await read('KM/A.md')),'keyboard move');
  assert.ok((await read('KM/A.md')).endsWith('body A\n'));check(true,'Space/arrows/Space moves with quote and body bytes preserved');
- await wait(()=>at('KM/A.md','doing'),'move reconciled');await focus('KM/A.md');await press('z',2);
- await wait(async()=>/status: 'todo'/.test(await read('KM/A.md')),'undo');await wait(()=>at('KM/A.md','todo'),'undo painted');
+ await wait(()=>at('KM/A.md','doing'),'move reconciled');await run(()=>{window.k5dryDelay=140;});await focus('KM/A.md');await press('z',2);assert.ok(await at('KM/A.md','todo'),'Undo previews before slow validation');assert.match(await read('KM/A.md'),/status: 'doing'/);
+ await wait(async()=>/status: 'todo'/.test(await read('KM/A.md')),'undo');await run(()=>{window.k5dryDelay=0;});await wait(()=>at('KM/A.md','todo'),'undo painted');
  await focus('KM/A.md');await press('z',10);await wait(async()=>/status: 'doing'/.test(await read('KM/A.md')),'redo');
  await wait(()=>at('KM/A.md','doing'),'redo painted');check(true,'Ctrl+Z and Ctrl+Shift+Z replay exact raw CAS lines');
  // Escape cancels without a writer; invalid YAML is disabled before pick-up.
@@ -119,7 +119,7 @@ await withBrowser(async ({run,click,point,send,press,check})=>{
  await wait(()=>run(()=>!!document.querySelector('.bases-kanban-card[data-path="KM/TagBody.md"]')),'tag filter board');await keyboard('KM/TagBody.md',1);
  await wait(async()=>/tags: \[other\]/.test(await read('KM/TagBody.md')),'body tag move');await sleep(150);assert.ok(await run(()=>!!document.querySelector('.bases-kanban-card[data-path="KM/TagBody.md"]')));
  await keyboard('KM/TagNoBody.md',1);await wait(async()=>/tags: \[other\]/.test(await read('KM/TagNoBody.md')),'removed tag move');await sleep(150);
- assert.equal(await run(()=>!!document.querySelector('.bases-kanban-card[data-path="KM/TagNoBody.md"]')),false);check(true,'Tag filters keep body tags and discard removed frontmatter tags after moving');
+ assert.equal(await run(()=>!!document.querySelector('.bases-kanban-card[data-path="KM/TagNoBody.md"]')),false);check(true,'Tag filters keep body tags and discard removed frontmatter tags after moving');await run(()=>{window.k5dryDelay=140;});await click('.bases-move-notice button');assert.ok(await run(()=>!!document.querySelector('.bases-kanban-card[data-path="KM/TagNoBody.md"]')),'tag-filter Undo paints before validation');assert.match(await read('KM/TagNoBody.md'),/tags: \[other\]/);await wait(async()=>/tags: \[work\]/.test(await read('KM/TagNoBody.md')),'tag-filter Undo saved');await run(()=>{window.k5dryDelay=0;});check(true,'Tag-filter Undo previews immediately while fresh validation is delayed');
  // Native pointer drag inside an editor embed does not drag text or move its following line.
  const embed='# Moving\n\n```base\n'+source+'```\n\nafter move board\n';
  await run(async embed=>{await k5api.createNote('Move Plan.md',embed);await ws.vault.refreshFiles();await ws.open('Move Plan.md');},embed);
@@ -129,6 +129,12 @@ await withBrowser(async ({run,click,point,send,press,check})=>{
  const y=await lineY(), start=await point(card('KM/C.md')), end=await point(`${col('doing')} .bases-kanban-body`);
  await send('Input.dispatchMouseEvent',{type:'mousePressed',...start,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseMoved',...end,buttons:1});await sleep(35);await send('Input.dispatchMouseEvent',{type:'mouseReleased',...end,button:'left',clickCount:1});
  await wait(async()=>/status: 'doing'/.test(await read('KM/C.md')),'embedded move');const afterY=await lineY();console.log('K5_EMBED',JSON.stringify({before:y,after:afterY}));assert.ok(Math.abs(afterY.followingGap-y.followingGap)<.01);assert.equal(afterY.widgetHeight,y.widgetHeight);assert.ok(Math.abs(afterY.screen-y.screen)<=1);assert.equal(afterY.height,400);check(true,'Embedded native drag changes only the property, with unchanged editor line geometry');
+ // The card menu must own the native context event inside an editor embed.
+ await click(card('KM/C.md'),'right');
+ const menuPoint=title=>run(title=>{const e=[...document.querySelectorAll('.menu-item')].find(e=>e.querySelector('.menu-item-title')?.textContent===title);if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};},title);
+ await wait(async()=>!!await menuPoint('Move to'),'card Move to');await move(await menuPoint('Move to'));await wait(async()=>!!await menuPoint('review'),'target submenu');await click(await menuPoint('review'));
+ await wait(async()=>/status: 'review'/.test(await read('KM/C.md')),'context move saved');assert.equal(await read('Move Plan.md'),embed);check(true,'Native card Move to submenu works inside an embed without editing its host');
+
 
 });
 
@@ -140,7 +146,7 @@ await withBrowser(async({run,send,point,press,check})=>{
   const {api}=await import('/src/api.ts');window.k5api=api;
   const source='filters: \'file.inFolder("KP")\'\nviews:\n  - type: kanban\n    name: Performance\n    order: [file.name, status, priority]\n    groupBy:\n      property: status\n      order: [todo, doing, review, done]\n    sort:\n      - property: file.name\n';
   for(let i=0;i<10000;i++){const e=i%100===0?'\r\n':'\n',bom=i%100===0?'\uFEFF':'';await api.createNote(`KP/${String(i).padStart(5,'0')}.md`,`${bom}---${e}status: ${['todo','doing','review','done'][i%4]}${e}priority: ${i%7}${e}---${e}body ${i}${e}`);}
-  await api.createNote('KP.base',source);await ws.vault.refreshFiles();await ws.open('KP.base');
+  await api.createNote('KP Finish.md','# Finished');await api.createNote('KP.base',source);await ws.vault.refreshFiles();await ws.open('KP.base');
  });
  await wait(()=>run(()=>!!document.querySelector('.bases-kanban-card[data-path="KP/00000.md"]')),'10k board');await sleep(150);
  const start=await point('.bases-kanban-card[data-path="KP/00000.md"]');
@@ -163,10 +169,10 @@ await withBrowser(async({run,send,point,press,check})=>{
  await send('Input.dispatchMouseEvent',{type:'mouseMoved',...start});await send('Input.dispatchMouseEvent',{type:'mousePressed',...start,button:'left',clickCount:1});
  const end={x:bounds.right-12,y:bounds.bottom-18};
  for(let i=1;i<=120;i++){await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:start.x+(end.x-start.x)*Math.min(1,i/90),y:start.y+(end.y-start.y)*Math.min(1,i/90),buttons:1});await sleep(8);}
- const drag=await run(()=>{k5p.active=false;cancelAnimationFrame(k5p.raf);return{...k5p,frames:k5p.frames.slice(2),scrollX:document.querySelector('.bases-kanban').scrollLeft,scrollY:Math.max(...[...document.querySelectorAll('.bases-kanban-body')].map(b=>b.scrollTop))};});
+ const drag=await run(()=>{k5p.active=false;cancelAnimationFrame(k5p.raf);return{...k5p,frames:k5p.frames.slice(2),trackTop:document.querySelector('.bases-kanban-track').getBoundingClientRect().top,scrollX:document.querySelector('.bases-kanban').scrollLeft,scrollY:Math.max(...[...document.querySelectorAll('.bases-kanban-body')].map(b=>b.scrollTop))};});
  const after=await metrics();const sorted=drag.frames.sort((a,b)=>a-b),p95=sorted[Math.floor(sorted.length*.95)],max=Math.max(...sorted),maxEvent=Math.max(...drag.events);
  console.log('K5_P4',JSON.stringify({frames:sorted.length,p95,max,handlerMaxMs:maxEvent,scriptPerMoveMs:(after.ScriptDuration-before.ScriptDuration)*1000/120,layouts:after.LayoutCount-before.LayoutCount,rectReads:drag.rects,ghostChecks:drag.ghostChecks,ghostLag:drag.ghostLag,scrollX:drag.scrollX,scrollY:drag.scrollY,long:drag.long}));
- assert.ok(p95<=20&&max<=25);assert.ok(maxEvent<=1);assert.ok((after.ScriptDuration-before.ScriptDuration)*1000/120<=1);assert.ok(after.LayoutCount-before.LayoutCount<=sorted.length+4);assert.ok(drag.rects<=3,'only threshold snapshot reads rectangles');assert.equal(drag.ghostLag,0);assert.ok(drag.ghostChecks>=100);assert.ok(drag.scrollX>0&&drag.scrollY>0);assert.deepEqual(drag.long,[]);
+ assert.ok(p95<=20&&max<=25);assert.ok(maxEvent<=1);assert.ok((after.ScriptDuration-before.ScriptDuration)*1000/120<=1);assert.ok(after.LayoutCount-before.LayoutCount<=sorted.length+4);assert.ok(drag.rects<=3,'only threshold snapshot reads rectangles');assert.equal(drag.ghostLag,0);assert.ok(drag.ghostChecks>=100);assert.ok(drag.scrollX>0&&drag.scrollY>0);assert.equal(drag.trackTop,bounds.top,'a drag hint never reflows the track');assert.deepEqual(drag.long,[]);
  await send('Input.dispatchMouseEvent',{type:'mouseReleased',...end,button:'left',clickCount:1});
  await wait(()=>run(()=>k5p.paint&&k5p.saved&&k5p.reconciled),'drop painted, saved and reconciled');
  const drop=await run(()=>({paint:k5p.paint-k5p.up,saved:k5p.saved-k5p.up,reconciled:k5p.reconciled-k5p.up,painted:k5p.painted,long:k5p.dropLong}));console.log('K5_P5',JSON.stringify(drop));assert.equal(drop.painted,true);assert.ok(drop.paint<=20&&drop.saved<=100&&drop.reconciled<=100);assert.deepEqual(drop.long,[]);
@@ -178,9 +184,15 @@ await withBrowser(async({run,send,point,press,check})=>{
  const historyMeasure=async(back,target)=>{
   await run(target=>{document.querySelector('.bases-kanban').focus();window.k5hist={target,frames:0};if(!window.k5historyListener){window.k5historyListener=true;window.addEventListener('keydown',e=>{if(!e.ctrlKey||e.key.toLowerCase()!=='z')return;k5hist.start=performance.now();requestAnimationFrame(function tick(){k5hist.frames++;if(document.querySelector(`.bases-kanban-col[data-group-id='s:"${k5hist.target}"'] .bases-kanban-card[data-path="KP/00000.md"]`)){k5hist.paint=performance.now();return;}if(k5hist.frames<30)requestAnimationFrame(tick);});},{capture:true});}},target);
   await press('z',back?2:10);await wait(()=>run(()=>k5hist.paint&&k5hist.reconciled&&k5p.saved>=k5hist.start),'history paint and reconcile');
-  const result=await run(()=>({paint:k5hist.paint-k5hist.start,saved:k5p.saved-k5hist.start,reconciled:k5hist.reconciled-k5hist.start,frames:k5hist.frames}));assert.ok(result.paint<=20&&result.saved<=100&&result.reconciled<=100);assert.equal(result.frames,1);return result;
+  const result=await run(()=>({paint:k5hist.paint-k5hist.start,saved:k5p.saved-k5hist.start,reconciled:k5hist.reconciled-k5hist.start,frames:k5hist.frames}));assert.ok(result.paint<=20&&result.saved<=100&&result.reconciled<=100,JSON.stringify(result));assert.equal(result.frames,1,JSON.stringify(result));return result;
  };
  const saved=await run(()=>k5api.readNote('KP/00000.md'));assert.ok(saved.startsWith('\uFEFF---\r\n')&&saved.endsWith('body 0\r\n')&&saved.includes('status: done\r\n'));
  const undo=await historyMeasure(true,'todo');await sleep(120);const redo=await historyMeasure(false,'done');console.log('K5_P7',JSON.stringify({undo,redo}));await run(()=>{k5p.obs.disconnect();k5p.mutations.disconnect();});
+ // Navigating away during an auto-scroll drag cancels it and any detached column fill.
+ const leaving=await point('.bases-kanban-card[data-path="KP/00000.md"]');
+ const other=await point('.bases-kanban-col[data-group-id=\'s:"review"\'] .bases-kanban-body');other.y=bounds.bottom-5;
+ await send('Input.dispatchMouseEvent',{type:'mousePressed',...leaving,button:'left',clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseMoved',...other,buttons:1});await wait(()=>run(()=>!!document.querySelector('.bases-move-ghost')),'navigation drag');
+ await run(()=>ws.open('KP Finish.md'));await send('Input.dispatchMouseEvent',{type:'mouseReleased',...other,button:'left',clickCount:1});await sleep(50);
+ assert.equal(await run(()=>!!document.querySelector('.bases-move-ghost')),false);assert.ok((await run(()=>k5api.readNote('KP/00000.md'))).includes('status: done'));check(true,'Leaving an auto-scroll drag removes its ghost and writes nothing');
  check(true,`P4: 10k drag p95 ${p95.toFixed(1)}ms, handler max ${maxEvent.toFixed(3)}ms; P5/P7 optimistic paint and CAS finish within budget`);
 });

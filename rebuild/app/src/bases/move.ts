@@ -30,9 +30,11 @@ export function inspectDocument(text: string, key: string): NoteProperties {
   if (result.status === "conflict") throw Error("Note changed during inspection");
   return result.props;
 }
+let nativeAPI: Promise<typeof import("../api")> | undefined;
 export async function writeProperty(ws: Workspace, path: string, edit: PropertyEdit, dryRun = false): Promise<EditResult> {
   if (!ws.editors.isLoaded(path)) {
-    const { api } = await import("../api");
+    const { api } = await (nativeAPI ??= import("../api"));
+    if (ws.editors.isLoaded(path)) return writeProperty(ws, path, edit, dryRun);
     const result = await api.setProperty(path, edit, dryRun);
     if (!dryRun && (result.status === "done" || result.status === "unchanged")) ws.vault.written(path);
     return result;

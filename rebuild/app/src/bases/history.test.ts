@@ -14,7 +14,7 @@ describe("board CAS history", () => {
   });
   it("serialises work, bounds history to 100 and clears redo for a new move", async () => {
     const h=createMoveHistory(), order:number[]=[];
-    await Promise.all([h.queue(async()=>{await new Promise(r=>setTimeout(r,5));order.push(1);}),h.queue(async()=>{order.push(2);})]); expect(order).toEqual([1,2]);
+    const work=Promise.all([h.queue(async()=>{await new Promise(r=>setTimeout(r,5));order.push(1);}),h.queue(async()=>{order.push(2);})]);expect(h.idle).toBe(false);await work;expect(h.idle).toBe(true); expect(order).toEqual([1,2]);
     for(let i=0;i<105;i++)h.push(record);expect(h.sizes.undo).toBe(100);
     await h.replay(true,async()=>({status:"unchanged",before:null,after:null,props:{props:[],lines:[]},mtime_ms:0}));h.push(record);expect(h.sizes.redo).toBe(0);
   });

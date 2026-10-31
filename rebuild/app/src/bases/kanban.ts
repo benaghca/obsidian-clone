@@ -23,7 +23,8 @@ import { reordered } from "./drag";
 import { isEmpty, type Value } from "./functions";
 import { groupEntry, hideGroup, withManual, writeManual, type GroupMenuHost } from "./groupMenu";
 import { arrangeGroups, groupRowsAsync, parseManual, valueKey, writeViewSetting, MANUAL_LIMIT, type Entry, type RowGroup, type SliceOptions } from "./groups";
-import { moveHistory } from "./history";
+import { moveHistory, reverseEdit, type MoveOp } from "./history";
+import type { EditResult } from "../editor/propertyEdit";
 import { inspectDocument, installMoves, propertyMove, readOnlyReason, writeProperty } from "./move";
 import { mapping } from "./yaml";
 import { baseModel, noteKey } from "./model";
@@ -163,17 +164,12 @@ export function createKanban(host: KanbanHost) {
     return { selected: !!target };
   }
   async function historyReplay(back: boolean) {
-    const m = model;
+    const m = model, hist = history();
     let previewed = false;
-    const restore: { entry: Entry; info: NoteProperties }[] = [];
-    try {
-      const record = await history().replay(back, async (path, edit, dry) => {
-        const result = await writeProperty(ws, path, edit, dry);
-        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) { await tagFacts(entry, edit.key).catch(() => {}); patch(entry, result.props); } }
-        return result;
-      }, prepared => {
+    const restore = new Map<string, { entry: Entry; info: NoteProperties; tags: string[] }>();
+    const preview = (prepared: { op: MoveOp; result: EditResult }[]) => {
         if (model !== m) return;
-        pendingWrites++; previewed = true;
+        if (!previewed) { pendingWrites++; previewed = true; }
         for (const { op, result } of prepared) {
           if (result.status !== "done" && result.status !== "unchanged") continue;
           const entry = entries.get(op.path) ?? (op.row && { row: op.row, context: m!.context(op.row) });
@@ -183,11 +179,29 @@ export function createKanban(host: KanbanHost) {
             const restored = editProperty(`---\n${result.props.lines.join("\n")}\n---\n`, { key: op.key, expect: result.after, to: result.before === null ? null : { lines: result.before } });
             if (restored.status === "done" || restored.status === "unchanged") prior = restored.props;
           }
-          if (prior) restore.push({ entry, info: prior });
+          if (prior && !restore.has(op.path)) restore.set(op.path, { entry, info: prior, tags: entry.row.tags });
+          if (/^(tags|tag)$/i.test(op.key)) entry.row = { ...entry.row, tags: (back ? op.tagsBefore : op.row?.tags) ?? entry.row.tags };
           entries.set(op.path, entry);
           patch(entry, result.props);
         }
-      }, async (record, undo) => {
+    };
+    try {
+      // Optimism is synchronous; fresh I/O preflight still gates every actual write.
+      // A busy queue is previewed when its operation reaches the front instead.
+      const head = hist.idle ? hist.peek(back) : undefined;
+      if (head && !head.order) {
+        const local = (back ? [...head.ops].reverse() : head.ops).map(op => {
+          const doc = ws.editors.doc(op.path), metadata = info.get(op.path);
+          const result = doc || metadata ? editProperty(doc?.toString() ?? `---\n${metadata!.lines.join("\n")}\n---\n`, reverseEdit(op, back)) : null;
+          return result && { op, result };
+        });
+        if (local.every((p): p is NonNullable<typeof p> => !!p && (p.result.status === "done" || p.result.status === "unchanged"))) preview(local);
+      }
+      const record = await hist.replay(back, async (path, edit, dry) => {
+        const result = await writeProperty(ws, path, edit, dry);
+        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) { await tagFacts(entry, edit.key).catch(() => {}); patch(entry, result.props); } }
+        return result;
+      }, preview, async (record, undo) => {
         const order = record.order!; let done = false;
         await host.groupHost().save((source) => {
           const original = baseModel(source, order.index);
@@ -197,7 +211,7 @@ export function createKanban(host: KanbanHost) {
         if (!done) throw Error("Group order changed since or could not be saved");
       });
       if (record) announce(`${back ? "Undid" : "Redid"} ${record.label}`, !back);
-    } catch (e) { if (model === m) for (const prior of restore.reverse()) patch(prior.entry, prior.info); announce(`Can't ${back ? "undo" : "redo"}: ${e instanceof Error ? e.message : String(e)}`); } finally { if (previewed) finishedWrite(); }
+    } catch (e) { if (model === m) for (const prior of [...restore.values()].reverse()) { prior.entry.row = { ...prior.entry.row, tags: prior.tags }; patch(prior.entry, prior.info); } announce(`Can't ${back ? "undo" : "redo"}: ${e instanceof Error ? e.message : String(e)}`); } finally { if (previewed) finishedWrite(); }
   }
   function move(entry: Entry, ci: number) {
     const target = columns[ci], m = model; if (!target || !m || target.rows.includes(entry)) return;
@@ -206,19 +220,21 @@ export function createKanban(host: KanbanHost) {
       const prospective = editProperty(`---\n${prior.lines.join("\n")}\n---\n`, edit);
       if (prospective.status !== "done" && prospective.status !== "unchanged") throw Error("This value doesn't fit the property");
       const hist = history(), label = `Moved "${noteName(path)}" to ${labelOf(target)}`;
+      let tagsBefore = entry.row.tags;
       const patched = patch(entry, prospective.props);
       announce(`${label}${patched?.selected ? "" : " · it no longer matches this view's filters"}`);
       void hist.queue(async () => {
         pendingWrites++;
         try {
+          if (/^(tags|tag)$/i.test(edit.key)) { await tagFacts(entry, edit.key).catch(() => {}); tagsBefore = entry.row.tags; }
           const result = await writeProperty(ws, path, edit);
           if (result.status === "conflict" || result.status === "refused") {
             if (model === m) patch(entry, prior);
             if (result.status === "conflict") ws.vault.written(path);
             throw Error(result.status === "conflict" ? `${noteName(path)} changed since the board was drawn (${edit.key} is now ${result.current ?? "No value"}). Not moved.` : result.reason);
           }
-          if (model === m && /^(tags|tag)$/i.test(edit.key)) { await tagFacts(entry, edit.key).catch(() => {}); const current = patch(entry, result.props); if (patched && current) patched.selected = current.selected; }
-          hist.push({ label, ops: [{ path, key: edit.key, before: result.before, after: result.after, row: entry.row }] });
+          if (/^(tags|tag)$/i.test(edit.key)) { await tagFacts(entry, edit.key).catch(() => {}); if (model === m) { const current = patch(entry, result.props); if (patched && current) patched.selected = current.selected; } }
+          hist.push({ label, ops: [{ path, key: edit.key, before: result.before, after: result.after, row: entry.row, tagsBefore }] });
           if (!gone && model?.name === m.name) announce(`${label}${patched?.selected ? "" : " · it no longer matches this view's filters"}`, true);
         } catch (e) { if (!gone) { if (model === m) patch(entry, prior); announce(e instanceof Error ? e.message : String(e)); } } finally { finishedWrite(); }
       });
@@ -354,7 +370,7 @@ export function createKanban(host: KanbanHost) {
     const el = h("section", { class: "bases-kanban-col", role: "list", "aria-label": `${label(g)}, ${count} ${count === 1 ? "note" : "notes"}`, "data-group-id": g.id, style: `left:${KANBAN.pad + i * (width + KANBAN.gap)}px;width:${width}px` }, head, body);
     const c: Column = { g, el, body, inner, cards: new Map(), first: -1, end: -1 };
     let tick = 0;
-    body.addEventListener("scroll", () => { scrollTops.set(g.id, body.scrollTop); tick ||= requestAnimationFrame(() => { tick = 0; fill(c); }); }, { passive: true });
+    body.addEventListener("scroll", () => { scrollTops.set(g.id, body.scrollTop); tick ||= requestAnimationFrame(() => { tick = 0; if (!gone && model && mounted.get(g.id) === c) fill(c); }); }, { passive: true });
     return c;
   }
   function unmount(id: string) {
@@ -385,10 +401,11 @@ export function createKanban(host: KanbanHost) {
     for (const c of mounted.values()) for (const [path, card] of c.cards) { const on = path === focusPath; card.tabIndex = on ? 0 : -1; drawn ||= on; }
     el.tabIndex = drawn ? -1 : 0;
   }
-  el.addEventListener("scroll", () => { scrollX = el.scrollLeft; frame ||= requestAnimationFrame(() => { frame = 0; paintBoard(); }); }, { passive: true });
+  const positionNotice = () => { notice.style.transform = `translateX(${scrollX}px)`; };
+  el.addEventListener("scroll", () => { scrollX = el.scrollLeft; positionNotice(); frame ||= requestAnimationFrame(() => { frame = 0; paintBoard(); }); }, { passive: true });
   const moves = installMoves({ el, property: keyOf, columns: () => columns, reason, slot, move,
     geometry: () => ({ width, pitch, cardHeight, viewport: viewWidth, height: viewHeight, scrollX }),
-    scrollX(value) { const next = Math.max(0, Math.min(Math.max(0, trackWidth(columns.length, width) - viewWidth), value)); if (next !== scrollX) { scrollX = next; el.scrollLeft = next; } },
+    scrollX(value) { const next = Math.max(0, Math.min(Math.max(0, trackWidth(columns.length, width) - viewWidth), value)); if (next !== scrollX) { scrollX = next; el.scrollLeft = next; positionNotice(); } },
     scrollY(ci, value) { const g = columns[ci]; if (!g) return 0; const top = scrollTops.get(g.id) ?? 0; if (value === undefined) return top; const next = Math.max(0, Math.min(Math.max(0, g.rows.length * pitch - bodyHeight()), value)); if (next !== top) { scrollTops.set(g.id, next); const c = mounted.get(g.id); if (c) c.body.scrollTop = next; } return next; },
     entry: path => entries.get(path),
     reorder: (a, b) => void reorderColumns(a, b), announce, undo: back => void historyReplay(back),

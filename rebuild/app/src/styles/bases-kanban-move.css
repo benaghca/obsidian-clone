@@ -6,7 +6,8 @@
 .bases-move-ghost { position: fixed !important; z-index: 1000; pointer-events: none; margin: 0; opacity: .9; will-change: transform; box-shadow: 0 8px 24px #0004; }
 .bases-move-line { position: fixed; top: 0; left: 0; z-index: 1001; pointer-events: none; background: var(--interactive-accent); }
 .bases-move-line[hidden] { display: none; }
-.bases-move-notice, .bases-move-lock { position: sticky; left: 0; flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px; color: var(--text-muted); font-size: 12px; }
+.bases-move-lock { position: sticky; left: 0; flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 12px; color: var(--text-muted); font-size: 12px; }
+.bases-move-notice { position: absolute; left: 8px; bottom: 8px; z-index: 4; display: flex; align-items: center; gap: 8px; max-width: calc(100% - 16px); box-sizing: border-box; padding: 6px 12px; border-radius: 6px; background: var(--background-secondary); color: var(--text-muted); font-size: 12px; pointer-events: none; }
 .bases-move-notice[hidden], .bases-move-lock[hidden] { display: none; }
-.bases-move-notice button { background: none; border: 0; color: var(--text-accent); cursor: pointer; font: inherit; }
+.bases-move-notice button { pointer-events: auto; background: none; border: 0; color: var(--text-accent); cursor: pointer; font: inherit; }
 .bases-move-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

@@ -3,7 +3,7 @@ import type { EditResult, PropertyEdit } from "../editor/propertyEdit";
 import type { Tab } from "../tabs";
 import type { Yaml } from "./yaml";
 import type { Row } from "./model";
-export interface MoveOp { path: string; key: string; before: string | null; after: string | null; /** Bounded with the 100 records, for immediate Undo after a filter hid the row. */ row?: Row }
+export interface MoveOp { path: string; key: string; before: string | null; after: string | null; /** Bounded with the 100 records, for immediate Undo after a filter hid the row. */ row?: Row; tagsBefore?: string[] }
 export interface MoveRecord { label: string; ops: MoveOp[]; order?: { index: number; view: string; before: Yaml | undefined; after: Yaml | undefined } }
 export type WriteProperty = (path: string, edit: PropertyEdit, dryRun?: boolean) => Promise<EditResult>;
 type Preview = (ops: { op: MoveOp; result: EditResult }[]) => void;
@@ -38,10 +38,12 @@ export async function replay(record: MoveRecord, undo: boolean, write: WriteProp
 }
 export function createMoveHistory() {
   const undo: MoveRecord[] = [], redo: MoveRecord[] = [];
-  let tail = Promise.resolve();
-  const queue = <T>(run: () => Promise<T>): Promise<T> => { const next = tail.then(run); tail = next.then(() => {}, () => {}); return next; };
+  let tail = Promise.resolve(), pending = 0;
+  const queue = <T>(run: () => Promise<T>): Promise<T> => { pending++; const next = tail.then(run).finally(() => { pending--; }); tail = next.then(() => {}, () => {}); return next; };
   return {
     queue,
+    get idle() { return pending === 0; },
+    peek(back: boolean) { return (back ? undo : redo).at(-1); },
     push(record: MoveRecord) { undo.push(record); if (undo.length > 100) undo.shift(); redo.length = 0; },
     async replay(back: boolean, write: WriteProperty, preview?: Preview, order?: ApplyOrder) {
       return queue(async () => {
