@@ -98,3 +98,20 @@ Full checks, all exit 0:
 Nothing for Chris to decide. The 10k distance assertion remains `scrollTop > 1000`, as the source notes specify.
 
 VERDICT: OK
+
+## KANBAN-EDGE-SYNC
+
+`rebuild/integration` is `c9fe49f` (canvas edge tests from `rebuild/edge-tests-review-grok`). Merged with `--no-ff` as `07c0e83`. Nothing was pushed.
+
+One conflict, `rebuild/app/package.json`. Both sides had edited the script block. The `test` line is integration's: `test-canvas-edge-titles.mjs` after navigation, `test-canvas-edge-hover.mjs` after hover, and `test-canvas-edge-menu.mjs` after the board menu. `test-canvas-create.mjs` stays once. The `posttest` line is this branch's: `test-bases-kanban-edge.mjs` and `test-bases-kanban-edge-scale.mjs` stay after `test-bases-list.mjs` and before the property fuzz. `test-bases-kanban-move.mjs` (K6) and `test-bases-list.mjs` (K8) stay once. The combined lists have 58 `test` scripts and 11 `posttest` scripts, with no duplicate. No other file conflicted. The merge adds the three canvas scripts and their two notes. `src/` is untouched, and no ceiling was changed.
+
+Full checks on `07c0e83`, all exit 0. No timing flake needed a rerun. Geometry Ctrl+o stayed at 16.7–16.9 ms. The 300-card zoom frames stayed under 20 ms.
+
+- `npm run build` (`tsc --noEmit && vite build`).
+- `flock /tmp/grove-npm-test.lock npm test`. Vitest: 73 files, 1248 tests. The three canvas edge scripts passed, including the huge-card title fit, the editing-card link hit, and the 2x paste. K8 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 279218. Kanban edge echo: before lastMs 2.6, echoed skip 3, full 2. Kanban edge 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 140000. View switches: board 580 ms, table 567 ms, list 565 ms, second scroll 935 ms, max frame 16.7–16.8 ms. Property fuzz `cases=48`.
+- `npm run audit:offline`: 186 source files, dist, CSP, capabilities, and dependencies.
+- `cargo test --offline` in `rebuild/app/src-tauri`: 73 passed, 4 ignored, 0 failed. `--offline` keeps the run off the network.
+
+`rebuild/round*-shots/` was restored with `git checkout` and is not in this commit.
+
+VERDICT: OK
