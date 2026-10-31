@@ -94,8 +94,10 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   check(held.out && Math.abs(held.scale - state.scale) < 1e-9, 'title mode does not flip again after the buttons rest');
 
   const at = await cardPoint('t');
-  // From titles, a one-frame burst crosses above 55% and ends inside the band.
-  // Nothing is applied until the wheel rests, so 50% keeps titles.
+  // From titles, one turn ends inside the band. Only the last scale is drawn,
+  // so the class stays titles on the next frame and after the settle. An
+  // in-band end looks the same if the class were applied on that frame. The
+  // out-and-back wheel below is what shows the settle wait.
   await wheelTo(at, 0.36);
   await sleep(200);
   check((await look()).out && (await look()).scale < 0.45, 'a wheel to 36% is title mode');
@@ -109,8 +111,7 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   check(downSettled.out === titleMode(downSettled.scale, true) && downSettled.out && downSettled.scale > 0.45 && downSettled.scale <= 0.55,
     'ending a burst inside the band, having started on titles, keeps titles (' + JSON.stringify(downSettled) + ')');
 
-  // The same burst from content keeps content, including an ending scale just below 45%
-  // that was only visited inside the turn... here the end is just above 45%.
+  // The same shape from content ends just above 45% and keeps content.
   await wheelTo(at, 0.62);
   await sleep(200);
   check(!(await look()).out && (await look()).scale > 0.55, 'a wheel to 62% leaves title mode');
@@ -151,7 +152,11 @@ await withBrowser(async ({ send, run, click, press, check }) => {
   const panSettled = await look();
   check(!panSettled.out && panSettled.scale > 0.55, 'title mode leaves after the zoom rests, pan included (' + JSON.stringify(panSettled) + ')');
 
-  // A zero ctrl+wheel during the wait resets the timer; it does not drop the pending change.
+  // A zero ctrl+wheel must not apply the pending leave on that frame, and the
+  // leave still happens after the wheel rests. The gap that would separate
+  // "timer reset" from "timer left running" is shorter than a stable wait, so
+  // this case does not time that difference. The out-and-back wheel above is
+  // what shows a later wheel replacing the pending one.
   await wheelTo(at, 0.34);
   await sleep(200);
   check((await look()).out, 'title mode is on before the zero-delta wheel');

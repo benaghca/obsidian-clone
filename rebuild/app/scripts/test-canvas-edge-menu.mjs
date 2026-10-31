@@ -109,6 +109,14 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
     const slack = 0.5 * scale + 1.25;
     return Math.abs(card.left - at.x) <= slack && Math.abs(card.top - at.y) <= slack;
   };
+  // showMenu flips around the pointer and rounds to a pixel. One corner of the menu
+  // stays on that pointer; a menu left at the previous corner does not.
+  const anchored = (info, at) => {
+    if (!info || !at) return false;
+    const dx = Math.min(Math.abs(info.left - at.x), Math.abs(info.right - at.x));
+    const dy = Math.min(Math.abs(info.top - at.y), Math.abs(info.bottom - at.y));
+    return dx <= 2 && dy <= 2;
+  };
 
   await send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
   await open('EdgeMenu.canvas', { nodes: [{ id: 'a', type: 'text', x: 0, y: 0, width: 160, height: 70, text: 'Anchor' }], edges: [] });
@@ -121,8 +129,8 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
     const at = await spot(fx, fy);
     const info = await openMenu(at);
     opened.push({ at, info });
-    check(info && info.count === 1 && info.inView && info.unscaled && !info.inCanvas && info.animations === 0 && info.itemsOnScreen,
-      `menu at canvas ${fx},${fy} stays on screen, unscaled, and still: ` + JSON.stringify(info && { inView: info.inView, unscaled: info.unscaled, inCanvas: info.inCanvas, animations: info.animations, box: [info.left, info.top, info.right, info.bottom], at }));
+    check(info && info.count === 1 && info.inView && info.unscaled && !info.inCanvas && info.animations === 0 && info.itemsOnScreen && anchored(info, at),
+      `menu at canvas ${fx},${fy} stays on the pointer, on screen, unscaled, and still: ` + JSON.stringify(info && { inView: info.inView, unscaled: info.unscaled, inCanvas: info.inCanvas, animations: info.animations, box: [info.left, info.top, info.right, info.bottom], at }));
     check(await titles() === full, `menu at canvas ${fx},${fy} lists every board item`);
     await press('Escape');
   }
@@ -134,7 +142,9 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
   await click(opened[3].at, 'right');
   await sleep(70);
   const replaced = await menuInfo();
-  check(replaced && replaced.count === 1 && replaced.inView, 'a second corner replaces the first menu (' + JSON.stringify(replaced && { count: replaced.count, left: replaced.left, top: replaced.top }) + ')');
+  check(replaced && replaced.count === 1 && replaced.inView && anchored(replaced, opened[3].at)
+      && Math.hypot(replaced.left - opened[0].info.left, replaced.top - opened[0].info.top) > 80,
+    'a second corner replaces the first menu (' + JSON.stringify(replaced && { count: replaced.count, left: replaced.left, top: replaced.top, at: opened[3].at, first: { left: opened[0].info.left, top: opened[0].info.top } }) + ')');
   await press('Escape');
 
   // Empty and almost-empty clipboards add nothing, from a corner so placement is not the easy center.
