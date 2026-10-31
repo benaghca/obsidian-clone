@@ -250,6 +250,15 @@ export function registerAppCommands(parts: AppParts) {
   const pluginAction = (plugin: string, id: string, name: string, icon: IconName, run: Command["run"], when?: Command["when"], hotkeys?: Command["hotkeys"]): Command =>
     ({ ...action(id, name, icon, run, hotkeys), plugin, when });
 
+  if (import.meta.env.DEV) commands.register({
+    id: "canvas:measure-zoom", name: "Canvas: measure zoom", icon: "layout-dashboard",
+    when: () => ws.active.type === "canvas",
+    run: async () => {
+      const tab = ws.active, el = parts.panes.el.querySelector<HTMLElement>(".workspace-tabs.mod-active .canvas-view");
+      if (el) return (await import("./canvas/measureZoom")).measureZoom(el, tab, () => ws.active === tab);
+    },
+  });
+
   commands.register(
     // ----- app and workspace -----
     action("app:open-settings", "Open settings", "settings", () => parts.openSettings(), mod(",")),

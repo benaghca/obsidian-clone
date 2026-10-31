@@ -54,9 +54,15 @@ export async function withBrowser(test, { height = 1000, screenshots } = {}) {
     socket = new WebSocket(tabs.find(t => t.type === 'page').webSocketDebuggerUrl);
     await new Promise(resolve => { socket.onopen = resolve; });
     let sequence = 0;
-    const pending = new Map(), errors = [];
+    const pending = new Map(), errors = [], listeners = new Map();
+    const on = (method, listener) => {
+      if (!listeners.has(method)) listeners.set(method, new Set());
+      listeners.get(method).add(listener);
+      return () => listeners.get(method)?.delete(listener);
+    };
     socket.onmessage = ({ data }) => {
       const message = JSON.parse(data);
+      for (const listener of listeners.get(message.method) ?? []) listener(message.params);
       if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails);
       if (message.id) { const [resolve, reject] = pending.get(message.id); pending.delete(message.id); message.error ? reject(message.error) : resolve(message.result); }
     };
@@ -108,7 +114,7 @@ export async function withBrowser(test, { height = 1000, screenshots } = {}) {
       await mkdir(screenshots, { recursive: true });
       await writeFile(join(screenshots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
     };
-    await test({ send, evaluate, run, key, press, chord, point, move, click, fill, double, read, open, check, shot });
+    await test({ send, on, evaluate, run, key, press, chord, point, move, click, fill, double, read, open, check, shot });
     assert.deepEqual(errors, [], 'no browser exceptions');
   } finally {
     socket?.close(); browser.kill(); server.kill();
