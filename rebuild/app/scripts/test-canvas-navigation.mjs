@@ -4,7 +4,7 @@ import { withBrowser, sleep } from './browser.mjs';
 const [fixture,note,diagram] = await Promise.all(['Reference.canvas','Note.md','diagram.svg'].map(name=>readFile(new URL('../../round23-shots/'+name, import.meta.url),'utf8')));
 const large = { nodes: Array.from({length:300},(_,i)=>({id:`n${i}`,type:'text',x:(i%20)*280,y:Math.floor(i/20)*190,width:250,height:160,text:`## Card ${i}\n**Local** Markdown and [[Welcome]].\n- Item\n- [ ] Task`,color:String(i%6+1)})), edges:Array.from({length:400},(_,i)=>({id:`e${i}`,fromNode:`n${i%300}`,toNode:`n${(i*7+1)%300}`,fromSide:'right',toSide:'left',label:i%25===0?`Edge ${i}`:undefined})) };
 await writeFile(new URL('../../round23-shots/Large.canvas', import.meta.url), JSON.stringify(large)+'\n');
-await withBrowser(async ({send,run,click,move,point,check,press,shot})=>{
+await withBrowser(async ({send,run,click,move,point,check,press,double,shot})=>{
   await run(async ({fixture,large,note,diagram})=>{
     const {api}=await import('/src/api.ts');
     for(const [path,content]of Object.entries({'Note.md':note,'diagram.svg':diagram,'Target.md':'# Target'})) {
@@ -78,7 +78,7 @@ await withBrowser(async ({send,run,click,move,point,check,press,shot})=>{
   await run(()=>ws.open('Large.canvas'));await sleep(1000);
   check(await run(()=>document.querySelectorAll('.canvas-node').length===300&&document.querySelectorAll('.canvas-edges > path').length===400),'Generated fixture renders 300 cards and 400 edges');
   await click(button('Reset zoom'));await sleep(500);
-  await run(()=>{window.canvasChildChanges=0;const world=document.querySelector('.canvas-world');window.canvasMutationObserver=new MutationObserver(records=>{canvasChildChanges+=records.filter(r=>r.target!==world).length});canvasMutationObserver.observe(world,{subtree:true,attributes:true,childList:true})});
+  await run(()=>{window.canvasChildChanges=0;const world=document.querySelector('.canvas-world');window.canvasMutationObserver=new MutationObserver(records=>{canvasChildChanges+=records.filter(r=>r.target!==world&&!r.target.closest?.('.canvas-selection-menu')).length});canvasMutationObserver.observe(world,{subtree:true,attributes:true,childList:true})});
   // Warm the compositor, then measure presentation intervals during native wheel input.
   await wheel(0,20);await wheel(0,-20);
   await run(()=>{window.canvasFrames=[];window.canvasRecording=true;let last=performance.now();const tick=now=>{if(!canvasRecording)return;canvasFrames.push(now-last);last=now;window.canvasFrameId=requestAnimationFrame(tick)};window.canvasFrameId=requestAnimationFrame(tick)});
@@ -89,6 +89,75 @@ await withBrowser(async ({send,run,click,move,point,check,press,shot})=>{
   const zoomFrames=await run(()=>{canvasRecording=false;cancelAnimationFrame(canvasFrameId);return canvasFrames.slice(2)});
   for(const [name,frames]of [['pan',panFrames],['zoom',zoomFrames]]){const sorted=frames.toSorted((a,b)=>a-b);console.log('FRAMES',name,JSON.stringify({samples:frames.length,p95:sorted[Math.floor(sorted.length*.95)],max:Math.max(...frames)}));check(frames.length>=20&&Math.max(...frames)<20,'300-card/400-edge '+name+' presentation frames stay under 20ms');}
   check(await run(()=>{canvasMutationObserver.disconnect();return canvasChildChanges===0}),'Pan/zoom transforms one world without changing card DOM or geometry');
+  // CZ1: a zoom frame writes no stylesheet rule; zoom-dependent handle sizes follow one band attribute once the wheel rests.
+  await run(()=>{window.canvasRuleWrites=0;const set=CSSStyleDeclaration.prototype.setProperty;window.canvasSetProperty=set;CSSStyleDeclaration.prototype.setProperty=function(...a){if(this.parentRule)canvasRuleWrites++;return set.apply(this,a)};});
+  const bandBefore=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);
+  for(let i=0;i<12;i++){await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-25,modifiers:2});await sleep(16);}
+  const midGesture=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);await sleep(250);
+  const settled=await run(()=>{CSSStyleDeclaration.prototype.setProperty=canvasSetProperty;const world=document.querySelector('.canvas-world'),s=new DOMMatrix(world.style.transform).a;return{writes:canvasRuleWrites,band:world.dataset.zoomBand,expected:String(Math.max(-16,Math.min(4,Math.round(Math.log2(s)*4)))),hit:getComputedStyle(document.querySelector('.canvas-edge-hit')).getPropertyValue('--canvas-inverse-scale').trim(),inverse:2**(-Math.max(-16,Math.min(4,Math.round(Math.log2(s)*4)))/4)}});
+  check(settled.writes===0,'Ctrl+wheel zoom writes no stylesheet rule');
+  check(midGesture===bandBefore&&settled.band===settled.expected&&settled.band!==bandBefore&&Math.abs(parseFloat(settled.hit)-settled.inverse)<1e-9,'Handle sizes follow the zoom band once the wheel rests, not during the gesture');
+  const bandNow=()=>run(()=>document.querySelector('.canvas-world').dataset.zoomBand);
+  const expectedBand=()=>run(()=>{const s=new DOMMatrix(document.querySelector('.canvas-world').style.transform).a;return String(Math.max(-16,Math.min(4,Math.round(Math.log2(s)*4))));});
+  await click(button('Reset zoom'));await sleep(80);check(await bandNow()==='0','Reset zoom applies the 100% band straight away');
+  const capBefore=await bandNow();
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-50000,modifiers:2});await sleep(25);
+  for(let i=0;i<6;i++){await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-100,modifiers:2});await sleep(25);}
+  check(await bandNow()===capBefore,'Wheels at the zoom cap keep postponing the band until the wheel rests');
+  await sleep(200);check(await bandNow()==='4'&&await expectedBand()==='4','The band catches up 120ms after the last capped wheel');
+  const jumpBefore=await bandNow();
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-100,modifiers:2});await sleep(35);
+  check(await bandNow()===jumpBefore,'A zoom frame does not apply its band');
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'!',code:'Digit1',windowsVirtualKeyCode:49,modifiers:8});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'!',code:'Digit1',windowsVirtualKeyCode:49,modifiers:8});await sleep(40);
+  check(await bandNow()===await expectedBand()&&await bandNow()!==jumpBefore,'Shift+1 applies the fit band straight away, without waiting out the wheel');
+  const panBefore=await bandNow();
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-100,modifiers:2});await sleep(35);
+  const panY=(await state()).y;
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:200,modifiers:0});await sleep(35);
+  check(await bandNow()===panBefore&&Math.abs((await state()).y-panY)>1,'A pan during settle does not apply the zoom band');
+  await sleep(200);check(await bandNow()===await expectedBand()&&await bandNow()!==panBefore,'The band follows the zoom 120ms after that wheel, not on the pan');
+  await click(button('Zoom in'));check(await bandNow()===await expectedBand(),'Zoom in applies the band straight away');
+  const picked=await run(()=>{const v=document.querySelector('.canvas-view').getBoundingClientRect();const c=[...document.querySelectorAll('.canvas-node')].find(c=>{const r=c.getBoundingClientRect();return r.width>40&&r.left>v.left+10&&r.right<v.right-10&&r.top>v.top+10&&r.bottom<v.bottom-10;});const r=c.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2};});
+  await click(picked);const selectionBefore=await bandNow();
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'@',code:'Digit2',windowsVirtualKeyCode:50,modifiers:8});
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'@',code:'Digit2',windowsVirtualKeyCode:50,modifiers:8});await sleep(40);
+  check(await bandNow()===await expectedBand()&&await bandNow()!==selectionBefore,'Zoom to selection applies the band straight away');
+  const resizeBefore=await bandNow();
+  // Zoom to selection of one card is already at the 2x cap, so zoom out. A further
+  // zoom-in wheel would not change the scale, and the band would already match.
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:100,modifiers:2});await sleep(20);
+  await send('Emulation.setDeviceMetricsOverride',{width:1200,height:800,deviceScaleFactor:1,mobile:false});await sleep(50);
+  check(await bandNow()===await expectedBand()&&await bandNow()!==resizeBefore,'Resize applies the pending zoom band straight away');
+  await send('Emulation.setDeviceMetricsOverride',{width:1280,height:800,deviceScaleFactor:1,mobile:false});await sleep(60);
+  // Space+wheel zooms too (Canvas help: "press Space or Ctrl ... and scroll").
+  const spaceBefore=await state();await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:100,modifiers:0});await sleep(80);
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});const spaceAfter=await state();
+  check(near(spaceAfter.s,spaceBefore.s*2**(-1/3))&&near((800-spaceBefore.left-spaceBefore.x)/spaceBefore.s,(800-spaceAfter.left-spaceAfter.x)/spaceAfter.s),'Space+wheel zooms around the pointer');
+  // Card bodies scroll only on a selected or edited card.
+  await click(button('Reset zoom'));await sleep(100);
+  const card=await run(()=>{const v=document.querySelector('.canvas-view').getBoundingClientRect();const c=[...document.querySelectorAll('.canvas-node')].find(c=>{const r=c.getBoundingClientRect();return r.left>v.left+20&&r.right<v.right-60&&r.top>v.top+60&&r.bottom<v.bottom-80;});const r=c.getBoundingClientRect();return{id:c.dataset.nodeId,x:r.x+r.width-15,y:r.y+r.height-10};});
+  const overflow=()=>run(id=>getComputedStyle(document.querySelector(`.canvas-node[data-node-id="${id}"] > .canvas-node-content`)).overflowY,card.id);
+  const unselected=await overflow();await click(card);const selected=await overflow();
+  const menuScale=await run(()=>{const m=document.querySelector('.canvas-selection-menu');return{visible:!m.hidden,inverse:parseFloat(m.style.getPropertyValue('--canvas-inverse-scale')),scale:new DOMMatrix(document.querySelector('.canvas-world').style.transform).a};});
+  check(unselected==='hidden'&&selected==='auto','Card bodies are not scroll containers unless the card is selected');
+  check(menuScale.visible&&Math.abs(menuScale.inverse-1/menuScale.scale)<1e-9,'The selection menu keeps its screen size from its own inline variables');
   await shot('grove-partb-large');
+  await run(async()=>{const {api}=await import('/src/api.ts');const text=Array.from({length:30},(_,i)=>`Line ${i} stays on the card.`).join('\n');await api.createNote('Overflow.canvas',JSON.stringify({nodes:[{id:'o',type:'text',x:200,y:200,width:280,height:140,text}],edges:[]}));await ws.vault.refreshFiles();await ws.open('Overflow.canvas');});
+  await sleep(200);await click(button('Reset zoom'));await sleep(80);
+  const overflowAt=await run(()=>{const content=document.querySelector('.canvas-node[data-node-id="o"] > .canvas-node-content');const r=content.getBoundingClientRect();return{overflow:getComputedStyle(content).overflowY,scrollable:content.scrollHeight>content.clientHeight+2,x:r.x+30,y:r.y+24};});
+  check(overflowAt.overflow==='hidden'&&overflowAt.scrollable,'An unselected overflowing text card clips its body');
+  await click({x:overflowAt.x,y:overflowAt.y});
+  const selectedScroll=await run(()=>{const content=document.querySelector('.canvas-node[data-node-id="o"] > .canvas-node-content');content.scrollTop=48;return{overflow:getComputedStyle(content).overflowY,top:content.scrollTop};});
+  check(selectedScroll.overflow==='auto'&&selectedScroll.top>=40,'Selecting an overflowing text card lets its body scroll');
+  await double({x:overflowAt.x,y:overflowAt.y});await sleep(120);
+  const editing=await run(()=>{const card=document.querySelector('.canvas-node[data-node-id="o"]');const content=card.querySelector('.canvas-node-content');return{editing:card.classList.contains('is-editing'),editor:!!card.querySelector('.cm-editor'),overflow:getComputedStyle(content).overflowY};});
+  check(editing.editing&&editing.editor&&editing.overflow==='auto','Editing an overflowing text card keeps a scrollable editor');
+  const editView=await state();
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:overflowAt.x,y:overflowAt.y,deltaX:0,deltaY:120,modifiers:0});await sleep(50);
+  const scrolled=await run(()=>{const card=document.querySelector('.canvas-node[data-node-id="o"]');return Math.max(card.querySelector('.cm-scroller')?.scrollTop??0,card.querySelector('.canvas-node-content').scrollTop);});
+  const editAfter=await state();
+  check(scrolled>0&&near(editAfter.x,editView.x)&&near(editAfter.y,editView.y)&&near(editAfter.s,editView.s),'Wheel over an edited overflowing text card scrolls it and does not pan');
   check(await run(async()=>{const{api}=await import('/src/api.ts');return await api.readNote('Navigation.canvas')===originalNavigation}),'Pan, zoom and tab changes leave canvas bytes unchanged');
 }, {height:800,screenshots:new URL('../../round23-shots/',import.meta.url).pathname});

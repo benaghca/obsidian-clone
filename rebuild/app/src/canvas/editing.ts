@@ -20,9 +20,16 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
   const edgeElements = () => world.querySelectorAll<HTMLElement | SVGElement>("[data-edge-id]");
-  for (const card of cards.values()) for (const side of sides.slice(0, 4))
-    card.append(h("div", { class: "canvas-node-connection-point", "data-side": side, "aria-label": `Connect ${side}` }));
+  // Connection dots show only on a hovered or selected card, so they are made then:
+  // four per card up front would be restyled by every zoom-band change.
+  const dotted = new WeakSet<HTMLElement>();
+  const dots = (card: HTMLElement) => {
+    if (dotted.has(card)) return;
+    dotted.add(card);
+    for (const side of sides.slice(0, 4)) card.append(h("div", { class: "canvas-node-connection-point", "data-side": side, "aria-label": `Connect ${side}` }));
+  };
   const events = new AbortController();
+  world.addEventListener("pointerover", e => { const card = (e.target as Element).closest<HTMLElement>(".canvas-node"); if (card && cards.get(card.dataset.nodeId!) === card) dots(card); }, { signal: events.signal });
   let cancel: (() => void) | undefined, suppress = false, pressedLabel: string | undefined;
   const chosen = () => nodes.filter(n => selected.has(n.id));
   let context: Element | null = null;
@@ -48,7 +55,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       if (card.classList.contains("is-selected") === selected.has(id)) continue;
       card.classList.toggle("is-selected", selected.has(id));
       card.querySelectorAll(".canvas-node-resizer").forEach(handle => handle.remove());
-      if (selected.has(id)) for (const side of sides) card.append(h("div", { class: "canvas-node-resizer", "data-resize": side }));
+      if (selected.has(id)) { dots(card); for (const side of sides) card.append(h("div", { class: "canvas-node-resizer", "data-resize": side })); }
     }
   }
   function moving() {

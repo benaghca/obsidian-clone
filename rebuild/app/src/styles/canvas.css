@@ -27,16 +27,19 @@
   border-color: color-mix(in srgb, var(--canvas-color) 70%, transparent);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--canvas-color) 70%, transparent), 0 .5px 1px .5px rgb(0 0 0 / 10%);
 }
+/* Bodies scroll only on a selected or edited card. Hundreds of scroll containers
+   make every zoom frame's layer update grow with the board; the wheel pans anyway. */
 .canvas-node-content {
   position: absolute;
   inset: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 16px;
   border-radius: inherit;
   font-size: 16px;
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
+.canvas-node:is(.is-selected, .is-editing) > .canvas-node-content { overflow: auto; }
 .canvas-node.is-colored > .canvas-node-content { background: color-mix(in srgb, var(--canvas-color) 7%, transparent); }
 .canvas-node-content img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .canvas-node-file:has(> .canvas-node-content > img) > .canvas-node-content { padding: 0; overflow: hidden; }
@@ -138,7 +141,7 @@
 
 .canvas-control-group { overflow: hidden; }
 .canvas-control-group .clickable-icon:not(:last-child) { height: 33px; }
-.canvas-world:has(.canvas-node-group.is-editing, .canvas-edge-label.is-editing) .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
+.canvas-world.is-editing-label .canvas-selection-menu, .canvas-world.is-connecting .canvas-selection-menu { display: none; }
 
 .canvas-swatch input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; padding: 0; border: 0; }
 .canvas-selection-menu:focus { outline: none; }

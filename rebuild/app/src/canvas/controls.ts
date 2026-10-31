@@ -23,7 +23,7 @@ export function canvasSettings(el: HTMLElement, anchor: HTMLElement, refresh: ()
 }
 export function canvasHelp() {
   const rows = [
-    ["Pan", "Space + Drag", "Scroll"], ["Pan horizontally", "Shift + Scroll"], ["Zoom", "Ctrl + Scroll"],
+    ["Pan", "Space + Drag", "Scroll"], ["Pan horizontally", "Shift + Scroll"], ["Zoom", "Space + Scroll", "Ctrl + Scroll"],
     ["Zoom to fit", "Shift + 1"], ["Zoom to selection", "Shift + 2"],
     ["Add to / remove from selection", "Shift + Click", "Shift + Drag to select"],
     ["Constrain card movement to axis", "Shift + Drag"], ["Disable snapping while dragging", "Alt"],
