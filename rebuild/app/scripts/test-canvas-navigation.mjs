@@ -5,7 +5,7 @@ import { traceGesture, summarizeTrace } from './canvas-zoom-trace.mjs';
 const [fixture,note,diagram] = await Promise.all(['Reference.canvas','Note.md','diagram.svg'].map(name=>readFile(new URL('../../round23-shots/'+name, import.meta.url),'utf8')));
 const large = { nodes: Array.from({length:300},(_,i)=>({id:`n${i}`,type:'text',x:(i%20)*280,y:Math.floor(i/20)*190,width:250,height:160,text:`## Card ${i}\n**Local** Markdown and [[Welcome]].\n- Item\n- [ ] Task`,color:String(i%6+1)})), edges:Array.from({length:400},(_,i)=>({id:`e${i}`,fromNode:`n${i%300}`,toNode:`n${(i*7+1)%300}`,fromSide:'right',toSide:'left',label:i%25===0?`Edge ${i}`:undefined})) };
 await writeFile(new URL('../../round23-shots/Large.canvas', import.meta.url), JSON.stringify(large)+'\n');
-await withBrowser(async ({send,on,run,click,move,point,check,press,double,shot})=>{
+await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,shot})=>{
   await run(async ({fixture,large,note,diagram})=>{
     const {api}=await import('/src/api.ts');
     for(const [path,content]of Object.entries({'Note.md':note,'diagram.svg':diagram,'Target.md':'# Target'})) {
@@ -175,6 +175,89 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,double,shot})
   const scrolled=await run(()=>{const card=document.querySelector('.canvas-node[data-node-id="o"]');return Math.max(card.querySelector('.cm-scroller')?.scrollTop??0,card.querySelector('.canvas-node-content').scrollTop);});
   const editAfter=await state();
   check(scrolled>0&&near(editAfter.x,editView.x)&&near(editAfter.y,editView.y)&&near(editAfter.s,editView.s),'Wheel over an edited overflowing text card scrolls it and does not pan');
+  // CZ2: title mode below 45% (back above 55%), switched at settle; card definition at every zoom.
+  const zoomed={nodes:[{id:'t',type:'text',x:0,y:0,width:250,height:160,color:'1',text:'Intro\n## **Plan** the [[Target|trip]]\nbody'},{id:'n',type:'file',file:'Target.md',x:300,y:0,width:250,height:160},
+    {id:'i',type:'file',file:'diagram.svg',x:600,y:0,width:250,height:160},{id:'l',type:'link',url:'https://jsoncanvas.org/spec/1.0/',x:0,y:260,width:250,height:160},
+    {id:'tiny',type:'text',x:300,y:260,width:120,height:50,text:'Tiny'},{id:'g',type:'group',x:580,y:240,width:300,height:200,label:'Reading',color:'6'}],
+    edges:[{id:'e',fromNode:'t',toNode:'l',label:'see spec'}]};
+  await run(async board=>{const{api}=await import('/src/api.ts');await api.createNote('Zoomed.canvas',JSON.stringify(board));await ws.vault.refreshFiles();await ws.open('Zoomed.canvas');},zoomed);
+  await sleep(300);await click(button('Reset zoom'));await sleep(80);
+  const look=()=>run(()=>{
+    const world=document.querySelector('.canvas-world'),node=id=>world.querySelector(`.canvas-node[data-node-id="${id}"]`),cs=e=>getComputedStyle(e);
+    const title=id=>{const t=node(id).querySelector('.canvas-node-title');return t&&{text:t.textContent,display:cs(t).display,size:parseFloat(cs(t).fontSize)};};
+    const ring=e=>parseFloat(cs(e.querySelector('.canvas-node-ring')).boxShadow.match(/0px 0px 0px ([\d.]+)px/)[1]);
+    return{out:world.classList.contains('is-zoomed-out'),band:world.dataset.zoomBand,scale:new DOMMatrix(world.style.transform).a,
+      bodies:Object.fromEntries(['t','n','i','l'].map(id=>[id,cs(node(id).querySelector('.canvas-node-content')).contentVisibility])),
+      titles:Object.fromEntries(['t','n','l','tiny'].map(id=>[id,title(id)])),imageTitle:!!node('i').querySelector('.canvas-node-title'),
+      fileLabel:cs(node('n').querySelector('.canvas-file-label')).display,edgeLabel:cs(world.querySelector('.canvas-edge-label')).display,
+      ring:{plain:ring(node('n')),colored:ring(node('t')),group:ring(node('g'))},border:cs(node('t')).borderTopColor,
+      edge:parseFloat(cs(world.querySelector('.canvas-edge')).strokeWidth),label:new DOMMatrix(cs(node('g').querySelector('.canvas-group-label')).transform).a,
+      fill:{canvas:cs(document.querySelector('.canvas-view')).backgroundColor,card:cs(node('n')).backgroundColor}};
+  });
+  const full=await look();
+  check(!full.out&&Object.values(full.bodies).every(v=>v==='visible')&&Object.values(full.titles).every(t=>t.display==='none')&&full.fileLabel!=='none'&&full.edgeLabel!=='none','At 100% cards show their content, not titles');
+  check(full.ring.plain===0&&Math.abs(full.ring.colored-.5)<.01&&full.edge===2&&full.label===1,'At 100% the 1px border needs no ring; coloured cards add half a pixel, edges stay 2px');
+  const red=await run(()=>{const p=document.createElement('div');p.style.color='var(--color-red)';document.body.append(p);const c=getComputedStyle(p).color;p.remove();return c;});
+  check(full.border===red,'A coloured card has a full-colour border');
+  check(full.fill.canvas==='rgb(250, 250, 250)'&&full.fill.card==='rgb(255, 255, 255)','Light theme: white cards on a #fafafa canvas');
+  await run(()=>{document.documentElement.classList.replace('theme-light','theme-dark');});
+  const dark=await look();await run(()=>{document.documentElement.classList.replace('theme-dark','theme-light');});
+  check(dark.fill.canvas==='rgb(28, 28, 28)'&&dark.fill.card==='rgb(38, 38, 38)','Dark theme: cards one step lighter than the canvas');
+  await click(button('Zoom out'));await click(button('Zoom out'));await sleep(80);
+  check(!(await look()).out,'50% still shows content (title mode starts below 45%)');
+  await click(button('Zoom out'));await sleep(80);
+  const out=await look(),inv=2**(-Number(out.band)/4);
+  check(out.out&&out.bodies.t==='hidden'&&out.bodies.n==='hidden'&&out.bodies.l==='hidden'&&out.bodies.i==='visible'&&!out.imageTitle,'Below 45% bodies skip layout and paint; an image stays a picture');
+  check(out.titles.t.text==='Plan the trip'&&out.titles.n.text==='Target'&&out.titles.l.text==='jsoncanvas.org'&&out.titles.t.display!=='none'&&Math.abs(out.titles.t.size*out.scale-13)<1.2,`Zoomed-out cards show their title at about 13px on screen (${(out.titles.t.size*out.scale).toFixed(1)}px)`);
+  check(out.titles.tiny.display==='none','A card too small on screen shows just its box');
+  check(out.fileLabel==='none'&&out.edgeLabel==='none','Note-name labels and edge labels hide when zoomed out');
+  check(Math.abs((1+out.ring.plain)*out.scale-1)<.15&&Math.abs((1+out.ring.colored)*out.scale-1.5)<.2&&Math.abs((1+out.ring.group)*out.scale-1)<.15,'Card borders stay 1px on screen (1.5px coloured) when zoomed out');
+  check(Math.abs(out.edge-1.5*inv)<.01&&Math.abs(out.label-inv*14/22.5)<.01,'Edges keep 1.5px and group labels about 14px on screen');
+  await click(await run(()=>{const r=document.querySelector('.canvas-node[data-node-id="t"]').getBoundingClientRect();return{x:r.x+r.width/4,y:r.y+r.height/4};}));
+  const accentRing=await run(()=>{const p=document.createElement('div');p.style.color='var(--interactive-accent)';document.body.append(p);const accent=getComputedStyle(p).color;p.remove();
+    const ring=getComputedStyle(document.querySelector('.canvas-node[data-node-id="t"].is-selected > .canvas-node-ring')).boxShadow;return{accent,ring};});
+  check(accentRing.ring.startsWith(accentRing.accent)&&Math.abs(parseFloat(accentRing.ring.match(/0px 0px 0px ([\d.]+)px/)[1])*out.scale-2)<.3,'A selected coloured card keeps a 2px accent ring on screen when zoomed out');
+  await press('Escape');
+  // Hysteresis: back above 55% coming in, and only once the wheel rests.
+  const wheelTo=async target=>{const s=(await look()).scale;await wheel(0,-300*Math.log2(target/s),true);};
+  await wheelTo(.5);await sleep(200);check((await look()).out,'Zooming in to 50% keeps titles (back above 55%)');
+  await wheelTo(.6);const early=(await look()).out;await sleep(200);
+  check(early&&!(await look()).out,'Above 55% content returns once the wheel rests, not mid-gesture');
+  await wheelTo(.5);await sleep(200);check(!(await look()).out,'Zooming out to 50% keeps content (titles below 45%)');
+  await wheelTo(.4);await sleep(200);check((await look()).out,'Below 45% titles return');
+  await wheelTo(.55);await sleep(200);check((await look()).out,'Exactly 55% stays in title mode');
+  await wheelTo(.551);await sleep(200);check(!(await look()).out,'Just above 55% leaves title mode');
+  await wheelTo(.45);await sleep(200);check(!(await look()).out,'Exactly 45% stays on content');
+  await wheelTo(.449);await sleep(200);check((await look()).out,'Just below 45% returns to title mode');
+  // Decision D3: double-click zooms to a zoomed-out card; the next double-click edits.
+  const spot=()=>run(()=>{const r=document.querySelector('.canvas-node[data-node-id="t"]').getBoundingClientRect();return{x:r.x+r.width/4,y:r.y+r.height*3/4};});
+  await double(await spot());await sleep(120);
+  const zoomedTo=await look();
+  check(!zoomedTo.out&&zoomedTo.scale>.55&&await run(()=>!document.querySelector('.canvas-node.is-editing')),'Double-clicking a zoomed-out card zooms to it instead of editing');
+  await double(await spot());await sleep(120);
+  check(await run(()=>!!document.querySelector('.canvas-node[data-node-id="t"].is-editing .cm-editor')),'A second double-click edits the card');
+  await chord('a');await send('Input.insertText',{text:'Renamed **card**'});await press('Escape');await sleep(80);
+  await click(button('Reset zoom'));for(let i=0;i<3;i++)await click(button('Zoom out'));await sleep(80);
+  check((await look()).titles.t.text==='Renamed card','A text card\'s title follows its edited text');
+  // A card that cannot fit above 55% stays in title mode after zoom-to. The second double-click still edits, and the card can be dragged.
+  await run(async()=>{const{api}=await import('/src/api.ts');await api.createNote('Huge.canvas',JSON.stringify({nodes:[{id:'h',type:'text',x:0,y:0,width:4000,height:2400,text:'Wide card'}],edges:[]}));await ws.vault.refreshFiles();await ws.open('Huge.canvas');});
+  await sleep(300);
+  const huge=()=>run(()=>{const world=document.querySelector('.canvas-world'),card=document.querySelector('.canvas-node[data-node-id="h"]');return{out:world.classList.contains('is-zoomed-out'),scale:new DOMMatrix(world.style.transform).a,editing:card.classList.contains('is-editing'),x:parseFloat(card.style.left)};});
+  const hugeAt=()=>run(()=>{const r=document.querySelector('.canvas-view').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height*.75};});
+  const opened=await huge();
+  check(opened.out&&opened.scale<.45,'A card larger than the view opens fitted in title mode');
+  const at=await hugeAt();await move(at);
+  await send('Input.dispatchMouseEvent',{type:'mousePressed',...at,button:'left',buttons:1,clickCount:1});
+  await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:at.x+80,y:at.y,buttons:1});await sleep(40);
+  await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:at.x+80,y:at.y,button:'left',clickCount:1});await sleep(80);
+  const dragged=await huge();
+  check(dragged.out&&dragged.x>opened.x+10,`Dragging a title-mode card moves it (${opened.x} -> ${dragged.x})`);
+  await double(await hugeAt());await sleep(120);
+  const framed=await huge();
+  check(framed.out&&framed.scale<=.55&&!framed.editing,'Double-clicking a card that stays under 55% zooms without editing');
+  await double(await hugeAt());await sleep(120);
+  check(await run(()=>!!document.querySelector('.canvas-node[data-node-id="h"].is-editing .cm-editor')),'A second double-click edits that card');
+  await press('Escape');await sleep(40);
   check(await run(async()=>{const{api}=await import('/src/api.ts');return await api.readNote('Navigation.canvas')===originalNavigation}),'Pan, zoom and tab changes leave canvas bytes unchanged');
   // The real-app diagnostic is in the DEV registry, performs exactly 300
   // synthetic inputs, restores the live viewport and does not save anything.

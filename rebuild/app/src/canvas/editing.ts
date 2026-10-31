@@ -228,8 +228,26 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
       }, () => { box.remove(); cancel = undefined; }, false);
     }
   }, { signal: events.signal });
+  // The card a title-mode double-click just framed, when that zoom stayed zoomed out.
+  let titleZoom: { id: string; scale: number } | undefined;
   el.addEventListener("dblclick", e => {
-    if (!e.isTrusted || canvasReadOnly.has(el) || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    if (!e.isTrusted || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
+    // Zoomed out, a double-click zooms to the card instead of opening a tiny editor.
+    // The next one, still on that framing, edits. A card too large to pass 55% never
+    // leaves title mode, so the scale is what tells the second click from the first.
+    // A group's label still edits.
+    const card = nodes.find(n => n.type !== "group" && n.id === (e.target as Element).closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    if (card && world.classList.contains("is-zoomed-out")) {
+      e.preventDefault(); e.stopPropagation();
+      const scale = new DOMMatrix(getComputedStyle(world).transform).a;
+      if (titleZoom?.id === card.id && Math.abs(titleZoom.scale - scale) < 1e-4 && !canvasReadOnly.has(el)) { titleZoom = undefined; edit(card, selection); return; }
+      zoom([card]);
+      const next = new DOMMatrix(getComputedStyle(world).transform).a;
+      titleZoom = world.classList.contains("is-zoomed-out") ? { id: card.id, scale: next } : undefined;
+      return;
+    }
+    titleZoom = undefined;
+    if (canvasReadOnly.has(el)) return;
     const edge = edges.find(edge => edge.id === (pressedLabel ?? (e.target as Element).closest<HTMLElement>("[data-edge-id]")?.dataset.edgeId));
     if (edge) { e.preventDefault(); e.stopPropagation(); edit(edge, selection); }
     const label = (e.target as Element).closest<HTMLElement>(".canvas-group-label");

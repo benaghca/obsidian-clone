@@ -16,14 +16,14 @@ import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
 import { canvasReadOnly } from "./controls";
 import { canvasCards, editTextCard } from "./cards";
-import { canvasNavigation } from "./navigation";
+import { canvasNavigation, titleBand } from "./navigation";
 import { editCanvas } from "./document";
 import { canvasEditing } from "./editing";
 import { spaceCardBody } from "./spacing";
 import { groupBackground } from "./groups";
 import { editNoteCard } from "./note";
 import { editCanvasLabel } from "./labels";
-import { edgeCurve, readCanvas, type CanvasEdge } from "./model";
+import { canvasTitle, edgeCurve, readCanvas, type CanvasEdge, type CanvasNode } from "./model";
 import type { Guide } from "./align";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -51,6 +51,12 @@ function withoutBlockIds(text: string) {
     }
     return "";
   });
+}
+// Zoomed out, a card too small on screen for its title shows as a box (navigation.ts).
+function sizeTitle(card: HTMLElement, node: CanvasNode) {
+  const band = titleBand(node.width, node.height)?.toString();
+  if (band === card.dataset.titleBand) return;
+  if (band === undefined) delete card.dataset.titleBand; else card.dataset.titleBand = band;
 }
 export function createCanvasView(ws: Workspace, path: string, group: Group, tab: Tab) {
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
@@ -193,6 +199,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       Object.assign(card.style, { left: `${node.x}px`, top: `${node.y}px`, width: `${node.width}px`, height: `${node.height}px` });
       if (node.color) card.classList.add("is-colored");
       card.style.setProperty("--canvas-color", color(node.color));
+      // The zoom bands size this ring, not the card, so a band change never restyles a card.
+      card.append(h("div", { class: "canvas-node-ring" }));
       world.append(card);
       let refreshFile = () => {};
       if (node.type === "file" && node.file) cleanups.push(ws.embeds.watch(node.file, () => {
@@ -227,12 +235,13 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         edits.set(node.id, edit); if (node.id === editId) startEditor = edit;
         continue;
       }
-      if (node.type === "file" || node.type === "link") {
-        const label = h("div", { class: "canvas-file-label" }, node.type === "link" ? node.url ?? "" : `${noteName(node.file ?? "")}${node.subpath ? ` › ${node.subpath.replace(/^#/, "")}` : ""}`);
-        card.append(label);
-      }
+      if (node.type === "file" || node.type === "link") card.append(h("div", { class: "canvas-file-label" }, node.type === "link" ? node.url ?? "" : canvasTitle(node)));
       const content = h("div", { class: "canvas-node-content markdown-rendered is-reading-mode" });
       card.append(content);
+      // Title mode shows an image itself; every other card shows this instead of its body.
+      const image = node.type === "file" && IMAGE_EXT.test(node.file ?? "");
+      const title = h("div", { class: "canvas-node-title" }, image ? "" : canvasTitle(node));
+      if (image) card.classList.add("is-image"); else { card.append(title); sizeTitle(card, node); }
       if (node.type === "link") {
         const url = node.url ?? "";
         const link = h("a", { class: "cm-link cm-rendered-link", role: "link", tabindex: "0" }, url);
@@ -242,7 +251,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         content.append(link);
         continue;
       }
-      if (node.type === "file" && IMAGE_EXT.test(node.file ?? "")) {
+      if (image) {
         const img = h("img", { alt: node.file ?? "" });
         content.append(img);
         let held: ReturnType<typeof ws.embeds.image> | undefined;
@@ -302,7 +311,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           stopText = editTextCard(card, content, node.text ?? "", cardHost, text => {
             if (!checkpoint) { undo.push(source); redo = []; checkpoint = true; }
             node.text = text; changed(editCanvas(source, [node]));
-          }, repaint => { stopText = undefined; if (repaint) paint(node.text ?? ""); });
+          }, repaint => { stopText = undefined; title.textContent = canvasTitle(node); if (repaint) paint(node.text ?? ""); });
         };
         edits.set(node.id, edit);
         card.addEventListener("dblclick", event => {
@@ -339,6 +348,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       for (const n of changed) {
         const card = cards.get(n.id)!;
         Object.assign(card.style, { left: `${n.x}px`, top: `${n.y}px`, width: `${n.width}px`, height: `${n.height}px` });
+        if (n.type !== "group" && !card.classList.contains("is-image")) sizeTitle(card, n);
         card.classList.toggle("is-colored", !!n.color); card.style.setProperty("--canvas-color", color(n.color)); backgrounds.get(n.id)?.();
       }
       for (const item of updateEdges) if (ids.has(item.edge.fromNode) || ids.has(item.edge.toNode))
