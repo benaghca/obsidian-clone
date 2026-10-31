@@ -109,13 +109,14 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
     const slack = 0.5 * scale + 1.25;
     return Math.abs(card.left - at.x) <= slack && Math.abs(card.top - at.y) <= slack;
   };
-  // showMenu flips around the pointer and rounds to a pixel. One corner of the menu
-  // stays on that pointer; a menu left at the previous corner does not.
+  // showMenu flips around the pointer, then keeps an 8px margin from the window.
+  // A corner click inside that margin sits up to 8px off the box. A menu left
+  // at the previous corner does not.
   const anchored = (info, at) => {
     if (!info || !at) return false;
     const dx = Math.min(Math.abs(info.left - at.x), Math.abs(info.right - at.x));
     const dy = Math.min(Math.abs(info.top - at.y), Math.abs(info.bottom - at.y));
-    return dx <= 2 && dy <= 2;
+    return dx <= 8 && dy <= 8;
   };
 
   await send('Browser.grantPermissions', { permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'] });
