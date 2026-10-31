@@ -31,6 +31,10 @@ const baseTheme = EditorView.theme({
   ".cm-content": { padding: "0 0 50vh", caretColor: "var(--text-normal)" },
   ".cm-line": { padding: "0" },
   ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--text-normal)", borderLeftWidth: "1.5px" },
+  // CodeMirror blinks this layer forever while focused, even with nothing in
+  // it (the browser draws a plain caret). WebKitGTK's GPU path then redraws the
+  // window every frame while the app sits idle.
+  "&.cm-focused > .cm-scroller > .cm-cursorLayer:empty": { animation: "none" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
     backgroundColor: "var(--text-selection) !important",
   },
