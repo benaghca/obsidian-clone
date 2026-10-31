@@ -125,9 +125,18 @@ export function installHoverPreviews(ws: Workspace) {
         if (a && b) rect = new DOMRect(a.left, a.top, Math.max(1, b.right - a.left), a.bottom - a.top);
       }
     }
+    // Rendered embeds have no data-href. The editor still finds them via linkAt above.
+    if (!target) {
+      const embed = el.closest<HTMLElement>("[data-embed-href]");
+      const href = embed?.dataset.embedHref;
+      if (embed && href) { target = href; rect = embed.getBoundingClientRect(); }
+    }
     if (!target || !rect || !(isNotePath(target) || target.startsWith("#"))) return leave();
     const source = view ?? ws.view;
-    const from = sidebar ? null : ws.editors.pathOf(source);
+    // The pane editor is not the card. File cards use the note; text cards use the canvas file.
+    const editorFrom = ws.editors.pathOf(source);
+    const cardFrom = el.closest<HTMLElement>(".canvas-node")?.dataset.path || null;
+    const from = sidebar ? null : editorFrom || cardFrom;
     const next = `${from}\n${target}\n${rect.x},${rect.y}`;
     if (key === next) {
       clearTimeout(leaving);

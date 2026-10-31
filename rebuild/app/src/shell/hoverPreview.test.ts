@@ -3,14 +3,14 @@ import { readingMode } from "../editor/render";
 import type { Workspace } from "../workspace";
 import { installHoverPreviews } from "./hoverPreview";
 
-const mocks = vi.hoisted(() => ({ view: null as unknown, draw: vi.fn(), destroy: vi.fn() }));
+const mocks = vi.hoisted(() => ({ view: null as unknown, draw: vi.fn(), destroy: vi.fn(), target: "" }));
 vi.mock("@codemirror/view", async (original) => ({ ...await original<typeof import("@codemirror/view")>(), EditorView: class {
   static findFromDOM() { return mocks.view; }
   constructor(readonly options: unknown) {}
   destroy() { mocks.destroy(); }
 } }));
 vi.mock("../editor/embeds", async (original) => ({ ...await original<typeof import("../editor/embeds")>(),
-  NoteEmbedWidget: class { toDOM() { mocks.draw(); return {}; } destroy() {} },
+  NoteEmbedWidget: class { constructor(target: string) { mocks.target = target; } toDOM() { mocks.draw(); return {}; } destroy() {} },
 }));
 vi.mock("./dom", () => ({ h: () => ({
   addEventListener() {}, contains: () => false, remove: () => mocks.destroy(),
@@ -19,12 +19,12 @@ vi.mock("./dom", () => ({ h: () => ({
 
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
-function setup() {
+function setup(hit?: { closest: (selector: string) => unknown; contains: () => boolean }) {
   vi.useFakeTimers();
   const doc = new EventTarget();
   const rect = { x: 100, y: 100, left: 100, top: 100, bottom: 120 };
   const link = { dataset: { href: "Note" }, getBoundingClientRect: () => rect };
-  const el = { closest: (selector: string) => selector === "[data-href]" ? link : null, contains: () => false };
+  const el = hit ?? { closest: (selector: string) => selector === "[data-href]" ? link : null, contains: () => false };
   Object.assign(doc, { body: { append() {} }, elementFromPoint: () => el });
   vi.stubGlobal("document", doc);
   vi.stubGlobal("window", { setTimeout, addEventListener() {} });
@@ -128,6 +128,15 @@ test("macOS Cmd press while still opens the preview and Ctrl does not", () => {
   event("keydown", { key: "Meta", ctrlKey: false, metaKey: true, target: { closest: () => null } });
   vi.advanceTimersByTime(350);
   expect(mocks.draw).toHaveBeenCalledTimes(1);
+});
+
+test("a rendered embed without data-href still previews its target", () => {
+  const embed = { dataset: { embedHref: "Embedded#Head" }, getBoundingClientRect: () => ({ x: 40, y: 50, left: 40, top: 50, bottom: 200, right: 300 }) };
+  const event = setup({ closest: (selector: string) => selector === "[data-embed-href]" ? embed : null, contains: () => false });
+  event("pointermove");
+  vi.advanceTimersByTime(350);
+  expect(mocks.draw).toHaveBeenCalledTimes(1);
+  expect(mocks.target).toBe("Note.md#Head");
 });
 
 test("touch does not open a preview, a pen does, and a pressed button does not", () => {

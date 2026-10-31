@@ -170,4 +170,91 @@ await withBrowser(async ({ send, run, click, double, point, press, key, check })
   await sleep(80);
   const leftAfter = await run(() => document.querySelector('[data-node-id="note"]').style.left);
   check(leftBefore !== leftAfter, 'dragging a card still moves it (' + leftBefore + ' -> ' + leftAfter + ')');
+
+  // Ambiguous names follow the card's note (or the canvas file for a text card).
+  // Embeds are not wikilink chips; missing ones still preview.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('a/Twin.md', '# Twin\n\nA-TWIN\n');
+    await api.createNote('b/Twin.md', '# Twin\n\nB-TWIN\n');
+    await api.createNote('a/Card.md', '# Card\n\nSee [[Twin]].\n');
+    await api.createNote('b/Other.md', '# Other\n\nSee [[Twin]].\n');
+    await api.createNote('b/Board.canvas', JSON.stringify({
+      nodes: [
+        { id: 'text', type: 'text', x: 40, y: 40, width: 380, height: 280, text: '[[Twin]] [[MissingHover]]\n\n![[PreviewTarget]]\n\n![[MissingEmbedCzh]]\n' },
+        { id: 'card', type: 'file', file: 'a/Card.md', x: 460, y: 40, width: 340, height: 200 },
+        { id: 'other', type: 'file', file: 'b/Other.md', x: 840, y: 40, width: 320, height: 180 },
+      ],
+      edges: [],
+    }));
+    await ws.vault.refreshFiles();
+    await ws.open('b/Board.canvas');
+  });
+  for (let i = 0; i < 60 && !await run(() => !!document.querySelector('[data-node-id="card"] [data-href="Twin"]') && !!document.querySelector('[data-node-id="other"] [data-href="Twin"]') && !!document.querySelector('[data-node-id="text"] .markdown-embed-title') && !!document.querySelector('[data-node-id="text"] .file-embed.mod-empty')); i++) await sleep(50);
+  check(await run(() => !!document.querySelector('[data-node-id="card"] [data-href="Twin"]') && document.querySelector('[data-node-id="text"]')?.dataset.path === 'b/Board.canvas' && document.querySelector('[data-node-id="other"]')?.dataset.path === 'b/Other.md'), 'cards record the path hover resolves from');
+
+  const hoverBody = async selector => {
+    await run(selector => {
+      const link = document.querySelector(selector);
+      if (!link) return;
+      for (let node = link.parentElement; node && node !== document.body; node = node.parentElement) {
+        if (node.scrollHeight <= node.clientHeight + 1) continue;
+        const linkRect = link.getBoundingClientRect();
+        const box = node.getBoundingClientRect();
+        if (linkRect.top >= box.top + 4 && linkRect.bottom <= box.bottom - 4) continue;
+        const scale = box.height / node.clientHeight || 1;
+        node.scrollTop += (linkRect.top - (box.top + 24)) / scale;
+      }
+    }, selector);
+    await sleep(30);
+    const p = await point(selector);
+    await dispatchAt(p, 'pointer', { pointerType: 'mouse', ctrlKey: true, metaKey: false, buttons: 0 });
+    await sleep(500);
+    return run(() => {
+      const pop = document.querySelector('.hover-popover');
+      return {
+        open: !!pop,
+        title: pop?.querySelector('.markdown-embed-title')?.textContent ?? '',
+        body: (pop?.querySelector('.markdown-embed-content')?.innerText ?? '').replace(/\s+/g, ' '),
+        parentBody: pop?.parentElement === document.body,
+      };
+    });
+  };
+
+  const textTwin = await hoverBody('[data-node-id="text"] [data-href="Twin"]');
+  check(textTwin.open && textTwin.body.includes('B-TWIN') && textTwin.parentBody, 'text card on b/Board.canvas resolves [[Twin]] from the canvas folder (' + textTwin.body + ')');
+  await closePreview();
+  const cardTwin = await hoverBody('[data-node-id="card"] [data-href="Twin"]');
+  check(cardTwin.open && cardTwin.body.includes('A-TWIN'), 'file card a/Card.md resolves [[Twin]] from that note (' + cardTwin.body + ')');
+  await closePreview();
+  const otherTwin = await hoverBody('[data-node-id="other"] [data-href="Twin"]');
+  check(otherTwin.open && otherTwin.body.includes('B-TWIN'), 'file card b/Other.md resolves [[Twin]] from that note (' + otherTwin.body + ')');
+  await closePreview();
+  const missing = await hoverBody('[data-node-id="text"] [data-href="MissingHover"]');
+  check(missing.open && missing.title === 'MissingHover' && /not created yet/i.test(missing.body), 'missing wikilink previews the not-created note (' + missing.body + ')');
+  await closePreview();
+  const embed = await hoverBody('[data-node-id="text"] .markdown-embed-title');
+  check(embed.open && embed.title === 'PreviewTarget', 'Ctrl+hover on ![[PreviewTarget]] opens that preview (' + embed.title + ')');
+  await closePreview();
+  const missingEmbed = await hoverBody('[data-node-id="text"] .file-embed.mod-empty');
+  check(missingEmbed.open && /not created yet/i.test(missingEmbed.body), 'missing ![[embed]] opens the not-created preview (' + missingEmbed.body + ')');
+  await closePreview();
+
+  const beforePan = await hoverBody('[data-node-id="text"] [data-href="Twin"]');
+  check(beforePan.open, 'preview is open before a wheel pan');
+  const panAt = await point('[data-node-id="text"] [data-href="Twin"]');
+  const transformBefore = await run(() => document.querySelector('.canvas-world').style.transform);
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...panAt, deltaX: 0, deltaY: 200, modifiers: 0 });
+  await sleep(80);
+  const panned = await run(before => ({
+    pop: !!document.querySelector('.hover-popover'),
+    changed: document.querySelector('.canvas-world').style.transform !== before,
+  }), transformBefore);
+  check(!panned.pop && panned.changed, 'wheel pan dismisses the preview and moves the board (' + JSON.stringify(panned) + ')');
+
+  const beforeClose = await hoverBody('[data-node-id="other"] [data-href="Twin"]');
+  check(beforeClose.open, 'preview is open before the canvas closes');
+  await run(() => ws.open('PreviewTarget.md'));
+  await sleep(200);
+  check(await run(() => !document.querySelector('.hover-popover') && !document.querySelector('.canvas-view') && ws.active.path === 'PreviewTarget.md'), 'leaving the canvas removes the preview');
 });
