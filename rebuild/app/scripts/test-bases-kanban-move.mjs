@@ -331,6 +331,63 @@ if (!process.argv.includes("--perf-only")) await withBrowser(async ({ run, press
  await keyboard('K6/B.md', 1);
  await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'file.backlinks still rebuilds an own write');
  check(await run(() => k6cols.some(el => !el.isConnected)), 'file.backlinks remounts columns');
+ // The save echo must not hide a later edit of the same note. A closed note has no save to absorb.
+ await run(() => ws.open('K6.base'));
+ await wait(() => run(() => document.querySelector('.bases-kanban-card[data-path="K6/E.md"]')?.classList.contains('is-movable')), 'plain board again');
+ before = await snap();
+ await keyboard('K6/E.md', 1);
+ await wait(() => run(skip => document.querySelector('.bases-view').reconcile.skip > skip, before.skip), 'closed-note move skipped');
+ before = await snap();
+ await run(async () => {
+  const { api } = await import('/src/api.ts');
+  await api.writeNote('K6/E.md', '---\nstatus: review\nkeep: same\n---\nbody E changed outside\n');
+  ws.vault.written('K6/E.md');
+ });
+ await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'body edit of the moved note still rebuilds');
+ check(await at('K6/E.md', 'review'), 'body edit keeps the status now on disk');
+ assert.match(await read('K6/E.md'), /body E changed outside/);
+ before = await snap();
+ await keyboard('K6/E.md', 1);
+ await wait(() => run(skip => document.querySelector('.bases-view').reconcile.skip > skip, before.skip), 'move before an outside property edit skipped');
+ before = await snap();
+ await run(async () => {
+  const { api } = await import('/src/api.ts');
+  await api.writeNote('K6/E.md', '---\nstatus: todo\nkeep: same\n---\nbody E from outside\n');
+  ws.vault.written('K6/E.md');
+ });
+ await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'same note edited outside the board still rebuilds');
+ check(await at('K6/E.md', 'todo'), 'outside edit moves the card to the new column');
+ before = await snap();
+ await run(async () => {
+  const { api } = await import('/src/api.ts');
+  await api.renamePath('K6/C.md', 'K6/Renamed.md');
+  await ws.vault.refreshFiles();
+ });
+ await wait(() => run(() => !!document.querySelector('.bases-kanban-card[data-path="K6/Renamed.md"]')), 'rename shows the new path');
+ check(await run(full => document.querySelector('.bases-view').reconcile.full > full && !document.querySelector('.bases-kanban-card[data-path="K6/C.md"]'), before.full), 'rename rebuilds and drops the old path');
+ // An open note's quiet window is the own-write notice. Typing into the body after the write still rebuilds.
+ await run(() => ws.open('K6/E.md', { where: 'right' }));
+ await wait(() => run(() => !!ws.editors.doc('K6/E.md')), 'moved note open beside the board');
+ await sleep(350);
+ before = await snap();
+ await keyboard('K6/E.md', 1);
+ await sleep(40);
+ await run(() => { const doc = ws.editors.doc('K6/E.md'); ws.editors.change('K6/E.md', { changes: { from: doc.length, insert: '\n#added\n' }, userEvent: 'input' }); });
+ await wait(() => run(full => document.querySelector('.bases-view').reconcile.full > full, before.full), 'typing into the moved note during the quiet window rebuilds');
+ check(await run(() => ws.editors.doc('K6/E.md').toString().includes('#added') && !!document.querySelector('.bases-kanban-card[data-path="K6/E.md"]')), 'the open note keeps the typed body and the card');
+ // A second visible board of the same base did not write the card, so it rebuilds.
+ await run(() => ws.open('K6.base', { where: 'right' }));
+ await wait(() => run(() => document.querySelectorAll('.bases-view').length >= 2 && [...document.querySelectorAll('.bases-view')].every(el => el.querySelector('.bases-kanban-card'))), 'two boards');
+ await sleep(300);
+ await run(() => { for (const el of document.querySelectorAll('.bases-kanban')) el.scrollLeft = 0; });
+ await sleep(80);
+ const counts = () => run(() => [...document.querySelectorAll('.bases-view')].map(el => el.reconcile.full));
+ const fulls = await counts();
+ // E sits in an early column, so a narrow split still has its card mounted.
+ await keyboard('K6/E.md', 1);
+ await wait(() => run(fulls => [...document.querySelectorAll('.bases-view')].some((el, i) => el.reconcile.full > fulls[i]), fulls), 'the other board rebuilds');
+ const after = await counts();
+ check(after.filter((n, i) => n === fulls[i]).length === 1 && after.some((n, i) => n > fulls[i]), `one board skips and the other rebuilds (${JSON.stringify(fulls)} -> ${JSON.stringify(after)})`);
 });
 
 // P4/P5/P7: 10,000 balanced notes, transform-only drag across three columns with auto-scroll.
