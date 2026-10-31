@@ -88,3 +88,20 @@ Earlier full runs stopped before the end. One died in `test-canvas-navigation.mj
 `npm run audit:offline` passed: 191 source files, dist/, CSP, capabilities and dependencies checked. The existing chunk-size warning is the only build warning.
 
 From `rebuild/app/src-tauri`, `cargo test --offline` passed 73 tests, with 4 ignored (`set_property_bench`, `crash_child`, `bench_vault`, `bench_search_commands`). `cargo build --offline` finished.
+
+## Sync onto 2e65ab8
+
+Merged `rebuild/integration` (`2e65ab8`) into this branch with `--no-ff`. Merge commit `a488f49`. `rebuild/integration` was not moved. Nothing was pushed. No new package. No GUI window.
+
+The only conflict was `rebuild/app/package.json`. `posttest` was already the same line on both sides (12 commands). `test` keeps this branch's `node scripts/test-canvas-lazy.mjs` after navigation, and adds integration's three scripts after `test-search-commands.mjs`: `test-search-props-edge.mjs`, `test-links-embeds-edge.mjs`, and `test-links-embeds-edge-browser.mjs`. 66 test commands, each once. JSON parses (`name` grove).
+
+That merge also brings the links/embeds and search/props edge tests, and the WebKit GPU renderer change. On Linux, `lib.rs` leaves the DMA-BUF renderer on when GDK uses Wayland and sets `__NV_DISABLE_EXPLICIT_SYNC` so NVIDIA does not trip Hyprland's missing acquire timeline. Under X11 it still sets `WEBKIT_DISABLE_DMABUF_RENDERER`. A variable that is already set is left alone. `editor.ts` turns animation off on an empty focused cursor layer so WebKit does not repaint every frame while the editor is idle.
+
+### Checks
+
+One run under `flock /tmp/grove-npm-test.lock`. The canvas navigation script passed the first time, so it was not rerun. Screenshots under `rebuild/round*-shots/` were restored before this commit.
+
+- `npm run build`: passed, `✓ built in 214ms`. Existing chunk-size warning only.
+- The `test` and `posttest` scripts: exit 0. Vitest 80 files, 1,275 tests. Navigation compositor pan 22 drawn / 0 dropped, zoom 24 drawn / 0 dropped, both inside the ceiling of 6 per 24 inputs. Debug zoom p50/p95/max 16.7/16.7/16.8. `test-canvas-lazy.mjs` passed, including the fitted 3,000-card board with no Markdown DOM. The three new edge scripts passed (130 link/embed checks, plus the browser embeds). 1,000-row scroll max 16.8 ms. 10,000-row scroll max 16.8 ms. K7 fuzz `cases=48 seed=27447`.
+- `npm run audit:offline`: passed, 191 source files, dist/, CSP, capabilities and dependencies checked. The rebuild inside it was `✓ built in 215ms`, with the same chunk-size warning.
+- `cargo test --offline` from `rebuild/app/src-tauri`: 82 passed, 5 ignored (`set_property_bench`, `crash_child`, `bench_vault`, `bench_search_commands`, `legacy_name_search_must_not_list_a_file_named_dot_md`). `gdk_backend_choice` passed.
