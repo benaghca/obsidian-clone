@@ -74,12 +74,16 @@ describe("Bases tables", () => {
     const sibling = baseModel(unsupported, 1);
     expect(sibling.name).toBe("Table");
     expect(sibling.notices.size).toBe(0);
-    const kanban = baseModel('views:\n  - type: kanban\n    name: Board\n');
-    expect(kanban.type).toBe("table");
-    expect(kanban.name).toBe("Board");
-    expect([...kanban.notices]).toEqual(["This layout isn't supported yet"]);
+    const places = baseModel('views:\n  - type: map\n    name: Places\n');
+    expect(places.type).toBe("table");
+    expect(places.name).toBe("Places");
+    expect([...places.notices]).toEqual(["This layout isn't supported yet"]);
     expect(baseModel('views:\n  - type: table\n').notices.size).toBe(0);
     expect(baseModel('views:\n  - type: cards\n').notices.size).toBe(0);
+    // K4: Kanban is a layout of its own.
+    const kanban = baseModel('views:\n  - type: kanban\n    name: Board\n');
+    expect(kanban.type).toBe("kanban");
+    expect(kanban.notices.size).toBe(0);
   });
   it("parses cards view type and card layout options with defaults", async () => {
     (globalThis as Record<string, unknown>).window ??= {};

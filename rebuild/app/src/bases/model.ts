@@ -62,7 +62,7 @@ export function baseModel(source: string, viewIndex = 0) {
   const first = views[viewIndex];
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
-  if (view.type != null && view.type !== "table" && view.type !== "cards") notices.add("This layout isn't supported yet");
+  if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban") notices.add("This layout isn't supported yet");
   const groupBy = parseGroupBy(view.groupBy, notices), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
@@ -143,7 +143,7 @@ export function baseModel(source: string, viewIndex = 0) {
     const sorted = keyed.map(k => k.r);
     return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
   }
-  const type: "table" | "cards" = view.type === "cards" ? "cards" : "table";
+  const type: "table" | "cards" | "kanban" = view.type === "cards" || view.type === "kanban" ? view.type : "table";
   const cardSize = typeof view.cardSize === "number" && Number.isFinite(view.cardSize) ? Math.max(80, Math.min(800, Math.round(view.cardSize))) : ({ small: 160, medium: 220, large: 320 } as Record<string, number>)[String(view.cardSize ?? "")] ?? 220;
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
