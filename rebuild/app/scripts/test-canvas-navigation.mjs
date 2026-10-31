@@ -209,6 +209,10 @@ await withBrowser(async ({send,run,click,move,point,check,press,chord,double,sho
   check(early&&!(await look()).out,'Above 55% content returns once the wheel rests, not mid-gesture');
   await wheelTo(.5);await sleep(200);check(!(await look()).out,'Zooming out to 50% keeps content (titles below 45%)');
   await wheelTo(.4);await sleep(200);check((await look()).out,'Below 45% titles return');
+  await wheelTo(.55);await sleep(200);check((await look()).out,'Exactly 55% stays in title mode');
+  await wheelTo(.551);await sleep(200);check(!(await look()).out,'Just above 55% leaves title mode');
+  await wheelTo(.45);await sleep(200);check(!(await look()).out,'Exactly 45% stays on content');
+  await wheelTo(.449);await sleep(200);check((await look()).out,'Just below 45% returns to title mode');
   // Decision D3: double-click zooms to a zoomed-out card; the next double-click edits.
   const spot=()=>run(()=>{const r=document.querySelector('.canvas-node[data-node-id="t"]').getBoundingClientRect();return{x:r.x+r.width/4,y:r.y+r.height*3/4};});
   await double(await spot());await sleep(120);
@@ -219,5 +223,24 @@ await withBrowser(async ({send,run,click,move,point,check,press,chord,double,sho
   await chord('a');await send('Input.insertText',{text:'Renamed **card**'});await press('Escape');await sleep(80);
   await click(button('Reset zoom'));for(let i=0;i<3;i++)await click(button('Zoom out'));await sleep(80);
   check((await look()).titles.t.text==='Renamed card','A text card\'s title follows its edited text');
+  // A card that cannot fit above 55% stays in title mode after zoom-to. The second double-click still edits, and the card can be dragged.
+  await run(async()=>{const{api}=await import('/src/api.ts');await api.createNote('Huge.canvas',JSON.stringify({nodes:[{id:'h',type:'text',x:0,y:0,width:4000,height:2400,text:'Wide card'}],edges:[]}));await ws.vault.refreshFiles();await ws.open('Huge.canvas');});
+  await sleep(300);
+  const huge=()=>run(()=>{const world=document.querySelector('.canvas-world'),card=document.querySelector('.canvas-node[data-node-id="h"]');return{out:world.classList.contains('is-zoomed-out'),scale:new DOMMatrix(world.style.transform).a,editing:card.classList.contains('is-editing'),x:parseFloat(card.style.left)};});
+  const hugeAt=()=>run(()=>{const r=document.querySelector('.canvas-view').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height*.75};});
+  const opened=await huge();
+  check(opened.out&&opened.scale<.45,'A card larger than the view opens fitted in title mode');
+  const at=await hugeAt();await move(at);
+  await send('Input.dispatchMouseEvent',{type:'mousePressed',...at,button:'left',buttons:1,clickCount:1});
+  await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:at.x+80,y:at.y,buttons:1});await sleep(40);
+  await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:at.x+80,y:at.y,button:'left',clickCount:1});await sleep(80);
+  const dragged=await huge();
+  check(dragged.out&&dragged.x>opened.x+10,`Dragging a title-mode card moves it (${opened.x} -> ${dragged.x})`);
+  await double(await hugeAt());await sleep(120);
+  const framed=await huge();
+  check(framed.out&&framed.scale<=.55&&!framed.editing,'Double-clicking a card that stays under 55% zooms without editing');
+  await double(await hugeAt());await sleep(120);
+  check(await run(()=>!!document.querySelector('.canvas-node[data-node-id="h"].is-editing .cm-editor')),'A second double-click edits that card');
+  await press('Escape');await sleep(40);
   check(await run(async()=>{const{api}=await import('/src/api.ts');return await api.readNote('Navigation.canvas')===originalNavigation}),'Pan, zoom and tab changes leave canvas bytes unchanged');
 }, {height:800,screenshots:new URL('../../round23-shots/',import.meta.url).pathname});

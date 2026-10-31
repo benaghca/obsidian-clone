@@ -21,7 +21,11 @@ const BANDS = { min: -16, max: 4 };
 export const zoomBand = (scale: number) => Math.max(BANDS.min, Math.min(BANDS.max, Math.round(Math.log2(scale) * 4)));
 // Title mode starts below 45% and ends above 55%, so a wobble at the threshold never
 // flickers. Its highest band is -3 (55%); a card's title band of -2 means "never".
-const titleMode = (scale: number, now: boolean) => now ? scale <= .55 : scale < .45;
+// A ctrl-wheel delta arrives as float32, so a zoom aimed at either edge lands a few
+// billionths off. Snap that onto the edge; one notch is about 0.2%.
+const TITLE_EPS = 1e-6;
+const titleEdge = (scale: number) => Math.abs(scale - .45) <= TITLE_EPS ? .45 : Math.abs(scale - .55) <= TITLE_EPS ? .55 : scale;
+const titleMode = (scale: number, now: boolean) => { const zoom = titleEdge(scale); return now ? zoom <= .55 : zoom < .45; };
 const TITLE_MAX = -2;
 // The band below which a card is under 26px tall or 50px wide on screen: its title
 // is hidden and it shows as a box. Undefined when the title always fits.
