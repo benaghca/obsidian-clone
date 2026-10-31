@@ -109,7 +109,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     if (!text.trim()) return;
     add(makeNode("text", place, 250, 60, { text }));
   }
-  // One list for this menu and for Ctrl+drag (CZ5): card, note, media, web page, group.
+  // One list for the board menu and for Ctrl+drag: card, note, media, web page, group.
   function addItems(place: CanvasAddPlace): MenuItems {
     const at = { x: place.x, y: place.y };
     const start = !!place.atStart;
@@ -121,6 +121,10 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
       { title: "Add web page", icon: "globe", action: () => void addWebPage(place) },
       { title: "Create group", icon: "group", action: () => add(makeNode("group", place, 400, 400, { label: "Untitled group" })) },
     ];
+  }
+  function createMenu(place: CanvasAddPlace, at: { x: number; y: number }) {
+    if (gone || canvasReadOnly.has(el)) return;
+    showMenu(addItems({ ...place, atStart: true }), at, { className: "canvas-create-menu" });
   }
   function boardMenu(x: number, y: number, history: { undo: boolean; redo: boolean; apply: (forward: boolean) => void }, refresh: () => void) {
     const place: CanvasAddPlace = { ...point(x, y), atStart: true };
@@ -205,9 +209,9 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   el.addEventListener("dblclick", doubleClick);
   const controlDouble = (e: MouseEvent) => { if (controlClick) { e.preventDefault(); e.stopImmediatePropagation(); } };
   el.addEventListener("dblclick", controlDouble, true);
-  const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu, .canvas-context-menu, .canvas-group-menu")) controlClick = true; };
+  const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu, .canvas-context-menu, .canvas-group-menu, .canvas-create-menu")) controlClick = true; };
   document.addEventListener("click", menuClick, true);
-  return { connect, reset, addItems, boardMenu, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); el.removeEventListener("dblclick", controlDouble, true); } };
+  return { connect, reset, addItems, boardMenu, createMenu, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); el.removeEventListener("dblclick", controlDouble, true); } };
 }
 
 // A temporary note editor owns only the card's Markdown, never a vault note.
