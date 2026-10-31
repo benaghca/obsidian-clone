@@ -33,13 +33,23 @@ const SETTLE_MS = 120;
 export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void) {
   let state = canvasViewports.get(tab);
   if (state?.path !== path) state = undefined;
-  let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false;
+  let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false, flushBand = false;
   let rect: DOMRect | undefined, menu: HTMLElement | undefined, styled: HTMLElement | undefined;
   let space = false, dragging = false, suppressClick = false;
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
   installBands();
-  const band = (scale: number) => { clearTimeout(settle); settle = 0; world.dataset.zoomBand = String(zoomBand(scale)); };
+  const applyBand = (scale: number) => { clearTimeout(settle); settle = 0; world.dataset.zoomBand = String(zoomBand(scale)); };
+  const postponeBand = () => { clearTimeout(settle); settle = window.setTimeout(() => { settle = 0; if (state) world.dataset.zoomBand = String(zoomBand(state.scale)); }, SETTLE_MS); };
+  // Wheel and pinch wait out the 120ms settle, including wheels that no longer
+  // change the scale (the zoom cap). Buttons, fit, zoom-to-selection, resize and
+  // the first draw apply the band now. A pan does neither, so that frame stays a
+  // transform change while the zoom's timer is still running.
+  function syncBand(scale: number, wheel: boolean, flush: boolean, first: boolean) {
+    if (world.dataset.zoomBand === String(zoomBand(scale))) { if (flush || wheel) { clearTimeout(settle); settle = 0; } return; }
+    if (wheel && !flush) postponeBand();
+    else if (flush || first) applyBand(scale);
+  }
   // The selection menu is appended to the world after the cards; look from the end.
   function selectionMenu() {
     if (menu?.parentElement === world) return menu;
@@ -50,12 +60,14 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   function draw() {
     cancelAnimationFrame(frame);
     frame = 0;
-    const wheel = gesture;
-    gesture = false;
+    const wheel = gesture, flush = flushBand;
+    gesture = false; flushBand = false;
     if (!state || !width || !height) return;
     const { cx, cy, scale } = state;
     const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
     canvasViewports.set(tab, state);
+    // A clamped wheel redraws the same viewport; it still has to postpone settle.
+    syncBand(scale, wheel, flush, drawn === "");
     // A card drag redraws with the same viewport on every move; a redrawn board
     // brings a new selection menu.
     const key = `${x} ${y} ${scale} ${width} ${height}`, toolbar = selectionMenu();
@@ -70,10 +82,6 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     styled = toolbar;
     if (key === drawn) return;
     drawn = key;
-    if (world.dataset.zoomBand !== String(zoomBand(scale))) {
-      if (!wheel) band(scale);
-      else { clearTimeout(settle); settle = window.setTimeout(() => band(state!.scale), SETTLE_MS); }
-    }
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
@@ -84,6 +92,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   const schedule = () => { frame ||= requestAnimationFrame(draw); };
   function fit(next = bounds, max = 1) {
     if (!next || !width || !height) return;
+    gesture = false; flushBand = true;
     state = { path, cx: (next.left + next.right) / 2, cy: (next.top + next.bottom) / 2,
       scale: clamp(Math.min(max, width / (Math.max(1, next.right - next.left) * 1.1), height / (Math.max(1, next.bottom - next.top) * 1.1))) };
     draw();
@@ -96,16 +105,17 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     state.scale = scale;
     schedule();
   }
+  const zoomNow = (scale: number) => { gesture = false; flushBand = true; zoom(scale); };
   const controls = h("div", { class: "canvas-controls" });
   const settingsButton = keyButton(icon("settings"), "Canvas settings", () => canvasSettings(el, settingsButton, refresh));
   const undo = keyButton(icon("undo-2"), "Undo", () => history(false));
   const redo = keyButton(icon("redo-2"), "Redo", () => history(true));
   const zoomControls = h("div", { class: "canvas-control-group" });
   for (const [label, glyph, action] of [
-    ["Zoom in", "plus", () => zoom((state?.scale ?? 1) * Math.SQRT2)],
-    ["Reset zoom", "rotate-cw", () => zoom(1)],
+    ["Zoom in", "plus", () => zoomNow((state?.scale ?? 1) * Math.SQRT2)],
+    ["Reset zoom", "rotate-cw", () => zoomNow(1)],
     ["Zoom to fit\n(Shift + 1)", "maximize", () => fit()],
-    ["Zoom out", "minus", () => zoom((state?.scale ?? 1) / Math.SQRT2)],
+    ["Zoom out", "minus", () => zoomNow((state?.scale ?? 1) / Math.SQRT2)],
   ] as const) zoomControls.append(keyButton(icon(glyph), label, e => {
     if (e.type === "keydown") { e.stopPropagation(); action(); }
     else { action(); el.focus({ preventScroll: true }); }
@@ -122,7 +132,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     // Canvas help: "press Space or Ctrl … and scroll" to zoom.
     if (e.ctrlKey || space) {
       rect ??= el.getBoundingClientRect();
-      gesture = true;
+      gesture = true; flushBand = false;
       zoom(state.scale * 2 ** (-e.deltaY * unit / 300), e.clientX - rect.left, e.clientY - rect.top);
     } else {
       state.cx += (e.deltaX + (e.shiftKey ? e.deltaY : 0)) * unit * .93 / state.scale;
@@ -160,6 +170,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   el.addEventListener("dblclick", blockClick, true);
   const size = new ResizeObserver(([entry]) => {
     width = entry.contentRect.width; height = entry.contentRect.height; rect = undefined;
+    gesture = false; flushBand = true;
     if (!state) fit(); else draw();
   });
   size.observe(el);
