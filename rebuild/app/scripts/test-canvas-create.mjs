@@ -431,6 +431,14 @@ await withBrowser(async ({ run, send, open, read, click, press, key, chord, move
   await move(many.from);
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...many.from, button: 'left', buttons: 1, clickCount: 1, modifiers: CTRL });
   await sleep(40);
+  // Zoom-out settle queues band and cull writes on the world. Those are not
+  // the drag. Wait until that queue stays empty, then measure the drag.
+  let idle = 0;
+  for (let i = 0; i < 80 && idle < 2; i++) {
+    const pending = await run(() => window.__canvasProbe?.().pending ?? 0);
+    idle = pending === 0 ? idle + 1 : 0;
+    await sleep(50);
+  }
   await run(() => { createReads = 0; createDom = 0; createFrames = []; });
   for (let i = 1; i <= 24; i++) {
     await send('Input.dispatchMouseEvent', {
