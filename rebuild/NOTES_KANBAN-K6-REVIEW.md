@@ -89,3 +89,48 @@ The UI was exercised in headless Chromium only. The task forbids opening a Grove
 - A links-only skip does not clear the mark. A later frontmatter change fails `sameProperties`. A body-only change of that same path, after the modify was swallowed into the links notice, is the same narrow window as the 20 ms case.
 - `trySkip` takes the notice before `await index.notes()`. A newer event during the read sets `dirty` or `reload`, the mark stays, and the loop retries. A shared stale `notes()` read compares old props with the new painted props and rebuilds.
 - The 50,000-note `file.backlinks` arm still pays the full select (this run `lastMs` 123.3, one 61 ms long task).
+
+## K6-SYNC
+
+Two local merges on `rebuild/k6-review-grok`. Nothing pushed. `rebuild/kanban-k6-grok` is still `8929d7d`. `rebuild/k8-review-grok` is `bd62407`.
+
+`git merge --no-ff rebuild/k8-review-grok` is `21c21b8` ("Merge branch 'rebuild/k8-review-grok' into rebuild/k6-review-grok."). Parents `6c756f5` and `bd62407`.
+
+One conflict, `rebuild/app/src/bases/view.ts`, at the resize observer and the own-write block that follows it. The recorded scratch resolution was reapplied and then read through. K8's observer still guards with `!isList()`. `listPane`, the list update branch, `listPane.clear()`, and `listPane.dispose()` stay. K6's `trySkip` stays after the observer. `skipsFullRebuild` is still called with `kanban: kanban()`, so a list layout does not skip. `types.json` still sets `changeOther` before `schedule()`. A Kanban own-write skip and a list rebuild both remain on the path.
+
+`rebuild/app/package.json` did not conflict. K6 had not edited it since `ba9e4ac`, so the merge took K8's scripts. `test` has 59 steps and `posttest` has 9, each once. That includes `test-canvas-zoom-trace.mjs`, `test-canvas-board-menu.mjs`, `test-canvas-create.mjs`, and `test-bases-list.mjs` (the list script is in `posttest`, before the property-edit fuzz). No test ceiling was edited.
+
+`git merge --no-ff rebuild/integration` is `f7e4fe6` ("Merge branch 'rebuild/integration' into rebuild/k6-review-grok."). Parents `21c21b8` and `e7f8d0f`. `e7f8d0f` is the K8 merge into integration (`ec7a58a` plus `bd62407`). Its tree matches `bd62407`, so this merge changed no files. While these notes were written, the integration worktree reset `rebuild/integration` from `e7f8d0f` back to `ec7a58a`. `ec7a58a` is already an ancestor of `f7e4fe6`, so it was not merged again. This branch was not reset.
+
+`node scripts/bench-bases-kanban.mjs`, one clean run, exit 0, under the same lock as `npm test`. Times are ms. Skip budget: no remount, no long task, `lastMs` under 50. The 50k full arm is still the select (B7).
+
+| Notes | Arm | Review reconcile / lastMs | This run reconcile / lastMs | long |
+| --- | --- | ---: | ---: | --- |
+| 1,000 | skip | 26.9 / 0.3 | 21.0 / 0.4 | none |
+| 1,000 | full | 30.1 / 8.0 | 30.1 / 7.7 | none |
+| 10,000 | skip | 30.4 / 3.0 | 28.3 / 2.6 | none |
+| 10,000 | full | 48.5 / 26.4 | 45.4 / 23.3 | none |
+| 50,000 | skip | 32.0 / 11.3 | 33.7 / 13.0 | none |
+| 50,000 | full | 143.3 / 123.3 | 152.7 / 132.5 | 67 (review 61) |
+
+Inside that same `npm test`, K5 drag and drop (`test-bases-kanban-move.mjs`) and K8 list scroll (`test-bases-list.mjs`):
+
+| Check | This run |
+|---|---|
+| P4 p95 / max | 16.8 / 16.8 |
+| P4 handler / script per move | 0.50 / 0.100 |
+| P4 layouts / frames / rects / ghost / scroll | 11 / 119 / 3 / 120 late 0 / 212×462, no long task |
+| P5 paint / save / reconcile | 6.7 / 8.3 / 40.0, no long task |
+| P7 undo paint / save / reconcile, frames | 13.4 / 3.1 / 29.7, frame 1 |
+| P7 redo paint / save / reconcile, frames | 4.5 / 2.5 / 37.5, frame 1 |
+| List, 1,000, warm open | 10.2 ms, 36 rows |
+| List, 1,000, scroll | max 16.8, p95 16.7, 45 rows, top 27218, no long task |
+| List, 10,000, cold open | 37.8 ms, no long task, 36 rows |
+| List, 10,000, warm open | 17.2, 14.3, 13.2 (median 14.3), no long task |
+| List, 10,000, scroll | p95 16.7, max 16.8, 45 rows, top 279218, no long task |
+
+K4 in that run: P1 cold 73.3 with long task 72, warm 24.7 / 24.9 / 22.3 and no warm long task. P2 p95/max 16.7/16.8, 15 cards. P3 p95/max 16.7/16.8, 7 columns, 5 visible. The cold long task is the first property read of 10,000 notes. P10 typing beside the 10,000-note board was 16.7. Canvas 300-card drag max 16.8. Canvas pan and zoom max 16.8. 1,000-row Bases scroll max 16.8. No timing flake needed a second run.
+
+From `rebuild/app`: `npm run build` exit 0 (the existing chunk-size warning on the main bundle remains, built in 671 ms), `npm run audit:offline` passed (186 source files), `flock /tmp/grove-npm-test.lock npm test` exit 0. The locked command's wall time was 976 s, including the wait while another suite held the lock. Vitest 73 files, 1248 tests, including 444 parity cases, then the browser scripts and posttest. From `rebuild/app/src-tauri`: `cargo test --offline` 73 passed, 4 ignored; `cargo build --offline` exit 0. Screenshots under `rebuild/round*-shots/` were restored and are not in this commit. Headless Chromium only.
+
+The items under Left open are unchanged. The verdict stays OK.
