@@ -1,0 +1,51 @@
+/* List layout. Row and heading heights are LIST_ROW (28) and LIST_HEADER (32) in list.ts.
+   No transitions. No vertical margins: an embedded base must not move editor lines. */
+.bases-list {
+  width: 100%;
+  box-sizing: border-box;
+  contain: strict;
+  overflow-anchor: none;
+}
+.bases-list-pad { overflow-anchor: none; }
+.bases-list > .bases-b5-toggle { margin: 0; }
+.bases-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0 12px 0 8px;
+  overflow: hidden;
+  contain: layout paint style;
+  overflow-anchor: none;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.bases-list-item:hover,
+.bases-list-item:focus-within { background: var(--background-modifier-hover); }
+.bases-list-marker {
+  flex: none;
+  min-width: 1.25em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.bases-list-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 50%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bases-list-props {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+.bases-list-sep { color: var(--text-faint); }
+.bases-list-prop { color: var(--text-muted); }

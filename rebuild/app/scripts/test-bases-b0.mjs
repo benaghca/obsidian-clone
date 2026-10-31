@@ -138,4 +138,30 @@ await withBrowser(async ({ run, send, click, press, check }) => {
   verify(metrics.revealUpdates === 1 && await run(() => b0Fixture.view.el.textContent.includes('Refreshed')), 'showing a deferred Base reloads current source once');
   await run(() => { b0Fixture.view.dispose(); b0Fixture.view.el.remove(); });
   console.log('B0_METRICS', JSON.stringify(metrics));
+  // P10: typing in a note while a 10,000-note board is open in the other pane.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    const status = ['todo', 'doing', 'review', 'done'];
+    for (let i = 0; i < 10000; i++) await api.createNote(`K6P10/${String(i).padStart(5, '0')}.md`, `---\nstatus: ${status[i % 4]}\n---\n# Note ${i}\n`);
+    await api.createNote('K6P10.base', 'filters: \'file.inFolder("K6P10")\'\nviews:\n  - type: kanban\n    name: Board\n    order: [file.name, status]\n    groupBy:\n      property: status\n      order: [todo, doing, review, done]\n    sort:\n      - property: file.name\n');
+    await ws.vault.refreshFiles();
+    await ws.open('K6P10.base', { group: b0BaseGroup });
+  });
+  for (let i = 0; i < 400; i++) { if (await run(() => !!document.querySelector('.bases-kanban-card[data-path="K6P10/00000.md"]'))) break; await sleep(50); if (i === 399) assert.fail('10,000-note board'); }
+  await run(() => ws.open('K6P10/00000.md', { group: b0ActorGroup }));
+  await run(() => ws.setMode('source'));
+  for (let i = 0; i < 40; i++) { if (await run(() => [...ws.editors.viewOf(b0ActorGroup).dom.querySelectorAll('.cm-line')].some(el => el.textContent.startsWith('# Note')))) break; await sleep(50); }
+  await sleep(500);
+  const p10Point = await run(() => {
+    const line = [...ws.editors.viewOf(b0ActorGroup).dom.querySelectorAll('.cm-line')].find(el => el.textContent.startsWith('# Note'));
+    const r = line.getBoundingClientRect(); return { x: r.left + 40, y: r.top + r.height / 2 };
+  });
+  await click(p10Point); await press('End'); await sleep(100);
+  await run(() => { window.k6p10Col = document.querySelector('.bases-kanban-col'); window.k6p10Frames = []; let last = performance.now(); window.k6p10Frame = requestAnimationFrame(function tick(t) { k6p10Frames.push(t - last); last = t; k6p10Frame = requestAnimationFrame(tick); }); });
+  for (let i = 0; i < 5; i++) { await send('Input.insertText', { text: 'x' }); await sleep(100); }
+  await sleep(80);
+  metrics.p10FrameMs = await run(() => { cancelAnimationFrame(k6p10Frame); return Math.max(...k6p10Frames.slice(2)); });
+  verify(metrics.p10FrameMs < 20, 'typing beside a 10,000-note board stays under 20ms');
+  await wait(() => run(() => document.querySelector('.bases-kanban-col') !== k6p10Col), 'a doc edit rebuilds the 10,000-note board after the quiet period');
+  console.log('K6_P10', JSON.stringify({ frameMs: metrics.p10FrameMs }));
 });

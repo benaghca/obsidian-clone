@@ -109,6 +109,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     redo: redo.some(text => text !== source),
     apply: history,
   }, () => draw());
+  const openCreateMenu = (box: { x: number; y: number; width: number; height: number }, at: { x: number; y: number }) =>
+    cardActions.createMenu({ ...box, atStart: true }, at);
   async function load() {
     const mine = ++loading;
     let text: string;
@@ -414,7 +416,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           edgeDrawing.update(item); refresh();
         }
       });
-    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides, openBoardMenu, ids => edgeDrawing.select(ids)));
+    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides, openBoardMenu, openCreateMenu, ids => edgeDrawing.select(ids)));
     built = true; building = false;
     const view = navigation.snapshot(); if (view) { bodies.update(); edgeDrawing.mode(view.titles, view.band, view); }
     work.resume();

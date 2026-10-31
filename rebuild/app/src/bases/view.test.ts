@@ -4,7 +4,8 @@ vi.hoisted(() => {
   (globalThis as unknown as { window: unknown }).window = globalThis;
 });
 
-import { baseChange, baseNeeds, docsOutsideFilter, missesPrefilter, readsChanged, type BaseChange } from "./view";
+import type { Property } from "../editor/frontmatter";
+import { baseChange, baseNeeds, docsOutsideFilter, missesPrefilter, readsChanged, readsOtherFiles, sameProperties, skipsFullRebuild, type BaseChange, type OwnWriteQuery } from "./view";
 
 const tasks = `filters:
   and:
@@ -150,4 +151,46 @@ it("rebuilds an embedded base that reads `this` when its note changes, even outs
   expect(readsChanged(source, "Host.md", ["Other.md"])).toBe(false);
   expect(readsChanged(source, null, ["Host.md"])).toBe(false);
   expect(readsChanged(tasks, "Host.md", ["Host.md"])).toBe(false);
+});
+
+const prop = (key: string, value: Property["value"] = "a", line = 1): Property => ({ key, type: "text", value, line, count: 1 });
+
+it("treats link facts as reads of other files", () => {
+  for (const source of ["file.backlinks", "file.links", "file.embeds", "file.hasLink('A')", "this.file.backlinks.length", "n: file.backlinks.length"]) {
+    expect(readsOtherFiles(source), source).toBe(true);
+  }
+  for (const source of ["status", "file.name", "file.folder", "file.tags", "priority"]) {
+    expect(readsOtherFiles(source), source).toBe(false);
+  }
+});
+
+it("compares painted frontmatter by key, type, line, count and value", () => {
+  const row = [prop("status", "todo"), prop("tags", ["a", "b"], 2)];
+  expect(sameProperties(row, row)).toBe(true);
+  expect(sameProperties(row, [prop("status", "todo"), prop("tags", ["a", "b"], 2)])).toBe(true);
+  expect(sameProperties(undefined, undefined)).toBe(true);
+  expect(sameProperties(row, undefined)).toBe(false);
+  expect(sameProperties(row, [prop("status", "doing"), prop("tags", ["a", "b"], 2)])).toBe(false);
+  expect(sameProperties(row, [prop("status", "todo", 4), prop("tags", ["a", "b"], 2)])).toBe(false);
+  expect(sameProperties(row, [prop("status", "todo"), prop("tags", ["a"], 2)])).toBe(false);
+  expect(sameProperties(row, [prop("status", "todo")])).toBe(false);
+});
+
+const ownQuery = (patch: Partial<OwnWriteQuery>): OwnWriteQuery => ({
+  kanban: true, reload: false, paths: ["A.md"], other: false, links: false, own: true, echo: false, readsThis: false, readsOther: false, ...patch,
+});
+
+it("skips a kanban rebuild only for one own write, or a link refresh that reads nothing else", () => {
+  expect(skipsFullRebuild(ownQuery({}))).toBe("own");
+  expect(skipsFullRebuild(ownQuery({ own: false, echo: true }))).toBe("own");
+  expect(skipsFullRebuild(ownQuery({ paths: [], links: true, own: false }))).toBe("links");
+  expect(skipsFullRebuild(ownQuery({ kanban: false }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ reload: true }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ other: true }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ readsOther: true }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ paths: [], links: false, own: false }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ paths: ["A.md", "B.md"] }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ readsThis: true }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ own: false, echo: false }))).toBe(false);
+  expect(skipsFullRebuild(ownQuery({ paths: ["A.md"], links: true }))).toBe("own");
 });
