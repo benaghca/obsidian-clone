@@ -18,6 +18,8 @@
 
 mod config;
 mod edit;
+#[cfg(test)]
+mod edit_fuzz;
 mod fsutil;
 mod index;
 mod lockdown;
