@@ -2,24 +2,28 @@ import { isNoteFile } from "../paths";
 import { confirmDialog } from "../shell/confirm";
 import { h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { closeMenu, showMenu } from "../shell/menu";
+import { closeMenu, showMenu, type MenuItems } from "../shell/menu";
 import { settings } from "../settings/store";
 import { groupAlign, type BackgroundPicker } from "./groups";
 import { edgeBounds, type CanvasEdge, type CanvasNode } from "./model";
 
 export const isCardControl = (target: EventTarget | null) => target instanceof Element && !!target.closest(".canvas-selection-menu, .canvas-color-menu");
 export const canvasReadOnly = new WeakSet<HTMLElement>();
-export function canvasSettings(el: HTMLElement, anchor: HTMLElement, refresh: () => void) {
+/** Gear menu and the empty-canvas menu. One list, so the two cannot drift. */
+export function canvasSettingsItems(el: HTMLElement, refresh: () => void): MenuItems {
   const opts = settings.get("canvas.json");
-  showMenu([
-    ...([['snapToGrid', 'Snap to grid', 'grid-2x2'], ['snapToObjects', 'Snap to objects', 'scan-line']] as const).map(([key, title, icon]) => ({
+  return [
+    ...([["snapToGrid", "Snap to grid", "grid-2x2"], ["snapToObjects", "Snap to objects", "scan-line"]] as const).map(([key, title, icon]) => ({
       title, icon, checked: opts[key], action: () => { settings.set("canvas.json", key, !opts[key]); },
     })),
     { title: "Read-only", icon: "lock", checked: canvasReadOnly.has(el), action: () => {
       if (canvasReadOnly.has(el)) canvasReadOnly.delete(el); else canvasReadOnly.add(el);
       el.classList.toggle("is-readonly", canvasReadOnly.has(el)); refresh();
     } },
-  ], anchor, { align: "right" });
+  ];
+}
+export function canvasSettings(el: HTMLElement, anchor: HTMLElement, refresh: () => void) {
+  showMenu(canvasSettingsItems(el, refresh), anchor, { align: "right" });
 }
 export function canvasHelp() {
   const rows = [
@@ -27,6 +31,7 @@ export function canvasHelp() {
     ["Zoom to fit", "Shift + 1"], ["Zoom to selection", "Shift + 2"],
     ["Add to / remove from selection", "Shift + Click", "Shift + Drag to select"],
     ["Constrain card movement to axis", "Shift + Drag"], ["Disable snapping while dragging", "Alt"],
+    ["Canvas menu", "Right-click"],
     ["Remove card", "Backspace", "Delete"], ["Undo", "Ctrl + Z"], ["Redo", "Ctrl + Y", "Ctrl + Shift + Z"],
   ];
   void confirmDialog({ title: "Canvas help", confirm: "Close", cancel: false,

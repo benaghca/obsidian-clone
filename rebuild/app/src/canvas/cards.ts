@@ -1,16 +1,29 @@
 import { EditorView } from "@codemirror/view";
+import { readClipboardText } from "../editor/clipboard";
 import { createNoteState } from "../editor/editor";
 import { IMAGE_EXT } from "../editor/embeds";
 import type { EditorHost } from "../editor/host";
+import { loneWebUrl } from "../links/external";
 import { noteName, parentDir } from "../paths";
+import { confirmDialog } from "../shell/confirm";
 import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
-import { closeMenu, showMenu } from "../shell/menu";
+import { closeMenu, showMenu, SEPARATOR, type MenuItems } from "../shell/menu";
 import { hints, openPrompt, pickFrom, suggestionText } from "../shell/prompt";
 import { switcherItems } from "../shell/switcherItems";
 import type { Workspace } from "../workspace";
-import { canvasReadOnly, isCardControl } from "./controls";
+import { canvasReadOnly, canvasSettingsItems, isCardControl } from "./controls";
 import type { CanvasEdge, CanvasNode } from "./model";
+
+/** Where an added card lands, in board units. CZ5 passes the drag box; the menu passes the pointer. */
+export interface CanvasAddPlace {
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+  /** x/y is the top-left. Otherwise x/y is the center, as drag-to-add does. */
+  atStart?: boolean;
+}
 
 export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode | CanvasNode[], edge?: CanvasEdge) => void) {
   let gone = false, controlClick = false, cancelDrag: (() => void) | undefined;
@@ -30,8 +43,10 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     }
     add(node, edge);
   }
-  async function insertFile(file: string, p: { x: number; y: number }, atStart = false, edge?: CanvasEdge) {
-    if (!IMAGE_EXT.test(file)) { insert("file", p, 400, 400, file, atStart, edge); return; }
+  async function insertFile(file: string, p: { x: number; y: number }, atStart = false, edge?: CanvasEdge, place?: CanvasAddPlace) {
+    const boxed = place?.width !== undefined && place.height !== undefined
+      ? [Math.max(50, Math.round(place.width)), Math.max(50, Math.round(place.height))] as const : undefined;
+    if (boxed || !IMAGE_EXT.test(file)) { insert("file", p, boxed?.[0] ?? 400, boxed?.[1] ?? 400, file, atStart, edge); return; }
     const mine = revision;
     const held = ws.embeds.image(file);
     try {
@@ -41,22 +56,85 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     } catch (err) { console.warn(`Could not add ${file}`, err); }
     finally { held.release(); }
   }
-  function pickNote(p = point(), edge?: CanvasEdge) {
+  function pickNote(p = point(), edge?: CanvasEdge, place?: CanvasAddPlace) {
     const mine = revision;
+    const at = place ?? p;
     const notes = edge ? ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path)).map(f => ({ ...f, name: noteName(f.path) })) : ws.vault.includedNotes();
     openPrompt({
       placeholder: "Find a note...", emptyText: "No notes found.", instructions: hints("to add"),
       items: query => switcherItems(query, notes, [...ws.recent, ...notes.map(n => n.path)], null).filter(item => item.path !== null),
       render: (item, row) => suggestionText(row, item.name, item.indices, parentDir(item.path!)),
-      choose: item => { if (mine === revision) void insertFile(item.path!, p, false, edge); },
+      choose: item => { if (mine === revision) void insertFile(item.path!, at, !!place?.atStart, edge, place); },
     });
   }
-  function pickMedia(p = point()) {
+  function pickMedia(p = point(), place?: CanvasAddPlace) {
     const mine = revision;
+    const at = place ?? p;
     pickFrom(ws.vault.files.filter(f => !f.is_dir && IMAGE_EXT.test(f.path) && !ws.vault.isExcluded(f.path)), f => f.path, {
       placeholder: "Find media...", emptyText: "No media found.", enter: "to add",
-      choose: file => { if (mine === revision) void insertFile(file.path, p); },
+      choose: file => { if (mine === revision) void insertFile(file.path, at, !!place?.atStart, undefined, place); },
     });
+  }
+  const sized = (place: CanvasAddPlace, width: number, height: number) => ({
+    width: Math.max(50, Math.round(place.width ?? width)), height: Math.max(50, Math.round(place.height ?? height)),
+  });
+  function makeNode(type: CanvasNode["type"], place: CanvasAddPlace, width: number, height: number, extra: Partial<CanvasNode>): CanvasNode {
+    const box = sized(place, width, height);
+    const atStart = !!place.atStart;
+    return {
+      id: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+      x: Math.round(place.x - (atStart ? 0 : box.width / 2)), y: Math.round(place.y - (atStart ? 0 : box.height / 2)),
+      width: box.width, height: box.height, type, ...extra,
+    };
+  }
+  async function addWebPage(place: CanvasAddPlace) {
+    if (gone || canvasReadOnly.has(el)) return;
+    const mine = revision;
+    const input = h("input", { class: "setting-input", type: "url", spellcheck: "false", placeholder: "Link address", "aria-label": "Web page URL" });
+    const pending = confirmDialog({ title: "Add web page", message: input, confirm: "Add" });
+    input.focus();
+    const { ok } = await pending;
+    const url = loneWebUrl(input.value);
+    if (!ok || !url || gone || mine !== revision || canvasReadOnly.has(el)) return;
+    add(makeNode("link", place, 400, 120, { url }));
+  }
+  async function pasteAt(place: CanvasAddPlace) {
+    if (gone || canvasReadOnly.has(el)) return;
+    const mine = revision;
+    el.focus({ preventScroll: true });
+    const text = await readClipboardText();
+    if (gone || mine !== revision || canvasReadOnly.has(el)) return;
+    const url = loneWebUrl(text);
+    if (url) { add(makeNode("link", place, 400, 120, { url })); return; }
+    if (!text.trim()) return;
+    add(makeNode("text", place, 250, 60, { text }));
+  }
+  // One list for this menu and for Ctrl+drag (CZ5): card, note, media, web page, group.
+  function addItems(place: CanvasAddPlace): MenuItems {
+    const at = { x: place.x, y: place.y };
+    const start = !!place.atStart;
+    const box = sized(place, 250, 60);
+    return [
+      { title: "Add card", icon: "sticky-note", action: () => insert("text", at, box.width, box.height, undefined, start) },
+      { title: "Add note from vault", icon: "file-text", action: () => pickNote(at, undefined, place) },
+      { title: "Add media from vault", icon: "file-image", action: () => pickMedia(at, place) },
+      { title: "Add web page", icon: "globe", action: () => void addWebPage(place) },
+      { title: "Create group", icon: "group", action: () => add(makeNode("group", place, 400, 400, { label: "Untitled group" })) },
+    ];
+  }
+  function boardMenu(x: number, y: number, history: { undo: boolean; redo: boolean; apply: (forward: boolean) => void }, refresh: () => void) {
+    const place: CanvasAddPlace = { ...point(x, y), atStart: true };
+    const writable = !canvasReadOnly.has(el);
+    showMenu([
+      ...(writable ? addItems(place) : []),
+      SEPARATOR,
+      { title: "Undo", icon: "undo-2", disabled: !writable || !history.undo, action: () => history.apply(false) },
+      history.redo && { title: "Redo", icon: "redo-2", disabled: !writable, action: () => history.apply(true) },
+      SEPARATOR,
+      writable && { title: "Paste", icon: "clipboard-paste", action: () => void pasteAt(place) },
+      SEPARATOR,
+      ...canvasSettingsItems(el, refresh),
+    ], { x, y }, { className: "canvas-context-menu" });
   }
   // Tree order, folders removed. One file keeps image aspect; several share one 400px row.
   const CARD = 400, GAP = 45;
@@ -129,7 +207,7 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   el.addEventListener("dblclick", controlDouble, true);
   const menuClick = (e: MouseEvent) => { if (e.detail === 1 && (e.target as Element).closest(".canvas-add-menu, .canvas-context-menu, .canvas-group-menu")) controlClick = true; };
   document.addEventListener("click", menuClick, true);
-  return { connect, reset, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); el.removeEventListener("dblclick", controlDouble, true); } };
+  return { connect, reset, addItems, boardMenu, dispose() { gone = true; reset(); cancelDrag?.(); toolbar.remove(); document.removeEventListener("click", menuClick, true); window.removeEventListener("grove:explorer-drag", explorerDrag); el.removeEventListener("click", click, true); el.removeEventListener("dblclick", doubleClick); el.removeEventListener("dblclick", controlDouble, true); } };
 }
 
 // A temporary note editor owns only the card's Markdown, never a vault note.
