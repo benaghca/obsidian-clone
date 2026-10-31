@@ -34,12 +34,18 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   world.addEventListener("pointerover", e => { const card = (e.target as Element).closest<HTMLElement>(".canvas-node"); if (card && cards.get(card.dataset.nodeId!) === card) dots(card); }, { signal: events.signal });
   let cancel: (() => void) | undefined, suppress = false, pressedLabel: string | undefined;
   let createBox: HTMLElement | undefined, createWatch: MutationObserver | undefined;
-  const clearCreate = () => { createWatch?.disconnect(); createWatch = undefined; createBox?.remove(); createBox = undefined; };
+  // The box is placed from the pointerdown transform. Ctrl is held, so a wheel
+  // would zoom (a plain wheel would pan) and the new card would miss that box.
+  let blockWheel: ((event: WheelEvent) => void) | undefined;
+  const unblockWheel = () => { if (!blockWheel) return; el.removeEventListener("wheel", blockWheel, true); blockWheel = undefined; };
+  const clearCreate = () => { unblockWheel(); createWatch?.disconnect(); createWatch = undefined; createBox?.remove(); createBox = undefined; };
   // Ctrl (Cmd on macOS) on empty canvas. The box is one screen-space element:
   // reading card geometry here would lay out the whole board on every move.
   function startCreate(e: PointerEvent) {
     const box = createBox = h("div", { class: "canvas-create" });
     el.append(box);
+    blockWheel = event => { event.preventDefault(); event.stopImmediatePropagation(); };
+    el.addEventListener("wheel", blockWheel, { capture: true, passive: false });
     const rect = el.getBoundingClientRect();
     const matrix = new DOMMatrix(getComputedStyle(world).transform);
     const toBoard = (x: number, y: number) => ({ x: (x - rect.left - matrix.e) / matrix.a, y: (y - rect.top - matrix.f) / matrix.a });

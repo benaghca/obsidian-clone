@@ -3,10 +3,10 @@ import { withBrowser, sleep } from './browser.mjs';
 
 const CTRL = 2, ALT = 1;
 
-await withBrowser(async ({ run, send, open, read, click, press, chord, move, check }) => {
+await withBrowser(async ({ run, send, open, read, click, press, key, chord, move, check }) => {
   const fixture = {
     nodes: [
-      { id: 'a', type: 'text', x: 0, y: 0, width: 120, height: 80, text: 'Alpha' },
+      { id: 'a', type: 'text', x: 0, y: 0, width: 220, height: 80, text: 'See [[Welcome]]' },
       { id: 'b', type: 'text', x: 0, y: 220, width: 120, height: 80, text: 'Beta' },
     ],
     edges: [],
@@ -211,6 +211,51 @@ await withBrowser(async ({ run, send, open, read, click, press, chord, move, che
   await press('Escape');
   await releaseAt(spot.to, CTRL);
   check(await run(() => !document.querySelector('.menu') && !document.querySelector('.canvas-create')) && await read() === original, 'Escape during the drag cancels it');
+
+  for (let i = 0; i < 30 && !await run(() => !!document.querySelector('[data-node-id="a"] [data-href="Welcome"]')); i++) await sleep(50);
+  const linkAt = await run(() => {
+    const link = document.querySelector('[data-node-id="a"] [data-href="Welcome"]');
+    if (!link) return null;
+    const r = link.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  check(linkAt, 'Card A renders its wikilink');
+  await move(linkAt);
+  await key('Control', CTRL);
+  await sleep(500);
+  check(await run(() => !!document.querySelector('.hover-popover')), 'Ctrl+hover on a canvas link still opens a preview');
+  await press('Escape');
+  await key('Control', 0, 'keyUp');
+  await sleep(40);
+  check(await run(() => !document.querySelector('.hover-popover')), 'Escape closes that preview');
+  await move(spot.from);
+  await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...spot.from, button: 'left', buttons: 1, clickCount: 1, modifiers: CTRL });
+  await send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...linkAt, buttons: 1, modifiers: CTRL });
+  await sleep(500);
+  check(await run(() => !!document.querySelector('.canvas-create') && !document.querySelector('.hover-popover')), 'A Ctrl+drag across a link does not open a preview');
+  await key('Control', 0, 'keyUp');
+  await key('Control', CTRL);
+  await sleep(500);
+  check(await run(() => !document.querySelector('.hover-popover')), 'Pressing Ctrl again during the drag does not open a preview');
+  await key('Control', 0, 'keyUp');
+  await press('Escape');
+  await releaseAt(linkAt, 0);
+  check(await run(() => !document.querySelector('.canvas-create') && !document.querySelector('.hover-popover')), 'Escape during that drag clears the box and the preview');
+
+  const transform = () => run(() => document.querySelector('.canvas-world').style.transform);
+  const still = await transform();
+  await dragTo(spot.from, spot.to, CTRL, 4);
+  const wheelAt = { x: (spot.from.x + spot.to.x) / 2, y: (spot.from.y + spot.to.y) / 2 };
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheelAt, deltaX: 0, deltaY: -80, modifiers: CTRL });
+  await sleep(70);
+  const whileDragging = await transform();
+  await releaseAt(spot.to, CTRL);
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...spot.to, deltaX: 0, deltaY: 160, modifiers: 0 });
+  await sleep(70);
+  const whileMenu = await transform();
+  check(whileDragging === still && whileMenu === still, 'Wheel and pinch while the create box is up do not zoom or pan');
+  await press('Escape');
+  check(await run(() => !document.querySelector('.menu') && !document.querySelector('.canvas-create')), 'Escape after that wheel drops the box');
 
   const added = async (title, finish, match) => {
     await dragTo(spot.from, spot.to, CTRL);
