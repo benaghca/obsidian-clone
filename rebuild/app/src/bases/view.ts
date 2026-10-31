@@ -2,7 +2,7 @@
 // tab (createBaseView) or in a note (embed.ts). Only the visible rows have DOM;
 // source YAML is read once, and the existing property index supplies changed note metadata.
 import { api, type FileEntry } from "../api";
-import { fits, asType, type PropertyType } from "../editor/frontmatter";
+import { fits, asType, type Property, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { formatDate } from "../settings/dateFormat";
@@ -145,6 +145,57 @@ export function docsOutsideFilter(paths: readonly string[], source: string, view
 
 /** The base reads `this` and the note it is changed: that rebuilds even when the note is outside the base's folder or tag. */
 export const readsChanged = (source: string, host: string | null, changed: readonly string[]) => host !== null && changed.includes(host) && /\bthis\b/.test(source);
+
+/**
+ * True when a formula, filter, sort or column reads another file's links.
+ * An own-note property write does not refresh those, so the board rebuilds
+ * (KANBAN_PLAN §4.5 step 5). `file.backlinks` is the case the plan names.
+ */
+export const readsOtherFiles = (source: string) => /\bfile\.(?:backlinks|links|embeds)\b|\.hasLink\s*\(/.test(source);
+
+/** Frontmatter the board painted versus the property index's re-read of that note. */
+export function sameProperties(a: readonly Property[] | undefined, b: readonly Property[] | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i], y = b[i];
+    if (x.key !== y.key || x.type !== y.type || x.line !== y.line || x.count !== y.count) return false;
+    const xv = x.value, yv = y.value;
+    if (Array.isArray(xv) || Array.isArray(yv)) {
+      if (!Array.isArray(xv) || !Array.isArray(yv) || xv.length !== yv.length || xv.some((item, n) => item !== yv[n])) return false;
+    } else if (xv !== yv) return false;
+  }
+  return true;
+}
+
+export interface OwnWriteQuery {
+  kanban: boolean;
+  reload: boolean;
+  paths: readonly string[] | null;
+  /** A file-list change, a reveal, or anything else that is not one note's text. */
+  other: boolean;
+  links: boolean;
+  /** This board recorded the path and has not reconciled it yet. */
+  own: boolean;
+  /** The editor save that follows an own write we already skipped, and only when that note's text is unchanged. */
+  echo: boolean;
+  readsThis: boolean;
+  readsOther: boolean;
+}
+
+/**
+ * Whether `update` can skip select and regroup. "own" still has to check that
+ * the re-read props equal the painted ones. "links" is the delayed link-index
+ * refresh after a write, which changes no row unless the view reads one.
+ */
+export function skipsFullRebuild(q: OwnWriteQuery): "own" | "links" | false {
+  if (!q.kanban || q.reload || q.other || q.readsOther) return false;
+  const count = q.paths?.length ?? 0;
+  if (count === 0 && q.links) return "links";
+  if (count !== 1 || q.readsThis || !q.paths) return false;
+  if (q.own || q.echo) return "own";
+  return false;
+}
 
 export interface BaseChange {
   change: string;
@@ -354,6 +405,66 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   }
   scroller.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; paint(); }); }, { passive: true });
   const resize = new ResizeObserver(() => { if(!cards()&&!isList()&&!controls.active)applySizes();paint(true); }); resize.observe(scroller);
+  // Own-write reconcile (K6). `lastMs` is the update work, not the scheduling delay.
+  const ECHO_MS = 500;
+  const reconcile = { full: 0, skip: 0, lastMs: 0 };
+  Object.assign(el, { reconcile });
+  // Armed only for a loaded note, and only with the text the skip already saw. A closed note has no later save to absorb.
+  const echoed = new Map<string, { at: number; text: string }>();
+  let changedPaths = new Set<string>(), changeOther = false, changeLinks = false, changeDoc = false;
+  const notePaths = (paths: readonly string[]) => { for (const path of paths) changedPaths.add(path); };
+  const takeNotice = () => {
+    const notice = { paths: [...changedPaths], other: changeOther, links: changeLinks, doc: changeDoc };
+    changedPaths = new Set(); changeOther = false; changeLinks = false; changeDoc = false;
+    return notice;
+  };
+  const echoLive = (path: string) => {
+    const row = echoed.get(path);
+    if (!row) return false;
+    if (performance.now() - row.at > ECHO_MS || ws.editors.doc(path)?.toString() !== row.text) { echoed.delete(path); return false; }
+    return true;
+  };
+  /** Skip select and regroup when this board already painted its own write. */
+  async function trySkip(): Promise<boolean> {
+    const notice = takeNotice();
+    const path = notice.paths.length === 1 ? notice.paths[0] : "";
+    const own = path ? board.ownProps(path) : undefined;
+    const echo = !!path && own === undefined && !notice.doc && echoLive(path);
+    const decision = skipsFullRebuild({
+      kanban: kanban(),
+      reload,
+      paths: notice.paths,
+      other: notice.other,
+      links: notice.links,
+      own: own !== undefined,
+      echo,
+      readsThis: notice.paths.length === 1 && readsChanged(source, hostPath(), notice.paths),
+      readsOther: readsOtherFiles(source),
+    });
+    if (decision === "links") { reconcile.skip++; reconcile.lastMs = 0; return true; }
+    if (decision !== "own" || !path) { echoed.clear(); return false; }
+    const started = performance.now();
+    const properties = await index.notes();
+    // A newer notice arrived while the index was reading. Leave the mark and retry.
+    if (gone || dirty || reload) return false;
+    const painted = board.paintedProps(path) ?? own;
+    if (!painted || !sameProperties(properties.get(path)?.props, painted)) { echoed.clear(); return false; }
+    // Typing into the open note during the doc quiet window changes the text after the write. That is a real edit.
+    const snap = own !== undefined ? board.ownText(path) : echoed.get(path)?.text;
+    if (snap != null && ws.editors.doc(path)?.toString() !== snap) { echoed.clear(); return false; }
+    const fresh = properties.get(path);
+    if (fresh) board.acceptMetadata(path, fresh);
+    board.consumeOwn(path);
+    if (echo) echoed.delete(path);
+    else {
+      const live = ws.editors.doc(path)?.toString();
+      if (live !== undefined) echoed.set(path, { at: performance.now(), text: live });
+      else echoed.delete(path);
+    }
+    reconcile.skip++;
+    reconcile.lastMs = performance.now() - started;
+    return true;
+  }
   async function update() {
     dirty = true;
     if (running) return;
@@ -362,6 +473,11 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       while (dirty && !gone) {
         dirty = false;
         await board.idle(); if (gone) break;
+        if (await trySkip()) continue;
+        if (dirty) continue;
+        const iterationStart = performance.now();
+        let countFull = false;
+        try {
         if (reload || !model) {
           reload = false; source = await file.read(); model = baseModel(source, viewIndex);
           // ![[X.base#View]] picks its view by name once; later the toolbar's choice stands.
@@ -399,6 +515,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         host = hostFile && row(hostFile);
         if (host) for (const r of rows) r.host = host;
         const matches = model!.select(rows,true);model!.total=matches.length;
+        countFull = true;
         selected = typeof model!.view.limit === "number" ? matches.slice(0,model!.view.limit) : matches;
         const found = query ? await searched(selected, () => gone || dirty) : selected;
         if (!found) continue;
@@ -449,6 +566,12 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
         if (!await groupedView.update(model!, drawn, types, () => gone || dirty)) continue;
         counted(); paint(true);
+        } finally {
+          if (countFull) {
+            reconcile.full++;
+            reconcile.lastMs = performance.now() - iterationStart;
+          }
+        }
       }
     } catch (error) {
       if (!gone) { model = null; groupedView.clear(); board.clear(); listPane.clear(); toolbar.textContent = "Unable to open base"; notice.hidden = false; notice.textContent = error instanceof Error ? error.message : String(error); head.replaceChildren(); body.replaceChildren(); }
@@ -526,8 +649,9 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const unwatch = ws.vault.onModified(changed => {
     const before = changedFrom.get(changed) ?? null;
     changedFrom.delete(changed);
-    if (changed === o.watch) reload = true;
+    if (changed === o.watch) { reload = true; changeOther = true; }
     else if (isNoteFile(changed) && outside([changed], () => before)) return;
+    else notePaths([changed]);
     schedule();
   });
   const off = ws.on(change => {
@@ -542,12 +666,18 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     });
     deferred = next.deferred;
     if (next.delay !== null) {
+      if (change === "doc") {
+        changeDoc = true;
+        if (changed?.length) notePaths(changed);
+        else changeOther = true;
+      } else if (change === "links") changeLinks = true;
+      else changeOther = true;
       schedule(next.delay);
       if (change === "show" || change === "pane" || change === "tabs") docSnap = openTexts();
     } else if (next.clear) { clearTimeout(timer); timer = 0; }
   });
   // A new Property type (header menu, Properties view) changes cells and icons.
-  const unsettle = settings.on(file => { if (file === "types.json" || file === null) schedule(); });
+  const unsettle = settings.on(file => { if (file === "types.json" || file === null) { changeOther = true; schedule(); } });
   void update();
   return {
     el,
