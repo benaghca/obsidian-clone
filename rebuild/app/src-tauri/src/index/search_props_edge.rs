@@ -3,6 +3,7 @@
 //! Search and a single-note switch on a 10k-note vault stay within 50 ms.
 
 use super::props::{PropertyType, PropertyValue};
+use super::query::parse_query;
 use super::{is_note_path, Index};
 use crate::fsutil::tmp_dir;
 use std::fs;
@@ -40,6 +41,8 @@ fn search_treats_regex_quotes_emoji_and_empty_input_as_literal_text() {
         ("Quoted.md", "say \"hello\" there\n"),
         ("Emoji.md", "family \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466} and 😀\n"),
         ("Brackets.md", "see [draft] in the prose\n"),
+        // "or" and "()" are real text here. OR and () must not find this note.
+        ("Operator.md", "or or () operator\n"),
     ]);
 
     assert_eq!(paths_of(&idx, "$5.00"), ["Literal.md"]);
@@ -64,9 +67,12 @@ fn search_treats_regex_quotes_emoji_and_empty_input_as_literal_text() {
     assert_eq!(paths_of(&idx, "\"[draft]\""), ["Brackets.md"]);
     assert!(paths_of(&idx, "[draft]").is_empty());
 
+    assert_eq!(paths_of(&idx, "or"), ["Operator.md"]);
+    assert_eq!(paths_of(&idx, "operator"), ["Operator.md"]);
     for query in ["", "   \t  ", "OR", "OR OR", "()", "\"\""] {
+        assert!(parse_query(query, false).is_none(), "{query:?}");
         assert!(paths_of(&idx, query).is_empty(), "{query:?}");
-        assert!(idx.search_lines(query, false, &["Literal.md".into()], 5).is_empty());
+        assert!(idx.search_lines(query, false, &["Literal.md".into(), "Operator.md".into()], 5).is_empty());
     }
 }
 

@@ -87,10 +87,16 @@ await withBrowser(async ({ run, click, check }) => {
   await wait(async () => (await names()).includes('Emoji'), 'an emoji query matches the note that contains it');
   await search('');
   await wait(() => run(() => document.querySelector('.search-results-count-label')?.textContent === '' && document.querySelectorAll('.search-view .search-result').length === 0), 'an empty query shows nothing');
+  // Start from a hit. A whitespace or quote query that never runs would leave Real on screen.
+  const cleared = () => run(() => document.querySelector('.search-results-count-label')?.textContent === '' && document.querySelectorAll('.search-view .search-result').length === 0);
+  await search('only-in-real');
+  await wait(async () => (await names()).includes('Real'), 'a real note is searchable before a whitespace query');
   await search('   ');
-  check(await run(() => document.querySelectorAll('.search-view .search-result').length === 0), 'a whitespace query shows nothing');
+  await wait(cleared, 'a whitespace query shows nothing');
+  await search('only-in-real');
+  await wait(async () => (await names()).includes('Real'), 'a real note is searchable before an empty quote');
   await search('"');
-  check(await run(() => document.querySelectorAll('.search-view .search-result').length === 0), 'an empty quote shows nothing');
+  await wait(cleared, 'an empty quote shows nothing');
   const needle = 'n'.repeat(4000);
   await search(needle);
   await wait(async () => (await names()).includes('Long'), 'a long query matches the note that contains it');
