@@ -77,11 +77,13 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
   await run(()=>ws.open('Small.canvas'));await sleep(120);const small=await state();
   check(near(small.s,1)&&near(small.x,small.w/2-1100)&&near(small.y,small.h/2-1050),'Small, offset canvas centers on its nodes without zooming past 100%');
   await run(()=>ws.open('Large.canvas'));await sleep(1000);
-  check(await run(()=>document.querySelectorAll('.canvas-node').length===300&&document.querySelectorAll('.canvas-edges > path').length===400),'Generated fixture renders 300 cards and 400 edges');
+  check(await run(()=>document.querySelectorAll('.canvas-node').length===300&&document.querySelectorAll('.canvas-edge-batch').length>0&&!document.querySelector('.canvas-edge-hit,.canvas-edge-end')),'Generated fixture renders 300 cards with batched title-mode edges and no hit paths or ends');
   await click(button('Reset zoom'));await sleep(500);
-  await run(()=>{window.canvasChildChanges=0;const world=document.querySelector('.canvas-world');window.canvasMutationObserver=new MutationObserver(records=>{canvasChildChanges+=records.filter(r=>r.target!==world&&!r.target.closest?.('.canvas-selection-menu')).length});canvasMutationObserver.observe(world,{subtree:true,attributes:true,childList:true})});
+
   // Warm the compositor, then measure presentation intervals during native wheel input.
   await wheel(0,20);await wheel(0,-20);
+  await sleep(180);while(await run(()=>!!window.__canvasProbe?.().pending))await sleep(20);
+  await run(()=>{window.canvasChildChanges=0;const world=document.querySelector('.canvas-world');window.canvasMutationObserver=new MutationObserver(records=>{canvasChildChanges+=records.filter(r=>r.target!==world&&!r.target.closest?.('.canvas-selection-menu')).length});canvasMutationObserver.observe(world,{subtree:true,attributes:true,childList:true})});
   await run(()=>{window.canvasFrames=[];window.canvasRecording=true;let last=performance.now();const tick=now=>{if(!canvasRecording)return;canvasFrames.push(now-last);last=now;window.canvasFrameId=requestAnimationFrame(tick)};window.canvasFrameId=requestAnimationFrame(tick)});
   for(let i=0;i<24;i++){await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:i%2?30:-30,deltaY:i%2?20:-20,modifiers:0});await sleep(18);}
   const panFrames=await run(()=>{canvasRecording=false;cancelAnimationFrame(canvasFrameId);return canvasFrames.slice(2)});
@@ -107,6 +109,7 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
   }
   // CZ1: a zoom frame writes no stylesheet rule; zoom-dependent handle sizes follow one band attribute once the wheel rests.
   await run(()=>{window.canvasRuleWrites=0;const set=CSSStyleDeclaration.prototype.setProperty;window.canvasSetProperty=set;CSSStyleDeclaration.prototype.setProperty=function(...a){if(this.parentRule)canvasRuleWrites++;return set.apply(this,a)};});
+  await click(button('Reset zoom'));await sleep(500);
   const bandBefore=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);
   for(let i=0;i<12;i++){await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-25,modifiers:2});await sleep(16);}
   const midGesture=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);await sleep(250);
@@ -187,9 +190,9 @@ await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,
     const title=id=>{const t=node(id).querySelector('.canvas-node-title');return t&&{text:t.textContent,display:cs(t).display,size:parseFloat(cs(t).fontSize)};};
     const ring=e=>parseFloat(cs(e.querySelector('.canvas-node-ring')).boxShadow.match(/0px 0px 0px ([\d.]+)px/)[1]);
     return{out:world.classList.contains('is-zoomed-out'),band:world.dataset.zoomBand,scale:new DOMMatrix(world.style.transform).a,
-      bodies:Object.fromEntries(['t','n','i','l'].map(id=>[id,cs(node(id).querySelector('.canvas-node-content')).contentVisibility])),
+      bodies:Object.fromEntries(['t','n','i','l'].map(id=>[id,node(id).querySelector('.canvas-node-content')?cs(node(id).querySelector('.canvas-node-content')).contentVisibility:'hidden'])),
       titles:Object.fromEntries(['t','n','l','tiny'].map(id=>[id,title(id)])),imageTitle:!!node('i').querySelector('.canvas-node-title'),
-      fileLabel:cs(node('n').querySelector('.canvas-file-label')).display,edgeLabel:cs(world.querySelector('.canvas-edge-label')).display,
+      fileLabel:cs(node('n').querySelector('.canvas-file-label')).display,edgeLabel:world.querySelector('.canvas-edge-label')?cs(world.querySelector('.canvas-edge-label')).display:'none',
       ring:{plain:ring(node('n')),colored:ring(node('t')),group:ring(node('g'))},border:cs(node('t')).borderTopColor,
       edge:parseFloat(cs(world.querySelector('.canvas-edge')).strokeWidth),label:new DOMMatrix(cs(node('g').querySelector('.canvas-group-label')).transform).a,
       fill:{canvas:cs(document.querySelector('.canvas-view')).backgroundColor,card:cs(node('n')).backgroundColor}};

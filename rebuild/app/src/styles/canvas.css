@@ -215,17 +215,25 @@
    and each card shows its title at about 13px on screen. Images stay pictures, and a
    card being edited never switches. */
 .canvas-node-title { display: none; }
-.canvas-world.is-zoomed-out > .canvas-node > .canvas-node-title {
+.canvas-node.is-title-mode > .canvas-node-title {
   display: -webkit-box; position: absolute; left: 0; right: 0; top: 50%; translate: 0 -50%;
   padding: 0 .6em; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
   font-size: calc(13px * var(--canvas-inverse-scale)); font-weight: 700; line-height: 1.25; text-align: center;
   overflow-wrap: anywhere; color: var(--text-normal); pointer-events: none;
 }
-.canvas-world.is-zoomed-out > .canvas-node > .canvas-node-title:empty,
-.canvas-world.is-zoomed-out > .canvas-node.is-editing > .canvas-node-title,
-.canvas-world.is-zoomed-out > .canvas-node > .canvas-file-label,
-.canvas-world.is-zoomed-out > .canvas-edge-label:not(.is-editing) { display: none; }
-.canvas-world.is-zoomed-out > .canvas-node:not(.is-editing, .is-image) > .canvas-node-content { content-visibility: hidden; }
+.canvas-node.is-title-mode > .canvas-node-title:empty,
+.canvas-node.is-title-mode.is-editing > .canvas-node-title,
+.canvas-node.is-title-mode > .canvas-file-label,
+.canvas-edge-label.is-title-mode:not(.is-editing) { display: none; }
+.canvas-node.is-title-mode:not(.is-editing, .is-image) > .canvas-node-content { content-visibility: hidden; }
 @supports not (content-visibility: hidden) {
-  .canvas-world.is-zoomed-out > .canvas-node:not(.is-editing, .is-image) > .canvas-node-content { display: none; }
+  .canvas-node.is-title-mode:not(.is-editing, .is-image) > .canvas-node-content { display: none; }
+}
+
+/* CZ3: culling preserves world-space card rectangles for selection. */
+.canvas-node.is-culled { visibility: hidden; content-visibility: hidden; }
+.canvas-node.is-body-pending:not(.is-editing) > .canvas-node-content { content-visibility: hidden; }
+.canvas-node.is-body-pending:not(.is-editing) > .canvas-node-title { display: -webkit-box; position: absolute; inset: 0; padding: 16px; overflow: hidden; text-align: center; }
+@supports not (content-visibility: hidden) {
+  .canvas-node.is-culled > *, .canvas-node.is-body-pending:not(.is-editing) > .canvas-node-content { display: none; }
 }

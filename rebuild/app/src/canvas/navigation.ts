@@ -10,13 +10,9 @@ interface Viewport { path: string; cx: number; cy: number; scale: number }
 export const canvasViewports = new WeakMap<Tab, Viewport>();
 const clamp = (scale: number) => Math.max(1 / 16, Math.min(2, scale));
 
-// Zoom bands: quarter octaves from 1/16x to 2x. Card borders, titles, group labels,
-// edges and handles keep their screen size through one band rule each, chosen by an
-// attribute on the world when a zoom settles. One static sheet for every canvas: a pan
-// or zoom frame writes no stylesheet, since a stylesheet change restyles the page (all
-// of it in WebKit). The rules set --canvas-inverse-scale on these elements only, never
-// on a card, so no card or its Markdown is restyled.
-// A selector list, not :is(), which matched about 1.6x slower per band change.
+// One immutable band sheet. The view applies attributes to rings, titles and
+// handles in bounded slices, so settling never invalidates the world's subtree.
+// A gesture still writes only the navigation transform, grid and selection menu.
 const BANDS = { min: -16, max: 4 };
 export const zoomBand = (scale: number) => Math.max(BANDS.min, Math.min(BANDS.max, Math.round(Math.log2(scale) * 4)));
 // Title mode starts below 45% and ends above 55%, so a wobble at the threshold never
@@ -38,21 +34,15 @@ function installBands() {
   if (bandSheet) return;
   bandSheet = new CSSStyleSheet();
   const rules = [];
-  const sized = [" > .canvas-node > .canvas-node-ring", " > .canvas-node > .canvas-node-connection-point", " > .canvas-node > .canvas-node-title",
-    " > .canvas-node-group > .canvas-group-label", " > .canvas-edge-end", " > .canvas-edges > .canvas-edge", " .canvas-edge-hit"];
-  for (let band = BANDS.min; band <= BANDS.max; band++) {
-    const world = `.canvas-world[data-zoom-band="${band}"]`;
-    rules.push(`${sized.map(element => world + element).join(", ")} { --canvas-inverse-scale: ${2 ** (-band / 4)}; }`);
-    const small = [];
-    for (let title = band + 1; title <= TITLE_MAX; title++) small.push(`${world} > .canvas-node[data-title-band="${title}"] > .canvas-node-title`);
-    if (small.length) rules.push(`${small.join(", ")} { display: none; }`);
-  }
+  for (let band = BANDS.min; band <= BANDS.max; band++)
+    rules.push(`.canvas-band[data-canvas-band="${band}"] { --canvas-inverse-scale: ${2 ** (-band / 4)}; }`);
   bandSheet.replaceSync(rules.join("\n"));
   document.adoptedStyleSheets = [...document.adoptedStyleSheets, bandSheet];
 }
 // How long the wheel must rest before zoom-dependent sizes follow.
 const SETTLE_MS = 120;
 
+export interface CanvasViewport { x: number; y: number; width: number; height: number; focusX: number; focusY: number; band: number; titles: boolean }
 export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void) {
   let state = canvasViewports.get(tab);
   if (state?.path !== path) state = undefined;
@@ -61,12 +51,17 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   let space = false, dragging = false, suppressClick = false, titles = false;
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
+  let changed = () => {}, pause = () => {}, focusX = .5, focusY = .5;
+  let notify = 0;
+  const snapshot = (): CanvasViewport | undefined => state && width && height ? { x: state.cx - width / state.scale / 2, y: state.cy - height / state.scale / 2, width: width / state.scale, height: height / state.scale, focusX: state.cx + (focusX - .5) * width / state.scale, focusY: state.cy + (focusY - .5) * height / state.scale, band: zoomBand(state.scale), titles } : undefined;
+  const notifyLater = () => { clearTimeout(notify); notify = window.setTimeout(() => { notify = 0; if (!settle) changed(); }, SETTLE_MS); };
   installBands();
   // Title mode changes with the band, at settle: one class on the world.
   const applyBand = (scale: number) => {
-    clearTimeout(settle); settle = 0;
+    clearTimeout(settle); settle = 0; clearTimeout(notify); notify = 0;
     world.dataset.zoomBand = String(zoomBand(scale));
     titles = titleMode(scale, titles); world.classList.toggle("is-zoomed-out", titles);
+    changed();
   };
   const postponeBand = () => { clearTimeout(settle); settle = window.setTimeout(() => { settle = 0; if (state) applyBand(state.scale); }, SETTLE_MS); };
   // Wheel and pinch wait out the 120ms settle, including wheels that no longer
@@ -74,7 +69,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   // the first draw apply the band now. A pan does neither, so that frame stays a
   // transform change while the zoom's timer is still running.
   function syncBand(scale: number, wheel: boolean, flush: boolean, first: boolean) {
-    if (world.dataset.zoomBand === String(zoomBand(scale)) && titles === titleMode(scale, titles)) { if (flush || wheel) { clearTimeout(settle); settle = 0; } return; }
+    if (world.dataset.zoomBand === String(zoomBand(scale)) && titles === titleMode(scale, titles)) { if (flush) applyBand(scale); else if (wheel) { clearTimeout(settle); settle = 0; } return; }
     if (wheel && !flush) postponeBand();
     else if (flush || first) applyBand(scale);
   }
@@ -110,6 +105,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     styled = toolbar;
     if (key === drawn) return;
     drawn = key;
+    if (wheel || dragging) { pause(); notifyLater(); }
+    else if (!flush) notifyLater();
     world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
@@ -158,8 +155,10 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     if (!state || (e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1;
     // Canvas help: "press Space or Ctrl … and scroll" to zoom.
+    pause(); notifyLater();
+    rect ??= el.getBoundingClientRect();
+    focusX = (e.clientX - rect.left) / width; focusY = (e.clientY - rect.top) / height;
     if (e.ctrlKey || space) {
-      rect ??= el.getBoundingClientRect();
       gesture = true; flushBand = false;
       zoom(state.scale * 2 ** (-e.deltaY * unit / 300), e.clientX - rect.left, e.clientY - rect.top);
     } else {
@@ -186,8 +185,10 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     cancelDrag?.();
     dragging = suppressClick = true;
     el.classList.add("is-panning");
+    const dragRect = rect ??= el.getBoundingClientRect();
     const start = { ...state };
     cancelDrag = dragPointer(e, el, move => {
+      focusX = (move.clientX - dragRect.left) / width; focusY = (move.clientY - dragRect.top) / height;
       state = { ...start, cx: start.cx - (move.clientX - e.clientX) / start.scale, cy: start.cy - (move.clientY - e.clientY) / start.scale };
       draw();
     }, () => { dragging = false; el.classList.remove("is-panning"); cancelDrag = undefined; });
@@ -205,6 +206,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   // The wheel reads the board's position from this cache, not from layout per event.
   el.addEventListener("pointerenter", () => { rect = undefined; });
   return {
+    snapshot,
+    watch(onChange: () => void, onPause: () => void) { changed = onChange; pause = onPause; },
     zoomTo(nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) { if (nodes.length) fit({ left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) }, 2); },
     updateHistory(back: boolean, forward: boolean) {
       for (const [button, enabled] of [[undo, back], [redo, forward]] as const) {
@@ -213,6 +216,6 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       }
     },
     loaded(next: Bounds) { bounds = next; if (!state) fit(); else draw(); },
-    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); size.disconnect(); events.abort(); },
+    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); size.disconnect(); events.abort(); },
   };
 }

@@ -17,7 +17,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
   history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker,
   guides: (list: Guide[], radius: number) => void, openBoardMenu: (x: number, y: number) => void,
-  openCreateMenu: (box: { x: number; y: number; width: number; height: number }, at: { x: number; y: number }) => void) {
+  openCreateMenu: (box: { x: number; y: number; width: number; height: number }, at: { x: number; y: number }) => void,
+  edgeSelection: (ids: Set<string>) => void) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -28,7 +29,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const dots = (card: HTMLElement) => {
     if (dotted.has(card)) return;
     dotted.add(card);
-    for (const side of sides.slice(0, 4)) card.append(h("div", { class: "canvas-node-connection-point", "data-side": side, "aria-label": `Connect ${side}` }));
+    for (const side of sides.slice(0, 4)) card.append(h("div", { class: "canvas-node-connection-point canvas-band", "data-canvas-band": world.dataset.zoomBand ?? "0", "data-side": side, "aria-label": `Connect ${side}` }));
   };
   const events = new AbortController();
   world.addEventListener("pointerover", e => { const card = (e.target as Element).closest<HTMLElement>(".canvas-node"); if (card && cards.get(card.dataset.nodeId!) === card) dots(card); }, { signal: events.signal });
@@ -90,6 +91,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   }, createGroup, background);
   const repaint = (changed: CanvasNode[]) => { paint(changed); menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id))); };
   function selection() {
+    edgeSelection(selectedEdges);
     menu.update(chosen(), edges.filter(edge => selectedEdges.has(edge.id)));
     for (const el of edgeElements()) el.classList.toggle("is-selected", selectedEdges.has(el.dataset.edgeId!));
     for (const [id, card] of cards) {

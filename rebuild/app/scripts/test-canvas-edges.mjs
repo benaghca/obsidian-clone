@@ -103,8 +103,8 @@ await withBrowser(async ({run,send,click,move,point,press,chord,open,read,check,
  check(await run(async expected=>{const {readCanvas,edgeCurve}=await import('/src/canvas/model.ts');const {nodes,edges}=readCanvas(expected),byId=new Map(nodes.map(n=>[n.id,n]));return edges.every(e=>document.querySelector(`path.canvas-edge[data-edge-id="${e.id}"]`)?.getAttribute('d')===edgeCurve(byId.get(e.fromNode),byId.get(e.toNode),e).path)&&nodes.every(n=>{const card=document.querySelector(`[data-node-id="${n.id}"]`);return card&&parseFloat(card.style.left)===n.x&&parseFloat(card.style.top)===n.y;});},reverse),'Native Obsidian reconnection returns to Grove with identical card and edge geometry');
  check(await read()===reverse,'Reverse round trip preserves exact native file bytes');await shot('grove-edges-return');
  // CZ1: one static zoom-band sheet shared by every canvas; no canvas adds a sheet of its own.
- const sheets=()=>run(()=>document.adoptedStyleSheets.map(s=>s.cssRules[0]?.selectorText??'').filter(s=>s.startsWith('#canvas-world-')||s.startsWith('.canvas-world[data-zoom-band')).join('|'));
+ const sheets=()=>run(()=>document.adoptedStyleSheets.map(s=>s.cssRules[0]?.selectorText??'').filter(s=>s.startsWith('#canvas-world-')||s.startsWith('.canvas-band[data-canvas-band')).join('|'));
  await run(()=>ws.open('Welcome.md'));await sleep(80);const left=await sheets();
  await run(()=>ws.open('ReverseArrows.canvas'));await sleep(100);const reopened=await sheets();
- check(left===reopened&&reopened.split('|').length===1&&reopened.startsWith('.canvas-world[data-zoom-band'),'Canvases share one zoom-band stylesheet and add none of their own');
+ check(left===reopened&&reopened.split('|').length===1&&reopened.startsWith('.canvas-band[data-canvas-band'),'Canvases share one zoom-band stylesheet and add none of their own');
 }, {height:800,screenshots:new URL('../../round26-shots/',import.meta.url).pathname});

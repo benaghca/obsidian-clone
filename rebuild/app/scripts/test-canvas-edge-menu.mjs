@@ -314,7 +314,8 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
       title: title?.textContent ?? '',
       titleDisplay: title ? getComputedStyle(title).display : 'missing',
       band: card.dataset.titleBand ?? '',
-      hidden: getComputedStyle(body).contentVisibility === 'hidden',
+      // Title mode detaches the body. A missing body is hidden, same as content-visibility.
+      hidden: !body || getComputedStyle(body).contentVisibility === 'hidden',
     };
   }, minPaste.nodes[0].id);
   // 250 by 60 at 1/16 is about 16 by 4 screen pixels, under the 50 by 26 title floor,

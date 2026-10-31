@@ -41,12 +41,16 @@ await withBrowser(async driver => {
       const start = performance.now(); await ws.open(path);
       while (document.querySelectorAll('.canvas-node').length !== board.nodes.length) await new Promise(r => setTimeout(r, 20));
       const ms = performance.now() - start;
-      await new Promise(requestAnimationFrame); await new Promise(r => setTimeout(r, 50)); observer.disconnect();
-      return { ms, longest: Math.max(0, ...long), dom: document.querySelector('.canvas-view').querySelectorAll('*').length };
+      await new Promise(requestAnimationFrame);
+      while (window.__canvasProbe?.().pending) await new Promise(r => setTimeout(r, 20));
+      const readyMs = performance.now() - start;
+      await new Promise(r => setTimeout(r, 50)); observer.disconnect();
+      return { ms, readyMs, longest: Math.max(0, ...long), dom: document.querySelector('.canvas-view').querySelectorAll('*').length };
     }, board, count);
     await sleep(500);
     for (const kind of ['wheel', 'pinch', 'pan']) {
       await click('.canvas-controls .lucide-maximize'); await sleep(250);
+      while (await run(() => !!window.__canvasProbe?.().pending)) await sleep(20);
       const half = kind === 'pinch' ? count <= 300 ? 150 : 60 : 12;
       const steps = half * 2, interval = kind === 'pinch' ? 8 : 16;
       const center = await run(() => { const r = document.querySelector('.canvas-view').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
@@ -81,6 +85,7 @@ await withBrowser(async driver => {
           await sleep(20);
         }
         await run(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))); await sleep(250);
+        while (await run(() => !!window.__canvasProbe?.().pending)) await sleep(20);
         observed = await run(() => { document.querySelector('.canvas-view').removeEventListener('wheel', cz0Count); cz0Observer.disconnect(); return { delivered: cz0Inputs, viewportUpdates: cz0Draws }; });
         gestureMs = performance.now() - begin;
       });
