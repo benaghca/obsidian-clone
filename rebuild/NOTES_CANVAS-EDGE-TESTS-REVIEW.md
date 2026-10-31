@@ -56,3 +56,30 @@ From `rebuild/app`, on `1cd7bd6`:
 A URL that still contains `U+200B` after trim is a link card. The menu script locks that in. A trusted double-click in the same turn as a wheel, before the new scale is painted, is still not automated. CDP cannot deliver that pair in one turn. The class during the 120ms settle is what the suite covers.
 
 VERDICT: OK
+
+## EDGE-SYNC
+
+Merged `rebuild/integration` (`4f9163c`) into `rebuild/edge-tests-review-grok` (`8fd03f4`) with `git merge --no-ff`. Nothing was pushed. No ceiling was loosened.
+
+The only conflict was `rebuild/app/package.json`, the `test` and `posttest` strings. Both sides stay, each script once. JSON parses (`name` grove).
+
+- `test` keeps the three canvas edge scripts. Integration's `node scripts/test-canvas-create.mjs` sits immediately after `node scripts/test-canvas-edge-menu.mjs` and before `node scripts/test-r27i.mjs`. Titles stay immediately after `test-canvas-navigation.mjs`. Hover stays immediately after `test-canvas-hover.mjs`. 62 steps, all unique.
+- `posttest` is integration's string. `test-bases-list.mjs` sits after `test-bases-kanban-move.mjs` and before the property-edit fuzz. 9 steps, all unique.
+- K6 adds no script name. Its cases stay in `test-bases-kanban-move.mjs` (in `posttest`) and in `test-bases-b0.mjs`, which `test-bases.mjs` imports. `test-bases.mjs` is already in `test`.
+
+`test-bases-b0.mjs`, `test-bases-kanban-move.mjs`, `test-bases-list.mjs`, and `test-canvas-create.mjs` match `4f9163c`. They still carry the K6 own-write cases and the K8 list script. `git diff rebuild/integration -- rebuild/app/src` is empty, so the merged canvas and bases sources are integration's: the CZ5 create box, the K8 list layout, and the K6 own-write skip. This sync does not edit `src/` by hand.
+
+Ceilings left as written: list 10k scroll `p95 <= 20` and `max <= 25`; K5 drag `p95 <= 20`, `max <= 25`, `maxEvent <= 1`; b0 typing beside a 10,000-note board `p10FrameMs < 20`.
+
+From `rebuild/app`, on the resolved tree, one run each. No timing flake, so no second run.
+
+- `npm run build` passed (`tsc --noEmit && vite build`, 2132 modules). The existing Vite chunk-size warning remains (`index-CSArzFUv.js` 1,140.50 kB). CSS is `index-Djwi7bkH.css` 122.98 kB.
+- `flock /tmp/grove-npm-test.lock npm test` exit 0. Vitest 73 files, 1248 tests, including 444 parity cases. The suite ran the three edge scripts (anchored corner menu, baseline hover preview, title mode after the buttons rest), the K6 own-write skip ("own write keeps the columns mounted"), and the K8 list scroll. 300-card drag max 16.8 ms. Pan and zoom max 16.8 ms. K5 10k drag p95 16.8, max 16.8, handler max 0.5 ms. K8 list: 1,000 warm open 10.4 ms; 1,000 scroll max 16.8, p95 16.7, 45 rows, top 27218; 10,000 warm open 14.4 ms (cold 36); 10,000 scroll p95 16.8, max 16.8, 45 rows, top 279218.
+- `npm run audit:offline` passed: 186 source files, dist, CSP, capabilities, and dependencies.
+- `cargo test --offline` in `rebuild/app/src-tauri`: 73 passed, 4 ignored. This merge does not touch `src-tauri`.
+
+`npm test` rewrote `rebuild/round*-shots/`. Those files were restored with `git checkout` and are not in this commit. No app window was opened.
+
+The verdict stays OK.
+
+VERDICT: OK
