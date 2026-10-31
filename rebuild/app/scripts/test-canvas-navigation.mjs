@@ -78,7 +78,7 @@ await withBrowser(async ({send,run,click,move,point,check,press,shot})=>{
   await run(()=>ws.open('Large.canvas'));await sleep(1000);
   check(await run(()=>document.querySelectorAll('.canvas-node').length===300&&document.querySelectorAll('.canvas-edges > path').length===400),'Generated fixture renders 300 cards and 400 edges');
   await click(button('Reset zoom'));await sleep(500);
-  await run(()=>{window.canvasChildChanges=0;const world=document.querySelector('.canvas-world');window.canvasMutationObserver=new MutationObserver(records=>{canvasChildChanges+=records.filter(r=>r.target!==world).length});canvasMutationObserver.observe(world,{subtree:true,attributes:true,childList:true})});
+  await run(()=>{window.canvasChildChanges=0;const world=document.querySelector('.canvas-world');window.canvasMutationObserver=new MutationObserver(records=>{canvasChildChanges+=records.filter(r=>r.target!==world&&!r.target.closest?.('.canvas-selection-menu')).length});canvasMutationObserver.observe(world,{subtree:true,attributes:true,childList:true})});
   // Warm the compositor, then measure presentation intervals during native wheel input.
   await wheel(0,20);await wheel(0,-20);
   await run(()=>{window.canvasFrames=[];window.canvasRecording=true;let last=performance.now();const tick=now=>{if(!canvasRecording)return;canvasFrames.push(now-last);last=now;window.canvasFrameId=requestAnimationFrame(tick)};window.canvasFrameId=requestAnimationFrame(tick)});
@@ -89,6 +89,27 @@ await withBrowser(async ({send,run,click,move,point,check,press,shot})=>{
   const zoomFrames=await run(()=>{canvasRecording=false;cancelAnimationFrame(canvasFrameId);return canvasFrames.slice(2)});
   for(const [name,frames]of [['pan',panFrames],['zoom',zoomFrames]]){const sorted=frames.toSorted((a,b)=>a-b);console.log('FRAMES',name,JSON.stringify({samples:frames.length,p95:sorted[Math.floor(sorted.length*.95)],max:Math.max(...frames)}));check(frames.length>=20&&Math.max(...frames)<20,'300-card/400-edge '+name+' presentation frames stay under 20ms');}
   check(await run(()=>{canvasMutationObserver.disconnect();return canvasChildChanges===0}),'Pan/zoom transforms one world without changing card DOM or geometry');
+  // CZ1: a zoom frame writes no stylesheet rule; zoom-dependent handle sizes follow one band attribute once the wheel rests.
+  await run(()=>{window.canvasRuleWrites=0;const set=CSSStyleDeclaration.prototype.setProperty;window.canvasSetProperty=set;CSSStyleDeclaration.prototype.setProperty=function(...a){if(this.parentRule)canvasRuleWrites++;return set.apply(this,a)};});
+  const bandBefore=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);
+  for(let i=0;i<12;i++){await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:-25,modifiers:2});await sleep(16);}
+  const midGesture=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);await sleep(250);
+  const settled=await run(()=>{CSSStyleDeclaration.prototype.setProperty=canvasSetProperty;const world=document.querySelector('.canvas-world'),s=new DOMMatrix(world.style.transform).a;return{writes:canvasRuleWrites,band:world.dataset.zoomBand,expected:String(Math.max(-16,Math.min(4,Math.round(Math.log2(s)*4)))),hit:getComputedStyle(document.querySelector('.canvas-edge-hit')).getPropertyValue('--canvas-inverse-scale').trim(),inverse:2**(-Math.max(-16,Math.min(4,Math.round(Math.log2(s)*4)))/4)}});
+  check(settled.writes===0,'Ctrl+wheel zoom writes no stylesheet rule');
+  check(midGesture===bandBefore&&settled.band===settled.expected&&settled.band!==bandBefore&&Math.abs(parseFloat(settled.hit)-settled.inverse)<1e-9,'Handle sizes follow the zoom band once the wheel rests, not during the gesture');
+  // Space+wheel zooms too (Canvas help: "press Space or Ctrl ... and scroll").
+  const spaceBefore=await state();await send('Input.dispatchKeyEvent',{type:'keyDown',key:' ',code:'Space',windowsVirtualKeyCode:32});
+  await send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:0,deltaY:100,modifiers:0});await sleep(80);
+  await send('Input.dispatchKeyEvent',{type:'keyUp',key:' ',code:'Space',windowsVirtualKeyCode:32});const spaceAfter=await state();
+  check(near(spaceAfter.s,spaceBefore.s*2**(-1/3))&&near((800-spaceBefore.left-spaceBefore.x)/spaceBefore.s,(800-spaceAfter.left-spaceAfter.x)/spaceAfter.s),'Space+wheel zooms around the pointer');
+  // Card bodies scroll only on a selected or edited card.
+  await click(button('Reset zoom'));await sleep(100);
+  const card=await run(()=>{const v=document.querySelector('.canvas-view').getBoundingClientRect();const c=[...document.querySelectorAll('.canvas-node')].find(c=>{const r=c.getBoundingClientRect();return r.left>v.left+20&&r.right<v.right-60&&r.top>v.top+60&&r.bottom<v.bottom-80;});const r=c.getBoundingClientRect();return{id:c.dataset.nodeId,x:r.x+r.width-15,y:r.y+r.height-10};});
+  const overflow=()=>run(id=>getComputedStyle(document.querySelector(`.canvas-node[data-node-id="${id}"] > .canvas-node-content`)).overflowY,card.id);
+  const unselected=await overflow();await click(card);const selected=await overflow();
+  const menuScale=await run(()=>{const m=document.querySelector('.canvas-selection-menu');return{visible:!m.hidden,inverse:parseFloat(m.style.getPropertyValue('--canvas-inverse-scale')),scale:new DOMMatrix(document.querySelector('.canvas-world').style.transform).a};});
+  check(unselected==='hidden'&&selected==='auto','Card bodies are not scroll containers unless the card is selected');
+  check(menuScale.visible&&Math.abs(menuScale.inverse-1/menuScale.scale)<1e-9,'The selection menu keeps its screen size from its own inline variables');
   await shot('grove-partb-large');
   check(await run(async()=>{const{api}=await import('/src/api.ts');return await api.readNote('Navigation.canvas')===originalNavigation}),'Pan, zoom and tab changes leave canvas bytes unchanged');
 }, {height:800,screenshots:new URL('../../round23-shots/',import.meta.url).pathname});
