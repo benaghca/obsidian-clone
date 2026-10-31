@@ -102,3 +102,45 @@ The scratch `vite.config.ts` gained a `server.fs.allow` entry for this tree's `n
 ## Reading
 
 This review used `rebuild/CANVAS_ZOOM_PLAN.md` and `rebuild/NOTES_CZ2.md`. No Obsidian source, CSS, or assets. Claude's notes say he used Chris's uncommitted reference screenshots and the Canvas help quotation already in the plan.
+
+## CZ2-SYNC
+
+Merged `rebuild/integration` (`565d826`) into this branch with `--no-ff`. Merge commit `19a4f6d`: 44 files, 2,875 insertions, 75 deletions. `rebuild/integration` was not moved. Nothing was pushed. The merge did not change Rust.
+
+One conflict, `rebuild/app/scripts/test-canvas-navigation.mjs`. The callback now takes both `on` (CZ0's `traceGesture`) and `chord` (the title-edit check):
+
+`await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,shot})=>{`
+
+The rest of that file merged on its own. It still measures pan and zoom with `traceGesture` / `summarizeTrace` and keeps the drop ceiling at 6 per 24 inputs. It still checks title mode at exactly 45% and 55% and just outside that band, zoom-band settle, no stylesheet write on a zoom frame, double-click zoom then edit, and the 4000×2400 card. `package.json` kept every test from both sides: integration's `test-canvas-zoom-trace.mjs` is in the same `node --test` line as browser discovery, and `posttest` includes `test-bases-kanban-move.mjs`. `editing.ts` and `view.ts` merged cleanly (`titleZoom` with `openBoardMenu`, `canvasTitle` with `card.dataset.path`).
+
+### Bench after the merge
+
+Same CZ0 bench, headless Chromium 155.0.8059.84, 1280×1000, device scale 1, GPU disabled. DOM counts are unchanged (2,676 / 7,851 / 25,956 / 77,691). Before is the CZ2-review run already in the table above. After is this merge.
+
+| Cards | Gesture | Main ms/update | Dropped | Long tasks (count / max ms) | Open ms / longest |
+|---:|---|---:|---:|---|---|
+| 100 | wheel | 3.0 → 3.1 | 1 → 2 | 0 → 0 | 92 / 76 → 93 / 76 |
+| 100 | pinch | 2.0 → 2.0 | 0 → 0 | 0 → 0 | |
+| 100 | pan | 1.9 → 1.7 | 0 → 0 | 0 → 0 | |
+| 300 | wheel | 5.0 → 4.4 | 2 → 2 | 0 → 0 | 257 / 214 → 256 / 216 |
+| 300 | pinch | 3.5 → 3.2 | 1 → 1 | 0 → 0 | |
+| 300 | pan | 3.8 → 3.2 | 0 → 0 | 0 → 0 | |
+| 1,000 | wheel | 20.5 → 19.2 | 6 → 5 | 1 / 105 → 1 / 136 | 1,118 / 942 → 1,121 / 946 |
+| 1,000 | pinch | 10.5 → 10.1 | 0 → 0 | 0 → 0 | |
+| 1,000 | pan | 9.3 → 9.3 | 2 → 2 | 0 → 0 | |
+| 3,000 | wheel | 262 → 184 | 130 → 88 | 11 / 580 → 10 / 707 | 6,446 / 5,724 → 6,343 / 5,611 |
+| 3,000 | pinch | 34.9 → 38.5 | 65 → 70 | 0 → 0 | |
+| 3,000 | pan | 36.5 → 37.2 | 19 → 19 | 1 / 86 → 1 / 90 | |
+
+100–1,000 cards stay in the same band. The 3,000-card wheel average and dropped-frame count improved. Its longest task rose to 707 ms, the same content-switch class left for CZ3. The 1,000-card wheel's single long task rose from 105 ms to 136 ms.
+
+### Checks
+
+One run each, no flake rerun. Screenshots under `rebuild/round*-shots/` restored before this commit.
+
+- `npm run build`: passed, `✓ built in 211ms`. Existing chunk-size warning only.
+- `flock /tmp/grove-npm-test.lock npm test`: exit 0. Vitest 72 files, 1,242 tests. 2,239 PASS lines. Compositor pan and zoom stayed within 6 drops. Exactly 55% and exactly 45% passed. The second double-click edits, including the card that stays under 55%. 300-card pan and zoom presentation max 16.8 ms. 300-card drag max 16.8 ms. 1000-row Bases scroll max 16.7 ms. K7 fuzz `cases=48 seed=27447`.
+- `npm run audit:offline`: passed, 184 source files.
+- `cargo build` and `cargo test` from `rebuild/app/src-tauri`: 73 passed, 4 ignored.
+
+No GUI window was opened. The sync used the same plan and notes as the review above, not Obsidian source.
