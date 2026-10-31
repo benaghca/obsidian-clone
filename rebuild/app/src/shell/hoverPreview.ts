@@ -197,8 +197,35 @@ export function installHoverPreviews(ws: Workspace) {
     if (event.key !== modifier) return;
     inspect(pointerX, pointerY, true, document.elementFromPoint(pointerX, pointerY) as HTMLElement | null);
   });
+  // Culling, and a cursor parked outside the layout viewport, make Chrome emit
+  // pointerout with no relatedTarget. The event's own coordinates can sit
+  // outside the page while the last pointer position is still a link. Leaving
+  // on those coordinates cancels the 350ms preview. A miss in the same turn
+  // can be the node detaching; check again next frame before leaving.
+  const stillPreviewing = (el: Element | null) => {
+    if (!el || typeof (el as HTMLElement).closest !== "function") return false;
+    if (popup?.contains(el)) return true;
+    const node = el as HTMLElement;
+    if (node.closest("[data-href], [data-preview-path], [data-embed-href]")) return true;
+    const view = EditorView.findFromDOM(node);
+    if (!view) return false;
+    const pos = view.posAtCoords({ x: pointerX, y: pointerY });
+    const found = pos === null ? null : linkAt(view.state, pos);
+    return found?.kind === "internal";
+  };
+  let recheck = 0;
   document.addEventListener("pointerout", (event) => {
     if (event.pointerType !== "mouse" && event.pointerType !== "pen") return;
-    if (!event.relatedTarget) leave();
+    if (event.relatedTarget) return;
+    window.cancelAnimationFrame(recheck);
+    recheck = 0;
+    if (!pointerSeen) return leave();
+    const hit = document.elementFromPoint(pointerX, pointerY);
+    if (stillPreviewing(hit)) return;
+    if (hit) return leave();
+    recheck = window.requestAnimationFrame(() => {
+      recheck = 0;
+      if (!stillPreviewing(document.elementFromPoint(pointerX, pointerY))) leave();
+    });
   }, { capture: true });
 }
