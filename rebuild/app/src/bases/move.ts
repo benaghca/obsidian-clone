@@ -129,7 +129,10 @@ export function installMoves(board: MoveSurface) {
   }, options);
   board.el.addEventListener("keydown", e => {
     suppressClick = false;
-    if ((e.target as Element).closest("input,textarea,select,[contenteditable=true],[contenteditable=plaintext-only]") || document.querySelector(".menu")) return;
+    const target = e.target as Element;
+    // The note editor is contenteditable around an embedded board. A card there is still the board's key target.
+    const editable = target.closest<HTMLElement>("[contenteditable=true]");
+    if (target.closest("input,textarea,select,[contenteditable=plaintext-only]") || (editable && board.el.contains(editable)) || document.querySelector(".menu")) return;
     if ((e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase())) { e.preventDefault(); e.stopPropagation(); board.undo(e.key.toLowerCase() === "z" && !e.shiftKey); return; }
     const card = (e.target as Element).closest<HTMLElement>(".bases-kanban-card");
     if (picked) {
@@ -150,5 +153,11 @@ export function installMoves(board: MoveSurface) {
   }, { ...options, capture: true });
   board.el.addEventListener("focusout", e => { if (picked && (e.relatedTarget as Element | null)?.closest?.<HTMLElement>(".bases-kanban-card")?.dataset.path !== picked.entry.row.file.path) cancelPicked(); }, options);
   window.addEventListener("blur", cancelPicked, options);
-  return { async idle() { while (tracking || picked) await new Promise<void>(resolve => waiting.push(resolve)); }, cancel() { cancel?.(); cancelPicked(); settled(); }, dispose() { cancel?.(); cancelPicked(); abort.abort(); settled(); } };
+  return {
+    async idle() { while (tracking || picked) await new Promise<void>(resolve => waiting.push(resolve)); },
+    /** True from pointer-down or Space until the gesture ends. A refresh must not treat that as idle. */
+    active: () => tracking || picked !== null,
+    cancel() { cancel?.(); cancelPicked(); settled(); },
+    dispose() { cancel?.(); cancelPicked(); abort.abort(); settled(); },
+  };
 }

@@ -152,6 +152,117 @@ if (!process.argv.includes("--perf-only")) await withBrowser(async ({run,click,p
 
 });
 
+// Refresh already inside properties, a second Ctrl+Z after that rebuild, undo of a deleted note, and two blocks in one note.
+let embedKeyFault = null;
+await withBrowser(async({run,point,send,press,check})=>{
+ const wait=async(test,label,n=400)=>{for(let i=0;i<n;i++){if(await test())return;await sleep(25);}assert.fail(label);};
+ const read=path=>run(async path=>{const {api}=await import('/src/api.ts');return api.readNote(path);},path);
+ const source=`filters: 'file.inFolder("KQ")'\nviews:\n  - type: kanban\n    name: Board\n    order: [file.name, status]\n    groupBy:\n      property: status\n      direction: ASC\n      order: [todo, doing, review, done, null]\n`;
+ const card=path=>`.bases-kanban-card[data-path='${path}']`;
+ const col=id=>`.bases-kanban-col[data-group-id='${id}'] .bases-kanban-body`;
+ await run(async source=>{
+  const {api}=await import('/src/api.ts');
+  for(const [name,status] of [['A','todo'],['B','doing'],['C','review']])await api.createNote(`KQ/${name}.md`,`---\nstatus: '${status}'\nkeep: same\n---\nbody ${name}\n`);
+  await api.createNote('KQ.base',source);await ws.vault.refreshFiles();await ws.open('KQ.base');
+  window.k5api=api;
+ },source);
+ await wait(()=>run(sel=>!!document.querySelector(sel),card('KQ/A.md')),'review board');
+ await run(sel=>document.querySelector(sel).focus(),card('KQ/A.md'));
+ await press(' ');await press('ArrowRight');await press(' ');
+ await wait(async()=>/status: 'doing'/.test(await read('KQ/A.md')),'A moved');
+ await sleep(200);
+ await run(()=>{window.k5col=document.querySelector('.bases-kanban-col');});
+ await press('z',2);
+ await wait(()=>run(sel=>window.k5col?.isConnected===false&&document.activeElement?.matches(sel),card('KQ/A.md')),'undo rebuild keeps focus');
+ await press('z',10);
+ await wait(async()=>/status: 'doing'/.test(await read('KQ/A.md')),'redo without clicking the board again');
+ check(true,'A second Ctrl+Z still reaches the board after undo rebuilds it');
+ await run(async()=>{await k5api.deletePath('KQ/A.md',true);await ws.vault.refreshFiles();});
+ await wait(()=>run(sel=>!document.querySelector(sel),card('KQ/A.md')),'deleted card leaves');
+ await run(()=>document.querySelector('.bases-kanban').focus());
+ await press('z',2);await sleep(300);
+ const delNotice=await run(()=>document.querySelector('.bases-move-notice')?.textContent??'');
+ let missing=false;try{await read('KQ/A.md');}catch{missing=true;}
+ assert.equal(missing,true);assert.equal(await run(sel=>!!document.querySelector(sel),card('KQ/A.md')),false);
+ assert.match(delNotice,/Can't undo|Note not found/);
+ check(true,'Undo after the moved note was deleted refuses and does not invent a card');
+ await run(()=>{
+  window.k5held=0;window.k5wait=[];window.k5hold=true;
+  const original=k5api.properties.bind(k5api);
+  k5api.properties=async(...args)=>{if(window.k5hold){window.k5held++;await new Promise(r=>window.k5wait.push(r));}return original(...args);};
+ });
+ try{
+  await run(async()=>{await k5api.writeNote('KQ/B.md',"---\nstatus: 'doing'\nkeep: touched\n---\nbody B\n");ws.vault.written('KQ/B.md');});
+  await wait(()=>run(()=>k5held>0),'properties held');
+  await run(()=>{document.querySelector('.bases-kanban').scrollLeft=0;});
+  const from=await point(card('KQ/C.md')),to=await point(col('s:"todo"'));
+  await send('Input.dispatchMouseEvent',{type:'mouseMoved',...from});
+  await send('Input.dispatchMouseEvent',{type:'mousePressed',...from,button:'left',clickCount:1});
+  for(let i=1;i<=8;i++)await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:from.x+(to.x-from.x)*i/8,y:from.y,buttons:1});
+  await sleep(40);
+  assert.equal(await run(()=>!!document.querySelector('.bases-move-ghost')),true);
+  await run(()=>{window.k5hold=false;window.k5wait.splice(0).forEach(r=>r());});
+  await sleep(300);
+  assert.equal(await run(()=>!!document.querySelector('.bases-move-ghost')),true,'a refresh already in flight must not cancel the drag');
+  await press('Escape');
+  assert.equal(await run(()=>!!document.querySelector('.bases-move-ghost')),false);
+  assert.match(await read('KQ/C.md'),/status: 'review'/);
+  await sleep(250);
+  await run(sel=>document.querySelector(sel).focus(),card('KQ/B.md'));
+  await press(' ');await press('ArrowRight');await press(' ');
+  await wait(async()=>/status: 'review'/.test(await read('KQ/B.md'))&&/keep: touched/.test(await read('KQ/B.md')),'external edit survived the cancelled drag');
+  check(true,'A refresh blocked on properties leaves the drag in place, and Escape still applies the external edit');
+ }finally{await run(()=>{window.k5hold=false;window.k5wait?.splice(0).forEach(r=>r());});}
+ const embed='# One\n\n```base\n'+source+'```\n\n# Two\n\n```base\nfilters: \'file.inFolder("NO")\'\nviews:\n  - type: kanban\n    name: Other\n    groupBy:\n      property: status\n```\n';
+ await run(async embed=>{await k5api.createNote('NO/Z.md',"---\nstatus: 'todo'\n---\nz\n");await k5api.createNote('KQ Plan.md',embed);await ws.vault.refreshFiles();await ws.open('KQ Plan.md');},embed);
+ await wait(()=>run(()=>document.querySelectorAll('.bases-embed .bases-kanban').length===2),'two blocks');
+ await wait(()=>run(sel=>!!document.querySelector(sel),`.bases-embed ${card('KQ/C.md')}`),'embedded card');
+ await run(()=>{document.querySelector('.bases-embed .bases-kanban').scrollLeft=0;});
+ await sleep(80);
+ const hit=await run(()=>{
+  const board=document.querySelector('.bases-embed .bases-kanban');
+  const card=board.querySelector('.bases-kanban-card[data-path="KQ/C.md"]');
+  const column=[...board.querySelectorAll('.bases-kanban-col')].find(c=>c.dataset.groupId==='s:"todo"');
+  const a=card.getBoundingClientRect(),b=column.querySelector('.bases-kanban-body').getBoundingClientRect();
+  return {ax:a.x+a.width/2,ay:a.y+12,bx:b.x+20,by:b.y+30};
+ });
+ const before=await read('KQ/C.md');
+ await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:hit.ax,y:hit.ay});
+ await send('Input.dispatchMouseEvent',{type:'mousePressed',x:hit.ax,y:hit.ay,button:'left',clickCount:1});
+ await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:hit.bx,y:hit.by,buttons:1});
+ await sleep(40);
+ await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:hit.bx,y:hit.by,button:'left',clickCount:1});
+ await wait(async()=>(await read('KQ/C.md'))!==before,'block move');
+ const moved=await read('KQ/C.md');
+ // The other block's notice may be hidden, so invoke its handler directly. A shared stack would revert C.
+ await run(()=>{
+  const boards=[...document.querySelectorAll('.bases-embed .bases-kanban')];
+  const other=boards.find(b=>!b.querySelector('.bases-kanban-card[data-path="KQ/C.md"]'));
+  other.querySelector('.bases-move-notice button').click();
+ });
+ await sleep(300);
+ assert.equal(await read('KQ/C.md'),moved,'the other block\'s Undo changed this note');
+ // A pointer drop suppresses the following click. pointerdown on the Undo button clears that, as a real press does.
+ await run(()=>{
+  const board=document.querySelector('.bases-embed .bases-kanban-card[data-path="KQ/C.md"]').closest('.bases-kanban');
+  const button=board.querySelector('.bases-move-notice button');
+  button.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,button:0,pointerId:1}));
+  button.click();
+ });
+ await wait(async()=>(await read('KQ/C.md'))===before,'undo stays on the block that moved');
+ check(true,'Undo on one base block does not revert a move made on another block in the same note');
+ await run(sel=>document.querySelector(sel).focus(),`.bases-embed ${card('KQ/B.md')}`);
+ await press(' ');await press('ArrowRight');await press(' ');
+ let embedKey='';
+ try{
+  await wait(async()=>{embedKey=await run(async()=>{try{const {api}=await import('/src/api.ts');return await api.readNote('KQ/B.md');}catch(e){return 'ERR '+e.message;}});return /status: 'done'/.test(embedKey);},'embed keyboard move');
+  check(true,'Space and arrows move a card inside an embedded board');
+ }catch(e){
+  console.log('EMBED KEY',embedKey,JSON.stringify(await run(()=>({active:document.activeElement?.className??null,paths:ws.vault.files.map(f=>f.path).filter(p=>p.startsWith('KQ')||p.startsWith('NO'))}))));
+  embedKeyFault=e;
+ }
+});
+
 // P4/P5/P7: 10,000 balanced notes, transform-only drag across three columns with auto-scroll.
 await withBrowser(async({run,send,point,press,check})=>{
  const wait=async(test,label,n=800)=>{for(let i=0;i<n;i++){if(await test())return;await sleep(10);}assert.fail(label);};
@@ -210,3 +321,4 @@ await withBrowser(async({run,send,point,press,check})=>{
  assert.equal(await run(()=>!!document.querySelector('.bases-move-ghost')),false);assert.ok((await run(()=>k5api.readNote('KP/00000.md'))).includes('status: done'));check(true,'Leaving an auto-scroll drag removes its ghost and writes nothing');
  check(true,`P4: 10k drag p95 ${p95.toFixed(1)}ms, handler max ${maxEvent.toFixed(3)}ms; P5/P7 optimistic paint and CAS finish within budget`);
 });
+if (embedKeyFault) throw embedKeyFault;

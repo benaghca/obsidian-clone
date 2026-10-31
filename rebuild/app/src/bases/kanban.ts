@@ -61,7 +61,7 @@ export function createKanban(host: KanbanHost) {
   let automatic: RowGroup[] = [], all: RowGroup[] = [], columns: RowGroup[] = [], hiddenRows = 0, generation = 0, gone = false;
   let width: number = KANBAN.width, cardHeight = 0, pitch = 0, viewWidth = 0, viewHeight = 0, props: string[] = [], coverHeight = 0;
   const mounted = new Map<string, Column>(), scrollTops = new Map<string, number>(), covers = new Map<HTMLElement, Cover>();
-  let focusPath: string | null = null, frame = 0;
+  let focusPath: string | null = null, frame = 0, refocus = false;
   const tab = group.active;
   let pendingWrites = 0;
   const waitingWrites: (() => void)[] = [];
@@ -485,14 +485,23 @@ export function createKanban(host: KanbanHost) {
   return {
     el,
     clear,
-    idle: () => Promise.all([moves.idle(), pendingWrites ? new Promise<void>(resolve => waitingWrites.push(resolve)) : Promise.resolve()]).then(() => {}),
+    async idle() {
+      // Recheck after the gesture: a drop queues its write in the same turn the gesture settles.
+      for (;;) {
+        await moves.idle();
+        if (moves.active()) continue;
+        if (!pendingWrites) return;
+        await new Promise<void>(resolve => waitingWrites.push(resolve));
+      }
+    },
     /**
      * Group `rows` (the drawn, searched rows) into the board's columns. `selected` (the rows before
      * Search) decides which columns exist, so a search empties columns instead of removing them.
      */
     async update(next: Model, rows: readonly Entry[], propertyTypes: Map<string, PropertyType>, obsolete: () => boolean, selected: readonly Entry[] = rows, metadata: Map<string, NoteProperties> = info): Promise<boolean> {
-      if (pendingWrites) return false;
-      const token = ++generation, options: SliceOptions = { cancelled: () => gone || pendingWrites > 0 || token !== generation || obsolete() };
+      // A gesture that began while this refresh was already reading must keep its card, ghost and drop.
+      if (pendingWrites || moves.active()) return false;
+      const token = ++generation, options: SliceOptions = { cancelled: () => gone || pendingWrites > 0 || moves.active() || token !== generation || obsolete() };
       try {
         const by = next.groupBy;
         const grouped = await groupRowsAsync(rows, by, options);
@@ -505,8 +514,10 @@ export function createKanban(host: KanbanHost) {
         const withRows = (g: RowGroup): RowGroup => selected === rows ? g : { ...g, rows: byId.get(g.id)?.rows ?? [] };
         const shown = arranged.filter(g => !g.hidden).map(withRows);
         hiddenRows = arranged.reduce((sum, g) => sum + (g.hidden ? withRows(g).rows.length : 0), 0);
+        const inside = el.contains(document.activeElement);
         for (const id of [...mounted.keys()]) unmount(id);
         moves.cancel();
+        refocus = inside;
         model = next; info = metadata; checking = new Map(); reasons = new Map();
         entries = new Map(selected.map(entry => [entry.row.file.path, entry]));
         const readOnly = readOnlyReason(by?.property);
@@ -537,6 +548,13 @@ export function createKanban(host: KanbanHost) {
     },
     /** A new query: every column back to its top (B6: a new query scrolls to the top). */
     top() { scrollTops.clear(); for (const c of mounted.values()) c.body.scrollTop = 0; },
+    /** The rebuild removed the focused card. Focus the replacement, which a second Ctrl+Z needs. */
+    restoreFocus() {
+      if (!refocus || !focusPath) { refocus = false; return; }
+      refocus = false;
+      const ci = columns.findIndex(g => g.rows.some(r => r.row.file.path === focusPath));
+      if (ci >= 0) focusCard(ci, columns[ci].rows.findIndex(r => r.row.file.path === focusPath));
+    },
     /** Rows in the order the board draws them, for Copy and Export CSV. */
     rows: (): readonly Entry[] | null => model ? columns.flatMap(g => g.rows) : null,
     groups: (): readonly RowGroup[] => automatic,
