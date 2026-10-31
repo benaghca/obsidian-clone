@@ -1,5 +1,6 @@
 import { isNoteFile } from "../paths";
 import { dragPointer, h } from "../shell/dom";
+import { isMac } from "../shell/keys";
 import { settings } from "../settings/store";
 import { closeMenu, showMenu, SEPARATOR } from "../shell/menu";
 import { canvasReadOnly, selectionMenu } from "./controls";
@@ -15,7 +16,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
   history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker,
-  guides: (list: Guide[], radius: number) => void, openBoardMenu: (x: number, y: number) => void) {
+  guides: (list: Guide[], radius: number) => void, openBoardMenu: (x: number, y: number) => void,
+  openCreateMenu: (box: { x: number; y: number; width: number; height: number }, at: { x: number; y: number }) => void) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -31,6 +33,39 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   const events = new AbortController();
   world.addEventListener("pointerover", e => { const card = (e.target as Element).closest<HTMLElement>(".canvas-node"); if (card && cards.get(card.dataset.nodeId!) === card) dots(card); }, { signal: events.signal });
   let cancel: (() => void) | undefined, suppress = false, pressedLabel: string | undefined;
+  let createBox: HTMLElement | undefined, createWatch: MutationObserver | undefined;
+  const clearCreate = () => { createWatch?.disconnect(); createWatch = undefined; createBox?.remove(); createBox = undefined; };
+  // Ctrl (Cmd on macOS) on empty canvas. The box is one screen-space element:
+  // reading card geometry here would lay out the whole board on every move.
+  function startCreate(e: PointerEvent) {
+    const box = createBox = h("div", { class: "canvas-create" });
+    el.append(box);
+    const rect = el.getBoundingClientRect();
+    const matrix = new DOMMatrix(getComputedStyle(world).transform);
+    const toBoard = (x: number, y: number) => ({ x: (x - rect.left - matrix.e) / matrix.a, y: (y - rect.top - matrix.f) / matrix.a });
+    let drawn = { x: 0, y: 0, width: 0, height: 0, sw: 0, sh: 0, cx: e.clientX, cy: e.clientY };
+    const paint = (move: PointerEvent) => {
+      const step = move.altKey || !settings.get("canvas.json").snapToGrid ? 0 : 20;
+      const snap = (v: number) => step ? Math.round(v / step) * step : v;
+      const a = toBoard(e.clientX, e.clientY), b = toBoard(move.clientX, move.clientY);
+      const x0 = snap(a.x), y0 = snap(a.y), x1 = snap(b.x), y1 = snap(b.y);
+      const x = Math.min(x0, x1), y = Math.min(y0, y1), width = Math.abs(x1 - x0), height = Math.abs(y1 - y0);
+      drawn = { x, y, width, height, sw: width * matrix.a, sh: height * matrix.a, cx: rect.left + x1 * matrix.a + matrix.e, cy: rect.top + y1 * matrix.a + matrix.f };
+      box.style.left = `${x * matrix.a + matrix.e}px`;
+      box.style.top = `${y * matrix.a + matrix.f}px`;
+      box.style.width = `${drawn.sw}px`;
+      box.style.height = `${drawn.sh}px`;
+    };
+    cancel = dragPointer(e, el, paint, cancelled => {
+      cancel = undefined;
+      if (cancelled || drawn.sw < 10 || drawn.sh < 10) { clearCreate(); return; }
+      openCreateMenu(drawn, { x: drawn.cx, y: drawn.cy });
+      const menu = document.querySelector(".canvas-create-menu");
+      if (!menu) { clearCreate(); return; }
+      createWatch = new MutationObserver(() => { if (!menu.isConnected) clearCreate(); });
+      createWatch.observe(document.body, { childList: true });
+    }, false);
+  }
   const chosen = () => nodes.filter(n => selected.has(n.id));
   let context: Element | null = null;
   const createGroup = () => {
@@ -73,6 +108,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     }
   }
   el.addEventListener("pointerdown", e => {
+    clearCreate();
     suppress = false; pressedLabel = undefined;
     if (e.defaultPrevented || e.button !== 0 || el.classList.contains("is-grabbable")) return;
     const target = e.target as Element;
@@ -210,6 +246,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
         if (!cancelled && !suppress && removeOnClick) { selected.delete(node.id); selection(); }
         finish(before, cancelled);
       }, false);
+    } else if (!canvasReadOnly.has(el) && (isMac ? e.metaKey : e.ctrlKey)) {
+      startCreate(e);
     } else {
       const initial = e.shiftKey ? new Set(selected) : new Set<string>();
       if (!e.shiftKey) selectedEdges.clear();
@@ -280,5 +318,13 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     } else if (e.key === "Escape") { selected.clear(); selectedEdges.clear(); selection(); }
   }, { signal: events.signal });
   selection();
-  return () => { cancel?.(); events.abort(); if (context?.isConnected) closeMenu(); menu.dispose(); };
+  return () => {
+    cancel?.();
+    const open = document.querySelector(".canvas-create-menu");
+    clearCreate();
+    events.abort();
+    if (open?.isConnected) closeMenu();
+    if (context?.isConnected) closeMenu();
+    menu.dispose();
+  };
 }
