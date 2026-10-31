@@ -1,10 +1,11 @@
 // Pan/zoom and performance with native CDP input in a scratch mock vault.
 import { readFile, writeFile } from 'node:fs/promises';
 import { withBrowser, sleep } from './browser.mjs';
+import { traceGesture, summarizeTrace } from './canvas-zoom-trace.mjs';
 const [fixture,note,diagram] = await Promise.all(['Reference.canvas','Note.md','diagram.svg'].map(name=>readFile(new URL('../../round23-shots/'+name, import.meta.url),'utf8')));
 const large = { nodes: Array.from({length:300},(_,i)=>({id:`n${i}`,type:'text',x:(i%20)*280,y:Math.floor(i/20)*190,width:250,height:160,text:`## Card ${i}\n**Local** Markdown and [[Welcome]].\n- Item\n- [ ] Task`,color:String(i%6+1)})), edges:Array.from({length:400},(_,i)=>({id:`e${i}`,fromNode:`n${i%300}`,toNode:`n${(i*7+1)%300}`,fromSide:'right',toSide:'left',label:i%25===0?`Edge ${i}`:undefined})) };
 await writeFile(new URL('../../round23-shots/Large.canvas', import.meta.url), JSON.stringify(large)+'\n');
-await withBrowser(async ({send,run,click,move,point,check,press,chord,double,shot})=>{
+await withBrowser(async ({send,on,run,click,move,point,check,press,chord,double,shot})=>{
   await run(async ({fixture,large,note,diagram})=>{
     const {api}=await import('/src/api.ts');
     for(const [path,content]of Object.entries({'Note.md':note,'diagram.svg':diagram,'Target.md':'# Target'})) {
@@ -89,6 +90,21 @@ await withBrowser(async ({send,run,click,move,point,check,press,chord,double,sho
   const zoomFrames=await run(()=>{canvasRecording=false;cancelAnimationFrame(canvasFrameId);return canvasFrames.slice(2)});
   for(const [name,frames]of [['pan',panFrames],['zoom',zoomFrames]]){const sorted=frames.toSorted((a,b)=>a-b);console.log('FRAMES',name,JSON.stringify({samples:frames.length,p95:sorted[Math.floor(sorted.length*.95)],max:Math.max(...frames)}));check(frames.length>=20&&Math.max(...frames)<20,'300-card/400-edge '+name+' presentation frames stay under 20ms');}
   check(await run(()=>{canvasMutationObserver.disconnect();return canvasChildChanges===0}),'Pan/zoom transforms one world without changing card DOM or geometry');
+  // Fitted, so all 300 cards are visible. rAF intervals stay smooth while the
+  // compositor can still drop. Three runs after CZ1: pan drops 2, zoom drops 0.
+  // Ceiling 6 keeps the old 3-drop timing spread above that. See NOTES_CZ0-REVIEW.
+  for(const name of ['pan','zoom']) {
+    await click(fit);await sleep(250);
+    const trace=await traceGesture({send,on},async()=>{
+      const pending=[];
+      for(let i=0;i<24;i++){
+        pending.push(send('Input.dispatchMouseEvent',{type:'mouseWheel',x:800,y:400,deltaX:name==='pan'?(i%2?30:-30):0,deltaY:i%2?20:-20,modifiers:name==='zoom'?2:0}));await sleep(16);
+      }
+      await Promise.all(pending);await sleep(250);
+    });
+    const metrics=summarizeTrace(trace,24);console.log('COMPOSITOR',name,JSON.stringify(metrics));
+    check(metrics.dropped<=6,'300-card/400-edge '+name+' stays within 6 compositor drops per 24 inputs');
+  }
   // CZ1: a zoom frame writes no stylesheet rule; zoom-dependent handle sizes follow one band attribute once the wheel rests.
   await run(()=>{window.canvasRuleWrites=0;const set=CSSStyleDeclaration.prototype.setProperty;window.canvasSetProperty=set;CSSStyleDeclaration.prototype.setProperty=function(...a){if(this.parentRule)canvasRuleWrites++;return set.apply(this,a)};});
   const bandBefore=await run(()=>document.querySelector('.canvas-world').dataset.zoomBand);
@@ -243,4 +259,30 @@ await withBrowser(async ({send,run,click,move,point,check,press,chord,double,sho
   check(await run(()=>!!document.querySelector('.canvas-node[data-node-id="h"].is-editing .cm-editor')),'A second double-click edits that card');
   await press('Escape');await sleep(40);
   check(await run(async()=>{const{api}=await import('/src/api.ts');return await api.readNote('Navigation.canvas')===originalNavigation}),'Pan, zoom and tab changes leave canvas bytes unchanged');
+  // The real-app diagnostic is in the DEV registry, performs exactly 300
+  // synthetic inputs, restores the live viewport and does not save anything.
+  await run(()=>ws.open('Small.canvas'));await sleep(120);const beforeMeasure=await state();
+  await run(()=>{window.cz0WheelCount=0;document.querySelector('.canvas-view').addEventListener('wheel',e=>{if(!e.isTrusted&&e.ctrlKey&&e.deltaY)cz0WheelCount++;});window.cz0Measure=grove.get('canvas:measure-zoom').run();});
+  for(let i=0;i<300&&!await run(()=>!!document.querySelector('[aria-label="Canvas: measure zoom"]'));i++)await sleep(25);
+  const report=await run(()=>cz0Measure);console.log('CZ0_DEBUG',JSON.stringify(report));
+  check(report.steps===300&&!report.cancelled&&report.samples>10&&report.droppedFrames===null&&await run(()=>cz0WheelCount===300),'Debug zoom command sends 300 steps and labels unavailable compositor counts honestly');
+  check(await run(()=>document.querySelector('[aria-label="Canvas: measure zoom"]')?.textContent.includes('Frame-gap p50 / p95 / max')),'Debug zoom results show p50/p95/max and device scale');
+  await press('Escape');await sleep(40);const afterMeasure=await state();check(near(beforeMeasure.s,afterMeasure.s)&&near(beforeMeasure.x,afterMeasure.x)&&near(beforeMeasure.y,afterMeasure.y),'Debug measurement restores the original live viewport');
+  await run(()=>{window.cz0Measure=grove.get('canvas:measure-zoom').run();});await sleep(80);await press('Escape');
+  const cancelled=await run(()=>cz0Measure);check(cancelled.cancelled&&cancelled.steps<300,'Escape cancels the debug measurement before 300 steps');
+  await press('Escape');await sleep(40);
+  check(await run(async()=>{const{api}=await import('/src/api.ts');return JSON.parse(await api.readNote('Small.canvas')).nodes[0].text==='Small';}),'Debug measurement and cancellation never save the canvas');
+  const beforeLeave=await state();
+  await run(()=>{window.cz0Measure=grove.get('canvas:measure-zoom').run();});
+  for(let i=0;i<40&&near((await state()).s,beforeLeave.s);i++)await sleep(25);
+  check(!near((await state()).s,beforeLeave.s),'measurement changes zoom before the canvas is left');
+  await run(()=>ws.open('Welcome.md'));
+  const leftReport=await run(()=>cz0Measure);
+  check(leftReport.cancelled&&leftReport.steps<300,'leaving the canvas cancels the measurement');
+  await press('Escape');await sleep(40);
+  check(await run(()=>!grove.isAvailable(grove.get('canvas:measure-zoom'))),'Debug zoom command is unavailable outside a canvas');
+  await run(()=>ws.open('Small.canvas'));await sleep(200);
+  const returned=await state();
+  check(near(beforeLeave.s,returned.s)&&near(beforeLeave.x,returned.x)&&near(beforeLeave.y,returned.y),'leaving mid-measure restores the live viewport ('+JSON.stringify(beforeLeave)+' -> '+JSON.stringify(returned)+')');
+  check(await run(async()=>{const{api}=await import('/src/api.ts');return JSON.parse(await api.readNote('Small.canvas')).nodes[0].text==='Small';}),'leaving mid-measure does not save the canvas');
 }, {height:800,screenshots:new URL('../../round23-shots/',import.meta.url).pathname});

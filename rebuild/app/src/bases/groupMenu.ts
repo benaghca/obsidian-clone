@@ -23,7 +23,7 @@ export interface GroupMenuHost {
   keys(): string[];
   kind(key: string): IconName;
   type(key: string): PropertyType;
-  save(change: (source: string, base: Model) => string, done?: () => void): void;
+  save(change: (source: string, base: Model) => string, done?: () => void): void | Promise<void>;
 }
 const ROW = 28, SHOWN = 12, FILTER_AT = 30;
 

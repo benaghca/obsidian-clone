@@ -103,10 +103,15 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const nodes = Array.isArray(node) ? node : [node];
     if (!nodes.length) return;
     undo.push(source); redo = [];
-    selectAfterDraw = nodes[0].id; editAfterDraw = nodes.length === 1 && nodes[0].type === "text" ? nodes[0].id : undefined;
+    selectAfterDraw = nodes[0].id; editAfterDraw = nodes.length === 1 && nodes[0].type === "text" && !nodes[0].text ? nodes[0].id : undefined;
     changed(editCanvas(source, [], undefined, nodes, edge ? [edge] : []), true);
-    if (!(nodes.length === 1 && nodes[0].type === "text")) el.focus({ preventScroll: true });
+    if (!(nodes.length === 1 && nodes[0].type === "text" && !nodes[0].text)) el.focus({ preventScroll: true });
   });
+  const openBoardMenu = (x: number, y: number) => cardActions.boardMenu(x, y, {
+    undo: undo.some(text => text !== source),
+    redo: redo.some(text => text !== source),
+    apply: history,
+  }, () => draw());
   async function load() {
     const mine = ++loading;
     let text: string;
@@ -188,6 +193,9 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     }
     for (const node of nodes) {
       const card = h("div", { class: `canvas-node canvas-node-${node.type}`, "data-node-id": node.id });
+      // Hover resolves links from this note, or from the canvas file for a text card.
+      if (node.type === "text") card.dataset.path = path;
+      else if (node.type === "file" && isNoteFile(node.file ?? "")) card.dataset.path = node.file!;
       Object.assign(card.style, { left: `${node.x}px`, top: `${node.y}px`, width: `${node.width}px`, height: `${node.height}px` });
       if (node.color) card.classList.add("is-colored");
       card.style.setProperty("--canvas-color", color(node.color));
@@ -377,7 +385,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
           updateEdge(record); refresh();
         }
       });
-    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides));
+    }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides, openBoardMenu));
     startEditor?.();
     function boundsOf() { return nodes.length ? { left: Math.min(...nodes.map(n => n.x)), top: Math.min(...nodes.map(n => n.y)), right: Math.max(...nodes.map(n => n.x + n.width)), bottom: Math.max(...nodes.map(n => n.y + n.height)) } : { left: 0, top: 0, right: 0, bottom: 0 }; }
     navigation.loaded(bounds);
