@@ -14,6 +14,7 @@ export function canvasWork() {
     schedule();
   }
   return { add(key: object | string, job: () => void, weight = 1) { if (!gone) { jobs.delete(key); jobs.set(key, { job, weight: Math.max(1, Math.min(32, weight)) }); schedule(); } },
+    cancel(key: object | string) { jobs.delete(key); },
     pause() { paused = true; cancelAnimationFrame(frame); frame = 0; },
     resume() { paused = false; schedule(); },
     dispose() { gone = true; jobs.clear(); cancelAnimationFrame(frame); },

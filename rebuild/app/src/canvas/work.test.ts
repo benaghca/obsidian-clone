@@ -14,6 +14,7 @@ test("work slices, pauses, replaces stale jobs and cancels disposal", () => {
   expect(frames.size).toBe(0);work.resume();tick();expect(values).toHaveLength(32);
   work.pause();expect(frames.size).toBe(0);work.add("99",()=>values.push("latest"));work.resume();
   while(frames.size)tick();expect(values).toHaveLength(100);expect(values.at(-1)).toBe("latest");
+  work.add("canceled",()=>{throw Error("canceled work ran");});work.cancel("canceled");tick();
   work.add("stop",()=>{throw Error("disposed work ran");});work.dispose();expect(frames.size).toBe(0);
 });
 test("SVG weights bound mutations independently of JavaScript execution time", () => {
