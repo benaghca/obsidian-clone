@@ -15,7 +15,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   preview: (edge?: CanvasEdge, free?: { end: "from" | "to"; x: number; y: number }) => void,
   connect: (edge: CanvasEdge, at: { x: number; y: number }, finished: () => void) => void,
   history: (redo: boolean) => void, zoom: (nodes: Pick<CanvasNode, "x" | "y" | "width" | "height">[]) => void, edit: (item: CanvasNode | CanvasEdge, refresh: () => void) => void, selectedId: string | undefined, background: BackgroundPicker,
-  guides: (list: Guide[], radius: number) => void) {
+  guides: (list: Guide[], radius: number) => void, openBoardMenu: (x: number, y: number) => void) {
   const selected = new Set<string>(selectedId ? [selectedId] : []);
   const selectedEdges = new Set<string>();
   const cards = new Map([...world.querySelectorAll<HTMLElement>(".canvas-node")].map(card => [card.dataset.nodeId!, card]));
@@ -238,7 +238,15 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   }, { capture: true, signal: events.signal });
   el.addEventListener("contextmenu", e => {
     if ((e.target as Element).closest(".is-editing, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
-    const node = nodes.find(n => n.id === (e.target as Element).closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    const target = e.target as Element;
+    const node = nodes.find(n => n.id === target.closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
+    // Empty board, including a click that merely has a selection. Edges and labels keep the selection menu.
+    if (!node && !target.closest("[data-edge-id]")) {
+      e.preventDefault(); e.stopPropagation();
+      openBoardMenu(e.clientX, e.clientY);
+      context = document.querySelector(".canvas-context-menu");
+      return;
+    }
     if (node && !selected.has(node.id)) { selected.clear(); selectedEdges.clear(); selected.add(node.id); selection(); }
     if (!selected.size && !selectedEdges.size) return;
     e.preventDefault(); e.stopPropagation();
