@@ -65,3 +65,53 @@ Wheel and pan move the same way: 300-card wheel main 28.0 → 7.3 ms, drops 14 �
 ## Left open
 
 Chris still runs **Canvas: measure zoom** in the real WebKitGTK app, on a scratch vault, before and after CZ1. The command records device scale and the engine. It cannot say whether WebKit re-rasters each scale change. That still needs a native trace before deciding on CZ6. The headless Chromium numbers above are the baseline this bench will reproduce.
+
+## CZ0-SYNC
+
+Merged `rebuild/integration` (`ba9e4ac`, CZ1 + K5 + CZ-H) into `rebuild/cz0-review-grok` with `git merge --no-ff`. Nothing was pushed. No GUI window was opened. No new package or crate. No Obsidian code or assets. The Space+wheel check kept integration's existing citation of Canvas help ("press Space or Ctrl … and scroll"). This sync did not make a new Obsidian lookup.
+
+Two files conflicted.
+
+`rebuild/app/package.json` (+1/−1 against integration). The `test` script is integration's line, including `scripts/test-canvas-hover.mjs`, with `scripts/test-canvas-zoom-trace.mjs` added to the `node --test` list. The `posttest` script is integration's, including `scripts/test-bases-kanban-move.mjs`.
+
+`rebuild/app/scripts/test-canvas-navigation.mjs` (+43/−1 against integration, 205 lines; CZ0 had 128 and integration had 163). The callback keeps both helpers: `{send,on,run,click,move,point,check,press,double,shot}`. `on` feeds the compositor trace. `double` feeds CZ1's edit-to-scroll check. Every CZ1 check stays: rAF frames under 20 ms, no stylesheet rule writes, zoom-band settle, the zoom cap, Shift+1, pan during settle, Zoom in, zoom to selection, resize, Space+wheel, and card-body scroll only when a card is selected or edited. CZ1's mutation observer stays too: it ignores the world and the selection menu, and the no-child-DOM check still runs on that gesture. The compositor trace runs after that observer disconnects, on a fitted 300-card board, so a band settle cannot fail the DOM check. The debug-command checks stay at the end.
+
+`measureZoom.ts` and the `import.meta.env.DEV` registration merged cleanly. CZ1's wheel handler still treats a Ctrl+wheel as zoom and schedules a redraw. The restore writes the saved viewport back into the same object and dispatches one Ctrl+wheel with no delta, which redraws that viewport. The navigation test covers 300 steps, the honest `droppedFrames: null` report, Escape, leaving the canvas, and the live viewport coming back with `Small.canvas` bytes unchanged.
+
+### Drop ceiling
+
+Three dedicated runs, with the check still at the old ceiling of 24 so it recorded the count. Headless Chromium 155, same harness as CZ0.
+
+| Run | Pan drawn / dropped | Zoom drawn / dropped |
+|---|---:|---:|
+| 1 | 22 / 2 | 20 / 0 |
+| 2 | 22 / 2 | 24 / 0 |
+| 3 | 22 / 2 | 22 / 0 |
+
+The ceiling is **6** drops per 24 inputs, for each gesture. Pan's measured maximum is 2, and zoom's is 0, so a zero ceiling rejects the pan samples CZ1 still produces. On this machine the pre-CZ1 runs of the same check spread by 3 drops (8–11), and the full suite sat about 2 above the best dedicated sample. 6 is that measured 2, plus the 3-drop spread, plus one. The old 8–11 band still fails. The full suite below repeated pan 22/2 and zoom 22/0.
+
+### Bench
+
+Same script as `NOTES_CZ0`: `flock /tmp/grove-npm-test.lock node scripts/bench-canvas-zoom.mjs`. Chromium 155.0.8059.84, 1280×1000, device scale 1, `--disable-gpu`. Pinch is the comparable column. "Before" is the unoptimized table in `NOTES_CZ0`. "After" is this merge. Main is ms per viewport update. DOM is lower after CZ1 because card bodies are no longer scroll containers until a card is selected. Style is ms per viewport update.
+
+| Cards | Before main | Before drops | After main | After drops | After style | After open / longest |
+|---:|---:|---:|---:|---:|---:|---:|
+| 100 | 8.7 | 2 | 2.4 | 0 | 0.10 | 87.9 / 76 |
+| 300 | 27.1 | 89 | 5.7 | 1 | 0.11 | 240.8 / 203 |
+| 1,000 | 109.6 | 336 | 29.2 | 45 | 0.31 | 1117 / 970 |
+| 3,000 | 411.4 | 1441 | 122.1 | 386 | 1.00 | 6358 / 5856 |
+
+Wheel and pan move the same way. 300-card wheel main 28.0 → 7.3 ms, drops 14 → 2. 300-card pan 15.3 → 3.9 ms, drops 5 → 1. At 1,000 and 3,000 cards, layerize is still the large main-thread cost (18.6 ms and 86.6 ms per pinch update) and drops stay well above zero. Opening a 3,000-card board is still 6.4 s, longest task 5.9 s. CZ2 and CZ3 still have that work.
+
+### Checks
+
+- `npm run build`: passed, 2130 modules. Existing chunk-size warning only. `dist/` has none of `canvas:measure-zoom`, `Canvas: measure zoom`, `measureZoom`, `Frame-gap p50`, or `Compositor dropped`.
+- `npm run audit:offline`: passed, 184 source files.
+- Trace parser and browser-discovery: 6 passed, inside the full suite.
+- `flock /tmp/grove-npm-test.lock npm test`: passed on the first run, 622 s, including `posttest`. Vitest 72 files, 1240 tests. 1000-row Bases scroll max 16.8 ms. Full-suite compositor: pan 22 drawn / 2 dropped, zoom 22 drawn / 0 dropped. rAF max 16.8 ms for both. Debug command: 300 steps, p50/p95/max 16.7/16.7/16.8, no long tasks, `droppedFrames: null`. No timing flake, so nothing was rerun.
+- `cargo build --offline` and `cargo test --offline` from `rebuild/app/src-tauri`: 73 passed, 4 ignored. No Rust files changed by this resolution.
+- Screenshots under `rebuild/round*-shots/` were restored and were not committed.
+
+## Left open after the sync
+
+Chris still runs **Canvas: measure zoom** in the real WebKitGTK app. The headless numbers above are what that bench reproduces on this machine after CZ1. The command still cannot say whether WebKit re-rasters each scale change. Layerize and the multi-second 3,000-card open remain for CZ2 and CZ3. No new product decision.
