@@ -4,7 +4,7 @@ import { h } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import { closeMenu, SEPARATOR, showMenu, type MenuItems } from "../shell/menu";
 import type { Workspace } from "../workspace";
-import { baseModel, noteKey, propertyId } from "./model";
+import { baseModel, noteKey, propertyId, viewGlyph } from "./model";
 import { addView, writeFilters, writeTop, writeView, type Sort } from "./write";
 import { filterMenu } from "./filterMenu";
 import { drag, dropSlot, reordered } from "./drag";
@@ -140,7 +140,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
         const title=typeof mapping(v).name==="string"?String(mapping(v).name):"View";
         if(!title.toLowerCase().includes(search.value.toLowerCase()))return [];
         const viewType = mapping(v).type;
-        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon(viewType === "cards" ? "grid-2x2" : viewType === "kanban" ? "square-kanban" : "table",14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"Configure view",onclick:(e:MouseEvent)=>{e.stopPropagation();if(i===current().viewIndex)configure();else void changed(i).then(configure);}},icon("chevron-right",14))),disabled:viewType!=null&&viewType!=="table"&&viewType!=="cards"&&viewType!=="kanban",action:()=>void changed(i)}];
+        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon(viewGlyph(String(viewType ?? "")),14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"Configure view",onclick:(e:MouseEvent)=>{e.stopPropagation();if(i===current().viewIndex)configure();else void changed(i).then(configure);}},icon("chevron-right",14))),disabled:viewType!=null&&viewType!=="table"&&viewType!=="cards"&&viewType!=="kanban"&&viewType!=="list",action:()=>void changed(i)}];
       }),SEPARATOR,{title:"Add view",icon:"plus",action:()=>{
         save((source,b)=>{
           const names=new Set(b.views.map(v=>mapping(v).name));let n=0;while(names.has(n?`View ${n}`:"View"))n++;
@@ -174,7 +174,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       buttons[2].querySelector('[aria-label="Filter"]')!.classList.toggle("is-active",base.filtered);
       return buttons;
     }
-    const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View",onclick:()=>views(view)},icon(base.type === "cards" ? "grid-2x2" : base.type === "kanban" ? "square-kanban" : "table"),h("span",null,base.name),icon("chevrons-up-down"));
+    const view=h("button",{type:"button",class:"bases-view-name","aria-label":"View",onclick:()=>views(view)},icon(viewGlyph(base.type)),h("span",null,base.name),icon("chevrons-up-down"));
     const count=h("button",{type:"button",class:"bases-count","aria-label":"Results",onclick:()=>resultsMenu(count,baseLimit(),current().total,current().columns.map(current().label),rows(),value=>save((source,b)=>writeView(source,"limit",value,b.viewIndex)))},icon("text-align-start"),h("span",null,`${base.results} results`));
     const sort=button("Sort","arrow-up-narrow-wide",()=>sortMenu(sort));sort.classList.toggle("is-active",!!base.sorts.length);if(base.sorts.length)sort.append(h("span",{class:"bases-badge"},String(base.sorts.length)));
     const grouped=button("Group","group",()=>groupMenu(grouped,groupHost));grouped.classList.toggle("is-active",!!base.groupBy);grouped.append(h("span",{class:"bases-group-detail"},groupDetail(base)));
