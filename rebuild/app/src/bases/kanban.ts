@@ -6,6 +6,8 @@
 // board's size comes from a ResizeObserver.
 import "../styles/bases-kanban.css";
 import { asType, fits, type PropertyType } from "../editor/frontmatter";
+import { api, type NoteProperties } from "../api";
+import { editProperty } from "../editor/propertyEdit";
 import { noteName } from "../paths";
 import { formatDate } from "../settings/dateFormat";
 import { h } from "../shell/dom";
@@ -17,10 +19,13 @@ import type { Workspace } from "../workspace";
 import { resolveCoverPath } from "./cards";
 import { reordered } from "./drag";
 import { isEmpty, type Value } from "./functions";
-import { hideGroup, writeManual, type GroupMenuHost } from "./groupMenu";
-import { arrangeGroups, groupRowsAsync, parseManual, type Entry, type RowGroup, type SliceOptions } from "./groups";
+import { groupEntry, hideGroup, withManual, writeManual, type GroupMenuHost } from "./groupMenu";
+import { arrangeGroups, groupRowsAsync, parseManual, valueKey, writeViewSetting, MANUAL_LIMIT, type Entry, type RowGroup, type SliceOptions } from "./groups";
+import { moveHistory } from "./history";
+import { inspectDocument, installMoves, propertyMove, readOnlyReason, writeProperty } from "./move";
+import { mapping } from "./yaml";
 import { baseModel, noteKey } from "./model";
-import { newRow, rowSeed } from "./newRow";
+import { newRow, rowSeed, seedColumn } from "./newRow";
 import { cardSpan, columnSpan, KANBAN, kanbanCardHeight, nearestIndex, trackWidth } from "./kanbanLayout";
 
 type Model = ReturnType<typeof baseModel>;
@@ -33,6 +38,9 @@ export interface KanbanHost {
   /** Open the toolbar's Group menu (the no-groupBy prompt). */
   openGroupMenu: () => void;
   error: (e: unknown) => void;
+  scope: () => string;
+  count: (value: number) => void;
+  matches: (entry: Entry) => boolean;
 }
 
 interface Column { g: RowGroup; el: HTMLElement; body: HTMLElement; inner: HTMLElement; cards: Map<string, HTMLElement>; first: number; end: number }
@@ -51,6 +59,167 @@ export function createKanban(host: KanbanHost) {
   let width: number = KANBAN.width, cardHeight = 0, pitch = 0, viewWidth = 0, viewHeight = 0, props: string[] = [], coverHeight = 0;
   const mounted = new Map<string, Column>(), scrollTops = new Map<string, number>(), covers = new Map<HTMLElement, Cover>();
   let focusPath: string | null = null, frame = 0;
+  const tab = group.active;
+  let pendingWrites = 0;
+  const waitingWrites: (() => void)[] = [];
+  const finishedWrite = () => { if (--pendingWrites === 0) waitingWrites.splice(0).forEach(resolve => resolve()); };
+  let scrollX = 0, info = new Map<string, NoteProperties>(), checking = new Map<string, Promise<void>>(), reasons = new Map<string, string>();
+  let entries = new Map<string, Entry>();
+  const live = h("div", { class: "bases-move-live", role: "status", "aria-live": "polite" });
+  const message = h("span"), undoButton = h("button", { type: "button", onclick: () => void historyReplay(true) }, "Undo");
+  const notice = h("div", { class: "bases-move-notice", role: "status" }, message, undoButton);
+  const lock = h("div", { class: "bases-move-lock" }, icon("lock"));
+  notice.hidden = true; lock.hidden = true; el.prepend(lock, notice, live);
+  const history = () => moveHistory(tab, host.scope());
+  const announce = (text: string, undo = false) => { live.textContent = text; message.textContent = text; notice.hidden = false; undoButton.hidden = !undo; };
+  const keyOf = () => noteKey(model?.groupBy?.property ?? "");
+  function reason(entry: Entry) {
+    return readOnlyReason(model?.groupBy?.property) || reasons.get(entry.row.file.path) || (info.has(entry.row.file.path) ? "" : "Checking whether this note can be edited");
+  }
+  function decorate(entry: Entry, card: HTMLElement) {
+    const why = reason(entry); card.classList.toggle("is-movable", !why); card.title = why;
+    card.setAttribute("aria-description", why || "Space to pick up; Alt+Left or Alt+Right to move one column");
+  }
+  function check(entry: Entry, card: HTMLElement) {
+    const path = entry.row.file.path, key = keyOf();
+    decorate(entry, card);
+    if (readOnlyReason(model?.groupBy?.property) || info.has(path) || reasons.has(path) || checking.has(path)) return;
+    const m = model;
+    const pending = (async () => {
+      try {
+        const doc = ws.editors.doc(path);
+        const result = doc ? inspectDocument(doc.toString(), key) : await api.setProperty(path, { key, expect: null, to: null }, true);
+        if (model !== m || gone) return;
+        if ("status" in result) {
+          if (result.status === "refused") reasons.set(path, result.reason);
+          else if (result.status === "conflict") {
+            // A valid property absent from the old index (e.g. a BOM-loaded editor).
+            if (result.current) { const r = await api.setProperty(path, { key, expect: result.current, to: { lines: result.current } }, true); if (model !== m || gone) return; if (r.status === "done" || r.status === "unchanged") info.set(path, r.props); else reasons.set(path, "Note changed; refresh before moving"); }
+          } else info.set(path, result.props);
+        } else info.set(path, result);
+      } catch (e) { if (model === m) reasons.set(path, String(e)); }
+      finally { checking.delete(path); if (model === m) { for (const c of mounted.values()) { const node = c.cards.get(path); if (node) decorate(entry, node); } } }
+    })();
+    checking.set(path, pending);
+  }
+  function editFor(entry: Entry, target: RowGroup) {
+    const why = reason(entry); if (why) throw Error(why);
+    const key = keyOf(), metadata = info.get(entry.row.file.path)!;
+    return propertyMove(key, metadata, target.id === "empty" ? null : target.value, propertyIndex(ws).host.typeOf(key) ?? undefined);
+  }
+  function slot(entry: Entry, ci: number) {
+    const rows = columns[ci]?.rows ?? [];
+    const target = columns[ci];
+    if (target && info.has(entry.row.file.path)) {
+      try {
+        const edit = editFor(entry, target), result = editProperty(`---\n${info.get(entry.row.file.path)!.lines.join("\n")}\n---\n`, edit);
+        if (result.status === "done" || result.status === "unchanged") { const row = { ...entry.row, props: result.props.props }; entry = { row, context: model!.context(row) }; }
+      } catch { return 0; }
+    }
+    let lo = 0, hi = rows.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      const first = model!.select([entry.row, rows[mid].row], true)[0];
+      if (first?.row.file.path === entry.row.file.path) hi = mid; else lo = mid + 1;
+    }
+    return lo;
+  }
+  /** Mutate one entry, splice only its source/target arrays and repaint those windows. */
+  function patch(entry: Entry, metadata: NoteProperties) {
+    if (!model) return;
+    const source = columns.find(g => g.rows.includes(entry));
+    if (source) source.rows.splice(source.rows.indexOf(entry), 1);
+    entry.row = { ...entry.row, props: metadata.props };
+    entry.context = model.context(entry.row);
+    info.set(entry.row.file.path, metadata);
+    const selected = model.select([entry.row], true).length > 0 && host.matches(entry);
+    const value = entry.context.get(model.groupBy!.property);
+    let target: RowGroup | undefined;
+    if (selected) { const id = valueKey(value); target = columns.find(g => g.id === id); if (target) target.rows.splice(slot(entry, columns.indexOf(target)), 0, entry); }
+    for (const g of new Set([source, target])) {
+      if (!g) continue;
+      const c = mounted.get(g.id); if (!c) continue;
+      const node = c.cards.get(entry.row.file.path); if (node) { release(node); node.remove(); c.cards.delete(entry.row.file.path); }
+      c.el.querySelector(".bases-kanban-count")!.textContent = g.rows.length.toLocaleString("en-US");
+      c.inner.style.height = `${g.rows.length ? g.rows.length * pitch - KANBAN.cardGap : 0}px`;
+      if (c.inner.parentNode !== c.body) c.body.replaceChildren(c.inner);
+      fill(c, true);
+    }
+    host.count(columns.reduce((sum, g) => sum + g.rows.length, 0)); roving();
+    return { selected: !!target };
+  }
+  async function historyReplay(back: boolean) {
+    const m = model;
+    let previewed = false;
+    const restore: { entry: Entry; info: NoteProperties }[] = [];
+    try {
+      const record = await history().replay(back, async (path, edit, dry) => {
+        const result = await writeProperty(ws, path, edit, dry);
+        if (!dry && model === m && (result.status === "done" || result.status === "unchanged")) { const entry = entries.get(path); if (entry) patch(entry, result.props); }
+        return result;
+      }, prepared => {
+        if (model !== m) return;
+        pendingWrites++; previewed = true;
+        for (const { op, result } of prepared) { const entry = entries.get(op.path), prior = info.get(op.path); if (entry && prior && (result.status === "done" || result.status === "unchanged")) { restore.push({ entry, info: prior }); patch(entry, result.props); } }
+      }, async (record, undo) => {
+        const order = record.order!; let done = false;
+        await host.groupHost().save((source) => {
+          const original = baseModel(source, order.index);
+          if (original.name !== order.view || JSON.stringify(original.view.groupBy) !== JSON.stringify(undo ? order.after : order.before)) throw Error("Group order changed since");
+          return writeViewSetting(source, "groupBy", undo ? order.before : order.after, original.viewIndex);
+        }, () => { done = true; });
+        if (!done) throw Error("Group order changed since or could not be saved");
+      });
+      if (record) announce(`${back ? "Undid" : "Redid"} ${record.label}`, !back);
+    } catch (e) { if (model === m) for (const prior of restore.reverse()) patch(prior.entry, prior.info); announce(`Can't ${back ? "undo" : "redo"}: ${e instanceof Error ? e.message : String(e)}`); } finally { if (previewed) finishedWrite(); }
+  }
+  function move(entry: Entry, ci: number) {
+    const target = columns[ci], m = model; if (!target || !m || target.rows.includes(entry)) return;
+    try {
+      const edit = editFor(entry, target), path = entry.row.file.path, prior = info.get(path)!;
+      const prospective = editProperty(`---\n${prior.lines.join("\n")}\n---\n`, edit);
+      if (prospective.status !== "done" && prospective.status !== "unchanged") throw Error("This value doesn't fit the property");
+      const hist = history(), label = `Moved "${noteName(path)}" to ${labelOf(target)}`;
+      const patched = patch(entry, prospective.props);
+      announce(`${label}${patched?.selected ? "" : " · it no longer matches this view's filters"}`);
+      void hist.queue(async () => {
+        pendingWrites++;
+        try {
+          const result = await writeProperty(ws, path, edit);
+          if (result.status === "conflict" || result.status === "refused") {
+            if (model === m) patch(entry, prior);
+            if (result.status === "conflict") ws.vault.written(path);
+            throw Error(result.status === "conflict" ? `${noteName(path)} changed since the board was drawn (${edit.key} is now ${result.current ?? "No value"}). Not moved.` : result.reason);
+          }
+          hist.push({ label, ops: [{ path, key: edit.key, before: result.before, after: result.after }] });
+          if (!gone && model?.name === m.name) announce(`${label}${patched?.selected ? "" : " · it no longer matches this view's filters"}`, true);
+        } catch (e) { if (!gone) { if (model === m) patch(entry, prior); announce(e instanceof Error ? e.message : String(e)); } } finally { finishedWrite(); }
+      });
+    } catch (e) { announce(e instanceof Error ? e.message : String(e)); }
+  }
+  const labelOf = (g: RowGroup) => g.id === "empty" ? "No value" : g.label;
+  async function reorderColumns(from: number, to: number) {
+    const m = model, item = columns[from], neighbour = columns[to];
+    if (!m?.groupBy || !item || !neighbour || all.length > MANUAL_LIMIT) return;
+    const hist = history(), groupHost = host.groupHost();
+    try {
+      await hist.queue(async () => {
+        let before = m.view.groupBy, after = before, finished = false;
+        await groupHost.save((source, base) => {
+          if (base.name !== m.name || base.groupBy?.property !== m.groupBy?.property) throw Error("View changed; column not moved");
+          before = base.view.groupBy;
+          const manual = parseManual(before), list = arrangeGroups(groupHost.groups(), manual);
+          const a = list.findIndex(g => g.id === item.id), b = list.findIndex(g => g.id === neighbour.id);
+          if (a < 0 || b < 0) throw Error("Group changed; column not moved");
+          after = withManual(mapping(before), reordered(list, a, to > from ? b + 1 : b).map(g => groupEntry(g, manual)), list.filter(g => g.hidden).map(g => groupEntry(g, manual)));
+          return writeViewSetting(source, "groupBy", after, base.viewIndex);
+        }, () => { finished = true; });
+        if (!finished) throw Error("Column order could not be saved");
+        hist.push({ label: "column order", ops: [], order: { view: m.name, index: m.viewIndex, before, after } });
+        if (!gone) announce("Changed column order", true);
+      });
+    } catch (e) { if (!gone) announce(String(e)); }
+  }
   // The columns' grouping of the rows before Search: kept while typing a query, when only the cards change.
   let columnsOf: { model: Model; rows: readonly Entry[]; groups: RowGroup[] } | null = null;
   // The track's height less the column's top and bottom space, border and header.
@@ -90,6 +259,11 @@ export function createKanban(host: KanbanHost) {
     const path = entry.row.file.path;
     const open = (e: MouseEvent) => { if ((e.target as Element).closest("input,button,a")) return; e.preventDefault(); void ws.open(path, { where: e.button === 1 ? "tab" : whereFromEvent(e), group }); };
     const el = h("div", { class: "bases-kanban-card", role: "listitem", tabindex: "-1", "data-path": path, "aria-posinset": String(index + 1), "aria-setsize": String(count), onclick: open, onauxclick: (e: MouseEvent) => { if (e.button === 1) open(e); } });
+    check(entry, el);
+    el.addEventListener("contextmenu", e => {
+      e.preventDefault(); e.stopPropagation(); const why = reason(entry);
+      showMenu([{ title: "Move to", disabled: !!why, submenu: () => columns.map(g => ({ title: labelOf(g), disabled: g.rows.includes(entry), action: () => move(entry, columns.indexOf(g)) })) }, ...(why ? [{ title: why, label: true }] : [])], { x: e.clientX, y: e.clientY });
+    });
     if (model!.image) {
       el.append(h("div", { class: "bases-kanban-cover" }));
       const resolved = resolveCoverPath(ws, entry.context.get(model!.image), path);
@@ -131,8 +305,14 @@ export function createKanban(host: KanbanHost) {
   /** A new note in this column: the view's New row, with the column's value as one more seed. */
   function create(g: RowGroup) {
     const m = model!, by = m.groupBy, v = g.value;
-    const seed = by && !g.id.startsWith("ls:") && (typeof v === "string" || typeof v === "number" || typeof v === "boolean") ? `${by.property} == ${JSON.stringify(v)}` : undefined;
-    void newRow(ws, rowSeed(m.columns, [m.root.filters, m.view.filters, seed], types)).catch(host.error);
+    let seed = rowSeed(m.columns, [m.root.filters, m.view.filters], types);
+    try {
+      if (by && !readOnlyReason(by.property)) {
+        const key = noteKey(by.property);
+        seed = seedColumn(seed, key, g.id === "empty" ? null : v, propertyIndex(ws).host.typeOf(key) ?? types.get(key));
+      }
+      void newRow(ws, seed).catch(host.error);
+    } catch (e) { host.error(e); }
   }
   function mount(g: RowGroup, i: number): Column {
     const count = g.rows.length;
@@ -143,7 +323,7 @@ export function createKanban(host: KanbanHost) {
     const head = h("div", { class: "bases-kanban-head", oncontextmenu: (e: MouseEvent) => { e.preventDefault(); columnMenu(e, g); } },
       h("span", { class: "bases-kanban-label", title: label(g) }, label(g)), h("span", { class: "bases-kanban-count" }, count.toLocaleString("en-US")), add, more);
     const inner = h("div", { class: "bases-kanban-cards", style: `height:${count ? count * pitch - KANBAN.cardGap : 0}px` });
-    const body = h("div", { class: "bases-kanban-body" }, count ? inner : h("div", { class: "bases-kanban-empty" }, "No notes"));
+    const body = h("div", { class: "bases-kanban-body" }, count ? inner : h("div", { class: "bases-kanban-empty" }, readOnlyReason(model?.groupBy?.property) ? "No notes" : `Drop here to set ${keyOf()} to ${label(g)}`));
     const el = h("section", { class: "bases-kanban-col", role: "list", "aria-label": `${label(g)}, ${count} ${count === 1 ? "note" : "notes"}`, "data-group-id": g.id, style: `left:${KANBAN.pad + i * (width + KANBAN.gap)}px;width:${width}px` }, head, body);
     const c: Column = { g, el, body, inner, cards: new Map(), first: -1, end: -1 };
     let tick = 0;
@@ -178,7 +358,14 @@ export function createKanban(host: KanbanHost) {
     for (const c of mounted.values()) for (const [path, card] of c.cards) { const on = path === focusPath; card.tabIndex = on ? 0 : -1; drawn ||= on; }
     el.tabIndex = drawn ? -1 : 0;
   }
-  el.addEventListener("scroll", () => { frame ||= requestAnimationFrame(() => { frame = 0; paintBoard(); }); }, { passive: true });
+  el.addEventListener("scroll", () => { scrollX = el.scrollLeft; frame ||= requestAnimationFrame(() => { frame = 0; paintBoard(); }); }, { passive: true });
+  const moves = installMoves({ el, columns: () => columns, reason, slot, move,
+    geometry: () => ({ width, pitch, cardHeight, viewport: viewWidth, height: viewHeight, scrollX }),
+    scrollX(value) { const next = Math.max(0, Math.min(Math.max(0, trackWidth(columns.length, width) - viewWidth), value)); if (next !== scrollX) { scrollX = next; el.scrollLeft = next; } },
+    scrollY(ci, value) { const g = columns[ci]; if (!g) return 0; const top = scrollTops.get(g.id) ?? 0; if (value === undefined) return top; const next = Math.max(0, Math.min(Math.max(0, g.rows.length * pitch - bodyHeight()), value)); if (next !== top) { scrollTops.set(g.id, next); const c = mounted.get(g.id); if (c) c.body.scrollTop = next; } return next; },
+    entry: path => entries.get(path),
+    reorder: (a, b) => void reorderColumns(a, b), announce, undo: back => void historyReplay(back),
+  });
   // The board's width and the track's height (the ungrouped prompt sits above the track).
   const resize = new ResizeObserver(entries => {
     let changed = false;
@@ -244,6 +431,7 @@ export function createKanban(host: KanbanHost) {
   });
 
   function clear() {
+    moves.cancel();
     generation++;
     for (const id of [...mounted.keys()]) unmount(id);
     model = null; automatic = []; all = []; columns = []; hiddenRows = 0; columnsOf = null;
@@ -252,14 +440,17 @@ export function createKanban(host: KanbanHost) {
   return {
     el,
     clear,
+    idle: () => Promise.all([moves.idle(), pendingWrites ? new Promise<void>(resolve => waitingWrites.push(resolve)) : Promise.resolve()]).then(() => {}),
     /**
      * Group `rows` (the drawn, searched rows) into the board's columns. `selected` (the rows before
      * Search) decides which columns exist, so a search empties columns instead of removing them.
      */
     async update(next: Model, rows: readonly Entry[], propertyTypes: Map<string, PropertyType>, obsolete: () => boolean, selected: readonly Entry[] = rows): Promise<boolean> {
-      const token = ++generation, options: SliceOptions = { cancelled: () => gone || token !== generation || obsolete() };
+      if (pendingWrites) return false;
+      const token = ++generation, options: SliceOptions = { cancelled: () => gone || pendingWrites > 0 || token !== generation || obsolete() };
       try {
         const by = next.groupBy;
+        const metadata = await propertyIndex(ws).notes();
         const grouped = await groupRowsAsync(rows, by, options);
         const groups = selected === rows ? grouped : columnsOf?.model === next && columnsOf.rows === selected ? columnsOf.groups : await groupRowsAsync(selected, by, options);
         if (options.cancelled!()) return false;
@@ -271,7 +462,13 @@ export function createKanban(host: KanbanHost) {
         const shown = arranged.filter(g => !g.hidden).map(withRows);
         hiddenRows = arranged.reduce((sum, g) => sum + (g.hidden ? withRows(g).rows.length : 0), 0);
         for (const id of [...mounted.keys()]) unmount(id);
-        model = next; types = propertyTypes; automatic = groups; all = arranged; columns = shown;
+        moves.cancel();
+        model = next; info = metadata; checking = new Map(); reasons = new Map();
+        entries = new Map(selected.map(entry => [entry.row.file.path, entry]));
+        const readOnly = readOnlyReason(by?.property);
+        lock.hidden = !readOnly; lock.replaceChildren(icon("lock"), readOnly);
+        for (const row of rows) { const path = row.row.file.path; if (row.row.file.size > 16 * 1024 * 1024) reasons.set(path, "Note exceeds 16 MB"); else if (row.row.props.some(p => p.key.toLowerCase() === keyOf().toLowerCase() && p.type === "unknown")) reasons.set(path, "Property is not safely editable"); }
+        types = propertyTypes; automatic = groups; all = arranged; columns = shown;
         if (!columns.some(g => g.rows.some(r => r.row.file.path === focusPath))) focusPath = columns.find(g => g.rows.length)?.rows[0].row.file.path ?? null;
         const view = next.view;
         width = typeof view.cardSize === "number" || typeof view.cardSize === "string" ? Math.max(200, next.cardSize) : KANBAN.width;
@@ -302,6 +499,6 @@ export function createKanban(host: KanbanHost) {
     hiddenRows: () => hiddenRows,
     /** The arranged groups, hidden ones flagged (tests and the column menu). */
     arranged: (): readonly RowGroup[] => all,
-    dispose() { gone = true; clear(); resize.disconnect(); cancelAnimationFrame(frame); el.remove(); },
+    dispose() { gone = true; moves.dispose(); clear(); resize.disconnect(); cancelAnimationFrame(frame); el.remove(); },
   };
 }

@@ -34,6 +34,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
       if (next !== source) await file.write(next);
       if (!gone) { await changed(select?.(base)); done?.(); }
     }).catch(error);
+    return writing;
   };
   const write = (key: "sort" | "order", change: (base: Model) => Sort[] | string[], done?: () => void) => save((source, base) => writeView(source, key, change(base), base.viewIndex), done);
   const keys = () => {

@@ -318,7 +318,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     collapsed: scope => { const key = `${o.watch ?? `block:${hostPath() ?? ""}`}\0${scope}`; let set = collapsedHere.get(key); if (!set) collapsedHere.set(key, set = new Set()); return set; },
     groupMenu: (event, g) => menus.groupHeading(event, g) });
   // K4: a Kanban view is drawn by the board, beside the scroller; table and cards by groupedView.
-  const board = createKanban({ ws, group, groupHost: () => menus.groupHost, openGroupMenu: () => toolbar.querySelector<HTMLElement>('[aria-label="Group"]')?.click(), error });
+  const board = createKanban({ ws, group, groupHost: () => menus.groupHost, scope: () => o.watch ?? `block:${hostPath() ?? ""}`, count: value => { if (model) { model.results = value; drawToolbar(); } }, matches: entry => !query || query.toLowerCase().split(/\s+/).filter(Boolean).every(term => rowText(entry.context, model!.columns, noteName(entry.row.file.path)).includes(term)), openGroupMenu: () => toolbar.querySelector<HTMLElement>('[aria-label="Group"]')?.click(), error });
   el.append(board.el);
   const layout = () => kanban() ? board : groupedView;
   /** Rows in hidden groups are not counted (D7). The last hidden total is only a stand-in until grouping finishes, and it must not drive the count below zero. */
@@ -352,6 +352,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     try {
       while (dirty && !gone) {
         dirty = false;
+        await board.idle(); if (gone) break;
         if (reload || !model) {
           reload = false; source = await file.read(); model = baseModel(source, viewIndex);
           // ![[X.base#View]] picks its view by name once; later the toolbar's choice stands.
