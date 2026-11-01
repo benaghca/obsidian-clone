@@ -92,6 +92,13 @@ test("a block id inside a code fence is ignored", () => {
   expect(embedSection("````\ncode ^abc\n```\nstill ^abc\n````\npara ^abc\n", "^abc")).toEqual({ text: "para", line: 5 });
   expect(embedSection("~~~\n^abc\n```\npara ^abc\n~~~\nout ^abc\n", "^abc")).toEqual({ text: "out", line: 5 });
   expect(embedSection("```\none\n```\n```\ntwo\n```\n\n^abc\n", "^abc")?.text).toBe("```\ntwo\n```");
+  // A longer closer still belongs to the shorter opener, and a content line
+  // that starts with the marker is not the opener.
+  expect(embedSection("before\n```\ncode\n````\n\n^abc\n", "^abc")?.text).toBe("```\ncode\n````");
+  expect(embedSection("before\n~~~\ncode\n~~~~\n\n^abc\n", "^abc")?.text).toBe("~~~\ncode\n~~~~");
+  expect(embedSection("```\n    ```\ncode\n```\n\n^abc\n", "^abc")?.text).toBe("```\n    ```\ncode\n```");
+  expect(embedSection("```\n```foo`bar\ncode\n```\n\n^abc\n", "^abc")?.text).toBe("```\n```foo`bar\ncode\n```");
+  expect(embedSection("```\ncode\n```\npara\n^abc\n", "^abc")?.text).toBe("para");
 });
 
 test("an embed stops at a cycle or five deep", () => {

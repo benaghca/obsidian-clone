@@ -30,6 +30,12 @@ test("block ids skip code fences and blank lines, and a first-line id resolves",
   expect(headingPos(tilde, "^abc")).toBe(tilde.line(6).from);
   const two = "```\none\n```\n```\ntwo\n```\n\n^abc\n";
   expect(headingPos(EditorState.create({ doc: two }).doc, "^abc")).toBe(two.lastIndexOf("```\ntwo"));
+  const longer = "before\n```\ncode\n````\n\n^abc\n";
+  expect(headingPos(EditorState.create({ doc: longer }).doc, "^abc")).toBe(longer.indexOf("```\ncode"));
+  const indented = "```\n    ```\ncode\n```\n\n^abc\n";
+  expect(headingPos(EditorState.create({ doc: indented }).doc, "^abc")).toBe(0);
+  const info = "```\n```foo`bar\ncode\n```\n\n^abc\n";
+  expect(headingPos(EditorState.create({ doc: info }).doc, "^abc")).toBe(0);
 });
 
 test("heading targets omit block IDs and normalize pipes like Obsidian", () => {

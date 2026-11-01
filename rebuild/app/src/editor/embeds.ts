@@ -68,11 +68,11 @@ export function embedSection(text: string, sub: string): NotePart | null {
     const fenced = codeFenceMask(lines);
     let at = -1;
     for (let i = 0; i < lines.length; i++) {
-      if (fenced[i]) continue;
+      if (fenced.inside[i]) continue;
       if (lines[i].trimEnd().endsWith(mark) || lines[i].trim() === sub) { at = i; break; }
     }
     if (at < 0) return null;
-    const inPara = (i: number) => !fenced[i] && !!lines[i].trim() && !/^#{1,6}\s/.test(lines[i]);
+    const inPara = (i: number) => !fenced.inside[i] && !!lines[i].trim() && !/^#{1,6}\s/.test(lines[i]);
     let a = at;
     let b = at;
     if (lines[at].trim() === sub) {
@@ -81,7 +81,7 @@ export function embedSection(text: string, sub: string): NotePart | null {
       // Line 1 has no block above it, but the id is still there.
       if (b < 0) return at === 0 ? { text: "", line: 0 } : null;
       a = b;
-      if (fenced[a]) a = fenceStart(lines, a);
+      if (fenced.inside[a]) a = fenced.start[a];
       else while (a > 0 && inPara(a - 1)) a--;
     } else {
       while (a > 0 && inPara(a - 1)) a--;
@@ -104,15 +104,6 @@ export function embedSection(text: string, sub: string): NotePart | null {
     } else if (start >= 0 && m[1].length <= level) return { text: lines.slice(start, i).join("\n").trimEnd(), line: start };
   }
   return start < 0 ? null : { text: lines.slice(start).join("\n").trimEnd(), line: start };
-}
-
-/** Opener of the fence whose closer (or only marker line) is `at`. */
-function fenceStart(lines: readonly string[], at: number): number {
-  const fence = /^ {0,3}(`{3,}|~{3,})/.exec(lines[at].replace(/\r$/, ""));
-  if (!fence) return at;
-  let a = at - 1;
-  while (a > 0 && !lines[a].replace(/\r$/, "").trimStart().startsWith(fence[1])) a--;
-  return Math.max(0, a);
 }
 
 /** What an embed of a note shows (#subpath: its section), without the frontmatter. */

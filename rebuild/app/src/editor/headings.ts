@@ -31,24 +31,28 @@ export function headingPos(doc: Text, heading: string): number | null {
 }
 
 /**
- * Whether each line is a code-fence line or inside one. Same rule as
- * `Fences` in linksTags.ts (CommonMark: at most three spaces, a matching
- * marker at least as long, nothing after a closer).
+ * Whether each line is a code-fence line or inside one, and the opener of
+ * that fence (`start[i]`, or -1). Same rule as `Fences` in linksTags.ts
+ * (CommonMark: at most three spaces, a matching marker at least as long,
+ * nothing after a closer). A longer closer still belongs to the shorter opener.
  */
-export function codeFenceMask(lines: readonly string[]): boolean[] {
-  const mask = new Array<boolean>(lines.length);
-  let open: { marker: string; len: number } | null = null;
+export function codeFenceMask(lines: readonly string[]): { inside: boolean[]; start: number[] } {
+  const inside = new Array<boolean>(lines.length);
+  const start = new Array<number>(lines.length).fill(-1);
+  let open: { marker: string; len: number; at: number } | null = null;
   for (let i = 0; i < lines.length; i++) {
     const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(lines[i].replace(/\r$/, ""));
     if (open) {
-      mask[i] = true;
+      inside[i] = true;
+      start[i] = open.at;
       if (m && m[1][0] === open.marker && m[1].length >= open.len && !m[2].trim()) open = null;
     } else if (m && !(m[1][0] === "`" && m[2].includes("`"))) {
-      open = { marker: m[1][0], len: m[1].length };
-      mask[i] = true;
-    } else mask[i] = false;
+      open = { marker: m[1][0], len: m[1].length, at: i };
+      inside[i] = true;
+      start[i] = i;
+    } else inside[i] = false;
   }
-  return mask;
+  return { inside, start };
 }
 
 /** Offset of the block named by a lowercased "^id". */
@@ -64,21 +68,17 @@ function blockPos(doc: Text, want: string): number | null {
   }
   const fenced = codeFenceMask(lines);
   for (let i = 0; i < lines.length; i++) {
-    if (fenced[i]) continue;
+    if (fenced.inside[i]) continue;
     const text = lines[i];
     if (text.trimEnd().toLowerCase().endsWith(mark)) return from[i];
     if (text.trim().toLowerCase() !== want) continue;
     let top = i - 1;
     while (top >= 0 && !lines[top].trim()) top--;
     if (top < 0) return i === 0 ? from[i] : null;
-    if (fenced[top]) {
-      const fence = /^ {0,3}(`{3,}|~{3,})/.exec(lines[top].replace(/\r$/, ""));
-      if (fence) {
-        top--;
-        while (top > 0 && !lines[top].replace(/\r$/, "").trimStart().startsWith(fence[1])) top--;
-        top = Math.max(0, top);
-      }
-    } else while (top > 0 && lines[top - 1].trim() && !fenced[top - 1]) top--;
+    // The opener recorded while scanning, so a longer closer or a content
+    // line that merely starts with the marker does not move the block.
+    if (fenced.inside[top]) top = fenced.start[top];
+    else while (top > 0 && lines[top - 1].trim() && !fenced.inside[top - 1]) top--;
     return from[top];
   }
   return null;

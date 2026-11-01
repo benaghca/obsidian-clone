@@ -202,6 +202,8 @@ try {
   check(embedSection(fencedId, "^zzbid")?.text === "para", "a block id inside a fence does not win over the paragraph");
   check(headingPos(EditorState.create({ doc: fencedId }).doc, "^zzbid") === fencedId.lastIndexOf("para"), "navigation skips a block id inside a fence");
   check(embedSection("```\nonly ^zzbid\n```\n", "^zzbid") === null, "a block id that exists only inside a fence is ignored");
+  check(embedSection("before\n```\ncode\n````\n\n^zzbid\n", "^zzbid")?.text === "```\ncode\n````", "a longer fence closer still embeds only that fence");
+  check(embedSection("```\n    ```\ncode\n```\n\n^zzbid\n", "^zzbid")?.text === "```\n    ```\ncode\n```", "a marker-like line inside a fence is not the opener");
   check(embedSection("## Hello | world\nbody\n# Next", "Hello world")?.text.startsWith("## Hello | world"), "pipes are dropped when a heading target is matched");
   const withFm = "---\ntags: [a]\naliases: [Secret]\n---\n# Top\nintro\n";
   const part = embedPart(withFm, "");
