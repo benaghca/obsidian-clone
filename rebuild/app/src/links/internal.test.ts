@@ -100,3 +100,99 @@ test("escaped Markdown destinations resolve and retain their escaping on rename"
   expect(r.count).toBe(3);
   expect(r.text).toBe("[x](c\\(d\\)%20100%25.md#Top) ![alt](c\\(d\\)%20100%25.md) [pct](c%28d%29%20100%25.md) `[](Projects/a\\(b\\).md)`");
 });
+
+test("renaming leaves double-backtick spans and short or deeply indented fences byte for byte", () => {
+  const before = [...notes, { name: "Old", path: "Old.md" }];
+  const after = [...notes, { name: "New name", path: "Folder/New name.md" }];
+  const style = { format: "shortest" as const, wikilinks: true };
+  const rewrite = (text: string) => rewriteLinks(text, "Ideas.md", "Old.md", "Folder/New name.md", before, after, style);
+
+  const spans = [
+    "[[Old]] `` a`[[Old]]b `` ``[[Old]]`` ``x`` `` a`b `` [[Old]]",
+    "``[[Old]] ` [[Old]]``",
+    "`` [old](Old.md) ` still `` [old](Old.md)",
+    "`unclosed [[Old]]",
+    "```[[Old]]```",
+  ].join("\n");
+  const spanned = rewrite(spans);
+  expect(spanned.count).toBe(4);
+  expect(spanned.text).toBe([
+    "[[New name]] `` a`[[Old]]b `` ``[[Old]]`` ``x`` `` a`b `` [[New name]]",
+    "``[[Old]] ` [[Old]]``",
+    "`` [old](Old.md) ` still `` [old](New%20name.md)",
+    "`unclosed [[New name]]",
+    "```[[Old]]```",
+  ].join("\n"));
+  expect(rewrite(spanned.text)).toEqual({ text: spanned.text, count: 0 });
+
+  const crlf = "`` a`b ``\r\n``x``\r\n``[[Old]]``\r\n[[Old]]\r\n";
+  const cr = rewrite(crlf);
+  expect(cr).toEqual({ text: "`` a`b ``\r\n``x``\r\n``[[Old]]``\r\n[[New name]]\r\n", count: 1 });
+
+  // A shorter line does not close a longer fence. Four spaces, a tab, or trailing
+  // text does not close one either. A backtick in the info string is not a fence.
+  const fences = [
+    "[[Old]]",
+    "````",
+    "```",
+    "[[Old]]",
+    "````",
+    "```",
+    "[[Old]]",
+    "    ```",
+    "``` trailing",
+    "[[Old]]",
+    "```",
+    "    ```",
+    "[[Old]]",
+    "\t```",
+    "[[Old]]",
+    "```info`backtick",
+    "[[Old]]",
+    "~~~",
+    "```",
+    "[[Old]]",
+    "~~~",
+    "[[Old]]",
+  ].join("\n");
+  const fenced = rewrite(fences);
+  expect(fenced.count).toBe(5);
+  expect(fenced.text).toBe([
+    "[[New name]]",
+    "````",
+    "```",
+    "[[Old]]",
+    "````",
+    "```",
+    "[[Old]]",
+    "    ```",
+    "``` trailing",
+    "[[Old]]",
+    "```",
+    "    ```",
+    "[[New name]]",
+    "\t```",
+    "[[New name]]",
+    "```info`backtick",
+    "[[New name]]",
+    "~~~",
+    "```",
+    "[[Old]]",
+    "~~~",
+    "[[New name]]",
+  ].join("\n"));
+  expect(rewrite(fenced.text)).toEqual({ text: fenced.text, count: 0 });
+
+  // The indented fence line stays, and it does not protect the link under it.
+  // An indented code block is not a fence; links there are still rewritten.
+  expect(rewrite("```\n    [[Old]]\n    ```\n[[Old]]\n```\n")).toEqual({
+    text: "```\n    [[Old]]\n    ```\n[[Old]]\n```\n",
+    count: 0,
+  });
+  expect(rewrite("    [[Old]]\n    ```\n[[Old]]")).toEqual({
+    text: "    [[New name]]\n    ```\n[[New name]]",
+    count: 2,
+  });
+  expect(rewrite("`` a`b ``\n``x``\n````\n```\n[[Keep]]\n````\n    ```\n").count).toBe(0);
+  expect(rewrite("`` a`b ``\n``x``\n````\n```\n[[Keep]]\n````\n    ```\n").text).toBe("`` a`b ``\n``x``\n````\n```\n[[Keep]]\n````\n    ```\n");
+});
