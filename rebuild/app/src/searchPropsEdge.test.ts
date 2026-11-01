@@ -2,7 +2,7 @@ import { Text } from "@codemirror/state";
 import { expect, test } from "vitest";
 import { readProperties, splitFrontmatter } from "./editor/frontmatter";
 import { headingPos } from "./editor/headings";
-import { resolveLink } from "./links/internal";
+import { linkTargets, resolveLink } from "./links/internal";
 import { isNoteFile } from "./paths";
 import { tagsInText } from "./shell/linksTags";
 import { searchVault, type NoteMatch } from "./shell/searchVault";
@@ -69,9 +69,41 @@ test("a file named .md is not a note and its bytes are not a note match", () => 
   expect(namedNotes).not.toContain(".md");
   expect(namedNotes).not.toContain(".MD");
   expect(namedNotes).not.toContain("dir/.md");
+  const plain = searchVault(files, "md");
+  expect(plain?.[".md"]).toBeUndefined();
+  expect(plain?.[".MD"]).toBeUndefined();
+  expect(plain?.["dir/.md"]).toBeUndefined();
+  expect(searchVault(files, "MD", true)?.[".MD"]).toBeUndefined();
+  expect(notePaths("case")).toContain("Notes/CASE.MD");
   const notes = [{ name: "Real", path: "Real.md" }];
   expect(resolveLink(".md", "Real.md", notes)).toBeNull();
   expect(resolveLink(".MD", "Real.md", notes)).toBeNull();
+  const withDot = [
+    { name: ".md", path: ".md" },
+    { name: ".MD", path: ".MD" },
+    { name: ".md", path: "dir/.md" },
+    { name: ".md", path: "dir/.MD" },
+    { name: "Real", path: "Real.md" },
+    { name: "a", path: "a.md" },
+    { name: "B", path: "B.MD" },
+    { name: "pic.png", path: "pic.png" },
+  ];
+  expect(resolveLink(".md", "Real.md", withDot)).toBeNull();
+  expect(resolveLink(".MD", "Real.md", withDot)).toBeNull();
+  expect(resolveLink("dir/.md", "Real.md", withDot)).toBeNull();
+  expect(resolveLink("dir/.MD", "Real.md", withDot)).toBeNull();
+  expect(resolveLink("./.md", "Real.md", withDot)).toBeNull();
+  expect(resolveLink("a", "Real.md", withDot)).toBe("a.md");
+  expect(resolveLink("a.md", "Real.md", withDot)).toBe("a.md");
+  expect(resolveLink("B", "Real.md", withDot)).toBe("B.MD");
+  expect(resolveLink("B.MD", "Real.md", withDot)).toBe("B.MD");
+  expect(resolveLink("pic.png", "Real.md", withDot)).toBe("pic.png");
+  const exists = linkTargets(withDot.map((n) => ({ path: n.path, is_dir: false })), withDot);
+  expect(exists(".md", "Real.md")).toBe(false);
+  expect(exists("dir/.MD", "Real.md")).toBe(false);
+  expect(exists("a", "Real.md")).toBe(true);
+  expect(exists("B.MD", "Real.md")).toBe(true);
+  expect(exists("pic.png", "Real.md")).toBe(true);
 });
 
 test("properties read duplicate keys, empties, lists, nested yaml, dates and string numbers", () => {

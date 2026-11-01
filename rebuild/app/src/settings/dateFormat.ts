@@ -98,7 +98,12 @@ export function dateNamePattern(format: string): { parse(name: string): number |
         else if (part === "Mn") mo = MONTHS.findIndex((n) => n.startsWith(v));
         else d = Number(v);
       });
-      return order.includes("Y") ? new Date(y, mo, d).getTime() : null;
+      if (!order.includes("Y")) return null;
+      // Date rolls 2026-02-29 to 1 March and 2026-13-40 into 2027. A daily
+      // note name has to be that calendar day, or it is not one.
+      const date = new Date(y, mo, d);
+      if (date.getFullYear() !== y || date.getMonth() !== mo || date.getDate() !== d) return null;
+      return date.getTime();
     },
   };
 }

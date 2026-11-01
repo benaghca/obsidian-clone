@@ -177,12 +177,7 @@ await withBrowser(async ({ run, click, check }) => {
       listed: ws.vault.notes.some((n) => n.path === '.md' || n.path === '.MD' || n.path === 'dir/.md'),
     };
   }, beforeDot);
-  // Workspace.resolve tries notes, then every file. A file named ".md" is not a
-  // note, but its full name is still in the file list, so the link resolves and
-  // open() loads it in the editor. That is a product bug. Leave the product
-  // code alone and keep the suite green: the file must still not be a note.
-  if (dotLink.listed) check(false, 'a file named .md became a note');
-  else if (dotLink.path !== dotLink.before) console.log('EXPECTED FAIL opening a link to .md moved the active path from', dotLink.before, 'to', dotLink.path);
-  else check(true, 'opening a link whose target is a file named .md leaves the open note alone');
+  check(!dotLink.listed, 'a file named .md is not a note');
+  check(dotLink.path === dotLink.before, 'opening a link whose target is a file named .md leaves the open note alone');
 
 });

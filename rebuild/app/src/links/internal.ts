@@ -20,6 +20,8 @@ export interface LinkStyle {
 
 const stripMd = (path: string) => (isNoteFile(path) ? path.slice(0, -3) : path);
 const nameOf = (path: string) => stripMd(fileName(path));
+/** The whole file name is `.md` in any case. That is not a note and not a link target. */
+const namelessMd = (path: string) => fileName(path).toLowerCase() === ".md";
 
 /** `to` relative to the folder `fromDir` ("../Other/Note.md"). */
 export function relativePath(fromDir: string, to: string): string {
@@ -138,7 +140,9 @@ function resolveIndexed(notes: NoteLike[], index: NoteIndex, target: string, fro
   const withMd = /\.md$/i.test(t) ? t : `${t}.md`;
   const byPath = index.byPath;
   // A note's path with or without its ".md"; any other file (an image in an embed) by its full name.
-  const find = (path: string | null) => (path === null ? undefined : (byPath.get(`${path}.md`.toLowerCase()) ?? byPath.get(path.toLowerCase())));
+  // A file whose whole name is ".md" is skipped.
+  const take = (path: string | undefined) => (path && !namelessMd(path) ? path : undefined);
+  const find = (path: string | null) => (path === null ? undefined : (take(byPath.get(`${path}.md`.toLowerCase())) ?? take(byPath.get(path.toLowerCase()))));
   const bare = isNoteFile(t) ? t.slice(0, -3) : t;
   const fromDir = parentDir(from ?? "");
   if (t.startsWith("./") || t.startsWith("../")) return find(normalise(`${fromDir}/${bare}`)) ?? null;
@@ -149,10 +153,10 @@ function resolveIndexed(notes: NoteLike[], index: NoteIndex, target: string, fro
     if (hit) return hit;
     // A partial path: any note (or file) whose path ends with it. First in the snapshot wins.
     const tails = [`/${withMd.toLowerCase()}`, `/${t.toLowerCase()}`];
-    return notes.find((n) => tails.some((tail) => `/${n.path.toLowerCase()}`.endsWith(tail)))?.path ?? null;
+    return notes.find((n) => !namelessMd(n.path) && tails.some((tail) => `/${n.path.toLowerCase()}`.endsWith(tail)))?.path ?? null;
   }
   const name = nameOf(withMd).toLowerCase();
-  const matches = index.byName.get(name) ?? [];
+  const matches = (index.byName.get(name) ?? []).filter((n) => !namelessMd(n.path));
   if (matches.length <= 1) return matches[0]?.path ?? null;
   // Several notes share the name: the one in the linking note's folder, else the shallowest.
   return (matches.find((n) => parentDir(n.path) === fromDir) ?? [...matches].sort((a, b) => a.path.split("/").length - b.path.split("/").length)[0]).path;
@@ -177,7 +181,7 @@ export function linkTargets(files: readonly { path: string; is_dir: boolean }[],
   const names = new Set<string>();
   const paths = new Set<string>();
   for (const f of files) {
-    if (f.is_dir) continue;
+    if (f.is_dir || namelessMd(f.path)) continue;
     const lower = f.path.toLowerCase();
     paths.add(lower).add(stripMd(lower));
     names.add(fileName(lower)).add(nameOf(lower));

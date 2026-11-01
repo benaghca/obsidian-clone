@@ -119,12 +119,8 @@ fn a_file_named_dot_md_is_not_a_note_and_stays_out_of_search() {
 }
 
 /// `Index::search` matches `display_name`. A file that is not a note keeps its
-/// full name, so ".md" contains "md" and the file is a hit. `search_notes`
-/// leaves it out. This is a product bug; the assertion is the rule, and it
-/// fails. Left ignored so the suite stays green without changing product code.
-/// `cargo test -- --ignored legacy_name_search` still fails.
+/// full name, so ".md" would contain "md". Search and link resolution skip it.
 #[test]
-#[ignore = "Index::search(\"md\") returns a file whose whole name is .md"]
 fn legacy_name_search_must_not_list_a_file_named_dot_md() {
     let idx = Index::from_notes(&[
         (".md", "only-in-dot\n"),
@@ -137,6 +133,44 @@ fn legacy_name_search_must_not_list_a_file_named_dot_md() {
         !legacy.iter().any(|p| p == ".md" || p == ".MD" || p == "dir/.md"),
         "a file named .md must not appear in search, got {legacy:?}"
     );
+}
+
+#[test]
+fn nameless_md_files_stay_out_of_search_and_links_while_real_notes_stay_in() {
+    let idx = Index::from_notes(&[
+        (".md", "only-in-dot md\n"),
+        (".MD", "only-in-dot-upper\n"),
+        ("dir/.md", "nested dot\n"),
+        ("dir/.MD", "nested upper\n"),
+        ("a.md", "alpha\n"),
+        ("B.MD", "beta\n"),
+        ("md.md", "the name is md\n"),
+        ("Real.md", "only-in-real\n"),
+    ]);
+    let legacy: Vec<_> = idx.search("md", 20).into_iter().map(|h| h.path).collect();
+    assert!(
+        !legacy.iter().any(|p| p == ".md" || p == ".MD" || p == "dir/.md" || p == "dir/.MD"),
+        "a file named .md must not appear in search, got {legacy:?}"
+    );
+    assert!(legacy.iter().any(|p| p == "md.md"));
+    assert!(idx.search("a", 20).iter().any(|h| h.path == "a.md" && h.line == 0));
+    assert!(idx.search("b", 20).iter().any(|h| h.path == "B.MD" && h.line == 0));
+    assert!(idx.resolve("Real.md", ".md").is_none());
+    assert!(idx.resolve("Real.md", ".MD").is_none());
+    assert!(idx.resolve("Real.md", "dir/.md").is_none());
+    assert!(idx.resolve("Real.md", "dir/.MD").is_none());
+    assert!(idx.resolve("Real.md", "./.md").is_none());
+    assert_eq!(idx.resolve("Real.md", "a").as_deref(), Some("a.md"));
+    assert_eq!(idx.resolve("Real.md", "a.md").as_deref(), Some("a.md"));
+    assert_eq!(idx.resolve("Real.md", "B").as_deref(), Some("B.MD"));
+    assert_eq!(idx.resolve("Real.md", "B.MD").as_deref(), Some("B.MD"));
+    let plain = &idx.search_match(&["md".into()])[0];
+    assert!(plain.contains(&"md.md".to_string()));
+    assert!(!plain.iter().any(|p| p == ".md" || p == ".MD" || p == "dir/.md" || p == "dir/.MD"));
+    let named = &idx.search_match(&["file:md".into()])[0];
+    assert!(named.iter().any(|p| p == ".md"));
+    assert!(named.iter().any(|p| p == "a.md"));
+    assert!(named.iter().any(|p| p == "B.MD"));
 }
 
 #[test]
