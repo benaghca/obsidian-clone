@@ -46,6 +46,11 @@ test("wikilink targets follow CommonMark fence rules and skip inline code", () =
   ]);
 });
 
+test("wikilink targets skip CRLF fences the same way", () => {
+  const text = ["[[A]]", "```", "[[no]]", "```", "[[B]]", "````", "```", "[[still]]", "````", "```a`b", "[[C]]"].join("\r\n");
+  expect(wikilinkTargets(text)).toEqual(["A", "B", "C"]);
+});
+
 test("tags: words after # at a word start, not headings, numbers, code or URL fragments", () => {
   expect(tagsInLine("#idea and #project/grove, x#no http://a.b/#frag")).toEqual(["idea", "project/grove"]);
   expect(tagsInLine("# Heading #tag")).toEqual(["tag"]);

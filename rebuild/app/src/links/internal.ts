@@ -197,12 +197,57 @@ export function linkTargets(files: readonly { path: string; is_dir: boolean }[],
 
 const WIKILINK = /(!?)\[\[([^\]|#\n]*)(#[^\]|\n]*)?(\|[^\]\n]*)?\]\]/g;
 const MDLINK = /(!?)\[([^\]\n]*)\]\(((?:\\.|[^\\)\s])+)\)/g;
+/** CommonMark fence: 3+ backticks or tildes, at most three spaces of indent. */
+const FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/**
+ * Blank CommonMark inline code on one line (a backtick run closed by a later
+ * run of the same length). The result is the same length, so match indexes
+ * still point into the original line. An unclosed run is left as written.
+ */
+function maskInlineCode(line: string): string {
+  if (!line.includes("`")) return line;
+  const chars = line.split("");
+  let i = 0;
+  while (i < chars.length) {
+    if (chars[i] !== "`") {
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < chars.length && chars[i] === "`") i++;
+    const n = i - start;
+    let j = i;
+    let end = -1;
+    while (j < chars.length) {
+      if (chars[j] !== "`") {
+        j++;
+        continue;
+      }
+      const run = j;
+      while (j < chars.length && chars[j] === "`") j++;
+      if (j - run === n) {
+        end = j;
+        break;
+      }
+    }
+    if (end >= 0) {
+      for (let k = start; k < end; k++) chars[k] = " ";
+      i = end;
+    }
+  }
+  return chars.join("");
+}
 
 /**
  * Rewrite the links in `text` (the note at `from`) that point at `oldPath`
  * so they point at `newPath`, keeping each link's heading and display text.
  * `before` and `after` are the vault's notes before and after the move.
- * Returns the new text and how many links changed. Code is left alone.
+ * Returns the new text and how many links changed. Fenced code (CommonMark:
+ * at most three spaces, a closer at least as long, no backtick in a backtick
+ * info string) and inline code of any backtick length are left alone.
+ * A trailing CR is dropped before the fence pattern, as in `tagsInText`:
+ * `.` does not match CR, so a CRLF fence line would otherwise not match.
  */
 export function rewriteLinks(
   text: string,
@@ -217,18 +262,22 @@ export function rewriteLinks(
 ): { text: string; count: number } {
   let count = 0;
   const lines = text.split("\n");
-  let fence: string | null = null;
+  let fence: { marker: string; len: number } | null = null;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const f = /^\s*(`{3,}|~{3,})/.exec(line);
-    if (f) {
-      if (!fence) fence = f[1][0];
-      else if (f[1][0] === fence) fence = null;
+    const raw = lines[i];
+    const line = raw.replace(/\r$/, "");
+    const f = FENCE.exec(line);
+    if (fence) {
+      if (f && f[1][0] === fence.marker && f[1].length >= fence.len && !f[2].trim()) fence = null;
       continue;
     }
-    if (fence || (!line.includes("[[") && !line.includes("]("))) continue;
+    if (f && !(f[1][0] === "`" && f[2].includes("`"))) {
+      fence = { marker: f[1][0], len: f[1].length };
+      continue;
+    }
+    if (!line.includes("[[") && !line.includes("](")) continue;
     // Skip inline code spans by blanking them while matching.
-    const masked = line.replace(/`[^`\n]*`/g, (m) => " ".repeat(m.length));
+    const masked = maskInlineCode(line);
     let out = "";
     let last = 0;
     const edits: { at: number; end: number; text: string }[] = [];
@@ -256,7 +305,7 @@ export function rewriteLinks(
       last = e.end;
       count++;
     }
-    lines[i] = out + line.slice(last);
+    lines[i] = out + line.slice(last) + (raw === line ? "" : "\r");
   }
   return { text: lines.join("\n"), count };
 }

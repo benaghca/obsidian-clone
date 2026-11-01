@@ -53,7 +53,7 @@ function time(fn, runs = 5) {
   return { median: +samples[samples.length >> 1].toFixed(2), max: +samples[samples.length - 1].toFixed(2), out };
 }
 
-/** Fence tracking copied from rewriteLinks, so a fuzz can see inside vs outside. */
+/** Simple fences for the fuzz, which only emits unindented ``` and ~~~ blocks. */
 function scanLines(text, onCode) {
   const lines = text.split("\n");
   let fence = null;
@@ -178,6 +178,30 @@ try {
   check(rewriteLinks("[[Old]]", "Ideas.md", "Old.md", "B/New.md", before, after, md("shortest")).text === "[[New]]", "turning markdown links on does not convert an existing wikilink");
   const unclosed = rewriteLinks("```js\n[[Old]]\n[[Ideas]] still fenced", "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
   check(unclosed.count === 0 && unclosed.text.endsWith("[[Old]]\n[[Ideas]] still fenced"), "an unclosed fence protects the rest of the note");
+  const doubleSpan = [
+    "[[Old]] `` a`[[Old]]b `` ``[[Old]]`` ``x`` `` a`b `` [[Old]]",
+    "``[[Old]] ` [[Still]]``",
+    "`` [old](Old.md) ` x ``",
+    "[old](Old.md)",
+  ].join("\n");
+  const spanned = rewriteLinks(doubleSpan, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
+  const spannedText = [
+    "[[New]] `` a`[[Old]]b `` ``[[Old]]`` ``x`` `` a`b `` [[New]]",
+    "``[[Old]] ` [[Still]]``",
+    "`` [old](Old.md) ` x ``",
+    "[old](New.md)",
+  ].join("\n");
+  check(spanned.count === 3 && spanned.text === spannedText, `double-backtick spans stay byte for byte (${spanned.count})`);
+  const shortFence = ["````", "```", "[[Old]]", "````", "[[Old]]", "    ```", "[[Old]]", "\t```", "[[Old]]"].join("\n");
+  const fenced = rewriteLinks(shortFence, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
+  const fencedText = ["````", "```", "[[Old]]", "````", "[[New]]", "    ```", "[[New]]", "\t```", "[[New]]"].join("\n");
+  check(fenced.count === 3 && fenced.text === fencedText, "a shorter or deeply indented fence does not end the code block");
+  const spannedAgain = rewriteLinks(spanned.text, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
+  const fencedAgain = rewriteLinks(fenced.text, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
+  check(spannedAgain.count === 0 && spannedAgain.text === spanned.text && fencedAgain.count === 0 && fencedAgain.text === fenced.text, "a second pass leaves those fences and spans unchanged");
+  const crlfFence = ["```", "[[Old]]", "```", "[[Old]]", "````", "```", "[[Old]]", "````"].join("\r\n");
+  const crlf = rewriteLinks(crlfFence, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
+  check(crlf.count === 1 && crlf.text === ["```", "[[Old]]", "```", "[[New]]", "````", "```", "[[Old]]", "````"].join("\r\n"), "a CRLF fence stays closed");
 
   // --- embeds: sections, block refs, missing targets, depth ---
   check(splitSubpath(" Note#Heading ")[0] === "Note" && splitSubpath("Note#a#b")[1] === "a#b", "splitSubpath trims and keeps everything after the first hash");
