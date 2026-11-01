@@ -19,6 +19,19 @@ test("nested heading paths use the last segment; #^id finds the block's line", (
   expect(headingPos(doc, "^")).toBeNull();
 });
 
+test("block ids skip code fences and blank lines, and a first-line id resolves", () => {
+  const fenced = EditorState.create({ doc: "```\ncode ^abc\n```\npara ^abc\n" }).doc;
+  expect(headingPos(fenced, "^abc")).toBe(fenced.line(4).from);
+  expect(headingPos(EditorState.create({ doc: "```\nonly ^abc\n```\n" }).doc, "^abc")).toBeNull();
+  expect(headingPos(EditorState.create({ doc: "^abc\n\npara\n" }).doc, "^abc")).toBe(0);
+  expect(headingPos(EditorState.create({ doc: "para\n\n\n^abc\n" }).doc, "^abc")).toBe(0);
+  expect(headingPos(EditorState.create({ doc: "\n^abc\n" }).doc, "^abc")).toBeNull();
+  const tilde = EditorState.create({ doc: "~~~\n^abc\n```\npara ^abc\n~~~\nout ^abc\n" }).doc;
+  expect(headingPos(tilde, "^abc")).toBe(tilde.line(6).from);
+  const two = "```\none\n```\n```\ntwo\n```\n\n^abc\n";
+  expect(headingPos(EditorState.create({ doc: two }).doc, "^abc")).toBe(two.lastIndexOf("```\ntwo"));
+});
+
 test("heading targets omit block IDs and normalize pipes like Obsidian", () => {
   const doc = EditorState.create({ doc: "Intro.\n\n# Has id ^keep\n\n# Pipe | split\n" }).doc;
   expect(headingLabel(doc.line(3).text)).toBe("Has id");

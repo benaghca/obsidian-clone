@@ -191,11 +191,17 @@ try {
   check(embedSection(sectionNote, "Missing") === null, "a missing heading is a null section");
   check(embedSection(sectionNote, "^zzbid")?.text === "body", "an inline block id embeds the paragraph without the id");
   const firstBlock = "^zzbid\n\npara\n";
-  check(embedSection(firstBlock, "^zzbid") === null, "a standalone block id on the first line has no paragraph");
+  const firstPart = embedSection(firstBlock, "^zzbid");
+  check(firstPart?.text === "" && firstPart.line === 0, "a standalone block id on the first line resolves to an empty block");
   const firstId = headingPos(EditorState.create({ doc: firstBlock }).doc, "^zzbid");
-  check(firstId === 0, `navigation still finds a first-line block id (${firstId})`);
-  if (firstId === 0) bug("embed-first-line-block", "embedSection returns null for a standalone block id on line 1, while headingPos returns 0. An embed of that block says it is missing; following the link lands on the id line.");
+  check(firstId === 0, `navigation finds a first-line block id (${firstId})`);
   check(embedSection("para\n\n^zzbid\n", "^zzbid")?.text === "para", "a standalone block id embeds the paragraph above it");
+  check(embedSection("para\n\n\n^zzbid\n", "^zzbid")?.text === "para", "blank lines before a standalone block id are skipped");
+  check(embedSection("\n^zzbid\n", "^zzbid") === null, "blank lines with no block above are not an empty embed");
+  const fencedId = "```\ncode ^zzbid\n```\npara ^zzbid\n";
+  check(embedSection(fencedId, "^zzbid")?.text === "para", "a block id inside a fence does not win over the paragraph");
+  check(headingPos(EditorState.create({ doc: fencedId }).doc, "^zzbid") === fencedId.lastIndexOf("para"), "navigation skips a block id inside a fence");
+  check(embedSection("```\nonly ^zzbid\n```\n", "^zzbid") === null, "a block id that exists only inside a fence is ignored");
   check(embedSection("## Hello | world\nbody\n# Next", "Hello world")?.text.startsWith("## Hello | world"), "pipes are dropped when a heading target is matched");
   const withFm = "---\ntags: [a]\naliases: [Secret]\n---\n# Top\nintro\n";
   const part = embedPart(withFm, "");
@@ -204,9 +210,8 @@ try {
   check(embedStopped("A.md", "A.md", []) === true, "a note embedding itself is a chip");
   check(embedStopped("B.md", "A.md", []) === false, "one level deep still renders");
   check(embedStopped("E.md", "A.md", ["B.md", "C.md", "D.md"]) === false, "four embeds deep still renders");
-  check(embedStopped("F.md", "A.md", ["B.md", "C.md", "D.md", "E.md"]) === false, "five embeds deep still renders");
+  check(embedStopped("F.md", "A.md", ["B.md", "C.md", "D.md", "E.md"]) === true, "five embeds deep is a chip");
   check(embedStopped("G.md", "A.md", ["B.md", "C.md", "D.md", "E.md", "F.md"]) === true, "six embeds deep is a chip");
-  bug("embed-depth-off-by-one", "embedStopped chips when chain.length >= 5. The chain lists notes already drawn and does not include the embed being drawn, so the sixth nested embed is the first chip. The file comment says five embeds deep.");
   check(embedStopped("A.md", "Top.md", ["B.md", "A.md"]) === true, "a cycle back to a note already in the chain is a chip");
   check(resizedSize(null, 0) === "|0" && resetSize("![[a.png|0]]", 9, "0")?.insert === "", "a zero resize is written and resets");
 
