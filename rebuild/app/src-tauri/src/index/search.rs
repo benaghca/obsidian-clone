@@ -4,7 +4,7 @@ use super::parse::Note;
 use super::props::PropertyValue;
 use super::query::{parse_query, Field, Query};
 use super::tags::is_js_space;
-use super::{basename, is_note_path, Index};
+use super::{basename, is_note_path, nameless_md, Index};
 use crate::model::{SearchLine, SearchNote};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -396,7 +396,8 @@ impl<'a, 'q> Evaluation<'a, 'q> {
                     } else {
                         name
                     };
-                    (*field == Field::Any && stem.contains(text))
+                    // ".md" keeps its whole name, which contains "md". It is not a note.
+                    (*field == Field::Any && !nameless_md(&self.path) && stem.contains(text))
                         || !self.term_lines(self.plan.ids[text]).is_empty()
                 }
             },

@@ -291,7 +291,8 @@ export function matches(path: string, q: Query | null, facts: Facts): boolean {
     case "tag":
       return (facts.tags?.get(path) ?? []).some((t) => isUnder(t.toLowerCase(), q.text));
     case "any":
-      if (noteName(folded).includes(q.text)) return true;
+      // A file named ".md" is not a note. Its whole name contains "md".
+      if (fileName(folded).toLowerCase() !== ".md" && noteName(folded).includes(q.text)) return true;
   }
   return !!facts.lines(q.text)?.get(path)?.length;
 }

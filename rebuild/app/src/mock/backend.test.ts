@@ -155,5 +155,12 @@ test("merged search commands treat nameless .md files as attachments and keep na
     expect(await invoke("search_match", { queries: ["content:c1bintprobe", "path:C1B-INT file:md"] })).toEqual([
       ["C1B-INT/Upper.MD"], ["C1B-INT/.MD", "C1B-INT/.md", "C1B-INT/Upper.MD"],
     ]);
+    const legacy = (await invoke<{ path: string }[]>("search", { query: "md", limit: 20 })).map((hit) => hit.path);
+    expect(legacy).not.toContain("C1B-INT/.md");
+    expect(legacy).not.toContain("C1B-INT/.MD");
+    const [plain] = await invoke<string[][]>("search_match", { queries: ["md"] });
+    expect(plain).not.toContain("C1B-INT/.md");
+    expect(plain).not.toContain("C1B-INT/.MD");
+    expect(plain).not.toContain("C1B-INT/Upper.MD");
   } finally { vi.unstubAllGlobals(); }
 });

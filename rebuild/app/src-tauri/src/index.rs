@@ -131,7 +131,9 @@ impl Index {
             key = stripped.to_string();
         }
         if let Some(cands) = self.by_name.get(&key) {
-            return Some(pick(cands, from).to_string());
+            if let Some(found) = pick(cands, from) {
+                return Some(found.to_string());
+            }
         }
         self.by_alias.get(&raw.to_lowercase()).cloned()
     }
@@ -200,6 +202,11 @@ impl Index {
         let mut name_hits = Vec::new();
         let mut line_hits = Vec::new();
         for (path, node) in &self.files {
+            // A file named ".md" is not a note. Its display name is the whole
+            // filename, so a search for "md" would otherwise hit it.
+            if nameless_md(path) {
+                continue;
+            }
             let name = display_name(path, node.is_dir);
             if terms.iter().all(|t| name.to_lowercase().contains(t)) {
                 name_hits.push(SearchHit {
@@ -378,6 +385,9 @@ impl Index {
                 continue;
             };
             if let Some(found) = self.by_path_lower.get(&norm.to_lowercase()) {
+                if nameless_md(found) {
+                    continue;
+                }
                 return Some(found.clone());
             }
         }
@@ -388,8 +398,11 @@ impl Index {
         self.files
             .iter()
             .filter(|(path, node)| {
+                if node.is_dir || nameless_md(path) {
+                    return false;
+                }
                 let pl = path.to_lowercase();
-                !node.is_dir && (pl.ends_with(&suf) || pl.ends_with(&suf_md))
+                pl.ends_with(&suf) || pl.ends_with(&suf_md)
             })
             .map(|(path, _)| path)
             .min_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)))
@@ -538,6 +551,11 @@ pub fn is_note_path(path: &str) -> bool {
     base.len() > 3 && base.get(base.len() - 3..).is_some_and(|ext| ext.eq_ignore_ascii_case(".md"))
 }
 
+/// The whole file name is `.md` in any case. That is not a note.
+fn nameless_md(path: &str) -> bool {
+    basename(path).eq_ignore_ascii_case(".md")
+}
+
 fn display_name(path: &str, is_dir: bool) -> String {
     let base = basename(path);
     if is_dir { base } else { strip_md(base) }.to_string()
@@ -554,10 +572,11 @@ fn parent_path(path: &str) -> &str {
     }
 }
 
-fn pick<'a>(cands: &'a [String], from: &str) -> &'a str {
+fn pick<'a>(cands: &'a [String], from: &str) -> Option<&'a str> {
     let dir = parent_path(from);
     cands
         .iter()
+        .filter(|path| !nameless_md(path))
         .min_by(|a, b| {
             rank(a, dir)
                 .cmp(&rank(b, dir))
@@ -565,7 +584,6 @@ fn pick<'a>(cands: &'a [String], from: &str) -> &'a str {
                 .then(a.as_str().cmp(b.as_str()))
         })
         .map(|s| s.as_str())
-        .unwrap_or("")
 }
 
 fn rank(path: &str, dir: &str) -> (u8, u8) {
