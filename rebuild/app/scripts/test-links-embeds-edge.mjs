@@ -277,10 +277,9 @@ try {
   check(formatDate(new Date(2026, 9, 3, 12, 0, 0), "h:mm a") === "12:00 pm", "noon is 12 pm");
   check(formatDate(new Date(2021, 0, 1), "WW") === "53", "1 January 2021 is ISO week 53");
   check(formatDate(new Date(2020, 0, 1), "W") === "1", "1 January 2020 is ISO week 1");
-  const impossible = dateNamePattern("YYYY-MM-DD").parse("2026-02-29");
-  check(impossible === new Date(2026, 2, 1).getTime(), `2026-02-29 currently parses as ${new Date(impossible).toDateString()}`);
-  bug("daily-date-rollover", "dateNamePattern accepts impossible dates and lets Date roll them forward. 2026-02-29 sorts as 1 March 2026, so it collides with a real 2026-03-01 daily note. 2026-13-40 rolls into 2027.");
-  check(dateNamePattern("YYYY-MM-DD").parse("2026-13-40") === new Date(2026, 12, 40).getTime(), "an out-of-range month and day roll forward");
+  check(dateNamePattern("YYYY-MM-DD").parse("2026-02-29") === null, "2026-02-29 is not a day, so it is not a daily note");
+  check(dateNamePattern("YYYY-MM-DD").parse("2026-03-01") === new Date(2026, 2, 1).getTime(), "2026-03-01 still parses as 1 March");
+  check(dateNamePattern("YYYY-MM-DD").parse("2026-13-40") === null, "an out-of-range month and day is not a daily note");
   check(dateNamePattern("MM-DD").parse("10-31") === null, "a format with no year does not order a daily note");
   check(dateNamePattern("YYYYMMDD").parse("20261031") === new Date(2026, 9, 31).getTime(), "a format with no separators still parses");
   const filled = fillTemplate("# {{title}}\n{{ DATE }} {{time}} {{date:dddd}} {{title:ignored}} {{date:}} {{other}}", "Plan", new Date(2026, 9, 31, 7, 5, 0), "YYYY-MM-DD", "HH:mm");
