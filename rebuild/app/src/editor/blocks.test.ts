@@ -76,11 +76,39 @@ test("embed targets and their sections", () => {
   expect(embedSection("```\n# not a heading\n```\n# Real\nyes", "not a heading")).toBeNull();
 });
 
+test("a standalone block id on line 1 resolves, and blank lines attach to the block above", () => {
+  expect(embedSection("^abc\n\npara\n", "^abc")).toEqual({ text: "", line: 0 });
+  expect(embedPart("---\ntags: [a]\n---\n^abc\n", "^abc")).toEqual({ text: "", line: 3 });
+  expect(embedSection("para\n\n\n^abc\n", "^abc")).toEqual({ text: "para", line: 0 });
+  expect(embedSection("para\n\n^abc\n", "^abc")).toEqual({ text: "para", line: 0 });
+  expect(embedSection("\n^abc\n", "^abc")).toBeNull();
+  expect(embedSection("\n\n^abc\npara\n", "^abc")).toBeNull();
+});
+
+test("a block id inside a code fence is ignored", () => {
+  expect(embedSection("```\ncode ^abc\n```\npara ^abc\n", "^abc")).toEqual({ text: "para", line: 3 });
+  expect(embedSection("~~~\n^abc\n~~~\npara\n\n^abc\n", "^abc")).toEqual({ text: "para", line: 3 });
+  expect(embedSection("```\nonly ^abc\n```\n", "^abc")).toBeNull();
+  expect(embedSection("````\ncode ^abc\n```\nstill ^abc\n````\npara ^abc\n", "^abc")).toEqual({ text: "para", line: 5 });
+  expect(embedSection("~~~\n^abc\n```\npara ^abc\n~~~\nout ^abc\n", "^abc")).toEqual({ text: "out", line: 5 });
+  expect(embedSection("```\none\n```\n```\ntwo\n```\n\n^abc\n", "^abc")?.text).toBe("```\ntwo\n```");
+  // A longer closer still belongs to the shorter opener, and a content line
+  // that starts with the marker is not the opener.
+  expect(embedSection("before\n```\ncode\n````\n\n^abc\n", "^abc")?.text).toBe("```\ncode\n````");
+  expect(embedSection("before\n~~~\ncode\n~~~~\n\n^abc\n", "^abc")?.text).toBe("~~~\ncode\n~~~~");
+  expect(embedSection("```\n    ```\ncode\n```\n\n^abc\n", "^abc")?.text).toBe("```\n    ```\ncode\n```");
+  expect(embedSection("```\n```foo`bar\ncode\n```\n\n^abc\n", "^abc")?.text).toBe("```\n```foo`bar\ncode\n```");
+  expect(embedSection("```\ncode\n```\npara\n^abc\n", "^abc")?.text).toBe("para");
+});
+
 test("an embed stops at a cycle or five deep", () => {
   expect(embedStopped("A.md", "A.md", [])).toBe(true); // a note embedding itself
   expect(embedStopped("A.md", "A.md", ["B.md"])).toBe(true); // A → B → A
   expect(embedStopped("B.md", "A.md", ["B.md", "C.md"])).toBe(true);
   expect(embedStopped("C.md", "A.md", ["B.md"])).toBe(false);
+  // chain is notes already drawn, not this embed: four deep still renders, five is the chip.
+  expect(embedStopped("E.md", "A.md", ["B.md", "C.md", "D.md"])).toBe(false);
+  expect(embedStopped("F.md", "A.md", ["B.md", "C.md", "D.md", "E.md"])).toBe(true);
   expect(embedStopped("F.md", "A.md", ["B.md", "C.md", "D.md", "E.md", "G.md"])).toBe(true);
 });
 

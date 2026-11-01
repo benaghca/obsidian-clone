@@ -20,7 +20,7 @@ import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
 import { splitFrontmatter } from "./frontmatter";
 import { type BaseEmbed, editorHost } from "./host";
-import { headingLabel, headingTarget } from "./headings";
+import { codeFenceMask, headingLabel, headingTarget } from "./headings";
 import { zoomImage } from "./imageZoom";
 import { DrawnWidget, editAt, editButton, isLinkEvent, onDestroy, readingMode, release, render, widgetAction } from "./render";
 
@@ -54,28 +54,38 @@ export interface NotePart {
 
 /**
  * The part of a note an embed's #subpath shows: a heading's section (to the
- * next heading of its level or above), or for "^id" the paragraph ending in
- * " ^id" (without it). Null if there is no such heading or block.
+ * next heading of its level or above), or for "^id" that block. An inline id
+ * is the paragraph ending in " ^id", without the id. A standalone id is the
+ * block above it; blank lines in between are skipped, and a code fence is
+ * the whole fence. Ids inside a code fence are not ids. A standalone id on
+ * the first line is an empty block at line 0. Null if there is no such
+ * heading or block.
  */
 export function embedSection(text: string, sub: string): NotePart | null {
   const lines = text.split("\n");
   if (sub.startsWith("^")) {
     const mark = ` ^${sub.slice(1)}`;
-    const at = lines.findIndex((l) => l.trimEnd().endsWith(mark) || l.trim() === sub);
+    const fenced = codeFenceMask(lines);
+    let at = -1;
+    for (let i = 0; i < lines.length; i++) {
+      if (fenced.inside[i]) continue;
+      if (lines[i].trimEnd().endsWith(mark) || lines[i].trim() === sub) { at = i; break; }
+    }
     if (at < 0) return null;
+    const inPara = (i: number) => !fenced.inside[i] && !!lines[i].trim() && !/^#{1,6}\s/.test(lines[i]);
     let a = at;
     let b = at;
-    const inPara = (l: string) => !!l.trim() && !/^#{1,6}\s/.test(l);
     if (lines[at].trim() === sub) {
-      if (!at) return null;
-      b--; while (b > 0 && !lines[b].trim()) b--;
+      b--;
+      while (b >= 0 && !lines[b].trim()) b--;
+      // Line 1 has no block above it, but the id is still there.
+      if (b < 0) return at === 0 ? { text: "", line: 0 } : null;
       a = b;
-      const fence = /^\s*(`{3,}|~{3,})/.exec(lines[b]);
-      if (fence) { a--; while (a > 0 && !lines[a].trimStart().startsWith(fence[1])) a--; }
-      else while (a > 0 && inPara(lines[a - 1])) a--;
+      if (fenced.inside[a]) a = fenced.start[a];
+      else while (a > 0 && inPara(a - 1)) a--;
     } else {
-      while (a > 0 && inPara(lines[a - 1])) a--;
-      while (b + 1 < lines.length && inPara(lines[b + 1])) b++;
+      while (a > 0 && inPara(a - 1)) a--;
+      while (b + 1 < lines.length && inPara(b + 1)) b++;
       lines[at] = lines[at].trimEnd().slice(0, -mark.length);
     }
     return { text: lines.slice(a, b + 1).join("\n"), line: a };
@@ -105,9 +115,14 @@ export function embedPart(text: string, sub: string): NotePart | null {
   return part && { text: part.text, line: part.line + skip };
 }
 
-/** Whether an embed of `path` shows only a chip: it is the note on screen (`top`) or one it is drawn inside of, or it is too deep. */
+/**
+ * Whether an embed of `path` shows only a chip: it is the note on screen
+ * (`top`) or one it is drawn inside of, or it is five embeds deep. `chain`
+ * lists notes already drawn and does not include this embed, so a chain of
+ * four is the fifth nested embed.
+ */
 export const embedStopped = (path: string, top: string | null, chain: readonly string[]) =>
-  chain.length >= MAX_DEPTH || path === top || chain.includes(path);
+  chain.length + 1 >= MAX_DEPTH || path === top || chain.includes(path);
 
 
 /** "Edit this block" on an image: its source shows, path selected, until the selection moves. */

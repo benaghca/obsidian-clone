@@ -34,7 +34,7 @@ test("same-note heading links honor relative and Markdown link settings without 
 
 test("an orphan standalone ID cannot crash navigation or embedding", () => {
   expect(headingPos(document("^target"), "^target")).toBe(0);
-  expect(embedSection("^target", "^target")).toBeNull();
+  expect(embedSection("^target", "^target")).toEqual({ text: "", line: 0 });
 });
 
 test("nested list rows own their text, ID and insertion position at every depth", () => {
