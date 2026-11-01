@@ -242,6 +242,8 @@ function maskInlineCode(line: string): string {
  * Returns the new text and how many links changed. Fenced code (CommonMark:
  * at most three spaces, a closer at least as long, no backtick in a backtick
  * info string) and inline code of any backtick length are left alone.
+ * A trailing CR is dropped before the fence pattern, as in `tagsInText`:
+ * `.` does not match CR, so a CRLF fence line would otherwise not match.
  */
 export function rewriteLinks(
   text: string,
@@ -258,7 +260,8 @@ export function rewriteLinks(
   const lines = text.split("\n");
   let fence: { marker: string; len: number } | null = null;
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const raw = lines[i];
+    const line = raw.replace(/\r$/, "");
     const f = FENCE.exec(line);
     if (fence) {
       if (f && f[1][0] === fence.marker && f[1].length >= fence.len && !f[2].trim()) fence = null;
@@ -298,7 +301,7 @@ export function rewriteLinks(
       last = e.end;
       count++;
     }
-    lines[i] = out + line.slice(last);
+    lines[i] = out + line.slice(last) + (raw === line ? "" : "\r");
   }
   return { text: lines.join("\n"), count };
 }

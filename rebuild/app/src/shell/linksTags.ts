@@ -26,7 +26,9 @@ function withoutInlineCode(line: string): string {
 export function wikilinkTargets(text: string): string[] {
   const out: string[] = [];
   const fences = new Fences();
-  for (const line of text.split("\n")) {
+  for (const raw of text.split("\n")) {
+    // Same trailing-CR drop as tagsInText: the fence pattern's `.` does not match CR.
+    const line = raw.replace(/\r$/, "");
     if (fences.step(line) || !line.includes("[[")) continue;
     for (const m of withoutInlineCode(line).matchAll(WIKILINK)) {
       const target = m[1].replace(/\\\|/g, "|").split("|")[0].split("#")[0].trim();

@@ -195,4 +195,62 @@ test("renaming leaves double-backtick spans and short or deeply indented fences 
   });
   expect(rewrite("`` a`b ``\n``x``\n````\n```\n[[Keep]]\n````\n    ```\n").count).toBe(0);
   expect(rewrite("`` a`b ``\n``x``\n````\n```\n[[Keep]]\n````\n    ```\n").text).toBe("`` a`b ``\n``x``\n````\n```\n[[Keep]]\n````\n    ```\n");
+
+  // Three spaces still open and close. Trailing spaces on a closer still close.
+  expect(rewrite("   ```\n[[Old]]\n   ```\n[[Old]]\n```   \n[[Old]]\n```\n")).toEqual({
+    text: "   ```\n[[Old]]\n   ```\n[[New name]]\n```   \n[[Old]]\n```\n",
+    count: 1,
+  });
+});
+
+test("renaming keeps a CRLF fence closed and preserves the carriage return", () => {
+  const before = [...notes, { name: "Old", path: "Old.md" }];
+  const after = [...notes, { name: "New name", path: "Folder/New name.md" }];
+  const rewrite = (text: string) => rewriteLinks(text, "Ideas.md", "Old.md", "Folder/New name.md", before, after, { format: "shortest", wikilinks: true });
+  const text = [
+    "```js",
+    "[[Old]]",
+    "```",
+    "[[Old]]",
+    "````",
+    "```",
+    "[[Old]]",
+    "````",
+    "    ```",
+    "[[Old]]",
+    "\t```",
+    "[[Old]]",
+    "```a`b",
+    "[[Old]]",
+    "~~~",
+    "[[Old]]",
+    "```",
+    "~~~",
+    "[[Old]]",
+  ].join("\r\n") + "\r\n";
+  const once = rewrite(text);
+  expect(once.count).toBe(5);
+  expect(once.text).toBe([
+    "```js",
+    "[[Old]]",
+    "```",
+    "[[New name]]",
+    "````",
+    "```",
+    "[[Old]]",
+    "````",
+    "    ```",
+    "[[New name]]",
+    "\t```",
+    "[[New name]]",
+    "```a`b",
+    "[[New name]]",
+    "~~~",
+    "[[Old]]",
+    "```",
+    "~~~",
+    "[[New name]]",
+  ].join("\r\n") + "\r\n");
+  expect(rewrite(once.text)).toEqual({ text: once.text, count: 0 });
+  expect(rewrite("```\r\n[[Old]]")).toEqual({ text: "```\r\n[[Old]]", count: 0 });
 });

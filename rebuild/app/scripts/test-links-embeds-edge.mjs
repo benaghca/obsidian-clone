@@ -196,8 +196,12 @@ try {
   const fenced = rewriteLinks(shortFence, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
   const fencedText = ["````", "```", "[[Old]]", "````", "[[New]]", "    ```", "[[New]]", "\t```", "[[New]]"].join("\n");
   check(fenced.count === 3 && fenced.text === fencedText, "a shorter or deeply indented fence does not end the code block");
+  const spannedAgain = rewriteLinks(spanned.text, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
   const fencedAgain = rewriteLinks(fenced.text, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
-  check(fencedAgain.count === 0 && fencedAgain.text === fenced.text, "a second pass leaves those fences and spans unchanged");
+  check(spannedAgain.count === 0 && spannedAgain.text === spanned.text && fencedAgain.count === 0 && fencedAgain.text === fenced.text, "a second pass leaves those fences and spans unchanged");
+  const crlfFence = ["```", "[[Old]]", "```", "[[Old]]", "````", "```", "[[Old]]", "````"].join("\r\n");
+  const crlf = rewriteLinks(crlfFence, "Ideas.md", "Old.md", "B/New.md", before, after, wiki("shortest"));
+  check(crlf.count === 1 && crlf.text === ["```", "[[Old]]", "```", "[[New]]", "````", "```", "[[Old]]", "````"].join("\r\n"), "a CRLF fence stays closed");
 
   // --- embeds: sections, block refs, missing targets, depth ---
   check(splitSubpath(" Note#Heading ")[0] === "Note" && splitSubpath("Note#a#b")[1] === "a#b", "splitSubpath trims and keeps everything after the first hash");
