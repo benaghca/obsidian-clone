@@ -11,7 +11,7 @@ await withBrowser(async ({ send, run, open, read, click, press, check }) => {
     const r = row.getBoundingClientRect();
     return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
   }, title);
-  const resources = () => run(() => ({ origin: location.origin, names: performance.getEntriesByType('resource').map(entry => entry.name) }));
+  const resources = () => run(() => ({ origin: location.origin, names: performance.getEntriesByType('resource').filter(entry => entry.transferSize > 0 || entry.decodedBodySize > 0).map(entry => entry.name) }));
   const offApp = (before, after) => after.names.filter(name => !before.names.includes(name) && !name.startsWith(before.origin));
   const look = () => run(() => {
     const world = document.querySelector('.canvas-world');

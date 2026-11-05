@@ -184,6 +184,12 @@ function fromCinder(o: Record<string, unknown>): Mapped {
     }
     if (used) notImported.push(label);
   }
+  // A non-string is not a Cinder mode. The getter above would treat it as "auto"
+  // (then dropped, because that is Grove's default). Name it, as the canvas import did.
+  const rawEmbed = o.webEmbeds;
+  if (rawEmbed !== undefined && typeof rawEmbed !== "string") {
+    notImported.push(`Embedded web pages (${JSON.stringify(rawEmbed)} isn't a value Grove takes)`);
+  }
   const plugins = isObj(o.plugins) ? o.plugins : null;
   if (plugins?.templater === true) notImported.push(CINDER_PLUGINS_NOT_IMPORTED.templater);
   // The plugin turns both on. A weekly or monthly folder only covers that one; the other still needs naming.

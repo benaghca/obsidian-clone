@@ -4,7 +4,7 @@
 // each fixture server counts the loads it serves.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { withBrowser, sleep } from './browser.mjs';
+import { permitFrameOrigin, withBrowser, sleep } from './browser.mjs';
 
 const fixture = async (name) => {
   const hits = [];
@@ -25,6 +25,8 @@ const fixture = async (name) => {
 
 const a = await fixture('A');
 const b = await fixture('B');
+const releaseA = permitFrameOrigin(a.origin);
+const releaseB = permitFrameOrigin(b.origin);
 try {
   await withBrowser(async ({ send, on, run, press, chord, click, move, check, open, key }) => {
     const requests = [];
@@ -199,6 +201,8 @@ try {
     check(remote.length === 0, `every request stayed on 127.0.0.1 (${remote.slice(0, 3)})`);
   });
 } finally {
+  releaseA();
+  releaseB();
   await a.close();
   await b.close();
 }

@@ -289,8 +289,21 @@ await withBrowser(async ({ run, send, open, read, click, press, key, chord, move
     await run(() => document.querySelector('.mod-confirm input').focus());
     await send('Input.insertText', { text: 'https://example.com/docs' });
     await press('Enter');
+    let framed = false;
+    for (let i = 0; i < 25 && !framed; i++) {
+      framed = await run(() => {
+        const frame = document.querySelector('.canvas-node-link iframe.canvas-web-frame');
+        return !!frame && (frame.getAttribute('src') || '').includes('example.com/docs')
+          && frame.getAttribute('sandbox') === 'allow-scripts allow-same-origin allow-forms'
+          && frame.getAttribute('referrerpolicy') === 'no-referrer'
+          && frame.getAttribute('loading') === 'lazy'
+          && !frame.hasAttribute('allow');
+      });
+      if (!framed) await sleep(40);
+    }
+    check(framed, 'A new web card frames the page before it is undone');
   }, node => node.type === 'link' && node.url === 'https://example.com/docs');
-  check(await run(() => performance.getEntriesByType('resource').every(entry => !entry.name.includes('example.com'))), 'The web page card is not fetched');
+  check(await run(() => performance.getEntriesByType('resource').every(entry => !entry.name.includes('example.com') || (!(entry.transferSize > 0) && !(entry.decodedBodySize > 0)))), 'The web page card is not fetched');
   await added('Create group', async () => {
     check(await run(() => !document.querySelector('.canvas-group-label.is-editing')), 'Create group does not open the label editor');
   }, (node, nodes) => node.type === 'group' && node.label === 'Untitled group' && nodes[0].id === node.id);

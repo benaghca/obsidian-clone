@@ -171,6 +171,25 @@ test("template paths lose extra slashes, and a folder location needs a folder Gr
   expect(importMessage(empty)).toBeNull();
 });
 
+test("Cinder: embedded web pages map click and off, and always is already Grove's default", () => {
+  const off = planImport({ ...none, cinder: json({ webEmbeds: "off" }) });
+  expect(off.values["app.json"].webEmbeds).toBe("off");
+  expect(off.imported).toContainEqual({ label: "Embedded web pages", value: "off (links only)" });
+  expect(off.notImported).toEqual([]);
+  const click = planImport({ ...none, cinder: json({ webEmbeds: "click" }) });
+  expect(click.values["app.json"].webEmbeds).toBe("click");
+  expect(click.imported).toContainEqual({ label: "Embedded web pages", value: "click to load" });
+  const always = planImport({ ...none, cinder: json({ webEmbeds: "always" }) });
+  expect(always.values["app.json"].webEmbeds).toBeUndefined();
+  expect(always.imported.some((item) => item.label === "Embedded web pages")).toBe(false);
+  const auto = planImport({ ...none, cinder: json({ webEmbeds: "auto" }) });
+  expect(auto.values["app.json"].webEmbeds).toBeUndefined();
+  expect(auto.notImported).toEqual([]);
+  const bad = planImport({ ...none, cinder: json({ webEmbeds: "sometimes" }) });
+  expect(bad.values["app.json"].webEmbeds).toBeUndefined();
+  expect(bad.notImported).toEqual(['Embedded web pages ("sometimes" isn\'t a value Grove takes)']);
+});
+
 test("values Grove's schema refuses are listed, not imported", () => {
   const plan = planImport({ ...none, daily: json({ folder: "a\nb", format: "x".repeat(101) }), app: json({ newFileLocation: "nowhere" }) });
   expect(plan.values).toEqual({ "daily-notes.json": {}, "templates.json": {}, "app.json": {} });

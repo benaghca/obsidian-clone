@@ -197,8 +197,8 @@ export const api = {
   openExternal,
   /**
    * Let an embedded frame load `origin` (`http(s)://host[:port]`, W1's
-   * navigation guard). Called just before a web embed creates its frame
-   * (editor/webEmbed.ts); the main window still can't go there.
+   * navigation guard). Called just before a note embed or a canvas link card
+   * points its frame there (editor/webEmbed.ts). The main window still can't go there.
    */
   allowFrameOrigin: (origin: string) => call<void>("allow_frame_origin", { origin }),
   /** "Open in new window": the note in a window of its own (the browser preview only logs; `?note=` shows that window). */

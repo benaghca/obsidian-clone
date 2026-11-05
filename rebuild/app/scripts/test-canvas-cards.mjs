@@ -1,6 +1,6 @@
 // Part B: every interaction is a native CDP pointer/key event, never DOM click().
 import { readFile, writeFile } from 'node:fs/promises';
-import { withBrowser, sleep } from './browser.mjs';
+import { frameFixture, withBrowser, sleep } from './browser.mjs';
 await withBrowser(async ({send, run, move, point, click, press, chord, check, shot, double, read}) => {
   const data=async()=>JSON.parse(await read());
   const last=async()=> (await data()).nodes.at(-1);
@@ -71,4 +71,87 @@ await withBrowser(async ({send, run, move, point, click, press, chord, check, sh
   const obs=await readFile(new URL('../../round24-shots/Obsidian-partb.canvas',import.meta.url),'utf8');await run(async text=>{const{api}=await import('/src/api.ts');await api.createNote('FromObsB.canvas',text);await ws.vault.refreshFiles();await ws.open('FromObsB.canvas');},obs);await sleep(150);
   check(await run(expected=>expected.nodes.every(n=>{const el=document.querySelector(`[data-node-id="${n.id}"]`);return el&&['x','y','width','height'].every(k=>parseFloat(el.style[{x:'left',y:'top',width:'width',height:'height'}[k]])===n[k]);}),JSON.parse(obs)),'Obsidian-edited cards open with identical geometry');
   check(await read()===obs,'Opening the Part B Obsidian fixture preserves exact bytes');
+  const fixture = await frameFixture();
+  try {
+    const board = Array.from({ length: 8 }, (_, i) => ({ id: 'f' + i, type: 'link', x: (i % 3) * 160, y: Math.floor(i / 3) * 90, width: 150, height: 70, url: fixture.url }));
+    board.push({ id: 'tiny', type: 'link', x: 0, y: 280, width: 28, height: 22, url: fixture.url });
+    board.push({ id: 'far', type: 'link', x: 5000, y: 0, width: 150, height: 70, url: fixture.url });
+    await run(async nodes => {
+      settings.set('app.json', 'webEmbeds', 'always');
+      const { api } = await import('/src/api.ts');
+      await api.createNote('Frames.canvas', JSON.stringify({ nodes, edges: [] }));
+      await ws.vault.refreshFiles();
+      await ws.open('Frames.canvas');
+    }, board);
+    const drain = async () => { for (let i = 0; i < 40 && await run(() => window.__canvasProbe?.().pending !== 0); i++) await sleep(25); };
+    const park = async scale => {
+      await run(async scale => {
+        const { canvasViewports } = await import('/src/canvas/navigation.ts');
+        Object.assign(canvasViewports.get(ws.active), { cx: 235, cy: 140, scale });
+        document.querySelector('.canvas-view').dispatchEvent(new WheelEvent('wheel', { ctrlKey: true, cancelable: true }));
+      }, scale);
+      await sleep(280);
+      await drain();
+    };
+    const waitFrames = async (n) => {
+      for (let i = 0; i < 40; i++) {
+        if (await run(n => document.querySelectorAll('iframe.canvas-web-frame[src]').length === n, n)) return true;
+        await sleep(25);
+      }
+      return false;
+    };
+    await park(1);
+    check(await waitFrames(6), 'Six on-screen link cards load a frame');
+    const framed = await run(url => {
+      const frames = [...document.querySelectorAll('iframe.canvas-web-frame')];
+      const one = frames[0];
+      return {
+        count: frames.length,
+        far: !!document.querySelector('[data-node-id="far"] iframe'),
+        tiny: !!document.querySelector('[data-node-id="tiny"] iframe'),
+        src: frames.every(frame => (frame.getAttribute('src') || '').startsWith(url)),
+        sandbox: one?.getAttribute('sandbox') ?? '',
+        referrer: one?.getAttribute('referrerpolicy') ?? '',
+        loading: one?.getAttribute('loading') ?? '',
+        allow: !!one?.hasAttribute('allow'),
+        pointer: one ? getComputedStyle(one).pointerEvents : '',
+        linked: !!document.querySelector('.canvas-node-link a[href]'),
+      };
+    }, fixture.url);
+    check(framed.count === 6 && !framed.far && !framed.tiny && framed.src, 'Off-screen and tiny link cards have no frame (' + framed.count + ')');
+    check(framed.sandbox === 'allow-scripts allow-same-origin allow-forms' && framed.referrer === 'no-referrer' && framed.loading === 'lazy' && !framed.allow && !framed.linked, 'The frame is sandboxed, lazy, and has no href on the address');
+    check(framed.pointer === 'none', 'An unselected frame ignores the pointer');
+    const before = await run(() => new DOMMatrix(document.querySelector('.canvas-world').style.transform).a);
+    const at = await point('iframe.canvas-web-frame');
+    await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...at, deltaX: 0, deltaY: -120, modifiers: 2 });
+    await sleep(80);
+    const after = await run(() => new DOMMatrix(document.querySelector('.canvas-world').style.transform).a);
+    check(after > before, 'A wheel over an unselected frame still zooms');
+    await click(await point('iframe.canvas-web-frame'));
+    check(await run(() => {
+      const frame = document.querySelector('iframe.canvas-web-frame');
+      return !!frame && frame.closest('.canvas-node').classList.contains('is-selected') && getComputedStyle(frame).pointerEvents !== 'none';
+    }), 'Selecting the card lets the page take the pointer');
+    await park(0.4);
+    check(await run(() => document.querySelectorAll('iframe').length === 0), 'Title mode removes every frame');
+    await park(1);
+    await run(() => settings.set('app.json', 'webEmbeds', 'click'));
+    await sleep(280);
+    await drain();
+    check(await run(() => document.querySelectorAll('iframe').length === 0 && document.querySelectorAll('.canvas-web-load').length >= 1), 'Click to load shows Load and no frame');
+    const loadAt = await point('.canvas-web-load');
+    await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...loadAt, button: 'left', clickCount: 1 });
+    await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...loadAt, button: 'left', clickCount: 1 });
+    await sleep(50);
+    await drain();
+    check(await waitFrames(1), 'Load frames the card that was asked');
+    check(await run(url => (document.querySelector('iframe.canvas-web-frame')?.getAttribute('src') || '').startsWith(url), fixture.url), 'The loaded frame uses the local fixture');
+    await run(() => settings.set('app.json', 'webEmbeds', 'off'));
+    await sleep(280);
+    await drain();
+    check(await run(url => document.querySelectorAll('iframe').length === 0 && document.querySelector('.canvas-node-link a')?.textContent === url, fixture.url), 'Off shows the address and no frame');
+    await run(() => settings.set('app.json', 'webEmbeds', 'always'));
+  } finally {
+    await fixture.close();
+  }
 }, {height:800,screenshots:new URL('../../round24-shots/',import.meta.url).pathname});

@@ -1,11 +1,13 @@
 import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+vi.mock("../api", () => ({ api: { allowFrameOrigin: vi.fn(async () => undefined) } }));
+import { api } from "../api";
 import { editingEmbed } from "./embeds";
 import { LivePreview } from "./livePreview";
 import { readingMode } from "./render";
 import { markdownSyntax } from "./syntax";
-import { frameHeight, frameOrigins, isWebPage, playerUrl, resizedWebAlt, type WebEmbedMode, webEmbedMode, WebEmbedWidget, webEmbedSize } from "./webEmbed";
+import { armWebFrame, createWebFrame, FRAME_SANDBOX, frameHeight, frameOrigins, isWebPage, parseWebEmbedMode, playerUrl, resizedWebAlt, type WebEmbedMode, webEmbedMode, WebEmbedWidget, webEmbedSize, webFrameTarget } from "./webEmbed";
 import { mockFrameOrigin } from "../mock/backend";
 import { importMessage, planImport } from "../settings/foreign";
 import { APP } from "../settings/schema";
@@ -186,4 +188,76 @@ test("Settings: always by default; Cinder's auto, click and off import as always
   expect(cinder("click").imported).toEqual([{ label: "Embedded web pages", value: "click to load" }]);
   expect(importMessage(cinder("off"))).toContain("• Embedded web pages: off (links only)");
   expect(cinder("sometimes").notImported).toEqual(['Embedded web pages ("sometimes" isn\'t a value Grove takes)']);
+});
+
+test("embedded pages default to always, and Cinder's auto means the same", () => {
+  expect(parseWebEmbedMode(undefined)).toBe("always");
+  expect(parseWebEmbedMode("auto")).toBe("always");
+  expect(parseWebEmbedMode("click")).toBe("click");
+  expect(parseWebEmbedMode("off")).toBe("off");
+  expect(parseWebEmbedMode("sometimes")).toBe("always");
+});
+
+test("a frame target is an http(s) origin with no userinfo", () => {
+  expect(webFrameTarget("http://127.0.0.1:9/page")).toEqual({ href: "http://127.0.0.1:9/page", origin: "http://127.0.0.1:9" });
+  expect(webFrameTarget("https://Example.COM:443/a")).toEqual({ href: "https://example.com/a", origin: "https://example.com" });
+  expect(webFrameTarget("http://docs.local/")).toEqual({ href: "http://docs.local/", origin: "http://docs.local" });
+  expect(webFrameTarget("javascript:alert(1)")).toBeNull();
+  expect(webFrameTarget("file:///tmp/x.html")).toBeNull();
+  expect(webFrameTarget("https://user:secret@docs.local/a")).toBeNull();
+  expect(webFrameTarget("not a url")).toBeNull();
+  expect(webFrameTarget("")).toBeNull();
+});
+
+test("the one frame factory sands the frame before any address, and a dropped card never navigates", async () => {
+  const made: { tag: string }[] = [];
+  const previous = globalThis.document;
+  globalThis.document = {
+    createElement(tag: string) {
+      const attrs = new Map<string, string>();
+      const frame = {
+        tag,
+        setAttribute(name: string, value: string) { attrs.set(name, value); },
+        removeAttribute(name: string) { attrs.delete(name); },
+        getAttribute(name: string) { return attrs.get(name) ?? null; },
+        hasAttribute(name: string) { return attrs.has(name); },
+        title: "",
+        referrerPolicy: "",
+        loading: "",
+        src: "",
+        isConnected: true,
+        className: "",
+      };
+      made.push(frame);
+      return frame;
+    },
+  } as unknown as Document;
+  const allow = vi.spyOn(api, "allowFrameOrigin").mockImplementation(async () => undefined);
+  try {
+    const frame = createWebFrame("Embedded page") as HTMLIFrameElement & { isConnected: boolean };
+    expect(made).toHaveLength(1);
+    expect(made[0].tag).toBe("iframe");
+    expect(frame.getAttribute("sandbox")).toBe(FRAME_SANDBOX);
+    expect(frame.referrerPolicy).toBe("no-referrer");
+    expect(frame.loading).toBe("lazy");
+    expect(frame.hasAttribute("allow")).toBe(false);
+    expect(frame.title).toBe("Embedded page");
+    expect(frame.src).toBe("");
+    const target = webFrameTarget("http://127.0.0.1:9/page")!;
+    let srcWhenAllowed = "unset";
+    allow.mockImplementation(async () => { srcWhenAllowed = frame.src; });
+    await armWebFrame(frame, target, () => false);
+    expect(allow).toHaveBeenCalledWith("http://127.0.0.1:9");
+    expect(srcWhenAllowed).toBe("");
+    expect(frame.src).toBe("");
+    frame.isConnected = false;
+    await armWebFrame(frame, target, () => true);
+    expect(frame.src).toBe("");
+    frame.isConnected = true;
+    await armWebFrame(frame, target, () => true);
+    expect(frame.src).toBe("http://127.0.0.1:9/page");
+  } finally {
+    allow.mockRestore();
+    globalThis.document = previous;
+  }
 });

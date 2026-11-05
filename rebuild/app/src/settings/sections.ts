@@ -259,7 +259,7 @@ function editor(): HTMLElement[] {
       toggleRow("app.json", "foldHeading", "Fold heading", "Lets you fold all content under a heading."),
       toggleRow("app.json", "foldIndent", "Fold indent", "Lets you fold part of an indentation, such as lists."),
       toggleRow("app.json", "showLineNumber", "Line numbers", "Show line numbers in the gutter."),
-      dropdownRow("app.json", "webEmbeds", "Embedded web pages", "What a web address embedded alone on a line, ![](address), shows. Pages come from the web; the rest of Grove stays offline.", [
+      dropdownRow("app.json", "webEmbeds", "Embedded web pages", "What a web address embedded alone on a line, ![](address), and a canvas link card show. Off leaves the address, Click to load waits, and Always shows the page. Pages come from the web; the rest of Grove stays offline.", [
         ["always", "Always load"],
         ["click", "Click to load"],
         ["off", "Off (show the link)"],

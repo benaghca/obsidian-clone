@@ -7,15 +7,16 @@
 // Vimeo pages become their players, which are made to be framed.
 //
 // This is the one place Grove reaches the network, and only for frames the
-// note's own text asks for. Settings → Editor → Embedded web pages: Always
-// (the default), Click to load, or Off (the address stays a link chip). A
-// view without the setting, such as a canvas card's, shows links only.
-// Before a frame is created its origin is registered with the backend
-// (`allow_frame_origin`, W1); the navigation guard lets a frame load only
-// registered origins and keeps the main window on the app. The frame has
-// no `allow-top-navigation` (it cannot move Grove away), no `allow-popups`
-// (new windows are denied anyway), no `allow=` features (no camera,
-// microphone, location or clipboard) and sends no referrer.
+// note's own text or a canvas link card asks for. Settings → Editor →
+// Embedded web pages: Always (the default), Click to load, or Off (the
+// address stays a link). A note view that doesn't set the facet, such as a
+// note drawn on a canvas card, shows links only. Canvas link cards read the
+// same setting themselves. Before a frame is created its origin is
+// registered with the backend (`allow_frame_origin`, W1); the navigation
+// guard lets a frame load only registered origins and keeps the main window
+// on the app. The frame has no `allow-top-navigation` (it cannot move Grove
+// away), no `allow-popups` (new windows are denied anyway), no `allow=`
+// features (no camera, microphone, location or clipboard) and sends no referrer.
 
 import { EditorSelection, Facet } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
@@ -27,11 +28,80 @@ import { DrawnWidget, onDestroy, readingMode } from "./render";
 
 export type WebEmbedMode = "always" | "click" | "off";
 
-/** Settings → Editor → Embedded web pages. Views that don't set it (canvas cards) show links only. */
+/** Settings → Editor → Embedded web pages, for a note. Views that don't set it (a note on a canvas card) show links only. */
 export const webEmbedMode = Facet.define<WebEmbedMode, WebEmbedMode>({ combine: (values) => values[0] ?? "off" });
+
+/** How a stored setting loads a page. Always is the default. Cinder's "auto" means the same. */
+export const WEB_EMBED_DEFAULT: WebEmbedMode = "always";
+
+/** The setting value for a canvas link card, or for a note once the editor reads it. */
+export function parseWebEmbedMode(value: unknown): WebEmbedMode {
+  if (value === "off" || value === "click" || value === "always") return value;
+  if (value === "auto") return WEB_EMBED_DEFAULT;
+  return WEB_EMBED_DEFAULT;
+}
 
 /** What the frame may do: run its scripts as its own origin and submit its forms. Nothing that reaches Grove's window. */
 export const FRAME_SANDBOX = "allow-scripts allow-same-origin allow-forms";
+
+/** The same sandbox, under the name canvas cards used before the merge. */
+export const WEB_FRAME_SANDBOX = FRAME_SANDBOX;
+
+export interface WebFrameTarget {
+  /** Absolute page URL for the frame's src. */
+  href: string;
+  /** Origin form for allow_frame_origin: scheme, host, and a non-default port. */
+  origin: string;
+}
+
+/**
+ * An http(s) page a canvas link card may load. Userinfo, other schemes, and a
+ * missing host are refused. The origin matches the form the Rust guard stores.
+ * Note embeds use `isWebPage`, which also refuses an image path.
+ */
+export function webFrameTarget(raw: string): WebFrameTarget | null {
+  const text = raw.trim();
+  if (!text || /\s/.test(text)) return null;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password || !url.hostname) return null;
+  // "null" is an opaque origin. An http(s) URL with a host does not produce one.
+  if (url.origin === "null") return null;
+  return { href: url.href, origin: url.origin };
+}
+
+/** Sandbox, no referrer, lazy, and no permission policy. Does not set src. */
+export function prepareWebFrame(frame: HTMLIFrameElement, title: string) {
+  frame.setAttribute("sandbox", FRAME_SANDBOX);
+  frame.referrerPolicy = "no-referrer";
+  frame.loading = "lazy";
+  frame.removeAttribute("allow");
+  frame.title = title || "Embedded page";
+}
+
+/** The one `iframe` Grove creates. Note embeds and canvas link cards both call this. */
+export function createWebFrame(title: string): HTMLIFrameElement {
+  const frame = document.createElement("iframe");
+  prepareWebFrame(frame, title);
+  return frame;
+}
+
+/**
+ * Register the origin, then point the frame at the page.
+ * `alive` is false once the card dropped the frame, so a late reply cannot navigate it.
+ */
+export async function armWebFrame(frame: HTMLIFrameElement, target: WebFrameTarget, alive: () => boolean) {
+  prepareWebFrame(frame, frame.title || target.origin);
+  // Loaded here so a note view can import this module without touching `window`.
+  const { api } = await import("../api");
+  await api.allowFrameOrigin(target.origin);
+  if (!alive() || !frame.isConnected) return;
+  frame.src = target.href;
+}
 
 const IMAGE_PATH = /\.(?:png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 
@@ -261,12 +331,8 @@ export class WebEmbedWidget extends DrawnWidget {
       Promise.all(origins.map((origin) => allow(origin))).then(
         () => {
           if (gone || mine !== generation) return;
-          const f = document.createElement("iframe");
           // The sandbox and referrer policy are set before the address, so the first load has them.
-          f.setAttribute("sandbox", FRAME_SANDBOX);
-          f.referrerPolicy = "no-referrer";
-          f.loading = "lazy";
-          f.title = host;
+          const f = createWebFrame(host);
           f.src = src;
           frame.replaceChildren(f);
           dom.classList.add("is-loaded");

@@ -327,10 +327,11 @@ if (tree) {
   }
 }
 
-// ----- 6. embedded web pages (W2): one place makes frames, with a fixed sandbox -----
+// ----- 6. embedded web pages (W2 notes, W3 canvas cards): one place makes frames -----
 
-// A frame is the only way the app reaches the web, so only the web embed may
-// make one: an "iframe" element created anywhere else in the source fails.
+// A frame is the only way the app reaches the web. Note embeds and canvas
+// link cards both use webEmbed.ts, so an "iframe" element created anywhere
+// else in the source fails.
 // Its sandbox must stay scripts, same origin and forms: no top navigation
 // (Grove can't be moved away), no popups, and no allow= features.
 const FRAME_MAKER = "src/editor/webEmbed.ts";
