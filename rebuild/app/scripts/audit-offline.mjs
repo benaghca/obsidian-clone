@@ -70,6 +70,12 @@ const ALLOW = [
     files: /^src-tauri\/capabilities\/[\w-]+\.json$/,
     why: "opener scope: which links a click may hand to the system browser",
   },
+  // Embedded web pages (W1). Not an ALLOW row: frame-src is the scheme sources
+  // "https:" and "http:" with no host, so the URL rule does not match them.
+  // Section 3 allows exactly those two sources on frame-src and nowhere else.
+  // The frame's network is the navigation guard's registered origins, not
+  // fetch, XHR, or WebSocket. Do not add an ALLOW row for those rules, or for
+  // a host URL inside the embed code.
   {
     rule: "url",
     match: /^https:\/\/(?:obsidian\.md|example\.com\/[\w./-]*)$/,
@@ -153,8 +159,11 @@ const REQUIRED = {
   "object-src": ["'none'"],
   "base-uri": ["'self'"],
   "form-action": ["'none'"],
-  "frame-src": ["'none'"],
 };
+// W1: the only remote CSP exception. Schemes, not hosts. child-src stays 'none'.
+const FRAME_SRC = ["https:", "http:"];
+// These rules stay closed. An ALLOW row for one of them fails the audit.
+const CLOSED_RULES = ["fetch", "xhr", "websocket", "eventsource", "beacon", "webrtc", "service-worker", "import-scripts", "window-open", "css-import", "css-url", "source-map"];
 
 function parseCsp(csp) {
   if (typeof csp === "string") {
@@ -173,6 +182,16 @@ function checkCsp(name, csp, extra = []) {
   if (!csp) return fail(`tauri.conf.json ${name}`, "missing (no Content-Security-Policy at all)");
   const policy = parseCsp(csp);
   for (const [directive, sources] of Object.entries(policy)) {
+    if (directive === "frame-src") {
+      const exact = sources.length === FRAME_SRC.length && FRAME_SRC.every((source) => sources.includes(source));
+      if (!exact) {
+        fail(
+          `tauri.conf.json ${name}`,
+          `frame-src must be exactly "${FRAME_SRC.join(" ")}" (embedded pages; schemes only, no hosts)`,
+        );
+      }
+      continue;
+    }
     for (const source of sources) {
       const ok =
         LOCAL_SOURCES.has(source) ||
@@ -306,6 +325,10 @@ if (tree) {
   for (const name of new Set(tree.split("\n").map((l) => l.split(" ")[0]).filter(Boolean))) {
     if (DENY.test(name)) fail("cargo tree", `crate ${name} is compiled into the app`);
   }
+}
+
+for (const rule of CLOSED_RULES) {
+  if (ALLOW.some((entry) => entry.rule === rule)) fail("allowlist", `rule ${rule} must stay closed`);
 }
 
 // ----- report -----

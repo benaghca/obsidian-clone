@@ -75,6 +75,7 @@ pub fn run() {
                 }),
                 watch_tx: tx.clone(),
             });
+            app.manage(lockdown::FrameOrigins::new());
             let handle: AppHandle = app.handle().clone();
             std::thread::Builder::new()
                 .name("vault-watch".into())
@@ -113,6 +114,7 @@ pub fn run() {
             write_config,
             read_foreign_config,
             open_note_window,
+            allow_frame_origin,
         ])
         .run(tauri::generate_context!())
         .expect("error while running grove");
@@ -395,6 +397,15 @@ fn write_file_bytes(
 #[tauri::command]
 async fn open_note_window(app: AppHandle, note: String) -> Result<(), String> {
     lockdown::create_note_window(&app, &note)
+}
+
+/// Register one http(s) origin so an embedded frame may load it. The main frame may not.
+#[tauri::command(async)]
+fn allow_frame_origin(
+    origins: State<'_, lockdown::FrameOrigins>,
+    origin: String,
+) -> Result<(), String> {
+    origins.allow(&origin)
 }
 
 #[tauri::command]

@@ -32,6 +32,7 @@ fn main() {
             "write_config",
             "read_foreign_config",
             "open_note_window",
+            "allow_frame_origin",
         ]),
     ))
     .expect("failed to run tauri-build");
