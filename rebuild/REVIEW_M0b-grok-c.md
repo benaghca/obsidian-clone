@@ -49,3 +49,21 @@ The notes timed the import itself in headless Chromium (no foreign files under 0
 - The rest of `app.json` (link format, `useMarkdownLinks`, `promptDelete`, theme, hotkeys, property types) is counted as other settings, and Grove's core plugins stay as they are. Those are follow-ups, as the notes say. The plan's 10-minute check on a copy of the work vault is still Chris's.
 
 VERDICT: OK. The first open maps the core daily-note, template, attachment, and new-note settings, one notice lists the rest, and nothing writes `.cinder` or `.obsidian`. The small bugs found here are fixed and tested, and build, the locked npm test, the offline audit, and cargo test passed.
+
+## Merge with integration 5760368
+
+Merged `rebuild/integration` (`5760368`) with `git merge --no-ff`. Two files conflicted. The resolution keeps both sides.
+
+- `rebuild/app/package.json`: both sides edited the `test` script. The merged script keeps `node scripts/test-template-merge.mjs` after `node scripts/test-paste.mjs`, and `node scripts/test-settings-import.mjs` at the end. `posttest` and the other scripts matched on both sides.
+- `rebuild/app/src/mock/backend.test.ts`: kept the two `read_foreign_config` cases and the `read_clipboard_image` case.
+
+`rebuild/CONTRACT.md`, `rebuild/app/src/api.ts`, and `rebuild/app/src/mock/backend.ts` merged on their own. Each still has the foreign-config import and the clipboard image read.
+
+Checks, all exit 0. Screenshot files under `rebuild/round*-shots/` that the suite rewrote were restored before this commit.
+
+- `npm run build`: passed (`tsc --noEmit` and vite).
+- `flock /tmp/grove-npm-test.lock npm test`: the lock was held by other runs; this run waited, then passed. Vitest: **85 files, 1365 tests**, including `backend.test.ts` (9 tests). Browser scripts passed, including `test-template-merge.mjs`, `test-settings-import.mjs` (14 checks), and `posttest`. 1,000-card scroll max 16.7 ms. K8 10k scroll p95 16.8 ms, max 16.8 ms. Bases edge 10k scroll p95 16.8 ms, max 16.8 ms. Property fuzz `cases=48`.
+- `npm run audit:offline`: passed (197 source files, dist/, CSP, capabilities and dependencies).
+- `cargo test --offline` from `rebuild/app/src-tauri`: **102 passed, 0 failed, 4 ignored**.
+
+No new packages. Nothing pushed.

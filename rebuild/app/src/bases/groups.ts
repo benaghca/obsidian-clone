@@ -2,7 +2,7 @@ import { compareNames } from "../paths";
 import { checked, displayValue, FormulaDate, FormulaDuration, FormulaFile, FormulaLink, isEmpty, isFormulaError, type Context, type Value } from "./functions";
 import { parseDate } from "./dates";
 import type { Row } from "./model";
-import { writeFilters } from "./write";
+import { unchanged, writeFilters } from "./write";
 import type { Yaml } from "./yaml";
 import { h, pressable } from "../shell/dom";
 import { icon } from "../shell/icons";
@@ -200,6 +200,7 @@ export const groupRowsAsync = (entries: readonly Entry[], config: GroupBy | null
 
 /** The shared writer owns its old keys; serialize new values with its existing YAML serializer. */
 export function writeViewSetting(source: string, key: "groupBy" | "summaries", value: Yaml | undefined, viewIndex = 0): string {
+  if (unchanged(source, key, value, viewIndex)) return source;
   const eol = source.includes("\r\n") ? "\r\n" : "\n", lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const text = (i: number) => lines[i].replace(/\r?\n$/, ""), significant = (i: number) => !!text(i).trim() && !text(i).trimStart().startsWith("#");
   const indent = (i: number) => /^ */.exec(text(i))![0].length;

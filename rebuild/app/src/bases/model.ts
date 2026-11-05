@@ -12,7 +12,7 @@ export interface Row { file: FileEntry; props: Property[]; tags: string[]; hasLi
 export function baseNoteFiles(files: readonly FileEntry[], excluded: (path: string) => boolean): FileEntry[] {
   return files.filter((f) => !f.is_dir && isNoteFile(f.path) && !excluded(f.path));
 }
-const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
+const FILE_LABELS: Record<string, string> = {"file.name":"file name", "file.basename":"basename", "file.ctime":"created time", "file.mtime":"modified time", "file.ext":"file extension", "file.folder":"folder", "file.path":"file path", "file.size":"file size", "file.tags":"file tags"};
 export const propertyId = (key: string) => /^(file|formula)\./.test(key) ? key : `note.${noteKey(key)}`;
 export const noteKey = (key: string) => key.replace(/^note\./, "");
 export const ROW_HEIGHTS:Record<string,number> = {"":30,medium:60,tall:120,extra:240};
@@ -29,7 +29,8 @@ const canonical = (key: string) => {
 function fileFact(row: Row, key: string): Value {
   const f = row.file;
   switch (key) {
-    case "file.name": return noteName(f.path);
+    case "file.name":
+    case "file.basename": return noteName(f.path);
     case "file.path": return f.path;
     case "file.folder": return parentDir(f.path);
     case "file.ext": return "md";
@@ -54,9 +55,17 @@ function compareKeys(a: SortKey, b: SortKey): number {
   if (a.dateLike && b.dateLike) return a.time !== undefined && b.time !== undefined ? a.time - b.time : x! < y! ? -1 : x! > y! ? 1 : 0;
   return compareNames(a.text, b.text);
 }
+/** Cinder's board is the same layout Grove stores as `kanban`. Any other unknown name draws as a table. */
+export function layoutOf(type: unknown): "table" | "cards" | "list" | "kanban" {
+  if (type === "cards" || type === "list" || type === "kanban") return type;
+  if (type === "board") return "kanban";
+  return "table";
+}
 /** Toolbar and view-menu icon. List uses Lucide `list`, the icon on the public Views page. */
-export const viewGlyph = (type: string): "table" | "grid-2x2" | "square-kanban" | "list" =>
-  type === "list" ? "list" : type === "cards" ? "grid-2x2" : type === "kanban" ? "square-kanban" : "table";
+export const viewGlyph = (type: string): "table" | "grid-2x2" | "square-kanban" | "list" => {
+  const layout = layoutOf(type);
+  return layout === "list" ? "list" : layout === "cards" ? "grid-2x2" : layout === "kanban" ? "square-kanban" : "table";
+};
 
 /** Grove's key is `markers` (the public List page names no YAML). `numbered` and `bullet` are accepted too. */
 function parseListMarkers(raw: Yaml, notices: Set<string>): "bullets" | "numbers" | "none" {
@@ -77,7 +86,7 @@ export function baseModel(source: string, viewIndex = 0) {
   const first = views[viewIndex];
   if (first != null && (typeof first !== "object" || Array.isArray(first))) throw Error("A view must be a mapping");
   const view = mapping(first);
-  if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban" && view.type !== "list") notices.add("This layout isn't supported yet");
+  if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban" && view.type !== "list" && view.type !== "board") notices.add("This layout isn't supported yet");
   const groupBy = parseGroupBy(view.groupBy, notices), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
@@ -160,7 +169,7 @@ export function baseModel(source: string, viewIndex = 0) {
     const sorted = keyed.map(k => k.r);
     return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
   }
-  const type: "table" | "cards" | "kanban" | "list" = view.type === "cards" || view.type === "kanban" || view.type === "list" ? view.type : "table";
+  const type = layoutOf(view.type);
   const listMarkers = type === "list" ? parseListMarkers(view.markers ?? view.marker ?? view.listMarkers, notices) : "bullets";
   // The public List page: the separator defaults to a comma. A space follows it, matching the inline line that page describes.
   const listSeparator = type === "list" && typeof (view.separator ?? view.propertySeparator) === "string" ? String(view.separator ?? view.propertySeparator) : ", ";

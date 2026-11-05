@@ -18,6 +18,24 @@ const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|((?:\\.|[^\\)\s])*))[^)\n]*\
 const BYTE_MARK = "\u0000grove-bytes:";
 const BYTE_MAX = 20 * 1024 * 1024;
 
+/**
+ * Packed `read_clipboard_image` body for browser tests: mime, one LF, then the
+ * image. Null until a test arms it. The mock does not read the system clipboard.
+ */
+let mockClipboardPacked: Uint8Array | null = null;
+let mockClipboardReads = 0;
+
+/** Arm the body `read_clipboard_image` returns, or null. Resets the read count. */
+export function setMockClipboardImage(packed: Uint8Array | null): void {
+  mockClipboardPacked = packed ? new Uint8Array(packed) : null;
+  mockClipboardReads = 0;
+}
+
+/** How many times the open mock has answered `read_clipboard_image` since it was armed. */
+export function mockClipboardImageReads(): number {
+  return mockClipboardReads;
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -342,6 +360,11 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     last_vault: () => ({ path: vault.path, name: vault.name }),
     list_files: () => listFiles(),
     read_note: ({ path }) => need(path).content,
+    read_clipboard_image: () => {
+      mockClipboardReads += 1;
+      if (!mockClipboardPacked) return null;
+      return new Uint8Array(mockClipboardPacked).buffer;
+    },
     read_file_bytes: ({ path }) => {
       if (!/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(path) || path.split("/").includes("..")) throw new Error(`not an image: ${path}`);
       const content = need(path).content;
