@@ -76,7 +76,7 @@ export const PLUGINS: CorePlugin[] = [
   {
     id: "templates",
     name: "Templates",
-    desc: "Insert a note from your templates folder, or today's date and time. Turning it off removes its commands and its ribbon button.",
+    desc: "Insert a template into the open note, create a new note from one, or insert the date and time. Turning it off removes its commands and its ribbon button.",
   },
   {
     id: "word-count",

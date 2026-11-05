@@ -19,7 +19,7 @@ import { baseNotice } from "./bases/notice";
 import { copyNote, deleteFile, newCanvas, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import { addLines, aliasEdit, frontmatterField } from "./editor/frontmatter";
-import { mergeTemplate } from "./editor/templateMerge";
+import { mergeTemplate, newNoteTemplate } from "./editor/templateMerge";
 import { openAlias, openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
@@ -161,6 +161,60 @@ export function registerAppCommands(parts: AppParts) {
     if (merged.skipped) baseNotice("The template's properties weren't added: this note's properties can't be edited safely.");
     view.dispatch({ changes: merged.changes, ...(merged.bodyInserted ? { selection: { anchor: merged.cursor } } : {}), scrollIntoView: true, userEvent: "input.template" });
     view.focus();
+  }
+
+  // One at a time, so two picks cannot both take the name "Untitled".
+  let creatingFromTemplate = Promise.resolve();
+  function createFromTemplate(templatePath: string) {
+    const next = creatingFromTemplate.then(() => applyNewTemplate(templatePath));
+    creatingFromTemplate = next.then(() => {}, () => {});
+    return next;
+  }
+  /** Create Untitled in the new-note folder, fill it from the template, and select the inline title. */
+  async function applyNewTemplate(templatePath: string) {
+    // Read before creating, so a missing template does not leave a blank note.
+    let raw: string;
+    try {
+      raw = await ws.editors.text(templatePath);
+    } catch (err) {
+      console.warn("Could not read template", err);
+      baseNotice("Couldn't read that template.");
+      return;
+    }
+    // newNote's own default is Settings → Files and links (the new-note folder).
+    let path: string;
+    try {
+      path = await newNote(ws);
+    } catch (err) {
+      console.warn("Could not create a note", err);
+      baseNotice("Couldn't create a note from that template.");
+      return;
+    }
+    const title = noteName(path);
+    const now = new Date();
+    const spec = templates();
+    const dateFormat = spec.dateFormat || "YYYY-MM-DD";
+    const timeFormat = spec.timeFormat || "HH:mm";
+    const note = ws.editors.doc(path)?.toString() ?? "";
+    // Empty unless the new note already has text when it opens.
+    const merged = note
+      ? mergeTemplate(note, fillTemplate(raw, title, now, dateFormat, timeFormat), { from: 0, to: 0 })
+      : newNoteTemplate(raw, title, now, dateFormat, timeFormat);
+    if (merged.skipped) baseNotice("The template's properties weren't added: this note's properties can't be edited safely.");
+    if (ws.editors.doc(path)) {
+      if (merged.changes.length) {
+        ws.editors.change(path, {
+          changes: merged.changes,
+          ...(merged.bodyInserted ? { selection: { anchor: merged.cursor } } : {}),
+          userEvent: "input.template",
+        });
+        await ws.saveNow(path);
+      }
+    } else if (merged.text) {
+      await api.writeNote(path, merged.text);
+      ws.vault.written(path);
+    }
+    if (ws.active.path === path) parts.panes.focusTitle(true);
   }
 
   // ----- appearance shortcuts, through the settings (so they are saved per vault) -----
@@ -488,6 +542,10 @@ export function registerAppCommands(parts: AppParts) {
         if (!templateFolder()) return parts.openSettings("templates");
         openTemplatePrompt(templateNotes(), (path) => void insertTemplate(path));
       }, canEdit),
+    pluginAction("templates", "templates:create-new-note-from-template", "Templates: Create new note from template", "file-plus", () => {
+        if (!templateFolder()) return parts.openSettings("templates");
+        openTemplatePrompt(templateNotes(), (path) => void createFromTemplate(path), "to create");
+      }),
     // Also from Reading view and from a field in the block, as in Obsidian.
     conditionalAction("markdown:add-metadata-property", "Add file property", "list-plus", () => {
         if (openNewProperty(ws.view) || ws.active.mode === "reading") return;
