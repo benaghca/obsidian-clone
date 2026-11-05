@@ -14,7 +14,7 @@
 import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import {
-  arrowLabelPatch, arrowsBoundTo, bindPoints, bindTargetAt, boundWith, deletePatches, followArrows, labelsFor,
+  arrowLabelPatch, arrowsBoundTo, bindPoints, bindTargetAt, boundWith, deletePatches, dragGaps, followArrows, followIfMoved, labelsFor,
   Patches, sceneLookup, setBinding, targetOf, unbindLeft, type Target,
 } from "./binding";
 import {
@@ -513,6 +513,23 @@ export function drawingEditor(host: EditorHost) {
     for (const [id, patch] of patches) tx.merge(id, patch);
   }
 
+  function framesOf(s: Scene, ids: readonly string[]) {
+    const out = new Map<string, Frame>();
+    for (const id of ids) {
+      const el = live(s, id);
+      if (el) out.set(id, elementFrame(el));
+    }
+    return out;
+  }
+
+  /** Bound arrows follow shapes whose boxes this edit just changed, stamped once with the rest. */
+  function stickMoved(s: Scene, tx: Transaction, before: Map<string, Frame>, ids: readonly string[], out: Patches) {
+    for (const [id, patch] of followIfMoved(s, ids, before, finder(s))) {
+      tx.absorb(id, patch);
+      out.merge(id, patch);
+    }
+  }
+
   const textStyle = (e: DrawingElement, over: Partial<Style> = {}): TextStyle => {
     const t = e as TextElement;
     return {
@@ -559,7 +576,9 @@ export function drawingEditor(host: EditorHost) {
       write(label, keys.filter((k) => k === "strokeColor" || k === "opacity" || TEXT_KEYS.has(k)));
       if (fonts) relayout(s, label, textStyle(label, patch), (label as TextElement).originalText, out);
     }
+    const before = framesOf(s, [...out.keys()]);
     for (const [id, p] of out) styleTx.preview(id, p);
+    stickMoved(s, styleTx, before, [...out.keys()], out);
     if (liveFrame) { host.repaint(out.keys()); refreshPanel(); return; }
     const tx = styleTx;
     styleTx = null;
@@ -701,6 +720,8 @@ export function drawingEditor(host: EditorHost) {
     const value = ed.area.value;
     const out = new Patches();
     const c = ed.container;
+    // A shape label can grow its box, and free text can change size. Arrows bound there follow.
+    const watch = c && !isLinear(c) ? [c.id] : c ? [] : [ed.id];
     if (c && isLinear(c)) out.merge(ed.id, arrowTextPatch(pathMidpoint(worldPoints(c)), value, ed.style, measure));
     else if (c) {
       const { label, container } = labelPatch(c, value, ed.style, measure);
@@ -708,7 +729,9 @@ export function drawingEditor(host: EditorHost) {
       out.merge(c.id, { ...ed.containerBase, ...container });
     } else out.merge(ed.id, freeTextPatch(ed.el, value, ed.style, measure));
     out.merge(ed.id, { fontSize: ed.style.fontSize, fontFamily: ed.style.fontFamily, textAlign: ed.style.textAlign, ...ed.extra });
+    const before = framesOf(s, watch);
     for (const [id, patch] of out) ed.tx.preview(id, patch);
+    stickMoved(s, ed.tx, before, watch, out);
     host.repaint(out.keys());
     hideEdited();
     placeArea();
@@ -931,7 +954,8 @@ export function drawingEditor(host: EditorHost) {
     if (at === last && la.endBinding) setBinding(line, "end", null, finder(s), out);
     const start = at !== 0 && la.startBinding ? lookup(la.startBinding.elementId) : null;
     const end = at !== last && la.endBinding ? lookup(la.endBinding.elementId) : null;
-    const ends = bindPoints(next, start, end);
+    const [startGap, endGap] = dragGaps(line, null, null);
+    const ends = bindPoints(next, start, end, startGap, endGap);
     out.merge(line.id, pointsPatch(ends));
     for (const l of labelsFor(s, new Set([line.id]))) out.merge(l.id, arrowLabelPatch(l, ends));
     const tx = history.begin(s, selection);
@@ -949,7 +973,9 @@ export function drawingEditor(host: EditorHost) {
     const lookup = sceneLookup(finder(s));
     const startTarget = g.index === 0 ? (target ? targetOf(target) : null) : la.startBinding ? lookup(la.startBinding.elementId) : null;
     const endTarget = g.index === last ? (target ? targetOf(target) : null) : la.endBinding ? lookup(la.endBinding.elementId) : null;
-    return bindPoints(list, startTarget, endTarget);
+    const which = g.index === 0 ? "start" : g.index === last ? "end" : null;
+    const [startGap, endGap] = dragGaps(g.el, which, target?.id ?? null);
+    return bindPoints(list, startTarget, endTarget, startGap, endGap);
   }
 
   function track(g: Gesture, event: PointerEvent) {

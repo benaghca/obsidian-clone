@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
-  arrowsBoundTo, BIND_GAP, bindPoints, bindTargetAt, deletePatches, followArrows, insideTarget, outlinePoint, Patches,
+  arrowsBoundTo, BIND_GAP, bindPoints, bindTargetAt, deletePatches, dragGaps, followArrows, followIfMoved, insideTarget, outlinePoint, Patches,
   sceneLookup, setBinding, targetOf, unbindLeft, type Target,
 } from "./binding";
+import { elementFrame } from "./geometry";
 import { DrawingHistory } from "./history";
 import { worldPoints } from "./linear";
-import { findElement, parseScene, serializeScene, type DrawingElement, type LinearElement, type Point, type Scene } from "./scene";
+import { findElement, parseScene, serializeScene, updateElement, type DrawingElement, type LinearElement, type Point, type Scene } from "./scene";
 import { movedPatch } from "./transform";
 
 const fixtures = import.meta.glob<string>("../../fixtures/drawings/*.excalidraw", { eager: true, query: "?raw", import: "default" });
@@ -93,6 +94,24 @@ describe("bound ends", () => {
     close(pts[2], [350, 0 - BIND_GAP]);
     close(pts[0], [0, 0]);
   });
+
+  it("keeps a stored gap when the end is not dropped on a new shape", () => {
+    const s = sceneOf([
+      { id: "a", type: "rectangle", x: 0, y: 0, width: 160, height: 80 },
+      { id: "arr", type: "arrow", x: 165, y: 40, points: [[0, 0], [190, 0]],
+        startBinding: { elementId: "a", focus: 0.25, gap: 5 }, endBinding: { elementId: "b", focus: 0.1, gap: 8 } },
+    ]);
+    const arrow = findElement(s, "arr")!;
+    expect(dragGaps(arrow, null, null)).toEqual([5, 8]);
+    expect(dragGaps(arrow, "end", "b")).toEqual([5, 8]);
+    expect(dragGaps(arrow, "end", "other")).toEqual([5, BIND_GAP]);
+    expect(dragGaps(arrow, "start", null)).toEqual([BIND_GAP, 8]);
+    const [startGap, endGap] = dragGaps(arrow, null, null);
+    const pts = bindPoints([[165, 40], [300, 40], [355, 40]], box("rectangle", 0, 0, 160, 80), box("ellipse", 360, 0, 140, 80), startGap, endGap);
+    // 5 past the box's right side, and 8 short of the ellipse, not the default gap of 4.
+    close(pts[0], [165, 40]);
+    close(pts[2], [352, 40]);
+  });
 });
 
 describe("arrows that follow their shapes", () => {
@@ -123,6 +142,20 @@ describe("arrows that follow their shapes", () => {
     const tag = patches.get("tag")!;
     expect((tag.x as number) + 20).toBeCloseTo((pts[0][0] + pts[1][0]) / 2, 3);
     expect(p.angle).toBe(0);
+  });
+
+  it("follows a shape that grew downward onto the new outline, at the stored gap", () => {
+    const s = sceneOf([
+      { id: "a", type: "rectangle", x: 0, y: 0, width: 100, height: 40, boundElements: [{ type: "arrow", id: "arr" }] },
+      { id: "arr", type: "arrow", x: 50, y: 45, width: 0, height: 155, points: [[0, 0], [0, 155]],
+        startBinding: { elementId: "a", focus: 0, gap: 5 }, endBinding: null },
+    ]);
+    const find = (id: string) => findElement(s, id);
+    const before = new Map([["a", elementFrame(find("a")!)]]);
+    expect(followIfMoved(s, ["a"], before, find).size).toBe(0);
+    updateElement(s, "a", { height: 120 });
+    const patch = followIfMoved(s, ["a"], before, find).get("arr")!;
+    close([patch.x as number, patch.y as number], [50, 125]);
   });
 
   it("leaves an arrow alone when none of its shapes can be found", () => {

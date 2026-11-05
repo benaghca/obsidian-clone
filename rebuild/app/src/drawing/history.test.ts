@@ -126,6 +126,22 @@ describe("drawing history", () => {
     expect(line.version).toBe(2);
   });
 
+  it("absorb folds into the live change and stamps once at commit", () => {
+    const scene = open();
+    const history = new DrawingHistory(stamp());
+    const tx = history.begin(scene, []);
+    tx.preview("a", { x: 5, strokeColor: "#ff0000" });
+    tx.absorb("a", { x: 8 });
+    tx.absorb("b", { x: 3 });
+    expect(findElement(scene, "a")!.version).toBe(3);
+    expect(findElement(scene, "b")!.version).toBe(1);
+    expect(tx.commit([])).toBe(true);
+    const a = findElement(scene, "a")!;
+    expect([a.x, a.strokeColor, a.version]).toEqual([8, "#ff0000", 4]);
+    const b = findElement(scene, "b")!;
+    expect([b.x, b.version]).toEqual([3, 2]);
+  });
+
   it("a later live frame drops fields an earlier one set", () => {
     const scene = open();
     const history = new DrawingHistory(stamp());

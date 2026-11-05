@@ -102,6 +102,22 @@ export function bindPoints(pts: Point[], start: Target | null, end: Target | nul
   return out;
 }
 
+/**
+ * Gaps for `bindPoints` while one point of `arrow` is dragged. `which` is the
+ * end under the pointer, or null when a middle point moves. An end let go on
+ * the shape it already names keeps that shape's stored gap; an end let go on
+ * a new shape uses the default. Any end not being dragged keeps its stored gap.
+ */
+export function dragGaps(arrow: DrawingElement, which: "start" | "end" | null, targetId: string | null): [number, number] {
+  const la = isLinear(arrow) ? arrow : null;
+  const gap = (binding: Binding | null, dragging: boolean) => {
+    if (!dragging) return binding?.gap ?? BIND_GAP;
+    if (targetId && binding?.elementId === targetId) return binding.gap;
+    return BIND_GAP;
+  };
+  return [gap(la?.startBinding ?? null, which === "start"), gap(la?.endBinding ?? null, which === "end")];
+}
+
 /** Patches keyed by element id; a second patch for an id adds to the first. */
 export class Patches extends Map<string, Patch> {
   merge(id: string, patch: Patch) {
@@ -160,6 +176,27 @@ export function followArrows(scene: Scene, arrows: readonly DrawingElement[], lo
     for (const l of labels.get(a.id) ?? []) out.merge(l.id, arrowLabelPatch(l, pts));
   }
   return out;
+}
+
+const frameNear = (a: Frame, b: Frame) =>
+  Math.abs(a.x - b.x) < 1e-4 && Math.abs(a.y - b.y) < 1e-4 && Math.abs(a.width - b.width) < 1e-4 &&
+  Math.abs(a.height - b.height) < 1e-4 && Math.abs(a.angle - b.angle) < 1e-6;
+
+/**
+ * Arrows bound to any of `ids` whose frame is no longer `before`, put back on
+ * the outlines as the scene holds them now. The scene must already show the
+ * new frames. Arrows that are themselves among the moved ids are left alone.
+ */
+export function followIfMoved(scene: Scene, ids: readonly string[], before: ReadonlyMap<string, Frame>, find: (id: string) => DrawingElement | undefined): Patches {
+  const moved = new Set<string>();
+  for (const id of ids) {
+    const el = find(id);
+    const was = before.get(id);
+    if (!el || !was || !isBindable(el) || frameNear(was, elementFrame(el))) continue;
+    moved.add(id);
+  }
+  if (!moved.size) return new Patches();
+  return followArrows(scene, arrowsBoundTo(scene, moved).filter((a) => !moved.has(a.id)), sceneLookup(find));
 }
 
 /** The lookup for shapes as the scene holds them, with `moved` ids shifted by `dx`, `dy`. */

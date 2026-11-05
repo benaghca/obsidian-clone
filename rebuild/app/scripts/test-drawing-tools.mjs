@@ -217,6 +217,23 @@ await withBrowser(async ({ run, send, press, chord, key, move, click, double, ch
   check(near(large.x + large.width / 2, 80, 1.5) && near(large.y + large.height / 2, 50, 1.5) && large.height > label.height, 'A larger font lays the label out again, still centred');
   check(await run(() => !document.querySelector('.drawing-style [aria-label="Code"]').closest('.drawing-style-section').hidden), 'The font choices show for a box with a label');
 
+  // Several lines grow the box downward. The arrow was aimed at the old centre, so its start has to move.
+  await press('Enter');
+  check(!!await editor(), 'Enter still edits the label after the font change');
+  await chord('a');
+  // A CDP Enter key does not insert a newline, so the breaks go in as text.
+  await typeText('one\ntwo\nthree\nfour\nfive\nsix');
+  await press('Escape');
+  doc = await saved(d => byId(d, 'A').height > 140, 'grown box saved');
+  {
+    const box = byId(doc, 'A');
+    const start = placed(byId(doc, aid))[0];
+    check(onBox(start, box, 4), `The bound arrow stays on the grown box ${JSON.stringify([start, box.height])}`);
+    check(Math.abs(start[1] - 50) > 8, `The arrow leaves the old centre when the box grows downward ${start[1]}`);
+  }
+  await chord('z');
+  doc = await saved(d => byId(d, 'A').height === 100 && byId(d, label.id).text === 'Start here', 'growth undone');
+
   // A label on the arrow, by double-clicking its middle.
   await press('Escape');
   await double(await at(280, 50));
@@ -292,6 +309,18 @@ await withBrowser(async ({ run, send, press, chord, key, move, click, double, ch
   await chord('z');
   await saved((d, text) => text === cinder, 'Cinder undo saved', 'Cinder.excalidraw');
   check(await readFile('Cinder.excalidraw') === cinder, 'Undo writes the Cinder file back byte for byte');
+
+  // A middle point keeps each end on its stored gap (5), not the default 4, and keeps focus.
+  await click(await at(200, 40));
+  const cinderMid = await overlayPoint('[data-mid="0"]');
+  check(!!cinderMid, 'The Cinder arrow shows a midpoint');
+  await drag(cinderMid, await at(300, 40));
+  const kept = await saved(d => byId(d, arrowId).points.length === 3, 'Cinder midpoint saved', 'Cinder.excalidraw');
+  const keptArrow = byId(kept, arrowId);
+  const [k0, , k2] = placed(keptArrow);
+  check(keptArrow.startBinding.gap === 5 && keptArrow.endBinding.gap === 5 && keptArrow.endBinding.focus === 0.1, `Adding a point keeps the stored gap and focus ${JSON.stringify([keptArrow.startBinding, keptArrow.endBinding])}`);
+  check(Math.abs(k0[0] - 165) < 0.2 && Math.abs(k0[1] - 40) < 0.2, `The start stays 5 off the box ${JSON.stringify(k0)}`);
+  check(Math.abs(k2[0] - 355) < 0.2 && Math.abs(k2[1] - 40) < 0.2, `The end stays 5 off the ellipse ${JSON.stringify(k2)}`);
 
   // ----- many bound arrows and a long stroke: no task over 50ms -----
   await run(async () => {
