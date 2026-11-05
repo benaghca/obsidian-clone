@@ -1,0 +1,6 @@
+filters:
+  - file.hasTag("book")
+  - status == "todo"
+views:
+  - type: list
+    name: List

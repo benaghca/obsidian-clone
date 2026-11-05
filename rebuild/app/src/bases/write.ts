@@ -1,8 +1,34 @@
 // Replace only an edited YAML block; never reserialize the file.
 import { yamlString } from "../editor/frontmatter";
-import { type Yaml } from "./yaml";
+import { readYaml, type Yaml } from "./yaml";
+
+/** Deep equality for parsed YAML. Key order does not matter; list order does. */
+export function yamlEqual(a: Yaml | undefined, b: Yaml | undefined): boolean {
+  if (a === b) return true;
+  if (a == null || b == null || typeof a !== "object" || typeof b !== "object") return false;
+  if (Array.isArray(a) || Array.isArray(b)) return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((item, i) => yamlEqual(item, b[i]));
+  const left = Object.keys(a), right = Object.keys(b);
+  return left.length === right.length && left.every(key => Object.hasOwn(b, key) && yamlEqual(a[key], b[key]));
+}
+
+/**
+ * True when `value` is already what this file stores, so a save must keep
+ * every byte (quotes, comments, flow lists, CRLF). A missing view is not a match:
+ * the caller still reports "View does not exist".
+ */
+export function unchanged(source: string, key: string, value: Yaml | undefined, viewIndex?: number): boolean {
+  let root: Record<string, Yaml>;
+  try { root = readYaml(source); } catch { return false; }
+  if (viewIndex === undefined) return yamlEqual(root[key], value);
+  const views = root.views;
+  if (!Array.isArray(views) || viewIndex < 0 || viewIndex >= views.length) return false;
+  const view = views[viewIndex];
+  if (view === null || typeof view !== "object" || Array.isArray(view)) return false;
+  return yamlEqual(view[key], value);
+}
 export interface Sort { property: string; direction: "ASC" | "DESC" }
 export function writeView(source: string, key: "order" | "sort" | "filters" | "columnSize" | "limit" | "name" | "rowHeight" | "type" | "markers", value: Yaml | Sort[] | undefined, viewIndex = 0): string {
+  if (unchanged(source, key, value as Yaml, viewIndex)) return source;
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const text = (i: number) => lines[i].replace(/\r?\n$/, "");
@@ -79,6 +105,7 @@ export function writeFilters(source: string, value: Yaml, viewIndex?: number): s
  * first, a new `properties` before `views` (or last).
  */
 export function writeTop(source: string, key: "filters" | "properties", value: Yaml | undefined): string {
+  if (unchanged(source, key, value)) return source;
   const eol = source.includes("\r\n") ? "\r\n" : "\n";
   const lines = source.match(/[^\n]*\n|[^\n]+$/g) ?? [];
   const at = lines.findIndex(line => new RegExp(`^\uFEFF?(?:${key}|"${key}"|'${key}')\\s*:`).test(line));

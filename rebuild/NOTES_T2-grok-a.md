@@ -59,3 +59,22 @@ Run 1's page samples were 5.6, 6.5 and 4.4 ms, so that 5.6 ms median is the midd
 T2 meets the plan and Chris's core-template scope. The command creates the note, fills it, and leaves the inline title editable, and the required checks passed with no meaningful benchmark change.
 
 VERDICT: OK
+
+## Merge with integration 5760368
+
+`git merge --no-ff rebuild/integration`. This branch was `ea5b5f7`. Integration was `5760368` (X1, BX1, M0a, WK1, T1, I1, I2).
+
+Conflicts:
+
+- None. Git auto-merged every path. `rebuild/app/package.json` differed by one test step: this branch inserts `node scripts/test-template-create.mjs` immediately after `node scripts/test-template-merge.mjs`. That step stayed, and every integration step on `test`, `posttest`, and the other scripts stayed. No test file was edited on both sides, so both sides' cases remain. `templateMerge.test.ts` is still 25 tests.
+
+No behaviour change beyond taking integration's tree.
+
+Checks, from `rebuild/app` (cargo from `src-tauri`):
+
+- `npm run build` — exit 0. `tsc --noEmit && vite build`, 2139 modules. The chunk-size warning is the existing one.
+- `flock /tmp/grove-npm-test.lock npm test` — exit 0. Vitest: 83 files, 1353 tests, including 444 parity and the 25 template-merge cases. Geometry stayed within 1px. Ctrl+o frames were 16.8–16.9 ms. `test-template-create.mjs` passed, including a missing template creating nothing and the inline title staying selected. `test-paste.mjs` passed, including the empty paste and the canvas image card. 300-card pan and zoom stayed under 20 ms. 300-card drag max 16.8 ms (49 intervals). Create and reconnect drag max 16.8 ms. K8 10k scroll: p95 16.8 ms, max 16.8 ms, scrollTop 279218. Kanban edge 10k scroll: p95 16.8 ms, max 16.8 ms, scrollTop 140000. Bases edge 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 160000. Property fuzz `cases=48`. `LEDGE_TYPE` max 16.8 ms, p95 16.7 ms. `LEDGE_SWITCH` max 16.8 ms, p95 16.8 ms.
+- `npm run audit:offline` — passed. 194 source files, dist, CSP, capabilities, and dependencies. The script runs the build above.
+- `cargo test --offline` — 102 passed, 0 failed, 4 ignored (`set_property_bench`, `crash_child`, `bench_vault`, `bench_search_commands`).
+
+`rebuild/round*-shots/` was restored with `git checkout` after the suite.

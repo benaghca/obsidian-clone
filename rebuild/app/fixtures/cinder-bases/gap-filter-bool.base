@@ -1,0 +1,4 @@
+filters: true
+views:
+  - type: cards
+    name: Cards

@@ -1,0 +1,6 @@
+# kept
+views:
+  - type: cards
+    name: "All books"
+    order: [file.name, cover]
+    image: cover

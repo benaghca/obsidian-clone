@@ -1,7 +1,7 @@
 //! Debounced vault watcher.
 //!
 //! Notify events sit for ~100ms of quiet (and at most ~400ms) so a burst becomes a few
-//! `vault-changed` events. Temp files and `.obsidian` / `.git` / `.trash` are dropped.
+//! `vault-changed` events. Temp files and `.obsidian` / `.git` / `.trash` / `.grove` / `.cinder` are dropped.
 //! A path written by `write_note` in the last 500ms is dropped too. Rename events carry
 //! `[from, to]`; a move into `.trash` is reported as `remove`.
 
@@ -423,6 +423,9 @@ mod tests {
                 at(root, ".git/config"),
                 at(root, ".obsidian/app.json"),
                 at(root, ".trash/old.md"),
+                at(root, ".grove/app.json"),
+                at(root, ".cinder/settings.json"),
+                at(root, ".cinder/README.md"),
             ],
         );
         assert!(coalesce(root, &[temp, hidden], |_| false).is_empty());

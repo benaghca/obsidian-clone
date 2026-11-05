@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { Backlink, LinkIndex, NoteProperties } from "../api";
-import { createMockBackend } from "./backend";
+import { createMockBackend, mockClipboardImageReads, setMockClipboardImage } from "./backend";
 
 test("splits linked mentions from the link index and resolves targeted reads after a folder move", async () => {
   const store = () => ({ getItem: () => null, setItem: () => {} });
@@ -163,4 +163,30 @@ test("merged search commands treat nameless .md files as attachments and keep na
     expect(plain).not.toContain("C1B-INT/.MD");
     expect(plain).not.toContain("C1B-INT/Upper.MD");
   } finally { vi.unstubAllGlobals(); }
+});
+
+test("read_clipboard_image returns null until a packed image is armed", async () => {
+  const store = () => ({ getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("location", { search: "" });
+  vi.stubGlobal("sessionStorage", store());
+  vi.stubGlobal("localStorage", store());
+  try {
+    setMockClipboardImage(null);
+    const { invoke } = createMockBackend();
+    expect(await invoke("read_clipboard_image")).toBeNull();
+    expect(mockClipboardImageReads()).toBe(1);
+    const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const head = new TextEncoder().encode("image/png\n");
+    const packed = new Uint8Array(head.length + png.length);
+    packed.set(head);
+    packed.set(png, head.length);
+    setMockClipboardImage(packed);
+    const out = new Uint8Array((await invoke("read_clipboard_image")) as ArrayBuffer);
+    expect([...out]).toEqual([...packed]);
+    expect(mockClipboardImageReads()).toBe(1);
+    expect([...out].includes(0x0a)).toBe(true);
+  } finally {
+    setMockClipboardImage(null);
+    vi.unstubAllGlobals();
+  }
 });
