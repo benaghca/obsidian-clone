@@ -13,6 +13,7 @@
 // goes in, and `skipped` says the properties were left out.
 // Pure, free of the DOM; tested on its own.
 
+import { fillTemplate } from "../settings/dateFormat";
 import { readProperties, type Change, type Property } from "./frontmatter";
 import { editProperty, lineAt, type Line } from "./propertyEdit";
 
@@ -178,4 +179,14 @@ export function mergeTemplate(noteText: string, templateText: string, selection 
   }
   text += noteText.slice(pos);
   return { changes, text, cursor: to + delta, bodyInserted: !!body, skipped };
+}
+
+/**
+ * The text of a brand-new note from a core template. `{{title}}`, `{{date}}`
+ * and `{{time}}` are filled first, then the result is merged onto an empty
+ * note, so the template's properties become the note's frontmatter. Templater
+ * `<% %>` is left as written.
+ */
+export function newNoteTemplate(templateText: string, title: string, now: Date, dateFormat: string, timeFormat: string): TemplateMerge {
+  return mergeTemplate("", fillTemplate(templateText, title, now, dateFormat, timeFormat));
 }
