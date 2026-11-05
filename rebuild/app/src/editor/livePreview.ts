@@ -25,6 +25,7 @@ import { isNoteFile } from "../paths";
 import { kept } from "../memo";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
+import { DrawingEmbedWidget } from "../drawing/embed";
 import { BaseWidget, editingEmbed, embedSize, IMAGE_EXT, ImageWidget, NoteEmbedWidget } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
@@ -381,6 +382,13 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       return true;
     }
     const file = src.split("#")[0];
+    if (/\.excalidraw$/i.test(file)) {
+      if (editing === from) return false;
+      const aliasText = alias ? doc.sliceString(alias.from, alias.to) : null;
+      const size = embedSize(aliasText ?? "");
+      decos.push(Decoration.replace({ widget: new DrawingEmbedWidget(resolve(file), src, size.width, size.height) }).range(from, node.to));
+      return true;
+    }
     const base = /\.base$/i.test(file);
     if (!base && /\.[a-z0-9]+$/i.test(file) && !isNoteFile(file)) return false; // other files stay links
     const widget = base ? new BaseWidget(null, resolve(file), src, state.facet(embedChain)) : new NoteEmbedWidget(src, resolve(file), state.facet(embedChain));

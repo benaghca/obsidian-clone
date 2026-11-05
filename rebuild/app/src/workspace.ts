@@ -10,6 +10,7 @@ import { api } from "./api";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, EmbedHost, PropertyHost } from "./editor/host";
+import { isDrawingPath } from "./drawing/render";
 import { IMAGE_EXT } from "./editor/embeds";
 import { createEditorHost } from "./editorHost";
 import { type Edge, Layout } from "./layout";
@@ -472,7 +473,7 @@ export class Workspace {
     const replaces = !opts.where;
     const mine = Symbol();
     if (replaces) this.opens.set(from, mine);
-    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path)) return this.openAttachment(path, opts.where ?? false, from);
+    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path) || isDrawingPath(path)) return this.openAttachment(path, opts.where ?? false, from);
     const state = await this.editors.load(path);
     if (!state || !this.layout.groups().includes(from) || (replaces && this.opens.get(from) !== mine)) return;
     let where = opts.where ?? false;
@@ -511,7 +512,7 @@ export class Workspace {
     const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
     pushBack(tab, this.caretIn(from));
     tab.path = null;
-    tab.type = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : "image";
+    tab.type = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : isDrawingPath(path) ? "drawing" : "image";
     this.recent = [path, ...this.recent.filter(p => p !== path)].slice(0, 50);
     tab.viewFile = path;
     this.show(group, tab, layoutChanged);
