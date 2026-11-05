@@ -1,0 +1,144 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "https://excalidraw.com",
+  "elements": [
+    {
+      "id": "old-rect",
+      "type": "rectangle",
+      "x": 10,
+      "y": 10,
+      "width": 100,
+      "height": 60,
+      "angle": 0,
+      "strokeColor": "#000000",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "strokeSharpness": "round",
+      "seed": 1,
+      "version": 3,
+      "versionNonce": 4,
+      "isDeleted": false,
+      "boundElementIds": [
+        "old-arrow"
+      ]
+    },
+    {
+      "id": "old-arrow",
+      "type": "arrow",
+      "x": 110,
+      "y": 40,
+      "width": 90,
+      "height": 0,
+      "angle": 0,
+      "strokeColor": "#000000",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "strokeSharpness": "round",
+      "seed": 2,
+      "version": 2,
+      "versionNonce": 5,
+      "isDeleted": false,
+      "boundElementIds": null,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          90,
+          0
+        ]
+      ],
+      "lastCommittedPoint": null,
+      "startBinding": {
+        "elementId": "old-rect",
+        "focus": 0,
+        "gap": 1
+      },
+      "endBinding": null
+    },
+    {
+      "id": "old-draw",
+      "type": "draw",
+      "x": 0,
+      "y": 100,
+      "width": 20,
+      "height": 20,
+      "angle": 0,
+      "strokeColor": "#000000",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "strokeSharpness": "sharp",
+      "seed": 3,
+      "version": 1,
+      "versionNonce": 6,
+      "isDeleted": false,
+      "points": [
+        [
+          0,
+          0
+        ],
+        [
+          20,
+          20
+        ]
+      ],
+      "lastCommittedPoint": null
+    },
+    {
+      "id": "old-text",
+      "type": "text",
+      "x": 0,
+      "y": 150,
+      "width": 80,
+      "height": 25,
+      "angle": 0,
+      "strokeColor": "#000000",
+      "backgroundColor": "transparent",
+      "fillStyle": "hachure",
+      "strokeWidth": 1,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "strokeSharpness": "sharp",
+      "seed": 4,
+      "version": 1,
+      "versionNonce": 7,
+      "isDeleted": false,
+      "text": "old text",
+      "fontSize": 20,
+      "fontFamily": 1,
+      "textAlign": "left",
+      "verticalAlign": "top",
+      "baseline": 18
+    },
+    null,
+    {
+      "type": "rectangle",
+      "x": 1,
+      "note": "no id, kept as is"
+    },
+    42
+  ],
+  "appState": {
+    "viewBackgroundColor": "#ffffff",
+    "gridSize": null
+  }
+}
