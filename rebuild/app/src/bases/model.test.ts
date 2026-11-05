@@ -84,6 +84,12 @@ describe("Bases tables", () => {
     const kanban = baseModel('views:\n  - type: kanban\n    name: Board\n');
     expect(kanban.type).toBe("kanban");
     expect(kanban.notices.size).toBe(0);
+    // Cinder writes `board` for this layout. The file keeps that word; the view draws as kanban.
+    const board = baseModel('views:\n  - type: board\n    name: Board\n');
+    expect(board.type).toBe("kanban");
+    expect(board.name).toBe("Board");
+    expect(board.view.type).toBe("board");
+    expect(board.notices.size).toBe(0);
     // K8: List is a layout of its own. Markers and the separator are read only for that layout.
     const list = baseModel('views:\n  - type: list\n    name: List\n    markers: numbers\n    separator: " | "\n');
     expect(list.type).toBe("list");
