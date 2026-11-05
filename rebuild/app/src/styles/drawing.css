@@ -1,4 +1,4 @@
-/* Read-only drawing tab, note embeds, and canvas file-card previews. */
+/* Drawing tab and its editor, note embeds, and canvas file-card previews. */
 .view-content.drawing-view {
   position: relative;
   flex: 1;
@@ -13,8 +13,10 @@
 .drawing-view:focus { outline: none; }
 .drawing-world { position: absolute; top: 0; left: 0; transform-origin: 0 0; will-change: transform; }
 .drawing-world svg { display: block; }
-.drawing-view.is-grabbable, .drawing-view.is-grabbable * { cursor: grab; }
-.drawing-view.is-panning, .drawing-view.is-panning * { cursor: grabbing; }
+/* The tab's drawing sits in scene coordinates, so edits outside its first box still show. */
+.drawing-world > svg { position: absolute; overflow: visible; }
+.drawing-view.is-grabbable, .drawing-view.is-grabbable * { cursor: grab !important; }
+.drawing-view.is-panning, .drawing-view.is-panning * { cursor: grabbing !important; }
 .drawing-message {
   position: absolute;
   inset: 0;
@@ -46,6 +48,97 @@
 .drawing-controls .clickable-icon + .clickable-icon { border-top: 1px solid var(--background-modifier-border); }
 .drawing-controls .clickable-icon:first-child { border-radius: 4px 4px 0 0; }
 .drawing-controls .clickable-icon:last-child { border-radius: 0 0 4px 4px; }
+
+/* Editor: selection overlay in screen pixels, toolbar, style panel, key sheet. */
+.drawing-overlay { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 2; overflow: visible; }
+.drawing-overlay .drawing-frame { fill: none; stroke: var(--interactive-accent); stroke-width: 1; }
+.drawing-overlay .drawing-member { fill: none; stroke: var(--interactive-accent); stroke-width: 1; stroke-dasharray: 3 3; opacity: .7; }
+.drawing-overlay .drawing-stem { stroke: var(--interactive-accent); stroke-width: 1; }
+.drawing-overlay .drawing-handle { fill: var(--background-primary); stroke: var(--interactive-accent); stroke-width: 1.5; }
+.drawing-overlay .drawing-marquee { fill: hsla(var(--accent-h), var(--accent-s), var(--accent-l), .08); stroke: var(--interactive-accent); stroke-width: 1; stroke-dasharray: 4 3; }
+.drawing-view.is-drawing-tool { cursor: crosshair; }
+
+.drawing-toolbar {
+  position: absolute;
+  z-index: 4;
+  top: 8px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+  --icon-size: 16px;
+  --icon-stroke: 2px;
+}
+.drawing-toolbar[hidden], .drawing-style[hidden] { display: none; }
+.drawing-tools { display: flex; }
+.drawing-tools .clickable-icon { width: 32px; height: 32px; padding: 8px; border-radius: 0; }
+.drawing-tools .clickable-icon + .clickable-icon { border-left: 1px solid var(--background-modifier-border); }
+.drawing-tools .clickable-icon:first-child { border-radius: 4px 0 0 4px; }
+.drawing-tools .clickable-icon:last-child { border-radius: 0 4px 4px 0; }
+.drawing-tools .clickable-icon.is-active { background: var(--interactive-accent); color: var(--text-on-accent); }
+.drawing-tools .clickable-icon.is-disabled { opacity: .4; }
+
+.drawing-style {
+  position: absolute;
+  z-index: 4;
+  top: 52px;
+  left: 8px;
+  width: 212px;
+  padding: 8px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
+  font-size: var(--font-ui-small);
+  user-select: none;
+}
+.drawing-style-section + .drawing-style-section { margin-top: 8px; }
+.drawing-style-title { color: var(--text-muted); margin-bottom: 4px; }
+.drawing-style-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+.drawing-style-choice {
+  width: 26px; height: 26px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--background-modifier-border); border-radius: 4px; background: var(--background-primary);
+  box-shadow: none; cursor: pointer;
+}
+.drawing-style-choice:hover { background: var(--background-modifier-hover); }
+.drawing-style-choice.is-active { border-color: var(--interactive-accent); box-shadow: 0 0 0 1px var(--interactive-accent); }
+.drawing-swatch { width: 16px; height: 16px; border-radius: 3px; background: var(--swatch); border: 1px solid rgb(0 0 0 / 15%); }
+.drawing-swatch.is-none { background: linear-gradient(to top right, transparent 45%, var(--text-error) 45%, var(--text-error) 55%, transparent 55%); }
+.drawing-hex { width: 100%; margin-top: 4px; height: 24px; font-size: var(--font-ui-small); font-family: var(--font-monospace); }
+.drawing-width-mark { display: block; width: 16px; background: var(--text-normal); border-radius: 2px; }
+.drawing-dash-mark { display: block; width: 16px; border-top: 2px solid var(--text-normal); }
+.drawing-dash-mark.is-dashed { border-top-style: dashed; }
+.drawing-dash-mark.is-dotted { border-top-style: dotted; }
+.drawing-fill-mark { display: block; width: 14px; height: 14px; border: 1px solid var(--text-normal); border-radius: 2px; }
+.drawing-fill-mark.is-solid { background: var(--text-muted); }
+.drawing-fill-mark.is-hachure { background: repeating-linear-gradient(-45deg, var(--text-muted) 0 1px, transparent 1px 4px); }
+.drawing-fill-mark.is-cross-hatch {
+  background: repeating-linear-gradient(-45deg, var(--text-muted) 0 1px, transparent 1px 4px), repeating-linear-gradient(45deg, var(--text-muted) 0 1px, transparent 1px 4px);
+}
+.drawing-opacity { flex: 1; min-width: 0; }
+.drawing-opacity-value { width: 36px; text-align: right; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+
+.drawing-help {
+  position: absolute;
+  z-index: 5;
+  top: 52px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 68px);
+  overflow: auto;
+  padding: 12px 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 18%);
+  font-size: var(--font-ui-small);
+}
+.drawing-help[hidden] { display: none; }
+.drawing-help-title { font-weight: var(--font-semibold); margin-bottom: 8px; }
+.drawing-help table { border-collapse: collapse; }
+.drawing-help td { padding: 3px 12px 3px 0; vertical-align: top; }
+.drawing-help kbd { white-space: nowrap; }
 
 .drawing-embed { display: block; position: relative; max-width: 100%; margin: 8px 0; }
 .drawing-embed svg { display: block; max-width: 100%; }
