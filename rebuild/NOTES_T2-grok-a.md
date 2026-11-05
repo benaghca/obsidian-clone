@@ -78,3 +78,22 @@ Checks, from `rebuild/app` (cargo from `src-tauri`):
 - `cargo test --offline` — 102 passed, 0 failed, 4 ignored (`set_property_bench`, `crash_child`, `bench_vault`, `bench_search_commands`).
 
 `rebuild/round*-shots/` was restored with `git checkout` after the suite.
+
+## Merge with integration 7ba7d09
+
+`git merge --no-ff origin/rebuild/integration`. This branch was `6b7e441`. Integration was `7ba7d09` (P0 on top of `5760368`).
+
+Conflicts:
+
+- `rebuild/app/package.json` only. Both sides edited the `test` script. The resolved script keeps every step from both sides: `node scripts/test-feel.mjs` stays where P0 put it, before `vitest run`, and `node scripts/test-template-create.mjs` stays immediately after `node scripts/test-template-merge.mjs`. `posttest` and the other scripts were unchanged. No test file was edited on both sides, so both sides' cases remain. `templateMerge.test.ts` is still 25 tests.
+
+No behaviour change beyond taking integration's tree. P0 adds `scripts/test-feel.mjs` and the opt-in dev hitch meter (`src/shell/hitchMeter.ts`, called from `src/main.ts`).
+
+Checks, from `rebuild/app` (cargo from `src-tauri`):
+
+- `npm run build` — exit 0. `tsc --noEmit && vite build`, 2140 modules. The chunk-size warning is the existing one.
+- `flock /tmp/grove-npm-test.lock npm test` — exit 0 on the rerun. The first attempt exited 1 because the graph phase reported 2 long tasks (max 62 ms) while other suites were running; that budget stays strict. The rerun had `long_tasks` 0 on every phase, including graph, and printed the held graph frame gap (`p95` 33.4 ms, max 33.4 ms, 58/186 frames over 20 ms). Vitest: 83 files, 1353 tests, including 444 parity and the 25 template-merge cases. Geometry stayed within 1px. Ctrl+o frames were 16.8–16.9 ms. `test-template-create.mjs` passed, including a missing template creating nothing and the inline title staying selected. `test-paste.mjs` passed, including the empty paste and the canvas image card. 300-card pan and zoom stayed under 20 ms. 300-card drag max 16.8 ms (49 intervals). Create and reconnect drag max 16.8 ms. K8 10k scroll: p95 16.8 ms, max 16.8 ms, scrollTop 279218. Kanban edge 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 140000. Bases edge 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 160000. Property fuzz `cases=48`. `LEDGE_TYPE` max 16.8 ms, p95 16.7 ms. `LEDGE_SWITCH` max 16.7 ms, p95 16.7 ms.
+- `npm run audit:offline` — passed. 195 source files, dist, CSP, capabilities, and dependencies. The script runs the build above.
+- `cargo test --offline` — 102 passed, 0 failed, 4 ignored (`set_property_bench`, `crash_child`, `bench_vault`, `bench_search_commands`).
+
+`rebuild/round*-shots/` was restored with `git restore` after the suite. 61 rewritten shot paths were put back. Nothing was pushed.
