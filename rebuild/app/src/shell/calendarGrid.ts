@@ -3,8 +3,7 @@
 // Week numbers and month names are not links; weekly and monthly notes are
 // a later piece.
 
-import { isNoteFile, trimSlashes } from "../paths";
-import { dateNamePattern } from "../settings/dateFormat";
+import { dailyNoteList } from "../settings/dateFormat";
 
 export type WeekStart = "monday" | "sunday";
 
@@ -77,19 +76,11 @@ export function monthGrid(year: number, month: number, weekStart: WeekStart): Ca
 /**
  * Local midnights of the days that have a daily note. Reads the note list
  * it is given (the vault's in-memory `notes`) and the daily-notes folder
- * and format. Nothing is opened or read from disk.
+ * and format, by the same rule as `openDailyNote` and previous/next
+ * (`dailyNoteList`). Nothing is opened or read from disk.
  */
 export function dailyNoteDays(notes: readonly { path: string }[], folder: string, format: string): Set<number> {
-  const trimmed = trimSlashes(folder);
-  const prefix = trimmed ? `${trimmed}/` : "";
-  const pattern = dateNamePattern(format || "YYYY-MM-DD");
-  const days = new Set<number>();
-  for (const note of notes) {
-    if (!note.path.startsWith(prefix) || !isNoteFile(note.path)) continue;
-    const time = pattern.parse(note.path.slice(prefix.length, -3));
-    if (time !== null) days.add(time);
-  }
-  return days;
+  return new Set(dailyNoteList(notes.map((n) => n.path), { folder, format }).map((n) => n.time));
 }
 
 /** The day `path` is a daily note for, or null when it is not one. */

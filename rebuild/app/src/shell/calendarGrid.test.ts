@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { dailyNotePath, existingDailyNote } from "../settings/dateFormat";
 import { dailyNoteDays, dailyNoteTime, monthGrid, monthTitle, weekdayLabels } from "./calendarGrid";
 
 const cell = (year: number, month: number, day: number, inMonth: boolean) => ({ year, month, day, inMonth });
@@ -89,4 +90,23 @@ test("dots come from daily-note names already in the note list", () => {
   expect(dailyNoteTime("Daily/2026-10-19.md", "Daily", "YYYY-MM-DD")).toBe(new Date(2026, 9, 19).getTime());
   expect(dailyNoteTime("Welcome.md", "Daily", "YYYY-MM-DD")).toBeNull();
   expect(dailyNoteTime(null, "Daily", "YYYY-MM-DD")).toBeNull();
+});
+
+test("dots follow the path openDailyNote writes and the notes it opens", () => {
+  const day = new Date(2026, 9, 3);
+  const time = day.getTime();
+  // Empty folder parts and slashes at either end of the format: the note goes
+  // to Daily/Sub/2026/10/03.md, and the calendar has to find it there.
+  const odd = { folder: "Daily//Sub/", format: "/YYYY/MM/DD" };
+  const written = dailyNotePath(day, odd);
+  expect(written).toBe("Daily/Sub/2026/10/03.md");
+  expect([...dailyNoteDays([{ path: written }], odd.folder, odd.format)]).toEqual([time]);
+  expect(dailyNoteTime(written, odd.folder, odd.format)).toBe(time);
+
+  // A padded name the short format still reads is the note openDailyNote
+  // opens for that day, so it gets the dot too.
+  const short = { folder: "Journal", format: "YYYY-M-D" };
+  const notes = [{ path: "Journal/2026-10-03.md" }];
+  expect(existingDailyNote(notes.map((n) => n.path), day, short)).toBe("Journal/2026-10-03.md");
+  expect([...dailyNoteDays(notes, short.folder, short.format)]).toEqual([time]);
 });

@@ -40,7 +40,7 @@ I could not check this fix in WebKitGTK, because the rules allow no GUI window. 
 ## Findings left open
 
 1. **Discoverability and WebKitGTK (medium).** At the default 300px dock in a frameless window, two icons are still hidden behind the window buttons until the row is scrolled, and nothing shows that the row scrolls. On top of that, it depends on WebKitGTK counting end padding as scrollable overflow (see above). It needs a check in the real app. One sturdier option: let the icons shrink below 28px when the row is short, which means dropping `flex: none` and reducing the button padding. Another: reserve the window-button room with a trailing spacer or a margin instead of padding. Either is a design choice, so I left it.
-2. **Merging with C1 needs a follow-up (low).** After the merge, the calendar has its own daily-note parser (`dailyNoteDays`, using `trimSlashes` and the raw format), while C1's `dailyNoteList` and `dailyNotePath` normalize differently. C1 also drops empty folder parts and `/` at either end of the format. So a format like `/YYYY/MM/DD` or a folder like `Daily//Sub` would create the note where C1 puts it, but the calendar would show no dot. When merging, `dailyNoteDays` should call C1's `dailyNoteList`, so all three places share one rule. Before the merge, C2 matches the base's `openDailyNote` and previous/next exactly.
+2. **Merging with C1 needs a follow-up (low). Resolved in the C1 merge below.** After the merge, the calendar has its own daily-note parser (`dailyNoteDays`, using `trimSlashes` and the raw format), while C1's `dailyNoteList` and `dailyNotePath` normalize differently. C1 also drops empty folder parts and `/` at either end of the format. So a format like `/YYYY/MM/DD` or a folder like `Daily//Sub` would create the note where C1 puts it, but the calendar would show no dot. When merging, `dailyNoteDays` should call C1's `dailyNoteList`, so all three places share one rule. Before the merge, C2 matches the base's `openDailyNote` and previous/next exactly.
 3. **`opening` drops a second click (low).** While one day's note is being opened or created, a click on a different day is ignored silently. After C1, `openDailyNote` deduplicates creation of the same path itself (`creatingDaily`), so the guard could go away, or be keyed by day.
 4. **Today's marker after midnight (low).** The marker updates only when the view repaints (on a file, show or settings change, or when the tab is selected). If the view stays visible past midnight, yesterday stays marked until something changes.
 5. **ARIA shape (low).** `role="grid"` has `role="gridcell"` buttons directly under it, with no `role="row"`. That is invalid structure, and `gridcell` hides the button role from screen readers. Either add rows or drop the grid roles and keep the plain buttons with `aria-current`. `aria-selected` is valid only on the gridcell form.
@@ -65,8 +65,30 @@ I did the trial merge in a scratch worktree, then threw it away. It was not comm
 - `flock /tmp/grove-npm-test.lock npm test`: one uninterrupted run, exit 0, `posttest` included. Vitest: 81 files, 1,287 tests. Every browser script passed, including the extended `test-calendar.mjs` (the four frameless tab-row checks). The frame budgets held: 300-card pan and zoom frames under their 20ms ceiling, and 10,000-row list and notes scroll at p95 16.7–16.8ms, max 16.8ms. No search or index path changed, so the 5,000-note Rust bench was not re-run.
 - `rebuild/round*-shots/` restored after the suite.
 
+## C1 merge
+
+On 2026-11-05 I merged `rebuild/c1-review-grok-a` (a13ed4d) into this branch with `--no-ff`. That branch is Claude's C1 (6887eae) plus Grok a's fix that keeps padded daily-note names visible. Nothing else was merged. The four conflicts were the ones the trial merge found, and each resolution keeps both sides:
+
+- `package.json`: the `test` script runs `test-calendar.mjs` and then `test-daily-notes.mjs`.
+- `settings/schema.ts`: `weekStart` and `autorun` both follow `template`.
+- `settings/sections.ts`: "Start week on" and "Open daily note on startup" both stay.
+- `editorHost.ts`: C1's `openDailyNote` body (`dailyNotePath`, `existingDailyNote`, `creatingDaily`) with C2's `where: OpenWhere = false`. Both `ws.open` calls pass `{ where }`.
+
+Follow-up (finding 2): `dailyNoteDays` in `calendarGrid.ts` now calls C1's `dailyNoteList`, and `dailyNoteTime` goes through it too. Its own prefix and pattern code is gone, along with the `trimSlashes` and `isNoteFile` imports. The dots, the open/create path and previous/next now share one rule. That rule covers C1's normalization of empty folder parts and slashes at either end of the format, as well as Grok a's padded names. Drawing still does no I/O. The view keeps its cache on the identity of `ws.vault.notes`, and `paint()` reads only that list and the settings. A new Vitest case, "dots follow the path openDailyNote writes and the notes it opens", covers two cases. With folder `Daily//Sub/` and format `/YYYY/MM/DD`, the note is written to `Daily/Sub/2026/10/03.md`, and that day gets a dot. With format `YYYY-M-D`, the padded `Journal/2026-10-03.md` is the note `existingDailyNote` opens, and it gets a dot too. With the old `calendarGrid.ts`, this case fails (`expected [] to deeply equal [ 1791010800000 ]`). With the change, it passes.
+
+Finding 2 is resolved. Findings 1 and 3 to 6 are unchanged. Finding 3 is still open: `openDailyNote` now deduplicates creation, so the view's `opening` guard could be dropped.
+
+Checks on the merged tree:
+
+- `npm run build`: passed.
+- `cargo test --offline` (src-tauri): 84 passed, 0 failed, 4 ignored.
+- Vitest `calendarGrid.test.ts` and `src/settings`: 3 files, 20 tests passed.
+- `flock /tmp/grove-npm-test.lock npm test`: one uninterrupted run, exit 0, `posttest` included. Vitest: 81 files, 1,293 tests. Every browser script passed, including `test-calendar.mjs` (the frameless tab-row checks too) and C1's `test-daily-notes.mjs` (startup open once, two opens create once). The frame budgets held: 300-card pan and zoom frames under 20ms, and 10,000-row scroll at p95 16.7ms, max 16.8ms.
+- `npm run audit:offline`: passed (193 source files, dist, CSP, capabilities, dependencies).
+- `rebuild/round*-shots/`: restored after the suite.
+
 ## Verdict
 
 VERDICT: OK
 
-C2 does everything in its plan row. The grid maths is right, and dots are read from `ws.vault.notes` with no I/O while drawing. Click, Ctrl+click and middle-click open or create the note through `openDailyNote`. The week-start setting sanitizes and saves as it should, and the view belongs to the Daily notes plugin. The tests cover what the plan asked for. The one real bug was that, in a frameless window, the eighth tab pushed Local graph under the window buttons, where it could not be reached. That is fixed here, with a test that fails without the fix. What is left is low severity, apart from finding 1, which needs a check in the real WebKitGTK app. The merge with C1 has four conflicts from lines added in the same place, all easy to resolve, plus one follow-up: use C1's `dailyNoteList` for the dots.
+C2 does everything in its plan row. The grid maths is right, and dots are read from `ws.vault.notes` with no I/O while drawing. Click, Ctrl+click and middle-click open or create the note through `openDailyNote`. The week-start setting sanitizes and saves as it should, and the view belongs to the Daily notes plugin. The tests cover what the plan asked for. The one real bug was that, in a frameless window, the eighth tab pushed Local graph under the window buttons, where it could not be reached. That is fixed here, with a test that fails without the fix. What is left is low severity, apart from finding 1, which needs a check in the real WebKitGTK app. C1 (`rebuild/c1-review-grok-a`) is now merged into this branch. The four conflicts were resolved so that both sides keep their behaviour. The calendar dots use C1's `dailyNoteList`, with a test, and every check passes on the merged tree.
