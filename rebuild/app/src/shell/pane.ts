@@ -10,6 +10,7 @@
 
 import { canvasViewports } from "../canvas/navigation";
 import { createCanvasView } from "../canvas/view";
+import { createDrawingView } from "../drawing/view";
 import { createBaseView } from "../bases/view";
 import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
@@ -406,17 +407,18 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     let shownCrumb = "";
     function renderHeader() {
       const tab = group.active;
-      const path = tab.type === "canvas" || tab.type === "base" ? tab.viewFile : tab.path;
+      const fileView = tab.type === "canvas" || tab.type === "base" || tab.type === "drawing";
+      const path = fileView ? tab.viewFile : tab.path;
       back.classList.toggle("is-disabled", tab.back.length === 0);
       forward.classList.toggle("is-disabled", tab.forward.length === 0);
       actions.hidden = !path && !tab.type;
       modeButton.hidden = !!tab.type;
       renderMode();
-      const crumb = tab.type && tab.type !== "canvas" && tab.type !== "base" ? `\0${tab.type}\0${tab.viewFile ?? ""}` : (path ?? "\0new-tab");
+      const crumb = tab.type && !fileView ? `\0${tab.type}\0${tab.viewFile ?? ""}` : (path ?? "\0new-tab");
       if (crumb === shownCrumb) return;
       shownCrumb = crumb;
       breadcrumb.replaceChildren();
-      if (tab.type && tab.type !== "canvas" && tab.type !== "base") {
+      if (tab.type && !fileView) {
         const title = tab.type === "image" || tab.type === "backlinks" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph";
         breadcrumb.append(h("span", { class: "view-header-title" }, title));
         return;
@@ -432,7 +434,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
           h("span", { class: "view-header-breadcrumb-separator" }, "/"),
         );
       }
-      breadcrumb.append(h("span", { class: "view-header-title" }, tab.type === "canvas" || tab.type === "base" ? tabTitle(tab) : noteName(path)));
+      breadcrumb.append(h("span", { class: "view-header-title" }, fileView ? tabTitle(tab) : noteName(path)));
     }
 
     // ----- note view -----
@@ -510,11 +512,15 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     let canvas: { el: HTMLElement; dispose(): void } | null = null;
     let canvasPath: string | null = null;
     let canvasTab: Tab | null = null;
+    let drawing: { el: HTMLElement; dispose(): void } | null = null;
+    let drawingPath: string | null = null;
+    let drawingTab: Tab | null = null;
     function renderView() {
       const tab = group.active;
       const path = tab.path;
       const image = tab.type === "image" ? (tab.viewFile ?? null) : null;
       const board = tab.type === "canvas" || tab.type === "base" ? tab.viewFile ?? null : null;
+      const drawingFile = tab.type === "drawing" ? tab.viewFile ?? null : null;
       if (tab.type !== "canvas") canvasViewports.delete(tab);
       if (board !== canvasPath || tab !== canvasTab) {
         canvas?.dispose();
@@ -523,11 +529,18 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         canvas = board ? tab.type === "base" ? createBaseView(ws, board, group) : createCanvasView(ws, board, group, tab) : null;
         if (canvas) { leaf.append(canvas.el); canvas.el.focus({ preventScroll: true }); }
       }
+      if (drawingFile !== drawingPath || tab !== drawingTab) {
+        drawing?.dispose();
+        drawingPath = drawingFile;
+        drawingTab = tab;
+        drawing = drawingFile ? createDrawingView(ws, drawingFile, tab) : null;
+        if (drawing) { leaf.append(drawing.el); drawing.el.focus({ preventScroll: true }); }
+      }
       const graph = tab.type === "graph" || tab.type === "localgraph" ? graphFor(tab) : null;
       const links = tab.type === "backlinks" ? (tab.viewFile ?? null) : undefined;
       showBacklinksTab(links);
       scroller.hidden = !path || !!graph || links !== undefined;
-      empty.hidden = !!path || !!graph || !!image || !!board || links !== undefined;
+      empty.hidden = !!path || !!graph || !!image || !!board || !!drawingFile || links !== undefined;
       imageView.hidden = !image;
       renderImage(image);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
@@ -735,6 +748,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         linksTab?.setActive(false);
         renderImage(null);
         canvas?.dispose();
+        drawing?.dispose();
         el.remove();
       },
     };

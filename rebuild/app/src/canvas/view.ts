@@ -9,6 +9,8 @@ import { editorHost } from "../editor/host";
 import { readingMode, release, render } from "../editor/render";
 import { isExternalUrl, isNotePath } from "../links/external";
 import { resolveLink } from "../links/internal";
+import { isDrawingPath, openDrawingImages, renderDrawing } from "../drawing/render";
+import { parseScene } from "../drawing/scene";
 import { isNoteFile, noteName } from "../paths";
 import { h } from "../shell/dom";
 import type { Group, Tab } from "../tabs";
@@ -249,6 +251,95 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         let unwatchImage = () => {};
         const drop = () => { unwatchImage(); unwatchImage = () => {}; held?.release(); held = undefined; img.removeAttribute("src"); };
         bodies.add(node, card, { element: content, ensure() { if (!held) { unwatchImage = ws.embeds.watch(node.file!, () => work.add(img, () => { if (bodies.wanted(node)) refreshFile(); else drop(); })); refreshFile(); } }, release: drop, ready: () => !!held });
+        cleanups.push(drop);
+        continue;
+      }
+      if (node.type === "file" && node.file && isDrawingPath(node.file)) {
+        const file = node.file;
+        card.classList.add("is-drawing");
+        const preview = h("div", { class: "drawing-preview" });
+        content.append(preview);
+        let images: ReturnType<typeof openDrawingImages> | null = null;
+        let text = "";
+        let dark = document.documentElement.classList.contains("theme-dark");
+        let requested = false;
+        let painted = false;
+        let request = 0;
+        let unwatch = () => {};
+        const theme = new MutationObserver(() => {
+          const next = document.documentElement.classList.contains("theme-dark");
+          if (next === dark) return;
+          dark = next;
+          if (text && painted && preview.dataset.failed !== "1") paint();
+        });
+        const drop = () => {
+          request++;
+          requested = false;
+          painted = false;
+          unwatch();
+          unwatch = () => {};
+          theme.disconnect();
+          images?.revoke();
+          images = null;
+          text = "";
+          preview.replaceChildren();
+          delete preview.dataset.failed;
+        };
+        function paint() {
+          images?.revoke();
+          images = null;
+          const parsed = parseScene(text);
+          if (!parsed.ok) {
+            preview.replaceChildren();
+            preview.textContent = parsed.error;
+            preview.dataset.failed = "1";
+            painted = true;
+            bodies.ready(node);
+            return;
+          }
+          delete preview.dataset.failed;
+          images = openDrawingImages(parsed.scene);
+          preview.innerHTML = renderDrawing(parsed.scene, {
+            dark,
+            images: (id) => images?.href(id),
+            idPrefix: `card${node.id}`,
+            paper: true,
+          }).markup;
+          painted = true;
+          bodies.ready(node);
+        }
+        function ensure() {
+          if (requested || painted) return;
+          requested = true;
+          const token = ++request;
+          theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+          unwatch = ws.embeds.watch(file, () => queueMicrotask(() => {
+            if (gone || mine !== generation) return;
+            if (!bodies.wanted(node)) { drop(); return; }
+            drop();
+            ensure();
+          }));
+          void ws.embeds.read(file).then((next) => work.add(preview, () => {
+            if (gone || mine !== generation || token !== request) return;
+            text = next;
+            if (bodies.wanted(node)) paint();
+            else drop();
+          }), () => work.add(preview, () => {
+            if (gone || mine !== generation || token !== request) return;
+            requested = false;
+            painted = true;
+            preview.textContent = `File not found: ${file}`;
+            preview.dataset.failed = "1";
+            bodies.ready(node);
+          }));
+        }
+        card.addEventListener("dblclick", (event) => {
+          if (!event.isTrusted || world.classList.contains("is-zoomed-out")) return;
+          if ((event.target as Element).closest(".canvas-node-resizer, .canvas-node-connection-point")) return;
+          event.stopPropagation();
+          void ws.open(file, { where: whereFromEvent(event), group });
+        });
+        bodies.add(node, card, { element: content, ensure, release: drop, ready: () => painted });
         cleanups.push(drop);
         continue;
       }
