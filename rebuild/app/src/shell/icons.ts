@@ -152,6 +152,7 @@ const ICONS = {
   pilcrow: lucide.Pilcrow,
   pin: lucide.Pin,
   "pin-off": lucide.PinOff,
+  play: lucide.Play,
   plus: lucide.Plus,
   quote: lucide.Quote,
   replace: lucide.Replace,

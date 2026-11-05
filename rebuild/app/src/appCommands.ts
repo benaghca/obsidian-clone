@@ -11,6 +11,7 @@ import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
+import { startCanvasPresentation } from "./canvas/presentSession";
 import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { openDailyNote } from "./editorHost";
@@ -318,6 +319,10 @@ export function registerAppCommands(parts: AppParts) {
       () => openQuickSwitcher(ws), undefined, mod("o")),
     action("bases:new-file", "Bases: Create new base", "table", () => newBase(ws)),
     action("canvas:new-file", "Create new canvas", "layout-dashboard", () => newCanvas(ws)),
+    conditionalAction("canvas:start-presentation", "Canvas: Start presentation", "play", () => {
+      const view = parts.panes.el.querySelector<HTMLElement>(".workspace-tabs.mod-active .canvas-view");
+      if (view) startCanvasPresentation(view);
+    }, () => ws.active.type === "canvas", [{ key: "f5" }]),
     { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => createNewNote() },
     { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => createNewNote(false) },
     action(

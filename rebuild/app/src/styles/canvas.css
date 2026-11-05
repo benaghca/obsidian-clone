@@ -237,3 +237,40 @@
 @supports not (content-visibility: hidden) {
   .canvas-node.is-culled > *, .canvas-node.is-body-pending:not(.is-editing) > .canvas-node-content { display: none; }
 }
+
+/* Presentation: the board fills the window, and only the slide bar stays. */
+body.is-canvas-presenting .workspace-ribbon,
+body.is-canvas-presenting .mod-left-split,
+body.is-canvas-presenting .mod-right-split,
+body.is-canvas-presenting .status-bar,
+body.is-canvas-presenting .titlebar-buttons,
+body.is-canvas-presenting .mod-root .workspace-tab-header-container,
+body.is-canvas-presenting .workspace-leaf-resize-handle {
+  display: none !important;
+}
+.canvas-view.is-presenting { background-image: none; }
+.canvas-view.is-presenting .canvas-controls,
+.canvas-view.is-presenting .canvas-selection-menu,
+.canvas-view.is-presenting .canvas-card-menu,
+.canvas-view.is-presenting .canvas-node-resizer,
+.canvas-view.is-presenting .canvas-node-connection-point,
+.canvas-view.is-presenting .canvas-edge-end {
+  display: none !important;
+}
+.canvas-present-ui {
+  position: absolute;
+  z-index: 6;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%);
+}
+.canvas-present-ui .clickable-icon { width: 32px; height: 32px; }
+.canvas-present-count { min-width: 4.5em; padding: 0 6px; text-align: center; font-size: 13px; color: var(--text-muted); }

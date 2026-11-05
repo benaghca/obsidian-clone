@@ -33,6 +33,20 @@ test("title mode detaches bodies without rebuilding their cached rendering",()=>
   const{view,manager,cards,flush,live}=setup();manager.update();flush();expect(cards[0].content.parentElement).toBe(cards[0].el);expect(live()).toBe(1);
   view.titles=true;manager.update();flush();expect(cards[0].content.parentElement).toBeNull();expect(live()).toBe(1);manager.dispose();expect(live()).toBe(0);
 });
+test("presentation keeps an off-screen body out of title mode",()=>{
+  const{view,manager,cards,flush}=setup();view.titles=true;manager.update();flush();
+  expect(cards[1].content.parentElement).toBeNull();
+  manager.present(["1"]);
+  expect(cards[1].el.classes.has("is-culled")).toBe(false);
+  expect(cards[1].el.classes.has("is-title-mode")).toBe(false);
+  expect(cards[1].content.parentElement).toBe(cards[1].el);
+  manager.update();flush();
+  expect(cards[1].content.parentElement).toBe(cards[1].el);
+  expect(cards[1].el.classes.has("is-title-mode")).toBe(false);
+  manager.present([]);manager.update();flush();
+  expect(cards[1].el.classes.has("is-culled")).toBe(true);
+  manager.dispose();
+});
 test("the LRU releases old bodies and disposal releases the remaining cache",()=>{
   const{view,manager,flush,live}=setup(400);
   for(let i=0;i<400;i++){view.x=i*1000;manager.update();flush();}

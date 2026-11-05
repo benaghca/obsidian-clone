@@ -116,6 +116,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     }
   }
   el.addEventListener("pointerdown", e => {
+    if (el.classList.contains("is-presenting")) return;
     clearCreate();
     suppress = false; pressedLabel = undefined;
     if (e.defaultPrevented || e.button !== 0 || el.classList.contains("is-grabbable")) return;
@@ -277,6 +278,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   // The card a title-mode double-click just framed, when that zoom stayed zoomed out.
   let titleZoom: { id: string; scale: number } | undefined;
   el.addEventListener("dblclick", e => {
+    if (el.classList.contains("is-presenting")) return;
     if (!e.isTrusted || (e.target as Element).closest(".is-editing, .canvas-selection-menu")) return;
     // Zoomed out, a double-click zooms to the card instead of opening a tiny editor.
     // The next one, still on that framing, edits. A card too large to pass 55% never
@@ -301,6 +303,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     if (group) { e.preventDefault(); e.stopPropagation(); edit(group, selection); }
   }, { capture: true, signal: events.signal });
   el.addEventListener("contextmenu", e => {
+    if (el.classList.contains("is-presenting")) return;
     if ((e.target as Element).closest(".is-editing, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
     const target = e.target as Element;
     const node = nodes.find(n => n.id === target.closest<HTMLElement>(".canvas-node")?.dataset.nodeId);
@@ -327,6 +330,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
   el.addEventListener("keydown", e => {
     if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only]")) return;
+    if (el.classList.contains("is-presenting")) return;
     if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); menu.zoom(); return; }
     const undo = (e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase());
     const remove = e.key === "Delete" || e.key === "Backspace";
