@@ -15,9 +15,9 @@ export type PropertyEditResult = EditResult & { change?: Change };
 const refused = (reason: string): PropertyEditResult => ({ status: "refused", reason });
 const MAX_BYTES = 16 * 1024 * 1024;
 const tooLarge = (s: string) => s.length > MAX_BYTES || s.length > MAX_BYTES / 3 && new TextEncoder().encode(s).length > MAX_BYTES;
-interface Line { text: string; from: number; end: number; eol: string }
+export interface Line { text: string; from: number; end: number; eol: string }
 interface Block { lines: Line[]; props: Property[]; open: Line; close: Line }
-function lineAt(text: string, from: number): Line {
+export function lineAt(text: string, from: number): Line {
   const lf = text.indexOf("\n", from), end = lf < 0 ? text.length : lf + 1;
   const cr = lf >= 0 && text[lf - 1] === "\r";
   return { text: text.slice(from, lf < 0 ? end : lf - Number(cr)), from, end, eol: lf < 0 ? "" : cr ? "\r\n" : "\n" };
