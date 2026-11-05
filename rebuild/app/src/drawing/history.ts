@@ -72,6 +72,29 @@ export class Transaction {
     return updateElement(this.scene, id, patch, this.stamp);
   }
 
+  /**
+   * `patch` on top of what this transaction already holds for `id`: added to
+   * its live change if it has one, made now if not. A gesture that gathers
+   * every element's patch first and merges each once stamps it once.
+   */
+  merge(id: string, patch: Patch): DrawingElement | undefined {
+    const live = this.pending.get(id);
+    return live ? this.preview(id, { ...live, ...patch }) : this.update(id, patch);
+  }
+
+  /**
+   * Fold `patch` into the live change for `id` and draw it now, without a new
+   * version. `commit` stamps it once. Unlike `merge`, this never stamps on
+   * the first call, so a gesture can add followers on every frame.
+   */
+  absorb(id: string, patch: Patch): DrawingElement | undefined {
+    const live = this.pending.get(id);
+    return this.preview(id, live ? { ...live, ...patch } : patch);
+  }
+
+  /** Whether `id` has a live change waiting for `commit`. */
+  isLive(id: string): boolean { return this.pending.has(id); }
+
   add(type: string, props: Record<string, Json>): DrawingElement {
     const el = addElement(this.scene, type, props, this.stamp);
     this.slots.set(el.id, el.slot);

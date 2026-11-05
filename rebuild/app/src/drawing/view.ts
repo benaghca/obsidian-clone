@@ -338,7 +338,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     }
   }, { passive: false });
   el.addEventListener("keydown", (event) => {
-    if ((event.target as Element).closest(".drawing-controls, .drawing-toolbar, .drawing-style, .drawing-help")) return;
+    if ((event.target as Element).closest(".drawing-controls, .drawing-toolbar, .drawing-style, .drawing-help, .drawing-text-editor")) return;
     if (event.code === "Space" || event.key === " ") {
       event.preventDefault();
       space = true;

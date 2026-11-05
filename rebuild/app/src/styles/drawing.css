@@ -56,7 +56,19 @@
 .drawing-overlay .drawing-stem { stroke: var(--interactive-accent); stroke-width: 1; }
 .drawing-overlay .drawing-handle { fill: var(--background-primary); stroke: var(--interactive-accent); stroke-width: 1.5; }
 .drawing-overlay .drawing-marquee { fill: hsla(var(--accent-h), var(--accent-s), var(--accent-l), .08); stroke: var(--interactive-accent); stroke-width: 1; stroke-dasharray: 4 3; }
+.drawing-overlay .drawing-point { fill: var(--background-primary); stroke: var(--interactive-accent); stroke-width: 1.5; }
+.drawing-overlay .drawing-midpoint { fill: var(--interactive-accent); stroke: var(--background-primary); stroke-width: 1; opacity: .75; }
+.drawing-overlay .drawing-bind-hint { fill: hsla(var(--accent-h), var(--accent-s), var(--accent-l), .08); stroke: var(--interactive-accent); stroke-width: 2; }
 .drawing-view.is-drawing-tool { cursor: crosshair; }
+.drawing-world [data-id].is-erasing { opacity: .2; }
+
+/* Text being typed: an unframed box over where the text will be drawn. */
+.drawing-text-editor {
+  position: absolute; z-index: 3; margin: 0; padding: 0; border: 0; border-radius: 0;
+  outline: 1px dashed var(--interactive-accent); outline-offset: 2px;
+  background: transparent; box-shadow: none; resize: none; overflow: hidden;
+  white-space: pre; overflow-wrap: normal; caret-color: var(--text-normal);
+}
 
 .drawing-toolbar {
   position: absolute;
@@ -91,8 +103,11 @@
   box-shadow: 0 1px 4px rgb(0 0 0 / 12%);
   font-size: var(--font-ui-small);
   user-select: none;
+  max-height: calc(100% - 64px);
+  overflow-y: auto;
 }
 .drawing-style-section + .drawing-style-section { margin-top: 8px; }
+.drawing-style-row + .drawing-style-row { margin-top: 4px; }
 .drawing-style-title { color: var(--text-muted); margin-bottom: 4px; }
 .drawing-style-row { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
 .drawing-style-choice {
@@ -109,6 +124,18 @@
 .drawing-dash-mark { display: block; width: 16px; border-top: 2px solid var(--text-normal); }
 .drawing-dash-mark.is-dashed { border-top-style: dashed; }
 .drawing-dash-mark.is-dotted { border-top-style: dotted; }
+.drawing-head-mark { position: relative; display: block; width: 16px; border-top: 2px solid var(--text-normal); }
+.drawing-head-mark.is-start { transform: scaleX(-1); }
+.drawing-head-mark::after { content: ""; position: absolute; right: -1px; top: -5px; width: 8px; height: 8px; box-sizing: border-box; }
+.drawing-head-mark.is-arrow::after { border-top: 2px solid var(--text-normal); border-right: 2px solid var(--text-normal); transform: rotate(45deg) translate(-1px, 1px); }
+.drawing-head-mark.is-triangle::after { width: 0; height: 0; top: -5px; border-left: 8px solid var(--text-normal); border-top: 4px solid transparent; border-bottom: 4px solid transparent; }
+.drawing-head-mark.is-dot::after { width: 7px; height: 7px; top: -4.5px; border-radius: 50%; background: var(--text-normal); }
+.drawing-head-mark.is-bar::after { width: 2px; height: 10px; top: -6px; background: var(--text-normal); }
+.drawing-font-mark { font-size: 13px; line-height: 1; color: var(--text-normal); }
+.drawing-font-mark.is-hand { font-family: cursive; }
+.drawing-font-mark.is-normal { font-family: sans-serif; }
+.drawing-font-mark.is-code { font-family: ui-monospace, "JetBrains Mono", monospace; }
+.drawing-style-choice .svg-icon { width: 14px; height: 14px; }
 .drawing-fill-mark { display: block; width: 14px; height: 14px; border: 1px solid var(--text-normal); border-radius: 2px; }
 .drawing-fill-mark.is-solid { background: var(--text-muted); }
 .drawing-fill-mark.is-hachure { background: repeating-linear-gradient(-45deg, var(--text-muted) 0 1px, transparent 1px 4px); }
