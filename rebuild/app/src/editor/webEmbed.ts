@@ -99,6 +99,7 @@ function rebuilt(url: URL, host: string, path: string, query: Record<string, str
   out.username = "";
   out.password = "";
   out.host = host;
+  out.port = "";
   out.pathname = path;
   out.search = "";
   out.hash = "";

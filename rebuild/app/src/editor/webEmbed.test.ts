@@ -65,6 +65,8 @@ test("YouTube and Vimeo pages become their players; other pages load as they are
   expect(playerUrl("https://youtube.com/watch?v=dQw4w9WgXcQ&list=x")).toBe(yt);
   expect(playerUrl("https://m.youtube.com/watch?v=dQw4w9WgXcQ")).toBe(yt);
   expect(playerUrl("http://youtu.be/dQw4w9WgXcQ")).toBe(yt);
+  expect(playerUrl("http://youtu.be:8080/dQw4w9WgXcQ")).toBe(yt);
+  expect(playerUrl("https://vimeo.com:8443/76979871")).toBe("https://player.vimeo.com/video/76979871");
   expect(playerUrl("https://www.youtube.com/shorts/dQw4w9WgXcQ")).toBe(yt);
   expect(playerUrl("https://www.youtube.com/live/dQw4w9WgXcQ")).toBe(yt);
   expect(playerUrl("https://youtu.be/dQw4w9WgXcQ?t=90")).toBe(`${yt}?start=90`);
