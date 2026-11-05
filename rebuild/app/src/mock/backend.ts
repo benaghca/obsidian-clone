@@ -38,7 +38,7 @@ function isBinary(content: string) {
 /** The same refusals as the Rust path check: nothing outside the vault or in a hidden folder. */
 function badPath(path: string): string | null {
   if (!path || path.startsWith("/") || path.includes("\\") || path.includes("\0") || path.includes(":")) return "invalid path";
-  const hidden = new Set([".grove", ".obsidian", ".git", ".trash"]);
+  const hidden = new Set([".grove", ".obsidian", ".git", ".trash", ".cinder"]);
   if (path.split("/").some((p) => !p || p === "." || p === ".." || hidden.has(p) || p.includes(".grove-tmp"))) return "invalid path";
   return null;
 }
@@ -115,6 +115,12 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     if (!CONFIG_NAME.test(name)) throw new Error(`invalid config name: ${name}`);
     return CONFIG_KEY + name;
   };
+  // Cinder's and Obsidian's settings files, read only (read_foreign_config).
+  // A test puts one in localStorage under this key plus "cinder/settings.json"
+  // or "obsidian/app.json" before loading the page; the mock never writes them.
+  const FOREIGN_KEY = "grove.mock.foreign:";
+  const FOREIGN = new Set(["cinder/settings.json", "obsidian/daily-notes.json", "obsidian/templates.json", "obsidian/app.json"]);
+  const CONFIG_MAX = 1 << 20;
 
 
   function entry(path: string): FileEntry {
@@ -446,6 +452,18 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       } catch {
         return null;
       }
+    },
+    read_foreign_config: ({ source, name }) => {
+      const id = `${source}/${name}`;
+      if (!FOREIGN.has(id)) throw new Error(`invalid foreign config: ${id}`);
+      let text: string | null = null;
+      try {
+        text = localStorage.getItem(FOREIGN_KEY + id);
+      } catch {
+        return null;
+      }
+      if (text !== null && new TextEncoder().encode(text).length > CONFIG_MAX) throw new Error(`not a settings file: ${id}`);
+      return text;
     },
     write_config: ({ name, content }) => {
       const key = configName(name);

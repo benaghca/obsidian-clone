@@ -146,6 +146,11 @@ export const api = {
   readConfig: (name: string) => call<string | null>("read_config", { name }),
   /** Write a settings file (JSON) into the vault's .grove folder. */
   writeConfig: (name: string, content: string) => call<void>("write_config", { name, content }),
+  /**
+   * One of Cinder's or Obsidian's settings files, read only: `cinder`/`settings.json`, or
+   * `obsidian` with `daily-notes.json`, `templates.json` or `app.json` (null if missing).
+   */
+  readForeignConfig: (source: "cinder" | "obsidian", name: string) => call<string | null>("read_foreign_config", { source, name }),
   openExternal,
   /** "Open in new window": the note in a window of its own (the browser preview only logs; `?note=` shows that window). */
   openNoteWindow: async (path: string) => {

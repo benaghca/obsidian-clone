@@ -164,3 +164,26 @@ test("merged search commands treat nameless .md files as attachments and keep na
     expect(plain).not.toContain("C1B-INT/Upper.MD");
   } finally { vi.unstubAllGlobals(); }
 });
+
+test("read_foreign_config reads only the allowlisted Cinder and Obsidian files and never writes them", async () => {
+  const saved = new Map<string, string>([["grove.mock.foreign:cinder/settings.json", '{"dailyFolder":"Daily"}']]);
+  const local = { getItem: (k: string) => saved.get(k) ?? null, setItem: (k: string, v: string) => void saved.set(k, v) };
+  vi.stubGlobal("location", { search: "" });
+  vi.stubGlobal("sessionStorage", { getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("localStorage", local);
+  try {
+    const { invoke } = createMockBackend();
+    expect(await invoke("read_foreign_config", { source: "cinder", name: "settings.json" })).toBe('{"dailyFolder":"Daily"}');
+    expect(await invoke("read_foreign_config", { source: "obsidian", name: "app.json" })).toBeNull();
+    for (const [source, name] of [["cinder", "settings.md"], ["obsidian", "hotkeys.json"], ["grove", "app.json"], ["obsidian", "../app.json"]]) {
+      await expect(invoke("read_foreign_config", { source, name })).rejects.toThrow("invalid foreign config");
+    }
+    saved.set("grove.mock.foreign:obsidian/app.json", "x".repeat((1 << 20) + 1));
+    await expect(invoke("read_foreign_config", { source: "obsidian", name: "app.json" })).rejects.toThrow("not a settings file");
+    // .cinder is hidden like .obsidian: the mock's path check refuses it.
+    await expect(invoke("write_file_bytes", { path: ".cinder/x.png", bytes: [1] })).rejects.toThrow("invalid path");
+    expect((await invoke<{ status: string }>("set_property", { path: ".cinder/settings.md", edit: {} })).status).toBe("refused");
+    expect([...saved.keys()].filter((k) => k.startsWith("grove.mock.foreign:"))).toEqual(["grove.mock.foreign:cinder/settings.json", "grove.mock.foreign:obsidian/app.json"]);
+    expect(saved.get("grove.mock.foreign:cinder/settings.json")).toBe('{"dailyFolder":"Daily"}');
+  } finally { vi.unstubAllGlobals(); }
+});
