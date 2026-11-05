@@ -294,7 +294,7 @@ function diamondPath(el: ShapeElement): string {
   return d + " Z";
 }
 
-function curveControls(pts: Point[], i: number): [Point, Point, Point, Point] {
+export function curveControls(pts: Point[], i: number): [Point, Point, Point, Point] {
   const p0 = pts[Math.max(0, i - 1)];
   const p1 = pts[i];
   const p2 = pts[i + 1];

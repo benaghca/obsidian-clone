@@ -332,9 +332,29 @@ export function liveElements(scene: Scene): DrawingElement[] {
   return scene.elements.filter(e => e.known && !e.isDeleted);
 }
 
+// Where each id sits in `scene.elements`, the last one winning as in a scan
+// from the end. Built on first use per array; an edit that swaps a view in
+// place keeps it, and one that adds or rebuilds views drops or extends it.
+const indexes = new WeakMap<DrawingElement[], Map<string, number>>();
+
+function indexOfId(scene: Scene, id: string): number {
+  const list = scene.elements;
+  let index = indexes.get(list);
+  if (index) {
+    const at = index.get(id);
+    if (at !== undefined && list[at]?.id === id) return at;
+    // Found nowhere and nothing was added behind the index's back: not here.
+    if (at === undefined && index.size === list.length) return -1;
+  }
+  index = new Map();
+  for (let i = 0; i < list.length; i++) index.set(list[i].id, i);
+  indexes.set(list, index);
+  return index.get(id) ?? -1;
+}
+
 export function findElement(scene: Scene, id: string): DrawingElement | undefined {
-  for (let i = scene.elements.length - 1; i >= 0; i--) if (scene.elements[i].id === id) return scene.elements[i];
-  return undefined;
+  const at = indexOfId(scene, id);
+  return at < 0 ? undefined : scene.elements[at];
 }
 
 const sameJson = (a: unknown, b: unknown) => a === b || typeof a === "object" && typeof b === "object" && JSON.stringify(a) === JSON.stringify(b);
@@ -368,7 +388,21 @@ function stamp(raw: JsonObject, s: Stamp): JsonObject {
  * no such element.
  */
 export function updateElement(scene: Scene, id: string, patch: Record<string, Json | undefined>, s: Stamp = {}): DrawingElement | undefined {
-  const el = findElement(scene, id);
+  return patchElement(scene, id, patch, s, true);
+}
+
+/**
+ * Like `updateElement`, without a new `version`, `versionNonce` or `updated`.
+ * For a gesture's live frames: the editor puts the record back and makes one
+ * stamped `updateElement` when the gesture ends.
+ */
+export function previewElement(scene: Scene, id: string, patch: Record<string, Json | undefined>): DrawingElement | undefined {
+  return patchElement(scene, id, patch, {}, false);
+}
+
+function patchElement(scene: Scene, id: string, patch: Record<string, Json | undefined>, s: Stamp, mark: boolean): DrawingElement | undefined {
+  const at = indexOfId(scene, id);
+  const el = at < 0 ? undefined : scene.elements[at];
   if (!el) return undefined;
   const list = scene.data.elements as Json[];
   let raw = list[el.slot] as JsonObject;
@@ -381,10 +415,10 @@ export function updateElement(scene: Scene, id: string, patch: Record<string, Js
     changed = true;
   }
   if (!changed) return el;
-  raw = stamp(raw, s);
+  if (mark) raw = stamp(raw, s);
   list[el.slot] = raw;
   const next = viewElement(raw, el.slot)!;
-  scene.elements[scene.elements.indexOf(el)] = next;
+  scene.elements[at] = next;
   scene.dirty = true;
   return next;
 }
@@ -427,6 +461,49 @@ export function addElement(scene: Scene, type: string, props: Record<string, Jso
   const el = viewElement(raw, list.length - 1);
   if (!el) throw new Error("A new element needs a string id and type.");
   scene.elements.push(el);
+  indexes.get(scene.elements)?.set(el.id, scene.elements.length - 1);
   scene.dirty = true;
   return el;
+}
+
+/** A deep copy of a raw record, keys in the same order. */
+export function cloneRecord(raw: JsonObject): JsonObject {
+  return JSON.parse(JSON.stringify(raw)) as JsonObject;
+}
+
+/** The raw record at `slot` of the file's `elements`, if it is an object. */
+export function recordAt(scene: Scene, slot: number): JsonObject | undefined {
+  const list = scene.data.elements;
+  const raw = Array.isArray(list) ? list[slot] : undefined;
+  return isObject(raw) ? raw : undefined;
+}
+
+/**
+ * Put records back at their slots and cut `elements` to `length`, then rebuild
+ * the element views. Undo and redo use this to return to an earlier state.
+ */
+export function restoreRecords(scene: Scene, records: ReadonlyMap<number, JsonObject>, length: number) {
+  if (!Array.isArray(scene.data.elements)) scene.data = setKey(scene.data, "elements", []);
+  const list = scene.data.elements as Json[];
+  for (const [slot, raw] of records) list[slot] = cloneRecord(raw);
+  list.length = length;
+  const views: DrawingElement[] = [];
+  for (let i = 0; i < list.length; i++) { const el = viewElement(list[i], i); if (el) views.push(el); }
+  scene.elements = views;
+}
+
+/** Put one record back at `slot` and refresh its view. Views are in slot order, so this is a binary search. */
+export function putRecord(scene: Scene, slot: number, raw: JsonObject) {
+  const list = scene.data.elements as Json[];
+  const copy = cloneRecord(raw);
+  list[slot] = copy;
+  let lo = 0, hi = scene.elements.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const at = scene.elements[mid].slot;
+    if (at === slot) { const view = viewElement(copy, slot); if (view) scene.elements[mid] = view; return; }
+    if (at < slot) lo = mid + 1; else hi = mid - 1;
+  }
+  const view = viewElement(copy, slot);
+  if (view) { scene.elements.splice(lo, 0, view); indexes.delete(scene.elements); }
 }
