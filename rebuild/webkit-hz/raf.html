@@ -1,0 +1,30 @@
+<!doctype html><meta charset="utf-8"><title>rAF rate</title>
+<style>html,body{margin:0;height:100%;background:#fff}
+#grid{position:fixed;inset:0;background-image:radial-gradient(circle,#999 1px,transparent 1px);background-size:20px 20px}
+#box{position:fixed;left:0;top:0;width:10px;height:10px;background:red}</style>
+<div id="grid"></div><div id="box"></div>
+<script>
+// Each phase: rAF every frame for 3 s; log fps and gap percentiles to the console.
+const grid = document.getElementById("grid"), box = document.getElementById("box");
+const t0 = Date.now(), wall = () => Date.now();
+function phase(name, perFrame) {
+  return new Promise(done => {
+    const gaps = []; let last = 0, start = 0, i = 0; const w0 = wall();
+    const tick = now => {
+      if (!start) start = now; if (last) gaps.push(now - last); last = now;
+      perFrame && perFrame(i++);
+      if (now - start < 3000) requestAnimationFrame(tick);
+      else { gaps.sort((a, b) => a - b); const p = q => gaps[Math.floor((gaps.length - 1) * q)].toFixed(2);
+        console.log("HZRESULT " + JSON.stringify({ name, fps: +(gaps.length / ((now - start) / 1000)).toFixed(1), p50: p(.5), p95: p(.95), wall: [w0, wall()], size: [innerWidth, innerHeight], ua: navigator.userAgent.slice(0, 60) })); done(); }
+    };
+    requestAnimationFrame(tick);
+  });
+}
+setTimeout(async () => {
+  await phase("idle");
+  await phase("tinyMove", i => box.style.transform = `translateX(${i % 200}px)`);
+  await phase("gridPan", i => grid.style.backgroundPosition = `${i % 40}px ${i % 40}px`);
+  await phase("gridZoom", i => grid.style.backgroundSize = `${16 + (i % 64) / 8}px ${16 + (i % 64) / 8}px`);
+  console.log("HZRESULT done");
+}, 1500);
+</script>

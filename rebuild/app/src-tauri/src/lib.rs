@@ -111,6 +111,7 @@ pub fn run() {
             tags,
             read_config,
             write_config,
+            read_foreign_config,
             open_note_window,
         ])
         .run(tauri::generate_context!())
@@ -435,6 +436,16 @@ fn read_config(state: State<'_, AppState>, name: String) -> Result<Option<String
 #[tauri::command]
 fn write_config(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
     with_vault(&state, |v| v.write_config(&name, &content))
+}
+
+/// One allowlisted Cinder or Obsidian settings file (`None` if missing). Never writes.
+#[tauri::command(async)]
+fn read_foreign_config(
+    state: State<'_, AppState>,
+    source: String,
+    name: String,
+) -> Result<Option<String>, String> {
+    with_vault(&state, |v| v.read_foreign_config(&source, &name))
 }
 
 #[tauri::command(async)]

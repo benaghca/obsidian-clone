@@ -1,0 +1,6 @@
+{ "type": "excalidraw", "version": 2, "source": "hand-edited",
+  "elements": [
+    { "id": "n1", "type": "rectangle", "x": 1.50, "y": 2e1, "width": 10, "height": 10, "text": "café" }
+  ],
+  "appState": { "viewBackgroundColor": "#ffffff" }
+}

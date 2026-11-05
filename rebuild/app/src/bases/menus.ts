@@ -140,7 +140,7 @@ export function baseMenus(ws: Workspace, file: BaseFile, current: () => Model, t
         const title=typeof mapping(v).name==="string"?String(mapping(v).name):"View";
         if(!title.toLowerCase().includes(search.value.toLowerCase()))return [];
         const viewType = mapping(v).type;
-        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon(viewGlyph(String(viewType ?? "")),14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"Configure view",onclick:(e:MouseEvent)=>{e.stopPropagation();if(i===current().viewIndex)configure();else void changed(i).then(configure);}},icon("chevron-right",14))),disabled:viewType!=null&&viewType!=="table"&&viewType!=="cards"&&viewType!=="kanban"&&viewType!=="list",action:()=>void changed(i)}];
+        return [{title,content:h("div",{class:`bases-view-option${i===base.viewIndex?" is-current-view":""}`},icon(viewGlyph(String(viewType ?? "")),14),h("span",{class:"menu-item-title"},title),h("button",{class:"bases-view-options",type:"button","aria-label":"Configure view",onclick:(e:MouseEvent)=>{e.stopPropagation();if(i===current().viewIndex)configure();else void changed(i).then(configure);}},icon("chevron-right",14))),disabled:viewType!=null&&viewType!=="table"&&viewType!=="cards"&&viewType!=="kanban"&&viewType!=="list"&&viewType!=="board",action:()=>void changed(i)}];
       }),SEPARATOR,{title:"Add view",icon:"plus",action:()=>{
         save((source,b)=>{
           const names=new Set(b.views.map(v=>mapping(v).name));let n=0;while(names.has(n?`View ${n}`:"View"))n++;

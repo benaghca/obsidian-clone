@@ -161,10 +161,14 @@ fn scan_skips_hidden_dirs_and_names_notes() {
     fs::create_dir_all(dir.path.join(".obsidian")).unwrap();
     fs::create_dir_all(dir.path.join(".git")).unwrap();
     fs::create_dir_all(dir.path.join(".trash")).unwrap();
+    fs::create_dir_all(dir.path.join(".cinder")).unwrap();
+    fs::create_dir_all(dir.path.join(".grove")).unwrap();
     fs::create_dir_all(dir.path.join("sub")).unwrap();
     fs::write(dir.path.join(".obsidian").join("app.json"), "{}").unwrap();
     fs::write(dir.path.join(".git").join("config"), "").unwrap();
     fs::write(dir.path.join(".trash").join("old.md"), "[[Hello]]").unwrap();
+    fs::write(dir.path.join(".cinder").join("README.md"), "[[Hello]] cinder-only\n").unwrap();
+    fs::write(dir.path.join(".grove").join("app.json"), "{\"cinder-only\":true}").unwrap();
     fs::write(dir.path.join("Hello.md"), "[[sub/Deep]]\n").unwrap();
     fs::write(dir.path.join("sub").join("Deep.md"), "hi\n").unwrap();
     fs::write(dir.path.join("pic.png"), "x").unwrap();
@@ -347,8 +351,10 @@ fn a_new_folder_is_indexed_like_a_scan() {
     let mut idx = Index::scan(&dir.path).unwrap();
     fs::create_dir_all(dir.path.join("new/inner")).unwrap();
     fs::create_dir_all(dir.path.join("new/.grove")).unwrap();
+    fs::create_dir_all(dir.path.join("new/.cinder")).unwrap();
     fs::write(dir.path.join("new/inner/Deep.md"), "[[Top]]\n").unwrap();
     fs::write(dir.path.join("new/.grove/app.json"), "{}").unwrap();
+    fs::write(dir.path.join("new/.cinder/README.md"), "hidden\n").unwrap();
     fs::write(dir.path.join(format!("new/x.md{}", fsutil::TEMP_MARK)), "").unwrap();
     idx.refresh_path(&dir.path, "new");
     let paths: Vec<_> = idx.list().into_iter().map(|e| e.path).collect();

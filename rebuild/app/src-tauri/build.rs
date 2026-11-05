@@ -30,6 +30,7 @@ fn main() {
             "properties",
             "read_config",
             "write_config",
+            "read_foreign_config",
             "open_note_window",
         ]),
     ))
