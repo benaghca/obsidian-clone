@@ -15,9 +15,11 @@ import { writeClipboard } from "./editor/clipboard";
 import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { openDailyNote } from "./editorHost";
 import { newBase } from "./bases/new";
+import { baseNotice } from "./bases/notice";
 import { copyNote, deleteFile, newCanvas, newNote } from "./fileOps";
 import { linkAt } from "./editor/linkAt";
 import { addLines, aliasEdit, frontmatterField } from "./editor/frontmatter";
+import { mergeTemplate } from "./editor/templateMerge";
 import { openAlias, openNewProperty } from "./editor/properties";
 import {
   BLOCKS,
@@ -146,8 +148,10 @@ export function registerAppCommands(parts: AppParts) {
   async function insertTemplate(path: string) {
     const view = ws.view;
     const text = await templateText(path, ws.active.path ? noteName(ws.active.path) : "");
-    const { from, to } = view.state.selection.main;
-    view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length }, scrollIntoView: true, userEvent: "input.template" });
+    // The body at the cursor, the template's properties merged into the note's: one transaction, one undo step.
+    const merged = mergeTemplate(view.state.doc.toString(), text, view.state.selection.main);
+    if (merged.skipped) baseNotice("The template's properties weren't added: this note's properties can't be edited safely.");
+    view.dispatch({ changes: merged.changes, ...(merged.bodyInserted ? { selection: { anchor: merged.cursor } } : {}), scrollIntoView: true, userEvent: "input.template" });
     view.focus();
   }
 

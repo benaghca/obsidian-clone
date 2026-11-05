@@ -1,0 +1,6 @@
+formulas:
+  label: |
+    hello
+views:
+  - type: table
+    name: Table

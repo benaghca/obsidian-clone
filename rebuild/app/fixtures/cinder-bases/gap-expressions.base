@@ -1,0 +1,11 @@
+formulas:
+  word: tags.contains("scifi") and tags.length == 2
+  tern: 'status == "done" ? 1 : 2'
+  base: file.basename
+views:
+  - type: table
+    name: Table
+    order:
+      - formula.word
+      - formula.tern
+      - formula.base

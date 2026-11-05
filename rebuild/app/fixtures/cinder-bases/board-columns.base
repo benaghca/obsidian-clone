@@ -1,0 +1,13 @@
+views:
+  - type: board
+    name: Board
+    groupBy:
+      property: status
+      direction: ASC
+    columns:
+      - todo
+      - reading
+      - done
+    order:
+      - file.name
+      - author

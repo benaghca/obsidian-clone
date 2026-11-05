@@ -87,6 +87,24 @@ Checks on the merged tree:
 - `npm run audit:offline`: passed (193 source files, dist, CSP, capabilities, dependencies).
 - `rebuild/round*-shots/`: restored after the suite.
 
+## Merge with integration 5760368
+
+On 2026-11-05 I merged `rebuild/integration` (5760368: X1, BX1, M0a, WK1, T1, I1, I2) into this branch, from 7783b9c, on `rebuild/c2-merge-claude`, with `--no-ff`.
+
+There was one conflict:
+
+- `package.json`, the `test` script: integration added `test-template-merge.mjs` after `test-paste.mjs`, and this branch added `test-calendar.mjs` and `test-daily-notes.mjs` at the end. The resolved script is integration's line with the two daily-notes tests appended. Each side had nothing else of its own, and `posttest` did not conflict.
+
+`appCommands.ts` and `editorHost.ts` merged cleanly. The two sides touched separate code: T1's template merge and I1/I2's attachment saving on one side, C1's daily-note list and `openDailyNote` on the other. No code changed beyond the resolution.
+
+Checks on the merged tree:
+
+- `npm run build`: passed.
+- `cargo test --offline` (src-tauri): 102 passed, 0 failed, 4 ignored.
+- `flock /tmp/grove-npm-test.lock npm test`: the first run passed the whole `test` script. It then failed in `posttest`, on one 33.3ms typing frame in `test-bases-embed.mjs` (limit 20ms). That run overlapped my own `cargo test`. The script passed three times on its own, at 16.7–16.8ms. A second full run, with nothing else of mine running, exited 0 with `posttest` included. Vitest: 84 files, 1,360 tests. Every browser script passed, including `test-template-merge.mjs`, `test-calendar.mjs` and `test-daily-notes.mjs`.
+- `npm run audit:offline`: passed (196 source files, dist, CSP, capabilities, dependencies).
+- `rebuild/round*-shots/`: restored after the suite.
+
 ## Verdict
 
 VERDICT: OK

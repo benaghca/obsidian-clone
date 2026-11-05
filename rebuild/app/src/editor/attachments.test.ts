@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { attachmentDir, attachmentName, attachmentPaths, embedFor, pastedImageName, uniquePath } from "./attachments";
+import { attachmentDir, attachmentName, attachmentPaths, embedFor, pastedImageName, splitClipboardImage, uniquePath } from "./attachments";
 
 const at = new Date(2026, 9, 23, 20, 15, 0);
 
@@ -35,6 +35,25 @@ test("clipboard images are stamped, named files keep their names, and clashes ga
     "Pasted image 20261023201500 1.png",
     "diagram 1.png",
   ]);
+});
+
+test("a clipboard image splits on the first line and keeps newlines in the bytes", () => {
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x01]);
+  const packed = new Uint8Array(new TextEncoder().encode("image/png\n").length + png.length);
+  packed.set(new TextEncoder().encode("image/png\n"));
+  packed.set(png, packed.length - png.length);
+  const image = splitClipboardImage(packed);
+  expect(image?.mime).toBe("image/png");
+  expect([...(image?.bytes ?? [])]).toEqual([...png]);
+  const jpeg = new Uint8Array(new TextEncoder().encode("image/jpeg\n").length + 1);
+  jpeg.set(new TextEncoder().encode("image/jpeg\n"));
+  jpeg[jpeg.length - 1] = 1;
+  expect(splitClipboardImage(jpeg)?.mime).toBe("image/jpeg");
+  expect(attachmentName({ name: "image.png", type: "image/jpeg" }, at)).toBe("Pasted image 20261023201500.jpg");
+  expect(splitClipboardImage(new Uint8Array())).toBeNull();
+  expect(splitClipboardImage(new TextEncoder().encode("image/png"))).toBeNull();
+  expect(splitClipboardImage(new TextEncoder().encode("image/png\n"))).toBeNull();
+  expect(splitClipboardImage(new TextEncoder().encode("text/plain\nnope"))).toBeNull();
 });
 
 test("the embed follows the link settings", () => {

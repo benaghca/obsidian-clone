@@ -94,7 +94,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   let cleanups: (() => void)[] = [];
   const clear = () => { cardActions.reset(); stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
   const navigation = canvasNavigation(el, world, tab, path, history, () => draw());
-  const cardActions = canvasCards(el, world, ws, (node, edge) => {
+  const cardActions = canvasCards(el, world, ws, path, (node, edge) => {
     if (gone || canvasReadOnly.has(el)) return;
     stopText?.();
     const nodes = Array.isArray(node) ? node : [node];
