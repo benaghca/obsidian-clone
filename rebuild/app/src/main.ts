@@ -23,12 +23,14 @@ import { commands, fromStored } from "./commands";
 import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
 import { frontmatterField } from "./editor/frontmatter";
+import { openDailyNote } from "./editorHost";
 import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
+import { dailyNotePath } from "./settings/dateFormat";
 import { excluder } from "./settings/exclude";
 import { isSettingsOpen, openSettings } from "./settings/modal";
 import type { PluginId } from "./settings/schema";
@@ -496,9 +498,22 @@ if (ws.vault.path) rememberVault({ path: ws.vault.path, name: ws.vault.name });
 await settings.load();
 bookmarks.load();
 if (popoutNote) await ws.open(popoutNote);
-else await restoreLayout();
+else {
+  await restoreLayout();
+  await openDailyOnStartup();
+}
 syncTitle();
 warmUpPromptGlyphs();
+
+/** Settings → Daily notes → Open daily note on startup: today's note, once per window, after the layout is back. */
+async function openDailyOnStartup() {
+  if (!commands.pluginEnabled("daily-notes") || !settings.get("daily-notes.json").autorun || !ws.vault.path) return;
+  // Already in a tab (restored, or the vault was last closed on it): show that tab.
+  const path = dailyNotePath(new Date(), settings.get("daily-notes.json")).toLowerCase();
+  const shown = ws.groups().flatMap((g) => g.tabs).find((t) => !t.type && t.path?.toLowerCase() === path);
+  if (shown) ws.activate(shown);
+  else await openDailyNote(ws, new Date()).catch((err) => console.error("Could not open today's daily note", err));
+}
 
 async function restoreLayout() {
   const layout = loadLayout(ws.vault.path);

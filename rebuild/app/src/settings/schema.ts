@@ -101,6 +101,8 @@ const DAILY_NOTES = {
   format: field("YYYY-MM-DD", text(100)),
   folder: field("", text()),
   template: field("", text()),
+  /** Open today's daily note when the vault opens (Obsidian's key for it). */
+  autorun: field(false, bool),
 };
 
 const TEMPLATES = {

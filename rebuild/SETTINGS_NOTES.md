@@ -221,7 +221,7 @@ Obsidian's list has 29 entries. Grove offers the twelve of those it has, with Ob
 | Page | Settings |
 |---|---|
 | **Backlinks** | "Show backlinks at the bottom of notes": new tabs start with backlinks under the note. |
-| **Daily notes** | **Date format:** Obsidian's four presets, shown as today's date, plus Custom with a live preview. **New file location.** **Template file location.** "Open today's daily note" builds the path from these and creates the note from the template. Previous/next daily note follow the format and folder. Checked: format `dddd D MMMM YYYY`, folder `Journal` → `Journal/Tuesday 20 October 2026.md`. |
+| **Daily notes** | **Date format:** Obsidian's four presets, shown as today's date, plus Custom with a live preview. **New file location.** **Template file location.** "Open today's daily note" builds the path from these and creates the note from the template. Previous/next daily note follow the format and folder. Checked: format `dddd D MMMM YYYY`, folder `Journal` → `Journal/Tuesday 20 October 2026.md`. A format with folders (`YYYY/MM/YYYY-MM-DD`) creates them with the note. **Open daily note on startup** (`autorun`, off by default) opens or creates today's note once per window (C1). |
 | **Note composer** | "Confirm file merge" (Obsidian's), with a merge dialog. |
 | **Templates** | Template folder location, Date format, Time format. "Templates: Insert template" lists the folder's notes and inserts one with `{{title}}`, `{{date}}`, `{{time}}` and `{{date:FORMAT}}` / `{{time:FORMAT}}` filled in. "Insert current date / time" now use these formats. |
 

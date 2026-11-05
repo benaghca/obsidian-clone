@@ -18,8 +18,8 @@ import { type NoteLike, resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
-import { fileName, isNoteFile, noteName, trimSlashes } from "./paths";
-import { fillTemplate, formatDate } from "./settings/dateFormat";
+import { fileName, isNoteFile, noteName } from "./paths";
+import { dailyNotePath, fillTemplate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
 import { propertyIndex } from "./shell/propertyIndex";
@@ -33,22 +33,36 @@ const mime = (path: string) => {
 const MAX_NOTES = 100;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
-/** Open the daily note for `date`, creating it from the daily-notes template when it is missing. */
+// Daily notes being created, by path, so a second open of the same day while
+// the first is still writing (startup and a click, two clicks) opens that note.
+const creatingDaily = new Map<string, Promise<FileEntry>>();
+
+/**
+ * Open the daily note for `date`, creating it from the daily-notes template
+ * when it is missing. A date format with folders (`YYYY/MM/YYYY-MM-DD`) puts
+ * the note in them; the backend creates the folders with the note.
+ */
 export async function openDailyNote(ws: Workspace, date: Date): Promise<void> {
   const daily = settings.get("daily-notes.json");
-  const folder = trimSlashes(daily.folder);
-  const path = `${folder ? `${folder}/` : ""}${formatDate(date, daily.format || "YYYY-MM-DD")}.md`;
-  const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
+  const path = dailyNotePath(date, daily);
+  const key = path.toLowerCase();
+  const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === key);
   if (existing) {
     await ws.open(existing.path);
     return;
   }
-  const templates = settings.get("templates.json");
-  const template = daily.template.trim() ? ws.resolve(daily.template.trim(), null) : null;
-  const raw = template ? await ws.editors.text(template).catch(() => "") : "";
-  const text = fillTemplate(raw, noteName(path), date, templates.dateFormat || "YYYY-MM-DD", templates.timeFormat || "HH:mm");
-  const entry = await createNote(ws, path, text);
-  await ws.open(entry.path);
+  let creating = creatingDaily.get(key);
+  if (!creating) {
+    creating = (async () => {
+      const templates = settings.get("templates.json");
+      const template = daily.template.trim() ? ws.resolve(daily.template.trim(), null) : null;
+      const raw = template ? await ws.editors.text(template).catch(() => "") : "";
+      const text = fillTemplate(raw, noteName(path), date, templates.dateFormat || "YYYY-MM-DD", templates.timeFormat || "HH:mm");
+      return createNote(ws, path, text);
+    })().finally(() => creatingDaily.delete(key));
+    creatingDaily.set(key, creating);
+  }
+  await ws.open((await creating).path);
 }
 
 /** The property date, at the current time of day so a template's {{time}} is not midnight. */
