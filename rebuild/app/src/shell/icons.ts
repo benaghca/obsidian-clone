@@ -172,6 +172,8 @@ const ICONS = {
   square: lucide.Square,
   diamond: lucide.Diamond,
   circle: lucide.Circle,
+  "move-up-right": lucide.MoveUpRight,
+  slash: lucide.Slash,
   "square-function": lucide.SquareFunction,
   "square-check-big": lucide.SquareCheckBig,
   "square-code": lucide.SquareCode,
