@@ -65,10 +65,28 @@ await withBrowser(async ({ send, run, press, chord, key, check }) => {
   await wait(() => run(() => !document.querySelector('.modal.mod-settings')), 'settings did not close');
 
   await run(async () => {
+    const { settings } = await import('/src/settings/store.ts');
+    settings.set('templates.json', 'folder', 'No Templates');
+  });
+  const emptyBefore = await paths();
+  await palette('note from template', 'Templates: Create new note from template');
+  await wait(() => run(() => document.querySelector('.prompt-input')?.placeholder === 'Type to search templates...'), 'an empty template folder did not open the picker');
+  check(await run(() => !!document.querySelector('.suggestion-empty') && [...document.querySelectorAll('.prompt-instruction')].some((el) => el.textContent.includes('to create'))), 'an empty template folder offers nothing and creates on Enter');
+  await press('Enter');
+  await sleep(80);
+  check(await run(() => !!document.querySelector('.prompt-input')), 'Enter in an empty template folder keeps the picker open');
+  await press('Escape');
+  await wait(() => run(() => !document.querySelector('.prompt-input')), 'the empty template picker did not close');
+  assert.deepEqual((await paths()).slice().sort(), emptyBefore.slice().sort());
+  check(true, 'an empty template folder creates nothing');
+
+  await run(async () => {
     const { api } = await import('/src/api.ts');
     const { settings } = await import('/src/settings/store.ts');
     await api.createNote('Templates/Meeting.md', '---\ntags:\n  - meeting\ncreated: {{date}}\ntopic: {{title}}\n---\n# {{title}}\nAt {{time}}\n<% tp.file.cursor() %>\n{{date:YYYY}}\n');
     await api.createNote('Templates/Standup.md', 'Standup {{title}}\n');
+    await api.createNote('Templates/Stamp.md', '{{date}} {{time}}\n');
+    await api.createNote('Templates/Gone.md', 'gone {{title}}\n');
     await api.createNote('Not a template.md', 'leave me out');
     await api.createNote('Journal/Log.md', 'log');
     settings.set('templates.json', 'folder', 'Templates');
@@ -109,6 +127,25 @@ await withBrowser(async ({ send, run, press, chord, key, check }) => {
   await wait(titleReady, 'the inline title is not focused and selected');
   check(true, 'the inline title is focused, selected, and editable');
 
+  // The title stays selected. Another create must not treat that draft as the new note's name.
+  stamp = await clock();
+  await palette('note from template', 'Templates: Create new note from template');
+  await pickTemplate('Meeting');
+  await press('Enter');
+  await wait(() => run(() => ws.active.path === 'Inbox/Untitled 1.md'), 'a second create from the selected title did not open Inbox/Untitled 1.md');
+  await wait(async () => accept(await text(), meeting('Untitled 1', stamp)) || accept(await text(), meeting('Untitled 1', await clock())), 'the second create from the selected title was not filled in');
+  const secondWhileFocused = await text();
+  assert.ok(accept(secondWhileFocused, meeting('Untitled 1', stamp)) || accept(secondWhileFocused, meeting('Untitled 1', await clock())), secondWhileFocused);
+  await wait(() => run(() => {
+    const title = document.querySelector('.workspace-tabs.mod-active .inline-title');
+    const sel = getSelection();
+    return !!title && document.activeElement === title && title.textContent === 'Untitled 1' && sel?.toString() === 'Untitled 1' && !title.hasAttribute('aria-invalid') && !document.querySelector('.rename-error');
+  }), 'the new title kept the previous note\'s name');
+  check(true, 'a create started from the selected title names and selects the new note');
+  await press('Escape');
+  await run(() => ws.open('Inbox/Untitled.md'));
+  await wait(() => run((expected) => ws.active.path === 'Inbox/Untitled.md' && ws.view.state.doc.toString() === expected, filled), 'the first note did not come back for undo');
+
   await press('Escape');
   await sleep(80);
   await chord('z');
@@ -126,11 +163,11 @@ await withBrowser(async ({ send, run, press, chord, key, check }) => {
   await palette('note from template', 'Templates: Create new note from template');
   await pickTemplate('Meeting');
   await press('Enter');
-  await wait(() => run(() => ws.active.path === 'Inbox/Untitled 1.md'), 'Inbox/Untitled 1.md did not open');
-  await wait(async () => accept(await text(), meeting('Untitled 1', stamp)) || accept(await text(), meeting('Untitled 1', await clock())), 'the second template was not filled in');
+  await wait(() => run(() => ws.active.path === 'Inbox/Untitled 2.md'), 'Inbox/Untitled 2.md did not open');
+  await wait(async () => accept(await text(), meeting('Untitled 2', stamp)) || accept(await text(), meeting('Untitled 2', await clock())), 'the second template was not filled in');
   const second = await text();
-  assert.ok(accept(second, meeting('Untitled 1', stamp)) || accept(second, meeting('Untitled 1', await clock())), second);
-  await wait(() => run(() => document.body.classList.contains('is-inline-title-hidden') && document.activeElement?.classList.contains('inline-title') && document.activeElement.classList.contains('is-renaming') && document.activeElement.getBoundingClientRect().height > 0 && getSelection()?.toString() === 'Untitled 1'), 'a hidden inline title did not open for the rename');
+  assert.ok(accept(second, meeting('Untitled 2', stamp)) || accept(second, meeting('Untitled 2', await clock())), second);
+  await wait(() => run(() => document.body.classList.contains('is-inline-title-hidden') && document.activeElement?.classList.contains('inline-title') && document.activeElement.classList.contains('is-renaming') && document.activeElement.getBoundingClientRect().height > 0 && getSelection()?.toString() === 'Untitled 2'), 'a hidden inline title did not open for the rename');
   check(true, 'the inline title still opens for editing when it is hidden');
   await send('Input.insertText', { text: 'Board notes' });
   await sleep(80);
@@ -138,7 +175,7 @@ await withBrowser(async ({ send, run, press, chord, key, check }) => {
   await press('Enter');
   await wait(() => run(() => ws.active.path === 'Inbox/Board notes.md'), 'the inline title did not rename the note');
   assert.equal(await text(), second);
-  check(second.includes('# Untitled 1\n'), 'renaming the note leaves the filled {{title}} as it was');
+  check(second.includes('# Untitled 2\n'), 'renaming the note leaves the filled {{title}} as it was');
   await wait(() => run(async (expected) => { const { api } = await import('/src/api.ts'); return (await api.readNote('Inbox/Board notes.md')) === expected; }, second), 'the renamed note was not saved');
   await wait(() => run(async (expected) => { const { api } = await import('/src/api.ts'); return (await api.readNote('Inbox/Untitled.md')) === expected; }, filled), 'the first note was not left as filled');
   check(true, 'the first note is unchanged');
@@ -170,6 +207,46 @@ await withBrowser(async ({ send, run, press, chord, key, check }) => {
   await wait(() => text().then((s) => s === 'Standup Untitled\n'), 'the root note was not filled from the template');
   assert.equal(await text(), 'Standup Untitled\n');
   check(true, 'the vault root is used when new notes go there');
+
+  const rootBefore = await paths();
+  await palette('note from template', 'Templates: Create new note from template');
+  await pickTemplate('Gone');
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.deletePath('Templates/Gone.md', true);
+    await ws.vault.refreshFiles();
+  });
+  await press('Enter');
+  await wait(() => run(() => document.querySelector('.bases-copy-notice')?.textContent === "Couldn't read that template."), 'a missing template did not say it could not be read');
+  await sleep(80);
+  assert.deepEqual((await paths()).slice().sort(), rootBefore.filter((p) => p !== 'Templates/Gone.md').sort());
+  check(await run(() => ws.active.path === 'Untitled.md'), 'a missing template creates no note');
+  check(true, 'a missing template creates nothing');
+
+  await run(async () => {
+    const { settings } = await import('/src/settings/store.ts');
+    settings.set('templates.json', 'dateFormat', 'D MMM YYYY');
+    settings.set('templates.json', 'timeFormat', 'HH:mm');
+  });
+  stamp = await clock();
+  const stampText = (s) => run(async (dateFormat, time) => {
+    const { formatDate } = await import('/src/settings/dateFormat.ts');
+    return `${formatDate(new Date(), dateFormat)} ${time}\n`;
+  }, 'D MMM YYYY', s.time);
+  await palette('note from template', 'Templates: Create new note from template');
+  await pickTemplate('Stamp');
+  await press('Enter');
+  await wait(() => run(() => ws.active.path === 'Untitled 1.md'), 'the formatted note did not open');
+  const wantStamp = async () => {
+    const now = await clock();
+    const exact = await stampText(stamp);
+    const alt = await stampText({ time: nextMinute(stamp.time) });
+    const later = await stampText(now);
+    const got = await text();
+    return got === exact || got === alt || got === later;
+  };
+  await wait(wantStamp, 'settings date and time formats were not filled in');
+  check(await wantStamp(), 'the new note uses the Templates date and time formats');
 
   await run(async () => {
     const { settings } = await import('/src/settings/store.ts');

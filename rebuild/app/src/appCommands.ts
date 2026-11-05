@@ -172,16 +172,31 @@ export function registerAppCommands(parts: AppParts) {
   }
   /** Create Untitled in the new-note folder, fill it from the template, and select the inline title. */
   async function applyNewTemplate(templatePath: string) {
+    // Read before creating, so a missing template does not leave a blank note.
+    let raw: string;
+    try {
+      raw = await ws.editors.text(templatePath);
+    } catch (err) {
+      console.warn("Could not read template", err);
+      baseNotice("Couldn't read that template.");
+      return;
+    }
     // newNote's own default is Settings → Files and links (the new-note folder).
-    const path = await newNote(ws);
-    const raw = await ws.editors.text(templatePath).catch(() => "");
+    let path: string;
+    try {
+      path = await newNote(ws);
+    } catch (err) {
+      console.warn("Could not create a note", err);
+      baseNotice("Couldn't create a note from that template.");
+      return;
+    }
     const title = noteName(path);
     const now = new Date();
     const spec = templates();
     const dateFormat = spec.dateFormat || "YYYY-MM-DD";
     const timeFormat = spec.timeFormat || "HH:mm";
     const note = ws.editors.doc(path)?.toString() ?? "";
-    // Empty unless something was typed into the new note before the template was read.
+    // Empty unless the new note already has text when it opens.
     const merged = note
       ? mergeTemplate(note, fillTemplate(raw, title, now, dateFormat, timeFormat), { from: 0, to: 0 })
       : newNoteTemplate(raw, title, now, dateFormat, timeFormat);
