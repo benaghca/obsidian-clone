@@ -36,7 +36,7 @@
         "object-src": "'none'",
         "base-uri": "'self'",
         "form-action": "'none'",
-        "frame-src": "'none'",
+        "frame-src": "https: http:",
         "child-src": "'none'",
         "worker-src": "'none'",
         "manifest-src": "'none'"
@@ -52,7 +52,7 @@
         "object-src": "'none'",
         "base-uri": "'self'",
         "form-action": "'none'",
-        "frame-src": "'none'",
+        "frame-src": "https: http:",
         "child-src": "'none'",
         "worker-src": "'none'",
         "manifest-src": "'none'"

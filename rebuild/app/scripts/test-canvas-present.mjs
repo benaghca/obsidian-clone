@@ -40,6 +40,34 @@ const hugeNote = {
   ],
   edges: [],
 };
+const slideDrawing = {
+  type: 'excalidraw',
+  version: 2,
+  source: 'grove',
+  elements: [
+    {
+      id: 'r1', type: 'rectangle', x: 40, y: 40, width: 160, height: 90,
+      strokeColor: '#1e1e1e', backgroundColor: '#a5d8ff', fillStyle: 'solid',
+      strokeWidth: 2, strokeStyle: 'solid', roughness: 1, opacity: 100, angle: 0,
+      roundness: { type: 3 },
+    },
+    {
+      id: 't1', type: 'text', x: 48, y: 70, width: 140, height: 25,
+      strokeColor: '#1e1e1e', backgroundColor: 'transparent', fillStyle: 'solid',
+      strokeWidth: 1, strokeStyle: 'solid', roughness: 0, opacity: 100, angle: 0,
+      text: 'Hello drawing', fontSize: 20, fontFamily: 1, textAlign: 'left', verticalAlign: 'top',
+    },
+  ],
+  appState: { viewBackgroundColor: '#ffffff', gridSize: 20 },
+  files: {},
+};
+const hugeDrawing = {
+  nodes: [
+    { id: 'G', type: 'group', x: 0, y: 0, width: 8000, height: 5000, label: 'Huge' },
+    { id: 'draw', type: 'file', file: 'Slide.excalidraw', x: 120, y: 120, width: 360, height: 240 },
+  ],
+  edges: [],
+};
 const many = {
   nodes: Array.from({ length: 300 }, (_, i) => ({
     id: `n${i}`, type: 'text', x: (i % 20) * 300, y: Math.floor(i / 20) * 220, width: 250, height: 160, text: `Card ${i}`,
@@ -273,6 +301,35 @@ await withBrowser(async ({ send, on, run, click, press, check, open }) => {
   }
   console.log('HUGE NOTE', JSON.stringify(noteBody));
   check(!noteBody.title && !noteBody.culled && noteBody.text, 'a file card in a fitted group still renders its note');
+  await press('Escape');
+  await sleep(40);
+
+  await run(async (body) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('Slide.excalidraw', JSON.stringify(body));
+    await ws.vault.refreshFiles();
+  }, slideDrawing);
+  await open('HugeDrawing.canvas', hugeDrawing);
+  await waitBuilt(2);
+  await f5();
+  await waitSlide('G');
+  let drawing = { title: true, culled: true, svg: false, text: false };
+  for (let i = 0; i < 40; i++) {
+    drawing = await run(() => {
+      const card = document.querySelector('[data-node-id="draw"]');
+      const svg = card?.querySelector('.drawing-preview svg');
+      return {
+        title: !!card?.classList.contains('is-title-mode'),
+        culled: !!card?.classList.contains('is-culled'),
+        svg: !!svg,
+        text: !!svg?.textContent.includes('Hello drawing'),
+      };
+    });
+    if (drawing.svg && drawing.text && !drawing.title && !drawing.culled) break;
+    await sleep(50);
+  }
+  console.log('HUGE DRAWING', JSON.stringify(drawing));
+  check(!drawing.title && !drawing.culled && drawing.svg && drawing.text, 'a drawing card in a fitted group still renders its picture');
   await press('Escape');
   await sleep(40);
 

@@ -25,9 +25,11 @@ tauri-plugin-opener = "2"
 
 # Already in the build through wry (Tauri's Linux webview); named directly only
 # to switch on WebKitGTK's own spellchecker (Enchant with on-disk dictionaries,
-# nothing networked), which wry leaves off.
+# nothing networked), which wry leaves off, and to read
+# `is_main_frame_main_resource` (WebKit 2.40) so a registered embed origin cannot
+# navigate the main frame. `v2_40` is a cfg of this crate, not a new dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
-webkit2gtk = "2"
+webkit2gtk = { version = "2", features = ["v2_40"] }
 
 [features]
 # `tauri build` turns this on so the webview embeds ../dist.
