@@ -88,6 +88,33 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 }
 
 /**
+ * Percent-encode a vault path for the `x-grove-path` header.
+ * `/` and `A-Za-z0-9-._~` stay as themselves. Every other byte is uppercase
+ * `%HH`. A space is `%20`, not `+`. Matches `encode_grove_path` in the backend.
+ */
+function encodeGrovePath(path: string): string {
+  const hex = "0123456789ABCDEF";
+  let out = "";
+  for (const byte of new TextEncoder().encode(path)) {
+    if (
+      (byte >= 0x41 && byte <= 0x5a) ||
+      (byte >= 0x61 && byte <= 0x7a) ||
+      (byte >= 0x30 && byte <= 0x39) ||
+      byte === 0x2d ||
+      byte === 0x2e ||
+      byte === 0x5f ||
+      byte === 0x7e ||
+      byte === 0x2f
+    ) {
+      out += String.fromCharCode(byte);
+    } else {
+      out += "%" + hex[byte >> 4] + hex[byte & 0xf];
+    }
+  }
+  return out;
+}
+
+/**
  * Hand an http(s) or mailto link to the system's default handler. Only ever
  * called from an explicit click: nothing in the app fetches, previews or
  * loads these URLs itself. In the browser mock it is only logged.
@@ -116,8 +143,17 @@ export const api = {
   /** An image file's bytes (vault images only, at most 20 MB), for an embed. */
   readFileBytes: (path: string) => call<ArrayBuffer>("read_file_bytes", { path }),
   writeNote: (path: string, content: string) => call<void>("write_note", { path, content }),
-  /** A new attachment. `bytes` is a JSON array of numbers (at most 20 MB). Fails if `path` exists. */
-  writeFileBytes: (path: string, bytes: Uint8Array) => call<FileEntry>("write_file_bytes", { path, bytes: Array.from(bytes) }),
+  /**
+   * A new attachment (at most 20 MB). Fails if `path` exists.
+   * The desktop app sends the raw bytes and the path in `x-grove-path`.
+   * The browser mock still sends `{ path, bytes: number[] }`.
+   */
+  writeFileBytes: (path: string, bytes: Uint8Array) =>
+    isTauri
+      ? import("@tauri-apps/api/core").then(({ invoke }) =>
+          invoke<FileEntry>("write_file_bytes", bytes, { headers: { "x-grove-path": encodeGrovePath(path) } }),
+        )
+      : call<FileEntry>("write_file_bytes", { path, bytes: Array.from(bytes) }),
   createNote: (path: string, content: string) => call<FileEntry>("create_note", { path, content }),
   createFolder: (path: string) => call<FileEntry>("create_folder", { path }),
   renamePath: (from: string, to: string) => call<void>("rename_path", { from, to }),

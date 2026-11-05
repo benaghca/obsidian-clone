@@ -247,7 +247,9 @@ const WRITE_PATH_HEADER: &str = "x-grove-path";
 /// Percent-encode a vault path for [`WRITE_PATH_HEADER`].
 ///
 /// `/` and `A-Za-z0-9-._~` stay as themselves. Every other byte is `%HH` with
-/// uppercase hex. A space is `%20`, not `+`.
+/// uppercase hex. A space is `%20`, not `+`. The desktop app encodes in
+/// `src/api.ts`; this copy is what the round-trip test checks.
+#[cfg(test)]
 fn encode_grove_path(path: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789ABCDEF";
     let mut out = String::with_capacity(path.len());

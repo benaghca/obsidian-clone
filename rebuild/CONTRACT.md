@@ -39,7 +39,7 @@ Read commands run off the main thread; replies to separate calls may arrive in a
   await invoke("write_file_bytes", bytes, { headers: { "x-grove-path": encodeGrovePath(path) } });
   ```
 
-  `src/api.ts` still sends `{ path, bytes: number[] }`. That call fails on the desktop command until it switches to the raw body above. The browser mock may keep the old object until the same change.
+  `src/api.ts` `writeFileBytes` uses that call in the desktop app. The browser mock still takes `{ path, bytes: number[] }` until I2 switches it with the paste command.
 - `create_note(path: String, content: String) -> FileEntry`
 - `create_folder(path: String) -> FileEntry` — creates an empty folder (the file explorer's "New folder"); errors if anything already exists at `path`. Added in round 4.
 - `rename_path(from: String, to: String) -> ()` — and returns nothing; front end updates links itself later.

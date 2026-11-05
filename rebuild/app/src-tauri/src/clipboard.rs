@@ -65,8 +65,9 @@ pub fn pack_image(mime: &str, bytes: &[u8]) -> Vec<u8> {
     packed
 }
 
-/// The mime and the image bytes from a packed body.
-pub fn split_packed(packed: &[u8]) -> Option<(&str, &[u8])> {
+/// The mime and the image bytes from a packed body. The page splits the same way.
+#[cfg(test)]
+fn split_packed(packed: &[u8]) -> Option<(&str, &[u8])> {
     let nl = packed.iter().position(|b| *b == b'\n')?;
     let mime = std::str::from_utf8(&packed[..nl]).ok()?;
     Some((mime, &packed[nl + 1..]))
