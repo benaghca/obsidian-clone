@@ -60,7 +60,11 @@ const CINDER_DEFAULTS = {
   dailyTemplate: "",
   templatesFolder: "Templates",
   attachFolder: "attachments",
+  webEmbeds: "auto",
 };
+
+/** Cinder's names for Embedded web pages: "auto" is the live page. */
+const CINDER_WEB_EMBEDS: Record<string, string> = { auto: "always", click: "click", off: "off" };
 
 /** Cinder settings Grove doesn't have yet, by what the notice calls them, with Cinder's defaults. */
 const CINDER_NOT_IMPORTED: [label: string, defaults: Record<string, unknown>][] = [
@@ -68,7 +72,6 @@ const CINDER_NOT_IMPORTED: [label: string, defaults: Record<string, unknown>][] 
   ["monthly notes", { monthlyFolder: "", monthlyFormat: "YYYY-MM", monthlyTemplate: "" }],
   ["folder templates", { folderTemplates: "" }],
   ["calendar week start", { weekStart: "monday" }],
-  ["web page embeds", { webEmbeds: "auto" }],
   ["drawing format", { drawingFormat: "excalidraw" }],
 ];
 
@@ -86,7 +89,7 @@ const folder = (v: string) => trimSlashes(trimSlashes(v).replace(/^(\.\/)+/, "")
 const LABELS: Record<ImportFile, Record<string, string>> = {
   "daily-notes.json": { folder: "Daily notes folder", format: "Daily note date format", template: "Daily note template" },
   "templates.json": { folder: "Template folder", dateFormat: "Template date format", timeFormat: "Template time format" },
-  "app.json": { attachmentFolderPath: "Attachment folder", newFileFolderPath: "New note folder", newFileLocation: "New notes go in" },
+  "app.json": { attachmentFolderPath: "Attachment folder", newFileFolderPath: "New note folder", newFileLocation: "New notes go in", webEmbeds: "Embedded web pages" },
 };
 
 /** How a value reads in the notice. */
@@ -96,6 +99,7 @@ function shown(key: string, value: unknown): string {
     if (value === "./") return "the note's folder";
   }
   if (key === "newFileLocation") return value === "current" ? "the current note's folder" : value === "folder" ? "a set folder" : "the vault folder";
+  if (key === "webEmbeds") return value === "click" ? "click to load" : value === "off" ? "off (links only)" : "always load";
   if (value === "" && (key === "folder" || key === "newFileFolderPath")) return "the vault folder";
   return String(value);
 }
@@ -162,6 +166,8 @@ function fromCinder(o: Record<string, unknown>): Mapped {
   // Cinder fills {{date}} and {{time}} as YYYY-MM-DD and HH:mm, Grove's defaults, so the formats stay.
   const attach = folder(get("attachFolder"));
   values["app.json"].attachmentFolderPath = attach || "/";
+  // A value Cinder doesn't have is passed on as it is, so the notice names it.
+  values["app.json"].webEmbeds = CINDER_WEB_EMBEDS[get("webEmbeds")] ?? get("webEmbeds");
   const newNotes = folder(get("newNoteFolder"));
   if (newNotes) {
     values["app.json"].newFileLocation = "folder";

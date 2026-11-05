@@ -36,6 +36,29 @@ export function mockClipboardImageReads(): number {
   return mockClipboardReads;
 }
 
+/** Origins registered with `allow_frame_origin`, in the form the Rust command stores (lowercase host, default port dropped). */
+const mockFrameOrigins = new Set<string>();
+
+/** The origins web embeds registered so far, in order, for browser tests. */
+export function mockAllowedFrameOrigins(): string[] {
+  return [...mockFrameOrigins];
+}
+
+/** `allow_frame_origin`'s check (src-tauri/src/lockdown.rs `parse_frame_origin`): origin form only, http(s). */
+export function mockFrameOrigin(raw: string): string {
+  const bad = () => new Error("origin must be an http(s) origin: scheme, host and an optional port");
+  const m = /^(https?):\/\/([^/?#@\\\s]+)$/i.exec(raw);
+  if (!m) throw bad();
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw bad();
+  }
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || url.origin === "null") throw bad();
+  return url.origin;
+}
+
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = "";
   for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
@@ -360,6 +383,10 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     last_vault: () => ({ path: vault.path, name: vault.name }),
     list_files: () => listFiles(),
     read_note: ({ path }) => need(path).content,
+    allow_frame_origin: ({ origin }) => {
+      mockFrameOrigins.add(mockFrameOrigin(String(origin ?? "")));
+      return null;
+    },
     read_clipboard_image: () => {
       mockClipboardReads += 1;
       if (!mockClipboardPacked) return null;

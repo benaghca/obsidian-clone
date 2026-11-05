@@ -19,6 +19,8 @@ export interface EditorHost {
   /** Follow a [[wikilink]] target (note name, optionally with #heading), from the pane of `view`. */
   openLink(target: string, where: LinkTarget, view?: EditorView): void;
   openUrl(url: string): void;
+  /** Let an embedded frame load an http(s) origin (W1's `allow_frame_origin`), before a web embed frames it. Without it, pages stay unloaded. */
+  allowFrameOrigin?(origin: string): Promise<void>;
   /** Link candidates, recent files first, including attachments and unresolved targets. */
   linkCandidates(): NoteRef[];
   /** A note's frontmatter aliases, for [[ suggestions. Absent when the host has no property index. */

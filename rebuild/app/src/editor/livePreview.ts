@@ -32,6 +32,7 @@ import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
 import { markdownURL } from "../links/internal";
 import { DrawnWidget, embedChain, paintWith, readingMode, tickLine } from "./render";
+import { isWebPage, webEmbedMode, WebEmbedWidget } from "./webEmbed";
 
 /** The vault's files changed: links are drawn again (one to a missing note looks unresolved). */
 export const filesChanged = StateEffect.define<null>();
@@ -69,17 +70,20 @@ class CheckboxWidget extends DrawnWidget {
 
 // A markdown image pointing at another machine. Grove never fetches it: the
 // image shows as a small link chip that opens the URL in the system browser
-// on click, like any other external link.
+// on click, like any other external link. So does a web page embed while
+// Settings → Editor → Embedded web pages is off (`page`).
 class RemoteImageWidget extends DrawnWidget {
   constructor(
     readonly alt: string,
     readonly url: string,
+    readonly page = false,
   ) {
     super();
   }
   toDOM() {
     const text = this.alt || hostOf(this.url);
-    return h("span", { class: "cm-link cm-rendered-link cm-remote-embed", "data-href": this.url, title: `Remote image, not loaded: ${this.url}` }, text);
+    const title = `${this.page ? "Embedded web page" : "Remote image"}, not loaded: ${this.url}`;
+    return h("span", { class: "cm-link cm-rendered-link cm-remote-embed", "data-href": this.url, title }, text);
   }
 }
 
@@ -175,6 +179,8 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
   const missing = (href: string) => !!host?.linkExists && !host.linkExists(href, view);
   const resolve = (target: string) => host?.embeds?.resolve(target, view) ?? null;
   const editing = state.field(editingEmbed, false);
+  // Read from the editor, as links are: a note embedded in it shows pages as the editor does.
+  const webMode = view.state.facet(webEmbedMode);
 
   const hide = (from: number, to: number) => {
     if (to > from) decos.push(hidden.range(from, to));
@@ -351,7 +357,9 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
   }
 
   // A remote image is a link chip (never fetched); an image in the vault is
-  // drawn, and stays drawn while the caret passes it, as in Obsidian.
+  // drawn, and stays drawn while the caret passes it, as in Obsidian. A web
+  // page alone on its line is the live page (webEmbed.ts), drawn as an
+  // image is, unless the setting is off.
   function decorateImage(node: SyntaxNode) {
     const url = node.getChild("URL");
     const marks = node.getChildren("LinkMark");
@@ -359,7 +367,13 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     const raw = doc.sliceString(url.from, url.to), href = markdownURL(raw);
     const alt = doc.sliceString(marks[0].to, marks[1].from);
     if (isRemoteUrl(href)) {
-      if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href) }).range(node.from, node.to));
+      const line = doc.lineAt(node.from);
+      const page = isWebPage(href.trim()) && node.to <= line.to && line.text.trim() === doc.sliceString(node.from, node.to);
+      if (page && webMode !== "off") {
+        if (editing === node.from) return;
+        const widget = new WebEmbedWidget(href.trim(), alt, marks[0].to - node.from, url.from - node.from, url.to - url.from, webMode, reading);
+        decos.push(Decoration.replace({ widget }).range(node.from, node.to));
+      } else if (!touches(node.from, node.to)) decos.push(Decoration.replace({ widget: new RemoteImageWidget(alt, href, page) }).range(node.from, node.to));
     } else if (IMAGE_EXT.test(href) && editing !== node.from) {
       const widget = new ImageWidget(resolve(href), raw, url.from - node.from, embedSize(alt), marks[0].to - node.from, alt, node.to - node.from);
       decos.push(Decoration.replace({ widget }).range(node.from, node.to));
@@ -535,6 +549,7 @@ export class LivePreview {
       syntaxTree(u.startState) !== syntaxTree(u.state) ||
       u.startState.facet(readingMode) !== u.state.facet(readingMode) ||
       u.startState.field(editingEmbed) !== u.state.field(editingEmbed) ||
+      u.startState.facet(webEmbedMode) !== u.state.facet(webEmbedMode) ||
       u.transactions.some((tr) => tr.effects.some((e) => e.is(filesChanged)))
     ) {
       this.revealed = held ? this.revealed.map((r) => r.map(u.changes)) : revealAround(u.view);

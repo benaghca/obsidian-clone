@@ -46,6 +46,8 @@ export const APP = {
   foldIndent: field(true, bool),
   spellcheck: field(true, bool),
   autoConvertHTML: field(true, bool),
+  /** `![](address)` alone on a line: the live page (Chris's choice), the page once clicked, or a link. */
+  webEmbeds: field<"always" | "click" | "off">("always", oneOf("always", "click", "off")),
   autoPairBrackets: field(true, bool),
   autoPairMarkdown: field(true, bool),
   smartIndentList: field(true, bool),
