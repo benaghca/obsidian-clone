@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "The main window and a note's own windows (Open in new window), on the app's own origin only, can call the vault commands (and read and write their own settings in the vault's .grove folder), open or create a vault folder, open a note in a window of its own, listen for vault-changed, drive their own frameless window, set their own zoom level (Settings → Interface → Zoom level), and hand http, https and mailto links to the system opener.",
+  "description": "The main window and a note's own windows (Open in new window), on the app's own origin only, can call the vault commands (and read and write their own settings in the vault's .grove folder, and read the allowlisted Cinder and Obsidian settings files), open or create a vault folder, open a note in a window of its own, read a pasted image from the system clipboard, listen for vault-changed, drive their own frameless window, set their own zoom level (Settings → Interface → Zoom level), and hand http, https and mailto links to the system opener.",
   "windows": [
     "main",
     "note-*"
@@ -15,6 +15,7 @@
     "allow-list-files",
     "allow-read-note",
     "allow-read-file-bytes",
+    "allow-read-clipboard-image",
     "allow-write-note",
     "allow-set-property",
     "allow-write-file-bytes",
@@ -34,6 +35,7 @@
     "allow-properties",
     "allow-read-config",
     "allow-write-config",
+    "allow-read-foreign-config",
     "allow-open-note-window",
     "core:window:allow-start-dragging",
     "core:window:allow-minimize",

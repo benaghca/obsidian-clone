@@ -34,3 +34,22 @@ The renderer is TypeScript (`rebuild/app/src/drawing/render.ts`). A Tauri round 
 - **Frames paint first**, then the other elements in file order. A frame that is last in the file still sits behind the shapes.
 - **Two drawings on one page** use different pattern id prefixes (`dw`, `em`, `card` plus the canvas node id).
 - The open button on a note embed passes the resolved vault path, so a miss cannot create a `.md` note.
+
+## Merge with integration 7ba7d09
+
+Branch `rebuild/x2-merge-grok-b` from `a9032eb` (reviewed X2, re-review VERDICT OK). `git merge --no-ff rebuild/integration`. Integration is `7ba7d09`, which is `5760368` plus the P0 merge (`8f2a6c5`).
+
+Conflicts:
+
+- `rebuild/app/package.json`. The `test` script is the union of both sides: integration's `node scripts/test-feel.mjs` (after the zoom trace) and `node scripts/test-template-merge.mjs` (after `test-paste.mjs`), and X2's `node scripts/test-drawing.mjs` at the end. `posttest` was already the same on both sides.
+
+`canvas/view.ts` and `main.ts` auto-merged. Canvas file cards still pass the canvas path into `canvasCards`, and an `.excalidraw` file card still paints as `is-drawing`. `main.ts` loads `drawing.css` and calls `installHitchMeter()`.
+
+Checks, from `rebuild/app` (cargo from `src-tauri`):
+
+- `npm run build` — exit 0. `tsc --noEmit && vite build`, 2145 modules. The chunk-size warning is the existing one.
+- `flock /tmp/grove-npm-test.lock npm test` — exit 0. No timing flake, no rerun. Vitest: 84 files, 1383 tests, including 444 parity and the drawing renderer (34) and scene (37) tests. Geometry stayed within 1px. Ctrl+o frames were 16.7–17.0 ms. `test-paste.mjs`: 53 converter cases, plus the empty paste (one mock read, undo leaves the file) and the canvas image card (aspect inside 400px, on the pointer, one undo). Template merge browser checks passed. `test-drawing.mjs`: wheel and zoom change only the world transform, the `|400` embed is 400px wide, the canvas card shows the drawing, and `DRAWING_OPEN {"ms":49.9,"long":[],"count":2000}`. 300-card pan and zoom stayed under 20 ms. 300-card drag max 16.8 ms (49 intervals). Create and reconnect drag max 16.8 ms. K8 10k scroll: p95 16.8 ms, max 16.8 ms, scrollTop 279218. Kanban edge 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 140000. Bases edge 10k scroll: p95 16.7 ms, max 16.8 ms, scrollTop 160000. Property fuzz `cases=48`. `LEDGE_TYPE` max 16.8 ms, p95 16.7 ms. `LEDGE_SWITCH` max 16.8 ms, p95 16.8 ms. `LEDGE_BENCH`: `embed_section` 0.1 ms, `link_targets` 1.94 ms, `tag_tree` 3.15 ms. Feel test printed the held graph gap (p95 33.4 ms, max 33.5 ms) and passed.
+- `npm run audit:offline` — passed. 199 source files, dist, CSP, capabilities, and dependencies. The script runs the build above.
+- `cargo test --offline` — 102 passed, 0 failed, 4 ignored (`set_property_bench`, `crash_child`, `bench_vault`, `bench_search_commands`). X2 did not change Rust; these are the integration tests.
+
+`rebuild/round*-shots/` was restored with `git checkout` after the suite.

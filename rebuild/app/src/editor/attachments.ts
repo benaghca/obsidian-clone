@@ -10,6 +10,9 @@ import { formatLink, type LinkStyle, type NoteLike } from "../links/internal";
 import { fileName, parentDir, trimSlashes } from "../paths";
 
 const GENERIC = /^image\.(png|jpe?g|gif|webp|bmp|avif)$/i;
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+/** Mimes `read_clipboard_image` packs. `jpeg` is saved as `jpg` by `attachmentName`. */
+const CLIPBOARD_MIME = new Set(["image/png", "image/jpeg", "image/webp", "image/gif", "image/bmp"]);
 const IMAGE_MIME: Record<string, string> = {
   "image/png": "png",
   "image/jpeg": "jpg",
@@ -52,6 +55,29 @@ export function safeName(name: string): string | null {
 
 /** A clipboard screenshot, as opposed to a file the user actually named. */
 export const genericClipboardName = (name: string) => !name.trim() || GENERIC.test(name.trim());
+
+/** A pasted image file, by its mime or its name. Other files stay a file paste. */
+export const isClipboardImage = (file: { name: string; type: string }) =>
+  file.type.startsWith("image/") || IMAGE_FILE.test(file.name);
+
+/**
+ * Split a `read_clipboard_image` body. The first LF ends the mime; a LF inside
+ * the image stays in the bytes. Anything that is not one of the packed mimes,
+ * or an empty image, is no image.
+ */
+export function splitClipboardImage(packed: Uint8Array): { mime: string; bytes: Uint8Array } | null {
+  const nl = packed.indexOf(0x0a);
+  if (nl <= 0) return null;
+  let mime = "";
+  for (let i = 0; i < nl; i++) {
+    const byte = packed[i];
+    if (byte < 0x20 || byte > 0x7e) return null;
+    mime += String.fromCharCode(byte);
+  }
+  if (!CLIPBOARD_MIME.has(mime)) return null;
+  const bytes = packed.subarray(nl + 1);
+  return bytes.byteLength ? { mime, bytes } : null;
+}
 
 /** The file name to save. A paste of a nameless clipboard image is stamped; a drop keeps the name, including "image.png". */
 export function attachmentName(file: { name: string; type: string }, date: Date, pasted = true): string {

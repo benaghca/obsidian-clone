@@ -1,3 +1,4 @@
+import { installHitchMeter } from "./shell/hitchMeter";
 import "./styles/theme.css";
 import "./styles/base.css";
 import "./styles/sidedock.css";
@@ -80,6 +81,7 @@ const parts = {
   },
 } as AppParts;
 registerAppCommands(parts);
+installHitchMeter();
 // Modals (settings, confirmations) have the keyboard too: hotkeys wait.
 const suspended = commands.suspended;
 commands.suspended = () => suspended() || isSettingsOpen() || isConfirmOpen();

@@ -201,16 +201,14 @@ impl Vault {
     /// A settings file from the vault's `.grove/` folder; `None` if there is none yet.
     pub fn read_config(&self, name: &str) -> Result<Option<String>, String> {
         let full = fsutil::config_file(&self.root, name)?;
-        let md = match fs::metadata(&full) {
-            Ok(md) => md,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(e.to_string()),
-        };
-        if !md.is_file() || md.len() > fsutil::CONFIG_MAX_BYTES as u64 {
-            return Err(format!("not a settings file: {name}"));
-        }
-        let text = fs::read_to_string(&full).map_err(|e| e.to_string())?;
-        Ok(Some(text))
+        read_settings_text(&full, name)
+    }
+
+    /// One allowlisted file from Cinder or Obsidian, or `None` if it is missing.
+    /// Never writes. The same size cap and symlink rule as [`Self::read_config`].
+    pub fn read_foreign_config(&self, source: &str, name: &str) -> Result<Option<String>, String> {
+        let full = fsutil::foreign_config_file(&self.root, source, name)?;
+        read_settings_text(&full, &format!("{source}/{name}"))
     }
 
     /// Write a settings file into `.grove/` (created if missing), atomically. The content must
@@ -338,6 +336,20 @@ impl Vault {
                 ..FileEntry::default()
             })
     }
+}
+
+/// Read a settings file the caller has already confined to the vault.
+/// Missing is `None`. A directory, or anything over [`fsutil::CONFIG_MAX_BYTES`], is an error.
+fn read_settings_text(full: &Path, label: &str) -> Result<Option<String>, String> {
+    let md = match fs::metadata(full) {
+        Ok(md) => md,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    if !md.is_file() || md.len() > fsutil::CONFIG_MAX_BYTES as u64 {
+        return Err(format!("not a settings file: {label}"));
+    }
+    fs::read_to_string(full).map(Some).map_err(|e| e.to_string())
 }
 
 fn trash_dest(root: &Path, rel: &str) -> PathBuf {
@@ -519,6 +531,144 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(names, vec!["app.json".to_string()]);
+    }
+
+    #[test]
+    fn cinder_stays_hidden_and_foreign_config_reads_the_allowlist() {
+        let dir = tmp_dir("foreign");
+        fs::create_dir_all(dir.path.join(".cinder")).unwrap();
+        fs::create_dir_all(dir.path.join("notes/.cinder")).unwrap();
+        fs::create_dir_all(dir.path.join(".obsidian")).unwrap();
+        let cinder = "{\"dailyFolder\":\"Daily\"}\n";
+        let daily = "{\"folder\":\"Daily\"}\n";
+        let templates = "{\"folder\":\"Templates\"}\n";
+        let app = "{\"attachmentFolderPath\":\"Attachments\"}\n";
+        fs::write(dir.path.join(".cinder/settings.json"), cinder).unwrap();
+        fs::write(dir.path.join(".cinder/settings.md"), "cinder-only-token\n").unwrap();
+        fs::write(dir.path.join(".cinder/README.md"), "see [[Visible]]\n").unwrap();
+        fs::write(dir.path.join("notes/.cinder/hidden.md"), "nested-cinder-token\n").unwrap();
+        fs::write(dir.path.join(".obsidian/daily-notes.json"), daily).unwrap();
+        fs::write(dir.path.join(".obsidian/templates.json"), templates).unwrap();
+        fs::write(dir.path.join(".obsidian/app.json"), app).unwrap();
+        fs::write(dir.path.join(".obsidian/appearance.json"), "{\"theme\":\"moonstone\"}\n").unwrap();
+        fs::write(dir.path.join("Visible.md"), "visible-token\n").unwrap();
+
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let paths: Vec<_> = vault.list_files().into_iter().map(|e| e.path).collect();
+        assert_eq!(paths, vec!["Visible.md".to_string(), "notes".to_string()]);
+        assert!(vault.index.search("cinder-only-token", 10).is_empty());
+        assert!(vault.index.search("nested-cinder-token", 10).is_empty());
+        assert!(vault
+            .index
+            .search("visible-token", 10)
+            .iter()
+            .any(|hit| hit.path == "Visible.md"));
+        assert!(vault.index.backlinks(&["Visible.md".into()]).is_empty());
+        for path in [
+            ".cinder/settings.md",
+            ".cinder/README.md",
+            ".cinder/settings.json",
+            "notes/.cinder/hidden.md",
+        ] {
+            assert!(vault.read_note(path).is_err(), "{path} should be refused");
+            assert!(vault.write_note(path, "nope").is_err(), "{path}");
+        }
+        assert!(vault.create_note(".cinder/New.md", "nope").is_err());
+        assert!(vault.create_folder(".cinder/folder").is_err());
+        assert!(!dir.path.join(".cinder/New.md").exists());
+
+        assert_eq!(
+            vault.read_foreign_config("cinder", "settings.json").unwrap().as_deref(),
+            Some(cinder)
+        );
+        assert_eq!(
+            vault.read_foreign_config("obsidian", "daily-notes.json").unwrap().as_deref(),
+            Some(daily)
+        );
+        assert_eq!(
+            vault.read_foreign_config("obsidian", "templates.json").unwrap().as_deref(),
+            Some(templates)
+        );
+        assert_eq!(
+            vault.read_foreign_config("obsidian", "app.json").unwrap().as_deref(),
+            Some(app)
+        );
+        // Missing is none, and a read does not create the folder or the file.
+        assert_eq!(
+            vault.read_foreign_config("cinder", "settings.json").unwrap().as_deref(),
+            Some(cinder)
+        );
+        let empty = tmp_dir("foreign-missing");
+        let empty_vault = Vault::open(empty.path.clone()).unwrap();
+        assert_eq!(empty_vault.read_foreign_config("cinder", "settings.json").unwrap(), None);
+        assert_eq!(empty_vault.read_foreign_config("obsidian", "app.json").unwrap(), None);
+        assert!(!empty.path.join(".cinder").exists());
+        assert!(!empty.path.join(".obsidian").exists());
+
+        for (source, name) in [
+            ("cinder", "settings.md"),
+            ("cinder", "README.md"),
+            ("cinder", "app.json"),
+            ("obsidian", "settings.json"),
+            ("obsidian", "appearance.json"),
+            ("obsidian", "community-plugins.json"),
+            ("notion", "settings.json"),
+            ("cinder", "../Visible.md"),
+            ("", ""),
+        ] {
+            assert!(
+                vault.read_foreign_config(source, name).is_err(),
+                "{source}/{name} should be refused"
+            );
+        }
+        assert_eq!(fs::read_to_string(dir.path.join(".cinder/settings.json")).unwrap(), cinder);
+        assert_eq!(fs::read_to_string(dir.path.join(".cinder/README.md")).unwrap(), "see [[Visible]]\n");
+        assert_eq!(
+            fs::read_to_string(dir.path.join(".obsidian/appearance.json")).unwrap(),
+            "{\"theme\":\"moonstone\"}\n"
+        );
+
+        fs::remove_file(dir.path.join(".cinder/settings.json")).unwrap();
+        fs::create_dir(dir.path.join(".cinder/settings.json")).unwrap();
+        assert!(vault.read_foreign_config("cinder", "settings.json").is_err());
+        let huge = dir.path.join(".obsidian/templates.json");
+        fs::File::create(&huge)
+            .unwrap()
+            .set_len(crate::fsutil::CONFIG_MAX_BYTES as u64 + 1)
+            .unwrap();
+        assert!(vault.read_foreign_config("obsidian", "templates.json").is_err());
+        assert_eq!(
+            fs::metadata(&huge).unwrap().len(),
+            crate::fsutil::CONFIG_MAX_BYTES as u64 + 1
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreign_config_refuses_a_symlink_out_of_the_vault() {
+        let dir = tmp_dir("foreign-vault-link");
+        let outside = tmp_dir("foreign-vault-out");
+        let secret = "{\"token\":\"outside-secret\"}\n";
+        fs::write(outside.path.join("settings.json"), secret).unwrap();
+        fs::write(outside.path.join("app.json"), secret).unwrap();
+        std::os::unix::fs::symlink(&outside.path, dir.path.join(".cinder")).unwrap();
+        fs::create_dir(dir.path.join(".obsidian")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path.join("app.json"),
+            dir.path.join(".obsidian/app.json"),
+        )
+        .unwrap();
+        fs::write(dir.path.join(".obsidian/daily-notes.json"), "{\"folder\":\"In\"}\n").unwrap();
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        assert!(vault.read_foreign_config("cinder", "settings.json").is_err());
+        assert!(vault.read_foreign_config("obsidian", "app.json").is_err());
+        assert_eq!(
+            vault.read_foreign_config("obsidian", "daily-notes.json").unwrap().as_deref(),
+            Some("{\"folder\":\"In\"}\n")
+        );
+        assert_eq!(fs::read_to_string(outside.path.join("settings.json")).unwrap(), secret);
+        assert_eq!(fs::read_to_string(outside.path.join("app.json")).unwrap(), secret);
+        assert!(vault.list_files().is_empty());
     }
 
     #[test]
