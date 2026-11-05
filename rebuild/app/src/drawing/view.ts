@@ -1,14 +1,18 @@
-// Read-only drawing tab. A gesture writes the world transform and, when the
-// drawing has a grid, that grid's background size and position. Element markup
-// stays put until the file or the theme changes.
+// Drawing tab. A pan or zoom writes the world transform and, when the
+// drawing has a grid, that grid's background size and position. The SVG sits
+// in scene coordinates (placed at its viewBox corner, overflow visible), so
+// an edit that grows the drawing needs no new viewBox. Opening or a theme
+// change paints the whole drawing; an edit repaints only the elements it
+// touched. Edits save through write_note after a short pause, like a canvas.
 
 import { api } from "../api";
 import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
 import type { Workspace } from "../workspace";
+import { drawingEditor } from "./editor";
 import { openDrawingImages, renderDrawing, type DrawingPicture } from "./render";
-import { parseScene, type Scene } from "./scene";
+import { findElement, parseScene, serializeScene, type Point, type Scene } from "./scene";
 
 interface Viewport { path: string; cx: number; cy: number; scale: number }
 const viewports = new WeakMap<Tab, Viewport>();
@@ -16,6 +20,8 @@ let prefixes = 0;
 const MIN_SCALE = 1 / 64;
 const MAX_SCALE = 16;
 const HEAVY_TEXT = 80_000;
+const SAVE_DELAY = 300;
+const BULK = 150;
 const clampScale = (scale: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
 
 export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
@@ -34,12 +40,21 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   let viewBox: DrawingPicture["viewBox"] | null = null;
   let emptyScene = false;
   let images: ReturnType<typeof openDrawingImages> | null = null;
+  let scene: Scene | null = null;
+  let painting = false;
   let textSeen = "";
   let darkSeen = false;
   let loadGen = 0;
   let chunkGen = 0;
   let parseTimer = 0;
   let chunkTimer = 0;
+  let saveTimer = 0;
+  let patches = 0;
+  let notifying = false;
+  let writing = Promise.resolve();
+  // Texts this tab wrote lately: a watcher event that reads one back is our own save.
+  const ours: string[] = [];
+  const patchDefs = new Map<string, Element>();
   let space = false;
   let cancelDrag: (() => void) | undefined;
   const theme = new MutationObserver(() => {
@@ -48,8 +63,10 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     darkSeen = dark;
     chunkGen++;
     clearTimeout(parseTimer);
-    parseTimer = window.setTimeout(() => mount(textSeen, dark), 0);
+    parseTimer = window.setTimeout(() => { if (scene) paint(scene, dark); else mount(textSeen, dark); }, 0);
   });
+
+  const svgOf = () => world.firstElementChild instanceof SVGSVGElement ? world.firstElementChild : null;
 
   function draw() {
     if (!state || !viewW || !viewH) return;
@@ -57,6 +74,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     const y = viewH / 2 - state.cy * state.scale;
     world.style.transform = `translate(${x}px, ${y}px) scale(${state.scale})`;
     viewports.set(tab, state);
+    editor.viewChanged();
     if (!gridStep) return;
     let grid = gridStep * state.scale;
     while (grid < 10) grid *= 2;
@@ -69,7 +87,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     if (!viewW || !viewH) { viewW = el.clientWidth; viewH = el.clientHeight; }
     if (!viewW || !viewH) return;
     const scale = emptyScene ? 1 : clampScale(Math.min(viewW / viewBox.width, viewH / viewBox.height));
-    state = { path, cx: viewBox.width / 2, cy: viewBox.height / 2, scale };
+    state = { path, cx: viewBox.x + viewBox.width / 2, cy: viewBox.y + viewBox.height / 2, scale };
     draw();
   }
 
@@ -87,11 +105,14 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
 
   function fail(text: string) {
     chunkGen++;
+    scene = null;
+    painting = false;
     world.replaceChildren();
     message.hidden = false;
     message.textContent = text;
     images?.revoke();
     images = null;
+    editor.reset();
   }
 
   function applyChrome(picture: DrawingPicture) {
@@ -103,49 +124,147 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     if (!gridStep) { el.style.backgroundSize = ""; el.style.backgroundPosition = ""; }
   }
 
-  function appendChunk(svg: SVGSVGElement, chunk: string) {
+  function parseSvg(markup: string): SVGSVGElement | null {
     const holder = document.createElement("div");
-    holder.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg">${chunk}</svg>`;
-    const parsed = holder.querySelector("svg");
+    holder.innerHTML = markup;
+    return holder.querySelector("svg");
+  }
+
+  function appendChunk(svg: SVGSVGElement, chunk: string) {
+    const parsed = parseSvg(`<svg xmlns="http://www.w3.org/2000/svg">${chunk}</svg>`);
     if (!parsed) return;
     while (parsed.firstChild) svg.appendChild(parsed.firstChild);
+  }
+
+  function place(svg: SVGSVGElement, box: DrawingPicture["viewBox"]) {
+    svg.style.left = `${box.x}px`;
+    svg.style.top = `${box.y}px`;
   }
 
   function mount(text: string, dark: boolean) {
     const parsed = parseScene(text);
     if (!parsed.ok) { fail(parsed.error); return; }
+    scene = parsed.scene;
     paint(parsed.scene, dark);
   }
 
-  function paint(scene: Scene, dark: boolean) {
+  function paint(next: Scene, dark: boolean) {
     message.hidden = true;
     images?.revoke();
-    images = openDrawingImages(scene);
-    const heavy = scene.elements.length > 400;
-    const picture = renderDrawing(scene, { dark, images: images.href, idPrefix: prefix, paper: false, omitMarkup: heavy });
+    images = openDrawingImages(next);
+    patchDefs.clear();
+    const heavy = next.elements.length > 400;
+    const picture = renderDrawing(next, { dark, images: images.href, idPrefix: prefix, paper: false, omitMarkup: heavy });
     viewBox = picture.viewBox;
-    emptyScene = !scene.elements.some((el) => !el.isDeleted);
+    emptyScene = !next.elements.some((e) => !e.isDeleted);
     applyChrome(picture);
     chunkGen++;
     clearTimeout(chunkTimer);
-    if (!heavy) world.innerHTML = picture.markup;
-    else {
+    if (!heavy) {
+      world.innerHTML = picture.markup;
+      const svg = svgOf();
+      if (svg) place(svg, picture.viewBox);
+      painting = false;
+    } else {
       world.innerHTML = picture.shell;
-      const svg = world.querySelector("svg");
+      const svg = svgOf();
+      if (svg) place(svg, picture.viewBox);
       const mine = chunkGen;
       let index = 0;
+      painting = !!svg && picture.chunks.length > 0;
       const step = () => {
         if (mine !== chunkGen || !svg) return;
         const chunk = picture.chunks[index++];
         if (!chunk) return;
         appendChunk(svg, chunk);
         if (index < picture.chunks.length) chunkTimer = window.setTimeout(step, 0);
+        else { painting = false; editor.painted(); }
       };
-      if (svg && picture.chunks.length) chunkTimer = window.setTimeout(step, 0);
+      if (painting) chunkTimer = window.setTimeout(step, 0);
     }
     if (!state) fit();
     else draw();
+    editor.painted();
   }
+
+  const nodeOf = (id: string): SVGElement | null => svgOf()?.querySelector<SVGElement>(`:scope > [data-id="${CSS.escape(id)}"]`) ?? null;
+
+  // Draw each element again on its own and swap it in where its node was, or
+  // where it belongs in the stacking order if it had none.
+  function repaint(ids: Iterable<string>) {
+    const svg = svgOf();
+    if (!svg || !scene) return;
+    const touched = new Set(ids);
+    // A big change (select all, then move or undo) paints the whole drawing in chunks instead.
+    if (touched.size > BULK) { paint(scene, darkSeen); return; }
+    const order = new Map<string, number>();
+    for (const id of touched) {
+      const old = nodeOf(id);
+      patchDefs.get(id)?.remove();
+      patchDefs.delete(id);
+      const elem = findElement(scene, id);
+      if (!elem || elem.isDeleted) { old?.remove(); continue; }
+      const picture = renderDrawing({ ...scene, elements: [elem] }, { dark: darkSeen, images: images?.href, idPrefix: `${prefix}p${++patches}`, paper: false });
+      const parsed = parseSvg(picture.markup);
+      const node = parsed?.querySelector<SVGElement>(":scope > [data-id]");
+      const defs = parsed?.querySelector(":scope > defs");
+      if (defs) { svg.insertBefore(defs, svg.firstChild); patchDefs.set(id, defs); }
+      if (!node) { old?.remove(); continue; }
+      if (old) { old.replaceWith(node); continue; }
+      if (!order.size) scene.elements.forEach((e, i) => order.set(e.id, i));
+      const at = order.get(id) ?? scene.elements.length;
+      let before: SVGElement | null = null;
+      for (let i = at + 1; i < scene.elements.length && !before; i++) before = nodeOf(scene.elements[i].id);
+      svg.insertBefore(node, before);
+    }
+    emptyScene = !scene.elements.some((e) => !e.isDeleted);
+  }
+
+  function save() {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    if (!scene) return;
+    // Mid-gesture the scene holds unstamped live frames: wait for the gesture to end.
+    if (editor.busy) { changed(); return; }
+    const text = serializeScene(scene);
+    textSeen = text;
+    ours.push(text);
+    if (ours.length > 4) ours.shift();
+    writing = writing.then(async () => {
+      try {
+        await api.writeNote(path, text);
+        notifying = true;
+        try { ws.vault.written(path); } finally { notifying = false; }
+      } catch (err) { console.error(`Could not save ${path}`, err); }
+    });
+  }
+
+  function changed() {
+    clearTimeout(saveTimer);
+    saveTimer = window.setTimeout(save, SAVE_DELAY);
+  }
+
+  const toScene = (clientX: number, clientY: number): Point => {
+    const rect = el.getBoundingClientRect();
+    const s = state ?? { cx: 0, cy: 0, scale: 1 };
+    return [s.cx + (clientX - rect.left - viewW / 2) / s.scale, s.cy + (clientY - rect.top - viewH / 2) / s.scale];
+  };
+  const toScreen = (p: Point): Point => {
+    const s = state ?? { cx: 0, cy: 0, scale: 1 };
+    return [viewW / 2 + (p[0] - s.cx) * s.scale, viewH / 2 + (p[1] - s.cy) * s.scale];
+  };
+
+  const editor = drawingEditor({
+    el,
+    scene: () => scene,
+    ready: () => !!scene && !painting && !!state,
+    toScene,
+    toScreen,
+    scale: () => state?.scale ?? 1,
+    node: nodeOf,
+    repaint,
+    changed,
+  });
 
   function load() {
     const gen = ++loadGen;
@@ -155,14 +274,20 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     void api.readNote(path).then((text) => {
       if (gen !== loadGen) return;
       const dark = document.documentElement.classList.contains("theme-dark");
-      if (text === textSeen && dark === darkSeen && world.querySelector("svg")) return;
+      if ((text === textSeen || ours.includes(text)) && dark === darkSeen && svgOf()) return;
+      // Someone else changed the file: it wins over edits not yet saved, as on a canvas.
+      clearTimeout(saveTimer);
+      saveTimer = 0;
+      ours.length = 0;
       textSeen = text;
       darkSeen = dark;
       parseTimer = window.setTimeout(() => {
         if (gen !== loadGen) return;
+        editor.reset();
         if (text.length > HEAVY_TEXT) {
           const parsed = parseScene(text);
           if (!parsed.ok) { fail(parsed.error); return; }
+          scene = parsed.scene;
           parseTimer = window.setTimeout(() => { if (gen === loadGen) paint(parsed.scene, dark); }, 0);
           return;
         }
@@ -192,11 +317,11 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   });
   resize.observe(el);
   theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  const unwatch = ws.vault.onModified((changed) => { if (changed === path) load(); });
+  const unwatch = ws.vault.onModified((changedPath) => { if (changedPath === path && !notifying) load(); });
 
   el.addEventListener("wheel", (event) => {
     event.preventDefault();
-    if (!state || (event.target as Element).closest(".drawing-controls")) return;
+    if (!state || (event.target as Element).closest(".drawing-controls, .drawing-toolbar, .drawing-style, .drawing-help")) return;
     const rect = el.getBoundingClientRect();
     const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewH : 1;
     if (event.ctrlKey || space) zoomAt(state.scale * 2 ** (-event.deltaY * unit / 300), event.clientX - rect.left, event.clientY - rect.top);
@@ -211,7 +336,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     }
   }, { passive: false });
   el.addEventListener("keydown", (event) => {
-    if ((event.target as Element).closest(".drawing-controls")) return;
+    if ((event.target as Element).closest(".drawing-controls, .drawing-toolbar, .drawing-style, .drawing-help")) return;
     if (event.code === "Space" || event.key === " ") {
       event.preventDefault();
       space = true;
@@ -222,7 +347,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   el.addEventListener("keyup", (event) => { if (event.code === "Space" || event.key === " ") releaseSpace(); });
   el.addEventListener("focusout", (event) => { if (!el.contains(event.relatedTarget as Node | null)) releaseSpace(); });
   el.addEventListener("pointerdown", (event) => {
-    if ((event.target as Element).closest(".drawing-controls")) return;
+    if ((event.target as Element).closest(".drawing-controls, .drawing-toolbar, .drawing-style, .drawing-help")) return;
     if (!state || (event.button !== 1 && !(event.button === 0 && space))) return;
     event.preventDefault();
     event.stopPropagation();
@@ -237,10 +362,17 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   }, true);
   el.addEventListener("auxclick", (event) => { if (event.button === 1) event.preventDefault(); });
 
+  const flush = () => { if (saveTimer) save(); };
+  window.addEventListener("beforeunload", flush);
+
   load();
   return {
     el,
     dispose() {
+      // Drop a gesture in progress first, so what's saved is the last finished edit.
+      editor.dispose();
+      flush();
+      window.removeEventListener("beforeunload", flush);
       loadGen++;
       chunkGen++;
       clearTimeout(parseTimer);
