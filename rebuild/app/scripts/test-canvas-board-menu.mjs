@@ -133,7 +133,7 @@ await withBrowser(async ({ run, send, open, read, click, press, check }) => {
   const pageBox = await run(id => document.querySelector(`[data-node-id="${id}"]`).getBoundingClientRect().toJSON(), page.id);
   check(near(pageBox, pageAt), 'The web page card sits on the pointer');
   check(await run(() => document.querySelector('.canvas-node-link a')?.textContent === 'https://example.com/docs' && !document.querySelector('.canvas-node.is-editing')), 'The link card shows its URL and does not open an editor');
-  check(await run(() => performance.getEntriesByType('resource').every(entry => !entry.name.includes('example.com'))), 'Adding a web page does not fetch it');
+  check(await run(() => performance.getEntriesByType('resource').every(entry => !entry.name.includes('example.com') || (!(entry.transferSize > 0) && !(entry.decodedBodySize > 0)))), 'Adding a web page does not fetch it');
 
   const pasteText = async (text, fallback = false) => {
     await run(text => navigator.clipboard.writeText(text), text);

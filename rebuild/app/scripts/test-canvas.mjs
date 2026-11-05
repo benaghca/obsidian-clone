@@ -20,7 +20,15 @@ await withBrowser(async ({ send, run, click, point, move, chord, press, check, s
   check(await run(() => document.querySelector('.nav-files [data-path="Reference.canvas"] .lucide-layout-dashboard') && document.querySelector('.workspace-tab-header.is-active .lucide-layout-dashboard')), 'Explorer and tab use the canvas icon');
   check(await run(() => document.querySelector('.view-header-title').textContent === 'Reference'), 'Canvas has the normal header');
   check(await run(() => document.querySelectorAll('.canvas-node').length === 11 && document.querySelectorAll('.canvas-edges > path').length === 16), 'All known card types and side/end edges render; future nodes are skipped');
-  check(await run(() => document.querySelector('[data-node-id="text0"] .cm-strong') && !document.querySelector('.canvas-view iframe')), 'Text uses Reading rendering and link cards have no iframe');
+  check(await run(() => {
+    const frame = document.querySelector('[data-node-id="link"] iframe.canvas-web-frame');
+    return !!document.querySelector('[data-node-id="text0"] .cm-strong') && !!frame
+      && frame.getAttribute('sandbox') === 'allow-scripts allow-same-origin allow-forms'
+      && frame.getAttribute('referrerpolicy') === 'no-referrer'
+      && frame.getAttribute('loading') === 'lazy'
+      && !frame.hasAttribute('allow')
+      && (frame.getAttribute('src') || '').includes('example.invalid');
+  }), 'Text uses Reading rendering and the link card frames its page in a sandbox');
   check(await run(() => document.querySelector('[data-node-id="note"]').textContent.includes('Heading destination.') && !document.querySelector('[data-node-id="note"]').textContent.includes('tags:')), 'Note cards render body without frontmatter');
   check(await run(() => !!document.querySelector('[data-node-id="image"] img[src^="blob:"]')), 'Image/SVG cards use local blob URLs');
   check(await run(() => document.querySelector('[data-node-id="link"] a').textContent === 'https://example.invalid/no-fetch' && !document.querySelector('[data-node-id="link"] a').hasAttribute('href')), 'Link card displays only URL text without a fetching target');

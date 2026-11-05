@@ -195,6 +195,8 @@ export const api = {
    */
   readForeignConfig: (source: "cinder" | "obsidian", name: string) => call<string | null>("read_foreign_config", { source, name }),
   openExternal,
+  /** Register one http(s) origin just before an embedded frame navigates there. */
+  allowFrameOrigin: (origin: string) => call<void>("allow_frame_origin", { origin }),
   /** "Open in new window": the note in a window of its own (the browser preview only logs; `?note=` shows that window). */
   openNoteWindow: async (path: string) => {
     // Percent-encoded in full: the backend accepts nothing else in the URL.
