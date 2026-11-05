@@ -1,11 +1,12 @@
-// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline, File properties and Local graph,
-// switched with icon tabs at the top like Obsidian's. Only the selected view,
-// and only while the sidebar is open, does any work.
+// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline, File properties,
+// Calendar and Local graph, switched with icon tabs at the top like Obsidian's.
+// Only the selected view, and only while the sidebar is open, does any work.
 
 import { createGraphView } from "../graph/view";
 import { listeners } from "../listeners";
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
+import { createCalendarView } from "./calendarView";
 import { h } from "./dom";
 import { createOutgoingView } from "./outgoingView";
 import { createOutlineView } from "./outlineView";
@@ -13,7 +14,7 @@ import { createFilePropertiesView, createPropertiesView } from "./propertiesView
 import { type SideView, viewTabs } from "./sideView";
 import { createTagsView } from "./tagsView";
 
-export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "fileprops", "localgraph"] as const;
+export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "fileprops", "calendar", "localgraph"] as const;
 export type RightView = (typeof RIGHT_VIEWS)[number];
 
 export type RightSidebar = ReturnType<typeof createRightSidebar>;
@@ -35,6 +36,7 @@ export function createRightSidebar(
     properties: createPropertiesView(ws, searchFor),
     outline: createOutlineView(ws),
     fileprops: createFilePropertiesView(ws),
+    calendar: createCalendarView(ws),
     localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
   const selected = listeners<[RightView]>();
@@ -47,6 +49,7 @@ export function createRightSidebar(
       ["properties", "archive", "All properties"],
       ["outline", "list", "Outline"],
       ["fileprops", "info", "File properties"],
+      ["calendar", "calendar", "Calendar"],
       ["localgraph", "git-fork", "Local graph"],
     ],
     (name: RightView) => views[name].el,

@@ -456,6 +456,7 @@ function dailyNotes(ctx: SettingsContext): HTMLElement[] {
       customRow,
       textRow("daily-notes.json", "folder", "New file location", "New daily notes will be placed here.", "Example: folder 1/folder 2", "grove-folder-list"),
       textRow("daily-notes.json", "template", "Template file location", "Choose the file to use as a template.", "Example: folder/note", "grove-note-list"),
+      dropdownRow("daily-notes.json", "weekStart", "Start week on", "The first column of the calendar.", [["monday", "Monday"], ["sunday", "Sunday"]]),
     ),
   ];
 }

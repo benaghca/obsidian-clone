@@ -283,6 +283,7 @@ export function registerAppCommands(parts: AppParts) {
       () => ws.open(adjacentDaily(-1)!), () => !!adjacentDaily(-1)),
     pluginAction("daily-notes", "daily-notes:goto-next", "Daily notes: Open next daily note", "calendar-plus",
       () => ws.open(adjacentDaily(1)!), () => !!adjacentDaily(1)),
+    pluginAction("daily-notes", "daily-notes:open-calendar", "Daily notes: Open calendar", "calendar", () => showRight("calendar")),
     pluginAction("random-note", "random-note", "Random note: Open random note", "dices", () => {
         const notes = ws.vault.includedNotes();
         const others = notes.filter((n) => n.path !== ws.active.path);

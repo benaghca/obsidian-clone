@@ -360,7 +360,7 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["fileprops", "properties"], ["localgraph", "graph"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["fileprops", "properties"], ["calendar", "daily-notes"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
   }
   // Graph view off: its tabs close, as Obsidian closes the plugin's views.

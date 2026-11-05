@@ -31,7 +31,7 @@ export const PLUGINS: CorePlugin[] = [
   {
     id: "daily-notes",
     name: "Daily notes",
-    desc: "Create or open today's note. Turning it off removes its commands and its ribbon button.",
+    desc: "Create or open a note for a day, and show those days on a calendar. Turning it off removes its commands, its ribbon button and the Calendar tab.",
   },
   {
     id: "graph",

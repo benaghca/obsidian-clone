@@ -24,6 +24,7 @@ import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
 import { propertyIndex } from "./shell/propertyIndex";
 import { recentNotes } from "./shell/switcherItems";
+import type { OpenWhere } from "./tabs";
 
 const MIME: Record<string, string> = { jpg: "image/jpeg", jpeg: "image/jpeg", svg: "image/svg+xml" };
 const mime = (path: string) => {
@@ -34,13 +35,13 @@ const MAX_NOTES = 100;
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** Open the daily note for `date`, creating it from the daily-notes template when it is missing. */
-export async function openDailyNote(ws: Workspace, date: Date): Promise<void> {
+export async function openDailyNote(ws: Workspace, date: Date, where: OpenWhere = false): Promise<void> {
   const daily = settings.get("daily-notes.json");
   const folder = trimSlashes(daily.folder);
   const path = `${folder ? `${folder}/` : ""}${formatDate(date, daily.format || "YYYY-MM-DD")}.md`;
   const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === path.toLowerCase());
   if (existing) {
-    await ws.open(existing.path);
+    await ws.open(existing.path, { where });
     return;
   }
   const templates = settings.get("templates.json");
@@ -48,7 +49,7 @@ export async function openDailyNote(ws: Workspace, date: Date): Promise<void> {
   const raw = template ? await ws.editors.text(template).catch(() => "") : "";
   const text = fillTemplate(raw, noteName(path), date, templates.dateFormat || "YYYY-MM-DD", templates.timeFormat || "HH:mm");
   const entry = await createNote(ws, path, text);
-  await ws.open(entry.path);
+  await ws.open(entry.path, { where });
 }
 
 /** The property date, at the current time of day so a template's {{time}} is not midnight. */

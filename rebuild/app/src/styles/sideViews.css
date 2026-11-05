@@ -1,4 +1,4 @@
-/* The right sidebar's views: outline, backlinks, outgoing links and tags. */
+/* The right sidebar's views: outline, backlinks, outgoing links, tags and the calendar. */
 
 .backlinks-tab {
   display: flex;
@@ -283,4 +283,122 @@
   padding: 4px 6px 4px 22px;
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
+}
+
+/* Calendar (Daily notes): a month grid. Today is marked, a day with a note has a dot. */
+.calendar-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px 32px;
+  user-select: none;
+}
+.calendar-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 8px;
+}
+.calendar-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--font-ui-medium);
+  font-weight: 650;
+  color: var(--text-normal);
+}
+.calendar-head .clickable-icon {
+  width: 28px;
+  height: 24px;
+  padding: 4px 6px;
+  --icon-size: var(--icon-s);
+}
+.calendar-today {
+  height: 24px;
+  margin: 0;
+  padding: 0 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: var(--font-ui-smaller);
+  cursor: pointer;
+}
+.calendar-today:hover {
+  color: var(--text-normal);
+  background: var(--background-modifier-hover);
+}
+.calendar-names,
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 2px;
+}
+.calendar-names {
+  margin-bottom: 2px;
+}
+.calendar-names span {
+  text-align: center;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-faint);
+  padding: 2px 0;
+}
+.calendar-day {
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--text-normal);
+  font: inherit;
+  font-size: var(--font-ui-small);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.calendar-day:hover {
+  background: var(--background-modifier-hover);
+}
+.calendar-day.is-outside {
+  color: var(--text-faint);
+}
+.calendar-day.is-today .calendar-num {
+  color: var(--text-accent);
+  font-weight: 700;
+}
+.calendar-day.is-active {
+  background: var(--interactive-accent);
+  color: var(--text-on-accent);
+}
+.calendar-day.is-active .calendar-num,
+.calendar-day.is-active.is-today .calendar-num {
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+.calendar-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--interactive-accent);
+}
+.calendar-dot.is-empty {
+  background: transparent;
+}
+.calendar-day.is-active .calendar-dot:not(.is-empty) {
+  background: var(--text-on-accent);
+}
+.calendar-hint {
+  margin-top: 10px;
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+  color: var(--text-faint);
 }
