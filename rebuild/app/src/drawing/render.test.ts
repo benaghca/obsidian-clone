@@ -336,3 +336,76 @@ describe("point geometry", () => {
     expect(gone.viewBox).toEqual(renderDrawing(sceneOf([line])).viewBox);
   });
 });
+
+
+describe("rendered point geometry containment", () => {
+  it("fits sampled emitted curves at oblique angles with heads at both ends", () => {
+    // Sample the emitted SVG, independently of the renderer's extrema helpers.
+    // Oblique angles exercise both axes; the older regressions use quarter turns.
+    for (const type of ["line", "arrow", "freedraw"]) {
+      for (const angle of [-2.3, -0.37, 0.61, 2.8]) {
+        for (const head of ["arrow", "triangle_outline", "diamond_outline", "circle_outline", "dot", "bar"]) {
+          const picture = renderDrawing(sceneOf([{
+            id: "sample", type, x: 137, y: -83, width: 2, height: 3,
+            points: [[0, 0], [-120, 70], [-35, -90], [40, -10]],
+            angle, strokeWidth: 8, roundness: { type: 2 },
+            startArrowhead: head, endArrowhead: head,
+          }]));
+          const rotation = picture.markup.match(/rotate\(([-\d.]+) ([-\d.]+) ([-\d.]+)\)/)!;
+          const radians = Number(rotation[1]) * Math.PI / 180;
+          const cx = Number(rotation[2]), cy = Number(rotation[3]);
+          const check = (x: number, y: number) => {
+            const rx = cx + (x - cx) * Math.cos(radians) - (y - cy) * Math.sin(radians);
+            const ry = cy + (x - cx) * Math.sin(radians) + (y - cy) * Math.cos(radians);
+            // Include the stroke, not just the centreline, within the fitted view.
+            covers(picture.viewBox, rx - 4, ry - 4);
+            covers(picture.viewBox, rx + 4, ry + 4);
+          };
+          for (const path of picture.markup.matchAll(/<path[^>]* d="([^"]+)"/g)) {
+            let previous = [0, 0];
+            for (const command of path[1].matchAll(/([MLC])([^MLCZ]+)/g)) {
+              const values = command[2].trim().split(/\s+/).map(Number);
+              if (command[1] === "C") {
+                for (let step = 0; step <= 100; step++) {
+                  const t = step / 100, u = 1 - t;
+                  check(...[0, 1].map(axis => u ** 3 * previous[axis]
+                    + 3 * u ** 2 * t * values[axis]
+                    + 3 * u * t ** 2 * values[axis + 2]
+                    + t ** 3 * values[axis + 4]) as [number, number]);
+                }
+                previous = values.slice(4);
+              } else {
+                previous = values;
+                check(values[0], values[1]);
+              }
+            }
+          }
+          // Circular and bar heads are separate SVG elements.
+          for (const circle of picture.markup.matchAll(/<circle[^>]* cx="([^"]+)" cy="([^"]+)" r="([^"]+)"/g)) {
+            for (let step = 0; step < 32; step++) {
+              const a = step * Math.PI / 16;
+              check(Number(circle[1]) + Number(circle[3]) * Math.cos(a), Number(circle[2]) + Number(circle[3]) * Math.sin(a));
+            }
+          }
+          for (const bar of picture.markup.matchAll(/<line[^>]* x1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="([^"]+)"/g)) {
+            check(Number(bar[1]), Number(bar[2]));
+            check(Number(bar[3]), Number(bar[4]));
+          }
+        }
+      }
+    }
+  });
+
+  it("fits a single negative-offset freedraw dot with its full stroke", () => {
+    const picture = renderDrawing(sceneOf([{
+      id: "dot", type: "freedraw", x: 300, y: 200, width: 500, height: 500,
+      points: [[-200, -100]], strokeWidth: 8, angle: 0.61,
+    }]));
+    expect(picture.markup).toContain('cx="100" cy="100" r="8"');
+    expect(picture.markup).toContain('rotate(34.95 100 100)');
+    covers(picture.bounds, 88, 100);
+    covers(picture.bounds, 112, 100);
+    covers(picture.bounds, 100, 88);
+    covers(picture.bounds, 100, 112);
+  });
+});
