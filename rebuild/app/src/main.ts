@@ -32,6 +32,7 @@ import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
 import { excluder } from "./settings/exclude";
+import { importForeignSettings } from "./settings/importSettings";
 import { isSettingsOpen, openSettings } from "./settings/modal";
 import type { PluginId } from "./settings/schema";
 import { settingsSections } from "./settings/sections";
@@ -497,6 +498,8 @@ await ws.vault.open(!!popoutNote);
 if (ws.vault.path) rememberVault({ path: ws.vault.path, name: ws.vault.name });
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
+// A vault Grove hasn't set up yet takes Cinder's or Obsidian's folders (once, in the main window).
+if (!popoutNote) await importForeignSettings();
 bookmarks.load();
 if (popoutNote) await ws.open(popoutNote);
 else await restoreLayout();
