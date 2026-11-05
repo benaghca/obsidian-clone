@@ -133,6 +133,34 @@ await withBrowser(async ({ send, run, key, click, check }) => {
   check(await run(() => document.querySelector('.calendar-title').textContent) === today.title, `Today shows ${today.title}`);
   check(await run((iso) => document.querySelector(`.calendar-day[data-day="${iso}"]`)?.classList.contains('is-today') === true, today.iso), 'today is marked');
 
+  // Frameless window: the tab row's right padding is the room the window
+  // buttons cover. Eight icons do not fit a 300px dock with it, so the row
+  // scrolls. A selected tab must land clear of that padding, and the wheel
+  // must reach the icons past it.
+  await run(() => document.querySelector('.app-container').classList.add('is-frameless'));
+  const tabRow = (label) => run((label) => {
+    const header = document.querySelector('.mod-right-split > .workspace-tab-header-container');
+    const box = header.getBoundingClientRect();
+    const style = getComputedStyle(header);
+    const tab = header.querySelector(`[aria-label="${label}"]`).getBoundingClientRect();
+    return {
+      overflows: header.scrollWidth > header.clientWidth,
+      scrollLeft: header.scrollLeft,
+      clear: tab.left >= box.left + parseFloat(style.paddingLeft) - 0.5 && tab.right <= box.right - parseFloat(style.paddingRight) + 0.5,
+      center: { x: box.left + box.width / 2, y: box.top + box.height / 2 },
+    };
+  }, label);
+  check((await tabRow('Local graph')).overflows, 'eight tabs overflow a frameless 300px dock');
+  check((await tabRow('Local graph')).clear === false, 'Local graph starts under the window buttons');
+  check(await run(() => grove.run('graph:show-local')) === true, 'the local graph command runs');
+  check((await tabRow('Local graph')).clear, 'selecting Local graph scrolls it clear of the window buttons');
+  check(await run(() => grove.run('backlink:open')) === true, 'the backlinks command runs');
+  check((await tabRow('Backlinks')).clear && (await tabRow('Backlinks')).scrollLeft === 0, 'selecting Backlinks scrolls the row back');
+  await send('Input.dispatchMouseEvent', { type: 'mouseWheel', ...(await tabRow('Backlinks')).center, deltaX: 0, deltaY: 120 });
+  await wait(async () => (await tabRow('Local graph')).clear, 'the wheel did not scroll the tab row to Local graph');
+  check((await tabRow('Local graph')).clear, 'the wheel scrolls the tab row past the window buttons');
+  await run(() => document.querySelector('.app-container').classList.remove('is-frameless'));
+
   await run(() => settings.set('core-plugins.json', 'daily-notes', false));
   check(await run(() => document.querySelector('.mod-right-split [aria-label="Calendar"]')?.hidden === true), 'turning Daily notes off hides the Calendar tab');
   check(await run(() => grove.run('daily-notes:open-calendar')) === false, 'the calendar command is off with Daily notes');

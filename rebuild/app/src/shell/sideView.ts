@@ -74,11 +74,16 @@ export function viewTabs<K extends string>(tabs: readonly (readonly [K, IconName
       const header = button?.parentElement;
       // The right sidebar's tab row scrolls once the icons pass the window
       // buttons. Bring the selected one into that row, and no other scroller.
+      // The row's padding is not visible room: the right padding is the
+      // space the window buttons cover.
       if (button && header && header.scrollWidth > header.clientWidth) {
         const tab = button.getBoundingClientRect();
         const box = header.getBoundingClientRect();
-        if (tab.left < box.left) header.scrollLeft -= box.left - tab.left;
-        else if (tab.right > box.right) header.scrollLeft += tab.right - box.right;
+        const style = getComputedStyle(header);
+        const left = box.left + parseFloat(style.paddingLeft);
+        const right = box.right - parseFloat(style.paddingRight);
+        if (tab.left < left) header.scrollLeft -= left - tab.left;
+        else if (tab.right > right) header.scrollLeft += tab.right - right;
       }
       if (content.firstElementChild !== viewOf(name)) content.replaceChildren(viewOf(name));
     },
