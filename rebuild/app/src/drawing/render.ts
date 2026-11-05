@@ -1,7 +1,10 @@
 // A drawing scene drawn as SVG. Geometry, hatch patterns and arrowheads here
 // are Grove's. Roughness is ignored: lines stay clean until a later piece
 // adds wobble. Freedraw keeps its pressures in the file and paints one
-// smoothed stroke. Nothing is fetched; image bytes become object URLs locally.
+// smoothed stroke. A line, arrow or freedraw is bounded by its points, the
+// curve those points actually draw and its arrowheads, and it turns about
+// the centre of that point box. Nothing is fetched; image bytes become
+// object URLs locally.
 
 import {
   type DrawingElement, type FillStyle, type FrameElement, type FreedrawElement, type ImageElement, type LinearElement,
@@ -185,7 +188,7 @@ function renderLinear(el: LinearElement, strokeOf: (el: DrawingElement) => strin
   if (el.points.length < 2) return null;
   const pts = placed(el);
   const color = strokeOf(el);
-  const size = 6 + el.strokeWidth * 3;
+  const size = arrowSize(el.strokeWidth);
   const startCut = insetFor(el.startArrowhead, size);
   const endCut = insetFor(el.endArrowhead, size);
   const shaft = shorten(pts, startCut, endCut);
@@ -291,16 +294,23 @@ function diamondPath(el: ShapeElement): string {
   return d + " Z";
 }
 
+function curveControls(pts: Point[], i: number): [Point, Point, Point, Point] {
+  const p0 = pts[Math.max(0, i - 1)];
+  const p1 = pts[i];
+  const p2 = pts[i + 1];
+  const p3 = pts[Math.min(pts.length - 1, i + 2)];
+  const c1: Point = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+  const c2: Point = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+  return [p1, c1, c2, p2];
+}
+
 function smoothPath(pts: Point[]): string {
   if (pts.length < 2) return "";
   let d = `M${n(pts[0][0])} ${n(pts[0][1])}`;
   if (pts.length === 2) return `${d} L${n(pts[1][0])} ${n(pts[1][1])}`;
   for (let i = 0; i < pts.length - 1; i++) {
-    const p0 = pts[Math.max(0, i - 1)];
-    const p1 = pts[i];
-    const p2 = pts[i + 1];
-    const p3 = pts[Math.min(pts.length - 1, i + 2)];
-    d += ` C${n(p1[0] + (p2[0] - p0[0]) / 6)} ${n(p1[1] + (p2[1] - p0[1]) / 6)} ${n(p2[0] - (p3[0] - p1[0]) / 6)} ${n(p2[1] - (p3[1] - p1[1]) / 6)} ${n(p2[0])} ${n(p2[1])}`;
+    const [, c1, c2, p2] = curveControls(pts, i);
+    d += ` C${n(c1[0])} ${n(c1[1])} ${n(c2[0])} ${n(c2[1])} ${n(p2[0])} ${n(p2[1])}`;
   }
   return d;
 }
@@ -309,6 +319,10 @@ function linePath(pts: Point[], close = false): string {
   let d = `M${n(pts[0][0])} ${n(pts[0][1])}`;
   for (let i = 1; i < pts.length; i++) d += ` L${n(pts[i][0])} ${n(pts[i][1])}`;
   return close ? d + " Z" : d;
+}
+
+function arrowSize(sw: number): number {
+  return 6 + sw * 3;
 }
 
 function arrowHead(kind: string, tip: Point, direction: Point, size: number, color: string, sw: number, part: "start" | "end"): string {
@@ -409,19 +423,138 @@ function layoutBox(el: DrawingElement): { x: number; y: number; w: number; h: nu
   return { x, y, w: Math.abs(w), h: Math.abs(h) };
 }
 
+function isPointElement(el: DrawingElement): el is LinearElement | FreedrawElement {
+  return el.type === "line" || el.type === "arrow" || el.type === "freedraw";
+}
+
 function paddedBox(el: DrawingElement): Bounds {
+  if (isPointElement(el)) {
+    const local = pointInkBox(el);
+    if (!el.angle) return local;
+    const around = pointPivot(el);
+    return rotatedAabb(local.x, local.y, local.width, local.height, el.angle, around.x, around.y);
+  }
   const b = layoutBox(el);
   const aabb = rotatedAabb(b.x, b.y, b.w, b.h, el.angle);
-  const pad = Math.max(el.strokeWidth, 1) / 2 + (el.type === "arrow" || el.type === "line" || el.type === "freedraw" ? 8 : 2);
+  const pad = Math.max(el.strokeWidth, 1) / 2 + 2;
   return { x: aabb.x - pad, y: aabb.y - pad, width: aabb.width + pad * 2, height: aabb.height + pad * 2 };
 }
 
-function rotatedAabb(x: number, y: number, w: number, h: number, angle: number): Bounds {
+// Stroke, arrowheads and the smoothed curve, still unrotated. The curve of a
+// cubic stays inside the control polygon, but its extremes leave the polyline,
+// so the bounds follow those extremes rather than the stored width and height.
+function pointInkBox(el: LinearElement | FreedrawElement): Bounds {
+  const pts = placed(el);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const add = (x: number, y: number) => {
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x); maxY = Math.max(maxY, y);
+  };
+  if (el.type === "freedraw" && pts.length === 1) {
+    const r = Math.max(1.5, el.strokeWidth);
+    add(pts[0][0] - r, pts[0][1] - r);
+    add(pts[0][0] + r, pts[0][1] + r);
+  } else if (pts.length >= 2) {
+    let shaft = pts;
+    if (el.type === "line" || el.type === "arrow") {
+      const size = arrowSize(el.strokeWidth);
+      shaft = shorten(pts, insetFor(el.startArrowhead, size), insetFor(el.endArrowhead, size));
+      if (el.startArrowhead) includeHead(el.startArrowhead, pts[0], dir(pts[1], pts[0]), size, add);
+      if (el.endArrowhead) includeHead(el.endArrowhead, pts[pts.length - 1], dir(pts[pts.length - 2], pts[pts.length - 1]), size, add);
+    }
+    const curved = shaft.length >= 3 && (el.type === "freedraw" || (!!el.roundness && !el.elbowed));
+    if (curved) includeCurve(shaft, add);
+    else for (const p of shaft) add(p[0], p[1]);
+  } else if (pts.length === 1) add(pts[0][0], pts[0][1]);
+  else add(el.x, el.y);
+  const pad = Math.max(el.strokeWidth, 1) / 2;
+  return { x: minX - pad, y: minY - pad, width: maxX - minX + pad * 2, height: maxY - minY + pad * 2 };
+}
+
+function pointPivot(el: { x: number; y: number; points: Point[] }): { x: number; y: number } {
+  const pts = placed(el);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p[0]); minY = Math.min(minY, p[1]);
+    maxX = Math.max(maxX, p[0]); maxY = Math.max(maxY, p[1]);
+  }
+  if (!Number.isFinite(minX)) return { x: el.x, y: el.y };
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+}
+
+function includeCurve(pts: Point[], add: (x: number, y: number) => void) {
+  add(pts[0][0], pts[0][1]);
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [p1, c1, c2, p2] = curveControls(pts, i);
+    add(p2[0], p2[1]);
+    for (const t of cubicExtrema(p1[0], c1[0], c2[0], p2[0])) add(bezier(t, p1[0], c1[0], c2[0], p2[0]), bezier(t, p1[1], c1[1], c2[1], p2[1]));
+    for (const t of cubicExtrema(p1[1], c1[1], c2[1], p2[1])) add(bezier(t, p1[0], c1[0], c2[0], p2[0]), bezier(t, p1[1], c1[1], c2[1], p2[1]));
+  }
+}
+
+function bezier(t: number, p0: number, c1: number, c2: number, p3: number): number {
+  const mt = 1 - t;
+  return mt * mt * mt * p0 + 3 * mt * mt * t * c1 + 3 * mt * t * t * c2 + t * t * t * p3;
+}
+
+// Roots of a cubic's derivative, in (0, 1). a(1-t)^2 + 2b(1-t)t + c t^2 = 0.
+function cubicExtrema(p0: number, c1: number, c2: number, p3: number): number[] {
+  const a = c1 - p0, b = c2 - c1, c = p3 - c2;
+  const qa = a - 2 * b + c, qb = 2 * (b - a), qc = a;
+  const ts: number[] = [];
+  const push = (t: number) => { if (t > 1e-8 && t < 1 - 1e-8) ts.push(t); };
+  if (Math.abs(qa) < 1e-12) {
+    if (Math.abs(qb) > 1e-12) push(-qc / qb);
+    return ts;
+  }
+  let disc = qb * qb - 4 * qa * qc;
+  if (disc < 0) {
+    if (disc > -1e-8) disc = 0;
+    else return ts;
+  }
+  const root = Math.sqrt(disc);
+  push((-qb + root) / (2 * qa));
+  push((-qb - root) / (2 * qa));
+  return ts;
+}
+
+function includeHead(kind: string, tip: Point, direction: Point, size: number, add: (x: number, y: number) => void) {
+  const [ux, uy] = unit(direction[0], direction[1]);
+  const px = -uy, py = ux;
+  const name = kind.toLowerCase();
+  const base = name.endsWith("_outline") ? name.slice(0, -"_outline".length) : name;
+  if (base === "bar") {
+    const half = size * 0.45;
+    add(tip[0] - px * half, tip[1] - py * half);
+    add(tip[0] + px * half, tip[1] + py * half);
+    return;
+  }
+  if (base === "dot" || base === "circle") {
+    const r = size * (base === "dot" ? 0.28 : 0.36);
+    add(tip[0] - r, tip[1] - r);
+    add(tip[0] + r, tip[1] + r);
+    return;
+  }
+  if (base === "diamond") {
+    const backX = tip[0] - ux * size, backY = tip[1] - uy * size;
+    const midX = tip[0] - ux * size / 2, midY = tip[1] - uy * size / 2;
+    add(tip[0], tip[1]);
+    add(backX, backY);
+    add(midX + px * size * 0.45, midY + py * size * 0.45);
+    add(midX - px * size * 0.45, midY - py * size * 0.45);
+    return;
+  }
+  const backX = tip[0] - ux * size, backY = tip[1] - uy * size;
+  add(tip[0], tip[1]);
+  add(backX + px * size * 0.42, backY + py * size * 0.42);
+  add(backX - px * size * 0.42, backY - py * size * 0.42);
+}
+
+function rotatedAabb(x: number, y: number, w: number, h: number, angle: number, cx = x + w / 2, cy = y + h / 2): Bounds {
   if (!angle) return { x, y, width: w, height: h };
-  const cx = x + w / 2, cy = y + h / 2;
   const c = Math.cos(angle), s = Math.sin(angle);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  for (const [px, py] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) {
+  for (const px of [x, x + w]) for (const py of [y, y + h]) {
     const dx = px - cx, dy = py - cy;
     const rx = cx + dx * c - dy * s, ry = cy + dx * s + dy * c;
     minX = Math.min(minX, rx); minY = Math.min(minY, ry);
@@ -472,8 +605,10 @@ function tail(el: DrawingElement, extra = ""): string {
 function transformAttr(el: DrawingElement, extra: string): string {
   const parts: string[] = [];
   if (el.angle) {
-    const cx = el.x + el.width / 2, cy = el.y + el.height / 2;
-    parts.push(`rotate(${n((el.angle * 180) / Math.PI)} ${n(cx)} ${n(cy)})`);
+    const around = isPointElement(el)
+      ? pointPivot(el)
+      : { x: el.x + el.width / 2, y: el.y + el.height / 2 };
+    parts.push(`rotate(${n((el.angle * 180) / Math.PI)} ${n(around.x)} ${n(around.y)})`);
   }
   if (extra) parts.push(extra);
   return parts.length ? ` transform="${parts.join(" ")}"` : "";

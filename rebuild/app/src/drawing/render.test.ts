@@ -193,3 +193,146 @@ describe("shapes", () => {
     expect(images.href("f0e1d2c3b4a5")).toBeUndefined();
   });
 });
+
+function covers(box: { x: number; y: number; width: number; height: number }, x: number, y: number) {
+  expect(box.x).toBeLessThanOrEqual(x);
+  expect(box.y).toBeLessThanOrEqual(y);
+  expect(box.x + box.width).toBeGreaterThanOrEqual(x);
+  expect(box.y + box.height).toBeGreaterThanOrEqual(y);
+}
+
+function headPoints(markup: string): Array<[number, number]> {
+  const head = markup.slice(markup.indexOf('data-part="end"'));
+  const d = head.match(/\bd="([^"]+)"/);
+  if (d) {
+    const nums = [...d[1].matchAll(/-?\d+(?:\.\d+)?/g)].map((m) => Number(m[0]));
+    const pts: Array<[number, number]> = [];
+    for (let i = 0; i < nums.length; i += 2) pts.push([nums[i], nums[i + 1]]);
+    return pts;
+  }
+  const circle = head.match(/\bcx="([^"]+)" cy="([^"]+)" r="([^"]+)"/);
+  if (circle) {
+    const cx = Number(circle[1]), cy = Number(circle[2]), r = Number(circle[3]);
+    return [[cx - r, cy], [cx + r, cy], [cx, cy - r], [cx, cy + r]];
+  }
+  const line = head.match(/\bx1="([^"]+)" y1="([^"]+)" x2="([^"]+)" y2="([^"]+)"/);
+  if (line) return [[Number(line[1]), Number(line[2])], [Number(line[3]), Number(line[4])]];
+  throw new Error(head.slice(0, 180));
+}
+
+describe("point geometry", () => {
+  const line = {
+    id: "ln", type: "line", x: 300, y: 200, width: 200, height: 100, angle: 0, strokeWidth: 2,
+    points: [[0, 0], [-200, -100]],
+  };
+  const arrow = {
+    id: "ar", type: "arrow", x: 300, y: 200, width: 200, height: 100, angle: Math.PI / 2, strokeWidth: 2,
+    points: [[0, 0], [-200, -100]], endArrowhead: "arrow",
+  };
+  const freedraw = {
+    id: "fd", type: "freedraw", x: 0, y: 0, width: 10, height: 10, angle: Math.PI / 2, strokeWidth: 2,
+    points: [[0, 0], [-80, 20], [-20, -60]],
+  };
+
+  it("fits a line whose points run up and left of the stored box", () => {
+    const picture = renderDrawing(sceneOf([line]));
+    expect(picture.bounds).toEqual({ x: 99, y: 99, width: 202, height: 102 });
+    expect(picture.viewBox).toEqual({ x: 83, y: 83, width: 234, height: 134 });
+    expect(picture.markup).not.toContain("rotate(");
+    expect(picture.markup).toContain("M300 200 L100 100");
+  });
+
+  it("turns a leftward arrow about the centre of its points", () => {
+    const picture = renderDrawing(sceneOf([arrow]));
+    expect(picture.markup).toContain("rotate(90 200 150)");
+    expect(picture.markup).not.toContain("400 250");
+    covers(picture.bounds, 150, 250);
+    covers(picture.bounds, 250, 50);
+    covers(picture.viewBox, 150, 250);
+    covers(picture.viewBox, 250, 50);
+  });
+
+  it("turns a freedraw stroke about its points and keeps the negative end", () => {
+    const picture = renderDrawing(sceneOf([freedraw]));
+    expect(picture.markup).toContain("rotate(90 -40 -20)");
+    expect(picture.markup).not.toContain("rotate(90 5 5)");
+    for (const [x, y] of [[-60, 20], [-80, -60], [0, 0]]) covers(picture.bounds, x, y);
+  });
+
+  it("includes the bulge of a smoothed stroke past the point box", () => {
+    const points = [[0, 0], [0, 60], [60, 60]];
+    const freedrawPicture = renderDrawing(sceneOf([
+      { id: "fd", type: "freedraw", x: 0, y: 0, width: 60, height: 60, strokeWidth: 2, points },
+    ]));
+    const linePicture = renderDrawing(sceneOf([
+      { id: "ln", type: "line", x: 0, y: 0, width: 60, height: 60, strokeWidth: 2, points, roundness: { type: 2 } },
+    ]));
+    // The cubic reaches x = -40/9. Half the stroke sits outside that.
+    for (const picture of [freedrawPicture, linePicture]) {
+      expect(picture.bounds.x).toBeCloseTo(-40 / 9 - 1, 5);
+      expect(picture.bounds.y).toBeCloseTo(-1, 5);
+      expect(picture.bounds.width).toBeCloseTo(62 + 40 / 9, 5);
+      expect(picture.bounds.height).toBeCloseTo(62 + 40 / 9, 5);
+    }
+    const elbow = renderDrawing(sceneOf([
+      { id: "ar", type: "arrow", x: 0, y: 0, width: 60, height: 60, strokeWidth: 2, points, roundness: { type: 2 }, elbowed: true, endArrowhead: null },
+    ]));
+    expect(elbow.bounds.x).toBeCloseTo(-1, 5);
+    expect(elbow.bounds.y).toBeCloseTo(-1, 5);
+  });
+
+  it("rotates that bulge about the point centre, not the ink centre", () => {
+    const picture = renderDrawing(sceneOf([
+      { id: "fd", type: "freedraw", x: 0, y: 0, width: 60, height: 60, angle: Math.PI / 2, strokeWidth: 2, points: [[0, 0], [0, 60], [60, 60]] },
+    ]));
+    expect(picture.markup).toContain("rotate(90 30 30)");
+    expect(picture.bounds.x).toBeCloseTo(-1 - 40 / 9, 5);
+    expect(picture.bounds.y).toBeCloseTo(-1 - 40 / 9, 5);
+    expect(picture.bounds.width).toBeCloseTo(62 + 40 / 9, 5);
+    expect(picture.bounds.height).toBeCloseTo(62 + 40 / 9, 5);
+  });
+
+  it("includes arrowheads that leave a flat point box", () => {
+    for (const kind of ["arrow", "triangle", "bar", "dot", "circle", "diamond", "triangle_outline"]) {
+      const picture = renderDrawing(sceneOf([
+        { id: "a", type: "arrow", x: 0, y: 0, width: 80, height: 0, strokeWidth: 4, points: [[0, 0], [80, 0]], endArrowhead: kind },
+      ]));
+      for (const [x, y] of headPoints(picture.markup)) covers(picture.bounds, x, y);
+    }
+    const bar = renderDrawing(sceneOf([
+      { id: "a", type: "arrow", x: 0, y: 0, width: 100, height: 0, strokeWidth: 20, points: [[0, 0], [100, 0]], endArrowhead: "bar" },
+    ]));
+    expect(bar.bounds.y).toBeCloseTo(-(66 * 0.45) - 10, 5);
+    expect(bar.bounds.height).toBeCloseTo(66 * 0.45 * 2 + 20, 5);
+  });
+
+  it("keeps a rotated bar inside the scene after it swings out of the stored box", () => {
+    const picture = renderDrawing(sceneOf([
+      { id: "a", type: "arrow", x: 0, y: 0, width: 100, height: 0, angle: Math.PI / 2, strokeWidth: 20, points: [[0, 0], [100, 0]], endArrowhead: "bar" },
+    ]));
+    expect(picture.markup).toContain("rotate(90 50 0)");
+    expect(picture.bounds.x).toBeCloseTo(10.3, 4);
+    expect(picture.bounds.y).toBeCloseTo(-60, 4);
+    expect(picture.bounds.width).toBeCloseTo(79.4, 4);
+    expect(picture.bounds.height).toBeCloseTo(120, 4);
+    covers(picture.viewBox, picture.bounds.x, picture.bounds.y);
+  });
+
+  it("fits a scene made only of negative and rotated strokes", () => {
+    const parts = [line, arrow, freedraw].map((el) => renderDrawing(sceneOf([el])).bounds);
+    const picture = renderDrawing(sceneOf([line, arrow, freedraw]));
+    expect(picture.markup.match(/data-id="/g)).toHaveLength(3);
+    expect(picture.bounds.x).toBeCloseTo(Math.min(...parts.map((b) => b.x)), 8);
+    expect(picture.bounds.y).toBeCloseTo(Math.min(...parts.map((b) => b.y)), 8);
+    expect(picture.bounds.x + picture.bounds.width).toBeCloseTo(Math.max(...parts.map((b) => b.x + b.width)), 8);
+    expect(picture.bounds.y + picture.bounds.height).toBeCloseTo(Math.max(...parts.map((b) => b.y + b.height)), 8);
+    expect(picture.viewBox).toEqual({
+      x: picture.bounds.x - 16,
+      y: picture.bounds.y - 16,
+      width: picture.bounds.width + 32,
+      height: picture.bounds.height + 32,
+    });
+    const gone = renderDrawing(sceneOf([line, { ...freedraw, id: "gone", isDeleted: true, x: -5000, y: -5000 }]));
+    expect(gone.viewBox).toEqual(renderDrawing(sceneOf([line])).viewBox);
+  });
+});
