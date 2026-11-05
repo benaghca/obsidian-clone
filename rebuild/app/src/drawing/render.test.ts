@@ -55,6 +55,29 @@ describe("drawingColor", () => {
 });
 
 describe("shapes", () => {
+  it("escapes file-supplied paint attributes", () => {
+    const color = '#fff"/><foreignObject data-injected="yes';
+    const markup = renderDrawing(sceneOf([
+      { id: "r", type: "rectangle", strokeColor: color, backgroundColor: color },
+      { id: "t", type: "text", text: "safe", strokeColor: color },
+      { id: "a", type: "arrow", strokeColor: color, points: [[0, 0], [100, 0]] },
+    ])).markup;
+    expect(markup).not.toContain("<foreignObject");
+    expect(markup).toContain("&quot;/&gt;&lt;foreignObject");
+  });
+
+  it("distinguishes open arrowheads from filled triangles", () => {
+    const markup = renderDrawing(sceneOf([
+      { id: "a", type: "arrow", points: [[0, 0], [100, 0]], endArrowhead: "arrow" },
+      { id: "t", type: "arrow", points: [[0, 20], [100, 20]], endArrowhead: "triangle" },
+    ])).markup;
+    const heads = [...markup.matchAll(/<path data-part="end"[^>]+/g)].map(m => m[0]);
+    expect(heads[0]).toContain('fill="none"');
+    expect(heads[0]).not.toContain(' Z');
+    expect(heads[1]).toContain('fill="#1e1e1e"');
+    expect(heads[1]).toContain(' Z');
+  });
+
   it("draws the cinder shapes", () => {
     const markup = draw("cinder-shapes").markup;
     expect(markup).toMatch(/data-id="BBhn4Geh"[^>]* rx="/);

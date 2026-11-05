@@ -105,6 +105,17 @@ await withBrowser(async ({ run, send, click, check }) => {
     await ws.vault.refreshFiles();
   });
   await run(async () => {
+    // A watcher may repeat an unchanged file while SVG chunks are still painting.
+    // The repeat must not leave only the first chunk mounted.
+    window.drawingRepeated = false;
+    window.drawingRepeatObserver = new MutationObserver(() => {
+      const count = document.querySelectorAll('.drawing-view [data-type="rectangle"]').length;
+      if (count > 0 && count < 2000 && !drawingRepeated) {
+        drawingRepeated = true;
+        ws.vault.written('Big.excalidraw');
+      }
+    });
+    drawingRepeatObserver.observe(document.body, { childList: true, subtree: true });
     window.drawingLong = [];
     window.drawingObserver = new PerformanceObserver(list => drawingLong.push(...list.getEntries().map(e => e.duration)));
     drawingObserver.observe({ type: 'longtask' });
@@ -119,5 +130,11 @@ await withBrowser(async ({ run, send, click, check }) => {
   }));
   console.log('DRAWING_OPEN', JSON.stringify(open));
   check(open.count === 2000 && open.long.every(n => n <= 50), '2000-element drawing opens with no task over 50ms');
-  await run(() => drawingObserver.disconnect());
+  check(await run(() => drawingRepeated), 'Unchanged watcher notification during chunked paint completes');
+  await run(() => { drawingObserver.disconnect(); drawingRepeatObserver.disconnect(); });
+  const unchanged = await run(async (body) => {
+    const { api } = await import('/src/api.ts');
+    return await api.readNote('Sketch.excalidraw') === JSON.stringify(body);
+  }, sketch);
+  check(unchanged, 'Viewing a drawing, note embeds and canvas preview preserves drawing bytes');
 });

@@ -149,9 +149,9 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
 
   function load() {
     const gen = ++loadGen;
-    chunkGen++;
+    // Keep the current paint running until different content replaces it.
+    // Duplicate watcher events may read identical bytes during chunked paint.
     clearTimeout(parseTimer);
-    clearTimeout(chunkTimer);
     void api.readNote(path).then((text) => {
       if (gen !== loadGen) return;
       const dark = document.documentElement.classList.contains("theme-dark");

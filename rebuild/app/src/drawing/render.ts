@@ -109,10 +109,10 @@ export function renderDrawing(scene: Scene, opts: RenderOptions = {}): DrawingPi
   const fillOf = (el: DrawingElement) => {
     const bg = drawingColor(el.backgroundColor, dark);
     if (!bg || bg === "transparent" || bg === "none") return "none";
-    if (el.fillStyle === "solid") return bg;
+    if (el.fillStyle === "solid") return esc(bg);
     return `url(#${hatch(el.fillStyle, bg, el.strokeWidth)})`;
   };
-  const strokeOf = (el: DrawingElement) => drawingColor(el.strokeColor, dark);
+  const strokeOf = (el: DrawingElement) => esc(drawingColor(el.strokeColor, dark));
   const clip = (x: number, y: number, w: number, h: number) => {
     const id = `${prefix}c${clips++}`;
     defs.push(`<clipPath id="${id}"><rect x="${n(x)}" y="${n(y)}" width="${n(w)}" height="${n(h)}"/></clipPath>`);
@@ -224,7 +224,7 @@ function renderText(el: TextElement, dark: boolean): string | null {
     ? `<tspan x="${n(x)}" y="${n(top)}">${escText(line)}</tspan>`
     : `<tspan x="${n(x)}" dy="${n(lineH)}">${escText(line)}</tspan>`).join("");
   const family = el.fontFamily === 1 ? "cursive" : el.fontFamily === 3 ? "ui-monospace, 'JetBrains Mono', monospace" : "sans-serif";
-  return `<text ${mark(el)} fill="${drawingColor(el.strokeColor, dark)}" stroke="none" font-size="${n(el.fontSize)}" font-family="${family}" text-anchor="${anchor}" dominant-baseline="text-before-edge" xml:space="preserve"${tail(el)}>${tspans}</text>`;
+  return `<text ${mark(el)} fill="${esc(drawingColor(el.strokeColor, dark))}" stroke="none" font-size="${n(el.fontSize)}" font-family="${family}" text-anchor="${anchor}" dominant-baseline="text-before-edge" xml:space="preserve"${tail(el)}>${tspans}</text>`;
 }
 
 function renderImage(el: ImageElement, clip: (x: number, y: number, w: number, h: number) => string, images: RenderOptions["images"], color: string, dark: boolean): string {
@@ -336,13 +336,16 @@ function arrowHead(kind: string, tip: Point, direction: Point, size: number, col
   const back: Point = [tip[0] - ux * size, tip[1] - uy * size];
   const a: Point = [back[0] + px * size * 0.42, back[1] + py * size * 0.42];
   const b: Point = [back[0] - px * size * 0.42, back[1] - py * size * 0.42];
+  if (base === "arrow") {
+    return `<path data-part="${part}" fill="none" stroke="${color}" stroke-width="${n(sw)}" d="M${n(a[0])} ${n(a[1])} L${n(tip[0])} ${n(tip[1])} L${n(b[0])} ${n(b[1])}"/>`;
+  }
   return `<path ${at} d="M${n(tip[0])} ${n(tip[1])} L${n(a[0])} ${n(a[1])} L${n(b[0])} ${n(b[1])} Z"/>`;
 }
 
 function insetFor(kind: string | null, size: number): number {
   if (!kind) return 0;
   const name = kind.toLowerCase().replace(/_outline$/, "");
-  if (name === "bar") return 0;
+  if (name === "bar" || name === "arrow") return 0;
   if (name === "dot") return size * 0.28;
   if (name === "circle") return size * 0.36;
   if (name === "diamond") return size;
