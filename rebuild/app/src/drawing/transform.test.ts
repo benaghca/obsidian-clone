@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { centreOf, elementFrame, frameCorners, resizeFrame, rotatePoint, selectionFrame } from "./geometry";
+import { centreOf, elementFrame, frameCorners, mapPoint, resizeFrame, rotatePoint, selectionFrame } from "./geometry";
 import { parseScene, type DrawingElement } from "./scene";
 import { followOf, followPatch, groupResizedPatch, groupRotatedPatch, movedPatch, resizedPatch } from "./transform";
 
@@ -84,5 +84,22 @@ describe("element patches", () => {
     const xs = corners.map((p) => p[0]);
     expect(want[0]).toBeGreaterThan(Math.min(...xs));
     expect(want[0]).toBeLessThan(Math.max(...xs));
+  });
+
+  it("mirrors a label when its shape flips", () => {
+    const [box, label] = elements([
+      { id: "b", type: "rectangle", x: 0, y: 0, width: 100, height: 60 },
+      { id: "t", type: "text", x: 60, y: 20, width: 20, height: 20, text: "hi", containerId: "b" },
+    ]);
+    const follow = followOf(label, box);
+    const from = elementFrame(box);
+    const resized = resizeFrame(from, "e", [-20, 30]);
+    expect(resized.flipX).toBe(true);
+    const patch = followPatch(follow, resized.frame, resized.flipX, resized.flipY);
+    const want = mapPoint(centreOf(elementFrame(label)), from, resized.frame, resized.flipX, resized.flipY);
+    expect((patch.x as number) + label.width / 2).toBeCloseTo(want[0]);
+    expect((patch.y as number) + label.height / 2).toBeCloseTo(want[1]);
+    const kept = followPatch(follow, resized.frame);
+    expect(kept.x as number).not.toBeCloseTo(patch.x as number);
   });
 });

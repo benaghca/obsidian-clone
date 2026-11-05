@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { elementFrame, resizeFrame } from "./geometry";
 import { DrawingHistory } from "./history";
-import { findElement, parseScene, serializeScene, type Scene } from "./scene";
+import { findElement, parseScene, serializeScene, type LinearElement, type Scene } from "./scene";
+import { resizedPatch } from "./transform";
 
 const stamp = () => {
   let t = 1000, r = 0;
@@ -101,6 +103,27 @@ describe("drawing history", () => {
     expect(history.canUndo).toBe(false);
     expect(scene.dirty).toBe(false);
     expect(serializeScene(scene)).toBe(source);
+  });
+
+  it("a later resize frame is taken from the original line", () => {
+    const parsed = parseScene(JSON.stringify({
+      type: "excalidraw", version: 2,
+      elements: [{ id: "l", type: "line", x: 10, y: 10, points: [[0, 0], [100, 0]], version: 1 }],
+    }));
+    if (!parsed.ok) throw new Error(parsed.error);
+    const scene = parsed.scene;
+    const history = new DrawingHistory(stamp());
+    const el = findElement(scene, "l")!;
+    const from = elementFrame(el);
+    const tx = history.begin(scene, ["l"]);
+    const at = (extra: number) => resizeFrame(from, "e", [from.x + from.width + extra, from.y]);
+    tx.preview("l", resizedPatch(el, from, at(40)));
+    tx.preview("l", resizedPatch(el, from, at(80)));
+    expect(tx.commit(["l"])).toBe(true);
+    const line = findElement(scene, "l") as LinearElement;
+    expect(line.points).toEqual([[0, 0], [180, 0]]);
+    expect(line.x).toBe(10);
+    expect(line.version).toBe(2);
   });
 
   it("a later live frame drops fields an earlier one set", () => {

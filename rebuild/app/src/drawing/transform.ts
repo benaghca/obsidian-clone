@@ -75,12 +75,19 @@ export function followOf(text: DrawingElement, container: DrawingElement): Follo
   return { id: text.id, owner: container.id, offset: [local[0] - c[0], local[1] - c[1]], width: Math.abs(text.width), height: Math.abs(text.height), frame };
 }
 
-/** The label's patch once its shape has the frame `now`. */
-export function followPatch(follow: Follow, now: Frame): Patch {
+/**
+ * The label's patch once its shape has the frame `now`.
+ * `flipX` / `flipY` mirror the label across the shape's own axes. A resize past
+ * the anchor reflects the box; the shape is symmetric, the label is not.
+ */
+export function followPatch(follow: Follow, now: Frame, flipX = false, flipY = false): Patch {
   const was = follow.frame;
   const sx = was.width > 1e-9 ? now.width / was.width : 1;
   const sy = was.height > 1e-9 ? now.height / was.height : 1;
+  let ox = follow.offset[0] * sx, oy = follow.offset[1] * sy;
+  if (flipX) ox = -ox;
+  if (flipY) oy = -oy;
   const c = centreOf(now);
-  const [tx, ty] = rotatePoint([c[0] + follow.offset[0] * sx, c[1] + follow.offset[1] * sy], c, now.angle);
+  const [tx, ty] = rotatePoint([c[0] + ox, c[1] + oy], c, now.angle);
   return { x: r4(tx - follow.width / 2), y: r4(ty - follow.height / 2), angle: now.angle };
 }

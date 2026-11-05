@@ -49,6 +49,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   let parseTimer = 0;
   let chunkTimer = 0;
   let saveTimer = 0;
+  let gone = false;
   let patches = 0;
   let notifying = false;
   let writing = Promise.resolve();
@@ -223,8 +224,9 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   function save() {
     clearTimeout(saveTimer);
     saveTimer = 0;
-    if (!scene) return;
+    if (gone || !scene) return;
     // Mid-gesture the scene holds unstamped live frames: wait for the gesture to end.
+    // A closed tab must not keep rescheduling this.
     if (editor.busy) { changed(); return; }
     const text = serializeScene(scene);
     textSeen = text;
@@ -362,7 +364,10 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   }, true);
   el.addEventListener("auxclick", (event) => { if (event.button === 1) event.preventDefault(); });
 
-  const flush = () => { if (saveTimer) save(); };
+  const flush = () => {
+    editor.endLive();
+    if (saveTimer) save();
+  };
   window.addEventListener("beforeunload", flush);
 
   load();
@@ -372,6 +377,9 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       // Drop a gesture in progress first, so what's saved is the last finished edit.
       editor.dispose();
       flush();
+      gone = true;
+      clearTimeout(saveTimer);
+      saveTimer = 0;
       window.removeEventListener("beforeunload", flush);
       loadGen++;
       chunkGen++;

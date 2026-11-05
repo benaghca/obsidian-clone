@@ -70,6 +70,12 @@ describe("hit-testing", () => {
     expect(hitElement(ring, [101, 30], tol)).toBe(true);
     expect(hitElement(ring, [50, -3], tol)).toBe(true);
   });
+  it("hits a flat ellipse beside its tip, not only along the centre ray", () => {
+    const ring = one({ type: "ellipse", x: 0, y: 0, width: 200, height: 20, strokeWidth: 2 });
+    // Tip is (200, 10). Four pixels straight above it is on the stroke; the centre ray overstates that gap.
+    expect(hitElement(ring, [200, 14], tol)).toBe(true);
+    expect(hitElement(ring, [200, 30], tol)).toBe(false);
+  });
   it("hits a diamond inside its four sides", () => {
     const el = one({ type: "diamond", x: 0, y: 0, width: 100, height: 100, backgroundColor: "#0000ff" });
     expect(hitElement(el, [50, 50], tol)).toBe(true);

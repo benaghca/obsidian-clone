@@ -13,7 +13,7 @@ import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon, type IconName } from "../shell/icons";
 import {
   boxFrom, centreOf, elementFrame, frameCorners, handleAt, handleCursor, handlePoints, hitTest, isEditable,
-  marqueeHits, resizeFrame, rotateFrame, rotatePoint, selectionFrame, toLocal, type Frame, type Handle,
+  marqueeHits, normalizeAngle, resizeFrame, rotateFrame, rotatePoint, selectionFrame, toLocal, type Frame, type Handle,
 } from "./geometry";
 import { DrawingHistory, stepIds, type Transaction } from "./history";
 import { findElement, type DrawingElement, type Point, type Scene } from "./scene";
@@ -47,7 +47,7 @@ const defaults: Style = { strokeColor: "#1e1e1e", backgroundColor: "transparent"
 
 const STROKES = ["#1e1e1e", "#d03030", "#2a8a3e", "#2464c8", "#e08a00", "#8a3fc0"];
 const FILLS = ["transparent", "#ffd6d6", "#d3f2d8", "#d6e6ff", "#ffe8b8", "#ece0f8"];
-const COLOR_RE = /^(#[0-9a-f]{3,8}|transparent)$/i;
+const COLOR_RE = /^(#(?:[0-9a-f]{3}|[0-9a-f]{4}|[0-9a-f]{6}|[0-9a-f]{8})|transparent)$/i;
 
 const TOOLS: [Tool, string, IconName, string][] = [
   ["select", "Select", "mouse-pointer-2", "v"],
@@ -61,7 +61,7 @@ export const DRAWING_KEYS: [string, string][] = [
   ["R", "Rectangle"],
   ["D", "Diamond"],
   ["E", "Ellipse"],
-  ["Shift + drag", "Square or circle; keep proportions; turn in 15° steps"],
+  ["Shift + drag", "Square or circle; keep proportions; snap turns to 15°; move on one axis"],
   ["Alt + drag", "Draw or resize from the centre"],
   ["Shift + click", "Add to or take from the selection"],
   ["Ctrl + A", "Select all"],
@@ -341,7 +341,7 @@ export function drawingEditor(host: EditorHost) {
     Object.assign(defaults, patch);
     const s = scene();
     const els = s && !gesture ? selected(s) : [];
-    if (!s || !els.length) { styleTx?.cancel(); styleTx = null; refresh(); return; }
+    if (!s || !els.length) { dropLiveStyle(); refresh(); return; }
     styleTx ??= history.begin(s, selection);
     const ids = els.map((e) => e.id);
     // Labels take their shape's ink and opacity.
@@ -385,8 +385,7 @@ export function drawingEditor(host: EditorHost) {
   function step(forward: boolean) {
     const s = scene();
     if (!s || gesture) return;
-    styleTx?.cancel();
-    styleTx = null;
+    dropLiveStyle();
     const next = history.peek(forward);
     if (!next) return;
     const ids = stepIds(next);
@@ -481,7 +480,7 @@ export function drawingEditor(host: EditorHost) {
           g.tx.preview(m.id, resizedPatch(m, g.frame, r));
           ids.push(m.id);
         } else for (const m of g.members) { g.tx.preview(m.id, groupResizedPatch(m, g.frame, r)); ids.push(m.id); }
-        followLabels(s, g.tx, g.follows, ids);
+        followLabels(s, g.tx, g.follows, ids, r.flipX, r.flipY, g.members.length === 1);
         host.repaint(ids);
         break;
       }
@@ -521,13 +520,33 @@ export function drawingEditor(host: EditorHost) {
     paintOverlay();
   }
 
-  function followLabels(s: Scene, tx: Transaction, follows: Follow[], ids: string[]) {
+  function followLabels(s: Scene, tx: Transaction, follows: Follow[], ids: string[], flipX = false, flipY = false, localFlips = true) {
     for (const f of follows) {
       const owner = findElement(s, f.owner);
       if (!owner) continue;
-      tx.preview(f.id, followPatch(f, elementFrame(owner)));
+      // One element's flips are in its own axes. A group's are in the upright box, which
+      // matches a member only while that member is upright or turned a half turn.
+      const turned = normalizeAngle(f.frame.angle);
+      const aligned = localFlips || turned < 1e-9 || Math.abs(turned - Math.PI) < 1e-9;
+      tx.preview(f.id, followPatch(f, elementFrame(owner), aligned && flipX, aligned && flipY));
       ids.push(f.id);
     }
+  }
+
+  /** Drop an uncommitted style preview (the opacity slider) and put its elements back. */
+  function dropLiveStyle() {
+    const tx = styleTx;
+    if (!tx) return;
+    const ids = tx.ids();
+    tx.cancel();
+    styleTx = null;
+    if (ids.length) host.repaint(ids);
+  }
+
+  /** Cancel a drag or a live style change so the scene holds only finished edits. */
+  function endLive() {
+    if (gesture) cancelDrag?.();
+    dropLiveStyle();
   }
 
   function finish(g: Gesture, cancelled: boolean) {
@@ -576,8 +595,7 @@ export function drawingEditor(host: EditorHost) {
     if (!s) return;
     event.preventDefault();
     el.focus({ preventScroll: true });
-    styleTx?.cancel();
-    styleTx = null;
+    dropLiveStyle();
     const g = begin(event);
     if (!g) { refresh(); return; }
     gesture = g;
@@ -644,17 +662,18 @@ export function drawingEditor(host: EditorHost) {
     painted: refresh,
     /** The file changed on disk under us: forget history and drop what's gone. */
     reset() {
-      if (gesture) cancelDrag?.();
-      styleTx = null;
+      endLive();
       history.clear();
       refresh();
     },
+    /** Cancel a drag or a live style change. The tab calls this before it saves or closes. */
+    endLive,
     /** A gesture or a live style change is under way; the scene holds unstamped frames. */
     get busy() { return !!gesture || !!styleTx; },
     get tool() { return tool; },
     get selection() { return [...selection]; },
     dispose() {
-      cancelDrag?.();
+      endLive();
       el.removeEventListener("pointerdown", onPointerDown);
       el.removeEventListener("pointermove", onHover);
       el.removeEventListener("keydown", onKey);

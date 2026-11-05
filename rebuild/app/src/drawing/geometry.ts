@@ -128,6 +128,18 @@ function sampledCurve(pts: Point[]): Point[] {
 
 const filled = (el: DrawingElement) => el.backgroundColor !== "transparent" && el.backgroundColor !== "none" && el.backgroundColor !== "";
 
+/** Distance to a sampled outline. Step count follows the longer radius so a flat ellipse's side is still dense. */
+function ellipseRimDistance(q: Point, cx: number, cy: number, rx: number, ry: number): number {
+  const steps = Math.min(180, Math.max(24, Math.ceil((rx + ry) * 2)));
+  let best = Infinity;
+  for (let i = 0; i < steps; i++) {
+    const t = (i / steps) * TAU;
+    const d = Math.hypot(q[0] - (cx + rx * Math.cos(t)), q[1] - (cy + ry * Math.sin(t)));
+    if (d < best) best = d;
+  }
+  return best;
+}
+
 /**
  * Whether scene point `p` touches element `el`. A filled shape is hit
  * anywhere inside; an unfilled one, lines and frames only near their stroke.
@@ -153,9 +165,12 @@ export function hitElement(el: DrawingElement, p: Point, tol: number): boolean {
       const dx = q[0] - cx, dy = q[1] - cy;
       const e = Math.hypot(dx / rx, dy / ry);
       if (filled(el) && e <= 1) return true;
-      // Distance along the ray from the centre to the outline: close to the true distance and exact on the axes.
-      const dist = e === 0 ? Math.min(rx, ry) : Math.hypot(dx, dy) * Math.abs(1 - 1 / e);
-      return dist <= edge;
+      if (q[0] < l - edge || q[0] > r + edge || q[1] < t - edge || q[1] > b + edge) return false;
+      // Along-the-ray distance is an upper bound (exact on the axes). A flat ellipse is much
+      // closer to a point beside its tip than that ray says, so the outline is sampled too.
+      const radial = e === 0 ? Math.min(rx, ry) : Math.hypot(dx, dy) * Math.abs(1 - 1 / e);
+      if (radial <= edge) return true;
+      return ellipseRimDistance(q, cx, cy, rx, ry) <= edge;
     }
     case "diamond": {
       const [cx, cy] = centreOf(f);
