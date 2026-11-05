@@ -1,0 +1,22 @@
+properties:
+  file.name:
+    displayName: Title
+  file.basename:
+    displayName: Base name
+  note.status:
+    displayName: Status
+views:
+  - type: table
+    name: Files
+    order:
+      - file.name
+      - file.basename
+      - file.path
+      - file.folder
+      - file.ext
+      - file.size
+      - file.ctime
+      - file.mtime
+      - file.tags
+      - file.links
+      - file.backlinks
