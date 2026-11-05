@@ -274,3 +274,18 @@ body.is-canvas-presenting .workspace-leaf-resize-handle {
 }
 .canvas-present-ui .clickable-icon { width: 32px; height: 32px; }
 .canvas-present-count { min-width: 4.5em; padding: 0 6px; text-align: center; font-size: 13px; color: var(--text-muted); }
+
+/* A link card's page. The frame ignores the pointer until the card is selected,
+   so a wheel over it still reaches the board. */
+.canvas-node-content.canvas-web,
+.canvas-node-content.canvas-web-ask { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.canvas-node:is(.is-selected, .is-editing) > .canvas-node-content.canvas-web,
+.canvas-node:is(.is-selected, .is-editing) > .canvas-node-content.canvas-web-ask { overflow: hidden; }
+.canvas-web-bar { display: flex; gap: 6px; align-items: center; flex: none; min-width: 0; padding: 4px 8px; }
+.canvas-web-url { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-web-load, .canvas-web-reload, .canvas-web-open {
+  flex: none; margin: 0; padding: 2px 8px; border: 1px solid var(--background-modifier-border); border-radius: 4px;
+  background: var(--background-primary); color: var(--text-normal); font: inherit; font-size: 12px; line-height: 1.4;
+}
+.canvas-web-frame { flex: 1 1 auto; width: 100%; min-height: 0; border: 0; }
+.canvas-node:not(.is-selected) .canvas-web-frame { pointer-events: none; }

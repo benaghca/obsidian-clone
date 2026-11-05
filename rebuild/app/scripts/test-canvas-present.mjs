@@ -1,6 +1,6 @@
 // Presentation mode: keys, clicks, chrome, viewport restore, and a glide that
 // only writes the world transform. Canvases are created in the mock vault.
-import { withBrowser, sleep } from './browser.mjs';
+import { frameFixture, withBrowser, sleep } from './browser.mjs';
 import { traceGesture, summarizeTrace } from './canvas-zoom-trace.mjs';
 
 const group = (id, x, text) => [
@@ -413,4 +413,60 @@ await withBrowser(async ({ send, on, run, click, press, check, open }) => {
   check(refit.vw < 950 && (refit.cw > refit.vw * 0.75 || refit.ch > refit.vh * 0.75), 'a resize during the glide refits the slide');
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
   await press('Escape');
+
+  const fixture = await frameFixture();
+  try {
+    const web = [
+      { id: 'web', type: 'link', x: 0, y: 0, width: 480, height: 320, url: fixture.url },
+      ...Array.from({ length: 7 }, (_, i) => ({ id: 'w' + i, type: 'link', x: 700 + i * 40, y: 0, width: 200, height: 140, url: fixture.url })),
+    ];
+    await run(async (nodes) => {
+      settings.set('app.json', 'webEmbeds', 'always');
+      const { api } = await import('/src/api.ts');
+      await api.createNote('PresentWeb.canvas', JSON.stringify({ nodes, edges: [] }));
+      await ws.vault.refreshFiles();
+      await ws.open('PresentWeb.canvas');
+    }, web);
+    await waitBuilt(8);
+    for (let i = 0; i < 40 && !await run(() => {
+      const probe = window.__canvasProbe?.();
+      return !!document.querySelector('.canvas-world')?.style.transform && probe?.built && probe.pending === 0 && probe.frames > 0;
+    }); i++) await sleep(50);
+    const waitFrame = async () => {
+      for (let i = 0; i < 40; i++) {
+        const ok = await run(url => {
+          const frame = document.querySelector('[data-node-id="web"] iframe.canvas-web-frame');
+          const n = document.querySelectorAll('iframe.canvas-web-frame[src]').length;
+          return !!frame?.getAttribute('src')?.startsWith(url) && n >= 1 && n <= 6;
+        }, fixture.url);
+        if (ok) return true;
+        await sleep(25);
+      }
+      return false;
+    };
+    await f5();
+    await waitSlide('web');
+    check(await waitFrame(), 'the presented link card loads a page and stays inside the frame cap');
+    check(await run(() => {
+      const card = document.querySelector('[data-node-id="web"]');
+      return !card.classList.contains('is-title-mode') && !card.classList.contains('is-culled') && !!card.querySelector('.canvas-node-content');
+    }), 'the presented link card keeps its body out of title mode');
+    await press('Escape');
+    await sleep(80);
+    check(await presenting() === false, 'Escape leaves the link-card presentation');
+    await run(() => settings.set('app.json', 'webEmbeds', 'click'));
+    for (let i = 0; i < 40 && !await run(() => document.querySelectorAll('iframe').length === 0); i++) await sleep(25);
+    await f5();
+    await waitSlide('web');
+    for (let i = 0; i < 40 && !await run(() => !!document.querySelector('[data-node-id="web"] .canvas-web-load')); i++) await sleep(25);
+    check(await run(() => document.querySelectorAll('iframe').length === 0 && !!document.querySelector('[data-node-id="web"] .canvas-web-load')), 'a presented link card can still ask to load');
+    await click('[data-node-id="web"] .canvas-web-load');
+    await sleep(50);
+    check(await slide() === 'web', 'Load does not advance the slide');
+    check(await waitFrame(), 'Load on the current slide frames that card');
+    await press('Escape');
+    await run(() => settings.set('app.json', 'webEmbeds', 'always'));
+  } finally {
+    await fixture.close();
+  }
 });

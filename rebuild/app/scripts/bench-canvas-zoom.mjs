@@ -2,20 +2,21 @@
 // Optional: --cards=300 --device-scale=2 --trace-dir=/tmp/grove-cz0-traces
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { withBrowser, sleep } from './browser.mjs';
+import { frameFixture, withBrowser, sleep } from './browser.mjs';
 import { traceGesture, summarizeTrace } from './canvas-zoom-trace.mjs';
 
 const option = name => process.argv.find(s => s.startsWith(`--${name}=`))?.split('=').slice(1).join('=');
 const counts = (option('cards') ?? '100,300,1000,3000').split(',').map(Number);
+const links = process.argv.includes('--links');
 const deviceScale = Number(option('device-scale') ?? 1), traceDir = option('trace-dir');
 if (counts.some(n => !Number.isInteger(n) || n < 1 || n > 3000) || ![1, 2].includes(deviceScale)) throw Error('Use 1..3000 cards and device-scale 1 or 2');
 if (traceDir) await mkdir(traceDir, { recursive: true });
 
-export function zoomBoard(count) {
+export function zoomBoard(count, url) {
   const across = Math.ceil(Math.sqrt(count * 1.6));
   const nodes = Array.from({ length: count }, (_, i) => ({
-    id: `n${i}`, type: i % 5 === 0 ? 'file' : 'text', x: i % across * 280, y: Math.floor(i / across) * 190, width: 250, height: 160,
-    ...(i % 5 === 0 ? { file: 'CZ0-note.md' } : { text: `## Card ${i}\n**Local** Markdown and [[Welcome]].\n- Item\n- [ ] Task` }),
+    id: `n${i}`, type: url ? 'link' : i % 5 === 0 ? 'file' : 'text', x: i % across * 280, y: Math.floor(i / across) * 190, width: 250, height: 160,
+    ...(url ? { url } : i % 5 === 0 ? { file: 'CZ0-note.md' } : { text: `## Card ${i}\n**Local** Markdown and [[Welcome]].\n- Item\n- [ ] Task` }),
     ...(i % 3 ? { color: String(i % 6 + 1) } : {}),
   }));
   for (let i = 0; i < count; i += 50) {
@@ -26,16 +27,20 @@ export function zoomBoard(count) {
 }
 
 const rows = [];
+const fixture = links ? await frameFixture() : null;
+try {
 await withBrowser(async driver => {
   const { send, run, click } = driver;
   await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: deviceScale, mobile: false });
   console.log('CZ0_ENV', JSON.stringify({ ...(await send('Browser.getVersion')), width: 1280, height: 1000, deviceScale, gpu: 'disabled (software, shared browser harness)' }));
   await run(async () => { const { api } = await import('/src/api.ts'); await api.createNote('CZ0-note.md', '# A short note\n**Local** Markdown and [[Welcome]].\n- Item\n- [ ] Task'); });
-  for (const count of counts) {
-    const board = zoomBoard(count);
-    const opening = await run(async (board, count) => {
+  const modes = links ? ['always', 'off'] : [''];
+  for (const count of counts) for (const mode of modes) {
+    const board = zoomBoard(count, fixture?.url);
+    const opening = await run(async (board, count, mode) => {
+      if (mode) settings.set('app.json', 'webEmbeds', mode);
       const { api } = await import('/src/api.ts');
-      const path = `CZ0-${count}.canvas`; await api.createNote(path, JSON.stringify(board)); await ws.vault.refreshFiles();
+      const path = `CZ0-${count}${mode ? '-' + mode : ''}.canvas`; await api.createNote(path, JSON.stringify(board)); await ws.vault.refreshFiles();
       const long = [], observer = new PerformanceObserver(list => long.push(...list.getEntries().map(e => e.duration)));
       observer.observe({ type: 'longtask', buffered: false });
       const start = performance.now(); await ws.open(path);
@@ -46,10 +51,17 @@ await withBrowser(async driver => {
       const readyMs = performance.now() - start;
       await new Promise(r => setTimeout(r, 50)); observer.disconnect();
       return { ms, readyMs, longest: Math.max(0, ...long), dom: document.querySelector('.canvas-view').querySelectorAll('*').length };
-    }, board, count);
+    }, board, count, mode);
     await sleep(500);
+    if (links) {
+      await click('.canvas-controls .lucide-rotate-cw');
+      await sleep(250);
+      while (await run(() => !!window.__canvasProbe?.().pending)) await sleep(20);
+      for (let i = 0; i < 20 && mode === 'always' && !await run(() => document.querySelectorAll('iframe.canvas-web-frame[src]').length); i++) await sleep(50);
+      console.log('W3_FRAMES', JSON.stringify({ cards: count, mode, frames: await run(() => document.querySelectorAll('iframe.canvas-web-frame[src]').length) }));
+    }
     for (const kind of ['wheel', 'pinch', 'pan']) {
-      await click('.canvas-controls .lucide-maximize'); await sleep(250);
+      await click(links ? '.canvas-controls .lucide-rotate-cw' : '.canvas-controls .lucide-maximize'); await sleep(250);
       while (await run(() => !!window.__canvasProbe?.().pending)) await sleep(20);
       const half = kind === 'pinch' ? count <= 300 ? 150 : 60 : 12;
       const steps = half * 2, interval = kind === 'pinch' ? 8 : 16;
@@ -91,13 +103,16 @@ await withBrowser(async driver => {
       });
       const summary = summarizeTrace(trace, steps);
       if (!observed.delivered || !observed.viewportUpdates) throw Error('Gesture did not reach or transform the board');
-      const metrics = { cards: count, kind, dom: opening.dom, opening, requestedIntervalMs: interval, gestureMs: +gestureMs.toFixed(1), traceWallMs: +(performance.now() - started).toFixed(1), ...observed, ...summary,
+      const metrics = { cards: count, kind, mode: mode || 'default', dom: opening.dom, opening, requestedIntervalMs: interval, gestureMs: +gestureMs.toFixed(1), traceWallMs: +(performance.now() - started).toFixed(1), ...observed, ...summary,
         perUpdate: Object.fromEntries(Object.entries(summary.perStep).map(([k, v]) => [k, +(v * steps / observed.viewportUpdates).toFixed(3)])) };
       rows.push(metrics); console.log('CZ0_RESULT', JSON.stringify(metrics));
-      if (traceDir) await writeFile(join(traceDir, `${count}-${kind}-dpr${deviceScale}.json`), JSON.stringify({ traceEvents: trace }));
+      if (traceDir) await writeFile(join(traceDir, `${count}${mode ? '-' + mode : ''}-${kind}-dpr${deviceScale}.json`), JSON.stringify({ traceEvents: trace }));
     }
   }
 });
+} finally {
+  await fixture?.close();
+}
 console.log('\nRequested inputs can coalesce; JSON includes both per-input and per-viewport-update CPU. CPU columns below are ms per viewport update, not callback intervals. Raster sums worker time, not wall time.');
 console.log('Cards | DOM | Gesture | Inputs/delivered/updates | Drawn | Dropped | RunTask/update | Style | Layerize | Paint | HitTest | Layout | Raster/update | Long tasks count/max | Open/longest');
 for (const r of rows) console.log([r.cards, r.dom, r.kind, `${r.steps}/${r.delivered}/${r.viewportUpdates}`, r.drawn, r.dropped, ...['task', 'style', 'layerize', 'paint', 'hitTest', 'layout', 'raster'].map(k => r.perUpdate[k]), r.longTasks.length ? `${r.longTasks.length}/${Math.max(...r.longTasks)}` : 0, `${r.opening.ms.toFixed(1)}/${r.opening.longest.toFixed(1)}`].join(' | '));

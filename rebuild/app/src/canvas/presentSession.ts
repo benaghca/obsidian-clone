@@ -176,6 +176,8 @@ export function attachPresentation(host: PresentHost) {
     if (target instanceof Element && target.closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor")) return;
     const action = presentAction({ key: e.key, ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey });
     if (action === "next" && e.key === "Enter" && target instanceof Element && target.closest("a, [data-href]")) return;
+    // Load, Reload and Open sit on the slide. Enter and Space activate them.
+    if (target instanceof Element && target.closest("button") && (e.key === "Enter" || e.key === " " || e.key === "Space")) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     if (action === "next") go(1);
@@ -210,7 +212,7 @@ export function attachPresentation(host: PresentHost) {
   host.el.addEventListener("pointerdown", e => {
     if (!on) return;
     const target = e.target as Element;
-    const skip = !!target.closest("a, [data-href], .canvas-present-ui");
+    const skip = !!target.closest("a, [data-href], button, .canvas-present-ui");
     down = { x: e.clientX, y: e.clientY, skip };
     if (skip) return;
     e.stopPropagation();
@@ -219,7 +221,7 @@ export function attachPresentation(host: PresentHost) {
   host.el.addEventListener("click", e => {
     if (!on || e.button !== 0 || e.detail > 1) return;
     const target = e.target as Element;
-    if (target.closest("a, [data-href], .canvas-present-ui, .canvas-controls")) return;
+    if (target.closest("a, [data-href], button, .canvas-present-ui, .canvas-controls")) return;
     if (!down || down.skip || Math.hypot(e.clientX - down.x, e.clientY - down.y) >= 3) return;
     e.preventDefault();
     e.stopImmediatePropagation();

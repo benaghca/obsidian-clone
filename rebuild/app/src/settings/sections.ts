@@ -259,6 +259,11 @@ function editor(): HTMLElement[] {
       toggleRow("app.json", "foldHeading", "Fold heading", "Lets you fold all content under a heading."),
       toggleRow("app.json", "foldIndent", "Fold indent", "Lets you fold part of an indentation, such as lists."),
       toggleRow("app.json", "showLineNumber", "Line numbers", "Show line numbers in the gutter."),
+      dropdownRow("app.json", "webEmbeds", "Embedded web pages", "What a canvas link card shows. Off leaves the address, Click to load waits, and Always shows the page.", [
+        ["always", "Always"],
+        ["click", "Click to load"],
+        ["off", "Off"],
+      ]),
     ),
     group(
       "Behavior",
