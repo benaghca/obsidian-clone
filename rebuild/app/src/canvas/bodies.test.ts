@@ -22,7 +22,7 @@ function setup(count=2){
   const work=canvasWork(),manager=canvasBodies(nodes,work,()=>view);let live=0;
   const cards=nodes.map(node=>{const el=new ElementStub(),content=new ElementStub();let ready=false;manager.add(node,el as unknown as HTMLElement,{element:content as unknown as HTMLElement,ensure(){if(!ready){live++;ready=true;}},ready:()=>ready,release(){if(ready){ready=false;live--;}}});return{el,content};});
   work.resume();const flush=()=>{while(frames.size){const[k,fn]=frames.entries().next().value!;frames.delete(k);fn(performance.now());}};
-  return{view,manager,cards,flush,live:()=>live};
+  return{view,manager,cards,flush,live:()=>live,nodes};
 }
 test("a superseded settle still culls every previously shown card",()=>{
   const{view,manager,cards,flush}=setup();manager.update();flush();view.x=1000;manager.update();manager.update();flush();
@@ -45,6 +45,23 @@ test("presentation keeps an off-screen body out of title mode",()=>{
   expect(cards[1].el.classes.has("is-title-mode")).toBe(false);
   manager.present([]);manager.update();flush();
   expect(cards[1].el.classes.has("is-culled")).toBe(true);
+  manager.dispose();
+});
+test("a pinned slide stays wanted in title mode and survives the body cache",()=>{
+  const{view,manager,cards,flush,nodes}=setup(400);
+  manager.present(["0"]);
+  for(let i=0;i<400;i++){view.x=i*1000;manager.update();flush();}
+  expect(manager.stats().retained).toBe(300);
+  expect(cards[0].content.parentElement).toBe(cards[0].el);
+  view.titles=true;view.x=399*1000;manager.update();flush();
+  expect(manager.wanted(nodes[0])).toBe(true);
+  expect(cards[0].content.parentElement).toBe(cards[0].el);
+  expect(cards[0].el.classes.has("is-culled")).toBe(false);
+  expect(cards[0].el.classes.has("is-title-mode")).toBe(false);
+  manager.present([]);manager.update();flush();
+  expect(manager.wanted(nodes[0])).toBe(false);
+  expect(cards[0].content.parentElement).toBeNull();
+  expect(cards[0].el.classes.has("is-culled")).toBe(true);
   manager.dispose();
 });
 test("the LRU releases old bodies and disposal releases the remaining cache",()=>{

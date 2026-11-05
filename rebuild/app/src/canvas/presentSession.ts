@@ -139,10 +139,11 @@ export function attachPresentation(host: PresentHost) {
     const back = saved;
     saved = undefined;
     slides = [];
-    if (restore && back) {
-      host.reflow();
-      host.jump(back);
-    }
+    if (!back) return;
+    // Esc measures after the chrome returns. Leaving still writes the saved
+    // camera, so opening this canvas again shows the view from before the show.
+    if (restore) host.reflow();
+    host.jump(back);
   }
   function start() {
     if (on || !host.el.isConnected) return;

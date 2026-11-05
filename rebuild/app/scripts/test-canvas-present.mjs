@@ -33,6 +33,13 @@ const huge = {
   ],
   edges: [],
 };
+const hugeNote = {
+  nodes: [
+    { id: 'G', type: 'group', x: 0, y: 0, width: 8000, height: 5000, label: 'Huge' },
+    { id: 'note', type: 'file', file: 'Welcome.md', x: 120, y: 120, width: 360, height: 240 },
+  ],
+  edges: [],
+};
 const many = {
   nodes: Array.from({ length: 300 }, (_, i) => ({
     id: `n${i}`, type: 'text', x: (i % 20) * 300, y: Math.floor(i / 20) * 220, width: 250, height: 160, text: `Card ${i}`,
@@ -155,6 +162,23 @@ await withBrowser(async ({ send, on, run, click, press, check, open }) => {
   console.log('CAMERA', JSON.stringify({ zoomed, restored }));
   check(same(restored, zoomed), 'Escape restores the viewport');
 
+  await f5();
+  await waitSlide('A');
+  await run(() => { ws.newTab(); return ws.open('Welcome.md'); });
+  await sleep(80);
+  check(await presenting() === false, 'opening another tab ends presentation');
+  check(await hidden('.workspace-ribbon') === false, 'leaving the canvas restores the ribbon');
+  await run(() => ws.activate(ws.activeGroup.tabs.find(t => t.type === 'canvas')));
+  await waitBuilt(6);
+  let back = await cam();
+  for (let i = 0; i < 30 && !same(back, zoomed); i++) { await sleep(40); back = await cam(); }
+  console.log('LEFT', JSON.stringify({ zoomed, back }));
+  check(same(back, zoomed), 'leaving the canvas restores the camera');
+  await run(() => {
+    const extra = ws.activeGroup.tabs.find(t => t !== ws.active && t.path === 'Welcome.md');
+    if (extra) ws.closeTab(extra);
+  });
+
   await click('.canvas-controls .lucide-maximize');
   await sleep(150);
   const onB = await run(() => {
@@ -233,6 +257,25 @@ await withBrowser(async ({ send, on, run, click, press, check, open }) => {
   await press('Escape');
   await sleep(40);
 
+  await open('HugeNote.canvas', hugeNote);
+  await waitBuilt(2);
+  await f5();
+  await waitSlide('G');
+  let noteBody = { title: true, culled: true, text: false };
+  for (let i = 0; i < 40; i++) {
+    noteBody = await run(() => {
+      const card = document.querySelector('[data-node-id="note"]');
+      const text = card?.querySelector('.canvas-node-content')?.textContent ?? '';
+      return { title: card.classList.contains('is-title-mode'), culled: card.classList.contains('is-culled'), text: text.includes('sample vault') };
+    });
+    if (noteBody.text && !noteBody.title && !noteBody.culled) break;
+    await sleep(50);
+  }
+  console.log('HUGE NOTE', JSON.stringify(noteBody));
+  check(!noteBody.title && !noteBody.culled && noteBody.text, 'a file card in a fitted group still renders its note');
+  await press('Escape');
+  await sleep(40);
+
   await open('Many.canvas', many);
   await waitBuilt(300);
   await f5();
@@ -298,4 +341,19 @@ await withBrowser(async ({ send, on, run, click, press, check, open }) => {
   const metrics = summarizeTrace(trace, 1);
   console.log('COMPOSITOR', JSON.stringify(metrics));
   check(metrics.dropped <= 6, 'a 300-card glide stays within 6 compositor drops');
+
+  await press('ArrowRight');
+  await sleep(60);
+  await send('Emulation.setDeviceMetricsOverride', { width: 900, height: 700, deviceScaleFactor: 1, mobile: false });
+  await sleep(700);
+  const refit = await run(() => {
+    const id = document.querySelector('.canvas-view').dataset.slideId;
+    const card = document.querySelector(`[data-node-id="${id}"]`).getBoundingClientRect();
+    const view = document.querySelector('.canvas-view').getBoundingClientRect();
+    return { id, cw: card.width, ch: card.height, vw: view.width, vh: view.height };
+  });
+  console.log('RESIZE', JSON.stringify(refit));
+  check(refit.vw < 950 && (refit.cw > refit.vw * 0.75 || refit.ch > refit.vh * 0.75), 'a resize during the glide refits the slide');
+  await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 1000, deviceScaleFactor: 1, mobile: false });
+  await press('Escape');
 });

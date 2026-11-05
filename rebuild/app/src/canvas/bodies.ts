@@ -53,7 +53,7 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     work.add(retained, () => {
       for (const [id, card] of retained) {
         if (retained.size <= 300) break;
-        if (visible.has(card.node) || card.el.classList.contains("is-editing")) continue;
+        if (pinned.has(id) || visible.has(card.node) || card.el.classList.contains("is-editing")) continue;
         card.body?.release(); retained.delete(id);
       }
     });
@@ -70,14 +70,28 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     pinned = new Set(ids ?? []);
     const view = viewport();
     if (!view || !pinned.size) return;
-    for (const id of pinned) { const card = cards.get(id); if (card) apply(card, view, true); }
+    for (const id of pinned) {
+      const card = cards.get(id);
+      if (!card) continue;
+      // Mark it visible before ensure(), so a file or drawing read that finishes
+      // during the call is kept, and the body cache does not evict the slide.
+      visible.add(card.node);
+      apply(card, view, true);
+    }
   }
   return { update, present,
     add(node: CanvasNode, el: HTMLElement, body?: Body) { const card = {node,el,body}; cards.set(node.id,card); prepare(card); },
     prepare(node: CanvasNode) { const card = cards.get(node.id); if (card) prepare(card); },
     changed(changed: CanvasNode[]) { changed.forEach(n => { index.update(n); const card = cards.get(n.id); if (card) card.last = undefined; }); update(); },
     ready(node: CanvasNode) { const card = cards.get(node.id); if (card && !gone) { retained.delete(node.id); retained.set(node.id, card); const view = viewport(); if (view) apply(card, view, visible.has(node)); trim(); } },
-    wanted(node: CanvasNode) { const view = viewport(); return !gone && visible.has(node) && !!view && (!view.titles || cards.get(node.id)?.el.classList.contains("is-image")); },
+    // A presented slide stays wanted after the camera drops into title mode, and
+    // while it is still outside the viewport the glide has not reached.
+    wanted(node: CanvasNode) {
+      if (gone) return false;
+      if (pinned.has(node.id)) return true;
+      const view = viewport();
+      return !!view && visible.has(node) && (!view.titles || !!cards.get(node.id)?.el.classList.contains("is-image"));
+    },
     stats: () => ({ retained: retained.size, visible: visible.size }),
     dispose() { gone = true; revision++; for (const card of cards.values()) card.body?.release(); cards.clear(); retained.clear(); shown.clear(); visible.clear(); },
   };

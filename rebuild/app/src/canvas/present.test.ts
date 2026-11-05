@@ -17,6 +17,14 @@ test("slideFrame fits a labeled group and clamps a small card at 4", () => {
   expect(huge.scale).toBeCloseTo(1280 / (8000 * 1.1));
   expect(huge.scale).toBeLessThan(0.45);
   expect(slideFrame(card("z", 0, 0), 0, 100)).toBeNull();
+  const labeled = slideFrame(card("g2", 0, 0, 8000, 5000, { type: "group", label: "Huge" }), 1280, 1000)!;
+  const lift = labeled.cy - (0 + 5000 / 2);
+  // cy sits half the lift above the group center, so the reserved band is -2 * that.
+  const reserved = -2 * lift;
+  expect(labeled.scale).toBeCloseTo(1280 / (8000 * 1.1));
+  const screen = reserved * labeled.scale;
+  expect(screen).toBeGreaterThan(18);
+  expect(screen).toBeLessThan(30);
 });
 
 test("slideMembers keeps a card, and a group plus what sits fully inside it", () => {

@@ -10,20 +10,46 @@ export interface Camera {
 const MIN_SCALE = 1 / 16;
 const MAX_SCALE = 4;
 const PAD = 1.1;
+// Unscaled label box in canvas.css: 22.5px font, 8px of vertical padding, 4px gap.
+// Zoomed out, the label scales so the font stays about 14px on screen.
+const GROUP_LIFT = 36;
+const FILE_LIFT = 22;
+const LABEL_BOX = 22.5 + 8;
+const LABEL_GAP = 4;
+const LABEL_SCREEN = 14;
 
-/**
- * Fit one slide into the view. Groups with a label leave room above the box.
- * Scale may pass the normal zoom cap (2) so a small card can fill the view,
- * and it stops at 4.
- */
-export function slideFrame(node: CanvasNode, width: number, height: number): Camera | null {
-  if (!(width > 0) || !(height > 0) || !(node.width > 0) || !(node.height > 0)) return null;
-  const lift = node.type === "group" && node.label ? 36 : node.type === "file" || node.type === "link" ? 22 : 0;
+function frameFor(node: CanvasNode, width: number, height: number, lift: number): Camera {
   const top = node.y - lift;
   const boxW = node.width * PAD;
   const boxH = (node.height + lift) * PAD;
   const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, width / boxW, height / boxH));
   return { cx: node.x + node.width / 2, cy: top + (node.height + lift) / 2, scale };
+}
+
+function groupLift(scale: number): number {
+  const board = LABEL_BOX * Math.max(1, (LABEL_SCREEN / 22.5) / scale) + LABEL_GAP;
+  return Math.max(GROUP_LIFT, board);
+}
+
+/**
+ * Fit one slide into the view. Groups with a label leave room above the box,
+ * including when the label scales up to stay readable. Scale may pass the
+ * normal zoom cap (2) so a small card can fill the view, and it stops at 4.
+ */
+export function slideFrame(node: CanvasNode, width: number, height: number): Camera | null {
+  if (!(width > 0) || !(height > 0) || !(node.width > 0) || !(node.height > 0)) return null;
+  const labeled = node.type === "group" && !!node.label;
+  let lift = labeled ? GROUP_LIFT : node.type === "file" || node.type === "link" ? FILE_LIFT : 0;
+  let camera = frameFor(node, width, height, lift);
+  if (!labeled) return camera;
+  // A taller lift can shrink the scale, which grows the label again.
+  for (let pass = 0; pass < 2; pass++) {
+    const next = groupLift(camera.scale);
+    if (next <= lift + 0.5) break;
+    lift = next;
+    camera = frameFor(node, width, height, lift);
+  }
+  return camera;
 }
 
 /** The slide plus every node fully inside it, when the slide is a group. */

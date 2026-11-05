@@ -50,7 +50,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false, flushBand = false;
   let rect: DOMRect | undefined, menu: HTMLElement | undefined, styled: HTMLElement | undefined;
   let space = false, dragging = false, suppressClick = false, titles = false;
-  let held = false, gliding = false, glideGen = 0;
+  let held = false, gliding = false, glideGen = 0, glideResize = false;
   let heldResize = () => {};
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
@@ -219,7 +219,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   el.addEventListener("dblclick", blockClick, true);
   const size = new ResizeObserver(([entry]) => {
     width = entry.contentRect.width; height = entry.contentRect.height; rect = undefined;
-    if (gliding) return;
+    if (gliding) { glideResize = true; return; }
     if (held) { heldResize(); return; }
     gesture = false; flushBand = true;
     if (!state) fit(); else draw();
@@ -241,16 +241,18 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     camera() { return state && width && height ? { cx: state.cx, cy: state.cy, scale: state.scale, width, height } : undefined; },
     reflow() { width = el.clientWidth; height = el.clientHeight; rect = undefined; },
     jump(next: Camera) {
-      glideGen++; gliding = false; cancelAnimationFrame(frame); frame = 0;
+      glideGen++; gliding = false; glideResize = false; cancelAnimationFrame(frame); frame = 0;
+      state = { path, cx: next.cx, cy: next.cy, scale: next.scale };
+      canvasViewports.set(tab, state);
       if (!width || !height) return;
       gesture = false; flushBand = true;
-      state = { path, cx: next.cx, cy: next.cy, scale: next.scale };
       drawn = "";
       draw();
     },
     glide(next: Camera, ms: number) {
       const gen = ++glideGen;
       gliding = true;
+      glideResize = false;
       cancelAnimationFrame(frame); frame = 0;
       clearTimeout(notify); notify = 0;
       clearTimeout(settle); settle = 0;
@@ -267,14 +269,21 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
           placeTransform(cam.cx, cam.cy, cam.scale);
           canvasViewports.set(tab, state);
           if (p < 1) requestAnimationFrame(step);
-          else { gliding = false; drawn = ""; gesture = false; flushBand = true; draw(); resolve(); }
+          else {
+            gliding = false; drawn = ""; gesture = false; flushBand = true;
+            const refit = glideResize && held;
+            glideResize = false;
+            if (refit) heldResize();
+            else draw();
+            resolve();
+          }
         };
         requestAnimationFrame(step);
       });
     },
-    cancelGlide() { glideGen++; gliding = false; },
+    cancelGlide() { glideGen++; gliding = false; glideResize = false; },
     hold(next: boolean) { held = next; if (next) releaseSpace(); },
     onHeldResize(fn: () => void) { heldResize = fn; },
-    dispose() { glideGen++; gliding = false; cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); size.disconnect(); events.abort(); },
+    dispose() { glideGen++; gliding = false; glideResize = false; cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); size.disconnect(); events.abort(); },
   };
 }
