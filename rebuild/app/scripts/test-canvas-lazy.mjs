@@ -1,6 +1,6 @@
 // CZ3: lazy bodies, shared origins, bounded opening/settles, culling and teardown.
 import assert from 'node:assert/strict';
-import { withBrowser, sleep } from './browser.mjs';
+import { frameFixture, withBrowser, sleep } from './browser.mjs';
 await withBrowser(async({run,send,click,press,check})=>{
  const wait=async(test,label)=>{for(let i=0;i<800;i++){if(await test())return;await sleep(15);}assert.fail(label);};
  const settle=()=>wait(()=>run(()=>window.__canvasProbe?.().pending===0),'work drains');
@@ -29,6 +29,7 @@ await withBrowser(async({run,send,click,press,check})=>{
  const openWithinBudget=open.long.every(n=>n<=50);
  await zoom(1);const content=await snapshot();console.log('CZ3_CONTENT',JSON.stringify(content));
  check(content.contexts<=2&&content.bodies>0&&content.retained<100&&content.culled>2900,'Only on-screen bodies render, sharing one context per origin');
+ check(await run(()=>document.querySelectorAll('iframe').length===0),'The 3000-card board loads no frames');
  await zoom(.4);const titles=await snapshot();check(titles.hit===0&&titles.ends===0&&titles.batch>0,'Settling into title mode removes every individual edge hit path and end');
  await zoom(.6);await settle();
  const tails=await run(()=>[...cz3long]);console.log('CZ3_TASKS',JSON.stringify(tails));const settlesWithinBudget=tails.every(n=>n<=50);
@@ -65,5 +66,24 @@ await withBrowser(async({run,send,click,press,check})=>{
  const pending=await run(async()=>{document.querySelector('.canvas-controls .lucide-maximize').closest('[role=button]').click();const pending=__canvasProbe().pending;window.cz3lastProbe=__canvasProbe;await ws.open('Welcome.md');return pending;});
  await sleep(100);
  check(pending>0&&await run(()=>!document.querySelector('.canvas-view')&&!window.__canvasProbe&&cz3watches===0&&cz3lastProbe().contexts===0&&cz3lastProbe().pending===0),'Leaving during queued work releases contexts, subscriptions and rendering');
+ const fixture=await frameFixture();
+ try {
+  const board=Array.from({length:8},(_,i)=>({id:'f'+i,type:'link',x:(i%3)*160,y:Math.floor(i/3)*90,width:150,height:70,url:fixture.url}));
+  board.push({id:'far',type:'link',x:5000,y:0,width:150,height:70,url:fixture.url});
+  await run(async nodes=>{
+   settings.set('app.json','webEmbeds','always');
+   const {api}=await import('/src/api.ts');
+   await api.createNote('FramesLazy.canvas',JSON.stringify({nodes,edges:[]}));
+   await ws.vault.refreshFiles();await ws.open('FramesLazy.canvas');
+  },board);
+  await wait(()=>run(()=>window.__canvasProbe?.().built),'frame board built');
+  await wait(()=>run(async()=>{const {canvasViewports}=await import('/src/canvas/navigation.ts');return !!document.querySelector('.canvas-world')?.style.transform&&canvasViewports.has(ws.active);}),'frame viewport ready');
+  await run(async()=>{const {canvasViewports}=await import('/src/canvas/navigation.ts');Object.assign(canvasViewports.get(ws.active),{cx:235,cy:140,scale:1});document.querySelector('.canvas-view').dispatchEvent(new WheelEvent('wheel',{ctrlKey:true,cancelable:true}));});
+  await sleep(280);await settle();
+  await wait(()=>run(()=>document.querySelectorAll('iframe.canvas-web-frame[src]').length===6),'six frames load');
+  check(await run(()=>document.querySelectorAll('iframe').length===6&&!document.querySelector('[data-node-id="far"] iframe')),'At most six on-screen frames, and an off-screen card has none');
+  await zoom(.4);
+  check(await run(()=>document.querySelectorAll('iframe').length===0),'Title mode drops every frame');
+ } finally { await fixture.close(); }
  assert.ok(openWithinBudget,'opening has no main-thread task over 50ms');assert.ok(settlesWithinBudget,'title/content settles have no task over 50ms');
 });

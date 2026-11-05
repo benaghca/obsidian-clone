@@ -42,6 +42,8 @@ export const APP = {
   readableLineLength: field(true, bool),
   propertiesInDocument: field<"visible" | "hidden" | "source">("visible", oneOf("visible", "hidden", "source")),
   showLineNumber: field(false, bool),
+  /** Canvas link cards. Off leaves the address, click waits, and always shows the page. */
+  webEmbeds: field<"off" | "click" | "always">("always", oneOf("off", "click", "always")),
   foldHeading: field(true, bool),
   foldIndent: field(true, bool),
   spellcheck: field(true, bool),

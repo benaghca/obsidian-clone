@@ -5,8 +5,29 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { accessSync, constants, statSync } from 'node:fs';
 import { delimiter, extname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createServer as createHttpServer } from 'node:http';
 import { createServer } from 'node:net';
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+// Loopback pages the tests themselves serve. Anything else http(s) is refused.
+const fixtureOrigins = new Set();
+export function frameFixture() {
+  return new Promise((resolve, reject) => {
+    const server = createHttpServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      res.end('<!doctype html><html><body><p id="grove-frame-fixture">ok</p></body></html>');
+    });
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      const origin = `http://127.0.0.1:${port}`;
+      fixtureOrigins.add(origin);
+      resolve({
+        url: `${origin}/`,
+        close: () => new Promise(done => { fixtureOrigins.delete(origin); server.close(() => done()); }),
+      });
+    });
+  });
+}
 // Resolve without launching candidates (especially Chrome/Edge on Windows).
 export function findBrowser(env = process.env, platform = process.platform) {
   const windows = platform === 'win32';
@@ -114,6 +135,20 @@ export async function withBrowser(test, { height = 1000, screenshots } = {}) {
       await mkdir(screenshots, { recursive: true });
       await writeFile(join(screenshots, `${name}.png`), Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
     };
+    // After the app is up, so Vite's own loads are done. Loopback that is not
+    // this page or a fixture is refused too, and it fails fast instead of hanging.
+    const pageOrigin = new URL(url).origin;
+    on('Fetch.requestPaused', params => {
+      const raw = params.request?.url ?? '';
+      let permit = true;
+      try {
+        const parsed = new URL(raw);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') permit = parsed.origin === pageOrigin || fixtureOrigins.has(parsed.origin);
+      } catch { permit = true; }
+      const payload = permit ? { requestId: params.requestId } : { requestId: params.requestId, errorReason: 'BlockedByClient' };
+      void send(permit ? 'Fetch.continueRequest' : 'Fetch.failRequest', payload).catch(() => {});
+    });
+    await send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
     await test({ send, on, evaluate, run, key, press, chord, point, move, click, fill, double, read, open, check, shot });
     assert.deepEqual(errors, [], 'no browser exceptions');
   } finally {
