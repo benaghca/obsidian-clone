@@ -3,7 +3,7 @@
 // handles, and resizing and rotating a frame. Pure: no DOM, no scene edits.
 // Coordinates are scene units; tolerances come in already divided by zoom.
 
-import { curveControls } from "./render";
+import { arrowSize, curveControls } from "./render";
 import type { DrawingElement, LinearElement, Point } from "./scene";
 
 export interface Box { x: number; y: number; width: number; height: number }
@@ -126,6 +126,29 @@ function sampledCurve(pts: Point[]): Point[] {
   return out;
 }
 
+// An arrowhead is a triangle back from its tip, as wide as the renderer draws it.
+function headHit(el: LinearElement, pts: Point[], q: Point, edge: number): boolean {
+  const size = arrowSize(el.strokeWidth);
+  const ends: [string | null, Point, Point][] = [[el.startArrowhead, pts[0], pts[1]], [el.endArrowhead, pts[pts.length - 1], pts[pts.length - 2]]];
+  for (const [kind, tip, from] of ends) {
+    if (!kind) continue;
+    const len = Math.hypot(tip[0] - from[0], tip[1] - from[1]);
+    if (len < 1e-9) continue;
+    const ux = (tip[0] - from[0]) / len, uy = (tip[1] - from[1]) / len;
+    const back: Point = [tip[0] - ux * size, tip[1] - uy * size];
+    const a: Point = [back[0] - uy * size * 0.45, back[1] + ux * size * 0.45];
+    const b: Point = [back[0] + uy * size * 0.45, back[1] - ux * size * 0.45];
+    if (insideTriangle(q, tip, a, b) || polylineDistance(q, [tip, a, b, tip]) <= edge) return true;
+  }
+  return false;
+}
+
+function insideTriangle(p: Point, a: Point, b: Point, c: Point): boolean {
+  const side = (u: Point, v: Point) => (v[0] - u[0]) * (p[1] - u[1]) - (v[1] - u[1]) * (p[0] - u[0]);
+  const d1 = side(a, b), d2 = side(b, c), d3 = side(c, a);
+  return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
+}
+
 const filled = (el: DrawingElement) => el.backgroundColor !== "transparent" && el.backgroundColor !== "none" && el.backgroundColor !== "";
 
 /** Distance to a sampled outline. Step count follows the longer radius so a flat ellipse's side is still dense. */
@@ -153,7 +176,8 @@ export function hitElement(el: DrawingElement, p: Point, tol: number): boolean {
   if (isPointType(el.type)) {
     const pts = placedPoints(el as LinearElement);
     const curved = pts.length >= 3 && (el.type === "freedraw" || (!!el.roundness && !(el as LinearElement).elbowed));
-    return polylineDistance(q, curved ? sampledCurve(pts) : pts) <= edge;
+    if (polylineDistance(q, curved ? sampledCurve(pts) : pts) <= edge) return true;
+    return el.type !== "freedraw" && pts.length >= 2 && headHit(el as LinearElement, pts, q, edge);
   }
   const l = f.x, t = f.y, r = f.x + f.width, b = f.y + f.height;
   const inside = q[0] >= l && q[0] <= r && q[1] >= t && q[1] <= b;

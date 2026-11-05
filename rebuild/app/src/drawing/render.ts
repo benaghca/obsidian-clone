@@ -203,7 +203,7 @@ function renderLinear(el: LinearElement, strokeOf: (el: DrawingElement) => strin
   return `<g ${mark(el)}${tail(el)}><path data-part="shaft" ${stroke} d="${d}"/>${heads}</g>`;
 }
 
-function renderFreedraw(el: DrawingElement & { type: "freedraw"; points: Point[] }, strokeOf: (el: DrawingElement) => string): string | null {
+function renderFreedraw(el: FreedrawElement, strokeOf: (el: DrawingElement) => string): string | null {
   const pts = placed(el);
   const color = strokeOf(el);
   const stroke = `stroke="${color}" stroke-width="${n(el.strokeWidth)}" fill="none"${dashAttr(el)}`;
@@ -211,8 +211,47 @@ function renderFreedraw(el: DrawingElement & { type: "freedraw"; points: Point[]
     return `<circle ${mark(el)} ${stroke} cx="${n(pts[0][0])}" cy="${n(pts[0][1])}" r="${n(Math.max(1.5, el.strokeWidth))}"${tail(el)}/>`;
   }
   if (pts.length < 2) return null;
-  // One width for the whole stroke. Pressures stay in the file.
+  // A pen's pressures set the width along the stroke; a mouse stroke (simulated pressure) has one width.
+  if (hasPressure(el)) return `<path ${mark(el)} fill="${color}" stroke="none" d="${pressureOutline(pts, el.pressures, el.strokeWidth)}"${tail(el)}/>`;
   return `<path ${mark(el)} ${stroke} d="${smoothPath(pts)}"${tail(el)}/>`;
+}
+
+/** Whether a freedraw stroke has a stored pressure for every point. */
+export function hasPressure(el: { type: string; simulatePressure?: boolean; pressures?: number[]; points?: Point[] }): boolean {
+  return el.type === "freedraw" && el.simulatePressure === false && !!el.pressures && !!el.points && el.points.length >= 2 && el.pressures.length >= el.points.length;
+}
+
+/** The stroke width at a pressure: 0.5 draws the element's own width, a light touch half of it, a hard one half again more. */
+export function pressureWidth(sw: number, pressure: number): number {
+  return Math.max(0.5, sw * (0.5 + Math.min(1, Math.max(0, pressure))));
+}
+
+// The outline of a stroke whose width follows the pressures: one side
+// forward, a round cap, the other side back, and a round cap to close it.
+function pressureOutline(all: Point[], pressures: number[], sw: number): string {
+  const pts: Point[] = [], half: number[] = [];
+  for (let i = 0; i < all.length; i++) {
+    const p = all[i], last = pts[pts.length - 1];
+    if (last && Math.hypot(p[0] - last[0], p[1] - last[1]) < 1e-6) continue;
+    pts.push(p);
+    half.push(pressureWidth(sw, pressures[i]) / 2);
+  }
+  if (pts.length === 1) {
+    const [x, y] = pts[0], r = n(half[0]);
+    return `M${n(x - half[0])} ${n(y)} A${r} ${r} 0 1 0 ${n(x + half[0])} ${n(y)} A${r} ${r} 0 1 0 ${n(x - half[0])} ${n(y)} Z`;
+  }
+  const left: Point[] = [], right: Point[] = [];
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(pts.length - 1, i + 1)];
+    const [ux, uy] = unit(b[0] - a[0], b[1] - a[1]);
+    left.push([pts[i][0] - uy * half[i], pts[i][1] + ux * half[i]]);
+    right.push([pts[i][0] + uy * half[i], pts[i][1] - ux * half[i]]);
+  }
+  right.reverse();
+  const end = n(half[half.length - 1]), start = n(half[0]);
+  return `M${n(left[0][0])} ${n(left[0][1])}${curveThrough(left)}`
+    + ` A${end} ${end} 0 0 0 ${n(right[0][0])} ${n(right[0][1])}${curveThrough(right)}`
+    + ` A${start} ${start} 0 0 0 ${n(left[0][0])} ${n(left[0][1])} Z`;
 }
 
 function renderText(el: TextElement, dark: boolean): string | null {
@@ -226,8 +265,13 @@ function renderText(el: TextElement, dark: boolean): string | null {
   const tspans = lines.map((line, i) => i === 0
     ? `<tspan x="${n(x)}" y="${n(top)}">${escText(line)}</tspan>`
     : `<tspan x="${n(x)}" dy="${n(lineH)}">${escText(line)}</tspan>`).join("");
-  const family = el.fontFamily === 1 ? "cursive" : el.fontFamily === 3 ? "ui-monospace, 'JetBrains Mono', monospace" : "sans-serif";
+  const family = fontFamilyCss(el.fontFamily);
   return `<text ${mark(el)} fill="${esc(drawingColor(el.strokeColor, dark))}" stroke="none" font-size="${n(el.fontSize)}" font-family="${family}" text-anchor="${anchor}" dominant-baseline="text-before-edge" xml:space="preserve"${tail(el)}>${tspans}</text>`;
+}
+
+/** The CSS font family a text element is drawn in: hand-drawn (1) as cursive, code (3) as monospace, the rest sans-serif. */
+export function fontFamilyCss(fontFamily: number): string {
+  return fontFamily === 1 ? "cursive" : fontFamily === 3 ? "ui-monospace, 'JetBrains Mono', monospace" : "sans-serif";
 }
 
 function renderImage(el: ImageElement, clip: (x: number, y: number, w: number, h: number) => string, images: RenderOptions["images"], color: string, dark: boolean): string {
@@ -306,8 +350,13 @@ export function curveControls(pts: Point[], i: number): [Point, Point, Point, Po
 
 function smoothPath(pts: Point[]): string {
   if (pts.length < 2) return "";
-  let d = `M${n(pts[0][0])} ${n(pts[0][1])}`;
-  if (pts.length === 2) return `${d} L${n(pts[1][0])} ${n(pts[1][1])}`;
+  return `M${n(pts[0][0])} ${n(pts[0][1])}${curveThrough(pts)}`;
+}
+
+// The curve from the first point through the rest, without its opening move.
+function curveThrough(pts: Point[]): string {
+  if (pts.length === 2) return ` L${n(pts[1][0])} ${n(pts[1][1])}`;
+  let d = "";
   for (let i = 0; i < pts.length - 1; i++) {
     const [, c1, c2, p2] = curveControls(pts, i);
     d += ` C${n(c1[0])} ${n(c1[1])} ${n(c2[0])} ${n(c2[1])} ${n(p2[0])} ${n(p2[1])}`;
@@ -321,7 +370,7 @@ function linePath(pts: Point[], close = false): string {
   return close ? d + " Z" : d;
 }
 
-function arrowSize(sw: number): number {
+export function arrowSize(sw: number): number {
   return 6 + sw * 3;
 }
 
@@ -467,7 +516,7 @@ function pointInkBox(el: LinearElement | FreedrawElement): Bounds {
     else for (const p of shaft) add(p[0], p[1]);
   } else if (pts.length === 1) add(pts[0][0], pts[0][1]);
   else add(el.x, el.y);
-  const pad = Math.max(el.strokeWidth, 1) / 2;
+  const pad = hasPressure(el) ? pressureWidth(el.strokeWidth, 1) / 2 : Math.max(el.strokeWidth, 1) / 2;
   return { x: minX - pad, y: minY - pad, width: maxX - minX + pad * 2, height: maxY - minY + pad * 2 };
 }
 
