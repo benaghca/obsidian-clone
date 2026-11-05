@@ -154,6 +154,13 @@ export const api = {
           invoke<FileEntry>("write_file_bytes", bytes, { headers: { "x-grove-path": encodeGrovePath(path) } }),
         )
       : call<FileEntry>("write_file_bytes", { path, bytes: Array.from(bytes) }),
+  /**
+   * The system clipboard's image, or null when it has none.
+   * The body is the mime, one LF, then the bytes (`splitClipboardImage`).
+   * A missing clipboard tool rejects with its install message.
+   */
+  readClipboardImage: () =>
+    call<ArrayBuffer | null>("read_clipboard_image").then((packed) => (packed ? new Uint8Array(packed) : null)),
   createNote: (path: string, content: string) => call<FileEntry>("create_note", { path, content }),
   createFolder: (path: string) => call<FileEntry>("create_folder", { path }),
   renamePath: (from: string, to: string) => call<void>("rename_path", { from, to }),

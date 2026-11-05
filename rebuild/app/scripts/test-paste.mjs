@@ -52,7 +52,7 @@ const cases = [
   ['multiline editor wrapper', '<div style="font-family:monospace"><div><span style="color:red">line one</span></div><div>line two</div></div>', null],
   ['editor wrapper', '<div style="font-family:monospace">const value = 1;</div>', null],
 ];
-await withBrowser(async ({ send, run, click, chord, key, press, check }) => {
+await withBrowser(async ({ send, run, click, chord, key, press, check, open, read }) => {
   await send('Network.enable');
   await send('Page.bringToFront');
   const units = await run(async cases => {
@@ -179,6 +179,113 @@ await withBrowser(async ({ send, run, click, chord, key, press, check }) => {
   check(await run(async () => { const {settings} = await import('/src/settings/store.ts'); return !settings.get('app.json').autoConvertHTML; }), 'Editor toggle switches conversion off');
   await click('[role="switch"][aria-label="Auto convert HTML"]');
   check(await run(async () => { const {settings} = await import('/src/settings/store.ts'); return settings.get('app.json').autoConvertHTML; }), 'Repeated toggle click restores conversion');
+
+  // No file and no text: the mock command supplies the image, and the embed is one undo.
+  const armImage = async () => run(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2; canvas.height = 1;
+    const g = canvas.getContext('2d');
+    g.fillStyle = '#ff0000';
+    g.fillRect(0, 0, 2, 1);
+    const png = new Uint8Array(await (await new Promise(resolve => canvas.toBlob(resolve, 'image/png'))).arrayBuffer());
+    const head = new TextEncoder().encode('image/png\n');
+    const packed = new Uint8Array(head.length + png.length);
+    packed.set(head);
+    packed.set(png, head.length);
+    const { setMockClipboardImage, mockClipboardImageReads } = await import('/src/mock/backend.ts');
+    setMockClipboardImage(packed);
+    return { png: [...png], reads: mockClipboardImageReads() };
+  });
+  const until = async (fn, label) => {
+    let last;
+    for (let i = 0; i < 40; i++) {
+      last = await fn();
+      if (last) return last;
+      await sleep(50);
+    }
+    assert.fail(`${label}: ${JSON.stringify(last)}`);
+  };
+  await press('Escape');
+  await sleep(80);
+  await run(() => ws.setMode('source'));
+  await reset();
+  await click('.cm-content .cm-line');
+  await chord('End');
+  await run(() => navigator.clipboard.writeText(''));
+  const armed = await armImage();
+  check(armed.png.includes(10), 'the armed PNG contains a newline after the mime split');
+  await chord('v');
+  const embedded = await until(async () => {
+    const body = await text();
+    const match = body.match(/!\[\[(Pasted image \d{14}\.png)\]\]/);
+    return match ? { body, name: match[1] } : null;
+  }, 'no-file paste writes an embed');
+  assert.equal(embedded.body, prefix + 'START\n![[' + embedded.name + ']]');
+  const savedBytes = await run(async name => {
+    const { api } = await import('/src/api.ts');
+    return [...new Uint8Array(await api.readFileBytes(name))];
+  }, embedded.name);
+  assert.deepEqual(savedBytes, armed.png);
+  const noteReads = await run(async () => (await import('/src/mock/backend.ts')).mockClipboardImageReads());
+  check(noteReads === 1, 'no-file paste calls read_clipboard_image once');
+  await chord('z');
+  await sleep(80);
+  assert.equal(await text(), prefix + 'START\n');
+  check(await run(async name => {
+    const { api } = await import('/src/api.ts');
+    return [...new Uint8Array(await api.readFileBytes(name))].length;
+  }, embedded.name) === armed.png.length, 'one undo removes the embed and leaves the file');
+
+  // Canvas Paste of that same empty clipboard makes one image card at the pointer. Undo removes it.
+  const fixture = { future: { keep: [1] }, nodes: [{ id: 'a', type: 'text', x: 0, y: 0, width: 200, height: 120, text: 'Alpha' }], edges: [] };
+  await armImage();
+  await open('PasteBoard.canvas', fixture);
+  const beforeCanvas = await read();
+  const spot = await run(() => {
+    const view = document.querySelector('.canvas-view');
+    const r = view.getBoundingClientRect();
+    for (let y = r.top + 100; y < r.bottom - 90; y += 34) {
+      for (let x = r.left + 36; x < r.right - 300; x += 34) {
+        const el = document.elementFromPoint(x, y);
+        if (el && view.contains(el) && !el.closest('.canvas-node, [data-edge-id], .canvas-controls, .canvas-card-menu, .canvas-selection-menu'))
+          return { x: Math.round(x), y: Math.round(y) };
+      }
+    }
+    return null;
+  });
+  check(spot, 'canvas has an empty point for the image paste');
+  await click(spot, 'right');
+  const pasteAt = await run(() => {
+    const row = [...document.querySelectorAll('.menu-item')].find(el => el.querySelector('.menu-item-title')?.textContent === 'Paste');
+    const r = row.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await click(pasteAt);
+  const card = await until(async () => {
+    const file = await read();
+    const nodes = JSON.parse(file).nodes;
+    const node = nodes.find(n => n.type === 'file' && /^Pasted image \d{14}( \d+)?\.png$/.test(n.file ?? ''));
+    if (!node) return null;
+    const box = await run(id => {
+      const el = document.querySelector(`[data-node-id="${id}"]`);
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { left: r.left, top: r.top, image: !!el.querySelector('img[src^="blob:"]') };
+    }, node.id);
+    return box?.image ? { node, box, file } : null;
+  }, 'canvas image paste writes a media card');
+  check(card.node.width === 400 && card.node.height === 200, 'the image card keeps the picture aspect inside 400px');
+  check(Math.abs(card.box.left - spot.x) <= 1.5 && Math.abs(card.box.top - spot.y) <= 1.5, 'the image card sits on the pointer');
+  check(card.box.image && JSON.parse(card.file).future.keep.join(',') === '1', 'the card shows the image and keeps unknown canvas fields');
+  check(JSON.parse(card.file).nodes.length === 2, 'the paste adds one card');
+  const canvasReads = await run(async () => (await import('/src/mock/backend.ts')).mockClipboardImageReads());
+  check(canvasReads === 1, 'canvas image paste calls read_clipboard_image once');
+  await run(() => document.querySelector('.canvas-view').focus());
+  await chord('z');
+  const restored = await until(async () => (await read()) === beforeCanvas, 'one undo restores the canvas');
+  check(restored === true && JSON.parse(await read()).nodes.length === 1, 'undo removes the image card in one step');
+  await run(async () => { const { setMockClipboardImage } = await import('/src/mock/backend.ts'); setMockClipboardImage(null); });
+
   assert.deepEqual(await run(() => consoleErrors), []);
   console.log(`Paste: ${cases.length} converter unit cases plus native integration checks passed`);
 });

@@ -8,7 +8,7 @@ import { isolateHistory } from "@codemirror/commands";
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorSelection, Facet } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
-import { clipboardFiles } from "./attachments";
+import { clipboardFiles, isClipboardImage, splitClipboardImage } from "./attachments";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
 import { htmlToMarkdown } from "./htmlToMarkdown";
@@ -21,36 +21,102 @@ const selectedText = (view: EditorView) =>
 /** Put text on the clipboard (a code block's copy button, Copy path, Copy URL). */
 export const writeClipboard = (text: string) => void navigator.clipboard.writeText(text).catch((err) => console.warn("Grove could not write the clipboard", err));
 
+/** What a paste carried. `bare` means a paste was seen with neither a file nor text. */
+export interface ClipboardSnapshot {
+  text: string;
+  files: File[];
+  bare: boolean;
+}
+
 /**
- * Plain text the way the editor context menu reads the clipboard: the native
- * paste command first, then the async clipboard API. The paste event is
- * consumed so it is not inserted into a focused editor as well.
+ * The native paste command first, then the async clipboard. The paste event is
+ * consumed so it is not inserted into a focused editor as well. A command that
+ * returns without an event is not bare: nothing was read, same as before.
  */
-export function readClipboardText(): Promise<string> {
+export function readClipboard(): Promise<ClipboardSnapshot> {
   return new Promise((resolve) => {
     let settled = false;
-    const finish = (text: string) => {
+    const finish = (snap: ClipboardSnapshot) => {
       if (settled) return;
       settled = true;
       document.removeEventListener("paste", onPaste, true);
-      resolve(text);
+      resolve(snap);
     };
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      finish(event.clipboardData?.getData("text/plain") ?? "");
+      finish(snapshotFromTransfer(event.clipboardData));
     };
     document.addEventListener("paste", onPaste, true);
     let commanded = false;
     try { commanded = document.execCommand("paste"); } catch { commanded = false; }
     if (settled) return;
     document.removeEventListener("paste", onPaste, true);
-    if (commanded) { finish(""); return; }
-    void navigator.clipboard.readText().then(finish, (err) => {
-      console.warn("Grove could not read the clipboard", err);
-      finish("");
-    });
+    if (commanded) { finish({ text: "", files: [], bare: false }); return; }
+    void readAsyncClipboard().then(finish);
   });
+}
+
+/** Plain text from `readClipboard`. */
+export function readClipboardText(): Promise<string> {
+  return readClipboard().then((snap) => snap.text);
+}
+
+function snapshotFromTransfer(data: DataTransfer | null): ClipboardSnapshot {
+  if (!data) return { text: "", files: [], bare: true };
+  const text = data.getData("text/plain") ?? "";
+  const html = data.getData("text/html") ?? "";
+  // Text wins, including a file that arrives with it. That stays a text paste.
+  if (text || html) return { text, files: [], bare: false };
+  const files = clipboardFiles(data);
+  const images = files.filter(isClipboardImage);
+  if (images.length) return { text: "", files: images, bare: false };
+  if (files.length) return { text: "", files: [], bare: false };
+  return { text: "", files: [], bare: true };
+}
+
+async function readAsyncClipboard(): Promise<ClipboardSnapshot> {
+  let text = "";
+  try {
+    text = await navigator.clipboard.readText();
+  } catch (err) {
+    console.warn("Grove could not read the clipboard", err);
+  }
+  if (text) return { text, files: [], bare: false };
+  if (navigator.clipboard?.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      const files: File[] = [];
+      for (const item of items) {
+        if (item.types.includes("text/plain") || item.types.includes("text/html")) continue;
+        const type = item.types.find((t) => t.startsWith("image/"));
+        if (!type) continue;
+        files.push(new File([await item.getType(type)], "image.png", { type }));
+      }
+      if (files.length) return { text: "", files, bare: false };
+    } catch {
+      // The page may not be allowed to read the clipboard. The native command is next.
+    }
+  }
+  return { text: "", files: [], bare: true };
+}
+
+/** The native clipboard image as a file, or null when there is none. */
+export async function readClipboardImageFile(): Promise<File | null> {
+  try {
+    // Loaded here so note-only unit tests can import this module without `window`.
+    const { api } = await import("../api");
+    const packed = await api.readClipboardImage();
+    if (!packed) return null;
+    const image = splitClipboardImage(packed);
+    if (!image) return null;
+    const bytes = new Uint8Array(image.bytes.byteLength);
+    bytes.set(image.bytes);
+    return new File([bytes], "image.png", { type: image.mime });
+  } catch (err) {
+    console.warn("Grove could not read the clipboard image", err);
+    return null;
+  }
 }
 
 /** Copy an image as PNG (the image menu's "Copy image"). */
@@ -88,6 +154,24 @@ async function pasteImages(view: EditorView): Promise<boolean> {
   return (await view.state.facet(editorHost)?.saveAttachments?.(view, files)) ?? false;
 }
 
+/** WebKitGTK's empty paste: no file and no text, so ask `read_clipboard_image`. */
+async function pasteImageFallback(view: EditorView, data: DataTransfer | null): Promise<void> {
+  try {
+    if (data && [...data.types].some((t) => t.startsWith("image/"))) {
+      if (await pasteImages(view)) return;
+    }
+    await pasteNativeImage(view);
+  } catch (err) {
+    console.warn("Grove could not read the clipboard image", err);
+  }
+}
+
+async function pasteNativeImage(view: EditorView): Promise<boolean> {
+  const file = await readClipboardImageFile();
+  if (!file || view.state.readOnly) return false;
+  return (await view.state.facet(editorHost)?.saveAttachments?.(view, [file])) ?? false;
+}
+
 export async function paste(view: EditorView, plain: boolean) {
   if (view.state.readOnly) return;
   view.focus();
@@ -104,6 +188,7 @@ export async function paste(view: EditorView, plain: boolean) {
       }
     }
     const text = await navigator.clipboard.readText();
+    if (!plain && !text && await pasteNativeImage(view)) return;
     if (plain || !insertUrl(view, text)) insertText(view, text);
   } catch (err) {
     console.warn("Grove could not read the clipboard", err);
@@ -161,7 +246,8 @@ export const clipboard = [
     paste(event, view) {
       if (view.state.readOnly) return true;
       const data = event.clipboardData;
-      if (!data) return false;
+      // No clipboard data is the same as an empty event: neither a file nor text.
+      if (!data) { void pasteImageFallback(view, null); return true; }
       const text = data.getData("text/plain");
       const html = data.getData("text/html");
       const files = clipboardFiles(data);
@@ -173,8 +259,10 @@ export const clipboard = [
         void view.state.facet(editorHost)?.saveAttachments?.(view, files);
         return true;
       }
-      if (!text && !html && [...data.types].some((t) => t.startsWith("image/"))) {
-        void pasteImages(view);
+      // No file and no text. An image type still tries the page clipboard first;
+      // an empty event (WebKitGTK) goes straight to the native read.
+      if (!text && !html) {
+        void pasteImageFallback(view, data);
         return true;
       }
       if (insertRich(view, html, text)) return true;
