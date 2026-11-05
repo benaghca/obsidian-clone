@@ -44,7 +44,7 @@ function orderSlides(items: readonly CanvasNode[], edges: readonly CanvasEdge[])
   const slides: CanvasNode[] = [];
   const seen = new Set<string>();
   const walk = (id: string | undefined) => {
-    while (id && !seen.has(id)) {
+    while (id !== undefined && !seen.has(id)) {
       seen.add(id);
       const node = byId.get(id);
       if (node) slides.push(node);

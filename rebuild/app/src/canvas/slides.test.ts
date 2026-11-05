@@ -99,3 +99,13 @@ test("an empty board has no slides and starts at 0", () => {
   expect(presented([])).toEqual({ ids: [], start: 0, slides: [] });
   expect(presented([], [edge("a", "b")], ["a"])).toEqual({ ids: [], start: 0, slides: [] });
 });
+
+test("an empty-string slide id is retained when following arrows", () => {
+  // readCanvas accepts any string id, including an empty string.
+  const blank = node("", "group", 0, 0);
+  const a = node("a", "group", 240, 0);
+  const b = node("b", "group", 480, 0);
+  expect(presented([blank, a, b], [edge("a", ""), edge("", "b")], [""]))
+    .toMatchObject({ ids: ["a", "", "b"], start: 1 });
+  expect(presented([blank, a], [edge("", "a")]).ids).toEqual(["", "a"]);
+});
