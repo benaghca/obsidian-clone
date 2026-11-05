@@ -1,6 +1,6 @@
 import { EditorState } from "@codemirror/state";
 import { expect, test } from "vitest";
-import { mergeTemplate } from "./templateMerge";
+import { mergeTemplate, newNoteTemplate } from "./templateMerge";
 
 /**
  * Merge, and check the changes give the same text as one CodeMirror
@@ -182,6 +182,35 @@ test("a refused list union reports skipped and leaves all note properties untouc
   const r = mergeTemplate(note, "---\ntags: [b]\nnew: 1\n---\nT");
   expect(r.skipped).toBe(true);
   expect(r.text).toBe(note + "T");
+});
+
+const created = new Date(2026, 9, 3, 14, 5, 9); // Saturday 3 October 2026, 14:05:09
+
+test("a new note is the template with title, date and time filled in", () => {
+  const r = newNoteTemplate("---\ntopic: {{title}}\ncreated: {{date}}\n---\n# {{title}}\n{{time}} {{date:YYYY}}\n", "Untitled", created, "YYYY-MM-DD", "HH:mm");
+  expect(r.text).toBe("---\ntopic: Untitled\ncreated: 2026-10-03\n---\n# Untitled\n14:05 2026\n");
+  expect(r.cursor).toBe(r.text.length);
+  expect(r.bodyInserted).toBe(true);
+  expect(r.skipped).toBe(false);
+  expect(r.text.split("\n").filter((l) => l === "---")).toHaveLength(2);
+});
+
+test("a new note leaves Templater syntax as written and drops a template BOM", () => {
+  expect(newNoteTemplate("\uFEFF<% tp.date.now() %> {{title}} {{other}}", "Note", created, "YYYY-MM-DD", "HH:mm").text).toBe("<% tp.date.now() %> Note {{other}}");
+});
+
+test("a new note keeps the template's list style and turns CRLF into the empty note's LF", () => {
+  const r = newNoteTemplate("---\r\ntags:\r\n  - meeting\r\n---\r\nHi {{title}}\r\n", "N", created, "YYYY-MM-DD", "HH:mm");
+  expect(r.text).toBe("---\ntags:\n  - meeting\n---\nHi N\n");
+  expect(r.text.includes("\r")).toBe(false);
+});
+
+test("an empty or properties-only template creates that note and nothing more", () => {
+  expect(newNoteTemplate("", "N", created, "YYYY-MM-DD", "HH:mm")).toMatchObject({ text: "", changes: [], skipped: false, bodyInserted: false });
+  expect(newNoteTemplate("---\n---\n", "N", created, "YYYY-MM-DD", "HH:mm")).toMatchObject({ text: "", changes: [] });
+  const props = newNoteTemplate("---\nkind: meeting\n---\n", "N", created, "YYYY-MM-DD", "HH:mm");
+  expect(props.text).toBe("---\nkind: meeting\n---\n");
+  expect(props.bodyInserted).toBe(false);
 });
 
 test("a long note is merged without reading its body line by line", () => {

@@ -57,16 +57,27 @@ class SettingsStore {
   }
 
   /**
+   * True after load() when the vault's .grove folder held none of Grove's
+   * settings files (a vault Grove hasn't changed a setting in), so its first
+   * settings may come from Cinder's or Obsidian's. A file that exists but
+   * doesn't read counts as there.
+   */
+  fresh = false;
+
+  /**
    * Read every settings file of the open vault. A missing file means
    * defaults; an unreadable one, or one that isn't JSON, too (with a
    * warning), and it is left alone on disk until a setting in it changes.
    */
   async load() {
+    let found = false;
     const read = async (name: SettingsFile) => {
       try {
         const text = await api.readConfig(name);
+        if (text !== null) found = true;
         return text === null ? null : (JSON.parse(text) as unknown);
       } catch (err) {
+        found = true;
         console.warn(`Settings: could not read .grove/${name}, using defaults`, err);
         return null;
       }
@@ -80,7 +91,38 @@ class SettingsStore {
     });
     this.hotkeyMap = sanitizeHotkeys(hotkeys);
     this.typeMap = sanitizeTypes(types);
+    this.fresh = !found;
     this.changes.emit(null, null);
+  }
+
+  /**
+   * Take a vault's first settings (imported from Cinder or Obsidian) and
+   * write each of `files` now, so the import isn't offered again. Values
+   * Grove would refuse are skipped. Resolves to the files that couldn't be
+   * saved (the values still apply until the window closes).
+   */
+  async adopt(values: Partial<Record<FileName, Record<string, unknown>>>, files: readonly FileName[]): Promise<string[]> {
+    for (const [file, changes] of Object.entries(values) as [FileName, Record<string, unknown>][]) {
+      const spec = FILES[file] as Record<string, { valid(v: unknown): boolean }>;
+      const current = this.values.get(file)!;
+      for (const [key, value] of Object.entries(changes)) if (spec[key]?.valid(value)) current[key] = structuredClone(value);
+    }
+    this.fresh = false;
+    this.changes.emit(null, null);
+    const failed: string[] = [];
+    await Promise.all(
+      files.map(async (file) => {
+        clearTimeout(this.timers.get(file));
+        this.timers.delete(file);
+        try {
+          await api.writeConfig(file, serialize(FILES[file], this.values.get(file) as never, this.extras.get(file)));
+        } catch (err) {
+          console.warn(`Settings: could not save .grove/${file}`, err);
+          failed.push(file);
+        }
+      }),
+    );
+    return failed;
   }
 
   /** Change one setting. Invalid values are refused (returns false). */

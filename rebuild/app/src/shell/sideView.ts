@@ -70,6 +70,21 @@ export function viewTabs<K extends string>(tabs: readonly (readonly [K, IconName
     header: h("div", { class: "workspace-tab-header-container", "data-tauri-drag-region": "" }, ...buttons.values()),
     show(name: K) {
       for (const [n, b] of buttons) b.classList.toggle("is-active", n === name);
+      const button = buttons.get(name);
+      const header = button?.parentElement;
+      // The right sidebar's tab row scrolls once the icons pass the window
+      // buttons. Bring the selected one into that row, and no other scroller.
+      // The row's padding is not visible room: the right padding is the
+      // space the window buttons cover.
+      if (button && header && header.scrollWidth > header.clientWidth) {
+        const tab = button.getBoundingClientRect();
+        const box = header.getBoundingClientRect();
+        const style = getComputedStyle(header);
+        const left = box.left + parseFloat(style.paddingLeft);
+        const right = box.right - parseFloat(style.paddingRight);
+        if (tab.left < left) header.scrollLeft -= left - tab.left;
+        else if (tab.right > right) header.scrollLeft += tab.right - right;
+      }
       if (content.firstElementChild !== viewOf(name)) content.replaceChildren(viewOf(name));
     },
   };

@@ -25,13 +25,16 @@ import { commands, fromStored } from "./commands";
 import { setEditorConfig } from "./editor/config";
 import { countsField } from "./editor/counts";
 import { frontmatterField } from "./editor/frontmatter";
+import { openDailyNote } from "./editorHost";
 import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
+import { existingDailyNote } from "./settings/dateFormat";
 import { excluder } from "./settings/exclude";
+import { importForeignSettings } from "./settings/importSettings";
 import { isSettingsOpen, openSettings } from "./settings/modal";
 import type { PluginId } from "./settings/schema";
 import { settingsSections } from "./settings/sections";
@@ -363,7 +366,7 @@ function applyPlugins() {
   const on = (id: PluginId) => commands.pluginEnabled(id);
   renderRibbon();
   let anyRight = false;
-  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["fileprops", "properties"], ["localgraph", "graph"]] as const) {
+  for (const [view, plugin] of [["backlinks", "backlink"], ["outgoing", "outgoing-link"], ["tags", "tag-pane"], ["properties", "properties"], ["outline", "outline"], ["fileprops", "properties"], ["calendar", "daily-notes"], ["localgraph", "graph"]] as const) {
     anyRight = rightSidebar.setEnabled(view, on(plugin));
   }
   // Graph view off: its tabs close, as Obsidian closes the plugin's views.
@@ -497,11 +500,29 @@ await ws.vault.open(!!popoutNote);
 if (ws.vault.path) rememberVault({ path: ws.vault.path, name: ws.vault.name });
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
+// A vault Grove hasn't set up yet takes Cinder's or Obsidian's folders (once, in the main window).
+if (!popoutNote) await importForeignSettings();
 bookmarks.load();
 if (popoutNote) await ws.open(popoutNote);
-else await restoreLayout();
+else {
+  await restoreLayout();
+  await openDailyOnStartup();
+}
 syncTitle();
 warmUpPromptGlyphs();
+
+/** Settings → Daily notes → Open daily note on startup: today's note, once per window, after the layout is back. */
+async function openDailyOnStartup() {
+  if (!commands.pluginEnabled("daily-notes") || !settings.get("daily-notes.json").autorun || !ws.vault.path) return;
+  // Already in a tab (restored, or the vault was last closed on it): show that tab.
+  // A padded name ("03" where the format writes "3") is still today's note.
+  const today = new Date();
+  const daily = settings.get("daily-notes.json");
+  const path = existingDailyNote(ws.vault.notes.map((n) => n.path), today, daily)?.toLowerCase();
+  const shown = path ? ws.groups().flatMap((g) => g.tabs).find((t) => !t.type && t.path?.toLowerCase() === path) : undefined;
+  if (shown) ws.activate(shown);
+  else await openDailyNote(ws, today).catch((err) => console.error("Could not open today's daily note", err));
+}
 
 async function restoreLayout() {
   const layout = loadLayout(ws.vault.path);

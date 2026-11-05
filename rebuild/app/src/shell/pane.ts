@@ -545,8 +545,12 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       renderImage(image);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
       if (graph && graph.el.parentElement !== leaf) leaf.append(graph.el);
-      if (path !== titlePath) { titlePath = path; fieldError(title, ""); }
-      if (path && document.activeElement !== title && !title.hasAttribute("aria-invalid")) title.textContent = noteName(path);
+      const pathChanged = path !== titlePath;
+      if (pathChanged) { titlePath = path; fieldError(title, ""); }
+      // A focused title is a draft of the note this pane was showing. A new
+      // path has its own name: keeping the draft would select the previous
+      // name and rename the new note onto it.
+      if (path && (pathChanged || document.activeElement !== title) && !title.hasAttribute("aria-invalid")) title.textContent = noteName(path);
       // The editor may have moved here from another group (a tab dragged out).
       const dom = ws.editors.viewOf(group).dom;
       if (dom.parentElement !== sizer) sizer.insertBefore(dom, backlinksBox);
@@ -661,6 +665,9 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
 
     function focusTitle(selectAll: boolean) {
       // With the inline title turned off, it shows just for the rename.
+      const path = group.active.path;
+      if (path) title.textContent = noteName(path);
+      fieldError(title, "");
       title.classList.add("is-renaming");
       title.focus();
       const range = document.createRange();
@@ -677,7 +684,9 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       renaming = true;
       try {
         await renameFile(ws, path, title.textContent ?? "");
-        title.textContent = group.active.path ? noteName(group.active.path) : "";
+        const name = group.active.path ? noteName(group.active.path) : "";
+        // The same text again would drop a selection a newer rename just made.
+        if (title.textContent !== name) title.textContent = name;
         fieldError(title, "");
         return true;
       } catch (err) {
@@ -707,7 +716,10 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       }
     });
     title.addEventListener("blur", () => {
-      void commitTitle().then((ok) => { if (ok) title.classList.remove("is-renaming"); });
+      void commitTitle().then((ok) => {
+        // A create or rename may have focused the title again while this commit finished.
+        if (ok && document.activeElement !== title) title.classList.remove("is-renaming");
+      });
     });
     title.addEventListener("input", () => {
       const path = group.active.path;
