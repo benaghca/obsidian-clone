@@ -1,11 +1,12 @@
-// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline, File properties and Local graph,
-// switched with icon tabs at the top like Obsidian's. Only the selected view,
-// and only while the sidebar is open, does any work.
+// Right sidebar: Backlinks, Outgoing links, Tags, All properties, Outline, File properties,
+// Calendar and Local graph, switched with icon tabs at the top like Obsidian's.
+// Only the selected view, and only while the sidebar is open, does any work.
 
 import { createGraphView } from "../graph/view";
 import { listeners } from "../listeners";
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
+import { createCalendarView } from "./calendarView";
 import { h } from "./dom";
 import { createOutgoingView } from "./outgoingView";
 import { createOutlineView } from "./outlineView";
@@ -13,7 +14,7 @@ import { createFilePropertiesView, createPropertiesView } from "./propertiesView
 import { type SideView, viewTabs } from "./sideView";
 import { createTagsView } from "./tagsView";
 
-export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "fileprops", "localgraph"] as const;
+export const RIGHT_VIEWS = ["backlinks", "outgoing", "tags", "properties", "outline", "fileprops", "calendar", "localgraph"] as const;
 export type RightView = (typeof RIGHT_VIEWS)[number];
 
 export type RightSidebar = ReturnType<typeof createRightSidebar>;
@@ -35,6 +36,7 @@ export function createRightSidebar(
     properties: createPropertiesView(ws, searchFor),
     outline: createOutlineView(ws),
     fileprops: createFilePropertiesView(ws),
+    calendar: createCalendarView(ws),
     localgraph: createLocalGraphView(ws, searchFor, graphMenu),
   };
   const selected = listeners<[RightView]>();
@@ -47,6 +49,7 @@ export function createRightSidebar(
       ["properties", "archive", "All properties"],
       ["outline", "list", "Outline"],
       ["fileprops", "info", "File properties"],
+      ["calendar", "calendar", "Calendar"],
       ["localgraph", "git-fork", "Local graph"],
     ],
     (name: RightView) => views[name].el,
@@ -66,6 +69,15 @@ export function createRightSidebar(
     const open = isOpen();
     for (const [name, view] of Object.entries(views) as [RightView, SideView][]) view.setActive(open && name === current);
   }
+
+  // The tab row scrolls sideways with its scrollbar hidden (sidedock.css), so
+  // a mouse wheel over it scrolls it: icons past the window buttons stay reachable.
+  tabs.header.addEventListener("wheel", (event) => {
+    const header = tabs.header;
+    if (header.scrollWidth <= header.clientWidth || event.deltaX !== 0) return;
+    event.preventDefault();
+    header.scrollLeft += event.deltaY;
+  }, { passive: false });
 
   const el = h("div", { class: "workspace-split mod-sidedock mod-right-split" }, tabs.header, tabs.content);
   tabs.show(current); // views start inactive; sync() wakes the selected one once the dock opens

@@ -154,6 +154,18 @@
   width: 28px;
   height: 25px;
   --icon-size: var(--icon-s);
+  flex: none;
+}
+/* Eight icons plus the frameless window buttons do not fit a 300px dock.
+   The row scrolls; the bar itself stays hidden. */
+.mod-right-split > .workspace-tab-header-container {
+  overflow-x: auto;
+  min-width: 0;
+  scrollbar-width: none;
+}
+.mod-right-split > .workspace-tab-header-container::-webkit-scrollbar {
+  display: none;
+  height: 0;
 }
 .mod-sidedock .workspace-tab-header.is-active {
   background: var(--background-modifier-hover);

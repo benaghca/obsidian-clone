@@ -50,7 +50,7 @@ import type { Panes } from "./shell/pane";
 import { isPromptOpen } from "./shell/prompt";
 import { openQuickSwitcher } from "./shell/quickSwitcher";
 import { currentTheme } from "./settings/appearance";
-import { dateNamePattern, fillTemplate, formatDate } from "./settings/dateFormat";
+import { adjacentDailyNote, dailyNoteList, fillTemplate, formatDate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
 import { openTemplatePrompt } from "./shell/templatePrompt";
 import type { RightSidebar, RightView } from "./shell/rightSidebar";
@@ -80,7 +80,6 @@ const mod = (key: string, more: { shift?: boolean; alt?: boolean } = {}) => [{ m
 const templates = () => settings.get("templates.json");
 const today = () => formatDate(new Date(), templates().dateFormat || "YYYY-MM-DD");
 const nowTime = () => formatDate(new Date(), templates().timeFormat || "HH:mm");
-const folderPrefix = (folder: string) => (trimSlashes(folder) ? `${trimSlashes(folder)}/` : "");
 
 /**
  * Register everything. Only `ws` and `bookmarks` must exist yet: the views
@@ -124,25 +123,18 @@ export function registerAppCommands(parts: AppParts) {
 
   // ----- daily notes (Settings → Daily notes: date format, folder, template) -----
   const daily = () => settings.get("daily-notes.json");
-  /** Daily notes, oldest first: notes in the daily notes folder whose names fit the date format. */
-  const dailyNotes = () => {
-    const prefix = folderPrefix(daily().folder);
-    const pattern = dateNamePattern(daily().format || "YYYY-MM-DD");
-    const out: { path: string; time: number }[] = [];
-    for (const n of ws.vault.notes) {
-      if (!n.path.startsWith(prefix)) continue;
-      const time = pattern.parse(n.path.slice(prefix.length, -3));
-      if (time !== null) out.push({ path: n.path, time });
-    }
-    return out.sort((a, b) => a.time - b.time);
+  // The daily notes in date order, kept until the notes or the folder and format change:
+  // the previous/next commands' checks ask for them whenever the palette or a hotkey looks.
+  let dailyKept: { notes: typeof ws.vault.notes; folder: string; format: string; list: { path: string; time: number }[] } | null = null;
+  const dailyList = () => {
+    const { folder, format } = daily();
+    const notes = ws.vault.notes;
+    if (dailyKept?.notes !== notes || dailyKept.folder !== folder || dailyKept.format !== format)
+      dailyKept = { notes, folder, format, list: dailyNoteList(notes.map((n) => n.path), { folder, format }) };
+    return dailyKept.list;
   };
-  const adjacentDaily = (dir: 1 | -1) => {
-    const path = ws.active.path;
-    if (!path) return null;
-    const list = dailyNotes();
-    const i = list.findIndex((n) => n.path === path);
-    return i < 0 ? null : (list[i + dir]?.path ?? null);
-  };
+  /** The daily note before or after the active one, in date order (folders in the format included). */
+  const adjacentDaily = (dir: 1 | -1) => adjacentDailyNote(dailyList(), ws.active.path, dir);
   /** A template note's text with its variables filled in for a note titled `title`. */
   const templateText = async (templatePath: string | null, title: string) => {
     if (!templatePath) return "";
@@ -341,6 +333,7 @@ export function registerAppCommands(parts: AppParts) {
       () => ws.open(adjacentDaily(-1)!), () => !!adjacentDaily(-1)),
     pluginAction("daily-notes", "daily-notes:goto-next", "Daily notes: Open next daily note", "calendar-plus",
       () => ws.open(adjacentDaily(1)!), () => !!adjacentDaily(1)),
+    pluginAction("daily-notes", "daily-notes:open-calendar", "Daily notes: Open calendar", "calendar", () => showRight("calendar")),
     pluginAction("random-note", "random-note", "Random note: Open random note", "dices", () => {
         const notes = ws.vault.includedNotes();
         const others = notes.filter((n) => n.path !== ws.active.path);

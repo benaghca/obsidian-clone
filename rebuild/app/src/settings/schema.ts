@@ -101,6 +101,10 @@ const DAILY_NOTES = {
   format: field("YYYY-MM-DD", text(100)),
   folder: field("", text()),
   template: field("", text()),
+  /** First column of the calendar. Monday matches a week that was left unset. */
+  weekStart: field<"monday" | "sunday">("monday", oneOf("monday", "sunday")),
+  /** Open today's daily note when the vault opens (Obsidian's key for it). */
+  autorun: field(false, bool),
 };
 
 const TEMPLATES = {

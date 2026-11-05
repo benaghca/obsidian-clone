@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { accentVars, hexToHsl } from "./accent";
 import { excluder } from "./exclude";
-import { APP, APPEARANCE, defaults, sanitize, sanitizeHotkeys, serialize, serializeHotkeys } from "./schema";
+import { APP, APPEARANCE, defaults, FILES, sanitize, sanitizeHotkeys, serialize, serializeHotkeys } from "./schema";
 
 test("unknown or invalid values fall back to defaults quietly; unknown keys are kept for the next write", () => {
   const { values, extra } = sanitize(APP, {
@@ -42,6 +42,14 @@ test("hotkeys.json: Obsidian's shape, invalid entries dropped, sorted on write",
   expect(Object.keys(map)).toEqual(["editor:toggle-bold", "app:go-back"]);
   expect(Object.keys(JSON.parse(serializeHotkeys(map)))).toEqual(["app:go-back", "editor:toggle-bold"]);
   expect(sanitizeHotkeys(null)).toEqual({});
+});
+
+test("the calendar week starts on Monday unless it is set to Sunday", () => {
+  const daily = FILES["daily-notes.json"];
+  expect(sanitize(daily, {}).values.weekStart).toBe("monday");
+  expect(sanitize(daily, { weekStart: "sunday" }).values.weekStart).toBe("sunday");
+  expect(sanitize(daily, { weekStart: "tuesday" }).values.weekStart).toBe("monday");
+  expect(serialize(daily, defaults(daily))).toBe("{}\n");
 });
 
 test("excluded files: folder paths, file paths and /regular expressions/", () => {
