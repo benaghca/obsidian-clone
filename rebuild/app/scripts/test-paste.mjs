@@ -236,6 +236,45 @@ await withBrowser(async ({ send, run, click, chord, key, press, check, open, rea
     return [...new Uint8Array(await api.readFileBytes(name))].length;
   }, embedded.name) === armed.png.length, 'one undo removes the embed and leaves the file');
 
+  // Empty paste with no clipboard image does nothing and keeps any selection intact.
+  await run(async () => {
+    const { setMockClipboardImage } = await import('/src/mock/backend.ts');
+    setMockClipboardImage(null);
+    const from = ws.view.state.doc.toString().indexOf('START');
+    ws.view.dispatch({ selection: { anchor: from, head: from + 5 } });
+  });
+  await chord('v');
+  await sleep(80);
+  assert.equal(await text(), prefix + 'START\n');
+  check(await run(async () => (await import('/src/mock/backend.ts')).mockClipboardImageReads()) === 1, 'empty paste with no clipboard image leaves the selection intact');
+
+  // Context-menu paste when execCommand is false and readText rejects still reads the native clipboard image.
+  await click('.cm-content .cm-line');
+  await chord('End');
+  await armImage();
+  await run(async () => {
+    const { paste } = await import('/src/editor/clipboard.ts');
+    const oldExec = document.execCommand;
+    const oldReadText = navigator.clipboard.readText;
+    document.execCommand = () => false;
+    navigator.clipboard.readText = () => Promise.reject(new Error('denied'));
+    try {
+      await paste(ws.view, false);
+    } finally {
+      document.execCommand = oldExec;
+      navigator.clipboard.readText = oldReadText;
+    }
+  });
+  const fallbackEmbed = await until(async () => {
+    const body = await text();
+    const match = body.match(/!\[\[(Pasted image \d{14}(?: \d+)?\.png)\]\]/);
+    return match ? { body, name: match[1] } : null;
+  }, 'context-menu paste falls back to read_clipboard_image when readText rejects');
+  check(fallbackEmbed.body === prefix + 'START\n![[' + fallbackEmbed.name + ']]', 'context-menu fallback writes the embed');
+  await chord('z');
+  await sleep(80);
+  assert.equal(await text(), prefix + 'START\n');
+
   // Canvas Paste of that same empty clipboard makes one image card at the pointer. Undo removes it.
   const fixture = { future: { keep: [1] }, nodes: [{ id: 'a', type: 'text', x: 0, y: 0, width: 200, height: 120, text: 'Alpha' }], edges: [] };
   await armImage();

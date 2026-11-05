@@ -119,7 +119,18 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
       }
       const size = await imageBox(file);
       if (gone || mine !== revision || canvasReadOnly.has(el)) return;
-      if (size) nodes.push(makeNode("file", at, size.width, size.height, { file }));
+      if (size) {
+        const atStart = !!at.atStart;
+        nodes.push({
+          id: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+          x: Math.round(at.x - (atStart ? 0 : size.width / 2)),
+          y: Math.round(at.y - (atStart ? 0 : size.height / 2)),
+          width: size.width,
+          height: size.height,
+          type: "file",
+          file,
+        });
+      }
     }
     if (!nodes.length || gone || mine !== revision || canvasReadOnly.has(el)) return;
     add(nodes.length === 1 ? nodes[0] : nodes);

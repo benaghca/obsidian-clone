@@ -45,7 +45,17 @@ export function readClipboard(): Promise<ClipboardSnapshot> {
     const onPaste = (event: ClipboardEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      finish(snapshotFromTransfer(event.clipboardData));
+      const data = event.clipboardData;
+      const snap = snapshotFromTransfer(data);
+      if (snap.bare && data && [...data.types].some((t) => t.startsWith("image/"))) {
+        settled = true;
+        document.removeEventListener("paste", onPaste, true);
+        void readAsyncClipboardImages().then((files) =>
+          resolve(files.length ? { text: "", files, bare: false } : snap),
+        );
+        return;
+      }
+      finish(snap);
     };
     document.addEventListener("paste", onPaste, true);
     let commanded = false;
@@ -75,6 +85,26 @@ function snapshotFromTransfer(data: DataTransfer | null): ClipboardSnapshot {
   return { text: "", files: [], bare: true };
 }
 
+/** Clipboard images from the browser's async clipboard API, or `[]` when unavailable. */
+async function readAsyncClipboardImages(): Promise<File[]> {
+  if (!navigator.clipboard?.read) return [];
+  try {
+    const items = await navigator.clipboard.read();
+    const files: File[] = [];
+    for (const item of items) {
+      // Text alongside an image stays a text paste (the file-bearing clipboard case).
+      if (item.types.includes("text/plain") || item.types.includes("text/html")) continue;
+      const type = item.types.find((t) => t.startsWith("image/"));
+      if (!type) continue;
+      files.push(new File([await item.getType(type)], "image.png", { type }));
+    }
+    return files;
+  } catch {
+    // The page may not be allowed to read the clipboard. The native command is next.
+    return [];
+  }
+}
+
 async function readAsyncClipboard(): Promise<ClipboardSnapshot> {
   let text = "";
   try {
@@ -83,21 +113,8 @@ async function readAsyncClipboard(): Promise<ClipboardSnapshot> {
     console.warn("Grove could not read the clipboard", err);
   }
   if (text) return { text, files: [], bare: false };
-  if (navigator.clipboard?.read) {
-    try {
-      const items = await navigator.clipboard.read();
-      const files: File[] = [];
-      for (const item of items) {
-        if (item.types.includes("text/plain") || item.types.includes("text/html")) continue;
-        const type = item.types.find((t) => t.startsWith("image/"));
-        if (!type) continue;
-        files.push(new File([await item.getType(type)], "image.png", { type }));
-      }
-      if (files.length) return { text: "", files, bare: false };
-    } catch {
-      // The page may not be allowed to read the clipboard. The native command is next.
-    }
-  }
+  const files = await readAsyncClipboardImages();
+  if (files.length) return { text: "", files, bare: false };
   return { text: "", files: [], bare: true };
 }
 
@@ -140,16 +157,7 @@ export async function copySelection(view: EditorView, cut: boolean) {
 
 /** Clipboard images the paste event didn't carry, saved as attachments. */
 async function pasteImages(view: EditorView): Promise<boolean> {
-  if (!navigator.clipboard?.read) return false;
-  const items = await navigator.clipboard.read().catch(() => []);
-  const files: File[] = [];
-  for (const item of items) {
-    // Text alongside an image stays a text paste (the file-bearing clipboard case).
-    if (item.types.includes("text/plain") || item.types.includes("text/html")) continue;
-    const type = item.types.find((t) => t.startsWith("image/"));
-    if (!type) continue;
-    files.push(new File([await item.getType(type)], "image.png", { type }));
-  }
+  const files = await readAsyncClipboardImages();
   if (!files.length) return false;
   return (await view.state.facet(editorHost)?.saveAttachments?.(view, files)) ?? false;
 }
@@ -187,8 +195,18 @@ export async function paste(view: EditorView, plain: boolean) {
         if (insertRich(view, html, text)) return;
       }
     }
-    const text = await navigator.clipboard.readText();
-    if (!plain && !text && await pasteNativeImage(view)) return;
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch (err) {
+      console.warn("Grove could not read the clipboard", err);
+      if (!plain) await pasteNativeImage(view);
+      return;
+    }
+    if (!text) {
+      if (!plain) await pasteNativeImage(view);
+      return;
+    }
     if (plain || !insertUrl(view, text)) insertText(view, text);
   } catch (err) {
     console.warn("Grove could not read the clipboard", err);

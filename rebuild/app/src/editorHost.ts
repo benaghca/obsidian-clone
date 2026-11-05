@@ -138,7 +138,7 @@ async function saveAttachments(ws: Workspace, view: EditorView, files: File[], a
   const insertAt = at ?? sel.from;
   const replaceTo = at == null ? sel.to : insertAt;
   const saved = await writeAttachments(ws, from, files, !keepNames);
-  if (!saved.length) return true;
+  if (!saved.length || view.state.readOnly || ws.editors.pathOf(view) !== from) return true;
   const notes = ws.vault.files.filter((f) => !f.is_dir);
   const text = saved.map((path) => embedFor(path, from, notes, ws.linkStyle())).join(view.state.lineBreak);
   const doc = view.state.doc.length;
