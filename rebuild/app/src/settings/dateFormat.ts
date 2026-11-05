@@ -129,9 +129,9 @@ function buildPattern(format: string): { parse(name: string): number | null } {
   const dayAt = tokens.findIndex((t) => t === "DD" || t === "D" || t === "Do");
   const monthNumber = tokens[monthAt] === "MM" || tokens[monthAt] === "M";
   // What else has to agree with the day: a repeat of the year, month or day
-  // token must be the same text; anything else is written out and compared.
-  // The year, month and day themselves are proven by the calendar check below,
-  // except a one-digit M or D written "03" and Do's suffix.
+  // token must be the same value; anything else is written out and compared.
+  // The year, month and day themselves are proven by the calendar check below.
+  // Do's suffix must match. M, D, W and w are compared in partAgrees.
   const checks: [at: number, same: number][] = [];
   tokens.forEach((tok, i) => {
     const first = tokens.indexOf(tok);
@@ -151,16 +151,34 @@ function buildPattern(format: string): { parse(name: string): number | null } {
       const date = new Date(y, mo, d);
       if (date.getFullYear() !== y || date.getMonth() !== mo || date.getDate() !== d) return null;
       // Every other date part as that day writes it ("2026/09/2026-10-03" is not 3 October).
-      for (const [i, same] of checks) if (m[i + 1] !== (same < 0 ? formatToken(date, tokens[i]) : m[same + 1])) return null;
+      for (const [i, same] of checks) {
+        const tok = tokens[i];
+        if (!partAgrees(m[i + 1], same < 0 ? formatToken(date, tok) : m[same + 1], tok)) return null;
+      }
       return date.getTime();
     },
   };
 }
 
+/**
+ * `captured` agrees with `expected`. M, D, W and w also accept one leading
+ * zero ("03" and "3"): Moment's strict parse does, so a note named that way
+ * in an Obsidian or Cinder vault is still that day. Grove writes the short form.
+ */
+function partAgrees(captured: string, expected: string, tok: string): boolean {
+  if (captured === expected) return true;
+  if (tok !== "M" && tok !== "D" && tok !== "W" && tok !== "w") return false;
+  const n = Number(captured);
+  return captured !== "" && Number.isInteger(n) && n === Number(expected);
+}
+
+/** A format segment that never writes text (`//`, `[]`) is not a folder. */
+const writesText = (part: string) => part !== "" && formatDate(new Date(2000, 0, 1), part) !== "";
+
 /** The daily notes folder and date format as a path's parts are joined: no empty folders, no ".md". */
 const dailyParts = (folder: string, format: string) => ({
   prefix: folder.trim().split("/").filter(Boolean).join("/"),
-  format: (format.trim() || "YYYY-MM-DD").split("/").filter(Boolean).join("/") || "YYYY-MM-DD",
+  format: (format.trim() || "YYYY-MM-DD").split("/").filter(writesText).join("/") || "YYYY-MM-DD",
 });
 const joinPath = (prefix: string, name: string) => (prefix ? `${prefix}/${name}` : name);
 
@@ -192,6 +210,20 @@ export function adjacentDailyNote(list: readonly { path: string }[], path: strin
   if (!path) return null;
   const i = list.findIndex((n) => n.path === path);
   return i < 0 ? null : (list[i + dir]?.path ?? null);
+}
+
+/**
+ * A daily note for `date` already among `paths`. The path Grove would write
+ * wins; otherwise a name the format still reads (a leading zero on M, D, W or w).
+ * Null when that day has no note yet, and the caller writes the strict path.
+ */
+export function existingDailyNote(paths: Iterable<string>, date: Date, daily: { folder: string; format: string }): string | null {
+  const all = [...paths];
+  const strict = dailyNotePath(date, daily).toLowerCase();
+  const exact = all.find((path) => path.toLowerCase() === strict);
+  if (exact) return exact;
+  const day = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return dailyNoteList(all, daily).find((n) => n.time === day)?.path ?? null;
 }
 
 /**

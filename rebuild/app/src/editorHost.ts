@@ -19,7 +19,7 @@ import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
 import { fileName, isNoteFile, noteName } from "./paths";
-import { dailyNotePath, fillTemplate } from "./settings/dateFormat";
+import { dailyNotePath, existingDailyNote, fillTemplate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
 import type { Workspace } from "./workspace";
 import { propertyIndex } from "./shell/propertyIndex";
@@ -46,9 +46,11 @@ export async function openDailyNote(ws: Workspace, date: Date): Promise<void> {
   const daily = settings.get("daily-notes.json");
   const path = dailyNotePath(date, daily);
   const key = path.toLowerCase();
-  const existing = ws.vault.notes.find((n) => n.path.toLowerCase() === key);
+  // A migrated note may be "2026-10-03" where this format writes "2026-10-3".
+  // Open that note. Create only when the day has none, and then write the short form.
+  const existing = existingDailyNote(ws.vault.notes.map((n) => n.path), date, daily);
   if (existing) {
-    await ws.open(existing.path);
+    await ws.open(existing);
     return;
   }
   let creating = creatingDaily.get(key);

@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { adjacentDailyNote, dailyNoteList, dailyNotePath, dateNamePattern, fillTemplate, formatDate } from "./dateFormat";
+import { adjacentDailyNote, dailyNoteList, dailyNotePath, dateNamePattern, existingDailyNote, fillTemplate, formatDate } from "./dateFormat";
 
 const d = new Date(2026, 9, 3, 14, 5, 9); // Saturday 3 October 2026, 14:05:09
 
@@ -100,6 +100,9 @@ test("daily notes in folders from the date format round-trip through their path"
   const daily = { folder: "Journal", format: "YYYY/MM/YYYY-MM-DD" };
   expect(dailyNotePath(new Date(2026, 9, 3, 14), daily)).toBe("Journal/2026/10/2026-10-03.md");
   expect(dailyNotePath(new Date(2026, 9, 3), { folder: "/Journal/", format: "/YYYY//MM/DD/" })).toBe("Journal/2026/10/03.md");
+  // An empty escape is not a folder: the note that was written is the note that is read back.
+  expect(dailyNotePath(new Date(2026, 9, 3), { folder: "", format: "YYYY/[]/MM-DD" })).toBe("2026/10-03.md");
+  expect(dailyNoteList(["2026/10-03.md"], { folder: "", format: "YYYY/[]/MM-DD" }).map((n) => n.time)).toEqual([new Date(2026, 9, 3).getTime()]);
   expect(dailyNotePath(new Date(2026, 9, 3), { folder: "", format: "" })).toBe("2026-10-03.md");
   for (const format of ["YYYY/MM/YYYY-MM-DD", "YYYY/MMMM/Do dddd", "GGGG/[W]WW/YYYY-MM-DD", "gggg/ww/ddd D MMM YYYY", "YYYY//MM/DD"]) {
     const days: Date[] = [];
@@ -110,6 +113,40 @@ test("daily notes in folders from the date format round-trip through their path"
     expect(list.map((n) => n.time), format).toEqual(days.map((t) => t.getTime()));
     expect(list.map((n) => n.path)).toEqual(paths);
   }
+});
+
+test("a leading zero still names the day when the format writes none", () => {
+  const oct3 = new Date(2026, 9, 3);
+  const sep3 = new Date(2026, 8, 3);
+  const jan4 = new Date(2027, 0, 4);
+  // Grove keeps writing the short form.
+  expect(formatDate(oct3, "YYYY-MM-D")).toBe("2026-10-3");
+  expect(formatDate(sep3, "YYYY-M-DD")).toBe("2026-9-03");
+  expect(formatDate(jan4, "GGGG-[W]W")).toBe("2027-W1");
+  expect(dailyNotePath(oct3, { folder: "Journal", format: "YYYY-MM-D" })).toBe("Journal/2026-10-3.md");
+  // Moment accepts "03" for D and "09" for M, and "W01" for W. A vault that already has those names still has that day.
+  const day = dateNamePattern("YYYY-MM-D");
+  expect(day.parse("2026-10-03")).toBe(oct3.getTime());
+  expect(day.parse("2026-10-3")).toBe(oct3.getTime());
+  expect(dateNamePattern("YYYY-M-DD").parse("2026-09-03")).toBe(sep3.getTime());
+  expect(dateNamePattern("GGGG/[W]W/YYYY-MM-DD").parse("2027/W01/2027-01-04")).toBe(jan4.getTime());
+  expect(dateNamePattern("dddd D MMMM YYYY").parse("Saturday 03 October 2026")).toBe(oct3.getTime());
+  // A padded and an unpadded repeat of the same month are the same month. A different month is not.
+  expect(dateNamePattern("YYYY/M/YYYY-M-D").parse("2026/09/2026-9-03")).toBe(sep3.getTime());
+  expect(dateNamePattern("YYYY/M/YYYY-M-D").parse("2026/9/2026-09-03")).toBe(sep3.getTime());
+  expect(dateNamePattern("YYYY/M/YYYY-M-D").parse("2026/09/2026-10-03")).toBeNull();
+  // DD still wants two digits, and a disagreed folder is still not that day.
+  expect(dateNamePattern("YYYY-MM-DD").parse("2026-10-3")).toBeNull();
+  expect(dateNamePattern("YYYY/MM/YYYY-MM-DD").parse("2026/09/2026-10-03")).toBeNull();
+  expect(dateNamePattern("GGGG/[W]W/YYYY-MM-DD").parse("2027/W02/2027-01-04")).toBeNull();
+  const daily = { folder: "", format: "YYYY-MM-D" };
+  const list = dailyNoteList(["2026-10-4.md", "2026-10-03.md", "2026-10-30.md"], daily);
+  expect(list.map((n) => n.path)).toEqual(["2026-10-03.md", "2026-10-4.md", "2026-10-30.md"]);
+  expect(adjacentDailyNote(list, "2026-10-4.md", -1)).toBe("2026-10-03.md");
+  // Open today's note finds the padded file and does not need a second, short-named one.
+  expect(existingDailyNote(["Journal/2026-10-03.md", "Journal/2026-10-4.md"], new Date(2026, 9, 3, 14, 5), { folder: "Journal", format: "YYYY-MM-D" })).toBe("Journal/2026-10-03.md");
+  expect(existingDailyNote(["Journal/2026-10-03.md", "Journal/2026-10-3.md"], oct3, { folder: "Journal", format: "YYYY-MM-D" })).toBe("Journal/2026-10-3.md");
+  expect(existingDailyNote(["Journal/2026-10-4.md"], oct3, { folder: "Journal", format: "YYYY-MM-D" })).toBeNull();
 });
 
 test("previous and next daily note cross month and year folders", () => {

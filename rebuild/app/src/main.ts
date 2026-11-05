@@ -30,7 +30,7 @@ import { fileSettings, newNote } from "./fileOps";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
-import { dailyNotePath } from "./settings/dateFormat";
+import { existingDailyNote } from "./settings/dateFormat";
 import { excluder } from "./settings/exclude";
 import { isSettingsOpen, openSettings } from "./settings/modal";
 import type { PluginId } from "./settings/schema";
@@ -509,10 +509,13 @@ warmUpPromptGlyphs();
 async function openDailyOnStartup() {
   if (!commands.pluginEnabled("daily-notes") || !settings.get("daily-notes.json").autorun || !ws.vault.path) return;
   // Already in a tab (restored, or the vault was last closed on it): show that tab.
-  const path = dailyNotePath(new Date(), settings.get("daily-notes.json")).toLowerCase();
-  const shown = ws.groups().flatMap((g) => g.tabs).find((t) => !t.type && t.path?.toLowerCase() === path);
+  // A padded name ("03" where the format writes "3") is still today's note.
+  const today = new Date();
+  const daily = settings.get("daily-notes.json");
+  const path = existingDailyNote(ws.vault.notes.map((n) => n.path), today, daily)?.toLowerCase();
+  const shown = path ? ws.groups().flatMap((g) => g.tabs).find((t) => !t.type && t.path?.toLowerCase() === path) : undefined;
   if (shown) ws.activate(shown);
-  else await openDailyNote(ws, new Date()).catch((err) => console.error("Could not open today's daily note", err));
+  else await openDailyNote(ws, today).catch((err) => console.error("Could not open today's daily note", err));
 }
 
 async function restoreLayout() {
