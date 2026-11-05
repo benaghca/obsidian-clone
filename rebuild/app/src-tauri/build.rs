@@ -10,6 +10,7 @@ fn main() {
             "list_files",
             "read_note",
             "read_file_bytes",
+            "read_clipboard_image",
             "write_note",
             "set_property",
             "write_file_bytes",
