@@ -23,6 +23,8 @@ export interface TemplateMerge {
   text: string;
   /** Where the caret goes in `text`: after the inserted body. */
   cursor: number;
+  /** False for a properties-only insert: keep and map the editor's selection. */
+  bodyInserted: boolean;
   /** The template has properties but the note's frontmatter can't be edited safely: they were left out. */
   skipped: boolean;
 }
@@ -101,7 +103,7 @@ function mergeProperties(note: string, nf: Fence, tf: Fence, eol: string): Chang
     const now = closed(fence(text))!;
     const current = now.props!.find((p) => sameKey(p.key, np.key))!;
     const r = editProperty(text, { key: np.key, expect: source(now, current).join("\n"), to: { type: np.type, value } });
-    if (r.status !== "done" || !r.change) continue;
+    if (r.status !== "done" || !r.change) return false;
     text = text.slice(0, r.change.from) + r.change.insert + text.slice(r.change.to);
     expected.set(np.key.toLowerCase(), JSON.stringify(value));
   }
@@ -175,5 +177,5 @@ export function mergeTemplate(noteText: string, templateText: string, selection 
     delta += c.insert.length - (c.to - c.from);
   }
   text += noteText.slice(pos);
-  return { changes, text, cursor: to + delta, skipped };
+  return { changes, text, cursor: to + delta, bodyInserted: !!body, skipped };
 }

@@ -107,6 +107,7 @@ test("an empty template changes nothing, and leaves a selection alone", () => {
     const r = merge(note, template, { from: 14, to: 18 });
     expect(r.text).toBe(note);
     expect(r.changes).toEqual([]);
+    expect(r.bodyInserted).toBe(false);
   }
   expect(merge("No frontmatter", "---\n---\n", 0).text).toBe("No frontmatter");
 });
@@ -165,6 +166,22 @@ test("emoji next to a change never split a surrogate pair", () => {
   for (const c of r.changes) {
     expect(/^[\uDC00-\uDFFF]/.test(c.insert) || /[\uD800-\uDBFF]$/.test(c.insert)).toBe(false);
   }
+});
+
+test("frontmatter beyond the line limit is left alone with a notice", () => {
+  const note = "---\n" + "# comment\n".repeat(2001) + "---\nBody\n";
+  expect(merge(note, TEMPLATE)).toMatchObject({ skipped: true, text: note + "## Agenda\n" });
+  // A readable block must also stay untouched if adding keys exceeds the limit.
+  const full = "---\n" + "# comment\n".repeat(1998) + "a: 1\n---\nBody\n";
+  expect(merge(full, "---\nb: 2\nc: 3\n---\nT")).toMatchObject({ skipped: true, text: full + "T" });
+});
+
+test("a refused list union reports skipped and leaves all note properties untouched", () => {
+  // editProperty's existing 16 MB limit must not silently turn a union into success.
+  const note = "---\ntags: [a]\n---\n" + "x".repeat(16 * 1024 * 1024);
+  const r = mergeTemplate(note, "---\ntags: [b]\nnew: 1\n---\nT");
+  expect(r.skipped).toBe(true);
+  expect(r.text).toBe(note + "T");
 });
 
 test("a long note is merged without reading its body line by line", () => {

@@ -15,6 +15,8 @@ await withBrowser(async ({ send, run, click, chord, press, key, check }) => {
     const { formatDate } = await import('/src/settings/dateFormat.ts');
     await api.createNote('Templates/Meeting.md', '---\ntags:\n  - meeting\n  - project\nstatus: draft\ncreated: {{date}}\n---\n## {{title}}\n- [ ] ');
     await api.createNote('Templates/Plain.md', 'Plain {{title}}');
+    await api.createNote('Templates/Empty.md', '');
+    await api.createNote('Templates/Properties.md', '---\nkind: meeting\n---\n');
     settings.set('templates.json', 'folder', 'Templates');
     settings.set('templates.json', 'dateFormat', 'YYYY-MM-DD');
     await ws.vault.refreshFiles();
@@ -92,6 +94,19 @@ await withBrowser(async ({ send, run, click, chord, press, key, check }) => {
   await insert('Plain');
   assert.equal(await text(), 'Hello Plain Words');
   check(true, 'template without frontmatter replaces the selection as before');
+
+  // No body: preserve a reversed selection, mapping it past added properties.
+  await open('Selected.md', 'Hello world');
+  await run(() => ws.setMode('source')); await sleep(80);
+  await run(() => { ws.view.dispatch({ selection: { anchor: 11, head: 6 } }); ws.view.focus(); });
+  await insert('Empty');
+  assert.deepEqual(await run(() => { const s = ws.view.state.selection.main; return [s.anchor, s.head]; }), [11, 6]);
+  assert.equal(await text(), 'Hello world');
+  await insert('Properties');
+  const prefix = '---\nkind: meeting\n---\n';
+  assert.equal(await text(), prefix + 'Hello world');
+  assert.deepEqual(await run(() => { const s = ws.view.state.selection.main; return [s.anchor, s.head]; }), [prefix.length + 11, prefix.length + 6]);
+  check(true, 'empty and properties-only templates preserve the selection and its direction');
 
   // The merge is saved: wait for the debounced write and read the file back.
   await chord('z'); await sleep(50);

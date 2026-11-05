@@ -159,7 +159,7 @@ export function registerAppCommands(parts: AppParts) {
     // The body at the cursor, the template's properties merged into the note's: one transaction, one undo step.
     const merged = mergeTemplate(view.state.doc.toString(), text, view.state.selection.main);
     if (merged.skipped) baseNotice("The template's properties weren't added: this note's properties can't be edited safely.");
-    view.dispatch({ changes: merged.changes, selection: { anchor: merged.cursor }, scrollIntoView: true, userEvent: "input.template" });
+    view.dispatch({ changes: merged.changes, ...(merged.bodyInserted ? { selection: { anchor: merged.cursor } } : {}), scrollIntoView: true, userEvent: "input.template" });
     view.focus();
   }
 
