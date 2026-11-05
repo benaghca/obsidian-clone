@@ -12,7 +12,7 @@ import type { CanvasNode } from "./model";
 export interface FrameHost {
   slotted(id: string): boolean;
   ready(node: CanvasNode): void;
-  recheck(): void;
+  recheck(prefer?: string): void;
 }
 
 type Showing = "none" | "text" | "ask" | "frame";
@@ -56,6 +56,12 @@ export function linkFrameBody(node: CanvasNode, content: HTMLElement, host: Fram
       e.stopPropagation();
       run();
     });
+    button.addEventListener("keydown", e => {
+      if (!e.isTrusted || (e.key !== "Enter" && e.key !== " ")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      run();
+    });
     return button;
   }
 
@@ -65,7 +71,7 @@ export function linkFrameBody(node: CanvasNode, content: HTMLElement, host: Fram
     if (ask) {
       // The address and Load share one bar. A short card clips a button that sits under the URL.
       const bar = h("div", { class: "canvas-web-bar" });
-      bar.append(urlLink(), action("canvas-web-load", "Load", "Load page", () => { asked = true; host.recheck(); }));
+      bar.append(urlLink(), action("canvas-web-load", "Load", "Load page", () => { asked = true; host.recheck(node.id); }));
       content.replaceChildren(bar);
     } else content.replaceChildren(urlLink());
     showing = ask ? "ask" : "text";
@@ -73,6 +79,7 @@ export function linkFrameBody(node: CanvasNode, content: HTMLElement, host: Fram
 
   function release() {
     token++;
+    asked = false;
     if (showing !== "frame") return;
     content.classList.remove("canvas-web");
     content.replaceChildren();
@@ -134,7 +141,8 @@ export function linkFrameBody(node: CanvasNode, content: HTMLElement, host: Fram
       void showFrame();
       return;
     }
-    const ask = embed === "click" && !asked && !!page;
+    asked = false;
+    const ask = embed === "click" && !!page;
     if (showing === "frame") release();
     if ((ask && showing === "ask") || (!ask && showing === "text")) return;
     showText(ask);

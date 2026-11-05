@@ -244,7 +244,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         bodies.add(node, card, linkFrameBody(node, content, {
           slotted: id => bodies.slotted(id),
           ready: item => bodies.ready(item),
-          recheck: () => bodies.recheck(),
+          recheck: id => bodies.recheck(id),
         }));
         continue;
       }

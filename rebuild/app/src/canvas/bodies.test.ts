@@ -43,20 +43,26 @@ test("at most six link cards keep a frame, and title mode releases them",()=>{
   const nodes:CanvasNode[]=Array.from({length:8},(_,i)=>({id:String(i),type:"link",x:i*30,y:0,width:200,height:120,url:"local"}));
   const view:CanvasViewport={x:0,y:0,width:1000,height:800,focusX:400,focusY:60,band:0,titles:false,scale:1};
   const work=canvasWork(),manager=canvasBodies(nodes,work,()=>view);
-  const live=new Set<string>();
+  const live=new Set<string>();let peak=0;
   for(const node of nodes){
     const el=new ElementStub(),content=new ElementStub();
     manager.add(node,el as unknown as HTMLElement,{
       element:content as unknown as HTMLElement,frame:true,wantsFrame:()=>true,
-      ensure(){if(manager.slotted(node.id)&&!live.has(node.id))live.add(node.id);},
+      ensure(){if(manager.slotted(node.id)&&!live.has(node.id)){live.add(node.id);peak=Math.max(peak,live.size);}},
       ready:()=>true,
       release(){live.delete(node.id);},
     });
   }
   work.resume();const flush=()=>{while(frames.size){const[k,fn]=frames.entries().next().value!;frames.delete(k);fn(performance.now());}};
   manager.update();flush();
-  expect(manager.stats().frames).toBe(6);expect(live.size).toBe(6);
-  view.titles=true;manager.update();flush();
+  expect(manager.stats().frames).toBe(6);expect(live.size).toBe(6);expect(peak).toBe(6);
+  const unslotted=nodes.map(n=>n.id).find(id=>!live.has(id))!;
+  manager.recheck(unslotted);flush();
+  expect(live.has(unslotted)).toBe(true);expect(live.size).toBe(6);expect(peak).toBe(6);
+  view.titles=true;manager.update();
   expect(manager.stats().frames).toBe(0);expect(live.size).toBe(0);
+  flush();
+  view.titles=false;manager.recheck("0");flush();
+  expect(live.has("0")).toBe(true);expect(live.size).toBe(6);expect(peak).toBe(6);
   manager.dispose();
 });

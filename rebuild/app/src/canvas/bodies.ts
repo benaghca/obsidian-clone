@@ -19,7 +19,7 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
   nodes.forEach(n => index.update(n));
   const shown = new Set<CanvasNode>();
   const frameCards = new Set<string>();
-  let frameOrder: string[] = [], frameIds = new Set<string>();
+  let frameOrder: string[] = [], frameIds = new Set<string>(), preferredFrame: string | undefined;
   let visible = new Set<CanvasNode>(), revision = 0, gone = false;
   const band = (el: Element, value: number) => { if (el.getAttribute("data-canvas-band") !== String(value)) { el.classList.add("canvas-band"); el.setAttribute("data-canvas-band", String(value)); } };
   const mark = (on: boolean, view: CanvasViewport, id: string) => `${on}/${view.band}/${view.titles}${frameIds.has(id) ? "/1" : ""}`;
@@ -34,10 +34,16 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
       const node = card.node;
       list.push({ id, x: node.x, y: node.y, width: node.width, height: node.height, wants: body.wantsFrame?.() ?? false });
     }
-    const next = webFrameSlots(list, view, frameOrder);
+    const prior = preferredFrame ? [...frameOrder.filter(id => id !== preferredFrame), preferredFrame] : frameOrder;
+    preferredFrame = undefined;
+    const next = webFrameSlots(list, view, prior);
     if (next.length === frameOrder.length && next.every((id, i) => id === frameOrder[i])) return;
+    const nextIds = new Set(next);
+    for (const id of frameOrder) {
+      if (!nextIds.has(id)) cards.get(id)?.body?.release();
+    }
     frameOrder = next;
-    frameIds = new Set(next);
+    frameIds = nextIds;
   }
   function unload(card: Card) {
     if (card.body?.frame && !frameIds.has(card.node.id)) card.body.release();
@@ -105,8 +111,13 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     ready(node: CanvasNode) { const card = cards.get(node.id); if (card && !gone) { retained.delete(node.id); retained.set(node.id, card); const view = viewport(); if (view) apply(card, view, visible.has(node)); trim(); } },
     wanted(node: CanvasNode) { const view = viewport(); return !gone && visible.has(node) && !!view && (!view.titles || cards.get(node.id)?.el.classList.contains("is-image")); },
     slotted: (id: string) => frameIds.has(id),
-    recheck() { if (gone) return; for (const card of cards.values()) card.last = undefined; update(); },
+    recheck(prefer?: string) {
+      if (gone) return;
+      if (prefer) preferredFrame = prefer;
+      for (const card of cards.values()) card.last = undefined;
+      update();
+    },
     stats: () => ({ retained: retained.size, visible: visible.size, frames: frameIds.size }),
-    dispose() { gone = true; revision++; for (const card of cards.values()) card.body?.release(); cards.clear(); retained.clear(); shown.clear(); visible.clear(); frameCards.clear(); frameOrder = []; frameIds = new Set(); },
+    dispose() { gone = true; revision++; for (const card of cards.values()) card.body?.release(); cards.clear(); retained.clear(); shown.clear(); visible.clear(); frameCards.clear(); frameOrder = []; frameIds = new Set(); preferredFrame = undefined; },
   };
 }
