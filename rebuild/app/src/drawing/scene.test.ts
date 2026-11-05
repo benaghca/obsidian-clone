@@ -303,20 +303,27 @@ describe("speed", () => {
 
   it("parses a 5,000-element drawing in under 20 ms", () => {
     const text = bigDrawing(5000);
-    const best = (f: () => unknown) => { let ms = Infinity; for (let i = 0; i < 7; i++) { const start = performance.now(); f(); ms = Math.min(ms, performance.now() - start); } return ms; };
+    const median = (f: () => unknown) => {
+      for (let i = 0; i < 3; i++) f();
+      const samples: number[] = [];
+      for (let i = 0; i < 9; i++) {
+        const start = performance.now();
+        f();
+        samples.push(performance.now() - start);
+      }
+      samples.sort((a, b) => a - b);
+      return samples[samples.length >> 1];
+    };
     const scene = open(text);
-    const json = best(() => JSON.parse(text));
-    const parse = best(() => parseScene(text));
-    const draw = best(() => { const s = open(text); for (const el of s.elements) for (const f of FIELDS) void (el as unknown as Record<string, unknown>)[f]; });
-    console.log(`5,000 elements (${(text.length / 1e6).toFixed(1)} MB): parseScene ${parse.toFixed(1)} ms, JSON.parse alone ${json.toFixed(1)} ms, parse + every field read ${draw.toFixed(1)} ms`);
+    const json = median(() => JSON.parse(text));
+    const parse = median(() => parseScene(text));
+    const draw = median(() => { const s = open(text); for (const el of s.elements) for (const f of FIELDS) void (el as unknown as Record<string, unknown>)[f]; });
+    console.log(`5,000 elements (${(text.length / 1e6).toFixed(1)} MB): parseScene median ${parse.toFixed(1)} ms, JSON.parse alone ${json.toFixed(1)} ms, parse + every field read ${draw.toFixed(1)} ms`);
     expect(scene.elements).toHaveLength(5000);
     expect(stringifyScene(scene)).toBe(text);
+    expect(parse).toBeLessThan(20);
     // The model adds little to JSON.parse, which is the floor for any parser here.
     expect(parse).toBeLessThan(json * 1.25 + 2);
     expect(draw).toBeLessThan(50);
-    // The 20 ms budget is for a machine that isn't saturated. While the full
-    // suite fills every core, JSON.parse alone can take over 20 ms, so only
-    // the overhead check above applies then.
-    if (json < 15) expect(parse).toBeLessThan(20);
   });
 });

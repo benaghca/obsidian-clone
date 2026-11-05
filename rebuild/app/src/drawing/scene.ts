@@ -263,14 +263,18 @@ function viewAppState(v: unknown): AppState {
   return { viewBackgroundColor: str(a.viewBackgroundColor, "#ffffff") || "#ffffff", gridSize: typeof a.gridSize === "number" && a.gridSize > 0 ? a.gridSize : null };
 }
 
-function detectStyle(text: string, bom: boolean): FileStyle {
-  const eol = text.includes("\r\n") ? "\r\n" : "\n";
-  const body = bom ? text.slice(1) : text;
-  const finalNewline = body.endsWith("\n");
-  // One line stays one line; otherwise the first indented line gives the indent.
-  if (!body.trimEnd().includes("\n")) return { indent: "", eol, finalNewline, bom };
-  const m = /\n([ \t]+)\S/.exec(body);
-  return { indent: m ? m[1] : "  ", eol, finalNewline, bom };
+const INDENT_RE = /\n([ \t]*)\S/g;
+
+function detectStyle(body: string, bom: boolean): FileStyle {
+  const nl = body.indexOf("\n");
+  if (nl < 0) return { indent: "", eol: "\n", finalNewline: false, bom };
+  const eol = nl > 0 && body.charCodeAt(nl - 1) === 13 ? "\r\n" : "\n";
+  const finalNewline = body.charCodeAt(body.length - 1) === 10;
+  // Nothing after the only newline means a one-line file with a final newline.
+  INDENT_RE.lastIndex = nl;
+  const m = INDENT_RE.exec(body);
+  if (!m) return { indent: "", eol, finalNewline, bom };
+  return { indent: m[1] || "  ", eol, finalNewline, bom };
 }
 
 const DEFAULT_STYLE: FileStyle = { indent: "  ", eol: "\n", finalNewline: true, bom: false };
@@ -293,7 +297,7 @@ export function parseScene(text: string): ParseResult {
   const bom = text.charCodeAt(0) === 0xfeff;
   const body = bom ? text.slice(1) : text;
   // Kept clean, so saving without an edit leaves the blank file blank.
-  if (!body.trim()) {
+  if (!/\S/.test(body)) {
     const data = JSON.parse(emptyDrawing()) as JsonObject;
     return { ok: true, scene: { source: text, data, elements: [], appState: viewAppState(data.appState), files: new Map(), style: { ...DEFAULT_STYLE, bom }, dirty: false } };
   }
@@ -307,7 +311,7 @@ export function parseScene(text: string): ParseResult {
   const raw = (data.elements ?? []) as Json[];
   const elements: DrawingElement[] = [];
   for (let i = 0; i < raw.length; i++) { const el = viewElement(raw[i], i); if (el) elements.push(el); }
-  return { ok: true, scene: { source: text, data, elements, appState: viewAppState(data.appState), files: viewFiles(data.files), style: detectStyle(text, bom), dirty: false } };
+  return { ok: true, scene: { source: text, data, elements, appState: viewAppState(data.appState), files: viewFiles(data.files), style: detectStyle(body, bom), dirty: false } };
 }
 
 /** The document as text, laid out like the file it came from. */
@@ -340,7 +344,8 @@ const sameJson = (a: unknown, b: unknown) => a === b || typeof a === "object" &&
 function setKey(raw: JsonObject, key: string, value: Json | undefined): JsonObject {
   if (value === undefined) { delete raw[key]; return raw; }
   if (key in raw) { raw[key] = value; return raw; }
-  const order = [...BASE_KEYS, ...(TYPE_KEYS[String(raw.type)] ?? [])];
+  const type = raw.type === "draw" ? "line" : String(raw.type);
+  const order = [...BASE_KEYS, ...(TYPE_KEYS[type] ?? [])];
   const rank = order.indexOf(key);
   const entries = Object.entries(raw);
   const before = rank < 0 ? -1 : entries.findIndex(([k]) => order.indexOf(k) > rank);
@@ -369,7 +374,7 @@ export function updateElement(scene: Scene, id: string, patch: Record<string, Js
   let raw = list[el.slot] as JsonObject;
   let changed = false;
   for (const key in patch) {
-    if (key === "id") continue;
+    if (key === "id" || (key === "type" && typeof patch[key] !== "string")) continue;
     const value = patch[key];
     if (value === undefined ? !(key in raw) : sameJson(raw[key], value)) continue;
     raw = setKey(raw, key, value);
