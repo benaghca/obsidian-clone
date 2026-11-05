@@ -67,7 +67,11 @@ test("Cinder: weekly and monthly notes, folder templates, Templater and other se
   expect(lines.at(-1)).toBe("Not imported: weekly notes; monthly notes; folder templates; calendar week start; Templater syntax; 3 other Cinder settings (plugins, theme, vim).");
   // The periodic-notes plugin alone means weekly and monthly notes were in use.
   expect(planImport({ ...none, cinder: json({ plugins: { "periodic-notes": true } }) }).notImported).toEqual(["weekly and monthly notes"]);
-  expect(planImport({ ...none, cinder: json({ weeklyFolder: "W", plugins: { "periodic-notes": true } }) }).notImported).toEqual(["weekly notes"]);
+  // A weekly folder only covers weekly notes; the plugin still means monthly notes too.
+  expect(planImport({ ...none, cinder: json({ weeklyFolder: "W", plugins: { "periodic-notes": true } }) }).notImported).toEqual(["weekly notes", "monthly notes"]);
+  expect(planImport({ ...none, cinder: json({ weeklyFolder: "W", monthlyFolder: "M", plugins: { "periodic-notes": true } }) }).notImported).toEqual(["weekly notes", "monthly notes"]);
+  // A plugins value that isn't an on/off map is still named, not dropped.
+  expect(planImport({ ...none, cinder: json({ plugins: ["templater"] }) }).notImported).toEqual(["1 other Cinder setting (plugins)"]);
 });
 
 test("Obsidian: daily-notes.json, templates.json and app.json, as Grove reads the same keys", () => {
@@ -94,6 +98,12 @@ test("Obsidian: daily-notes.json, templates.json and app.json, as Grove reads th
     "New notes go in: the current note's folder",
   ]);
   expect(plan.notImported).toEqual(["opening today's daily note on startup", "2 other Obsidian settings (useMarkdownLinks, promptDelete)"]);
+  // A note path keeps its ".md" and loses slashes, so Grove can resolve it.
+  expect(planImport({ ...none, daily: json({ template: "/Templates/Daily.md/" }) }).values["daily-notes.json"].template).toBe("Templates/Daily.md");
+  // A known key of the wrong type is named, and the other keys still import.
+  const typed = planImport({ ...none, daily: json({ folder: 5, format: "DD-MM-YYYY" }) });
+  expect(typed.values["daily-notes.json"]).toEqual({ format: "DD-MM-YYYY" });
+  expect(typed.notImported).toEqual(["Daily notes folder (5 isn't a value Grove takes)"]);
   // Only some of the files is fine; "./" reads as the note's folder.
   const app = planImport({ ...none, app: json({ attachmentFolderPath: "./", newFileLocation: "folder", newFileFolderPath: "/New/" }) });
   expect(app.values["app.json"]).toEqual({ attachmentFolderPath: "./", newFileLocation: "folder", newFileFolderPath: "New" });
@@ -143,6 +153,22 @@ test("bad JSON, a non-object or a failed read stops the import, with the file na
   ]);
   // Obsidian's errors don't matter when Cinder's file is there and good.
   expect(planImport({ ...none, cinder: "{}", app: { error: "denied" } }).problems).toEqual([]);
+});
+
+test("template paths lose extra slashes, and a folder location needs a folder Grove can use", () => {
+  const ok = planImport({ ...none, cinder: json({ dailyTemplate: "/Templates/Daily/" }) });
+  expect(ok.values["daily-notes.json"].template).toBe("Templates/Daily");
+  const refused = planImport({ ...none, app: json({ newFileLocation: "folder", newFileFolderPath: "a\nb" }) });
+  expect(refused.values["app.json"]).toEqual({});
+  expect(refused.notImported).toEqual(['New note folder ("a\\nb" isn\'t a value Grove takes)']);
+  const missing = planImport({ ...none, app: json({ newFileLocation: "folder" }) });
+  expect(missing.values["app.json"]).toEqual({});
+  expect(missing.notImported).toEqual(["New notes go in (no folder was set)"]);
+  // An empty folder is the vault folder, the same as Grove's default location.
+  const empty = planImport({ ...none, app: json({ newFileLocation: "folder", newFileFolderPath: "/" }) });
+  expect(empty.values["app.json"]).toEqual({});
+  expect(empty.notImported).toEqual([]);
+  expect(importMessage(empty)).toBeNull();
 });
 
 test("values Grove's schema refuses are listed, not imported", () => {

@@ -187,3 +187,13 @@ test("read_foreign_config reads only the allowlisted Cinder and Obsidian files a
     expect(saved.get("grove.mock.foreign:cinder/settings.json")).toBe('{"dailyFolder":"Daily"}');
   } finally { vi.unstubAllGlobals(); }
 });
+
+test("read_foreign_config reports a storage failure instead of a missing file", async () => {
+  vi.stubGlobal("location", { search: "" });
+  vi.stubGlobal("sessionStorage", { getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("localStorage", { getItem: () => { throw new Error("storage disabled"); }, setItem: () => {} });
+  try {
+    const { invoke } = createMockBackend();
+    await expect(invoke("read_foreign_config", { source: "cinder", name: "settings.json" })).rejects.toThrow("storage disabled");
+  } finally { vi.unstubAllGlobals(); }
+});

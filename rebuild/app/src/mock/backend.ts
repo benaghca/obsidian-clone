@@ -456,12 +456,8 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     read_foreign_config: ({ source, name }) => {
       const id = `${source}/${name}`;
       if (!FOREIGN.has(id)) throw new Error(`invalid foreign config: ${id}`);
-      let text: string | null = null;
-      try {
-        text = localStorage.getItem(FOREIGN_KEY + id);
-      } catch {
-        return null;
-      }
+      // A storage error is a failed read, not a missing file: the import must not treat it as empty.
+      const text = localStorage.getItem(FOREIGN_KEY + id);
       if (text !== null && new TextEncoder().encode(text).length > CONFIG_MAX) throw new Error(`not a settings file: ${id}`);
       return text;
     },

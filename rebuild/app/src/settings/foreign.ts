@@ -79,7 +79,6 @@ const CINDER_PLUGINS_NOT_IMPORTED: Record<string, string> = {
 };
 
 const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
 /** A folder from the vault root, without slashes at either end or a leading "./". */
 const folder = (v: string) => trimSlashes(trimSlashes(v).replace(/^(\.\/)+/, ""));
@@ -157,7 +156,8 @@ function fromCinder(o: Record<string, unknown>): Mapped {
   const values = emptyValues();
   values["daily-notes.json"].folder = folder(get("dailyFolder"));
   if (get("dailyFormat").trim()) values["daily-notes.json"].format = get("dailyFormat").trim();
-  values["daily-notes.json"].template = get("dailyTemplate").trim();
+  // A note path, not a folder setting: the same slash trimming, so "/Templates/Daily/" still resolves.
+  values["daily-notes.json"].template = folder(get("dailyTemplate"));
   values["templates.json"].folder = folder(get("templatesFolder"));
   // Cinder fills {{date}} and {{time}} as YYYY-MM-DD and HH:mm, Grove's defaults, so the formats stay.
   const attach = folder(get("attachFolder"));
@@ -178,13 +178,19 @@ function fromCinder(o: Record<string, unknown>): Mapped {
     }
     if (used) notImported.push(label);
   }
-  const plugins = isObj(o.plugins) ? o.plugins : {};
-  for (const [id, label] of Object.entries(CINDER_PLUGINS_NOT_IMPORTED)) {
-    // The periodic-notes plugin says nothing more once weekly or monthly notes are listed.
-    const said = id === "periodic-notes" && notImported.some((l) => l === "weekly notes" || l === "monthly notes");
-    if (plugins[id] === true && !said) notImported.push(label);
+  const plugins = isObj(o.plugins) ? o.plugins : null;
+  if (plugins?.templater === true) notImported.push(CINDER_PLUGINS_NOT_IMPORTED.templater);
+  // The plugin turns both on. A weekly or monthly folder only covers that one; the other still needs naming.
+  if (plugins?.["periodic-notes"] === true) {
+    const weekly = notImported.includes("weekly notes");
+    const monthly = notImported.includes("monthly notes");
+    if (!weekly && !monthly) notImported.push(CINDER_PLUGINS_NOT_IMPORTED["periodic-notes"]);
+    else {
+      if (!weekly) notImported.push("weekly notes");
+      if (!monthly) notImported.push("monthly notes");
+    }
   }
-  const otherPlugins = Object.keys(plugins).some((id) => !(id in CINDER_PLUGINS_NOT_IMPORTED));
+  const otherPlugins = plugins ? Object.keys(plugins).some((id) => !(id in CINDER_PLUGINS_NOT_IMPORTED)) : "plugins" in o;
   const others = Object.keys(o).filter((key) => !known.has(key) && (key !== "plugins" || otherPlugins));
   if (others.length) notImported.push(otherSettings(others, "Cinder"));
   return { values, notImported };
@@ -194,23 +200,29 @@ function fromObsidian(daily: Record<string, unknown>, templates: Record<string, 
   const values = emptyValues();
   const notImported: string[] = [];
   const others: string[] = [];
-  const take = (from: Record<string, unknown>, to: Record<string, unknown>, keys: Record<string, (v: string) => string | null>, ignore: string[] = []) => {
+  const take = (file: ImportFile, from: Record<string, unknown>, keys: Record<string, (v: string) => string | null>, ignore: string[] = []) => {
+    const to = values[file];
     for (const [key, v] of Object.entries(from)) {
       const map = keys[key];
       if (!map) {
         if (!ignore.includes(key)) others.push(key);
         continue;
       }
-      const s = str(v);
-      const mapped = s === null ? null : map(s);
+      // A stale new-note folder (location isn't "folder") is ignored, whatever its type.
+      if (typeof v !== "string") {
+        if (key === "newFileFolderPath" && app.newFileLocation !== "folder") continue;
+        notImported.push(`${LABELS[file][key] ?? key} (${JSON.stringify(v)} isn't a value Grove takes)`);
+        continue;
+      }
+      const mapped = map(v);
       if (mapped !== null) to[key] = mapped;
     }
   };
   const text = (v: string) => v.trim() || null;
-  take(daily, values["daily-notes.json"], { folder, format: text, template: (v) => v.trim() }, ["autorun"]);
+  take("daily-notes.json", daily, { folder, format: text, template: folder }, ["autorun"]);
   if (daily.autorun === true) notImported.push("opening today's daily note on startup");
-  take(templates, values["templates.json"], { folder, dateFormat: text, timeFormat: text });
-  take(app, values["app.json"], {
+  take("templates.json", templates, { folder, dateFormat: text, timeFormat: text });
+  take("app.json", app, {
     // Grove reads Obsidian's attachmentFolderPath as is, "./" folders included.
     attachmentFolderPath: (v) => v.trim() || "/",
     newFileLocation: (v) => v,
@@ -242,9 +254,22 @@ function finish(source: "Cinder" | "Obsidian", mapped: Mapped): ImportPlan {
         continue;
       }
       if (JSON.stringify(value) === JSON.stringify(field.default)) continue;
+      // "folder" with no usable folder is the vault folder, which is Grove's default location.
+      // An invalid path is named on its own line; a missing one is named here.
+      if (key === "newFileLocation" && value === "folder") {
+        const path = mapped.values[file].newFileFolderPath;
+        const pathField = spec.newFileFolderPath;
+        const pathOk = !!pathField?.valid(path) && JSON.stringify(path) !== JSON.stringify(pathField.default);
+        if (!pathOk) {
+          if (path === undefined && !mapped.notImported.some((line) => line.startsWith("New note folder"))) {
+            notImported.push(`${label} (no folder was set)`);
+          }
+          continue;
+        }
+        values[file][key] = value;
+        continue;
+      }
       values[file][key] = value;
-      // "New notes go in: a set folder" says nothing the folder line doesn't.
-      if (key === "newFileLocation" && value === "folder" && "newFileFolderPath" in mapped.values[file]) continue;
       imported.push({ label, value: shown(key, value) });
     }
   }
