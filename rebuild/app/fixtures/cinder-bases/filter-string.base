@@ -1,0 +1,4 @@
+filters: 'file.inFolder("Books")'
+views:
+  - type: table
+    name: In folder

@@ -1,0 +1,53 @@
+{
+  "type": "excalidraw",
+  "version": 2,
+  "source": "cinder",
+  "elements": [
+    {
+      "id": "VGf49SV5",
+      "type": "image",
+      "x": 40,
+      "y": 40,
+      "width": 64,
+      "height": 64,
+      "angle": 0,
+      "strokeColor": "#1e1e1e",
+      "backgroundColor": "transparent",
+      "fillStyle": "solid",
+      "strokeWidth": 2,
+      "strokeStyle": "solid",
+      "roughness": 1,
+      "opacity": 100,
+      "groupIds": [],
+      "frameId": null,
+      "roundness": null,
+      "seed": 1939340130,
+      "version": 1,
+      "versionNonce": 397035945,
+      "isDeleted": false,
+      "boundElements": null,
+      "updated": 1792400413000,
+      "link": "[[Some note]]",
+      "locked": false,
+      "fileId": "f0e1d2c3b4a5",
+      "status": "saved",
+      "scale": [
+        1,
+        1
+      ],
+      "crop": null
+    }
+  ],
+  "appState": {
+    "gridSize": null,
+    "viewBackgroundColor": "#fdfdf6"
+  },
+  "files": {
+    "f0e1d2c3b4a5": {
+      "mimeType": "image/png",
+      "id": "f0e1d2c3b4a5",
+      "dataURL": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==",
+      "created": 1760864400000
+    }
+  }
+}

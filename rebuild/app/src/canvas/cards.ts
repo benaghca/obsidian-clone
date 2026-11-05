@@ -1,5 +1,6 @@
 import { EditorView } from "@codemirror/view";
-import { readClipboardText } from "../editor/clipboard";
+import { readClipboard, readClipboardImageFile } from "../editor/clipboard";
+import { writeAttachments } from "../editor/saveAttachments";
 import { createNoteState } from "../editor/editor";
 import { IMAGE_EXT } from "../editor/embeds";
 import type { EditorHost } from "../editor/host";
@@ -25,7 +26,7 @@ export interface CanvasAddPlace {
   atStart?: boolean;
 }
 
-export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, add: (node: CanvasNode | CanvasNode[], edge?: CanvasEdge) => void) {
+export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, canvasPath: string, add: (node: CanvasNode | CanvasNode[], edge?: CanvasEdge) => void) {
   let gone = false, controlClick = false, cancelDrag: (() => void) | undefined;
   let revision = 0, stopMenu: (() => void) | undefined;
   const point = (x?: number, y?: number) => {
@@ -43,18 +44,22 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     }
     add(node, edge);
   }
+  async function imageBox(file: string): Promise<{ width: number; height: number } | null> {
+    const held = ws.embeds.image(file);
+    try {
+      const img = new Image(); img.src = await held.url; await img.decode();
+      const ratio = 400 / Math.max(img.naturalWidth, img.naturalHeight);
+      return { width: Math.round(img.naturalWidth * ratio), height: Math.round(img.naturalHeight * ratio) };
+    } catch (err) { console.warn(`Could not add ${file}`, err); return null; }
+    finally { held.release(); }
+  }
   async function insertFile(file: string, p: { x: number; y: number }, atStart = false, edge?: CanvasEdge, place?: CanvasAddPlace) {
     const boxed = place?.width !== undefined && place.height !== undefined
       ? [Math.max(50, Math.round(place.width)), Math.max(50, Math.round(place.height))] as const : undefined;
     if (boxed || !IMAGE_EXT.test(file)) { insert("file", p, boxed?.[0] ?? 400, boxed?.[1] ?? 400, file, atStart, edge); return; }
     const mine = revision;
-    const held = ws.embeds.image(file);
-    try {
-      const img = new Image(); img.src = await held.url; await img.decode();
-      const ratio = 400 / Math.max(img.naturalWidth, img.naturalHeight);
-      if (mine === revision) insert("file", p, Math.round(img.naturalWidth * ratio), Math.round(img.naturalHeight * ratio), file, atStart, edge);
-    } catch (err) { console.warn(`Could not add ${file}`, err); }
-    finally { held.release(); }
+    const size = await imageBox(file);
+    if (size && mine === revision) insert("file", p, size.width, size.height, file, atStart, edge);
   }
   function pickNote(p = point(), edge?: CanvasEdge, place?: CanvasAddPlace) {
     const mine = revision;
@@ -98,16 +103,53 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
     if (!ok || !url || gone || mine !== revision || canvasReadOnly.has(el)) return;
     add(makeNode("link", place, 400, 120, { url }));
   }
+  // One undo for every image in the paste. A drag box keeps its size; otherwise the image fits in 400px.
+  async function placePastedImages(place: CanvasAddPlace, files: File[], mine: number) {
+    const saved = await writeAttachments(ws, canvasPath, files, true);
+    if (gone || mine !== revision || canvasReadOnly.has(el) || !saved.length) return;
+    const nodes: CanvasNode[] = [];
+    for (let i = 0; i < saved.length; i++) {
+      if (gone || mine !== revision || canvasReadOnly.has(el)) return;
+      const file = saved[i];
+      const at: CanvasAddPlace = { ...place, x: place.x + i * (400 + 45) };
+      const boxed = at.width !== undefined && at.height !== undefined;
+      if (boxed || !IMAGE_EXT.test(file)) {
+        nodes.push(makeNode("file", at, at.width ?? 400, at.height ?? 400, { file }));
+        continue;
+      }
+      const size = await imageBox(file);
+      if (gone || mine !== revision || canvasReadOnly.has(el)) return;
+      if (size) {
+        const atStart = !!at.atStart;
+        nodes.push({
+          id: crypto.randomUUID().replaceAll("-", "").slice(0, 16),
+          x: Math.round(at.x - (atStart ? 0 : size.width / 2)),
+          y: Math.round(at.y - (atStart ? 0 : size.height / 2)),
+          width: size.width,
+          height: size.height,
+          type: "file",
+          file,
+        });
+      }
+    }
+    if (!nodes.length || gone || mine !== revision || canvasReadOnly.has(el)) return;
+    add(nodes.length === 1 ? nodes[0] : nodes);
+  }
   async function pasteAt(place: CanvasAddPlace) {
     if (gone || canvasReadOnly.has(el)) return;
     const mine = revision;
     el.focus({ preventScroll: true });
-    const text = await readClipboardText();
+    const snap = await readClipboard();
     if (gone || mine !== revision || canvasReadOnly.has(el)) return;
-    const url = loneWebUrl(text);
+    if (snap.files.length) { await placePastedImages(place, snap.files, mine); return; }
+    const url = loneWebUrl(snap.text);
     if (url) { add(makeNode("link", place, 400, 120, { url })); return; }
-    if (!text.trim()) return;
-    add(makeNode("text", place, 250, 60, { text }));
+    if (snap.text.trim()) { add(makeNode("text", place, 250, 60, { text: snap.text })); return; }
+    // Whitespace, or a paste command that never produced an event, adds nothing.
+    if (!snap.bare) return;
+    const file = await readClipboardImageFile();
+    if (!file || gone || mine !== revision || canvasReadOnly.has(el)) return;
+    await placePastedImages(place, [file], mine);
   }
   // One list for the board menu and for Ctrl+drag: card, note, media, web page, group.
   function addItems(place: CanvasAddPlace): MenuItems {

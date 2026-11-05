@@ -59,6 +59,7 @@ it("reads list markers and the inline separator, and writes markers back", () =>
   expect(viewGlyph("list")).toBe("list");
   expect(viewGlyph("cards")).toBe("grid-2x2");
   expect(viewGlyph("kanban")).toBe("square-kanban");
+  expect(viewGlyph("board")).toBe("square-kanban");
   expect(viewGlyph("table")).toBe("table");
   expect(viewGlyph("map")).toBe("table");
 

@@ -1,0 +1,17 @@
+filters:
+  not:
+    - file.hasTag("archive")
+views:
+  - type: list
+    name: List
+    filters:
+      and:
+        - file.inFolder("Books")
+    order:
+      - file.name
+      - status
+      - file.basename
+    sort:
+      - property: file.name
+        direction: ASC
+    limit: 20

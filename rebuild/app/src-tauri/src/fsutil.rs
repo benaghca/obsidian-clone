@@ -12,7 +12,11 @@ pub const TEMP_MARK: &str = ".grove-tmp";
 /// listed, searched, indexed or reported by the watcher; only the config commands touch it.
 pub const CONFIG_DIR: &str = ".grove";
 
-const SKIP_DIRS: &[&str] = &[".obsidian", ".git", ".trash", CONFIG_DIR];
+/// Cinder's settings folder. Hidden like the others. Only `read_foreign_config` reads
+/// the one allowlisted file inside it.
+pub const CINDER_DIR: &str = ".cinder";
+
+const SKIP_DIRS: &[&str] = &[".obsidian", ".git", ".trash", CONFIG_DIR, CINDER_DIR];
 
 pub fn mtime_ms(md: &fs::Metadata) -> u64 {
     epoch_ms(md.modified())
@@ -112,6 +116,22 @@ pub fn config_file(root: &Path, name: &str) -> Result<PathBuf, String> {
         return Err(format!("invalid config name: {name}"));
     }
     let full = root.join(CONFIG_DIR).join(name);
+    ensure_inside(root, &full)?;
+    Ok(full)
+}
+
+/// Absolute path of one allowlisted foreign settings file. The only pairs are
+/// `cinder`/`settings.json` (`.cinder/settings.json`) and `obsidian` with
+/// `daily-notes.json`, `templates.json` or `app.json` (under `.obsidian/`).
+/// Every other pair is refused. The folder must not lead outside the vault
+/// (a symlinked `.cinder` or `.obsidian` is refused), same as [`config_file`].
+pub fn foreign_config_file(root: &Path, source: &str, name: &str) -> Result<PathBuf, String> {
+    let dir = match (source, name) {
+        ("cinder", "settings.json") => CINDER_DIR,
+        ("obsidian", "daily-notes.json" | "templates.json" | "app.json") => ".obsidian",
+        _ => return Err(format!("invalid foreign config: {source}/{name}")),
+    };
+    let full = root.join(dir).join(name);
     ensure_inside(root, &full)?;
     Ok(full)
 }
@@ -286,7 +306,10 @@ pub fn sweep_temps(root: &Path) -> io::Result<usize> {
         let name = entry.file_name();
         let name = name.to_string_lossy();
         if kind.is_dir() {
-            if ![".obsidian", ".git", ".trash"].contains(&name.as_ref()) {
+            // Hidden folders Grove does not write into. `.grove` is the exception:
+            // settings saves leave temps there, and those are swept.
+            let skipped = SKIP_DIRS.contains(&name.as_ref()) && name.as_ref() != CONFIG_DIR;
+            if !skipped {
                 removed += sweep_temps(&entry.path())?;
             }
         } else if let Some(pid) = kind.is_file().then(|| temp_owner(&name)).flatten() {
@@ -487,6 +510,9 @@ mod tests {
             "a/.git/config",
             ".obsidian/app.json",
             ".grove/app.json",
+            ".cinder/settings.json",
+            ".cinder/README.md",
+            "notes/.cinder/x.md",
             r"a\b",
             "C:/x",
             "a//b",
@@ -531,6 +557,82 @@ mod tests {
         let root = dir.path.canonicalize().unwrap();
         std::os::unix::fs::symlink(&outside.path, root.join(CONFIG_DIR)).unwrap();
         assert!(config_file(&root, "app.json").is_err());
+    }
+
+    #[test]
+    fn foreign_config_file_is_a_fixed_allowlist() {
+        let dir = tmp_dir("foreign-name");
+        let root = dir.path.canonicalize().unwrap();
+        assert_eq!(
+            foreign_config_file(&root, "cinder", "settings.json").unwrap(),
+            root.join(".cinder").join("settings.json")
+        );
+        for name in ["daily-notes.json", "templates.json", "app.json"] {
+            assert_eq!(
+                foreign_config_file(&root, "obsidian", name).unwrap(),
+                root.join(".obsidian").join(name),
+                "{name}"
+            );
+        }
+        for (source, name) in [
+            ("cinder", "settings.md"),
+            ("cinder", "README.md"),
+            ("cinder", "app.json"),
+            ("cinder", "daily-notes.json"),
+            ("obsidian", "settings.json"),
+            ("obsidian", "community-plugins.json"),
+            ("obsidian", "appearance.json"),
+            ("obsidian", "App.json"),
+            ("obsidian", "daily-notes.JSON"),
+            ("Cinder", "settings.json"),
+            ("", "settings.json"),
+            ("cinder", ""),
+            ("cinder", "../settings.json"),
+            ("cinder", "settings.json/../../x"),
+            ("../cinder", "settings.json"),
+            ("notion", "settings.json"),
+            ("grove", "app.json"),
+        ] {
+            assert!(
+                foreign_config_file(&root, source, name).is_err(),
+                "{source}/{name} should be refused"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreign_config_symlinked_outside_is_refused() {
+        let dir = tmp_dir("foreign-link");
+        let outside = tmp_dir("foreign-outside");
+        let root = dir.path.canonicalize().unwrap();
+        fs::write(outside.path.join("settings.json"), "{\"from\":\"outside\"}").unwrap();
+        fs::write(outside.path.join("secret.json"), "{\"from\":\"outside\"}").unwrap();
+        std::os::unix::fs::symlink(&outside.path, root.join(CINDER_DIR)).unwrap();
+        assert!(foreign_config_file(&root, "cinder", "settings.json").is_err());
+        fs::create_dir(root.join(".obsidian")).unwrap();
+        std::os::unix::fs::symlink(
+            outside.path.join("secret.json"),
+            root.join(".obsidian").join("app.json"),
+        )
+        .unwrap();
+        assert!(foreign_config_file(&root, "obsidian", "app.json").is_err());
+    }
+
+    #[test]
+    fn sweep_skips_cinder_and_still_cleans_grove() {
+        let dir = tmp_dir("sweep-cinder");
+        let dead = format!(".note.md.{}.1{TEMP_MARK}", u32::MAX);
+        fs::create_dir_all(dir.path.join(".cinder")).unwrap();
+        fs::create_dir_all(dir.path.join(".obsidian")).unwrap();
+        fs::create_dir_all(dir.path.join(CONFIG_DIR)).unwrap();
+        fs::write(dir.path.join(".cinder").join(&dead), "keep").unwrap();
+        fs::write(dir.path.join(".obsidian").join(&dead), "keep").unwrap();
+        fs::write(dir.path.join(CONFIG_DIR).join(&dead), "drop").unwrap();
+        assert_eq!(sweep_temps(&dir.path).unwrap(), 1);
+        assert!(dir.path.join(".cinder").join(&dead).is_file());
+        assert!(dir.path.join(".obsidian").join(&dead).is_file());
+        assert!(!dir.path.join(CONFIG_DIR).join(&dead).exists());
     }
 
     fn walk_names(root: &Path) -> Vec<String> {

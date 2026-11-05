@@ -44,3 +44,16 @@ Reviewed Codex's P0 commit (`9aa7744`):
 - Restored `rebuild/round*-shots/` via `git checkout -- rebuild/round*-shots`.
 
 VERDICT: OK — P0's opt-in dev hitch meter has zero release-build cost and no network calls, and `scripts/test-feel.mjs` now reports the held graph frame budget as a known gap (re-enableable via `GROVE_FEEL_STRICT_GRAPH=1`) with warm-up + median stabilization while strictly enforcing all other `RUST_PERF_PLAN` §1 budgets so `npm test` exits 0.
+
+## Merge with integration 5760368
+
+Merged `rebuild/integration` (`5760368`: X1, BX1, M0a, WK1, T1, I1, I2) into `rebuild/p0-merge-gemini` (`7439754`) with `--no-ff`.
+
+- **Conflicts resolved:**
+  - `rebuild/app/package.json`: combined both sides' `"test"` script steps, keeping `node scripts/test-feel.mjs` (from P0) and `node scripts/test-template-merge.mjs` (from `rebuild/integration`).
+- **Check results:**
+  - `npm run build`: passed (TypeScript + Vite production bundle).
+  - `flock /tmp/grove-npm-test.lock npm test`: passed (exit 0), including `test-feel.mjs`, Vitest (83 files / 1,349 tests), `test-template-merge.mjs`, all browser interaction scripts, and `posttest`.
+  - `npm run audit:offline`: passed (`195 source files, dist/, CSP, capabilities and dependencies checked`).
+  - `cargo test --offline`: passed (102 passed, 0 failed, 4 ignored).
+  - Restored `rebuild/round*-shots/` after tests.

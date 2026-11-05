@@ -11,7 +11,8 @@ import { api, type FileEntry } from "./api";
 import { mountBaseEmbed } from "./bases/embed";
 import { isolateHistory } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
-import { attachmentPaths, embedFor } from "./editor/attachments";
+import { embedFor } from "./editor/attachments";
+import { writeAttachments } from "./editor/saveAttachments";
 import { editorHost, type EditorHost, type EmbedHost } from "./editor/host";
 import { toggledTask } from "./editor/render";
 import { type NoteLike, resolveLink } from "./links/internal";
@@ -128,8 +129,6 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
   };
 }
 
-const ATTACHMENT_MAX = 20 * 1024 * 1024;
-
 /** Write each file, refresh the file list, then insert the embeds as one paste. */
 async function saveAttachments(ws: Workspace, view: EditorView, files: File[], at?: number | null, keepNames = false): Promise<boolean> {
   if (view.state.readOnly) return true;
@@ -138,28 +137,8 @@ async function saveAttachments(ws: Workspace, view: EditorView, files: File[], a
   const sel = view.state.selection.main;
   const insertAt = at ?? sel.from;
   const replaceTo = at == null ? sel.to : insertAt;
-  const incoming: { name: string; type: string; bytes: Uint8Array }[] = [];
-  for (const file of files) {
-    const bytes = new Uint8Array(await file.arrayBuffer());
-    if (bytes.byteLength > ATTACHMENT_MAX) {
-      console.warn("Grove skipped an attachment over 20 MB", file.name);
-      continue;
-    }
-    incoming.push({ name: file.name, type: file.type, bytes });
-  }
-  if (!incoming.length) return true;
-  const paths = attachmentPaths(from, settings.get("app.json").attachmentFolderPath, incoming, ws.vault.files.map((f) => f.path), new Date(), !keepNames);
-  const saved: string[] = [];
-  for (let i = 0; i < incoming.length; i++) {
-    try {
-      await api.writeFileBytes(paths[i], incoming[i].bytes);
-      saved.push(paths[i]);
-    } catch (err) {
-      console.warn("Grove could not save an attachment", paths[i], err);
-    }
-  }
-  if (!saved.length) return true;
-  await ws.vault.refreshFiles();
+  const saved = await writeAttachments(ws, from, files, !keepNames);
+  if (!saved.length || view.state.readOnly || ws.editors.pathOf(view) !== from) return true;
   const notes = ws.vault.files.filter((f) => !f.is_dir);
   const text = saved.map((path) => embedFor(path, from, notes, ws.linkStyle())).join(view.state.lineBreak);
   const doc = view.state.doc.length;

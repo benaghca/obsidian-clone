@@ -1,0 +1,35 @@
+filters:
+  and:
+    - file.hasTag("book")
+    - 'file.ext == "md"'
+formulas:
+  ppd: pages / 7   # pages per day
+  label: 'if(status == "done", "✓ " + file.basename, file.basename)'
+properties:
+  author:
+    displayName: Author
+  formula.ppd:
+    displayName: "Pages/day"
+views:
+  - type: table
+    name: Reading list
+    filters:
+      or:
+        - status == "reading"
+        - status == "todo"
+    order:
+      - file.name
+      - author
+      - formula.ppd
+    sort:
+      - property: pages
+        direction: DESC
+    limit: 10
+  - type: cards
+    name: "All books"
+    image: cover
+  - type: board
+    name: Board
+    groupBy:
+      property: status
+      direction: ASC
