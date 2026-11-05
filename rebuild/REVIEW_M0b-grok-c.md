@@ -67,3 +67,21 @@ Checks, all exit 0. Screenshot files under `rebuild/round*-shots/` that the suit
 - `cargo test --offline` from `rebuild/app/src-tauri`: **102 passed, 0 failed, 4 ignored**.
 
 No new packages. Nothing pushed.
+
+## Merge with integration 7ba7d09
+
+Merged `origin/rebuild/integration` (`7ba7d09`) with `git merge --no-ff`. One file conflicted. The resolution keeps both sides.
+
+- `rebuild/app/package.json`: both sides edited the `test` script. The merged script keeps `node scripts/test-feel.mjs` after the browser-discovery step and before `vitest run`, and `node scripts/test-settings-import.mjs` at the end. `posttest` and the other scripts matched on both sides.
+- `rebuild/app/src/main.ts` merged on its own. It calls `installHitchMeter()` after `registerAppCommands`, and `importForeignSettings()` after `settings.load()` in the main window.
+
+`rebuild/NOTES_P0-codex.md`, `rebuild/NOTES_P0-REVIEW-gemini.md`, `rebuild/app/scripts/test-feel.mjs`, and `rebuild/app/src/shell/hitchMeter.ts` came in clean.
+
+Checks, all exit 0. Screenshot files under `rebuild/round*-shots/` that the suite rewrote were restored before this commit.
+
+- `npm run build`: passed (`tsc --noEmit` and vite).
+- `flock /tmp/grove-npm-test.lock npm test`: the lock was held by other runs; this run waited, then passed. Vitest: **85 files, 1365 tests**. `test-feel.mjs` passed. It logged the held graph gap (p95 33.4 ms, max 50.1 ms, 56 of 185 frames over 20 ms) and did not fail on it. Typing, the quick switcher, note switches, and folder expand stayed inside their budgets. `test-settings-import.mjs` passed (14 checks) and `posttest` passed. Virtualized 1,000-card scroll max 16.8 ms. K8 10k scroll p95 16.7 ms, max 16.8 ms. Bases edge 10k scroll p95 16.7 ms, max 16.8 ms. Property fuzz `cases=48`.
+- `npm run audit:offline`: passed (198 source files, dist/, CSP, capabilities and dependencies).
+- `cargo test --offline` from `rebuild/app/src-tauri`: **102 passed, 0 failed, 4 ignored**.
+
+No new packages. Nothing pushed.
