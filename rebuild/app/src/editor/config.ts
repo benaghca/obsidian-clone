@@ -16,11 +16,12 @@ import { autoConvertHTML } from "./clipboard";
 import { backspaceList, closeCodeFence } from "./format";
 import { folding } from "./fold";
 import { propertiesDisplay } from "./properties";
+import { webEmbedMode } from "./webEmbed";
 
 /** The settings that are the editor's, under their app.json names. */
 const KEYS = [
   "showLineNumber", "foldHeading", "foldIndent", "spellcheck", "autoPairBrackets",
-  "autoPairMarkdown", "autoConvertHTML", "smartIndentList", "useTab", "tabSize", "propertiesInDocument",
+  "autoPairMarkdown", "autoConvertHTML", "smartIndentList", "useTab", "tabSize", "propertiesInDocument", "webEmbeds",
 ] as const;
 export type EditorConfig = Pick<SettingsOf<"app.json">, (typeof KEYS)[number]>;
 
@@ -112,6 +113,7 @@ const PARTS: { compartment: Compartment; ext: (c: EditorConfig) => Extension }[]
       ]),
   },
   { compartment: new Compartment(), ext: (c) => cached(`properties:${c.propertiesInDocument}`, () => propertiesDisplay.of(c.propertiesInDocument)) },
+  { compartment: new Compartment(), ext: (c) => cached(`web:${c.webEmbeds}`, () => webEmbedMode.of(c.webEmbeds)) },
 ];
 
 let current: EditorConfig = defaults(APP);

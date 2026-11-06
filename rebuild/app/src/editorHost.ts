@@ -86,6 +86,7 @@ export function createEditorHost(ws: Workspace): EditorHost & { embeds: EmbedHos
   return {
     openLink: (target, where, view) => void ws.openLink(target, where, view ? ws.editors.groupOfView(view) : undefined),
     openUrl: (url) => void api.openExternal(url).catch((err) => console.error(`Could not open ${url}`, err)),
+    allowFrameOrigin: (origin) => api.allowFrameOrigin(origin),
     linkCandidates: () => {
       const candidates = new Map(ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path))
         .map(f => [f.path.toLowerCase(), { name: noteName(f.path), path: f.path }]));

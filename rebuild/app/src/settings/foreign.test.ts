@@ -174,11 +174,11 @@ test("template paths lose extra slashes, and a folder location needs a folder Gr
 test("Cinder: embedded web pages map click and off, and always is already Grove's default", () => {
   const off = planImport({ ...none, cinder: json({ webEmbeds: "off" }) });
   expect(off.values["app.json"].webEmbeds).toBe("off");
-  expect(off.imported).toContainEqual({ label: "Embedded web pages", value: "Off" });
+  expect(off.imported).toContainEqual({ label: "Embedded web pages", value: "off (links only)" });
   expect(off.notImported).toEqual([]);
   const click = planImport({ ...none, cinder: json({ webEmbeds: "click" }) });
   expect(click.values["app.json"].webEmbeds).toBe("click");
-  expect(click.imported).toContainEqual({ label: "Embedded web pages", value: "Click to load" });
+  expect(click.imported).toContainEqual({ label: "Embedded web pages", value: "click to load" });
   const always = planImport({ ...none, cinder: json({ webEmbeds: "always" }) });
   expect(always.values["app.json"].webEmbeds).toBeUndefined();
   expect(always.imported.some((item) => item.label === "Embedded web pages")).toBe(false);
