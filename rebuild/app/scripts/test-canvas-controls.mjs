@@ -8,7 +8,7 @@ await withBrowser(async ({run,send,open,read,click,point,move,press,chord,check,
  const stationary=async p=>{for(const type of ['mousePressed','mouseReleased'])await send('Input.dispatchMouseEvent',{type,...p,button:'left',clickCount:1});await sleep(70);};
  const color=async label=>{await click(button('Set color'));await click(`.canvas-color-menu ${button(label)}`);await sleep(350);};
  await open('Controls.canvas',fixture);const original=await read();
- check(await run(()=>document.querySelectorAll('.canvas-control-group').length===4),'Control stack has settings, zoom, history and help groups');
+ check(await run(()=>document.querySelectorAll('.canvas-control-group').length===5),'Control stack has presentation, settings, zoom, history and help groups');
  check(await run(()=>['Undo','Redo'].every(label=>document.querySelector(`[aria-label="${label}"]`).getAttribute('aria-disabled')==='true')),'Both history controls start disabled');
  const monitor=selector=>run(selector=>{
    document.addEventListener('pointerdown',()=>{

@@ -18,6 +18,7 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
   const index = new CanvasSpatial<CanvasNode>(), cards = new Map<string, Card>(), retained = new Map<string, Card>();
   nodes.forEach(n => index.update(n));
   const shown = new Set<CanvasNode>();
+  let pinned = new Set<string>();
   const frameCards = new Set<string>();
   let frameOrder: string[] = [], frameIds = new Set<string>(), preferredFrame: string | undefined;
   let visible = new Set<CanvasNode>(), revision = 0, gone = false;
@@ -48,7 +49,13 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
   function unload(card: Card) {
     if (card.body?.frame && !frameIds.has(card.node.id)) card.body.release();
   }
+  // A presented slide is drawn as itself while the board is still zoomed out.
+  function slideView(id: string, view: CanvasViewport) {
+    return pinned.has(id) && view.titles ? { ...view, titles: false } : view;
+  }
   function apply(card: Card, view: CanvasViewport, on: boolean) {
+    view = slideView(card.node.id, view);
+    if (pinned.has(card.node.id)) on = true;
     const { node, el, body } = card;
     unload(card);
     if (on || el.classList.contains("is-editing")) shown.add(node); else shown.delete(node);
@@ -73,6 +80,7 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     const view = viewport(); if (!view) return;
     assignFrames(view);
     const token = ++revision, next = new Set(index.query({ x: view.x - view.width / 4, y: view.y - view.height / 4, width: view.width * 1.5, height: view.height * 1.5 }));
+    for (const id of pinned) { const card = cards.get(id); if (card) next.add(card.node); }
     const ordered = [...next].sort((a, b) => Math.hypot(a.x + a.width / 2 - view.focusX, a.y + a.height / 2 - view.focusY) - Math.hypot(b.x + b.width / 2 - view.focusX, b.y + b.height / 2 - view.focusY));
     const enqueue = (list: CanvasNode[], on: boolean, prefix: string) => {
       const size = on && !view.titles ? 1 : 8;
@@ -82,7 +90,11 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
       });
     };
     enqueue([...shown].filter(node => !next.has(node)), false, "body-hide");
-    enqueue(ordered.filter(node => { const card = cards.get(node.id); return card && (card.last !== mark(true, view, node.id) || !!(card.body && (!view.titles || card.el.classList.contains("is-image")) && !card.body.ready())); }), true, "body-show");
+    enqueue(ordered.filter(node => {
+      const card = cards.get(node.id); if (!card) return false;
+      const shown = slideView(node.id, view);
+      return card.last !== mark(true, shown, node.id) || !!(card.body && (!shown.titles || card.el.classList.contains("is-image")) && !card.body.ready());
+    }), true, "body-show");
     visible = next;
     trim();
   }
@@ -90,7 +102,7 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     work.add(retained, () => {
       for (const [id, card] of retained) {
         if (retained.size <= 300) break;
-        if (visible.has(card.node) || card.el.classList.contains("is-editing")) continue;
+        if (pinned.has(id) || visible.has(card.node) || card.el.classList.contains("is-editing")) continue;
         card.body?.release(); retained.delete(id);
       }
     });
@@ -104,12 +116,32 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
       card.last = `${on}/${view.band}/${view.titles}`; if (on) { shown.add(node); visible.add(node); } else shown.delete(node);
     } else shown.add(node);
   }
-  return { update,
+  function present(ids: Iterable<string> | null) {
+    pinned = new Set(ids ?? []);
+    const view = viewport();
+    if (!view || !pinned.size) return;
+    for (const id of pinned) {
+      const card = cards.get(id);
+      if (!card) continue;
+      // Mark it visible before ensure(), so a file or drawing read that finishes
+      // during the call is kept, and the body cache does not evict the slide.
+      visible.add(card.node);
+      apply(card, view, true);
+    }
+  }
+  return { update, present,
     add(node: CanvasNode, el: HTMLElement, body?: Body) { const card = {node,el,body}; cards.set(node.id,card); if (body?.frame) frameCards.add(node.id); prepare(card); },
     prepare(node: CanvasNode) { const card = cards.get(node.id); if (card) prepare(card); },
     changed(changed: CanvasNode[]) { changed.forEach(n => { index.update(n); const card = cards.get(n.id); if (card) card.last = undefined; }); update(); },
     ready(node: CanvasNode) { const card = cards.get(node.id); if (card && !gone) { retained.delete(node.id); retained.set(node.id, card); const view = viewport(); if (view) apply(card, view, visible.has(node)); trim(); } },
-    wanted(node: CanvasNode) { const view = viewport(); return !gone && visible.has(node) && !!view && (!view.titles || cards.get(node.id)?.el.classList.contains("is-image")); },
+    // A presented slide stays wanted after the camera drops into title mode, and
+    // while it is still outside the viewport the glide has not reached.
+    wanted(node: CanvasNode) {
+      if (gone) return false;
+      if (pinned.has(node.id)) return true;
+      const view = viewport();
+      return !!view && visible.has(node) && (!view.titles || !!cards.get(node.id)?.el.classList.contains("is-image"));
+    },
     slotted: (id: string) => frameIds.has(id),
     recheck(prefer?: string) {
       if (gone) return;
@@ -118,6 +150,6 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
       update();
     },
     stats: () => ({ retained: retained.size, visible: visible.size, frames: frameIds.size }),
-    dispose() { gone = true; revision++; for (const card of cards.values()) card.body?.release(); cards.clear(); retained.clear(); shown.clear(); visible.clear(); frameCards.clear(); frameOrder = []; frameIds = new Set(); preferredFrame = undefined; },
+    dispose() { gone = true; revision++; pinned = new Set(); for (const card of cards.values()) card.body?.release(); cards.clear(); retained.clear(); shown.clear(); visible.clear(); frameCards.clear(); frameOrder = []; frameIds = new Set(); preferredFrame = undefined; },
   };
 }

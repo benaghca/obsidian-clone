@@ -2,6 +2,7 @@ import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { canvasHelp, canvasReadOnly, canvasSettings } from "./controls";
 import type { CanvasNode } from "./model";
+import { glideCamera, type Camera } from "./present";
 import type { Tab } from "../tabs";
 
 interface Bounds { left: number; top: number; right: number; bottom: number }
@@ -43,12 +44,14 @@ function installBands() {
 const SETTLE_MS = 120;
 
 export interface CanvasViewport { x: number; y: number; width: number; height: number; focusX: number; focusY: number; band: number; titles: boolean; scale: number }
-export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void) {
+export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void, onPresent?: () => void) {
   let state = canvasViewports.get(tab);
   if (state?.path !== path) state = undefined;
   let bounds: Bounds | null = null, width = 0, height = 0, frame = 0, drawn = "", settle = 0, gesture = false, flushBand = false;
   let rect: DOMRect | undefined, menu: HTMLElement | undefined, styled: HTMLElement | undefined;
   let space = false, dragging = false, suppressClick = false, titles = false;
+  let held = false, gliding = false, glideGen = 0, glideResize = false;
+  let heldResize = () => {};
   let cancelDrag: (() => void) | undefined;
   const events = new AbortController();
   let changed = () => {}, pause = () => {}, focusX = .5, focusY = .5;
@@ -80,6 +83,10 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       if (child.classList.contains("canvas-selection-menu")) return menu = child as HTMLElement;
     return menu = undefined;
   }
+  function placeTransform(cx: number, cy: number, scale: number) {
+    const x = width / 2 - cx * scale, y = height / 2 - cy * scale;
+    world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  }
   function draw() {
     cancelAnimationFrame(frame);
     frame = 0;
@@ -107,7 +114,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     drawn = key;
     if (wheel || dragging) { pause(); notifyLater(); }
     else if (!flush) notifyLater();
-    world.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+    placeTransform(cx, cy, scale);
     // Obsidian keeps dots legible when zoomed out, with a fixed .7px radius.
     let grid = 20 * scale;
     while (grid < 10) grid *= 2;
@@ -116,21 +123,21 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   }
   const schedule = () => { frame ||= requestAnimationFrame(draw); };
   function fit(next = bounds, max = 1) {
-    if (!next || !width || !height) return;
+    if (held || !next || !width || !height) return;
     gesture = false; flushBand = true;
     state = { path, cx: (next.left + next.right) / 2, cy: (next.top + next.bottom) / 2,
       scale: clamp(Math.min(max, width / (Math.max(1, next.right - next.left) * 1.1), height / (Math.max(1, next.bottom - next.top) * 1.1))) };
     draw();
   }
   function zoom(scale: number, x = width / 2, y = height / 2) {
-    if (!state) return;
+    if (!state || held) return;
     scale = clamp(scale);
     state.cx += (x - width / 2) * (1 / state.scale - 1 / scale);
     state.cy += (y - height / 2) * (1 / state.scale - 1 / scale);
     state.scale = scale;
     schedule();
   }
-  const zoomNow = (scale: number) => { gesture = false; flushBand = true; zoom(scale); };
+  const zoomNow = (scale: number) => { if (held || !state) return; gesture = false; flushBand = true; zoom(scale); };
   const controls = h("div", { class: "canvas-controls" });
   const settingsButton = keyButton(icon("settings"), "Canvas settings", () => canvasSettings(el, settingsButton, refresh));
   const undo = keyButton(icon("undo-2"), "Undo", () => history(false));
@@ -145,14 +152,25 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     if (e.type === "keydown") { e.stopPropagation(); action(); }
     else { action(); el.focus({ preventScroll: true }); }
   }));
-  controls.append(h("div", { class: "canvas-control-group" }, settingsButton), zoomControls,
+  const presentButton = keyButton(icon("play"), "Start presentation\n(F5)", e => {
+    if (e.type === "keydown") e.stopPropagation();
+    onPresent?.();
+    el.focus({ preventScroll: true });
+  });
+  controls.append(h("div", { class: "canvas-control-group" }, presentButton),
+    h("div", { class: "canvas-control-group" }, settingsButton), zoomControls,
     h("div", { class: "canvas-control-group" }, undo, redo),
     h("div", { class: "canvas-control-group" }, keyButton(icon("circle-help"), "Canvas help", canvasHelp)));
   el.append(controls);
   el.addEventListener("wheel", e => {
     if (!e.ctrlKey && (e.target as Element).closest(".canvas-node.is-editing")) return;
+    if (held) {
+      const content = (e.target as Element).closest<HTMLElement>(".canvas-node-content");
+      if (!(content && content.scrollHeight > content.clientHeight + 1)) e.preventDefault();
+      return;
+    }
     e.preventDefault();
-    if (!state || (e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    if (!state || (e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu, .canvas-present-ui")) return;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? height : 1;
     // Canvas help: "press Space or Ctrl … and scroll" to zoom.
     pause(); notifyLater();
@@ -169,6 +187,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   }, { passive: false });
   el.addEventListener("keydown", e => {
     if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    if (held) return;
     if (e.code === "Space" || e.key === " ") { e.preventDefault(); space = true; el.classList.add("is-grabbable"); }
     if (e.shiftKey && e.code === "Digit1") { e.preventDefault(); fit(); }
   });
@@ -183,6 +202,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     // Focusing the board on a button's press swallows its click. Space-pan still
     // starts below, including on a link, so a held Space click does not follow it.
     if (!target.closest(".cm-editor, [contenteditable], input, textarea, button, a")) el.focus({ preventScroll: true });
+    if (held) return;
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();
@@ -202,6 +222,8 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   el.addEventListener("dblclick", blockClick, true);
   const size = new ResizeObserver(([entry]) => {
     width = entry.contentRect.width; height = entry.contentRect.height; rect = undefined;
+    if (gliding) { glideResize = true; return; }
+    if (held) { heldResize(); return; }
     gesture = false; flushBand = true;
     if (!state) fit(); else draw();
   });
@@ -219,6 +241,52 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
       }
     },
     loaded(next: Bounds) { bounds = next; if (!state) fit(); else draw(); },
-    dispose() { cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); size.disconnect(); events.abort(); },
+    camera() { return state && width && height ? { cx: state.cx, cy: state.cy, scale: state.scale, width, height } : undefined; },
+    reflow() { width = el.clientWidth; height = el.clientHeight; rect = undefined; },
+    jump(next: Camera) {
+      glideGen++; gliding = false; glideResize = false; cancelAnimationFrame(frame); frame = 0;
+      state = { path, cx: next.cx, cy: next.cy, scale: next.scale };
+      canvasViewports.set(tab, state);
+      if (!width || !height) return;
+      gesture = false; flushBand = true;
+      drawn = "";
+      draw();
+    },
+    glide(next: Camera, ms: number) {
+      const gen = ++glideGen;
+      gliding = true;
+      glideResize = false;
+      cancelAnimationFrame(frame); frame = 0;
+      clearTimeout(notify); notify = 0;
+      clearTimeout(settle); settle = 0;
+      pause();
+      return new Promise<void>(resolve => {
+        if (!state || !width || !height) { gliding = false; resolve(); return; }
+        const from = { cx: state.cx, cy: state.cy, scale: state.scale };
+        const t0 = performance.now();
+        const step = (now: number) => {
+          if (gen !== glideGen) { resolve(); return; }
+          const p = Math.min(1, (now - t0) / Math.max(1, ms));
+          const cam = glideCamera(from, next, p);
+          state = { path, ...cam };
+          placeTransform(cam.cx, cam.cy, cam.scale);
+          canvasViewports.set(tab, state);
+          if (p < 1) requestAnimationFrame(step);
+          else {
+            gliding = false; drawn = ""; gesture = false; flushBand = true;
+            const refit = glideResize && held;
+            glideResize = false;
+            if (refit) heldResize();
+            else draw();
+            resolve();
+          }
+        };
+        requestAnimationFrame(step);
+      });
+    },
+    cancelGlide() { glideGen++; gliding = false; glideResize = false; },
+    hold(next: boolean) { held = next; if (next) releaseSpace(); },
+    onHeldResize(fn: () => void) { heldResize = fn; },
+    dispose() { glideGen++; gliding = false; glideResize = false; cancelDrag?.(); cancelAnimationFrame(frame); clearTimeout(settle); clearTimeout(notify); size.disconnect(); events.abort(); },
   };
 }

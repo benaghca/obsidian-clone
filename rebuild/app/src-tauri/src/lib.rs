@@ -577,6 +577,15 @@ mod tests {
     }
 
     #[test]
+    fn presentation_may_fullscreen_the_window() {
+        let cap = include_str!("../capabilities/default.json");
+        assert!(
+            cap.contains("\"core:window:allow-set-fullscreen\""),
+            "presentation mode needs core:window:allow-set-fullscreen"
+        );
+    }
+
+    #[test]
     fn grove_path_header_round_trips() {
         for path in [
             "pics/shot.png",

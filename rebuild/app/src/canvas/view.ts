@@ -4,6 +4,7 @@ import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { api } from "../api";
+import { commands } from "../commands";
 import { IMAGE_EXT, embedPart } from "../editor/embeds";
 import { editorHost } from "../editor/host";
 import { readingMode, release, render } from "../editor/render";
@@ -26,7 +27,8 @@ import { spaceCardBody } from "./spacing";
 import { groupBackground } from "./groups";
 import { editNoteCard } from "./note";
 import { editCanvasLabel } from "./labels";
-import { canvasTitle, edgeCurve, readCanvas, type CanvasEdge } from "./model";
+import { canvasTitle, edgeCurve, readCanvas, type CanvasEdge, type CanvasNode } from "./model";
+import { attachPresentation, registerPresentation } from "./presentSession";
 import type { Guide } from "./align";
 import { canvasWork } from "./work";
 import { canvasBodies } from "./bodies";
@@ -102,8 +104,10 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     refreshFrames();
   });
   let cleanups: (() => void)[] = [];
-  const clear = () => { refreshFrames = () => {}; cardActions.reset(); stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
-  const navigation = canvasNavigation(el, world, tab, path, history, () => draw());
+  let live: { nodes: CanvasNode[]; edges: CanvasEdge[]; present(ids: readonly string[]): void } | null = null;
+  let presentation: { start(): void; stop(restore?: boolean): void; dispose(): void } = { start() {}, stop() {}, dispose() {} };
+  const clear = () => { presentation.stop(false); live = null; refreshFrames = () => {}; cardActions.reset(); stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
+  const navigation = canvasNavigation(el, world, tab, path, history, () => draw(), () => presentation.start());
   const cardActions = canvasCards(el, world, ws, path, (node, edge) => {
     if (gone || canvasReadOnly.has(el)) return;
     stopText?.();
@@ -114,6 +118,25 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     changed(editCanvas(source, [], undefined, nodes, edge ? [edge] : []), true);
     if (!(nodes.length === 1 && nodes[0].type === "text" && !nodes[0].text)) el.focus({ preventScroll: true });
   });
+  const selected = () => [...el.querySelectorAll<HTMLElement>(".canvas-node.is-selected")].flatMap(node => node.dataset.nodeId ? [node.dataset.nodeId] : []);
+  presentation = attachPresentation({
+    el,
+    nodes: () => live?.nodes ?? [],
+    edges: () => live?.edges ?? [],
+    selected,
+    reveal: ids => live?.present(ids),
+    clearReveal: () => live?.present([]),
+    camera: () => navigation.camera(),
+    reflow: () => navigation.reflow(),
+    jump: camera => navigation.jump(camera),
+    glide: (camera, ms) => navigation.glide(camera, ms),
+    cancelGlide: () => navigation.cancelGlide(),
+    hold: value => navigation.hold(value),
+    onHeldResize: fn => navigation.onHeldResize(fn),
+    stopEditing: () => stopText?.(false),
+    keysBlocked: () => commands.suspended(),
+  });
+  const unregisterPresentation = registerPresentation(el, () => presentation.start());
   const openBoardMenu = (x: number, y: number) => cardActions.boardMenu(x, y, {
     undo: undo.some(text => text !== source),
     redo: redo.some(text => text !== source),
@@ -516,6 +539,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         }
       });
     }, selectedId, (node, anchor, apply) => groupBackground(ws, node, anchor, apply, () => !gone && mine === generation && !canvasReadOnly.has(el)), showGuides, openBoardMenu, openCreateMenu, ids => edgeDrawing.select(ids)));
+    live = { nodes, edges, present: ids => bodies.present(ids) };
     built = true; building = false;
     const view = navigation.snapshot(); if (view) { bodies.update(); edgeDrawing.mode(view.titles, view.band, view); }
     work.resume();
@@ -539,5 +563,5 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   window.addEventListener("beforeunload", flush);
   const unwatch = ws.vault.onModified(changed => { if (changed === path && !notifying) { clearTimeout(timer); timer = 0; void load(); } });
   void load();
-  return { el, dispose() { gone = true; flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
 }

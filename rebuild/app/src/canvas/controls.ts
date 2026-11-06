@@ -32,6 +32,10 @@ export function canvasHelp() {
     ["Add to / remove from selection", "Shift + Click", "Shift + Drag to select"],
     ["Constrain card movement to axis", "Shift + Drag"], ["Disable snapping while dragging", "Alt"],
     ["Canvas menu", "Right-click"],
+    ["Present", "F5"],
+    ["Next slide", "→", "Space", "Click"],
+    ["Previous slide", "←", "Right-click"],
+    ["Leave presentation", "Esc"],
     ["Remove card", "Backspace", "Delete"], ["Undo", "Ctrl + Z"], ["Redo", "Ctrl + Y", "Ctrl + Shift + Z"],
   ];
   void confirmDialog({ title: "Canvas help", confirm: "Close", cancel: false,
