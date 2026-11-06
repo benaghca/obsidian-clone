@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareFiles, compareNames, fileName, isNoteFile, isUnder, movedPath, noteName, parentDir, SORT_ORDERS, type SortOrder, systemPath, trimSlashes } from "./paths";
+import { compareFiles, compareNames, explorerName, fileName, isNoteFile, isUnder, movedPath, noteName, parentDir, SORT_ORDERS, type SortOrder, systemPath, trimSlashes } from "./paths";
 
 describe("paths", () => {
   it("names and folders", () => {
@@ -18,6 +18,16 @@ describe("paths", () => {
     expect(parentDir("A/B/Note.md")).toBe("A/B");
     expect(parentDir("Note.md")).toBe("");
     expect(trimSlashes(" /Daily/notes/ ")).toBe("Daily/notes");
+  });
+
+  it("shows a drawing without its extension, and keeps that suffix on a note", () => {
+    expect(explorerName("Sketches/Floor plan.excalidraw")).toBe("Floor plan");
+    expect(explorerName("Boards/Map.CANVAS")).toBe("Map");
+    expect(explorerName("Bases/Tasks.base")).toBe("Tasks");
+    expect(explorerName("Plan.excalidraw.md")).toBe("Plan.excalidraw");
+    expect(explorerName("Notes/Report.canvas.md")).toBe("Report.canvas");
+    expect(explorerName("photo.png")).toBe("photo.png");
+    expect(explorerName("Folder/Plans", true)).toBe("Plans");
   });
 
   it("a file named .md is not a note", () => {

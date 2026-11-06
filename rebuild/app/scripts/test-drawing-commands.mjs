@@ -304,4 +304,37 @@ await withBrowser(async ({ run, send, press, chord, move, click, check }) => {
   }, quick);
   await sleep(600);
   check(!await exists(quick), 'A delete inside the pause stays deleted');
+
+  // Text still being typed is part of the drawing. Rename commits it into the
+  // new file. Closing the box afterwards must not write the old path back.
+  await palette('Create new drawing');
+  await wait(async () => STAMPED.test(await activeDrawing() ?? ''), 'drawing for live text opens');
+  const live = await activeDrawing();
+  await editorReady();
+  const spot = await run(() => {
+    const view = document.querySelector('.workspace-tabs.mod-active .drawing-view');
+    const r = view.getBoundingClientRect();
+    const clear = (x, y) => { const el = document.elementFromPoint(x, y); return !!el && view.contains(el) && !el.closest('.drawing-controls, .drawing-toolbar, .drawing-style, .drawing-help'); };
+    for (let y = r.y + r.height / 2; y < r.bottom - 40; y += 24) {
+      for (let x = r.x + r.width / 2; x < r.right - 40; x += 24) {
+        if (clear(x, y)) return { x, y };
+      }
+    }
+    return null;
+  });
+  assert.ok(spot, 'room to place text');
+  await click(spot);
+  await press('t');
+  await click(spot);
+  await wait(() => run(() => document.activeElement?.classList.contains('drawing-text-editor')), 'text box is open');
+  await send('Input.insertText', { text: 'Kept' });
+  check(await run(() => document.querySelector('.drawing-text-editor')?.value === 'Kept'), 'the text box holds Kept');
+  await run(async (from) => {
+    const { renameFile } = await import('/src/fileOps.ts');
+    await renameFile(ws, from, 'Labeled');
+  }, live);
+  const labeled = live.includes('/') ? live.replace(/[^/]+$/, 'Labeled.excalidraw') : 'Labeled.excalidraw';
+  await sleep(600);
+  check(!await exists(live), 'finishing the text box does not bring the old drawing back');
+  check((await readNote(labeled)).includes('Kept'), 'the text being typed is in the renamed drawing');
 });

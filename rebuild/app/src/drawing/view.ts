@@ -370,7 +370,18 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     if (saveTimer) save();
   };
   window.addEventListener("beforeunload", flush);
-  const untrack = trackDrawing({ path, save: () => { if (saveTimer) save(); return writing; } });
+  // Finish text that is still being typed before writing. A rename flushes,
+  // then moves the file, then closes this tab: text finished only on close
+  // would be written at the old path and bring that file back. A drag in
+  // progress is dropped, the same as closing the tab.
+  const untrack = trackDrawing({
+    path,
+    save: () => {
+      editor.endLive();
+      if (saveTimer) save();
+      return writing;
+    },
+  });
 
   load();
   return {

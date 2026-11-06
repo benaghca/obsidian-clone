@@ -8,7 +8,7 @@ import { commands } from "../commands";
 import { slideHeight } from "../motion";
 import { deleteFile, fileSettings, newFolder, renameError, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
-import { compareFiles, compareNames, isNoteFile, noteName, parentDir, SORT_ORDERS, type SortOrder, viewFileExt } from "../paths";
+import { compareFiles, compareNames, explorerName, isNoteFile, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -273,8 +273,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function renderNodes(nodes: TreeNode[], depth: number, into: HTMLElement) {
     for (const node of nodes) {
       const { entry } = node;
-      const base = noteName(entry.path);
-      const label = entry.is_dir ? entry.name : base.slice(0, base.length - viewFileExt(base).length);
+      const label = explorerName(entry.path, entry.is_dir);
       const chevron = entry.is_dir
         ? h(
             "div",
