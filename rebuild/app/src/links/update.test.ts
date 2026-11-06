@@ -56,3 +56,58 @@ test("a 50-note folder move rewrites every linking note", async () => {
   expect(updateNoteText).toHaveBeenCalledWith(ws, "Link0.md", "[[Note0]]");
   expect(updateNoteText).toHaveBeenCalledWith(ws, "Link49.md", "[[Note49]]");
 });
+
+test("renaming a drawing rewrites its embeds, keeps their size, and leaves a same-named note's links", async () => {
+  const before = [
+    { path: "Sketch.md", name: "Sketch" },
+    { path: "Source.md", name: "Source" },
+    { path: "Sketch.excalidraw", name: "Sketch.excalidraw" },
+  ];
+  const ws = {
+    vault: { notes: before.slice(0, 2) },
+    editors: { text: vi.fn().mockResolvedValue("![[Sketch.excalidraw]]\n![[Sketch.excalidraw|400]] [[Sketch]] ![[Sketch]]\n![drawn](Sketch.excalidraw)") },
+  } as unknown as Workspace;
+  expect(await updateLinks(ws, "Sketch.excalidraw", "Plan 2.excalidraw", before, ["Source.md"], style, null)).toBe(3);
+  expect(updateNoteText).toHaveBeenCalledWith(ws, "Source.md", "![[Plan 2.excalidraw]]\n![[Plan 2.excalidraw|400]] [[Sketch]] ![[Sketch]]\n![drawn](Plan%202.excalidraw)");
+});
+
+test("a drawing moved into a folder with a same-named drawing is linked by its path", async () => {
+  const before = [
+    { path: "Source.md", name: "Source" },
+    { path: "Sketch.excalidraw", name: "Sketch.excalidraw" },
+    { path: "Other/Sketch.excalidraw", name: "Sketch.excalidraw" },
+  ];
+  const ws = {
+    vault: { notes: before.slice(0, 1) },
+    editors: { text: vi.fn().mockResolvedValue("![[Sketch.excalidraw]] and ![[Other/Sketch.excalidraw|200]]") },
+  } as unknown as Workspace;
+  // Shortest: the bare name now matches two drawings, so the moved one is written as its path.
+  expect(await updateLinks(ws, "Sketch.excalidraw", "Archive/Sketch.excalidraw", before, ["Source.md"], style, null)).toBe(1);
+  expect(updateNoteText).toHaveBeenCalledWith(ws, "Source.md", "![[Archive/Sketch.excalidraw]] and ![[Other/Sketch.excalidraw|200]]");
+});
+
+test("a folder move rewrites links to its notes and embeds of its drawings together", async () => {
+  const before = [
+    { path: "Old/Note.md", name: "Note" },
+    { path: "Old/Map.excalidraw", name: "Map.excalidraw" },
+    { path: "Index.md", name: "Index" },
+  ];
+  const ws = {
+    vault: { notes: [{ path: "New/Note.md", name: "Note" }, before[2]] },
+    editors: { text: vi.fn().mockResolvedValue("[[Old/Note]] ![[Old/Map.excalidraw]]") },
+  } as unknown as Workspace;
+  const ask = vi.fn().mockResolvedValue(true);
+  expect(await updateLinks(ws, "Old", "New", before, ["Index.md"], { format: "absolute", wikilinks: true }, ask)).toBe(2);
+  expect(ask).toHaveBeenCalledWith(2, 1);
+  expect(updateNoteText).toHaveBeenCalledWith(ws, "Index.md", "[[New/Note]] ![[New/Map.excalidraw]]");
+});
+
+test("renaming a note leaves embeds of a drawing with the same stem alone", async () => {
+  const before = [{ path: "Sketch.md", name: "Sketch" }, { path: "Source.md", name: "Source" }, { path: "Sketch.excalidraw", name: "Sketch.excalidraw" }];
+  const ws = {
+    vault: { notes: [{ path: "Renamed.md", name: "Renamed" }, before[1]] },
+    editors: { text: vi.fn().mockResolvedValue("[[Sketch]] ![[Sketch.excalidraw|300]]") },
+  } as unknown as Workspace;
+  expect(await updateLinks(ws, "Sketch.md", "Renamed.md", before, ["Source.md"], style, null)).toBe(1);
+  expect(updateNoteText).toHaveBeenCalledWith(ws, "Source.md", "[[Renamed]] ![[Sketch.excalidraw|300]]");
+});

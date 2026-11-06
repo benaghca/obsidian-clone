@@ -11,6 +11,7 @@ import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
 import type { Workspace } from "../workspace";
 import { drawingEditor } from "./editor";
+import { trackDrawing } from "./pending";
 import { openDrawingImages, renderDrawing, type DrawingPicture } from "./render";
 import { findElement, parseScene, serializeScene, type Point, type Scene } from "./scene";
 
@@ -369,6 +370,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     if (saveTimer) save();
   };
   window.addEventListener("beforeunload", flush);
+  const untrack = trackDrawing({ path, save: () => { if (saveTimer) save(); return writing; } });
 
   load();
   return {
@@ -381,6 +383,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       clearTimeout(saveTimer);
       saveTimer = 0;
       window.removeEventListener("beforeunload", flush);
+      untrack();
       loadGen++;
       chunkGen++;
       clearTimeout(parseTimer);

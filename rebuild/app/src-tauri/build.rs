@@ -11,6 +11,7 @@ fn main() {
             "read_note",
             "read_file_bytes",
             "read_clipboard_image",
+            "write_clipboard_image",
             "write_note",
             "set_property",
             "write_file_bytes",

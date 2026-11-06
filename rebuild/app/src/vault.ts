@@ -29,6 +29,7 @@ export class Vault {
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
+  private refs: { files: FileEntry[]; out: NoteRef[] } | null = null;
   private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
 
   /** `changed` hears "files" and "links"; `reload` takes a loaded note's new text from disk. */
@@ -73,6 +74,15 @@ export class Vault {
     if (mine !== this.linksRequest) return;
     this.links = links;
     this.changed("links");
+  }
+
+  /** Every file (not folders) as a link target: notes by their name without ".md", other files by their whole name. */
+  fileRefs(): NoteRef[] {
+    if (this.refs?.files !== this.files) {
+      const notes = new Map(this.notes.map((n) => [n.path, n]));
+      this.refs = { files: this.files, out: this.files.filter((f) => !f.is_dir).map((f) => notes.get(f.path) ?? { name: noteName(f.path), path: f.path }) };
+    }
+    return this.refs.out;
   }
 
   /** The notes that aren't excluded (Settings → Files and links → Excluded files). */

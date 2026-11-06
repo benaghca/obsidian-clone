@@ -1,9 +1,10 @@
-//! The clipboard's image, for pasting.
+//! The clipboard's image, for pasting, and a PNG put on it (a drawing's "Copy as PNG").
 //!
 //! WebKitGTK gives the page an empty paste event when the clipboard holds an image, so the
 //! page asks here. The read waits on whichever app owns the clipboard, so the command runs
 //! off the GTK thread. Wayland uses `wl-paste`, X11 uses `xclip`, both through `std::process`
-//! only. The mime and the arguments come from a fixed list.
+//! only. The mime and the arguments come from a fixed list. A copy uses `wl-copy` or `xclip`,
+//! which keep serving the image in the background after they read it.
 
 use crate::vault::IMAGE_MAX_BYTES;
 use std::io::Read;
@@ -213,6 +214,97 @@ pub fn read_clipboard_image() -> Result<Option<Image>, String> {
     }
 }
 
+const PNG_SIGNATURE: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+
+/// How a PNG is put on the clipboard: the program, its arguments, and the error when it
+/// is missing.
+fn copy_tool(wayland: bool) -> (&'static str, &'static [&'static str], &'static str) {
+    if wayland {
+        (
+            "wl-copy",
+            &["--type", "image/png"],
+            "install wl-clipboard to copy images",
+        )
+    } else {
+        (
+            "xclip",
+            &["-selection", "clipboard", "-t", "image/png", "-i"],
+            "install xclip to copy images",
+        )
+    }
+}
+
+enum CopyOut {
+    Done,
+    Missing,
+    Failed(String),
+}
+
+/// Put `png` on the clipboard with `run`, which feeds it to the tool's stdin. Anything
+/// that isn't a PNG, or is over [`IMAGE_MAX_BYTES`], is refused before a tool runs.
+fn copy_with(
+    wayland: bool,
+    png: &[u8],
+    run: impl FnOnce(&str, &[&str], &[u8]) -> CopyOut,
+) -> Result<(), String> {
+    if !png.starts_with(&PNG_SIGNATURE) {
+        return Err("not a PNG image".into());
+    }
+    if png.len() as u64 > IMAGE_MAX_BYTES {
+        return Err("too large to copy".into());
+    }
+    let (prog, args, missing) = copy_tool(wayland);
+    match run(prog, args, png) {
+        CopyOut::Done => Ok(()),
+        CopyOut::Missing => Err(missing.into()),
+        CopyOut::Failed(msg) => Err(format!("{prog}: {msg}")),
+    }
+}
+
+/// Write `input` to the tool's stdin and wait for it. Its output goes nowhere: the copy the
+/// tool leaves serving the clipboard would hold a pipe open.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn run_copy(prog: &str, args: &[&str], input: &[u8]) -> CopyOut {
+    use std::io::Write;
+    let spawned = Command::new(prog)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn();
+    let mut child = match spawned {
+        Ok(child) => child,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return CopyOut::Missing,
+        Err(err) => return CopyOut::Failed(err.to_string()),
+    };
+    let wrote = child.stdin.take().map(|mut stdin| stdin.write_all(input));
+    match child.wait() {
+        Ok(status) if status.success() => match wrote {
+            Some(Ok(())) => CopyOut::Done,
+            Some(Err(err)) => CopyOut::Failed(err.to_string()),
+            None => CopyOut::Failed("no stdin".into()),
+        },
+        Ok(status) => CopyOut::Failed(status.to_string()),
+        Err(err) => CopyOut::Failed(err.to_string()),
+    }
+}
+
+/// Put a PNG on the system clipboard. A missing tool is an error (`install wl-clipboard to
+/// copy images` or `install xclip to copy images`). On macOS and Windows the page copies
+/// through the webview instead, so this refuses.
+pub fn write_clipboard_png(png: &[u8]) -> Result<(), String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let wayland = std::env::var_os("WAYLAND_DISPLAY").is_some();
+        copy_with(wayland, png, run_copy)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = png;
+        Err("copying images is not supported here".into())
+    }
+}
+
 pub fn command_body() -> Result<ClipboardBody, String> {
     read_clipboard_image().map(|image| match image {
         Some(image) => ClipboardBody::from_image(image),
@@ -227,6 +319,53 @@ mod tests {
 
     fn owned(args: &[&str]) -> Vec<String> {
         args.iter().map(|arg| (*arg).to_string()).collect()
+    }
+
+    #[test]
+    fn a_copy_feeds_the_png_to_wl_copy_or_xclip() {
+        let png = [&PNG_SIGNATURE[..], b"rest"].concat();
+        for (wayland, prog, args) in [
+            (true, "wl-copy", vec!["--type", "image/png"]),
+            (
+                false,
+                "xclip",
+                vec!["-selection", "clipboard", "-t", "image/png", "-i"],
+            ),
+        ] {
+            let mut seen = None;
+            copy_with(wayland, &png, |p, a, input| {
+                seen = Some((p.to_string(), owned(a), input.to_vec()));
+                CopyOut::Done
+            })
+            .unwrap();
+            assert_eq!(seen, Some((prog.to_string(), owned(&args), png.clone())));
+        }
+    }
+
+    #[test]
+    fn a_copy_refuses_what_is_not_a_png_and_reports_the_tool() {
+        let never =
+            |_: &str, _: &[&str], _: &[u8]| -> CopyOut { panic!("no tool for a bad image") };
+        assert_eq!(
+            copy_with(true, b"GIF89a", never).unwrap_err(),
+            "not a PNG image"
+        );
+        let png = PNG_SIGNATURE.to_vec();
+        assert_eq!(
+            copy_with(true, &png, |_, _, _| CopyOut::Missing).unwrap_err(),
+            "install wl-clipboard to copy images"
+        );
+        assert_eq!(
+            copy_with(false, &png, |_, _, _| CopyOut::Missing).unwrap_err(),
+            "install xclip to copy images"
+        );
+        assert_eq!(
+            copy_with(false, &png, |_, _, _| CopyOut::Failed(
+                "exit status: 1".into()
+            ))
+            .unwrap_err(),
+            "xclip: exit status: 1"
+        );
     }
 
     #[test]

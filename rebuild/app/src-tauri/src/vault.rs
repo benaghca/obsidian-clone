@@ -109,12 +109,36 @@ impl Vault {
     /// bytes are over [`IMAGE_MAX_BYTES`]. Any extension is allowed, including none; empty is fine.
     /// Parents are created. The watcher echo is suppressed, as for `write_note`.
     pub fn write_file_bytes(&mut self, path: &str, bytes: &[u8]) -> Result<FileEntry, String> {
+        self.put_file_bytes(path, bytes, false).map(|(entry, _)| entry)
+    }
+
+    /// `write_file_bytes` that may also replace a file already at `path` (a drawing exported
+    /// again, after the page asked). A folder there is still refused. Also says whether a
+    /// file was replaced.
+    pub fn replace_file_bytes(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+    ) -> Result<(FileEntry, bool), String> {
+        self.put_file_bytes(path, bytes, true)
+    }
+
+    fn put_file_bytes(
+        &mut self,
+        path: &str,
+        bytes: &[u8],
+        replace: bool,
+    ) -> Result<(FileEntry, bool), String> {
         if bytes.len() as u64 > IMAGE_MAX_BYTES {
             return Err(format!("too large to save: {path}"));
         }
         let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
-        if full.exists() {
+        let existed = full.exists();
+        if existed && !replace {
             return Err(format!("already exists: {rel}"));
+        }
+        if full.is_dir() {
+            return Err(format!("not a file: {rel}"));
         }
         self.mark_own(&rel);
         if let Err(e) = atomic_write(&full, bytes) {
@@ -122,7 +146,7 @@ impl Vault {
             return Err(e.to_string());
         }
         self.index.refresh_path(&self.root, &rel);
-        Ok(self.entry_for(&rel))
+        Ok((self.entry_for(&rel), existed))
     }
 
     pub fn create_note(&mut self, path: &str, content: &str) -> Result<FileEntry, String> {
@@ -764,6 +788,31 @@ mod tests {
         );
         #[cfg(unix)]
         assert!(!outside.path.join("secret.png").exists());
+    }
+
+    #[test]
+    fn replace_file_bytes_overwrites_a_file_but_not_a_folder() {
+        let dir = tmp_dir("replace");
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_file_bytes("Sketch.png", &[1, 2]).unwrap();
+        let (again, replaced) = vault
+            .replace_file_bytes("Sketch.png", &[137, 80, 78, 71])
+            .unwrap();
+        assert_eq!(again.path, "Sketch.png");
+        assert!(replaced);
+        assert_eq!(fs::read(dir.path.join("Sketch.png")).unwrap(), [137, 80, 78, 71]);
+        assert!(listed(&vault, "Sketch.png").size >= 4);
+        // A new path works as well, and the same checks as write_file_bytes apply.
+        assert!(!vault.replace_file_bytes("out/New.png", &[1]).unwrap().1);
+        assert!(dir.path.join("out").join("New.png").is_file());
+        fs::create_dir(dir.path.join("Folder.png")).unwrap();
+        assert!(vault.replace_file_bytes("Folder.png", &[1]).is_err());
+        assert!(vault.replace_file_bytes("../x.png", &[1]).is_err());
+        assert!(vault.replace_file_bytes(".grove/x.png", &[1]).is_err());
+        assert!(vault
+            .replace_file_bytes("Sketch.png", &vec![0; IMAGE_MAX_BYTES as usize + 1])
+            .is_err());
+        assert_eq!(fs::read(dir.path.join("Sketch.png")).unwrap(), [137, 80, 78, 71]);
     }
 
     #[test]

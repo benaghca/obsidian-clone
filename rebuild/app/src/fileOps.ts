@@ -4,9 +4,11 @@
 // (Workspace.followMove, Workspace.forget).
 
 import { api, type FileEntry } from "./api";
+import { saveDrawings } from "./drawing/pending";
+import { emptyDrawing } from "./drawing/scene";
 import type { ViewMode } from "./editor/editor";
 import type { NoteRef } from "./editor/host";
-import { fileName, isUnder, movedPath, parentDir } from "./paths";
+import { fileName, isUnder, movedPath, parentDir, viewFileExt } from "./paths";
 import type { OpenWhere } from "./tabs";
 import type { Workspace } from "./workspace";
 
@@ -22,7 +24,7 @@ export const fileSettings = {
   confirmDelete: (_path: string): Promise<boolean> => Promise.resolve(true),
   /** Asked before merging one note into another; false cancels. */
   confirmMerge: (_from: string, _into: string): Promise<boolean> => Promise.resolve(true),
-  /** Told after a move, with the notes and link-source paths from before it (to update links). */
+  /** Told after a move, with the files (`Vault.fileRefs`) and link-source paths from before it (to update links). */
   renamed: (_from: string, _to: string, _before: NoteRef[], _sources: readonly string[]) => {},
 };
 
@@ -61,6 +63,34 @@ export function newCanvas(ws: Workspace, folder = fileSettings.newNoteFolder(), 
   return next;
 }
 
+/** "Drawing 2026-11-05 14.30.05": a new drawing's name, from when it is made. */
+export function drawingStem(now = new Date()): string {
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `Drawing ${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())} ${two(now.getHours())}.${two(now.getMinutes())}.${two(now.getSeconds())}`;
+}
+
+let creatingDrawing = Promise.resolve();
+/** Create an empty drawing in a folder; returns its path. Two at once get different names. */
+export function createDrawing(ws: Workspace, folder: string): Promise<string> {
+  const next = creatingDrawing.then(async () => {
+    if (folder && !ws.vault.isFolder(folder)) await api.createFolder(folder).catch(() => {});
+    const entry = await createNote(ws, freeName(ws, `${folder ? `${folder}/` : ""}${drawingStem()}`, ".excalidraw"), emptyDrawing());
+    return entry.path;
+  });
+  creatingDrawing = next.then(() => {}, () => {});
+  return next;
+}
+
+/**
+ * Create an empty drawing in a folder (by default where new notes go) and
+ * open it in a new tab when this one shows something. Returns its path.
+ */
+export async function newDrawing(ws: Workspace, folder = fileSettings.newNoteFolder()): Promise<string> {
+  const path = await createDrawing(ws, folder);
+  await ws.open(path, { where: ws.active.path !== null || ws.active.type ? "tab" : false });
+  return path;
+}
+
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
   const entry = await api.createFolder(freeName(ws, `${parent ? `${parent}/` : ""}Untitled`, ""));
@@ -83,7 +113,7 @@ export function renameError(ws: Workspace, path: string, newName: string, commit
   if (!name || name === "." || name === "..") return commit ? "Enter a file or folder name." : "";
   if (/[\\/:\x00-\x1f]/.test(name)) return "File name cannot contain any of these characters: \\ / :";
   const isDir = ws.vault.isFolder(path);
-  const ext = isDir ? "" : /\.(canvas|base)$/i.test(path) ? path.slice(path.lastIndexOf(".")) : ".md";
+  const ext = isDir ? "" : viewFileExt(path) || ".md";
   if (name === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return "";
   const dir = parentDir(path);
   const to = `${dir ? dir + "/" : ""}${name}${ext}`;
@@ -98,7 +128,7 @@ export async function renameFile(ws: Workspace, path: string, newName: string) {
   if (problem) throw new Error(problem);
   const name = newName.trim();
   const isDir = ws.vault.isFolder(path);
-  const ext = isDir ? "" : /\.(canvas|base)$/i.test(path) ? path.slice(path.lastIndexOf(".")) : ".md";
+  const ext = isDir ? "" : viewFileExt(path) || ".md";
   if (name === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return;
   const dir = parentDir(path);
   await relocate(ws, path, `${dir ? dir + "/" : ""}${name}${ext}`);
@@ -122,8 +152,9 @@ async function relocate(ws: Workspace, from: string, to: string) {
   const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
   const under = (p: string) => isUnder(p, from);
-  await ws.editors.flush(under);
-  const before = ws.vault.notes;
+  await Promise.all([ws.editors.flush(under), saveDrawings(under)]);
+  // Every file, not only notes: an embed of a drawing or an image follows it too.
+  const before = ws.vault.fileRefs();
   // Old-name links can stop resolving as soon as renamePath returns.
   const targets = before.filter((n) => under(n.path)).map((n) => n.path);
   const sources = targets.length ? await api.linkSources(targets) : [];
@@ -136,9 +167,9 @@ async function relocate(ws: Workspace, from: string, to: string) {
 
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
-  await ws.saveNow(path);
-  const ext = /\.canvas$/i.test(path) ? path.slice(-7) : ".md";
-  const content = await (ext.toLowerCase() === ".canvas" ? api.readNote(path) : ws.editors.text(path));
+  await Promise.all([ws.saveNow(path), saveDrawings((p) => p === path)]);
+  const ext = viewFileExt(path) || ".md";
+  const content = await (ext !== ".md" ? api.readNote(path) : ws.editors.text(path));
   const entry = await createNote(ws, freeName(ws, path.slice(0, -ext.length), ext, true), content);
   await ws.open(entry.path);
   return entry.path;
@@ -171,7 +202,8 @@ export async function mergeNote(ws: Workspace, path: string, into: string) {
 export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
   if (!opts.confirmed && !(await fileSettings.confirmDelete(path))) return false;
   const under = (p: string) => isUnder(p, path);
-  await ws.editors.flush(under);
+  // A drawing's waiting save is written first, so closing its tab can't write the file back.
+  await Promise.all([ws.editors.flush(under), saveDrawings(under)]);
   await api.deletePath(path, fileSettings.permanentDelete());
   ws.editors.forget(under);
   await ws.forget(under);

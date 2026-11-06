@@ -7,7 +7,11 @@ vi.mock("./api", () => ({ api: { renamePath: vi.fn().mockResolvedValue(undefined
 const flush = vi.fn().mockResolvedValue(undefined);
 const moved = vi.fn();
 const ws = {
-  vault: { isFolder: (path: string) => path === "Folder", files: [{ path: "Note.md" }, { path: "Taken.md" }], notes: [] },
+  vault: {
+    isFolder: (path: string) => path === "Folder", files: [{ path: "Note.md" }, { path: "Taken.md" }], notes: [],
+    // The real one lists every file; these tests set the notes and read them back.
+    fileRefs(this: { notes: unknown[] }) { return this.notes; },
+  },
   editors: { flush, move: moved }, followMove: vi.fn().mockResolvedValue(undefined),
 } as unknown as Workspace;
 beforeEach(() => vi.clearAllMocks());
@@ -93,7 +97,7 @@ test("asks for every moved note's link sources before rename and passes that lis
   vi.mocked(api.linkSources).mockReturnValueOnce(new Promise(resolve => { release = resolve; }));
   const renamed = vi.spyOn(fileSettings, "renamed");
   const movingNote = moveFile(moving, "A", "B");
-  await Promise.resolve();
+  await vi.waitFor(() => expect(api.linkSources).toHaveBeenCalled());
   expect(api.linkSources).toHaveBeenCalledWith(before.slice(0, 25).map(n => n.path));
   expect(api.renamePath).not.toHaveBeenCalled();
   release(sources);
@@ -111,4 +115,17 @@ test("a failed link-source read aborts before any path is renamed", async () => 
   await expect(moveFile(moving, "A/Note.md", "B")).rejects.toThrow("snapshot unavailable");
   expect(api.renamePath).not.toHaveBeenCalled();
   expect(moved).not.toHaveBeenCalled();
+});
+
+test("a drawing keeps its extension on rename, and its embeds are looked up before the rename", async () => {
+  const drawing = movingWorkspace();
+  const refs = [{ path: "B/Sketch.excalidraw", name: "Sketch.excalidraw" }, { path: "B/Note.md", name: "Note" }];
+  drawing.vault.fileRefs = () => refs;
+  vi.mocked(api.linkSources).mockResolvedValueOnce(["B/Note.md"]);
+  const renamed = vi.spyOn(fileSettings, "renamed");
+  await renameFile(drawing, "B/Sketch.excalidraw", "Plan");
+  expect(api.linkSources).toHaveBeenCalledWith(["B/Sketch.excalidraw"]);
+  expect(api.renamePath).toHaveBeenCalledWith("B/Sketch.excalidraw", "B/Plan.excalidraw");
+  expect(renamed).toHaveBeenCalledWith("B/Sketch.excalidraw", "B/Plan.excalidraw", refs, ["B/Note.md"]);
+  renamed.mockRestore();
 });

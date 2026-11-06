@@ -25,6 +25,14 @@ const BYTE_MAX = 20 * 1024 * 1024;
 let mockClipboardPacked: Uint8Array | null = null;
 let mockClipboardReads = 0;
 
+/** The last image `write_clipboard_image` put on the mock clipboard. */
+let mockCopiedImage: Uint8Array | null = null;
+
+/** What the last `write_clipboard_image` copied, or null; browser tests read it. */
+export function mockCopiedClipboardImage(): Uint8Array | null {
+  return mockCopiedImage;
+}
+
 /** Arm the body `read_clipboard_image` returns, or null. Resets the read count. */
 export function setMockClipboardImage(packed: Uint8Array | null): void {
   mockClipboardPacked = packed ? new Uint8Array(packed) : null;
@@ -360,6 +368,11 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     last_vault: () => ({ path: vault.path, name: vault.name }),
     list_files: () => listFiles(),
     read_note: ({ path }) => need(path).content,
+    write_clipboard_image: ({ bytes }) => {
+      const raw = Uint8Array.from(bytes as number[]);
+      if (![137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => raw[i] === b)) throw new Error("not a PNG image");
+      mockCopiedImage = raw;
+    },
     read_clipboard_image: () => {
       mockClipboardReads += 1;
       if (!mockClipboardPacked) return null;
@@ -371,10 +384,11 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       const binary = isBinary(content) ? base64ToBytes(content.slice(BYTE_MARK.length)) : null;
       return binary ?? imageBytes(content);
     },
-    write_file_bytes: ({ path, bytes }) => {
+    write_file_bytes: ({ path, bytes, replace }) => {
       const why = badPath(String(path ?? ""));
       if (why) throw new Error(`${why}: ${path}`);
-      if (files.has(path) || listFiles().some((e) => e.path === path)) throw new Error(`already exists: ${path}`);
+      const dir = !files.has(path) && listFiles().some((e) => e.path === path);
+      if (dir || (files.has(path) && !replace)) throw new Error(`already exists: ${path}`);
       const raw = bytes instanceof Uint8Array ? bytes : Uint8Array.from(bytes as number[]);
       if (raw.length > BYTE_MAX) throw new Error(`too large to save: ${path}`);
       put(path, BYTE_MARK + bytesToBase64(raw));
