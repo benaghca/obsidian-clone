@@ -11,6 +11,7 @@ import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
 import type { Workspace } from "../workspace";
 import { drawingEditor } from "./editor";
+import { trackDrawing } from "./pending";
 import { openDrawingImages, renderDrawing, type DrawingPicture } from "./render";
 import { findElement, parseScene, serializeScene, type Point, type Scene } from "./scene";
 
@@ -369,6 +370,18 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     if (saveTimer) save();
   };
   window.addEventListener("beforeunload", flush);
+  // Finish text that is still being typed before writing. A rename flushes,
+  // then moves the file, then closes this tab: text finished only on close
+  // would be written at the old path and bring that file back. A drag in
+  // progress is dropped, the same as closing the tab.
+  const untrack = trackDrawing({
+    path,
+    save: () => {
+      editor.endLive();
+      if (saveTimer) save();
+      return writing;
+    },
+  });
 
   load();
   return {
@@ -381,6 +394,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       clearTimeout(saveTimer);
       saveTimer = 0;
       window.removeEventListener("beforeunload", flush);
+      untrack();
       loadGen++;
       chunkGen++;
       clearTimeout(parseTimer);

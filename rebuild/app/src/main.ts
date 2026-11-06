@@ -146,6 +146,8 @@ const RIBBON: { id: string; label: string; icon: IconName; plugin?: PluginId }[]
   { id: "daily-notes", label: "Open today's daily note", icon: "calendar", plugin: "daily-notes" },
   { id: "templates:insert-template", label: "Insert template", icon: "files", plugin: "templates" },
   { id: "command-palette:open", label: "Open command palette", icon: "terminal", plugin: "command-palette" },
+  // Not Obsidian's own: a plugin's button (the Excalidraw plugin's here) comes after the core ones.
+  { id: "drawing:new-file", label: "Create new drawing", icon: "pencil" },
 ];
 const RIBBON_HIDDEN = "grove.ribbon.hidden";
 const savedHidden = readStored(RIBBON_HIDDEN, []);

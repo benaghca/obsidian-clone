@@ -217,6 +217,37 @@ mod tests {
     }
 
     #[test]
+    fn every_embed_of_a_drawing_is_a_source() {
+        let idx = notes(&[
+            ("Plans/Floor plan.excalidraw", "{\"type\":\"excalidraw\"}"),
+            ("Floor plan.md", "the note"),
+            ("Sized.md", "![[Floor plan.excalidraw|400]]"),
+            ("Markdown.md", "![sketch](Plans/Floor%20plan.excalidraw)"),
+            ("Path.md", "![[Plans/Floor plan.excalidraw]]"),
+            ("Note link.md", "[[Floor plan]]"),
+        ]);
+        assert_eq!(
+            idx.link_sources(&["Plans/Floor plan.excalidraw".into()]),
+            vec![
+                "Markdown.md".to_string(),
+                "Path.md".to_string(),
+                "Sized.md".to_string(),
+            ]
+        );
+        // The note's name is in the drawing's, so those notes are mentions of it too. The
+        // page's rewrite resolves each link and leaves the drawing's embeds alone.
+        assert_eq!(
+            idx.link_sources(&["Floor plan.md".into()]),
+            vec![
+                "Markdown.md".to_string(),
+                "Note link.md".to_string(),
+                "Path.md".to_string(),
+                "Sized.md".to_string(),
+            ]
+        );
+    }
+
+    #[test]
     fn a_folder_of_fifty_notes_is_not_capped() {
         let mut owned = Vec::new();
         for i in 0..50 {

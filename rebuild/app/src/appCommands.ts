@@ -17,7 +17,8 @@ import { foldAllAllowed, toggleFoldAt, unfoldEverything } from "./editor/fold";
 import { openDailyNote } from "./editorHost";
 import { newBase } from "./bases/new";
 import { baseNotice } from "./bases/notice";
-import { copyNote, deleteFile, newCanvas, newNote } from "./fileOps";
+import { copyNote, createDrawing, deleteFile, newCanvas, newDrawing, newNote } from "./fileOps";
+import { copyDrawingPng, exportDrawing } from "./drawing/export";
 import { linkAt } from "./editor/linkAt";
 import { addLines, aliasEdit, frontmatterField } from "./editor/frontmatter";
 import { mergeTemplate, newNoteTemplate } from "./editor/templateMerge";
@@ -57,7 +58,7 @@ import { openTemplatePrompt } from "./shell/templatePrompt";
 import type { RightSidebar, RightView } from "./shell/rightSidebar";
 import type { LeftSidebar, LeftView } from "./shell/sidebar";
 import type { Sidedocks } from "./shell/sidedock";
-import { noteName, systemPath, trimSlashes } from "./paths";
+import { noteName, parentDir, systemPath, trimSlashes } from "./paths";
 import type { OpenWhere } from "./tabs";
 import type { Workspace } from "./workspace";
 
@@ -90,7 +91,8 @@ const nowTime = () => formatDate(new Date(), templates().timeFormat || "HH:mm");
 export function registerAppCommands(parts: AppParts) {
   const { ws, bookmarks } = parts;
   const hasNote = () => !!ws.active.path;
-  const file = () => ws.active.path ?? (ws.active.type === "canvas" ? ws.active.viewFile : null);
+  const file = () => ws.active.path ?? (ws.active.type === "canvas" || ws.active.type === "drawing" ? ws.active.viewFile : null);
+  const drawing = () => (ws.active.type === "drawing" ? ws.active.viewFile ?? null : null);
   const hasFile = () => !!file();
   const note = () => ws.active.path!;
 
@@ -116,6 +118,35 @@ export function registerAppCommands(parts: AppParts) {
     parts.right.select(view);
     parts.docks.setCollapsed("right", false);
   };
+
+  /**
+   * "Create new drawing and embed it here": a drawing in the note's folder,
+   * its embed at the caret on a line of its own, then the drawing opens to
+   * the right, so the note stays in view.
+   */
+  async function newDrawingHere() {
+    const view = ws.view, from = note();
+    const path = await createDrawing(ws, parentDir(from));
+    const embed = `!${ws.linkTo(path, from)}`;
+    // The note went out of view while the file was made: the embed goes at its end instead.
+    if (ws.active.path !== from || ws.view !== view) {
+      const doc = ws.editors.doc(from);
+      if (doc) ws.editors.change(from, { changes: { from: doc.length, insert: `${doc.length && doc.sliceString(doc.length - 1) !== "\n" ? "\n" : ""}${embed}\n` } });
+      await ws.open(path, { where: "right" });
+      return;
+    }
+    const { state } = view;
+    const range = state.selection.main;
+    const line = state.doc.lineAt(range.from), end = state.doc.lineAt(range.to);
+    const before = range.from > line.from ? "\n" : "", after = range.to < end.to ? "\n" : "";
+    view.dispatch({
+      changes: { from: range.from, to: range.to, insert: before + embed + after },
+      selection: { anchor: range.from + before.length + embed.length },
+      scrollIntoView: true,
+      userEvent: "input",
+    });
+    await ws.open(path, { where: "right" });
+  }
 
   async function createNewNote(where?: OpenWhere) {
     await newNote(ws, "", where);
@@ -323,6 +354,11 @@ export function registerAppCommands(parts: AppParts) {
       const view = parts.panes.el.querySelector<HTMLElement>(".workspace-tabs.mod-active .canvas-view");
       if (view) startCanvasPresentation(view);
     }, () => ws.active.type === "canvas", [{ key: "f5" }]),
+    action("drawing:new-file", "Create new drawing", "pencil", () => newDrawing(ws)),
+    conditionalAction("drawing:new-file-embed", "Create new drawing and embed it here", "pencil", () => newDrawingHere(), (focus) => canEdit(focus)),
+    conditionalAction("drawing:export-svg", "Drawing: Export as SVG", "image-down", () => exportDrawing(ws, drawing()!, "svg"), () => !!drawing()),
+    conditionalAction("drawing:export-png", "Drawing: Export as PNG", "image-down", () => exportDrawing(ws, drawing()!, "png"), () => !!drawing()),
+    conditionalAction("drawing:copy-png", "Drawing: Copy as PNG", "clipboard-copy", () => copyDrawingPng(drawing()!), () => !!drawing()),
     { id: "file-explorer:new-file", name: "Create new note", icon: "file-plus", hotkeys: mod("n"), run: () => createNewNote() },
     { id: "file-explorer:new-file-in-current-tab", name: "Create new note in current tab", icon: "file-plus", run: () => createNewNote(false) },
     action(
@@ -419,7 +455,7 @@ export function registerAppCommands(parts: AppParts) {
     // ----- the open file -----
     conditionalAction("workspace:edit-file-title", "Rename file", "pen-line",
       () => {
-        if (ws.active.type !== "canvas") return parts.panes.focusTitle(true);
+        if (ws.active.type !== "canvas" && ws.active.type !== "drawing") return parts.panes.focusTitle(true);
         showLeft("files");
         parts.left.renameInTree(file()!);
       }, hasFile, [{ key: "f2" }]),

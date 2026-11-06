@@ -15,7 +15,9 @@ import type { ImageRef } from "../editor/host";
 import { linkAt } from "../editor/linkAt";
 import { editTable, type TableOp, tableModel, tableOps } from "../editor/tables";
 import { newBase } from "../bases/new";
-import { copyNote, deleteFile, fileSettings, moveFile, newCanvas, newFolder } from "../fileOps";
+import { copyNote, deleteFile, fileSettings, moveFile, newCanvas, newDrawing, newFolder } from "../fileOps";
+import { copyDrawingPng, exportDrawing } from "../drawing/export";
+import { isDrawingPath } from "../drawing/render";
 import { isNoteFile, noteName, systemPath } from "../paths";
 import { type Group, linkedWith, type Tab, tabTitle, viewIcon } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -112,6 +114,7 @@ export function createMenus(host: MenuHost) {
         { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn(path) },
         { title: "New canvas", icon: "layout-dashboard", action: () => newCanvas(ws, path) },
         { title: "New base", icon: "table", action: () => newBase(ws, path) },
+        { title: "New drawing", icon: "pencil", action: () => newDrawing(ws, path).catch(warn("create a drawing")) },
         SEPARATOR,
         moveItem(path, true),
         { title: "Search in folder", icon: "folder-search", action: () => host.searchInFolder(path) },
@@ -125,20 +128,30 @@ export function createMenus(host: MenuHost) {
     }
     const isNote = isNoteFile(path);
     const isCanvas = /\.canvas$/i.test(path);
+    const isDrawing = isDrawingPath(path);
+    const opens = isNote || isCanvas || isDrawing;
     return [
-      ...(isNote || isCanvas ? [...openFile(path), openInNewWindow(path)] : []),
+      ...(isNote || isCanvas ? [...openFile(path), openInNewWindow(path)] : isDrawing ? openFile(path) : []),
       SEPARATOR,
-      (isNote || isCanvas) && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
+      opens && { title: "Make a copy", icon: "files", action: () => copyNote(ws, path).catch(warn(`copy ${path}`)) },
       moveItem(path),
       bookmarkItem(path),
       isNote && mergeItem(path),
+      ...(isDrawing ? [SEPARATOR, ...drawingItems(path)] : []),
       SEPARATOR,
       copyPath(path),
       SEPARATOR,
-      (isNote || isCanvas) && renameItem(() => host.renameInTree(path)),
+      opens && renameItem(() => host.renameInTree(path)),
       deleteItem(path),
     ];
   }
+
+  /** A drawing's picture items: export beside it, or copy. */
+  const drawingItems = (path: string): MenuEntry[] => [
+    { title: "Export as SVG", icon: "image-down", action: () => void exportDrawing(ws, path, "svg") },
+    { title: "Export as PNG", icon: "image-down", action: () => void exportDrawing(ws, path, "png") },
+    { title: "Copy as PNG", icon: "clipboard-copy", action: () => void copyDrawingPng(path) },
+  ];
 
   /** Right-click on a row that is part of a multi-selection. */
   function selection(paths: string[]): MenuItems {
@@ -199,6 +212,7 @@ export function createMenus(host: MenuHost) {
       { title: "New folder", icon: "folder-plus", action: () => host.newFolderIn("") },
       { title: "New canvas", icon: "layout-dashboard", action: () => newCanvas(ws, "") },
       { title: "New base", icon: "table", action: () => newBase(ws, "") },
+      { title: "New drawing", icon: "pencil", action: () => newDrawing(ws, "").catch(warn("create a drawing")) },
     ];
   }
 
@@ -491,7 +505,7 @@ export function createMenus(host: MenuHost) {
             action: () => void ws.moveToWindow(t).catch(warn(`move ${t.path} to a new window`)),
           })]
         : []),
-      ...(isActive && !t.path ? [SEPARATOR, ...(t.type ? graphViewItems(t) : splitItems(t))] : []),
+      ...(isActive && !t.path ? [SEPARATOR, ...(t.type === "drawing" && t.viewFile ? drawingViewItems(t, t.viewFile) : t.type ? graphViewItems(t) : splitItems(t))] : []),
     ];
   }
 
@@ -520,6 +534,28 @@ export function createMenus(host: MenuHost) {
     ];
   }
 
+  /** A drawing tab's view items: splits, the picture items, then its file items. */
+  function drawingViewItems(t: Tab, path: string): MenuItems {
+    const onTab = (fn: () => void) => () => {
+      ws.activate(t);
+      fn();
+    };
+    return [
+      ...splitItems(t),
+      SEPARATOR,
+      ...drawingItems(path),
+      SEPARATOR,
+      renameItem(onTab(() => commands.run("workspace:edit-file-title"))),
+      moveItem(path),
+      bookmarkItem(path),
+      SEPARATOR,
+      copyPath(path),
+      revealItem(path),
+      SEPARATOR,
+      deleteItem(path, "Delete file"),
+    ];
+  }
+
   /** A graph tab's view items: splits, and the local graph's note. */
   function graphViewItems(t: Tab): MenuItems {
     const file = t.type === "localgraph" ? t.viewFile : null;
@@ -534,6 +570,7 @@ export function createMenus(host: MenuHost) {
   /** The view header's "More options" (three dots), for the active pane. */
   function moreOptions(): MenuItems {
     const t = ws.active;
+    if (t.type === "drawing" && t.viewFile) return drawingViewItems(t, t.viewFile);
     if (t.type) return graphViewItems(t);
     return t.path ? viewItems(t, t.path) : [];
   }

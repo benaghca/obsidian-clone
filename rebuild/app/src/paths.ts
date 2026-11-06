@@ -19,6 +19,26 @@ export const noteName = (path: string) => {
   const base = fileName(path);
   return isNoteFile(base) ? base.slice(0, -3) : base;
 };
+/**
+ * The extension of a file Grove opens in a view of its own (a canvas, a base,
+ * a drawing), as written in the path; "" for anything else. A rename keeps
+ * it, and the file explorer shows the name without it.
+ */
+export const viewFileExt = (path: string) => /\.(canvas|base|excalidraw)$/i.exec(path)?.[0] ?? "";
+
+/**
+ * The name the file explorer shows, which is also the name a rename edits.
+ * A note drops ".md". A canvas, base or drawing drops that extension only
+ * when the file itself ends with it, so "Plan.excalidraw.md" stays
+ * "Plan.excalidraw" and confirming the name does not rename it.
+ */
+export function explorerName(path: string, isDir = false): string {
+  if (isDir) return fileName(path);
+  const base = noteName(path);
+  const ext = viewFileExt(path);
+  return ext ? base.slice(0, base.length - ext.length) : base;
+}
+
 /** The folder a path is in ("" at the vault root). */
 export const parentDir = (path: string) => (path.includes("/") ? path.slice(0, path.lastIndexOf("/")) : "");
 /** A folder as typed in a setting ("/Daily/ ") as a vault path ("Daily"). */

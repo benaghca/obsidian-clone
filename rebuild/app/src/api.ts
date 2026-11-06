@@ -155,6 +155,24 @@ export const api = {
         )
       : call<FileEntry>("write_file_bytes", { path, bytes: Array.from(bytes) }),
   /**
+   * Like `writeFileBytes`, but a file already at `path` is replaced (a drawing
+   * exported again, once the user said so). A folder there is still refused.
+   */
+  replaceFileBytes: (path: string, bytes: Uint8Array) =>
+    isTauri
+      ? import("@tauri-apps/api/core").then(({ invoke }) =>
+          invoke<FileEntry>("write_file_bytes", bytes, { headers: { "x-grove-path": encodeGrovePath(path), "x-grove-replace": "1" } }),
+        )
+      : call<FileEntry>("write_file_bytes", { path, bytes: Array.from(bytes), replace: true }),
+  /**
+   * Put a PNG on the system clipboard (a drawing's "Copy as PNG"). The desktop
+   * app sends the raw bytes. A missing clipboard tool rejects with its install message.
+   */
+  writeClipboardImage: (png: Uint8Array) =>
+    isTauri
+      ? import("@tauri-apps/api/core").then(({ invoke }) => invoke<void>("write_clipboard_image", png))
+      : call<void>("write_clipboard_image", { bytes: Array.from(png) }),
+  /**
    * The system clipboard's image, or null when it has none.
    * The body is the mime, one LF, then the bytes (`splitClipboardImage`).
    * A missing clipboard tool rejects with its install message.

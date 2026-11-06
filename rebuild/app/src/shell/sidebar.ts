@@ -8,7 +8,7 @@ import { commands } from "../commands";
 import { slideHeight } from "../motion";
 import { deleteFile, fileSettings, newFolder, renameError, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
-import { compareFiles, compareNames, isNoteFile, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
+import { compareFiles, compareNames, explorerName, isNoteFile, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -273,7 +273,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
   function renderNodes(nodes: TreeNode[], depth: number, into: HTMLElement) {
     for (const node of nodes) {
       const { entry } = node;
-      const label = entry.is_dir ? entry.name : noteName(entry.path).replace(/\.(canvas|base)$/i, "");
+      const label = explorerName(entry.path, entry.is_dir);
       const chevron = entry.is_dir
         ? h(
             "div",
@@ -323,7 +323,7 @@ function createFileExplorer(ws: Workspace, menus: () => Menus) {
             contextMenu(e, paths && paths.length > 1 ? menus().selection(paths) : menus().file(entry), self);
           },
         },
-        chevron ?? (/\.base$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("table", 14)) : /\.canvas$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("layout-dashboard", 14)) : null),
+        chevron ?? (/\.base$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("table", 14)) : /\.canvas$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("layout-dashboard", 14)) : /\.excalidraw$/i.test(entry.path) ? h("div", { class: "tree-item-icon" }, icon("pencil", 14)) : null),
         h("div", { class: "tree-item-inner" }, label),
         !entry.is_dir && !isNoteFile(entry.path)
           ? h("div", { class: "nav-file-tag" }, entry.path.split(".").pop()!)

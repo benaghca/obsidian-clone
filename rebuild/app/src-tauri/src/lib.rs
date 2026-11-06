@@ -93,6 +93,7 @@ pub fn run() {
             read_note,
             read_file_bytes,
             read_clipboard_image,
+            write_clipboard_image,
             set_property,
             write_note,
             write_file_bytes,
@@ -237,6 +238,18 @@ fn read_file_bytes(
     with_vault(&state, |v| v.read_file_bytes(&path)).map(tauri::ipc::Response::new)
 }
 
+/// Put a PNG (the raw body) on the system clipboard, off the GTK thread: a drawing's
+/// "Copy as PNG". A missing `wl-copy` or `xclip` is an error. See `clipboard`.
+#[tauri::command(async)]
+fn write_clipboard_image(request: tauri::ipc::Request<'_>) -> Result<(), String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => clipboard::write_clipboard_png(bytes),
+        tauri::ipc::InvokeBody::Json(_) => {
+            Err("write_clipboard_image expects a raw body, not JSON".into())
+        }
+    }
+}
+
 /// The clipboard's image, off the GTK thread. `null` when there is no image.
 /// A missing `wl-paste` or `xclip` is an error. See `clipboard`.
 #[tauri::command(async)]
@@ -246,6 +259,8 @@ fn read_clipboard_image() -> Result<clipboard::ClipboardBody, String> {
 
 /// Header for the vault-relative path on a raw `write_file_bytes` body.
 const WRITE_PATH_HEADER: &str = "x-grove-path";
+/// `write_file_bytes` replaces a file already at the path only when this header is `1`.
+const REPLACE_HEADER: &str = "x-grove-replace";
 
 /// Percent-encode a vault path for [`WRITE_PATH_HEADER`].
 ///
@@ -313,6 +328,13 @@ fn path_from_headers(headers: &tauri::http::HeaderMap) -> Result<String, String>
     decode_grove_path(value)
 }
 
+/// Whether `x-grove-replace` is `1`. Anything else, or no header, keeps the file that is there.
+fn replace_from_headers(headers: &tauri::http::HeaderMap) -> bool {
+    headers
+        .get(REPLACE_HEADER)
+        .is_some_and(|value| value.as_bytes() == b"1")
+}
+
 fn bytes_from_body(body: &tauri::ipc::InvokeBody) -> Result<&[u8], String> {
     match body {
         tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes),
@@ -371,7 +393,10 @@ fn set_property(
 
 /// A new file's raw bytes (a pasted image or a dropped file), at most 20 MB.
 /// The path is the `x-grove-path` header, not a JSON field. Runs off the GTK thread.
-/// Other windows get a `vault-changed` `create`; the window that saved does not (it refreshes itself).
+/// With `x-grove-replace: 1` a file already at the path is replaced (a drawing's PNG
+/// export, after the page asked); without it that is an error.
+/// Other windows get a `vault-changed` `create` (`modify` for a replaced file); the window
+/// that saved does not (it refreshes itself).
 #[tauri::command(async)]
 fn write_file_bytes(
     window: tauri::Window,
@@ -380,9 +405,20 @@ fn write_file_bytes(
 ) -> Result<FileEntry, String> {
     let path = path_from_headers(request.headers())?;
     let bytes = bytes_from_body(request.body())?;
-    let entry = with_vault(&state, |v| v.write_file_bytes(&path, bytes))?;
+    let replace = replace_from_headers(request.headers());
+    let (entry, existed) = with_vault(&state, |v| {
+        if replace {
+            v.replace_file_bytes(&path, bytes)
+        } else {
+            v.write_file_bytes(&path, bytes).map(|entry| (entry, false))
+        }
+    })?;
     let change = model::VaultChanged {
-        kind: model::ChangeKind::Create,
+        kind: if existed {
+            model::ChangeKind::Modify
+        } else {
+            model::ChangeKind::Create
+        },
         paths: vec![entry.path.clone()],
     };
     let me = window.label().to_owned();
@@ -646,7 +682,7 @@ mod tests {
     #[test]
     fn write_10mb_stays_off_the_calling_thread() {
         let src = include_str!("lib.rs");
-        for name in ["write_file_bytes", "read_clipboard_image"] {
+        for name in ["write_file_bytes", "read_clipboard_image", "write_clipboard_image"] {
             let needle = format!("\nfn {name}(");
             let idx = src
                 .find(&needle)
