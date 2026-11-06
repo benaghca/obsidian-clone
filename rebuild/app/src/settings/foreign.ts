@@ -60,7 +60,11 @@ const CINDER_DEFAULTS = {
   dailyTemplate: "",
   templatesFolder: "Templates",
   attachFolder: "attachments",
+  webEmbeds: "auto",
 };
+
+/** Cinder's names for Embedded web pages: "auto" is the live page. */
+const CINDER_WEB_EMBEDS: Record<string, string> = { auto: "always", click: "click", off: "off" };
 
 /** Cinder settings Grove doesn't have yet, by what the notice calls them, with Cinder's defaults. */
 const CINDER_NOT_IMPORTED: [label: string, defaults: Record<string, unknown>][] = [
@@ -95,7 +99,7 @@ function shown(key: string, value: unknown): string {
     if (value === "./") return "the note's folder";
   }
   if (key === "newFileLocation") return value === "current" ? "the current note's folder" : value === "folder" ? "a set folder" : "the vault folder";
-  if (key === "webEmbeds") return value === "click" ? "Click to load" : value === "off" ? "Off" : "Always";
+  if (key === "webEmbeds") return value === "click" ? "click to load" : value === "off" ? "off (links only)" : "always load";
   if (value === "" && (key === "folder" || key === "newFileFolderPath")) return "the vault folder";
   return String(value);
 }
@@ -162,6 +166,8 @@ function fromCinder(o: Record<string, unknown>): Mapped {
   // Cinder fills {{date}} and {{time}} as YYYY-MM-DD and HH:mm, Grove's defaults, so the formats stay.
   const attach = folder(get("attachFolder"));
   values["app.json"].attachmentFolderPath = attach || "/";
+  // A value Cinder doesn't have is passed on as it is, so the notice names it.
+  values["app.json"].webEmbeds = CINDER_WEB_EMBEDS[get("webEmbeds")] ?? get("webEmbeds");
   const newNotes = folder(get("newNoteFolder"));
   if (newNotes) {
     values["app.json"].newFileLocation = "folder";
@@ -178,10 +184,12 @@ function fromCinder(o: Record<string, unknown>): Mapped {
     }
     if (used) notImported.push(label);
   }
-  known.add("webEmbeds");
-  const embed = o.webEmbeds;
-  if (embed === "off" || embed === "click" || embed === "always") values["app.json"].webEmbeds = embed;
-  else if (embed !== undefined && embed !== "auto") notImported.push(`Embedded web pages (${JSON.stringify(embed)} isn't a value Grove takes)`);
+  // A non-string is not a Cinder mode. The getter above would treat it as "auto"
+  // (then dropped, because that is Grove's default). Name it, as the canvas import did.
+  const rawEmbed = o.webEmbeds;
+  if (rawEmbed !== undefined && typeof rawEmbed !== "string") {
+    notImported.push(`Embedded web pages (${JSON.stringify(rawEmbed)} isn't a value Grove takes)`);
+  }
   const plugins = isObj(o.plugins) ? o.plugins : null;
   if (plugins?.templater === true) notImported.push(CINDER_PLUGINS_NOT_IMPORTED.templater);
   // The plugin turns both on. A weekly or monthly folder only covers that one; the other still needs naming.

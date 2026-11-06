@@ -10,15 +10,6 @@ import { fileName, isNoteFile, noteName } from "../paths";
 import { createSearchVault } from "../shell/searchVault";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
-/** Origin form only: scheme, host, and a non-default port. No user, path, query, or hash. */
-function frameOrigin(origin: string): boolean {
-  if (!origin || /\s/.test(origin)) return false;
-  let url: URL;
-  try { url = new URL(origin); } catch { return false; }
-  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return false;
-  return url.pathname === "/" && !url.search && !url.hash && !!url.hostname && url.origin === origin;
-}
-
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 /** [text](target) and ![alt](target); the target as written (without a title). */
 const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|((?:\\.|[^\\)\s])*))[^)\n]*\)/g;
@@ -43,6 +34,29 @@ export function setMockClipboardImage(packed: Uint8Array | null): void {
 /** How many times the open mock has answered `read_clipboard_image` since it was armed. */
 export function mockClipboardImageReads(): number {
   return mockClipboardReads;
+}
+
+/** Origins registered with `allow_frame_origin`, in the form the Rust command stores (lowercase host, default port dropped). */
+const mockFrameOrigins = new Set<string>();
+
+/** The origins web embeds registered so far, in order, for browser tests. */
+export function mockAllowedFrameOrigins(): string[] {
+  return [...mockFrameOrigins];
+}
+
+/** `allow_frame_origin`'s check (src-tauri/src/lockdown.rs `parse_frame_origin`): origin form only, http(s). */
+export function mockFrameOrigin(raw: string): string {
+  const bad = () => new Error("origin must be an http(s) origin: scheme, host and an optional port");
+  const m = /^(https?):\/\/([^/?#@\\\s]+)$/i.exec(raw);
+  if (!m) throw bad();
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw bad();
+  }
+  if (url.username || url.password || url.pathname !== "/" || url.search || url.hash || url.origin === "null") throw bad();
+  return url.origin;
 }
 
 function bytesToBase64(bytes: Uint8Array): string {
@@ -369,6 +383,10 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     last_vault: () => ({ path: vault.path, name: vault.name }),
     list_files: () => listFiles(),
     read_note: ({ path }) => need(path).content,
+    allow_frame_origin: ({ origin }) => {
+      mockFrameOrigins.add(mockFrameOrigin(String(origin ?? "")));
+      return null;
+    },
     read_clipboard_image: () => {
       mockClipboardReads += 1;
       if (!mockClipboardPacked) return null;
@@ -492,9 +510,6 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       const text = localStorage.getItem(FOREIGN_KEY + id);
       if (text !== null && new TextEncoder().encode(text).length > CONFIG_MAX) throw new Error(`not a settings file: ${id}`);
       return text;
-    },
-    allow_frame_origin: ({ origin }) => {
-      if (typeof origin !== "string" || !frameOrigin(origin)) throw new Error("origin must be an http(s) origin");
     },
     write_config: ({ name, content }) => {
       const key = configName(name);

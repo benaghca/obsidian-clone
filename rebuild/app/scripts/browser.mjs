@@ -10,6 +10,11 @@ import { createServer } from 'node:net';
 export const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Loopback pages the tests themselves serve. Anything else http(s) is refused.
 const fixtureOrigins = new Set();
+/** Let a test's own loopback server through the harness. Returns an unregister. */
+export function permitFrameOrigin(origin) {
+  fixtureOrigins.add(origin);
+  return () => fixtureOrigins.delete(origin);
+}
 export function frameFixture() {
   return new Promise((resolve, reject) => {
     const server = createHttpServer((_req, res) => {

@@ -126,7 +126,7 @@ export const embedStopped = (path: string, top: string | null, chain: readonly s
 
 
 /** "Edit this block" on an image: its source shows, path selected, until the selection moves. */
-const editEmbed = StateEffect.define<number>();
+export const editEmbed = StateEffect.define<number>();
 export const editingEmbed = StateField.define<number | null>({
   create: () => null,
   update(value, tr) {
