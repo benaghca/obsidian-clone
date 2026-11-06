@@ -327,6 +327,32 @@ if (tree) {
   }
 }
 
+// ----- 6. embedded web pages (W2 notes, W3 canvas cards): one place makes frames -----
+
+// A frame is the only way the app reaches the web. Note embeds and canvas
+// link cards both use webEmbed.ts, so an "iframe" element created anywhere
+// else in the source fails.
+// Its sandbox must stay scripts, same origin and forms: no top navigation
+// (Grove can't be moved away), no popups, and no allow= features.
+const FRAME_MAKER = "src/editor/webEmbed.ts";
+const FRAME_SANDBOX = "allow-scripts allow-same-origin allow-forms";
+for (const path of sources.filter((p) => /\.(?:ts|js|mjs|html)$/.test(p))) {
+  const file = rel(path);
+  if (file === FRAME_MAKER) continue;
+  const text = readFileSync(path, "utf8");
+  if (/createElement\(\s*["'`]iframe|<iframe\b|\bh\(\s*["'`]iframe/i.test(text)) fail(file, `makes an iframe; only ${FRAME_MAKER} may`);
+}
+{
+  // Code only: the file's comments name what the frame doesn't get.
+  const maker = readFileSync(join(root, FRAME_MAKER), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const sandbox = /export const FRAME_SANDBOX = "([^"]*)";/.exec(maker)?.[1];
+  if (sandbox !== FRAME_SANDBOX) fail(FRAME_MAKER, `FRAME_SANDBOX must be exactly "${FRAME_SANDBOX}" (found ${JSON.stringify(sandbox)})`);
+  if ((maker.match(/createElement\(\s*["'`]iframe/g) ?? []).length !== 1) fail(FRAME_MAKER, "must create its frame in exactly one place");
+  if (!/setAttribute\("sandbox", FRAME_SANDBOX\)/.test(maker)) fail(FRAME_MAKER, "the frame must get FRAME_SANDBOX");
+  if (!/referrerPolicy = "no-referrer"/.test(maker)) fail(FRAME_MAKER, 'the frame must send no referrer');
+  if (/\.allow\s*=|setAttribute\(\s*["'`]allow["'`]|allow-top-navigation|allow-popups/.test(maker)) fail(FRAME_MAKER, "the frame may not get allow= features, top navigation or popups");
+}
+
 for (const rule of CLOSED_RULES) {
   if (ALLOW.some((entry) => entry.rule === rule)) fail("allowlist", `rule ${rule} must stay closed`);
 }

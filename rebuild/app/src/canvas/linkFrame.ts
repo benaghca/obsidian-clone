@@ -1,9 +1,9 @@
 // The body of a canvas link card. The address stays text until this card has a
 // frame slot (on screen, above the title size, and inside the cap of six).
-// Note embeds can share webEmbed.ts; this file is the canvas DOM only.
+// The frame element itself is created in webEmbed.ts, with the note embeds.
 
 import { api } from "../api";
-import { armWebFrame, webEmbedMode, webFrameTarget } from "../editor/webEmbed";
+import { armWebFrame, createWebFrame, parseWebEmbedMode, webFrameTarget } from "../editor/webEmbed";
 import { isExternalUrl } from "../links/external";
 import { h } from "../shell/dom";
 import { settings } from "../settings/store";
@@ -22,7 +22,7 @@ export function linkFrameBody(node: CanvasNode, content: HTMLElement, host: Fram
   let token = 0;
   let showing: Showing = "none";
 
-  const mode = () => webEmbedMode(settings.get("app.json").webEmbeds);
+  const mode = () => parseWebEmbedMode(settings.get("app.json").webEmbeds);
   const target = () => webFrameTarget(node.url ?? "");
   const wantsFrame = () => {
     const embed = mode();
@@ -112,9 +112,8 @@ export function linkFrameBody(node: CanvasNode, content: HTMLElement, host: Fram
     const mine = ++token;
     const bar = h("div", { class: "canvas-web-bar" });
     bar.append(urlLink(), action("canvas-web-reload", "Reload", "Reload", reload), action("canvas-web-open", "Open", "Open in browser", openPage));
-    const frame = document.createElement("iframe");
+    const frame = createWebFrame("Embedded page");
     frame.className = "canvas-web-frame";
-    frame.title = "Embedded page";
     content.classList.remove("canvas-web-ask");
     content.classList.add("canvas-web");
     content.replaceChildren(bar, frame);

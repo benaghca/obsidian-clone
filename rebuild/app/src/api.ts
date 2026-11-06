@@ -213,7 +213,11 @@ export const api = {
    */
   readForeignConfig: (source: "cinder" | "obsidian", name: string) => call<string | null>("read_foreign_config", { source, name }),
   openExternal,
-  /** Register one http(s) origin just before an embedded frame navigates there. */
+  /**
+   * Let an embedded frame load `origin` (`http(s)://host[:port]`, W1's
+   * navigation guard). Called just before a note embed or a canvas link card
+   * points its frame there (editor/webEmbed.ts). The main window still can't go there.
+   */
   allowFrameOrigin: (origin: string) => call<void>("allow_frame_origin", { origin }),
   /** "Open in new window": the note in a window of its own (the browser preview only logs; `?note=` shows that window). */
   openNoteWindow: async (path: string) => {

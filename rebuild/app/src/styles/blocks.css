@@ -379,3 +379,130 @@
 .hover-popover .cm-blank {
   min-height: 16px;
 }
+
+/* a web page embedded alone on a line (editor/webEmbed.ts) */
+.web-embed {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-width: 100%;
+  margin: 4px 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  overflow: hidden;
+  background: var(--background-primary);
+}
+.web-embed-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 2px 4px 2px 8px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  color: var(--text-muted);
+  --icon-size: var(--icon-s);
+}
+.web-embed-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  color: var(--text-normal);
+}
+.web-embed-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+.web-embed-action {
+  flex: none;
+  --cursor: pointer;
+}
+.web-embed-load {
+  flex: none;
+  padding: 0 8px;
+  font-size: inherit;
+  line-height: 1.5;
+}
+.web-embed.is-asked .web-embed-load,
+.web-embed:not(.is-asked) .web-embed-reload,
+.is-reading-mode .web-embed-corner,
+:is(.cm-callout, .cm-table-widget, .markdown-embed) :is(.web-embed-corner, .web-embed-edit) {
+  display: none;
+}
+.web-embed-frame {
+  display: flex;
+  min-height: 0;
+}
+.web-embed-frame iframe {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #fff;
+}
+/* The page underneath must not swallow a resize drag. */
+.web-embed.is-resizing iframe {
+  pointer-events: none;
+}
+.web-embed-message {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 16px;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+  text-align: center;
+}
+button.web-embed-ask {
+  height: auto;
+  cursor: pointer;
+}
+.web-embed-ask > span {
+  font-size: var(--font-ui-medium);
+  color: var(--text-accent);
+}
+.web-embed-ask small {
+  color: var(--text-faint);
+}
+.web-embed-message.mod-error {
+  color: var(--text-error);
+}
+.web-embed-corner {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(135deg, transparent 50%, var(--background-modifier-border-hover) 50%);
+}
+.web-embed-corner[data-size]::after {
+  content: attr(data-size);
+  position: absolute;
+  right: 22px;
+  bottom: 4px;
+  padding: 1px 6px;
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  font-family: var(--font-interface);
+  font-size: var(--font-ui-smaller);
+  white-space: nowrap;
+  color: var(--text-muted);
+}
