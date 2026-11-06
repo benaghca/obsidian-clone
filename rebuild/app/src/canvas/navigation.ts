@@ -42,7 +42,7 @@ function installBands() {
 // How long the wheel must rest before zoom-dependent sizes follow.
 const SETTLE_MS = 120;
 
-export interface CanvasViewport { x: number; y: number; width: number; height: number; focusX: number; focusY: number; band: number; titles: boolean }
+export interface CanvasViewport { x: number; y: number; width: number; height: number; focusX: number; focusY: number; band: number; titles: boolean; scale: number }
 export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, path: string, history: (forward: boolean) => void, refresh: () => void) {
   let state = canvasViewports.get(tab);
   if (state?.path !== path) state = undefined;
@@ -53,7 +53,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   const events = new AbortController();
   let changed = () => {}, pause = () => {}, focusX = .5, focusY = .5;
   let notify = 0;
-  const snapshot = (): CanvasViewport | undefined => state && width && height ? { x: state.cx - width / state.scale / 2, y: state.cy - height / state.scale / 2, width: width / state.scale, height: height / state.scale, focusX: state.cx + (focusX - .5) * width / state.scale, focusY: state.cy + (focusY - .5) * height / state.scale, band: zoomBand(state.scale), titles } : undefined;
+  const snapshot = (): CanvasViewport | undefined => state && width && height ? { x: state.cx - width / state.scale / 2, y: state.cy - height / state.scale / 2, width: width / state.scale, height: height / state.scale, focusX: state.cx + (focusX - .5) * width / state.scale, focusY: state.cy + (focusY - .5) * height / state.scale, band: zoomBand(state.scale), titles, scale: state.scale } : undefined;
   const notifyLater = () => { clearTimeout(notify); notify = window.setTimeout(() => { notify = 0; if (!settle) changed(); }, SETTLE_MS); };
   installBands();
   // Title mode changes with the band, at settle: one class on the world.
@@ -178,8 +178,11 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   window.addEventListener("blur", releaseSpace, { signal: events.signal });
   el.addEventListener("pointerdown", e => {
     suppressClick = false;
-    if ((e.target as Element).closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
-    if (!(e.target as Element).closest(".cm-editor, [contenteditable], input, textarea")) el.focus({ preventScroll: true });
+    const target = e.target as Element;
+    if (target.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    // Focusing the board on a button's press swallows its click. Space-pan still
+    // starts below, including on a link, so a held Space click does not follow it.
+    if (!target.closest(".cm-editor, [contenteditable], input, textarea, button, a")) el.focus({ preventScroll: true });
     if (!state || (e.button !== 1 && !(e.button === 0 && space))) return;
     e.preventDefault(); e.stopPropagation();
     cancelDrag?.();

@@ -10,6 +10,15 @@ import { fileName, isNoteFile, noteName } from "../paths";
 import { createSearchVault } from "../shell/searchVault";
 import { sampleVault, syntheticVault } from "./sampleVault";
 
+/** Origin form only: scheme, host, and a non-default port. No user, path, query, or hash. */
+function frameOrigin(origin: string): boolean {
+  if (!origin || /\s/.test(origin)) return false;
+  let url: URL;
+  try { url = new URL(origin); } catch { return false; }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) return false;
+  return url.pathname === "/" && !url.search && !url.hash && !!url.hostname && url.origin === origin;
+}
+
 const WIKILINK = /\[\[([^\]|#\n]+)(?:#[^\]|\n]*)?(?:\|[^\]\n]*)?\]\]/g;
 /** [text](target) and ![alt](target); the target as written (without a title). */
 const MDLINK = /(?<!\[)\[[^\]\n]*\]\((?:<([^>\n]*)>|((?:\\.|[^\\)\s])*))[^)\n]*\)/g;
@@ -497,6 +506,9 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       const text = localStorage.getItem(FOREIGN_KEY + id);
       if (text !== null && new TextEncoder().encode(text).length > CONFIG_MAX) throw new Error(`not a settings file: ${id}`);
       return text;
+    },
+    allow_frame_origin: ({ origin }) => {
+      if (typeof origin !== "string" || !frameOrigin(origin)) throw new Error("origin must be an http(s) origin");
     },
     write_config: ({ name, content }) => {
       const key = configName(name);

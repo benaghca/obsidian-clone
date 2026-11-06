@@ -68,7 +68,6 @@ const CINDER_NOT_IMPORTED: [label: string, defaults: Record<string, unknown>][] 
   ["monthly notes", { monthlyFolder: "", monthlyFormat: "YYYY-MM", monthlyTemplate: "" }],
   ["folder templates", { folderTemplates: "" }],
   ["calendar week start", { weekStart: "monday" }],
-  ["web page embeds", { webEmbeds: "auto" }],
   ["drawing format", { drawingFormat: "excalidraw" }],
 ];
 
@@ -86,7 +85,7 @@ const folder = (v: string) => trimSlashes(trimSlashes(v).replace(/^(\.\/)+/, "")
 const LABELS: Record<ImportFile, Record<string, string>> = {
   "daily-notes.json": { folder: "Daily notes folder", format: "Daily note date format", template: "Daily note template" },
   "templates.json": { folder: "Template folder", dateFormat: "Template date format", timeFormat: "Template time format" },
-  "app.json": { attachmentFolderPath: "Attachment folder", newFileFolderPath: "New note folder", newFileLocation: "New notes go in" },
+  "app.json": { attachmentFolderPath: "Attachment folder", newFileFolderPath: "New note folder", newFileLocation: "New notes go in", webEmbeds: "Embedded web pages" },
 };
 
 /** How a value reads in the notice. */
@@ -96,6 +95,7 @@ function shown(key: string, value: unknown): string {
     if (value === "./") return "the note's folder";
   }
   if (key === "newFileLocation") return value === "current" ? "the current note's folder" : value === "folder" ? "a set folder" : "the vault folder";
+  if (key === "webEmbeds") return value === "click" ? "Click to load" : value === "off" ? "Off" : "Always";
   if (value === "" && (key === "folder" || key === "newFileFolderPath")) return "the vault folder";
   return String(value);
 }
@@ -178,6 +178,10 @@ function fromCinder(o: Record<string, unknown>): Mapped {
     }
     if (used) notImported.push(label);
   }
+  known.add("webEmbeds");
+  const embed = o.webEmbeds;
+  if (embed === "off" || embed === "click" || embed === "always") values["app.json"].webEmbeds = embed;
+  else if (embed !== undefined && embed !== "auto") notImported.push(`Embedded web pages (${JSON.stringify(embed)} isn't a value Grove takes)`);
   const plugins = isObj(o.plugins) ? o.plugins : null;
   if (plugins?.templater === true) notImported.push(CINDER_PLUGINS_NOT_IMPORTED.templater);
   // The plugin turns both on. A weekly or monthly folder only covers that one; the other still needs naming.

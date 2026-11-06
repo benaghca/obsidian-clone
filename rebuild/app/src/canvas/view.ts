@@ -13,6 +13,7 @@ import { isDrawingPath, openDrawingImages, renderDrawing } from "../drawing/rend
 import { parseScene } from "../drawing/scene";
 import { isNoteFile, noteName } from "../paths";
 import { h } from "../shell/dom";
+import { settings } from "../settings/store";
 import type { Group, Tab } from "../tabs";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -29,6 +30,7 @@ import { canvasTitle, edgeCurve, readCanvas, type CanvasEdge } from "./model";
 import type { Guide } from "./align";
 import { canvasWork } from "./work";
 import { canvasBodies } from "./bodies";
+import { linkFrameBody } from "./linkFrame";
 import { canvasEdges } from "./edges";
 
 const NS = "http://www.w3.org/2000/svg";
@@ -93,8 +95,14 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     if (next === undefined) return;
     to.push(source); changed(next, true); el.focus({ preventScroll: true });
   }
+  let refreshFrames = () => {};
+  const stopEmbeds = settings.on((file, key) => {
+    if (file !== null && file !== "app.json") return;
+    if (key !== null && key !== "webEmbeds") return;
+    refreshFrames();
+  });
   let cleanups: (() => void)[] = [];
-  const clear = () => { cardActions.reset(); stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
+  const clear = () => { refreshFrames = () => {}; cardActions.reset(); stopText?.(false); cleanups.splice(0).reverse().forEach(fn => fn()); world.replaceChildren(); };
   const navigation = canvasNavigation(el, world, tab, path, history, () => draw());
   const cardActions = canvasCards(el, world, ws, path, (node, edge) => {
     if (gone || canvasReadOnly.has(el)) return;
@@ -132,6 +140,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     const { nodes, edges } = readCanvas(source);
     const bounds = boundsOf();
     const work = canvasWork(), bodies = canvasBodies(nodes, work, () => navigation.snapshot());
+    refreshFrames = () => { if (!gone && mine === generation) bodies.recheck(); };
     let built = false;
     const contexts = new Map<string, { view: EditorView; refs: number }>();
     const hosts = new Map<string, typeof host>();
@@ -232,12 +241,11 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
       const title = h("div", { class: "canvas-node-title" }, image ? "" : canvasTitle(node));
       if (image) card.classList.add("is-image"); else card.append(title);
       if (node.type === "link") {
-        const url = node.url ?? "";
-        const link = h("a", { class: "cm-link cm-rendered-link", role: "link", tabindex: "0" }, url);
-        const open = () => { if (isExternalUrl(url)) void api.openExternal(url).catch(console.warn); };
-        link.addEventListener("click", e => { if (e.isTrusted) open(); });
-        link.addEventListener("keydown", e => { if (e.isTrusted && e.key === "Enter") open(); });
-        bodies.add(node, card, { element: content, ensure() { if (!content.firstChild) content.append(link); }, release() { content.replaceChildren(); }, ready: () => !!content.firstChild });
+        bodies.add(node, card, linkFrameBody(node, content, {
+          slotted: id => bodies.slotted(id),
+          ready: item => bodies.ready(item),
+          recheck: id => bodies.recheck(id),
+        }));
         continue;
       }
       if (image) {
@@ -531,5 +539,5 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   window.addEventListener("beforeunload", flush);
   const unwatch = ws.vault.onModified(changed => { if (changed === path && !notifying) { clearTimeout(timer); timer = 0; void load(); } });
   void load();
-  return { el, dispose() { gone = true; flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
 }

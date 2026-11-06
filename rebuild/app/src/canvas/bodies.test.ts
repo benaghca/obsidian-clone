@@ -18,7 +18,7 @@ class ElementStub {
 function setup(count=2){
   let id=0;const frames=new Map<number,FrameRequestCallback>();vi.stubGlobal("requestAnimationFrame",(fn:FrameRequestCallback)=>{frames.set(++id,fn);return id;});vi.stubGlobal("cancelAnimationFrame",(i:number)=>frames.delete(i));
   const nodes:CanvasNode[]=Array.from({length:count},(_,i)=>({id:String(i),type:"text",x:i*1000,y:0,width:100,height:100}));
-  const view:CanvasViewport={x:0,y:0,width:250,height:200,focusX:0,focusY:0,band:0,titles:false};
+  const view:CanvasViewport={x:0,y:0,width:250,height:200,focusX:0,focusY:0,band:0,titles:false,scale:1};
   const work=canvasWork(),manager=canvasBodies(nodes,work,()=>view);let live=0;
   const cards=nodes.map(node=>{const el=new ElementStub(),content=new ElementStub();let ready=false;manager.add(node,el as unknown as HTMLElement,{element:content as unknown as HTMLElement,ensure(){if(!ready){live++;ready=true;}},ready:()=>ready,release(){if(ready){ready=false;live--;}}});return{el,content};});
   work.resume();const flush=()=>{while(frames.size){const[k,fn]=frames.entries().next().value!;frames.delete(k);fn(performance.now());}};
@@ -37,4 +37,32 @@ test("the LRU releases old bodies and disposal releases the remaining cache",()=
   const{view,manager,flush,live}=setup(400);
   for(let i=0;i<400;i++){view.x=i*1000;manager.update();flush();}
   expect(manager.stats().retained).toBe(300);expect(live()).toBe(300);manager.dispose();expect(live()).toBe(0);
+});
+test("at most six link cards keep a frame, and title mode releases them",()=>{
+  let id=0;const frames=new Map<number,FrameRequestCallback>();vi.stubGlobal("requestAnimationFrame",(fn:FrameRequestCallback)=>{frames.set(++id,fn);return id;});vi.stubGlobal("cancelAnimationFrame",(i:number)=>frames.delete(i));
+  const nodes:CanvasNode[]=Array.from({length:8},(_,i)=>({id:String(i),type:"link",x:i*30,y:0,width:200,height:120,url:"local"}));
+  const view:CanvasViewport={x:0,y:0,width:1000,height:800,focusX:400,focusY:60,band:0,titles:false,scale:1};
+  const work=canvasWork(),manager=canvasBodies(nodes,work,()=>view);
+  const live=new Set<string>();let peak=0;
+  for(const node of nodes){
+    const el=new ElementStub(),content=new ElementStub();
+    manager.add(node,el as unknown as HTMLElement,{
+      element:content as unknown as HTMLElement,frame:true,wantsFrame:()=>true,
+      ensure(){if(manager.slotted(node.id)&&!live.has(node.id)){live.add(node.id);peak=Math.max(peak,live.size);}},
+      ready:()=>true,
+      release(){live.delete(node.id);},
+    });
+  }
+  work.resume();const flush=()=>{while(frames.size){const[k,fn]=frames.entries().next().value!;frames.delete(k);fn(performance.now());}};
+  manager.update();flush();
+  expect(manager.stats().frames).toBe(6);expect(live.size).toBe(6);expect(peak).toBe(6);
+  const unslotted=nodes.map(n=>n.id).find(id=>!live.has(id))!;
+  manager.recheck(unslotted);flush();
+  expect(live.has(unslotted)).toBe(true);expect(live.size).toBe(6);expect(peak).toBe(6);
+  view.titles=true;manager.update();
+  expect(manager.stats().frames).toBe(0);expect(live.size).toBe(0);
+  flush();
+  view.titles=false;manager.recheck("0");flush();
+  expect(live.has("0")).toBe(true);expect(live.size).toBe(6);expect(peak).toBe(6);
+  manager.dispose();
 });
