@@ -4,8 +4,9 @@
 // For each action: input → painted result, long tasks, frame gaps, slow input
 // events, per-frame flashes (empty state, missing editor or tree), remounts,
 // where focus and the caret land, and labels left stale. Budgets: RUST_PERF_PLAN §1.
-// The link commands run in Rust, off the page thread, in the app: here the
-// mock answers them, and its time is kept apart (`rust`) from page-side timing.
+// Budgets check the raw numbers. The link commands run in Rust, off the page
+// thread, in the app; here the mock answers them on the page, so `minus_mock`
+// is an estimate with the mock's time taken out (not a measure of Rust).
 import assert from "node:assert/strict";
 import { sleep, withBrowser } from "./browser.mjs";
 
@@ -75,9 +76,9 @@ function harness() {
   // Timing starts at the action's own key, not a modifier held for it.
   const MODIFIERS = ["Control", "Shift", "Alt", "Meta"];
   for (const type of ["keydown", "mousedown", "auxclick", "pointerdown"]) window.addEventListener(type, (e) => { if (fx.on && fx.t0 == null && !MODIFIERS.includes(e.key)) fx.t0 = e.timeStamp; }, true);
-  // Mock link commands ([start, end]): Rust's work in the app, not the page's.
-  fx.rust = [];
-  const page = (start, d) => d - fx.rust.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, start + d) - Math.max(a, start)), 0);
+  // Mock link commands ([start, end]), for the minus_mock estimate only.
+  fx.mock = [];
+  const minusMock = (start, d) => d - fx.mock.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, start + d) - Math.max(a, start)), 0);
   new PerformanceObserver((l) => { if (fx.on) for (const e of l.getEntries()) fx.long.push(e); }).observe({ type: "longtask" });
   // Entries that started before the action belong to earlier input (CDP can stamp them late).
   new PerformanceObserver((l) => { if (fx.on) for (const e of l.getEntries()) if (e.startTime >= fx.armedAt) fx.events.push(e); }).observe({ type: "event", durationThreshold: 16 });
@@ -91,13 +92,12 @@ function harness() {
       for (const [sel, name] of Object.entries(watched)) if (node.matches(sel) || node.querySelector(sel)) fx.removed[name] = (fx.removed[name] ?? 0) + 1;
     }
   }).observe(document.body, { childList: true, subtree: true });
-  fx.arm = (opts = {}) => Object.assign(fx, { on: true, armedAt: performance.now(), t0: null, done: null, frames: [], series: [labels()], long: [], events: [], rust: [], flashes: {}, removed: {}, cond: opts.cond ?? null, expectNote: opts.expectNote ?? true, watchTitle: opts.watchTitle ?? true });
+  fx.arm = (opts = {}) => Object.assign(fx, { on: true, armedAt: performance.now(), t0: null, done: null, frames: [], series: [labels()], long: [], events: [], mock: [], flashes: {}, removed: {}, cond: opts.cond ?? null, expectNote: opts.expectNote ?? true, watchTitle: opts.watchTitle ?? true });
   fx.take = () => {
     fx.on = false;
-    // Page-side only: time inside the mock's link commands is taken out.
-    const gaps = fx.frames.slice(1).map((t, i) => page(fx.frames[i], t - fx.frames[i])).sort((a, b) => a - b);
-    const long = fx.long.map((e) => page(e.startTime, e.duration)).filter((d) => d > 50);
-    const events = fx.events.map((e) => ({ name: e.name, d: page(e.startTime, e.duration), js: page(e.processingStart, e.processingEnd - e.processingStart), target: e.target?.className?.toString().slice(0, 30) })).filter((e) => e.d >= 16);
+    const gaps = fx.frames.slice(1).map((t, i) => t - fx.frames[i]).sort((a, b) => a - b);
+    const long = fx.long.filter((e) => e.duration > 50);
+    const events = fx.events.map((e) => ({ name: e.name, d: e.duration, js: e.processingEnd - e.processingStart, target: e.target?.className?.toString().slice(0, 30) })).filter((e) => e.d >= 16);
     const q = (p) => Math.round(gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * p))] ?? 0);
     // A label that showed something other than its first and last value in between flashed.
     const flicker = {};
@@ -109,9 +109,13 @@ function harness() {
     }
     return {
       flicker,
-      ms: fx.done != null && fx.t0 != null ? Math.round(page(fx.t0, fx.done - fx.t0)) : null,
-      rust: Math.round(fx.rust.reduce((sum, [a, b]) => sum + b - a, 0)),
-      gap_p95: q(0.95), gap_max: q(1), long: long.length, long_max: Math.round(Math.max(0, ...long)),
+      ms: fx.done != null && fx.t0 != null ? Math.round(fx.done - fx.t0) : null,
+      mock_ms: Math.round(fx.mock.reduce((sum, [a, b]) => sum + b - a, 0)),
+      minus_mock: { // estimate, not measured: the mock's link work taken out (Rust, off the page thread, in the app)
+        ms: fx.done != null && fx.t0 != null ? Math.round(minusMock(fx.t0, fx.done - fx.t0)) : null,
+        long_max: Math.round(Math.max(0, ...long.map((e) => minusMock(e.startTime, e.duration)))),
+      },
+      gap_p95: q(0.95), gap_max: q(1), long: long.length, long_max: Math.round(Math.max(0, ...long.map((e) => e.duration))),
       slow_events: events.length, event_max: Math.round(Math.max(0, ...events.map((e) => e.d))), js_max: Math.round(Math.max(0, ...events.map((e) => e.js))),
       worst: [...events].sort((a, b) => b.d - a.d).slice(0, 3).map((e) => `${e.name}:${Math.round(e.d)}${e.target ? "@" + e.target : ""}`),
       flashes: fx.flashes, removed: fx.removed, after: fx.state(),
@@ -126,17 +130,17 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   for (let i = 0; i < 600 && !(await evaluate(`!!window.ws?.active.path && ws.vault.notes.length >= ${n}`).catch(() => false)); i++) await sleep(100);
   for (let i = 0; i < 600 && !(await evaluate("Object.keys(ws.vault.links.outgoing).length > 1000").catch(() => false)); i++) await sleep(100);
   await run(harness);
-  // The mock's own link commands answer, so replies follow every edit. Their time is Rust's in the app: microtasks
-  // queued either side of the call bracket exactly the mock's synchronous work. The page still decodes the reply.
+  // The mock's own link commands answer, so replies follow every edit. Microtasks queued either side of the
+  // call bracket the mock's synchronous work, for minus_mock. __fx.mockDelay (self-check only) stalls it.
   await run(async () => {
     const { api } = await import("/src/api.ts");
     for (const [name, real] of ["linkIndex", "backlinks", "linkSources"].map((k) => [k, api[k]])) api[name] = async (...args) => {
       let start = 0, end = 0;
-      queueMicrotask(() => (start = performance.now()));
+      queueMicrotask(() => { start = performance.now(); while (performance.now() < start + (__fx.mockDelay ?? 0)); });
       const reply = real(...args);
       queueMicrotask(() => (end = performance.now()));
       const value = await reply;
-      __fx.rust.push([start, end]);
+      __fx.mock.push([start, end]);
       return JSON.parse(JSON.stringify(value));
     };
   });
@@ -145,8 +149,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   const out = { n };
   const typeText = async (text, gap = 30) => {
     for (const ch of text) {
-      await send("Input.dispatchKeyEvent", { type: "keyDown", key: ch, text: ch });
-      await send("Input.dispatchKeyEvent", { type: "keyUp", key: ch });
+      for (const type of ["keyDown", "keyUp"]) await send("Input.dispatchKeyEvent", { type, key: ch, text: type === "keyDown" ? ch : undefined });
       await sleep(gap);
     }
   };
@@ -166,15 +169,12 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
     await input();
     if (cond) for (let t = 0; t < timeout && !(await evaluate("__fx.done != null")); t += 20) await sleep(20);
     await sleep(settle);
-    const sample = await evaluate("__fx.take()");
-    out[name] = sample;
+    const sample = (out[name] = await evaluate("__fx.take()"));
     if (REPORT) console.log(name, JSON.stringify(sample));
-    return sample;
   };
   const rowFor = async (path) => {
-    await run((p) => { const row = document.querySelector(`.nav-files [data-path="${CSS.escape(p)}"]`); row?.scrollIntoView({ block: "center" }); }, path);
-    await sleep(80);
-    return point(`.nav-files [data-path="${path.replace(/"/g, '\\"')}"]`);
+    await run((p) => document.querySelector(`.nav-files [data-path="${CSS.escape(p)}"]`)?.scrollIntoView({ block: "center" }), path);
+    return sleep(80).then(() => point(`.nav-files [data-path="${path.replace(/"/g, '\\"')}"]`));
   };
   const notes = await evaluate(`ws.vault.notes.filter(n => !n.path.includes("/") && n.path !== "Big note.md" && n.path !== "Welcome.md").slice(0, 12).map(n => n.path)`);
   const nameOf = (p) => p.split("/").pop().replace(/\.md$/i, "");
@@ -190,8 +190,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   const until = async (expr, ms = 5000) => { for (let t = 0; t < ms && !(await evaluate(expr)); t += 20) await sleep(20); return evaluate(expr); };
   const palette = async (command) => { await chord("p"); await sleep(150); await typeText(command, 20); await sleep(150); await press("Enter"); };
   // Most people keep the backlinks pane open: switching notes refreshes it.
-  await combo("]", 3);
-  await sleep(600);
+  await combo("]", 3).then(() => sleep(600));
 
   // ---- 1. Open a note ----
   await measure("open_tree_click", async () => click(await rowFor(notes[0])), opened(notes[0]));
@@ -218,24 +217,17 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await measure("close_tab", () => chord("w"), "ws.active.path !== null");
   for (const [name, dir, mods] of [["ctrl_tab", 1, 2], ["ctrl_shift_tab", -1, 10]]) await measure(name, () => combo("Tab", mods), await cycled(name, dir));
   // Scroll and caret come back on return: the Big note, scrolled and with the caret mid-document.
-  await run(async () => { await ws.open("Big note.md"); });
-  await sleep(300);
-  await run(() => {
-    const line = ws.view.state.doc.line(2500);
-    ws.view.dispatch({ selection: { anchor: line.from + 3 }, scrollIntoView: true });
-    ws.view.focus();
-  });
-  await sleep(300);
-  const bigBefore = await state();
-  out.big_before = bigBefore;
+  await run(async () => { await ws.open("Big note.md"); }).then(() => sleep(300));
+  // The caret at line `line` of the Big note, on screen and focused.
+  const placeBig = (line) => run((l) => { const at = ws.view.state.doc.line(l); ws.view.dispatch({ selection: { anchor: at.from + 3 }, scrollIntoView: true }); ws.view.focus(); }, line).then(() => sleep(300));
+  await placeBig(2500);
+  out.big_before = await state();
   await measure("tab_away", async () => click(await point(".workspace-tabs.mod-active .workspace-tab-header:not(.is-active)")), "ws.active.path !== 'Big note.md'");
   await measure("tab_back_click", () => click('.workspace-tabs.mod-active .workspace-tab-header[aria-label="Big note"], .workspace-tabs.mod-active .workspace-tab-header[aria-label="Big note.md"]'), opened("Big note.md"));
   await measure("tab_close_reopen", async () => { await chord("w"); await sleep(200); await combo("t", 10); }, opened("Big note.md"));
 
   // Back from a link restores where you were in a long note.
-  const placeBig = (line) => run((l) => { const at = ws.view.state.doc.line(l); ws.view.dispatch({ selection: { anchor: at.from + 3 }, scrollIntoView: true }); ws.view.focus(); }, line);
   await placeBig(2500);
-  await sleep(300);
   out.big_mid = await state();
   await measure("big_link_click", () => click(".workspace-tabs.mod-active .cm-content .cm-rendered-link:not(.is-unresolved)"), "ws.active.path !== 'Big note.md'");
   await measure("big_back", () => click('.workspace-tabs.mod-active [aria-label="Navigate back"]'), opened("Big note.md"), { settle: 300 });
@@ -247,12 +239,16 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   // At the end of the note, with the caret's line on screen (and parsed, as it is by the time anyone reads it).
   await run(() => { const doc = ws.view.state.doc; const end = doc.length; ws.view.dispatch({ changes: { from: end, insert: "\n- first item" }, selection: { anchor: end + 13 }, scrollIntoView: true }); ws.view.focus(); });
   await sleep(300);
-  await measure("enter_list_item", () => press("Enter"), `ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === "- "`);
+  const lineIs = (text) => `ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === ${JSON.stringify(text)}`;
+  await measure("enter_list_item", () => press("Enter"), lineIs("- "));
+  // Self-check: an Enter whose result is painted 250 ms late, with no long task, must fail the Enter budget.
+  const linesNow = await run(() => (addEventListener("keydown", (e) => { if (e.key !== "Enter") return; e.preventDefault(); e.stopImmediatePropagation(); setTimeout(() => { const h = ws.view.state.selection.main.head; ws.view.dispatch({ changes: { from: h, insert: "\n- " }, selection: { anchor: h + 3 } }); }, 250); }, { capture: true, once: true }), ws.view.state.doc.lines));
+  await measure("selftest_slow_enter", () => press("Enter"), `ws.view.state.doc.lines === ${linesNow + 1} && ${lineIs("- ")}`, { settle: 100 });
+  await run(() => { const h = ws.view.state.selection.main.head; ws.view.dispatch({ changes: { from: h - 3, to: h } }); });
   await measure("suggest_open", () => typeText("[[", 30), `!!document.querySelector(".cm-tooltip.cm-link-suggest li")`);
   await measure("suggest_type", () => typeText("riv", 40), `!!document.querySelector(".cm-tooltip.cm-link-suggest li")`, { settle: 300 });
   await measure("suggest_choose", () => press("Enter"), `!document.querySelector(".cm-link-suggest") && /\\[\\[[^\\]]+\\]\\]$/.test(ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text.slice(0, ws.view.state.selection.main.head - ws.view.state.doc.lineAt(ws.view.state.selection.main.head).from))`);
   await measure("suggest_esc", async () => { await typeText(" [[", 30); await sleep(150); await press("Escape"); }, `!document.querySelector(".cm-link-suggest") && ws.view.state.doc.sliceString(ws.view.state.selection.main.head - 2, ws.view.state.selection.main.head + 2) === "[[]]"`);
-  const lineIs = (text) => `ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === ${JSON.stringify(text)}`;
   await measure("undo", () => chord("z"), lineIs(out.suggest_choose.after.line), { settle: 200 });
   await measure("redo", () => combo("z", 10), lineIs(out.suggest_esc.after.line), { settle: 200 });
   // After the save, the link index and backlinks show the link just chosen.
@@ -270,20 +266,17 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await measure("switcher_last_key", () => typeText("t", 0), `document.querySelector(".prompt-input")?.value === "river st"`);
   await measure("switcher_esc", () => press("Escape"), "!document.querySelector('.prompt')");
   await placeBig(3000);
-  await sleep(300);
   out.before_palette = await state();
   await measure("palette_open", () => chord("p"), `!!document.querySelector(".prompt .suggestion-item")`);
   await measure("palette_type", () => typeText("toggle left", 50), `document.querySelector(".prompt-input")?.value === "toggle left"`);
   await measure("palette_last_key", () => typeText(" s", 0), `document.querySelector(".prompt-input")?.value === "toggle left s"`);
   await measure("palette_esc", () => press("Escape"), "!document.querySelector('.prompt')");
   await placeBig(3500);
-  await sleep(300);
   out.before_settings = await state();
   await measure("settings_open", () => chord(","), "!!document.querySelector('.modal.mod-settings, .mod-settings')", { settle: 400 });
   await measure("settings_esc", () => press("Escape"), "!document.querySelector('.mod-settings')", { settle: 400 });
   // A confirmation (Delete current file), cancelled with Esc: back to the same place.
   await placeBig(3800);
-  await sleep(300);
   out.before_confirm = await state();
   await measure("confirm_esc", async () => { await palette("delete current file"); await until("!!document.querySelector('.modal.mod-confirm')", 1000); await press("Escape"); },
     "!document.querySelector('.modal.mod-confirm') && ws.active.path === 'Big note.md'", { settle: 400 });
@@ -365,8 +358,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   }, "true", { settle: 200 });
   await measure("folder_expand", () => click('.nav-folder-title[data-path="Projects"]'), "document.querySelectorAll('.nav-file-title').length > 1500", { settle: 300 });
   await measure("folder_collapse", () => click('.nav-folder-title[data-path="Projects"]'), "document.querySelectorAll('.nav-file-title').length < 1500", { settle: 300 });
-  await run(async () => { await ws.open(ws.vault.notes.find((x) => x.path.startsWith("Journal/")).path); });
-  await sleep(300);
+  await run(async () => { await ws.open(ws.vault.notes.find((x) => x.path.startsWith("Journal/")).path); }).then(() => sleep(300));
   await measure("reveal_active", () => palette("reveal"), `document.querySelector(".nav-files .tree-item-self.is-active")?.dataset.path === ws.active.path`, { settle: 300 });
 
   // ---- 7. New note and rename from the inline title ----
@@ -408,6 +400,9 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
       old_gone: await evaluate(`![...Object.values(ws.vault.links.outgoing), ...Object.values(ws.vault.links.markdown)].some((v) => v.includes(${JSON.stringify(chosen)}))`) };
   }
 
+  // Self-check: a backend reply 80 ms late shows in the measured time, not taken out of it.
+  await run(() => addEventListener("keydown", (e) => { if (e.key !== "F9") return; __fx.mockDelay = 80; import("/src/api.ts").then(({ api }) => api.backlinks([ws.active.path ?? "Welcome.md"])).then(() => { __fx.mockDelay = 0; __fx.replied = true; }); }, { capture: true, once: true }));
+  await measure("selftest_slow_backend", () => press("F9"), "__fx.replied === true", { expectNote: false });
   console.log(JSON.stringify(out));
   if (REPORT) return;
 
@@ -439,12 +434,17 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   const typing = sample("typing_big_note");
   check(typing.long === 0 && typing.gap_max <= 20 && typing.event_max <= 16, `typing_big_note: ${typing.long} long tasks, max frame ${typing.gap_max} ms, input ${typing.event_max} ms`);
   for (const name of ["enter_list_item", "enter_list_fresh_long"]) check(sample(name).after.line === "- ", `${name}: Enter on a list item gave ${JSON.stringify(sample(name).after.line)}, not "- "`);
-  // Enter: keystroke to paint within 16 ms (no slow input event).
-  const enter = sample("enter_list_item");
-  check(enter.ms !== null && enter.long === 0 && enter.event_max <= 16, `enter_list_item: ${enter.ms} ms, ${enter.long} long tasks, slowest input ${enter.event_max} ms (budget 16)`);
-  // Just after a jump, CodeMirror spends up to 20 ms of each edit parsing toward the
-  // screen. A plain Enter costs what a letter does there (no parse of the note
-  // to the caret); a list Enter pays that parse once, within its 100 ms cap.
+  // Enter in a note already parsed to the caret: painted within 16 ms, i.e. in the next 60 Hz frame (`ms` runs to
+  // the start of the frame that shows it, so 16.7 reads as 17 and a frame late as 33), and no slow input event.
+  const FRAME = Math.ceil(1000 / 60);
+  const enterOk = (x) => x.ms !== null && x.ms <= FRAME && x.long === 0 && x.event_max <= 16;
+  const enter = sample("enter_list_item"), slowEnter = sample("selftest_slow_enter"), slowReply = sample("selftest_slow_backend");
+  check(enterOk(enter), `enter_list_item: ${enter.ms} ms, ${enter.long} long tasks, slowest input ${enter.event_max} ms (budget 16)`);
+  // The checks themselves: a late Enter fails the budget; a late backend reply counts in the measured time.
+  check(slowEnter.ms >= 250 && slowEnter.long === 0 && !enterOk(slowEnter), `self-check: an Enter painted ${slowEnter.ms} ms late passed the Enter budget`);
+  check(slowReply.ms >= 80 && slowReply.mock_ms >= 80, `self-check: a backend reply 80 ms late measured as ${slowReply.ms} ms (mock ${slowReply.mock_ms} ms)`);
+  // The one exception, kept apart: just after a jump into a long note, CodeMirror spends up to 20 ms of each edit parsing
+  // toward the screen. A plain Enter costs what a letter does there; a list Enter pays that parse once, within its 100 ms cap.
   const [letter, plain, list] = ["letter_fresh_long", "enter_plain_fresh_long", "enter_list_fresh_long"].map(sample);
   check(letter.ms !== null && plain.ms !== null && plain.long === 0 && plain.ms <= Math.max(16, letter.ms) + 8, `enter_plain_fresh_long: ${plain.ms} ms to the new line, a letter ${letter.ms} ms`);
   check(list.ms !== null && list.js_max <= 100 && list.long_max <= 100, `enter_list_fresh_long: ${list.js_max} ms of JS, longest task ${list.long_max} ms (parse cap 100)`);
@@ -489,7 +489,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   // Splits.
   check(sample("split_right").ms !== null && sample("close_split").ms !== null && sample("close_split").after.focus === "editor", `splits: split ${sample("split_right").ms} ms, close ${sample("close_split").ms} ms, focus ${sample("close_split").after.focus}`);
   // Known gap: a new note or a rename rebuilds every visible tree row (P6, file-tree virtualization).
-  const p6 = ["new_note", "rename_enter", "rename_linked"].filter((x) => sample(x).long).map((x) => `${x} ${sample(x).long_max} ms`);
+  const p6 = ["new_note", "rename_enter", "rename_linked"].filter((x) => sample(x).long).map((x) => `${x} ${sample(x).long_max} ms (${sample(x).minus_mock.long_max} without the mock)`);
   if (p6.length) console.log(`KNOWN GAP (P6, tree rebuilt on every file-list change): long task ${p6.join(", ")}`);
   console.log(`KNOWN COST (once per long note, just after a jump): list Enter parses to the caret, ${list.js_max} ms of JS`);
   if (n !== 5000) {

@@ -37,7 +37,7 @@ The independent review asked for three fixes. They're all in this commit:
        - Now: 23–24 ms for both.
        - F1: 45–46 ms of JS against 1 ms for the letter, so the check fails.
      - **List Enter stays within its 100 ms cap.** It measured 43–46 ms and is printed as a known one-time cost.
-     - **Warm list Enter must keep the 16 ms keystroke budget.** It's the Enter at the Big note's end, now with the line on screen as a user has it. It measured 16 ms.
+     - **Warm list Enter must keep the 16 ms keystroke budget.** It's the Enter at the Big note's end, now with the line on screen as a user has it. It measured 16 ms. (The second review added the time budget this check lacked.)
 2. **The friction test checks that the action happened.**
    - **Problem:** Ctrl+Tab's condition was `true`, and timing started on the Ctrl keydown. A frame could therefore "finish" it before Tab was sent.
    - **Fixes:**
@@ -53,7 +53,7 @@ The independent review asked for three fixes. They're all in this commit:
 3. **The link commands give fresh, correct answers.**
    - **Problem:** the old stand-in echoed the page's own index, so a refresh could never see a change. Its backlinks had no counts, Markdown links or text.
    - **Fix:** the script now calls the mock's real `link_index`, `backlinks` and `link_sources`, and takes their time out of page-side timing as Rust's.
-     - Microtasks queued either side of each call bracket exactly the mock's synchronous work. That time is subtracted from long tasks, frame gaps, input events and the input-to-result time, and reported per flow as `rust`.
+     - Microtasks queued either side of each call bracket exactly the mock's synchronous work. That time is subtracted from long tasks, frame gaps, input events and the input-to-result time, and reported per flow as `rust`. (The second review replaced this: budgets now check raw times.)
      - The page still pays `JSON.parse` on each reply.
    - **New checks:**
      - after choosing `[[river signal 4]]` and the autosave: the page's index has the link and equals a fresh backend answer, and the target's backlinks include the Big note with the line's text;
@@ -68,6 +68,34 @@ One combined sabotage run had F1's `config.ts`, a no-op Ctrl+Tab and the echo st
 
 With all three fixes, the script passes.
 
+## Second review fixes (after `2d2d505`)
+
+The re-review passed the product fixes and asked for two changes to the measurements:
+
+1. **Budgets check the raw times again.**
+   - **Problem:** `2d2d505` subtracted the mock's link-command time from every number, so a result that waited 80 ms on the backend was reported as 0 ms.
+   - **Fix:** input-to-result times, frame gaps, long tasks and input events are now the raw measurements. They're what every budget checks.
+   - **Estimate, kept separate:** each flow also prints `mock_ms` (time inside the mock's link commands) and `minus_mock` (`ms` and `long_max` with that time taken out). It's labelled as an estimate: it removes the mock's work, and doesn't measure Rust's. Only the P6 known-gap line prints it.
+   - **Mock made cheaper, answers unchanged:** with raw numbers, the mock's whole-vault link walk (about 40 ms per save at 5k, on the page thread) would have failed the typing budget. That cost belongs to the mock, not to Grove.
+     - `src/mock/backend.ts` now keeps each file's links until the file's text or the vault's file list changes, so a save re-reads only the saved file. That brings a walk down to 6–12 ms.
+     - Most of the old cost was one comparison of the whole file list, made once per file instead of once per walk.
+     - **Checked:** old and new mock gave identical `link_index`, `backlinks` and `link_sources` for every file in a 2k vault. The check ran at the start and again after an edit (with wikilinks, a Markdown link, an unresolved link and a fenced link), its revert, a rename, a create and a delete.
+   - **Raw at 5k:**
+     - typing through the autosave: max frame 17 ms, no long task (15 ms of mock work);
+     - every open and switch: 10–22 ms.
+2. **The warm Enter has a time budget.**
+   - **Problem:** the check required only that a time existed, so a 250 ms Enter with no long task passed.
+   - **Fix:** the Enter at the Big note's end, with its line on screen, must now paint in the next frame. The 16 ms budget is one 60 Hz frame (16.7 ms).
+     - The time runs to the start of the frame that shows the result, rounded, so the next frame reads 16 or 17 ms and one frame late reads 33. The check is therefore `ms ≤ 17`.
+     - The earlier checks stay: no long task, no input event over 16 ms. Measured: 17 ms, 3 ms of JS.
+   - **The cold-note exception stays separate.** Just after a jump deep into a long note, a plain Enter must cost no more than a letter there, and a list Enter stays within its 100 ms parse cap. These are labelled as the one exception.
+3. **Self-checks, so the measurements can't drift back:**
+   - an Enter whose result is painted 250 ms late, with no long task (a test-only key handler), must fail the Enter budget;
+   - a backend reply stalled 80 ms (a test-only delay inside the mock's link command) must be measured as at least 80 ms.
+   - **Checked against the bug:** with the subtraction and the old Enter check put back, the script fails on exactly these two:
+     - "an Enter painted 267 ms late passed the Enter budget";
+     - "a backend reply 80 ms late measured as 17 ms (mock 80 ms)".
+
 ## How it was measured
 
 `scripts/test-friction.mjs` (500 lines, in `npm test` at 5k; it takes `GROVE_FEEL_N`, and `GROVE_FRICTION_REPORT=1` prints every sample and asserts nothing).
@@ -80,10 +108,11 @@ With all three fixes, the script passes.
 - remounted editors, leaves, tab headers and file-tree rows;
 - afterwards: focus, caret, scroll, current line, tab, header, title and tree selection.
 
-**Link commands: real answers, Rust's time kept apart.** `link_index`, `backlinks` and `link_sources` are the mock's own, so they follow every edit and rename. In the app those run in Rust, off the page thread, so their time comes out of the page-side numbers.
-- Microtasks queued either side of each call bracket the mock's synchronous work. That time is subtracted from long tasks, frame gaps, input events and the input-to-result time, and reported per flow as `rust`.
+**Link commands: real answers, timed raw.** `link_index`, `backlinks` and `link_sources` are the mock's own, so they follow every edit and rename.
+- In the app these run in Rust, off the page thread. Here the mock runs them on the page, and the budgets count that time anyway.
+- Microtasks queued either side of each call bracket the mock's synchronous work. Each flow prints that time as `mock_ms`, plus a labelled `minus_mock` estimate with it taken out. No budget uses either (see Second review fixes).
 - The page still pays `JSON.parse` on each reply.
-- At 5k, the mock spends 38–53 ms per file change in these commands. Those are dev-only costs, not the app's.
+- At 5k, the mock spends 6–12 ms per saved edit. A file-list change (new note, rename) costs about 40 ms, because every file's links are resolved again.
 - Search still runs in the mock, on the page, and is counted.
 
 (The first F1 commit answered from the page's own index instead, which could never show a change; see Review fixes.)
@@ -103,7 +132,7 @@ Ranked by how often a user hits it times how much it hurts. Numbers are at 5k, h
 | 3 | Settings, image zoom: close | Same pattern | Settings didn't jump in this run: it only refocuses when focus fell to the body. Image zoom wasn't driven | — | Same plain `focus()` in `settings/modal.ts` and `editor/imageZoom.ts` | Same, as a guard |
 | 4 | Typing: Enter on a list item in a long note, just after jumping there | An extra step: retype `- ` by hand | `""` after Enter (a just-opened copy of the 5,000-line note at line 4,500; also the Big note's end with the caret off screen) | `"- "`; that first Enter 43–46 ms of JS once, no long task. Plain Enter unaffected (review fix) | The background parse stops about 100,000 characters past the screen and reaches a jumped-to caret about 100 ms later; `insertNewlineContinueMarkupCommand` reads whatever tree exists | Parse to the caret first (`forceParsing`, 100 ms cap) in `editor/config.ts`, only on a line that starts with a list marker, `>` or indentation. Ranked high in F1; the window turned out to be only about 100 ms after a jump |
 | 5 | Sidebars: resize the left one | Can't: there's nothing to drag | width +0 px after an 80 px drag; nothing saved | +80 px; saved width equals the shown width | No handle was ever added for the left dock; only the right width was saved | Handle on the left dock's right edge (`main.ts`, `sidedock.css`), `leftWidth` in the saved layout (`prefs.ts`), and the drag highlight only on the dragged handle (`sidedock.ts`) |
-| 6 | New note (Ctrl+N), rename Enter, Esc out of a rename | A short hitch | page-side 46–52 ms to the result, 40–48 ms of JS on the key, no page-side long task (the first F1 run counted 50–58 ms long tasks, part of them the mock's link work); at 20k: see below | not changed | Each file-list change rebuilds every visible tree row and re-sorts the vault (13.8 ms of `render` at 5k), then forced layouts read on the dirty tree (`rememberPane`'s `scrollTop`, the title's blur, about 10 ms each) | **P6** (file-tree incremental updates and virtualization). Reported as a known gap by the script. Moving the `scrollTop` read wouldn't remove the layout, only move it |
+| 6 | New note (Ctrl+N), rename Enter, Esc out of a rename | A short hitch | raw: one long task of 82–94 ms. About 40 ms of that is the mock re-resolving every link after the file-list change; without it, 45–47 ms. At 20k: see below | not changed | Each file-list change rebuilds every visible tree row and re-sorts the vault (13.8 ms of `render` at 5k), then forced layouts read on the dirty tree (`rememberPane`'s `scrollTop`, the title's blur, about 10 ms each) | **P6** (file-tree incremental updates and virtualization). Reported as a known gap by the script. Moving the `scrollTop` read wouldn't remove the layout, only move it |
 | 7 | Reveal active file, expanding a 6,700-row folder (20k) | A hitch | 5k: keydown 48 ms, no long task. 20k: 194 ms reveal, 72 ms expand | not changed | Same tree rebuild, plus every row of the opened folder in the DOM | **P6** |
 | 8 | Search as you type (20k) | Keystrokes lag | 5k: last key → results 16 ms. 20k: two long tasks, max 110 ms | not changed | The mock's search runs on the page; in the app it's Rust, async | **P5** (parallel, cancellable search). Re-measure in the app after P5 |
 | 9 | Jumping to the end of a long note just opened | Unstyled Markdown for a moment | 145 ms (8 frames) before the end is styled | not changed | CodeMirror parses past 100,000 characters in idle slices | Not fixed: forcing the parse there would trade 8 unstyled frames for one ~50 ms frame. Same in any CodeMirror 6 editor |
@@ -119,7 +148,7 @@ Ranked by how often a user hits it times how much it hurts. Numbers are at 5k, h
 | Typing 22 characters mid-document in the 5,000-line note, through the autosave and link refresh (0 frames over 20 ms; input ≤ 16 ms) | max frame 17 ms, no event over 16 ms, no long task, word count live |
 | `[[` suggester | opens about 1 frame after the second `[`; Enter writes `[[river signal 4]]` with the caret after it; Esc keeps `[[]]`; undo/redo step correctly |
 | Quick switcher and command palette (≤ 100 ms to open; ≤ 16 ms of JS per keystroke; ≤ 50 ms from the last keystroke to its results) | open in 17 ms with the input focused; 1–6 ms of JS per keystroke; last key to results 16–17 ms; Enter and Ctrl+Enter land in the note |
-| Enter on a list item with its line on screen (≤ 16 ms, no input event over 16 ms) | 16–17 ms, 3 ms of JS |
+| Enter on a list item with its line on screen (in the next frame, `ms ≤ 17`; no long task; no input event over 16 ms) | 16–17 ms, 3 ms of JS |
 | Search (≤ 100 ms last key to results) | 16 ms; a click opens at the match, selected and on screen, including one 4,200 lines into the long note; clearing empties the results |
 | Sidebar toggles, tab switches, resizing, hovering down the tree, folder expand/collapse | no long task; the collapse slide is the existing motion |
 | New note (Ctrl+N) | title focused with "Untitled" selected; Enter moves into the body; tab, header and tree all show the new name with no flash; Esc keeps the old name and returns to the note |
@@ -127,7 +156,7 @@ Ranked by how often a user hits it times how much it hurts. Numbers are at 5k, h
 
 ## 20k (report only, not in `npm test`)
 
-`GROVE_FEEL_N=20000 node scripts/test-friction.mjs`, re-run with the review fixes, page-side numbers.
+`GROVE_FEEL_N=20000 node scripts/test-friction.mjs`, run with the first review fixes, so these numbers have the mock's link time taken out. It wasn't re-run after the second review fixes.
 - The fixed checks and the new link checks all pass at 20k too:
   - the edit: index equals the backend, the backlink has its text;
   - the linked rename: 4 → 4 backlinks, the same sources and status label.
@@ -171,17 +200,17 @@ Ranked by how often a user hits it times how much it hurts. Numbers are at 5k, h
 - WebKitGTK's JavaScript is slower than V8, so the one-off parse, about 45 ms for a list Enter just after a jump deep into a 386 KB note, may be longer there. It's still capped at 100 ms, after which Enter behaves as before.
 - Frame timing in WebKitGTK is capped at 60 Hz (WEBKIT_HZ notes), so frame-gap numbers here are a floor, not a measurement of the app.
 
-**Ruled out:** a backlinks pane or count flash on note switch (checked with the right sidebar open); a stale tab or title after a rename; a lost caret or scroll on tab switch, Back, or close-and-reopen; focus left in a closed prompt; the tree scroll jumping on a new note (it reveals the new row, as intended); a typing hitch from the autosave and link refresh at 5k (with the mock's link work counted as Rust's, not the page's).
+**Ruled out:** a backlinks pane or count flash on note switch (checked with the right sidebar open); a stale tab or title after a rename; a lost caret or scroll on tab switch, Back, or close-and-reopen; focus left in a closed prompt; the tree scroll jumping on a new note (it reveals the new row, as intended); a typing hitch from the autosave and link refresh at 5k (raw: max frame 17 ms, the mock's link work included).
 
 ## Recorded for later pieces (not done here)
 
-- **P6 (file tree):** every file-list change rebuilds every visible root row and re-sorts the vault. Page-side, with the mock's link work taken out:
-  - new note, rename and rename-cancel cost 40–48 ms of JS at 5k (no task over 50 ms);
+- **P6 (file tree):** every file-list change rebuilds every visible root row and re-sorts the vault.
+  - At 5k, new note, rename and rename-cancel each have one long task of 82–94 ms raw. With the mock's link work taken out it's 45–47 ms, which estimates the app's cost.
   - at 20k they're long tasks of 189–214 ms, and so is a linked rename. Reveal and expanding a large folder are 194 ms and 72 ms at 20k, and showing the Files tab again 52 ms. The script prints these as a known gap; P6's incremental updates and virtual rows are the fix.
 - **P5 (search):** typing in search at 20k has two long tasks (max 110 ms), all in the mock's page-side search. Re-measure in the app after P5.
 - **P2, P4, P8:** nothing new. Typing with the link refresh is clean at 5k and 20k with the link commands off the page. The graph wasn't in these flows; the switcher opens in 16 ms and filters within the budget at 20k.
 - **Rust:** nothing needed.
-- **Mock only:** the mock's synchronous link commands cost 38–53 ms per file change at 5k and 150–320 ms per flow at 20k. The script reports these as `rust` and keeps them out of the page-side numbers. They're dev-only, not the app's cost.
+- **Mock only:** the mock's synchronous link commands now cost 6–12 ms per saved edit at 5k, and about 40 ms per file-list change. They used to be about 40 ms per save. The budgets count this time; `mock_ms` shows it per flow.
 - **CodeMirror:** just after a jump deep into a long note, any edit (a letter or a plain Enter) spends up to 20 ms parsing toward the screen. That's CodeMirror's fixed per-edit slice, for about 100 ms until the background parse catches up. It's measured, not changed.
 
 ## Tests and checks
@@ -189,13 +218,13 @@ Ranked by how often a user hits it times how much it hurts. Numbers are at 5k, h
 - **`scripts/test-friction.mjs`** at 5k: passes.
   - **First F1 commit:** with the product changes reversed (`git apply -R`), it failed on exactly six checks: `enter_list_item`, `enter_list_fresh_long`, `switcher_esc`, `palette_esc`, `confirm_esc`, `resize_left`.
     - Since the review fix, `enter_list_item` puts the line on screen first, as a user has it. On the old code it now fails only `enter_list_fresh_long`'s continuation, which is the case the fix is for.
-  - **Review fixes:** the sabotage run listed under Review fixes.
+  - **Review fixes:** the sabotage runs listed under Review fixes and Second review fixes.
   - It runs in about a minute and is in `npm test`, after `test-feel.mjs`.
 - **`src/editor/config.test.ts`:** the cold-note Enter test, which fails on both F1's code and the code before F1.
 - **`scripts/test-feel.mjs`:** budgets unchanged; the graph is still the reported known gap.
 - **No assertion anywhere was weakened.**
 - **Full runs on the final tree, first run, no retry:**
-  - `flock /tmp/grove-npm-test.lock npm test` (with `posttest`): exit 0, after the review fixes. Vitest 99 files, 1,545 tests. P0 at 5k passed, with the graph reported as its known gap. The friction script passed, printing the P6 gap (linked rename, 62 ms) and the known one-time list-Enter parse (45 ms).
+  - `flock /tmp/grove-npm-test.lock npm test` (with `posttest`): exit 0, after the second review fixes. Vitest 99 files, 1,545 tests. P0 at 5k passed, with the graph reported as its known gap. The friction script passed, printing the P6 gap (raw long tasks 85, 94 and 121 ms; 45, 46 and 63 ms without the mock) and the known one-time list-Enter parse (45 ms).
   - `npm run build`: passed. The existing Vite large-chunk warning remains.
   - `npm run audit:offline`: passed. 220 source files, dist, CSP, capabilities and dependencies checked.
   - `cargo test`: not run, because no Rust changed.
@@ -215,12 +244,13 @@ Ranked by how often a user hits it times how much it hurts. Numbers are at 5k, h
 | **TypeScript, app code** | **28** | **10** |
 | `app/src/styles/sidedock.css` | 9 | 1 |
 | **CSS** | **9** | **1** |
+| `app/src/mock/backend.ts` (dev mock backend, link walk cached; most lines only re-indented) | 70 | 55 |
 | `app/src/editor/config.test.ts` | 18 | 1 |
 | `app/scripts/test-friction.mjs` (new) | 500 | 0 |
 | `app/package.json` (the script in `npm test`) | 1 | 1 |
 | `NOTES_F1-claude.md` | this file | |
 
-- **App code net:** +26 lines (TS +18, CSS +8), far under the +300 limit. Counts are against the brief commit `e4cdb65`, review fixes included.
+- **App code net:** +26 lines (TS +18, CSS +8), far under the +300 limit. The dev mock backend adds +15 net. Counts are against the brief commit `e4cdb65`, both rounds of review fixes included.
 - **No new dependency.** `forceParsing` comes from `@codemirror/language`, already a dependency.
-- **Files near 800 lines:** none touched. `main.ts` is 541, `editor/config.ts` 151, `shell/prompt.ts` 199.
+- **Files near 800 lines:** none touched. `mock/backend.ts` is 578, `main.ts` 541, `editor/config.ts` 151, `shell/prompt.ts` 199.
 - **Dead code:** none was made dead.
