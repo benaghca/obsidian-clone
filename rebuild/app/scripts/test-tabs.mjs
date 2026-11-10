@@ -68,6 +68,22 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
       return r;
     }, theme, STRIP);
     check(colours.strip === colours.want && colours.active === colours.page, `${theme}: strip and active tab use the theme's colours ${JSON.stringify(colours)}`);
+    // No line between the strip and the note: the active tab runs straight into the note, in its colour.
+    const seam = await run((theme, sel) => {
+      const root = document.documentElement, was = [...root.classList].filter((c) => c.startsWith("theme-"));
+      root.classList.remove(...was); root.classList.add(`theme-${theme}`);
+      const strip = document.querySelector(sel), pane = strip.closest(".workspace-tabs"), leaf = pane.querySelector(".workspace-leaf"), act = strip.querySelector(".workspace-tab-header.is-active");
+      const cs = (e) => getComputedStyle(e), seen = (w, c) => parseFloat(w) > 0 && !/^rgba\(.*, 0\)$|transparent/.test(c);
+      const lines = [];
+      if (seen(cs(strip).borderBottomWidth, cs(strip).borderBottomColor)) lines.push(`strip border-bottom ${cs(strip).borderBottomWidth} ${cs(strip).borderBottomColor}`);
+      if (cs(strip).boxShadow !== "none") lines.push(`strip box-shadow ${cs(strip).boxShadow}`);
+      for (const e of [leaf, leaf.firstElementChild].filter(Boolean)) if (seen(cs(e).borderTopWidth, cs(e).borderTopColor)) lines.push(`${e.className} border-top ${cs(e).borderTopWidth} ${cs(e).borderTopColor}`);
+      for (const e of [strip, act]) for (const pseudo of ["::after"]) { const p = getComputedStyle(e, pseudo); if (p.content !== "none" && p.content !== "normal" && p.backgroundColor !== "rgba(0, 0, 0, 0)") lines.push(`${e.className}${pseudo}`); }
+      const r = { tab: cs(act).backgroundColor, note: cs(leaf).backgroundColor, gap: leaf.getBoundingClientRect().top - act.getBoundingClientRect().bottom, lines };
+      root.classList.remove(`theme-${theme}`); root.classList.add(...was);
+      return r;
+    }, theme, STRIP);
+    check(seam.tab === seam.note && Math.abs(seam.gap) < 0.5 && !seam.lines.length, `${theme}: the active tab flows into the note, same colour and no line between strip and note ${JSON.stringify(seam)}`);
   }
 
   // ---- Hover: the close button fades in, a small highlight, nothing moves ----
@@ -87,15 +103,47 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
   check(JSON.stringify(await boxes()) === JSON.stringify(rest), "hovering New tab moves or resizes nothing");
   await move({ x: 800, y: 500 });
 
-  // ---- Close, middle-close, click: the next note in 50 ms, focus and caret kept ----
   // Each step starts with focus in the note, so one step's focus loss doesn't carry into the next.
   const refocus = () => run(() => ws.view.focus());
   const kept = async (name, want) => { const now = await where(); check(now.focus && now.path === want.path && now.head === want.head, `${name}: focus ${now.focus ? "in the note" : "lost"}, ${now.path} @${now.head}, expected ${want.path} @${want.head}`); };
+  const open = (p) => evaluate(`ws.tabs.some((t) => t.path === ${JSON.stringify(p)})`);
+  await run(() => { window.__mid = []; addEventListener("pointerdown", (e) => e.button === 1 && __mid.push(e.defaultPrevented)); });
+
+  // ---- A linked tab: its unlink icon stays clear of the close button; a click unlinks, nothing else ----
+  const link = (a, b) => run((a, b) => { const t = (p) => ws.tabs.find((x) => x.path === p); ws.setLink(t(a), t(b)); }, a, b);
+  const linkOf = (p) => `${tab(p)} .workspace-tab-header-status-icon`;
+  await link(notes[3], notes[2]);
+  await sleep(100);
+  await hoverSettled(await point(tab(notes[3])));
+  const linkHit = await run((l, c) => { const lb = document.querySelector(l).getBoundingClientRect(), cb = document.querySelector(c).getBoundingClientRect();
+    return { gap: cb.left - lb.right, hit: !!document.elementFromPoint(lb.x + lb.width / 2, lb.y + lb.height / 2)?.closest(".workspace-tab-header-status-icon") }; }, linkOf(notes[3]), closeOf(notes[3]));
+  check(linkHit.gap >= 0 && linkHit.hit, `hovered linked tab: the unlink icon is clear of the close button ${JSON.stringify(linkHit)}`);
+  await refocus();
+  await press1(linkOf(notes[3]));
+  await sleep(250);
+  check((await open(notes[3])) && !(await evaluate(`document.querySelector(${JSON.stringify(tab(notes[3]))}).classList.contains("is-linked")`)), "clicking a hovered tab's unlink icon unlinks it and doesn't close it");
+  await kept("unlink", big);
+  if (!(await open(notes[3]))) await run(async (p) => { await ws.open(p, { where: "tab" }); ws.activate(ws.tabs.find((t) => t.path === "Big note.md")); }, notes[3]);
+
+  // ---- A middle press closes the tab over its buttons too, with no default (autoscroll, paste) ----
+  await link(notes[3], notes[2]);
+  await run(async (p) => { await ws.open(p, { where: "tab" }); ws.activate(ws.tabs.find((t) => t.path === "Big note.md")); }, notes[11]);
+  await sleep(400);
+  for (const [name, p, sel] of [["middle_on_unlink", notes[3], linkOf(notes[3])], ["middle_on_close", notes[11], closeOf(notes[11])]]) {
+    await refocus();
+    await run(() => (__mid = []));
+    await press1(sel, "middle");
+    await sleep(250);
+    check(!(await open(p)) && JSON.stringify(await evaluate("__mid")) === "[true]" && (await where()).doc === big.doc, `${name}: closes ${p} (${!(await open(p))}), press default cancelled ${JSON.stringify(await evaluate("__mid"))}`);
+    await kept(name, big);
+  }
+
+  // ---- Close, middle-close, click: the next note in 50 ms, focus and caret kept ----
   const quick = (name) => { const x = out[name]; check(x.ms !== null && x.ms <= 50 && x.long === 0 && !Object.keys(x.flashes).length && !x.removed.editor, `${name}: ${x.ms} ms, ${x.long} long tasks, flashes ${JSON.stringify(x.flashes)}, editor removed ${x.removed.editor ?? 0}`); };
   await measure("close_background", () => press1(closeOf(notes[1])), `!ws.tabs.some((t) => t.path === ${JSON.stringify(notes[1])})`);
   quick("close_background");
   await kept("close_background", big);
-  await run(() => { window.__mid = []; addEventListener("pointerdown", (e) => e.button === 1 && __mid.push(e.defaultPrevented)); });
+  await run(() => (__mid = []));
   await refocus();
   await measure("middle_close_background", () => press1(tab(notes[2]), "middle"), `!ws.tabs.some((t) => t.path === ${JSON.stringify(notes[2])})`);
   quick("middle_close_background");
@@ -155,14 +203,24 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
 
   // ---- Keyboard and pin still work ----
   const count = (await order()).length;
+  // Ctrl+T from the first tab (so its new tab's neighbour is another note), with the caret set.
+  await press1(tab((await order())[0])); await sleep(250);
+  await run(() => { ws.view.dispatch({ selection: { anchor: Math.min(7, ws.view.state.doc.length) } }); ws.view.focus(); });
+  const origin = await where();
   await chord("t"); await sleep(250);
   check((await order()).length === count + 1 && (await evaluate("ws.active.path")) === null && (await order()).at(-1) === null, "Ctrl+T opens a new tab at the end");
   await chord("w"); await sleep(250);
   const back = await where();
-  check(back.focus && !!back.path && (await order()).length === count, `Ctrl+W closes it with focus in the next note (${back.path})`);
+  check(back.focus && back.path === origin.path && back.head === origin.head && (await order()).length === count, `Ctrl+W closes the untouched new tab and goes back to the note it came from, caret and all (${back.path} @${back.head}, expected ${origin.path} @${origin.head})`);
+  await chord("t"); await sleep(250);
+  await run(async (p) => { await ws.open(p); }, notes[4]);
+  await chord("w"); await sleep(250);
+  check((await where()).path === (await order()).at(-1), `a new tab that opened a note closes to its neighbour as before (${(await where()).path})`);
+  await press1(tab(big.path)); await sleep(250);
+  const pre = await where();
   await key("Control", 2); await press("Tab", 2); await key("Control", 0, "keyUp"); await sleep(250);
   const cycled = await where();
-  check(cycled.path !== back.path && cycled.focus, `Ctrl+Tab moves to the next tab with focus in it (${back.path} → ${cycled.path})`);
+  check(cycled.path !== pre.path && cycled.focus, `Ctrl+Tab moves to the next tab with focus in it (${pre.path} → ${cycled.path})`);
   await chord("w"); await sleep(250);
   await key("Control", 2); await key("Shift", 10); await press("T", 10); await key("Shift", 2, "keyUp"); await key("Control", 0, "keyUp"); await sleep(300);
   check((await where()).path === cycled.path && (await order()).length === count, "Ctrl+Shift+T reopens the closed tab in its place");
@@ -170,7 +228,10 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
   await sleep(250);
   const pinned = await look(cycled.path);
   check(pinned.close === "1" && (await evaluate(`document.querySelector(${JSON.stringify(tab(cycled.path))}).classList.contains("is-pinned")`)) && pinned.titleClear >= 0, `pin: the pin shows and the title stops before it ${JSON.stringify(pinned)}`);
-  await run(() => ws.togglePin());
+  await refocus();
+  await press1(closeOf(cycled.path));
+  await sleep(250);
+  check((await open(cycled.path)) && !(await evaluate(`document.querySelector(${JSON.stringify(tab(cycled.path))}).classList.contains("is-pinned")`)), "a click on the pin unpins the tab and keeps it open");
 
   // ---- Many tabs share the strip evenly ----
   await run(async (ps) => { for (const p of ps) await ws.open(p, { where: "tab" }); }, notes.slice(7, 12));
@@ -181,5 +242,5 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
   console.log(JSON.stringify(Object.fromEntries(Object.entries(out).map(([k, v]) => [k, v.ms === undefined ? v : { ms: v.ms, long: v.long, gap_p95: v.gap_p95, js_max: v.js_max }]))));
   if (REPORT) return console.log(misses);
   assert.deepEqual(misses, [], "tab strip (T1)");
-  console.log("PASS tab strip: slim and even, hover, close, middle-close, click, drag, drop outside, keyboard, pin, focus");
+  console.log("PASS tab strip: slim and even, hover, unlink, close, middle-close (also over the buttons), click, drag, drop outside, keyboard, new tab closes to its origin, pin, focus");
 });

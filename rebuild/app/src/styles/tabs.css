@@ -2,14 +2,14 @@
    window corner for the frameless window's buttons, and backlinks under
    the note. */
 
-/* tab strip: the top ones double as the title bar */
+/* tab strip: the top ones double as the title bar. No line under it: the
+   active tab, in the note's colour, runs straight into the note. */
 .mod-root .workspace-tab-header-container {
   height: var(--header-height);
   flex: none;
   display: flex;
   align-items: flex-end;
   background: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
   padding: 0 4px 0 8px;
 }
 .mod-root .workspace-tabs.mod-top > .workspace-tab-header-container {
@@ -36,7 +36,6 @@
   position: relative;
   padding: 3px 3px 4px;
   border-radius: var(--radius-m) var(--radius-m) 0 0;
-  margin-bottom: -1px;
   -webkit-app-region: no-drag;
 }
 /* opening and closing tabs grow and shrink (Web Animations in pane.ts) */
@@ -88,7 +87,8 @@
 /* The close button sits over the title's end instead of taking room from
    it, so an inactive tab's title uses its whole width and nothing moves
    when the button fades in on hover: the title fades out under it. The
-   active and pinned tabs, which always show it, keep its room clear. */
+   active and pinned tabs, which always show it, keep its room clear, and
+   so do linked tabs, whose unlink icon sits just before it. */
 .workspace-tab-header-inner-close-button {
   --icon-size: 14px;
   --icon-stroke: var(--icon-xs-stroke-width);
@@ -112,10 +112,11 @@
   opacity: 1;
 }
 .workspace-tab-header.is-active .workspace-tab-header-inner,
-.workspace-tab-header.is-pinned .workspace-tab-header-inner {
+.workspace-tab-header.is-pinned .workspace-tab-header-inner,
+.workspace-tab-header.is-linked .workspace-tab-header-inner {
   padding-right: 22px;
 }
-.workspace-tab-header:not(.is-active, .is-pinned):hover .workspace-tab-header-inner-title {
+.workspace-tab-header:not(.is-active, .is-pinned, .is-linked):hover .workspace-tab-header-inner-title {
   -webkit-mask-image: linear-gradient(to left, transparent 20px, #000 32px);
   mask-image: linear-gradient(to left, transparent 20px, #000 32px);
 }

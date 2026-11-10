@@ -29,6 +29,62 @@ What Chris will see and feel in the tab strip:
 
 No new setting, command or feature.
 
+## Review fixes and the seamless strip (after `e6a7157`)
+
+The independent review passed `e6a7157` with three fixes required. Chris then asked for one more look change in the same round.
+
+**In plain words:**
+
+- **The unlink icon on a linked tab works on hover.** The close "×" used to sit on top of it when you hovered, so trying to unlink could close the tab. Linked tabs now keep room for both, side by side.
+- **Middle-click closes a tab anywhere on it**, including over its "×" or its link icon. Before, a middle press there did nothing. A left click on those buttons still closes, unpins or unlinks as before.
+- **Ctrl+T then Ctrl+W puts you back where you were.** Closing a new tab you haven't used returns to the note you opened it from, with the caret where you left it. Before, you landed on whichever tab sat next to it. Once the new tab has opened a note, closing it follows the usual nearest-neighbour rule.
+- **No line under the tab strip.** The active tab, already in the note's colour, now runs straight into the note, as in Obsidian. Inactive tabs stay on the strip colour. Only existing theme tokens are used (`--background-primary`, `--background-secondary`); nothing new was added.
+
+**What changed:**
+
+- **`styles/tabs.css`:**
+  - linked tabs keep 22 px clear for the close button, as the active and pinned ones do, and their title isn't masked on hover;
+  - the strip's `border-bottom` is gone, and with it the tab's `margin-bottom: -1px`, which existed only to cover that border.
+- **`shell/tabStrip.ts`:** the close and unlink buttons keep only non-middle presses to themselves (`own`), so a middle press reaches the tab, which closes it and cancels the press's default. That default would otherwise be autoscroll (Windows) or paste (Linux). The close button's `mousedown` still cancels its default, so focus stays in the note.
+- **`workspace.ts`:**
+  - `newTab` remembers the tab it was opened from, in a `WeakMap`.
+  - `closeTabs` makes that tab active again when the closed tab is the group's active one and is still untouched: no note, no view, no history, and the origin still in the same group. Otherwise the old rule applies.
+  - The caret comes back through the existing per-tab memory, the same as any tab switch.
+
+**Tests (`scripts/test-tabs.mjs`)**, each checked against the old code. The sabotage put one app file at a time back to `e6a7157` and confirmed that only its own new checks failed:
+
+| Check | With the old file |
+|---|---|
+| A hovered linked tab's unlink icon is clear of the "×" and is what's under the pointer; clicking it unlinks without closing or switching, and focus and caret stay | `tabs.css`: fails (gap −17 px; the click closed the tab) |
+| A middle press on the unlink icon, and on the "×", closes that tab and cancels the press's default; focus and caret stay | `tabStrip.ts`: fails (nothing closed, no press handled) |
+| From the first tab, with the caret set, Ctrl+T then Ctrl+W comes back to that tab at that caret | `workspace.ts`: fails (landed on Big note, the neighbour) |
+| A new tab that opened a note closes to its neighbour, as before | passes both ways (the fallback) |
+| A left click on a pinned tab's pin unpins it and keeps it open | passes both ways (preserved behaviour) |
+| Light and dark: the active tab's background equals the note's, its bottom meets the note's top exactly, and nothing draws a line between them (strip border or shadow, leaf or view-header top border, `::after` lines) | strip border in place: fails (`1px rgb(224, 224, 224)` light, `1px rgb(51, 51, 51)` dark) |
+
+The Ctrl+Tab check now compares against the tab active just before the press. The test reaches it from a different tab than before, and the old comparison would have matched by wrap-around.
+
+**`scripts/test-r27e.mjs`** asserted the old rule for exactly this case: from Welcome, "+" then "×" showed the neighbour. Its check now expects Welcome, the tab the new one came from, and keeps the same exact tab-order check. The behaviour changed as the review asked; the check is no looser.
+
+**Seen, not changed:** the sidebars' tab strips keep their line under the header. The brief puts sidebar tabs out of scope, and Chris's request was about the strip over the note. In a top/bottom split, the lower pane's strip sits directly under the upper note; its strip colour still separates the two (checked in `/tmp` screenshots).
+
+**Line counts against `e6a7157`:**
+- **App code:** CSS +7/−6, TS +11/−6 (`tabStrip.ts` +6/−6, `workspace.ts` +5/−0), net **+6**.
+- **Tests:** `test-tabs.mjs` +67/−6, `test-r27e.mjs` +2/−1.
+- **T1 app code since `6c2a0af`:** net +28.
+- **File sizes:** `workspace.ts` is 706 lines (under 800), `tabStrip.ts` 163, `tabs.css` 225.
+- No new dependency and no Rust.
+
+**Results, on the final tree of this round:**
+
+- **`flock /tmp/grove-npm-test.lock npm test` (with `posttest`):** exit 0. Vitest 99 files, 1,545 tests.
+  - P0 `test-feel.mjs` passed, with the graph as its known gap.
+  - F1 `test-friction.mjs` passed. It printed its P6 gap (raw long tasks 87, 94 and 124 ms) and the one-time list-Enter parse (46 ms).
+  - `test-header.mjs`, `test-r27e.mjs` and `test-tabs.mjs` passed.
+  - An earlier full run, with the three review fixes but before the seamless-strip change, also exited 0.
+- **`npm run build`** and **`npm run audit:offline`:** passed. The existing Vite large-chunk warning remains.
+- **Screenshots** the suite rewrote under `rebuild/round*-shots/` were restored before committing.
+
 ## Audit: what each item did before
 
 Measured in headless Chromium at 1280×1000, `?synthetic=5000`, five tabs open with the 5,000-line note active and the caret at line 2,000.
@@ -120,9 +176,9 @@ The speed was already fine. What changed is the look, and where focus lands.
 ## Seen, not changed (out of scope or not friction)
 
 - **Ctrl+T leaves focus on the page.** The new tab is empty, with no editor to focus. Recorded only.
-- **Ctrl+W right after Ctrl+T** lands on the tab next to the closed one, not the note you came from. That's the existing close rule (nearest neighbour); changing it would be a behaviour change beyond this brief.
+- ~~**Ctrl+W right after Ctrl+T** lands on the tab next to the closed one.~~ Fixed in the review round below.
 - **One reorder can move several header elements.** Moving a tab two places moves the headers it passes (three DOM moves for one reorder). They're the same elements, not remounts, and nothing flickers (checked frame by frame). Recorded only.
-- **Inactive linked tabs:** the hover "×" covers the end of the title, and on a linked tab also the small link icon there. The link icon is a rare case and still shows when the tab isn't hovered.
+- ~~**Inactive linked tabs:** the hover "×" covers the link icon.~~ Fixed in the review round below.
 
 ## Line counts (against `6c2a0af`)
 
