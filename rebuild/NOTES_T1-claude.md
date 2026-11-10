@@ -66,7 +66,7 @@ The Ctrl+Tab check now compares against the tab active just before the press. Th
 
 **`scripts/test-r27e.mjs`** asserted the old rule for exactly this case: from Welcome, "+" then "×" showed the neighbour. Its check now expects Welcome, the tab the new one came from, and keeps the same exact tab-order check. The behaviour changed as the review asked; the check is no looser.
 
-**Seen, not changed:** the sidebars' tab strips keep their line under the header. The brief puts sidebar tabs out of scope, and Chris's request was about the strip over the note. In a top/bottom split, the lower pane's strip sits directly under the upper note; its strip colour still separates the two (checked in `/tmp` screenshots).
+**Seen, not changed in this round:** the sidebars' tab rows kept their line under the header. Chris has since approved removing it (see "Follow-up: no line under the side panels' tab rows" below). In a top/bottom split, the lower pane's strip sits directly under the upper note; its strip colour still separates the two (checked in `/tmp` screenshots).
 
 **Line counts against `e6a7157`:**
 - **App code:** CSS +7/−6, TS +11/−6 (`tabStrip.ts` +6/−6, `workspace.ts` +5/−0), net **+6**.
@@ -84,6 +84,38 @@ The Ctrl+Tab check now compares against the tab active just before the press. Th
   - An earlier full run, with the three review fixes but before the seamless-strip change, also exited 0.
 - **`npm run build`** and **`npm run audit:offline`:** passed. The existing Vite large-chunk warning remains.
 - **Screenshots** the suite rewrote under `rebuild/round*-shots/` were restored before committing.
+
+## Follow-up: no line under the side panels' tab rows (after `e33299e`)
+
+**In plain words:** Chris approved this one. The left and right sidebars' icon tab rows no longer have a line under them, so each row runs straight into its panel, like the main tab strip.
+
+**What changed:**
+- **`styles/sidedock.css`:** the tab row's `border-bottom` is removed.
+- **The light-theme override is deleted too.** It only recoloured that line, and it was the one hard-coded colour there (`#e4e4e4`).
+- **No colours added.** The row and panel keep their existing theme backgrounds. The active icon's highlight (`--background-modifier-hover`) is unchanged.
+
+**Tests:**
+- **`scripts/test-tabs.mjs`:** in light and dark, for both the left and right sidebar, nothing draws a line between the tab row and the panel below. It looks at:
+  - the row's bottom border, box shadow and `::after`;
+  - the top border of the panel below the row, and of that panel's first child.
+
+  With the border still in place it failed in both themes, on both sidebars (`1px rgb(228, 228, 228)` light, `1px rgb(51, 51, 51)` dark). It passes after the change.
+- **`scripts/test-r27m.mjs`:** this older test asserted the opposite, a 1 px `rgb(228, 228, 228)` line under the left sidebar's tab row. Its check now asserts no line (`0px`), which is the approved design. It is still an exact check.
+- **Screenshots:** left and right sidebars in light and dark, kept under `/tmp/grove-t1-shots` and not committed, show no seam.
+
+**Line counts against `e33299e`:**
+- **App code:** CSS +1/−5 in `sidedock.css`, net −4.
+- **Tests:** `test-tabs.mjs` +17/−0, `test-r27m.mjs` +2/−1.
+- **T1 app code since `6c2a0af`:** net +24.
+- No new dependency and no Rust.
+
+**Results:**
+
+- **`flock /tmp/grove-npm-test.lock npm test` (with `posttest`):**
+  - **First run: exit 1, on the same unrelated timing check as in the first T1 round.** `src/drawing/scene.test.ts` "parses a 5,000-element drawing in under 20 ms" measured 20.3 ms; even plain `JSON.parse` of that file took 20.1 ms under the load. Vitest stopping there means the later scripts and `posttest` didn't run. The check passed alone three times.
+  - **Second run, same tree: exit 0.** Vitest 99 files, 1,545 tests. `test-tabs.mjs` and `test-r27m.mjs` ("the sidebar tab row has no bottom line") passed, along with the rest of `posttest`.
+- **`npm run build`** and **`npm run audit:offline`:** passed.
+- **Screenshots** the suite rewrote were restored before committing.
 
 ## Audit: what each item did before
 

@@ -84,6 +84,23 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
       return r;
     }, theme, STRIP);
     check(seam.tab === seam.note && Math.abs(seam.gap) < 0.5 && !seam.lines.length, `${theme}: the active tab flows into the note, same colour and no line between strip and note ${JSON.stringify(seam)}`);
+    // Nor under the side panels' tab rows (left and right sidebars): no line between the row and the panel below.
+    const sides = await run((theme) => {
+      const root = document.documentElement, was = [...root.classList].filter((c) => c.startsWith("theme-"));
+      root.classList.remove(...was); root.classList.add(`theme-${theme}`);
+      const cs = (e) => getComputedStyle(e), seen = (w, c) => parseFloat(w) > 0 && !/^rgba\(.*, 0\)$|transparent/.test(c), lines = [];
+      for (const side of [".mod-left-split", ".mod-right-split"]) {
+        const row = document.querySelector(`${side} > .workspace-tab-header-container`);
+        if (!row) { lines.push(`${side}: no tab row`); continue; }
+        if (seen(cs(row).borderBottomWidth, cs(row).borderBottomColor)) lines.push(`${side} row border-bottom ${cs(row).borderBottomWidth} ${cs(row).borderBottomColor}`);
+        if (cs(row).boxShadow !== "none") lines.push(`${side} row box-shadow ${cs(row).boxShadow}`);
+        const p = getComputedStyle(row, "::after"); if (p.content !== "none" && p.content !== "normal") lines.push(`${side} row ::after`);
+        for (const e of [row.nextElementSibling, row.nextElementSibling?.firstElementChild].filter(Boolean)) if (seen(cs(e).borderTopWidth, cs(e).borderTopColor)) lines.push(`${side} ${e.className} border-top ${cs(e).borderTopWidth} ${cs(e).borderTopColor}`);
+      }
+      root.classList.remove(`theme-${theme}`); root.classList.add(...was);
+      return lines;
+    }, theme);
+    check(!sides.length, `${theme}: no line under the side panels' tab rows ${JSON.stringify(sides)}`);
   }
 
   // ---- Hover: the close button fades in, a small highlight, nothing moves ----
