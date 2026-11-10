@@ -172,7 +172,7 @@ try {
   // The one pass updateLinks makes: every moved note in one map, every source rewritten once.
   const movedTo = new Map(moved.map((n) => [n.path, `X/${n.path}`]));
   const movedAfter = notes.map((n) => (movedTo.has(n.path) ? { name: n.name, path: movedTo.get(n.path) } : n));
-  const moves = [{ moved: movedTo, before: notes, after: movedAfter }];
+  const moves = [{ moved: new Map([...movedTo].map(([from, to], order) => [from, { to, order }])), before: notes, after: movedAfter }];
   const onePass = time(() => folderSources.reduce((links, s) => links + rewriteLinks(text.get(s), s, moves, style, movedTo.get(s) ?? s).count, 0), 3);
   r.folder_move_one_pass_ms = onePass.ms;
   r.folder_move_one_pass_max_ms = onePass.max;

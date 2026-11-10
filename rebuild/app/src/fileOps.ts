@@ -146,8 +146,34 @@ export async function moveFile(ws: Workspace, path: string, folder: string) {
   await relocate(ws, path, clash ? freeName(ws, to.slice(0, to.length - ext.length), ext, true) : to);
 }
 
+// A move waits for note writes already sent, and a link update holds its next
+// read or write while a move runs, so neither works on a path that is moving.
+const moving = new Set<Promise<unknown>>();
+const writing = new Set<Promise<unknown>>();
+function track<T>(set: Set<Promise<unknown>>, task: Promise<T>): Promise<T> {
+  set.add(task);
+  const done = () => void set.delete(task);
+  task.then(done, done);
+  return task;
+}
+
+/** Whether a rename or move is under way. Check it just before sending a read or write. */
+export const isMoving = () => moving.size > 0;
+
+/** Settles once no rename or move is under way. */
+export async function movesSettled() {
+  while (moving.size) await Promise.allSettled([...moving]);
+}
+
 /** Move a file or folder; the loaded notes and everything open follow. */
-async function relocate(ws: Workspace, from: string, to: string) {
+function relocate(ws: Workspace, from: string, to: string): Promise<void> {
+  return track(moving, (async () => {
+    while (writing.size) await Promise.allSettled([...writing]);
+    await relocateNow(ws, from, to);
+  })());
+}
+
+async function relocateNow(ws: Workspace, from: string, to: string) {
   if (ws.vault.isFolder(from) && isUnder(parentDir(to).toLowerCase(), from.toLowerCase())) throw new Error("A folder cannot move into itself.");
   const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
@@ -218,7 +244,7 @@ export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?
 export async function updateNoteText(ws: Workspace, path: string, next: string) {
   const doc = ws.editors.doc(path);
   if (!doc) {
-    await api.writeNote(path, next);
+    await track(writing, api.writeNote(path, next));
     ws.vault.written(path);
     return;
   }

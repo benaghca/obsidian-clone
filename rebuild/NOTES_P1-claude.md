@@ -9,7 +9,7 @@ Branch `rebuild/g1-claude`, from the brief commit `9f78826` on `rebuild/integrat
   - It is now **0.58 s** of link rewriting. With Tauri-like IPC boundaries, the whole move costs **577 ms** of page time.
 - **The rewritten text is byte-for-byte what the old code wrote.** This was checked several ways:
   - against the literal pre-P1 code, on a 64-note test vault, in every link format;
-  - by a 1,017-case random fuzz (scratch, not committed);
+  - by random fuzzes (scratch, not committed): 1,017 cases at first, then 4,053 and 8,091 cases after the review fixes, with note/image name clashes forced into the moved folder;
   - by a hash of the whole mock vault after each real browser move (5k and 20k).
 - **Lookups are microseconds when warm.** Hover previews, canvas cards, `ws.resolve`'s fallback, `ws.linkTo` and the embed host now share one cached file array (`Vault.fileRefs()`). So they share one index.
   - A missing-note resolve at 50k went from 18.6 ms on every call to 18 ms once per file list, then 0 ms.
@@ -17,6 +17,51 @@ Branch `rebuild/g1-claude`, from the brief commit `9f78826` on `rebuild/integrat
 - **The move yields.** About every 8 ms the move lets the page paint, so a move never becomes one long task, even when reads settle without a task boundary (loaded notes, the mock). Sources are read 16 at a time. Writes stay one at a time on purpose: `write_note` runs on the GTK main thread.
 - **The mock answers link commands from one walk per vault state.** `link_index`, `backlinks` and `link_sources` share it, and replies are copies, as IPC would hand back.
 - **What still bounds a 50k / 500-note move is the writes, not the rewrite.** The JS rewrite is **19 ms**. Each `write_note` costs about 26 ms on the Rust main thread at 50k (RUST_PERF_PLAN §3.1). That makes the full move about **35 s**, by estimate. Batching writes is P2 (`write_notes`), so **the 2 s target is not met at 50k** and is left to P2.
+
+## Fixes after the review
+
+Codex reviewed `8b7371a` independently: **FAIL**, with three required fixes. All three are fixed here, each with a regression test. Each test fails on `8b7371a` and passes now (checked by running it against `8b7371a`'s `update.ts` / `internal.ts`).
+
+1. **High: typing during a yield was lost.** `updateLinks` read each note, yielded, and later wrote the result computed from that earlier read. Now every note is checked just before its write:
+   - **Loaded:** the editor's text right then. If it differs from what was read, the links are rewritten in the current text.
+   - **Not loaded:** the job listens to `Vault.onModified` (our saves, and outside changes through `vault-changed`). A note modified since its read is read again and rewritten in the new text.
+
+   Nothing waits between taking the text and handing the result to `updateNoteText`, so an editor can't change in between.
+
+   Tests (`links/updateRace.test.ts`, real `updateNoteText` on CodeMirror states):
+   - typing on a line, and typing a new line, into two loaded linking notes after the first write: both kept, and the link rewritten;
+   - a note changed on disk mid-move: the change kept, and its new link rewritten too.
+2. **High: a second move during the rewrite left obsolete paths.** Old → New, then New → Final mid-job: `8b7371a` recreated 20 notes under `New/` and left old links in the `Final/` copies. Two parts:
+   - **`fileOps.ts` (coordination).** `relocate` now registers itself while it runs and first waits for note writes already sent through `updateNoteText`. `isMoving()` / `movesSettled()` let a link update hold its next read or write until no move is running. The check happens just before each request is sent.
+   - **`links/update.ts` (rebase).** The job listens to `ws.onMove`, which now returns its unsubscribe (one line in `workspace.ts`). On each later move it carries everything along:
+     - the moved files' new paths;
+     - each linking note's current path;
+     - the after-move snapshots (names follow a rename);
+     - the modified-note marks.
+
+     A read that failed because its note moved mid-read is tried again at the new path. Links still resolve against the snapshot from before the first move, from the note's original path, so a note's untouched old links still find their targets.
+
+   The test runs the real `renameFile` twice (Old → New, then New → Final after the fifth write), on 20 notes linking each other and 40 linking from outside, one of them loaded. Afterwards: nothing under `Old/` or `New/`, all 20 under `Final/`, and no `[[Old/…` or `[[New/…` link anywhere, on disk or in the editor.
+3. **Medium: grouping changed which file an embed targets.** `8b7371a` resolved the notes group first. The fix is described under "Pair order" below.
+   - `update.test.ts` checks Codex's case (`Move/Img/photo.png`, `Move/Img/Source.md` with `![[photo.png|300]]`, `Move/Note/photo.png.md`) in both file orders, with absolute and with shortest links, against what `9f78826` wrote. In absolute: `![[New/Img/photo.png|300]]` when the image comes first, `![[New/Note/photo.png|300]]` when the note comes first. In shortest, with the note first, the old code rewrote the link twice (2 links), and so does the new.
+   - The same test passes when run against `9f78826`'s own code.
+   - **The first fuzz missed this.** P1's random vaults never put both kinds in one moved folder: the old notes-first rule also scored 0 differences. Once 40% of the vaults held such a pair, notes-first scored 81 differences against `9f78826`, and taking the earliest pair alone still scored 77, because of the chained rewrites. With the chains replayed: **0 of 4,053**, then **0 of 8,091** on another seed.
+
+Not changed, as the brief allows:
+- A yield comes only between notes, so one very large note is still rewritten in one go. That's inherited, not new.
+- A note deleted while its links are being rewritten is written again, as before P1.
+- The `write_note` cost at 50k stays P2's.
+
+Cost of the fixes: the 50k one-pass rewrite went from 19.1 to 20.4 ms (1,313 sources), and the 5k one from 1.7 to 1.9 ms.
+
+The browser move bench after the fixes, with the whole-vault hashes unchanged from before P1:
+
+| Run | Links | Whole move | `updateLinks` | Long tasks | Hash |
+|---|---:|---:|---:|---|---|
+| 5k, IPC | 2,364 | 122 ms | 97 ms | 0 (max frame gap 16.7 ms) | `946309ed…` |
+| 5k, mock | 2,364 | 545 ms | 80 ms | 1 × 488 ms (mock work, as before) | `946309ed…` |
+| 20k, IPC | 9,941 | 575 ms | 477 ms | 1 × 86 ms (file tree, P6) | `3325ea22…` |
+| 20k, mock | 9,941 | 6,812 ms | 593 ms | 1 × 6,284 ms (mock work, as before) | `3325ea22…` |
 
 ## What changed
 
@@ -56,7 +101,12 @@ Reused, not replaced: the `WeakMap` note index in `links/internal.ts` (`indexNot
 
 **Aliases.** The link resolver has never read frontmatter aliases (`NOTES_LINK-INDEX.md`), and it still doesn't. No cache here holds aliases, so there's nothing for an alias change to invalidate. The note index is keyed by array identity plus length. `Vault.refreshFiles` replaces `files` and `notes` (and so `fileRefs()`) on every file-list change. The only in-place change is `touch()` writing `mtime_ms`, which the index doesn't read.
 
-**One deliberate edge.** The old loop applied the pairs in file-list order, so a link that resolved to a moved note among the notes *and* to a different moved non-note file among every file took whichever pair came first. Now the notes group goes first. This needs a note and a file that both answer one link target (for example a note named `photo.png.md` next to `photo.png`), and both must move together. The fuzz and the fixtures never produced it. It's documented on `rewriteLinks`.
+**Pair order (fixed after the review).** 8b7371a put the notes group first, so a link that a moved note *and* a moved file both answered could change target: `![[photo.png|300]]` next to `photo.png` and `photo.png.md`. Each move now carries its place in the file list (`order`). For each link, the one pass replays the old passes:
+- it takes the earliest move the link resolves to, in that move's own group;
+- it then offers the rewritten link to the later moves, which may move it again, as the next pass did;
+- each step counts as a changed link, so the counts shown in "Update links?" match too.
+
+A wikilink whose new path holds `]`, `|`, `#` or a line break stops there, because the old next pass would have read a different link. See "Fixes after the review".
 
 ## Measurements
 
@@ -134,6 +184,7 @@ At 20k, the mock already loaded in about 1.5 s before P1 (the link-index work ha
 
 ## Tests
 
+- **`links/updateRace.test.ts`** (new, after the review): typing and new lines in loaded notes mid-move, a note changed on disk mid-move, and a second folder move mid-rewrite, all through the real `renameFile` and `updateNoteText`. See "Fixes after the review".
 - **`links/update.test.ts`** (new tests):
   - **64-note folder move, one pass vs one pass per pair.** The vault has clashing names across folders, headings, aliases, relative and partial paths, Markdown links with `%20` and escaped parentheses, image and drawing embeds, an extensionless file, code spans, fences, CRLF notes and unresolved links. Every written note equals the old per-pair loop's output, with over 500 links rewritten.
   - **Hashes of the literal pre-P1 code.** Five moves (folder rename, folder into a folder, subfolder out, one note, one image) × three link formats × both Wikilinks settings. The hashes were made by running `9f78826`'s own `updateLinks` / `internal.ts` beside the new code before committing, and that run also compared every written note directly: all 30 identical.
@@ -143,10 +194,10 @@ At 20k, the mock already loaded in about 1.5 s before P1 (the link-index work ha
 - **`workspace.test.ts`:** two cases built a fake vault without `fileRefs()`. They now use a real `Vault` over the same file list. The assertions are unchanged.
 - **Unchanged and passing:** `internal.test.ts`, `fixtures/parity/links.json`, `test-links-embeds-edge.mjs` (its rewrite and resolve cases).
 
-Full runs on the final tree, first run, no retry:
+Full runs on the final tree, after the review fixes, first run, no retry:
 
-- `flock /tmp/grove-npm-test.lock npm test` (including `posttest`): exit 0. Vitest: 98 files, 1,540 tests. P0 at 5k passed, with the graph reported as the known gap (p95 33.4 ms, max 33.4 ms).
-  - The first full run had failed on the two `workspace.test.ts` fake vaults described above. Those were fixed, and the suite passed on the next run.
+- `flock /tmp/grove-npm-test.lock npm test` (including `posttest`): exit 0. Vitest: 99 files, 1,544 tests. P0 at 5k passed, with the graph reported as the known gap (p95 33.4 ms, max 33.4 ms).
+  - For the record: on `8b7371a`, the first full run had failed on the two `workspace.test.ts` fake vaults described above, and passed on the next run after they were fixed.
 - `npm run build`: passed. The existing Vite large-chunk warning remains.
 - `npm run audit:offline`: passed. 220 source files, dist, CSP, capabilities and dependencies checked.
 - `cargo test`: not run, because no Rust changed.
@@ -155,38 +206,42 @@ Full runs on the final tree, first run, no retry:
 
 Checked with the browser bench, the tests and the code. No window was opened, so WebKitGTK itself wasn't observed.
 
-- **Lag and freezes.** The rewrite no longer blocks: at most about 8 ms of rewriting between paints. With IPC-like boundaries, a 833-note move at 5k has no long task and a 16.7 ms worst frame. The remaining page block at 20k is the file tree's 75 ms rebuild on the file-list change (P6), present before P1 for any rename. Rust-side `write_note` main-thread time is the remaining window-side cost at large sizes (P2). The move now finishes in well under a second at 20k on the page side, so the window in which typing races the rewrite is much shorter.
+- **Lag and freezes.** The rewrite no longer blocks: at most about 8 ms of rewriting between paints. With IPC-like boundaries, a 833-note move at 5k has no long task and a 16.7 ms worst frame. The remaining page block at 20k is the file tree's 75 ms rebuild on the file-list change (P6), present before P1 for any rename. Rust-side `write_note` main-thread time is the remaining window-side cost at large sizes (P2). Because the move yields, the user can type, save or move again while it runs. 8b7371a then wrote its earlier snapshot over those changes. Each note is now checked just before it's written (see "Fixes after the review").
 - **Focus and caret.** The rename flow didn't change: same `relocate` order, no new dialog, same "Update links?" prompt when that setting is off. Open notes are still updated through `updateNoteText`'s line-level change, so the caret and selection stay where they are, as before. The new yields don't move focus.
-  - **Existing behaviour, not new:** if a user changes the line count of an open linking note between its read and its write, `updateNoteText` replaces the whole document. The window for that existed before, because reads were already async in Tauri, and it is now far shorter. Not changed here.
+  - Typing in an open linking note during the move is kept, with or without a new line: the links are rewritten in the editor's text as it is just before the write. A note saved or changed on disk meanwhile is read again first.
 - **Flicker.** There's one `refreshFiles` (in `followMove`) as before. Rewritten open notes change line by line, with no remount. The vault hash after a move is identical, so no extra or different writes happen.
 - **Extra steps.** None: no new prompt, setting or command.
 - **Stale links.** Hover previews, canvas cards, embeds, `ws.resolve` and `linkTo` read `Vault.fileRefs()`. That array is replaced on the file-list refresh in `followMove`, so the next lookup builds a fresh index with the new paths. No cache outlives a file list. The backlinks pane and link styling refresh from `refreshLinks` after `followMove`, and again one second after the last rewrite write, as before. The mock's walk is re-done after any change, so it can't serve the pre-move index.
 
 ## Line counts
 
-Net change by file (`git diff --numstat` against `9f78826`, plus this notes file):
+Net change by file, all of P1 (`git diff --numstat 9f78826`, after the review fixes, plus this notes file):
 
 | File | Added | Removed |
 |---|---:|---:|
-| `app/src/links/internal.ts` | 46 | 8 |
-| `app/src/links/update.ts` | 44 | 30 |
+| `app/src/links/update.ts` | 153 | 33 |
+| `app/src/links/internal.ts` | 69 | 15 |
+| `app/src/fileOps.ts` | 28 | 2 |
 | `app/src/mock/backend.ts` | 25 | 10 |
+| `app/src/workspace.ts` | 5 | 5 |
 | `app/src/editorHost.ts` | 2 | 6 |
-| `app/src/workspace.ts` | 2 | 2 |
 | `app/src/shell/hoverPreview.ts` | 1 | 1 |
 | `app/src/canvas/view.ts` | 1 | 1 |
-| **TypeScript, app code** | **121** | **58** |
-| `app/src/links/update.test.ts` | 123 | 0 |
+| **TypeScript, app code** | **284** | **73** |
+| `app/src/links/update.test.ts` | 163 | 16 |
+| `app/src/links/updateRace.test.ts` (new) | 145 | 0 |
 | `app/src/mock/backend.test.ts` | 28 | 0 |
 | `app/src/workspace.test.ts` | 8 | 3 |
-| **TypeScript, tests** | **159** | **3** |
+| **TypeScript, tests** | **344** | **19** |
 | `app/scripts/bench-feel.mjs` | 13 | 1 |
 | `app/scripts/test-feel.mjs` | 5 | 4 |
 | **JavaScript, scripts** | **18** | **5** |
 | `NOTES_P1-claude.md` | this file | |
 
+The review fixes alone, against `8b7371a`: `update.ts` +138 / −32, `internal.ts` +38 / −22, `fileOps.ts` +28 / −2, `workspace.ts` +3 / −3, `bench-feel.mjs` +1 / −1, and tests +186 / −17 (including the new `updateRace.test.ts`).
+
 - **No new dependency.**
-- **Files near 800 lines:** none touched comes close. `workspace.ts` is 701 lines (unchanged in length), `mock/backend.ts` 563, `links/internal.ts` 349.
+- **Files near 800 lines:** none touched comes close. `workspace.ts` is 701 lines, `mock/backend.ts` 563, `links/internal.ts` 365, `fileOps.ts` 262 and `links/update.ts` 191.
 - **Dead code removed:** `editorHost.ts`'s private `files` cache and its `NoteLike` import, and `update.ts`'s per-pair loop and `seen` set.
 
 ## Left for P2 or later (not done here)

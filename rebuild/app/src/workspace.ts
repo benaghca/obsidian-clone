@@ -653,9 +653,9 @@ export class Workspace {
 
   // ----- what is open follows the files -----
 
-  /** Called with a path-mapping function after anything is renamed or moved. */
-  onMove(fn: (swap: (path: string) => string) => void) {
-    this.moves.on(fn);
+  /** Called with a path-mapping function after anything is renamed or moved; returns a function that stops. */
+  onMove(fn: (swap: (path: string) => string) => void): () => void {
+    return this.moves.on(fn);
   }
 
   /** A file or folder moved (see fileOps.ts): tabs, their history, closed tabs and recents follow. */

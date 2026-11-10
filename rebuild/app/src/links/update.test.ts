@@ -4,16 +4,19 @@ import type { Workspace } from "../workspace";
 import { rewriteLinks } from "./internal";
 import { updateLinks } from "./update";
 
-vi.mock("../fileOps", () => ({ updateNoteText: vi.fn().mockResolvedValue(undefined) }));
+vi.mock("../fileOps", () => ({ updateNoteText: vi.fn().mockResolvedValue(undefined), isMoving: () => false, movesSettled: async () => {} }));
+/** A workspace with only what a test sets, plus no moves, no saves and no loaded notes. */
+const fake = (w: { vault: object; editors: object }) =>
+  ({ onMove: () => () => {}, ...w, vault: { onModified: () => () => {}, ...w.vault }, editors: { doc: () => undefined, ...w.editors } }) as unknown as Workspace;
 const style = { format: "shortest", wikilinks: true } as const;
 beforeEach(() => vi.clearAllMocks());
 
 test("rewrites from a pre-rename source list", async () => {
   const before = [{ path: "Old.md", name: "Old" }, { path: "Source.md", name: "Source" }];
-  const ws = {
+  const ws = fake({
     vault: { notes: [{ path: "New.md", name: "New" }, before[1]], links: { outgoing: {} } },
     editors: { text: vi.fn().mockResolvedValue("[[Old]] and [label](Old.md#Heading)") },
-  } as unknown as Workspace;
+  });
   const ask = vi.fn().mockResolvedValue(true);
   expect(await updateLinks(ws, "Old.md", "New.md", before, ["Source.md"], style, ask)).toBe(2);
   expect(ask).toHaveBeenCalledWith(2, 1);
@@ -22,10 +25,10 @@ test("rewrites from a pre-rename source list", async () => {
 
 test("maps sources inside a moved folder forward exactly once and uses live editor text", async () => {
   const before = [{ path: "Old/Target.md", name: "Target" }, { path: "Old/Source.md", name: "Source" }];
-  const ws = {
+  const ws = fake({
     vault: { notes: before.map(n => ({ ...n, path: n.path.replace("Old/", "New/") })), links: { outgoing: {} } },
     editors: { text: vi.fn().mockResolvedValue("unsaved [[Old/Target]]") },
-  } as unknown as Workspace;
+  });
   expect(await updateLinks(ws, "Old", "New", before, ["Old/Source.md"], style, null)).toBe(1);
   expect(ws.editors.text).toHaveBeenCalledWith("New/Source.md");
   expect(updateNoteText).toHaveBeenCalledWith(ws, "New/Source.md", "unsaved [[Target]]");
@@ -33,7 +36,7 @@ test("maps sources inside a moved folder forward exactly once and uses live edit
 
 test("declining the rename-link confirmation leaves source text untouched", async () => {
   const before = [{ path: "Old.md", name: "Old" }, { path: "Source.md", name: "Source" }];
-  const ws = { vault: { notes: [{ path: "New.md", name: "New" }, before[1]] }, editors: { text: async () => "[[Old]]" } } as unknown as Workspace;
+  const ws = fake({ vault: { notes: [{ path: "New.md", name: "New" }, before[1]] }, editors: { text: async () => "[[Old]]" } });
   expect(await updateLinks(ws, "Old.md", "New.md", before, ["Source.md"], style, async () => false)).toBe(0);
   expect(updateNoteText).not.toHaveBeenCalled();
 });
@@ -43,7 +46,7 @@ test("a 50-note folder move rewrites every linking note", async () => {
   const linkers = Array.from({ length: 50 }, (_, i) => ({ path: `Link${i}.md`, name: `Link${i}` }));
   const before = [...moved, ...linkers];
   const after = before.map((n) => n.path.startsWith("Old/") ? { ...n, path: `New/${n.path.slice(4)}` } : n);
-  const ws = {
+  const ws = fake({
     vault: { notes: after },
     editors: {
       text: vi.fn(async (path: string) => {
@@ -51,7 +54,7 @@ test("a 50-note folder move rewrites every linking note", async () => {
         return i === undefined ? "" : `[[Old/Note${i}]]`;
       }),
     },
-  } as unknown as Workspace;
+  });
   expect(await updateLinks(ws, "Old", "New", before, linkers.map((n) => n.path), style, null)).toBe(50);
   expect(updateNoteText).toHaveBeenCalledTimes(50);
   expect(updateNoteText).toHaveBeenCalledWith(ws, "Link0.md", "[[Note0]]");
@@ -64,10 +67,10 @@ test("renaming a drawing rewrites its embeds, keeps their size, and leaves a sam
     { path: "Source.md", name: "Source" },
     { path: "Sketch.excalidraw", name: "Sketch.excalidraw" },
   ];
-  const ws = {
+  const ws = fake({
     vault: { notes: before.slice(0, 2) },
     editors: { text: vi.fn().mockResolvedValue("![[Sketch.excalidraw]]\n![[Sketch.excalidraw|400]] [[Sketch]] ![[Sketch]]\n![drawn](Sketch.excalidraw)") },
-  } as unknown as Workspace;
+  });
   expect(await updateLinks(ws, "Sketch.excalidraw", "Plan 2.excalidraw", before, ["Source.md"], style, null)).toBe(3);
   expect(updateNoteText).toHaveBeenCalledWith(ws, "Source.md", "![[Plan 2.excalidraw]]\n![[Plan 2.excalidraw|400]] [[Sketch]] ![[Sketch]]\n![drawn](Plan%202.excalidraw)");
 });
@@ -78,10 +81,10 @@ test("a drawing moved into a folder with a same-named drawing is linked by its p
     { path: "Sketch.excalidraw", name: "Sketch.excalidraw" },
     { path: "Other/Sketch.excalidraw", name: "Sketch.excalidraw" },
   ];
-  const ws = {
+  const ws = fake({
     vault: { notes: before.slice(0, 1) },
     editors: { text: vi.fn().mockResolvedValue("![[Sketch.excalidraw]] and ![[Other/Sketch.excalidraw|200]]") },
-  } as unknown as Workspace;
+  });
   // Shortest: the bare name now matches two drawings, so the moved one is written as its path.
   expect(await updateLinks(ws, "Sketch.excalidraw", "Archive/Sketch.excalidraw", before, ["Source.md"], style, null)).toBe(1);
   expect(updateNoteText).toHaveBeenCalledWith(ws, "Source.md", "![[Archive/Sketch.excalidraw]] and ![[Other/Sketch.excalidraw|200]]");
@@ -93,10 +96,10 @@ test("a folder move rewrites links to its notes and embeds of its drawings toget
     { path: "Old/Map.excalidraw", name: "Map.excalidraw" },
     { path: "Index.md", name: "Index" },
   ];
-  const ws = {
+  const ws = fake({
     vault: { notes: [{ path: "New/Note.md", name: "Note" }, before[2]] },
     editors: { text: vi.fn().mockResolvedValue("[[Old/Note]] ![[Old/Map.excalidraw]]") },
-  } as unknown as Workspace;
+  });
   const ask = vi.fn().mockResolvedValue(true);
   expect(await updateLinks(ws, "Old", "New", before, ["Index.md"], { format: "absolute", wikilinks: true }, ask)).toBe(2);
   expect(ask).toHaveBeenCalledWith(2, 1);
@@ -105,10 +108,10 @@ test("a folder move rewrites links to its notes and embeds of its drawings toget
 
 test("renaming a note leaves embeds of a drawing with the same stem alone", async () => {
   const before = [{ path: "Sketch.md", name: "Sketch" }, { path: "Source.md", name: "Source" }, { path: "Sketch.excalidraw", name: "Sketch.excalidraw" }];
-  const ws = {
+  const ws = fake({
     vault: { notes: [{ path: "Renamed.md", name: "Renamed" }, before[1]] },
     editors: { text: vi.fn().mockResolvedValue("[[Sketch]] ![[Sketch.excalidraw|300]]") },
-  } as unknown as Workspace;
+  });
   expect(await updateLinks(ws, "Sketch.md", "Renamed.md", before, ["Source.md"], style, null)).toBe(1);
   expect(updateNoteText).toHaveBeenCalledWith(ws, "Source.md", "[[Renamed]] ![[Sketch.excalidraw|300]]");
 });
@@ -169,7 +172,7 @@ async function moveOnce(from: string, to: string, linkStyle: { format: "shortest
   const after = files.filter((f) => f.path.endsWith(".md")).map((f) => ({ path: swap(f.path), name: swap(f.path).split("/").pop()!.replace(/\.md$/, "") }));
   const old = new Map([...texts.keys()].map((s) => [swap(s), s]));
   vi.mocked(updateNoteText).mockClear();
-  const ws = { vault: { notes: after }, editors: { text: async (p: string) => texts.get(old.get(p)!)! } } as unknown as Workspace;
+  const ws = fake({ vault: { notes: after }, editors: { text: async (p: string) => texts.get(old.get(p)!)! } });
   const links = await updateLinks(ws, from, to, files, [...texts.keys()], linkStyle, null);
   const written = new Map(vi.mocked(updateNoteText).mock.calls.map(([, path, text]) => [path, text]));
   return { files, texts, swap, after, links, written };
@@ -232,5 +235,26 @@ test("a long move lets other tasks run while it rewrites and writes", async () =
   } finally {
     now.mockRestore();
     ticks = 1000;
+  }
+});
+
+test("an embed that a note and an image both answer is rewritten as one pass per move rewrote it", async () => {
+  const image = { path: "Move/Img/photo.png", name: "photo.png" };
+  const note = { path: "Move/Note/photo.png.md", name: "photo.png" };
+  const source = { path: "Move/Img/Source.md", name: "Source" };
+  // What the per-pair code (9f78826) wrote. The pair first in the file list
+  // goes first; with shortest links, the note's rewrite ("photo.png") still
+  // names the image for the image's pair, which moves it again.
+  for (const [files, format, expected, count] of [
+    [[source, image, note], "absolute", "![[New/Img/photo.png|300]]", 1],
+    [[source, note, image], "absolute", "![[New/Note/photo.png|300]]", 1],
+    [[source, image, note], "shortest", "![[New/Img/photo.png|300]]", 1],
+    [[source, note, image], "shortest", "![[New/Img/photo.png|300]]", 2],
+  ] as const) {
+    vi.mocked(updateNoteText).mockClear();
+    const after = [source, note].map((n) => ({ ...n, path: n.path.replace("Move/", "New/") }));
+    const ws = fake({ vault: { notes: after }, editors: { text: async () => "![[photo.png|300]]" } });
+    expect(await updateLinks(ws, "Move", "New", [...files], [source.path], { format, wikilinks: true }, null), `${format} ${files[1].path}`).toBe(count);
+    expect(updateNoteText, `${format} ${files[1].path}`).toHaveBeenCalledWith(ws, "New/Img/Source.md", expected);
   }
 });
