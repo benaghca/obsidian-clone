@@ -29,6 +29,34 @@ test("splits linked mentions from the link index and resolves targeted reads aft
 });
 
 
+test("the cached link walk follows writes, deletes and renames, and hands out copies", async () => {
+  const store = () => ({ getItem: () => null, setItem: () => {} });
+  vi.stubGlobal("location", { search: "" });
+  vi.stubGlobal("sessionStorage", store());
+  vi.stubGlobal("localStorage", store());
+  try {
+    const { invoke } = createMockBackend();
+    await invoke("create_note", { path: "C/Target.md", content: "t" });
+    await invoke("create_note", { path: "C/Source.md", content: "none yet" });
+    expect((await invoke<LinkIndex>("link_index")).outgoing["C/Source.md"]).toBeUndefined();
+    await invoke("write_note", { path: "C/Source.md", content: "[[Target]]" });
+    const index = await invoke<LinkIndex>("link_index");
+    expect(index.outgoing["C/Source.md"]).toEqual(["C/Target.md"]);
+    index.outgoing["C/Source.md"].push("changed by the page");
+    expect((await invoke<LinkIndex>("link_index")).outgoing["C/Source.md"]).toEqual(["C/Target.md"]);
+    const back = await invoke<Record<string, Backlink[]>>("backlinks", { paths: ["C/Target.md"] });
+    back["C/Target.md"].length = 0;
+    expect(await invoke("backlinks", { paths: ["C/Target.md"] })).toEqual({ "C/Target.md": [{ from: "C/Source.md", line: 1, text: "[[Target]]" }] });
+    await invoke("rename_path", { from: "C/Target.md", to: "C/Moved.md" });
+    expect(await invoke("backlinks", { paths: ["C/Target.md", "C/Moved.md"] })).toEqual({});
+    expect((await invoke<LinkIndex>("link_index")).unresolved?.["C/Source.md"]).toEqual(["Target"]);
+    await invoke("write_note", { path: "C/Source.md", content: "[[Moved]]" });
+    expect(await invoke("link_sources", { paths: ["C/Moved.md"] })).toEqual(["C/Source.md"]);
+    await invoke("delete_path", { path: "C/Source.md" });
+    expect(await invoke("backlinks", { paths: ["C/Moved.md"] })).toEqual({});
+  } finally { vi.unstubAllGlobals(); }
+});
+
 test("link_sources finds resolved links and each rename spelling, with no folder cap", async () => {
   const store = () => ({ getItem: () => null, setItem: () => {} });
   vi.stubGlobal("location", { search: "" });

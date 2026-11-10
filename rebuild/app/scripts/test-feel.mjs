@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// P0: fixed 5k gate; raise to 20k only after P1. Uses the real UI and
-// cached mock IPC replies, not Rust timing. Budgets: RUST_PERF_PLAN §1.
+// P0: 5k gate in npm test; GROVE_FEEL_N=20000 runs the same budgets at 20k
+// (the mock caps the synthetic vault there). Uses the real UI and cached
+// mock IPC replies, not Rust timing. Budgets: RUST_PERF_PLAN §1.
 import assert from "node:assert/strict";
 import { sleep, withBrowser } from "./browser.mjs";
 
-const n = 5000;
+const n = Number(process.env.GROVE_FEEL_N) || 5000;
 const STRICT_GRAPH = process.env.GROVE_FEEL_STRICT_GRAPH === "1";
 
 const median = (xs) => {
@@ -22,7 +23,7 @@ await withBrowser(async ({ send, evaluate, run, press, chord, click }) => {
   await send("Page.navigate", { url: `${base}?synthetic=${n}` });
   await sleep(300);
   for (let i = 0; i < 600 && !(await evaluate("!!window.ws?.active.path && ws.vault.notes.length > 1000").catch(() => false)); i++) await sleep(100);
-  assert.ok(await evaluate("!!window.ws?.active.path && ws.vault.notes.length >= 5000"), "5k vault ready before deadline");
+  assert.ok(await evaluate(`!!window.ws?.active.path && ws.vault.notes.length >= ${n}`), `${n} vault ready before deadline`);
   const ready = Date.now() - started;
   for (let i = 0; i < 600 && !(await evaluate("Object.keys(ws.vault.links.outgoing).length > 1000").catch(() => false)); i++) await sleep(200);
   assert.ok(await evaluate("Object.keys(ws.vault.links.outgoing).length > 1000"), "link index ready before deadline");

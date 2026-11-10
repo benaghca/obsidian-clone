@@ -1,8 +1,13 @@
 import { expect, test, vi } from "vitest";
 import type { Tab } from "./tabs";
+import { Vault } from "./vault";
 import { Workspace } from "./workspace";
 
 vi.mock("./api", () => ({ api: {}, isTauri: false }));
+
+/** A real Vault (its cached file refs and link index) over a fixed file list. */
+const vaultOf = (files: { name: string; path: string; is_dir: boolean }[]) =>
+  Object.assign(new Vault(() => {}, async () => {}), { notes: [], files });
 
 test("returning from Reading focuses the active editor after reconfiguration without changing its selection", () => {
   const active = { mode: "live", path: "note.md" } as Tab;
@@ -22,14 +27,14 @@ test("returning from Reading focuses the active editor after reconfiguration wit
 });
 
 test("link formatting qualifies attachment names shared by multiple folders", () => {
-  const ws = { vault: { notes: [], files: [
+  const ws = { vault: vaultOf([
     { name: "photo.png", path: "A/photo.png", is_dir: false },
     { name: "photo.png", path: "B/photo.png", is_dir: false },
-  ] }, linkStyle: () => ({ format: "shortest", wikilinks: true }) } as unknown as Workspace;
+  ]), linkStyle: () => ({ format: "shortest", wikilinks: true }) } as unknown as Workspace;
   expect(Workspace.prototype.linkTo.call(ws, "B/photo.png", "Note.md")).toBe("[[B/photo.png]]");
 });
 
 test("canvas wikilinks resolve as attachments instead of creating a markdown note", () => {
-  const ws = { vault: { notes: [], files: [{ name: "Board.canvas", path: "Folder/Board.canvas", is_dir: false }] }, active: { path: "Note.md" } } as unknown as Workspace;
+  const ws = { vault: vaultOf([{ name: "Board.canvas", path: "Folder/Board.canvas", is_dir: false }]), active: { path: "Note.md" } } as unknown as Workspace;
   expect(Workspace.prototype.resolve.call(ws, "Board.canvas")).toBe("Folder/Board.canvas");
 });
