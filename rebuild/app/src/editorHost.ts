@@ -15,7 +15,7 @@ import { embedFor } from "./editor/attachments";
 import { writeAttachments } from "./editor/saveAttachments";
 import { editorHost, type EditorHost, type EmbedHost } from "./editor/host";
 import { toggledTask } from "./editor/render";
-import { type NoteLike, resolveLink } from "./links/internal";
+import { resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
@@ -176,7 +176,6 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   const notes = new Map<string, Promise<string>>();
   const images = new Map<string, { url: Promise<string>; holders: number }>();
   const watchers = new Map<string, ReturnType<typeof listeners>>();
-  let files: { list: FileEntry[]; out: NoteLike[] } | null = null;
 
   const modified = (path: string) => {
     notes.delete(path);
@@ -186,10 +185,7 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   ws.vault.onModified(modified);
 
   return {
-    resolve(target, view) {
-      if (files?.list !== ws.vault.files) files = { list: ws.vault.files, out: ws.vault.files.filter((f) => !f.is_dir) };
-      return resolveLink(target, ws.editors.pathOf(view), files.out);
-    },
+    resolve: (target, view) => resolveLink(target, ws.editors.pathOf(view), ws.vault.fileRefs()),
     pathOf: (view) => ws.editors.pathOf(view),
     read(path) {
       if (ws.editors.isLoaded(path)) return ws.editors.text(path);

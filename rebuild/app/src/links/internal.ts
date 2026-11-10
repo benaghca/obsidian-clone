@@ -36,8 +36,7 @@ export function relativePath(fromDir: string, to: string): string {
 function linkPath(target: string, from: string | null, notes: NoteLike[], format: LinkFormat): string {
   if (format === "absolute") return target;
   if (format === "relative") return relativePath(parentDir(from ?? ""), target);
-  const name = nameOf(target).toLowerCase();
-  const clash = notes.some((n) => n.path !== target && n.name.toLowerCase() === name);
+  const clash = indexNotes(notes).byName.get(nameOf(target).toLowerCase())?.some((n) => n.path !== target);
   return clash ? target : fileName(target);
 }
 
@@ -240,6 +239,16 @@ function maskInlineCode(line: string): string {
 }
 
 /**
+ * Files that moved, for one rewrite pass: old path to new path, with the
+ * snapshots a link resolves in before the move and is written against after it.
+ */
+export interface LinkMoves {
+  moved: ReadonlyMap<string, string>;
+  before: NoteLike[];
+  after: NoteLike[];
+}
+
+/**
  * Rewrite the links in `text` (the note at `from`) that point at `oldPath`
  * so they point at `newPath`, keeping each link's heading and display text.
  * `before` and `after` are the vault's notes before and after the move.
@@ -248,6 +257,10 @@ function maskInlineCode(line: string): string {
  * info string) and inline code of any backtick length are left alone.
  * A trailing CR is dropped before the fence pattern, as in `tagsInText`:
  * `.` does not match CR, so a CRLF fence line would otherwise not match.
+ *
+ * The second form takes every move at once (a folder move): one pass over
+ * the text, each link resolved once. A link takes the first group in which it
+ * resolves to a moved file. `fromAfter` is where `from` is after the move.
  */
 export function rewriteLinks(
   text: string,
@@ -258,8 +271,32 @@ export function rewriteLinks(
   after: NoteLike[],
   style: LinkStyle,
   /** Where the linking note is after the move (it may have moved with a folder). */
-  fromAfter: string = from === oldPath ? newPath : from,
+  fromAfter?: string,
+): { text: string; count: number };
+export function rewriteLinks(text: string, from: string, moves: readonly LinkMoves[], style: LinkStyle, fromAfter: string): { text: string; count: number };
+export function rewriteLinks(
+  text: string,
+  from: string,
+  ...args: [string, string, NoteLike[], NoteLike[], LinkStyle, string?] | [readonly LinkMoves[], LinkStyle, string]
 ): { text: string; count: number } {
+  let groups: readonly LinkMoves[], style: LinkStyle, fromAfter: string;
+  if (args.length === 3) [groups, style, fromAfter] = args;
+  else {
+    const [oldPath, newPath, before, after] = args;
+    groups = [{ moved: new Map([[oldPath, newPath]]), before, after }];
+    style = args[4];
+    fromAfter = args[5] ?? (from === oldPath ? newPath : from);
+  }
+  const indexed = groups.map((g) => ({ ...g, index: indexNotes(g.before) }));
+  /** The new link path for a target that moved, or null. */
+  const moved = (target: string): string | null => {
+    for (const g of indexed) {
+      const hit = resolveIndexed(g.before, g.index, target, from);
+      const to = hit === null ? undefined : g.moved.get(hit);
+      if (to !== undefined) return linkPath(to, fromAfter, g.after, style.format);
+    }
+    return null;
+  };
   let count = 0;
   const lines = text.split("\n");
   let fence: { marker: string; len: number } | null = null;
@@ -283,19 +320,20 @@ export function rewriteLinks(
     const edits: { at: number; end: number; text: string }[] = [];
     for (const m of masked.matchAll(WIKILINK)) {
       const target = line.slice(m.index! + m[1].length + 2, m.index! + m[1].length + 2 + m[2].length);
-      if (!target.trim() || resolveLink(target, from, before) !== oldPath) continue;
-      const path = stripMd(linkPath(newPath, fromAfter, after, style.format));
+      const to = target.trim() ? moved(target) : null;
+      if (!to) continue;
       const rest = line.slice(m.index! + m[1].length + 2 + m[2].length, m.index! + m[0].length);
-      edits.push({ at: m.index!, end: m.index! + m[0].length, text: `${m[1]}[[${path}${rest}` });
+      edits.push({ at: m.index!, end: m.index! + m[0].length, text: `${m[1]}[[${stripMd(to)}${rest}` });
     }
     for (const m of masked.matchAll(MDLINK)) {
       const dest = line.slice(m.index! + m[0].length - m[3].length - 1, m.index! + m[0].length - 1);
       if (/^[a-z][a-z0-9+.-]*:/i.test(dest)) continue; // a URL
       const hash = dest.indexOf("#");
       const sub = hash < 0 ? "" : dest.slice(hash);
-      if (resolveLink(hash < 0 ? dest : dest.slice(0, hash), from, before) !== oldPath) continue;
+      const to = moved(hash < 0 ? dest : dest.slice(0, hash));
+      if (!to) continue;
       const head = line.slice(m.index!, m.index! + m[0].length - m[3].length - 1);
-      edits.push({ at: m.index!, end: m.index! + m[0].length, text: `${head}${encodeDest(linkPath(newPath, fromAfter, after, style.format), /\\[()]/.test(dest))}${sub})` });
+      edits.push({ at: m.index!, end: m.index! + m[0].length, text: `${head}${encodeDest(to, /\\[()]/.test(dest))}${sub})` });
     }
     if (!edits.length) continue;
     edits.sort((a, b) => a.at - b.at);

@@ -51,7 +51,7 @@ export function installHoverPreviews(ws: Workspace) {
     const path = name ? ws.resolve(name, from) : from;
     if (path && !isNoteFile(path)) return close();
     const origin = path ?? from;
-    const resolve = (href: string) => resolveLink(href, origin, ws.vault.files.filter((f) => !f.is_dir));
+    const resolve = (href: string) => resolveLink(href, origin, ws.vault.fileRefs());
     const context = new EditorView({ state: EditorState.create({ extensions: [
       EditorState.readOnly.of(true), readingMode.of(true), editorHost.of({
         ...host,

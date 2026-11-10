@@ -105,7 +105,12 @@ async function imageBytes(content: string): Promise<ArrayBuffer> {
 
 export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   const files = new Map<string, { content: string; mtime: number; ctime: number }>();
-  const put = (path: string, content: string) => files.set(path, { content, mtime: Date.now(), ctime: files.get(path)?.ctime ?? Date.now() });
+  /** Bumped on every change to `files`, so the link index is walked once per state of the vault. */
+  let revision = 0;
+  const put = (path: string, content: string) => {
+    revision++;
+    files.set(path, { content, mtime: Date.now(), ctime: files.get(path)?.ctime ?? Date.now() });
+  };
   // `?synthetic=1000` on the dev page adds a generated 1,000-note vault (for measuring the graph).
   const synthetic = Number(new URLSearchParams(location.search).get("synthetic")) || 0;
   const vaultFiles = { ...sampleVault(), ...(synthetic > 0 ? syntheticVault(Math.min(synthetic, 20000)) : {}) };
@@ -282,7 +287,13 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   };
 
   // Links resolve as the front end resolves them (links/internal.ts), which is how the backend does.
-  function linkData(wanted?: Set<string>): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
+  // One walk per revision serves link_index, backlinks and link_sources.
+  let walked: { revision: number; links: LinkIndex; backlinks: Record<string, Backlink[]> } | null = null;
+  function linkData(): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
+    if (walked?.revision !== revision) walked = { revision, ...walkLinks() };
+    return walked;
+  }
+  function walkLinks(): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
     const notes = [...files.keys()].filter((path) => isNoteFile(path) || !/\.md$/i.test(path)).map((path) => ({ name: noteName(path), path }));
     const resolve = linkResolver(notes);
     const outgoing: Record<string, string[]> = {};
@@ -326,7 +337,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
             continue;
           }
           out.add(target);
-          if (wanted?.has(target)) (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
+          (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
         }
         for (const m of scan.matchAll(MDLINK)) {
           const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
@@ -334,7 +345,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
           const hit = resolve(raw, path);
           if (hit) {
             md.add(hit);
-            if (wanted?.has(hit)) (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
+            (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
           }
           else {
             let name = markdownURL(raw).replace(/^\.\//, "");
@@ -353,10 +364,9 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   /** Notes that might link to `paths`. Same rules as Rust `link_sources`. */
   function linkSources(paths: string[]): string[] {
     if (!paths.length) return [];
-    const wanted = new Set(paths);
     const sources = new Set<string>();
-    const data = linkData(wanted);
-    for (const path of paths) for (const hit of data.backlinks[path] ?? []) sources.add(hit.from);
+    const { backlinks } = linkData();
+    for (const path of paths) for (const hit of backlinks[path] ?? []) sources.add(hit.from);
     const needles = [...new Set(paths.filter((path) => isNoteFile(path)).flatMap((path) => linkSpellings(noteName(path)).map((s) => s.toLowerCase())))];
     if (needles.length) {
       for (const [path, f] of files) {
@@ -443,6 +453,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
         if (under(path)) {
           files.delete(path);
           files.set(to + path.slice(from.length), f);
+          revision++;
         }
       }
       for (const dir of [...emptyDirs]) {
@@ -456,7 +467,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     // `permanent` makes no difference here: the mock has no .trash.
     delete_path: ({ path }) => {
       const under = (p: string) => p === path || p.startsWith(path + "/");
-      for (const p of [...files.keys()]) if (under(p)) files.delete(p);
+      for (const p of [...files.keys()]) if (under(p) && files.delete(p)) revision++;
       for (const d of [...emptyDirs]) if (under(d)) emptyDirs.delete(d);
       keepEmptyParents(path);
     },
@@ -467,8 +478,12 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       const source = searchFiles();
       return queries.map((query: string) => Object.keys(matchVault(source, query) ?? {}).sort(pathOrder));
     },
-    link_index: () => linkData().links,
-    backlinks: ({ paths }) => paths.length ? linkData(new Set(paths)).backlinks : {},
+    // Copies, as IPC hands the page a fresh reply: the walk is kept for the next call.
+    link_index: () => structuredClone(linkData().links),
+    backlinks: ({ paths }) => {
+      const all = paths.length ? linkData().backlinks : {};
+      return structuredClone(Object.fromEntries([...new Set(paths as string[])].filter((path) => all[path]).map((path) => [path, all[path]])));
+    },
     link_sources: ({ paths }) => linkSources(paths),
     set_property: ({ path, edit, dryRun }) => {
       const target = path as string;

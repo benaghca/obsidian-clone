@@ -79,7 +79,11 @@ try {
   // Link resolution the page does itself (ws.resolve, embeds, backlinks view).
   const someName = notes[notes.length >> 1].name;
   r.resolve_one = time(() => resolveLink(someName, notes[0].path, notes)).ms;
-  r.resolve_missing = time(() => resolveLink("no such note", notes[0].path, notes) ?? resolveLink("no such note", notes[0].path, files.filter((f) => !f.is_dir))).ms;
+  // ws.resolve's fallback reads Vault.fileRefs(), one array per file list: the first call builds its index.
+  const fileRefs = files.filter((f) => !f.is_dir).map((f) => ({ name: noteName(f.path), path: f.path }));
+  const missing = () => resolveLink("no such note", notes[0].path, notes) ?? resolveLink("no such note", notes[0].path, fileRefs);
+  r.resolve_missing_cold = time(missing, 1).ms;
+  r.resolve_missing = time(missing).ms;
   r.link_targets_build = time(() => linkTargets(files, notes)).ms;
 
   // The outgoing index the page receives from link_index (resolved here with one map, like Rust).
@@ -165,6 +169,14 @@ try {
   r.folder_move_sources = folderSources.length;
   r.folder_move_ms_per_source = Number(perSourceAllPairs.toFixed(1));
   r.folder_move_estimate_s = Number(((perSourceAllPairs * folderSources.length) / 1000).toFixed(1));
+  // The one pass updateLinks makes: every moved note in one map, every source rewritten once.
+  const movedTo = new Map(moved.map((n) => [n.path, `X/${n.path}`]));
+  const movedAfter = notes.map((n) => (movedTo.has(n.path) ? { name: n.name, path: movedTo.get(n.path) } : n));
+  const moves = [{ moved: movedTo, before: notes, after: movedAfter }];
+  const onePass = time(() => folderSources.reduce((links, s) => links + rewriteLinks(text.get(s), s, moves, style, movedTo.get(s) ?? s).count, 0), 3);
+  r.folder_move_one_pass_ms = onePass.ms;
+  r.folder_move_one_pass_max_ms = onePass.max;
+  r.folder_move_links = onePass.out;
 
   console.log(JSON.stringify(r));
 } finally {

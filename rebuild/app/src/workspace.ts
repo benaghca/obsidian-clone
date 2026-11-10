@@ -155,12 +155,12 @@ export class Workspace {
    * folder or from the linking note's folder, or a note name, any case.
    */
   resolve(target: string, from: string | null = this.active.path): string | null {
-    return resolveLink(target, from, this.vault.notes) ?? resolveLink(target, from, this.vault.files.filter(f => !f.is_dir));
+    return resolveLink(target, from, this.vault.notes) ?? resolveLink(target, from, this.vault.fileRefs());
   }
 
   /** A new link to `target` from the note at `from`, in the style the settings ask for. */
   linkTo(target: string, from: string | null, display?: string, subpath = ""): string {
-    return formatLink(target, from, this.vault.files.filter(f => !f.is_dir), this.linkStyle(), display, subpath);
+    return formatLink(target, from, this.vault.fileRefs(), this.linkStyle(), display, subpath);
   }
 
   // ----- tabs -----

@@ -379,7 +379,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         continue;
       }
       const origin = node.type === "file" ? node.file! : path;
-      const resolve = (href: string) => resolveLink(href, origin, ws.vault.files.filter(f => !f.is_dir));
+      const resolve = (href: string) => resolveLink(href, origin, ws.vault.fileRefs());
       const cardHost = hosts.get(origin) ?? {
         ...host, contextMenu: undefined, properties: undefined,
         formatLink: (target: string, _view: EditorView, display?: string, subpath?: string) => ws.linkTo(target, origin, display, subpath),
