@@ -30,12 +30,19 @@ const NONE: Extension = [];
 // Enter on an empty list item ends the list (or steps out one level) without
 // leaving a blank line behind, as Obsidian does. CodeMirror's default would
 // first turn a tight list loose. It reads the parsed tree, which in a long
-// note just opened may not reach the caret yet: parse that far first, for
-// at most 100 ms, as the list commands in format.ts do.
+// note just opened may not reach the caret yet: on a line that can be in a
+// list or quote (a marker, ">" or indentation), parse that far first, for at
+// most 100 ms, as the list commands in format.ts do. A plain line skips that.
 const continueMarkup = insertNewlineContinueMarkupCommand({ nonTightLists: false });
+const MARKUP_LINE = /^(?:\s|>|[-+*](?:\s|$)|\d+[.)])/;
+const continueList = (view: EditorView) => {
+  const head = view.state.selection.main.head;
+  if (MARKUP_LINE.test(view.state.doc.lineAt(head).text)) forceParsing(view, head, 100);
+  return continueMarkup(view);
+};
 const smartLists = Prec.high(
   keymap.of([
-    { key: "Enter", run: (view) => (forceParsing(view, view.state.selection.main.head, 100), continueMarkup(view)) },
+    { key: "Enter", run: continueList },
     { key: "Backspace", run: backspaceList },
   ]),
 );

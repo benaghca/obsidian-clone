@@ -1,6 +1,7 @@
 import { deleteBracketPair } from "@codemirror/autocomplete";
+import { syntaxTree } from "@codemirror/language";
 import { EditorState, type TransactionSpec } from "@codemirror/state";
-import { EditorView } from "@codemirror/view";
+import { EditorView, keymap } from "@codemirror/view";
 import { afterEach, expect, test } from "vitest";
 import { APP, defaults } from "../settings/schema";
 import { configExtensions, pairingExtensions, setEditorConfig } from "./config";
@@ -17,6 +18,7 @@ function editor(doc = "", anchor = doc.length, head = anchor, cell = false) {
   return {
     get state() { return state; },
     backspace: () => deleteBracketPair(view),
+    enter: () => state.facet(keymap).flat().some((b) => b.key === "Enter" && !!b.run?.(view)), // in keymap order
     type(text: string) {
       const { from, to } = state.selection.main;
       const insert = () => state.update(state.replaceSelection(text));
@@ -83,4 +85,19 @@ test("Alt+Up/Down and Ctrl+Enter are not CodeMirror's line move or blank line", 
   expect(bound("Alt-ArrowUp")[0].run?.({} as EditorView)).toBe(true);
   expect(bound("Mod-Enter")[0].run?.({} as EditorView)).toBe(true);
   expect(bound("Shift-Alt-ArrowUp")).toHaveLength(1);
+});
+
+test("Enter in a long note just opened continues a list there, and parses nothing for a plain line", () => {
+  const lines = Array.from({ length: 5000 }, (_, i) => (i % 2 ? "" : `Paragraph ${i} with a few words of plain text in it.`));
+  lines[4501] = "- item";
+  const doc = lines.join("\n");
+  const end = (i: number) => lines.slice(0, i + 1).join("\n").length;
+  const plain = editor(doc, end(4400));
+  const parsed = syntaxTree(plain.state).length;
+  expect(parsed).toBeLessThan(end(4000)); // cold: the tree stops well short of the caret
+  expect(plain.enter()).toBe(false); // not list markup: the default newline handles it
+  expect(syntaxTree(plain.state).length).toBe(parsed);
+  const list = editor(doc, end(4501));
+  expect(list.enter()).toBe(true);
+  expect(list.state.doc.lineAt(list.state.selection.main.head).text).toBe("- ");
 });

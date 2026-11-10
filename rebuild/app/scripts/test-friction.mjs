@@ -4,6 +4,8 @@
 // For each action: input → painted result, long tasks, frame gaps, slow input
 // events, per-frame flashes (empty state, missing editor or tree), remounts,
 // where focus and the caret land, and labels left stale. Budgets: RUST_PERF_PLAN §1.
+// The link commands run in Rust, off the page thread, in the app: here the
+// mock answers them, and its time is kept apart (`rust`) from page-side timing.
 import assert from "node:assert/strict";
 import { sleep, withBrowser } from "./browser.mjs";
 
@@ -64,16 +66,21 @@ function harness() {
       if (fx.cond && fx.done == null && fx.t0 != null) {
         let ok = false;
         try { ok = fx.cond(); } catch {}
-        if (ok) fx.done = t;
+        if (ok) fx.done = performance.now(); // not `t`: a frame's stamp can predate a long handler before it
       }
     }
     requestAnimationFrame(loop);
   };
   requestAnimationFrame(loop);
-  for (const type of ["keydown", "mousedown", "auxclick", "pointerdown"]) window.addEventListener(type, (e) => { if (fx.on && fx.t0 == null) fx.t0 = e.timeStamp; }, true);
-  new PerformanceObserver((l) => { if (fx.on) for (const e of l.getEntries()) fx.long.push(e.duration); }).observe({ type: "longtask" });
+  // Timing starts at the action's own key, not a modifier held for it.
+  const MODIFIERS = ["Control", "Shift", "Alt", "Meta"];
+  for (const type of ["keydown", "mousedown", "auxclick", "pointerdown"]) window.addEventListener(type, (e) => { if (fx.on && fx.t0 == null && !MODIFIERS.includes(e.key)) fx.t0 = e.timeStamp; }, true);
+  // Mock link commands ([start, end]): Rust's work in the app, not the page's.
+  fx.rust = [];
+  const page = (start, d) => d - fx.rust.reduce((sum, [a, b]) => sum + Math.max(0, Math.min(b, start + d) - Math.max(a, start)), 0);
+  new PerformanceObserver((l) => { if (fx.on) for (const e of l.getEntries()) fx.long.push(e); }).observe({ type: "longtask" });
   // Entries that started before the action belong to earlier input (CDP can stamp them late).
-  new PerformanceObserver((l) => { if (fx.on) for (const e of l.getEntries()) if (e.startTime >= fx.armedAt) fx.events.push({ name: e.name, d: e.duration, target: e.target?.className?.toString().slice(0, 30) }); }).observe({ type: "event", durationThreshold: 16 });
+  new PerformanceObserver((l) => { if (fx.on) for (const e of l.getEntries()) if (e.startTime >= fx.armedAt) fx.events.push(e); }).observe({ type: "event", durationThreshold: 16 });
   // Remounts: these removed (class selectors still match a detached node), and tree rows dropped from the list.
   const watched = { ".cm-editor": "editor", ".workspace-leaf": "leaf", ".workspace-tab-header": "tab", ".inline-title": "title" };
   new MutationObserver((records) => {
@@ -84,10 +91,13 @@ function harness() {
       for (const [sel, name] of Object.entries(watched)) if (node.matches(sel) || node.querySelector(sel)) fx.removed[name] = (fx.removed[name] ?? 0) + 1;
     }
   }).observe(document.body, { childList: true, subtree: true });
-  fx.arm = (opts = {}) => Object.assign(fx, { on: true, armedAt: performance.now(), t0: null, done: null, frames: [], series: [labels()], long: [], events: [], flashes: {}, removed: {}, cond: opts.cond ?? null, expectNote: opts.expectNote ?? true, watchTitle: opts.watchTitle ?? true });
+  fx.arm = (opts = {}) => Object.assign(fx, { on: true, armedAt: performance.now(), t0: null, done: null, frames: [], series: [labels()], long: [], events: [], rust: [], flashes: {}, removed: {}, cond: opts.cond ?? null, expectNote: opts.expectNote ?? true, watchTitle: opts.watchTitle ?? true });
   fx.take = () => {
     fx.on = false;
-    const gaps = fx.frames.slice(1).map((t, i) => t - fx.frames[i]).sort((a, b) => a - b);
+    // Page-side only: time inside the mock's link commands is taken out.
+    const gaps = fx.frames.slice(1).map((t, i) => page(fx.frames[i], t - fx.frames[i])).sort((a, b) => a - b);
+    const long = fx.long.map((e) => page(e.startTime, e.duration)).filter((d) => d > 50);
+    const events = fx.events.map((e) => ({ name: e.name, d: page(e.startTime, e.duration), js: page(e.processingStart, e.processingEnd - e.processingStart), target: e.target?.className?.toString().slice(0, 30) })).filter((e) => e.d >= 16);
     const q = (p) => Math.round(gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * p))] ?? 0);
     // A label that showed something other than its first and last value in between flashed.
     const flicker = {};
@@ -99,10 +109,11 @@ function harness() {
     }
     return {
       flicker,
-      ms: fx.done != null && fx.t0 != null ? Math.round(fx.done - fx.t0) : null,
-      gap_p95: q(0.95), gap_max: q(1), long: fx.long.length, long_max: Math.round(Math.max(0, ...fx.long)),
-      slow_events: fx.events.length, event_max: Math.round(Math.max(0, ...fx.events.map((e) => e.d))),
-      worst: [...fx.events].sort((a, b) => b.d - a.d).slice(0, 3).map((e) => `${e.name}:${Math.round(e.d)}${e.target ? "@" + e.target : ""}`),
+      ms: fx.done != null && fx.t0 != null ? Math.round(page(fx.t0, fx.done - fx.t0)) : null,
+      rust: Math.round(fx.rust.reduce((sum, [a, b]) => sum + b - a, 0)),
+      gap_p95: q(0.95), gap_max: q(1), long: long.length, long_max: Math.round(Math.max(0, ...long)),
+      slow_events: events.length, event_max: Math.round(Math.max(0, ...events.map((e) => e.d))), js_max: Math.round(Math.max(0, ...events.map((e) => e.js))),
+      worst: [...events].sort((a, b) => b.d - a.d).slice(0, 3).map((e) => `${e.name}:${Math.round(e.d)}${e.target ? "@" + e.target : ""}`),
       flashes: fx.flashes, removed: fx.removed, after: fx.state(),
     };
   };
@@ -114,20 +125,21 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await sleep(300);
   for (let i = 0; i < 600 && !(await evaluate(`!!window.ws?.active.path && ws.vault.notes.length >= ${n}`).catch(() => false)); i++) await sleep(100);
   for (let i = 0; i < 600 && !(await evaluate("Object.keys(ws.vault.links.outgoing).length > 1000").catch(() => false)); i++) await sleep(100);
-  // The link commands run in Rust, off the page thread, in the app. From here
-  // they answer from the page's own index, still paying JSON.parse (as test-feel does).
+  await run(harness);
+  // The mock's own link commands answer, so replies follow every edit. Their time is Rust's in the app: microtasks
+  // queued either side of the call bracket exactly the mock's synchronous work. The page still decodes the reply.
   await run(async () => {
     const { api } = await import("/src/api.ts");
-    const back = () => {
-      const out = {};
-      for (const [from, tos] of Object.entries(ws.vault.links.outgoing)) for (const to of tos) (out[to] ??= []).push({ from, line: 1, text: "" });
-      return out;
+    for (const [name, real] of ["linkIndex", "backlinks", "linkSources"].map((k) => [k, api[k]])) api[name] = async (...args) => {
+      let start = 0, end = 0;
+      queueMicrotask(() => (start = performance.now()));
+      const reply = real(...args);
+      queueMicrotask(() => (end = performance.now()));
+      const value = await reply;
+      __fx.rust.push([start, end]);
+      return JSON.parse(JSON.stringify(value));
     };
-    api.linkIndex = async () => JSON.parse(JSON.stringify(ws.vault.links));
-    api.backlinks = async (paths) => { const all = back(); return JSON.parse(JSON.stringify(Object.fromEntries(paths.filter((p) => all[p]).map((p) => [p, all[p]])))); };
-    api.linkSources = async (paths) => { const all = back(); return [...new Set(paths.flatMap((p) => (all[p] ?? []).map((b) => b.from)))].sort(); };
   });
-  await run(harness);
   await sleep(500);
 
   const out = { n };
@@ -167,7 +179,16 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   const notes = await evaluate(`ws.vault.notes.filter(n => !n.path.includes("/") && n.path !== "Big note.md" && n.path !== "Welcome.md").slice(0, 12).map(n => n.path)`);
   const nameOf = (p) => p.split("/").pop().replace(/\.md$/i, "");
   const opened = (p) => `ws.active.path === ${JSON.stringify(p)} && document.querySelector(".workspace-tabs.mod-active .workspace-leaf .inline-title")?.textContent === ${JSON.stringify(nameOf(p))} && !!document.querySelector(".workspace-tabs.mod-active .cm-content")?.textContent`;
-
+  // The tab Ctrl+Tab (dir 1) or Ctrl+Shift+Tab (-1) should land on (kept for the checks), and the condition for being there.
+  const cycled = async (name, dir) => {
+    const to = (out[`${name}_to`] = await evaluate(`(() => { const t = ws.tabs, i = t.indexOf(ws.active), to = t[(i + ${dir} + t.length) % t.length]; return { id: to.id, path: to.path, from: ws.active.id }; })()`));
+    return `ws.active.id === ${to.id} && ${opened(to.path)}`;
+  };
+  // The page's link index against a fresh answer from the backend (lists compared as sets).
+  const linksFresh = () => evaluate(`(async () => { const { api } = await import("/src/api.ts"); const fresh = await api.linkIndex(); const norm = (x) => JSON.stringify(Object.entries(x ?? {}).filter(([, v]) => v.length).sort().map(([k, v]) => [k, [...v].sort()])); return ["outgoing", "markdown", "unresolved"].every((k) => norm(ws.vault.links[k]) === norm(fresh[k])); })()`);
+  const backlinksOf = (p) => evaluate(`(async () => { const { api } = await import("/src/api.ts"); return (await api.backlinks([${JSON.stringify(p)}]))[${JSON.stringify(p)}] ?? []; })()`);
+  const until = async (expr, ms = 5000) => { for (let t = 0; t < ms && !(await evaluate(expr)); t += 20) await sleep(20); return evaluate(expr); };
+  const palette = async (command) => { await chord("p"); await sleep(150); await typeText(command, 20); await sleep(150); await press("Enter"); };
   // Most people keep the backlinks pane open: switching notes refreshes it.
   await combo("]", 3);
   await sleep(600);
@@ -184,22 +205,18 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await measure("forward_shortcut", () => combo("ArrowRight", 3), linkTarget ? opened(linkTarget) : "ws.active.forward.length === 0");
   await measure("back_shortcut", () => combo("ArrowLeft", 3), "ws.active.forward.length > 0");
   const tabsBefore = await evaluate("ws.tabs.length");
-  await measure("open_ctrl_click_tree", async () => {
-    const p = await rowFor(notes[2]);
+  const clickRow = async (path, button, modifiers = 0) => {
+    const p = await rowFor(path);
     await move(p);
-    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...p, button: "left", clickCount: 1, modifiers: 2 });
-  }, `ws.tabs.length === ${tabsBefore + 1} && ws.tabs.some(t => t.path === ${JSON.stringify(notes[2])})`);
-  await measure("open_middle_click_tree", async () => {
-    const p = await rowFor(notes[3]);
-    await move(p);
-    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...p, button: "middle", clickCount: 1 });
-  }, `ws.tabs.some(t => t.path === ${JSON.stringify(notes[3])})`);
+    for (const type of ["mousePressed", "mouseReleased"]) await send("Input.dispatchMouseEvent", { type, ...p, button, clickCount: 1, modifiers });
+  };
+  await measure("open_ctrl_click_tree", () => clickRow(notes[2], "left", 2), `ws.tabs.length === ${tabsBefore + 1} && ws.tabs.some(t => t.path === ${JSON.stringify(notes[2])})`);
+  await measure("open_middle_click_tree", () => clickRow(notes[3], "middle"), `ws.tabs.some(t => t.path === ${JSON.stringify(notes[3])})`);
 
   // ---- 3. Tabs (before typing, so the Big note is fresh) ----
   await measure("new_tab", () => chord("t"), `ws.active.path === null && !!document.querySelector(".workspace-tabs.mod-active .empty-state")`, { expectNote: false });
   await measure("close_tab", () => chord("w"), "ws.active.path !== null");
-  await measure("ctrl_tab", () => combo("Tab", 2), "true");
-  await measure("ctrl_shift_tab", () => combo("Tab", 10), "true");
+  for (const [name, dir, mods] of [["ctrl_tab", 1, 2], ["ctrl_shift_tab", -1, 10]]) await measure(name, () => combo("Tab", mods), await cycled(name, dir));
   // Scroll and caret come back on return: the Big note, scrolled and with the caret mid-document.
   await run(async () => { await ws.open("Big note.md"); });
   await sleep(300);
@@ -227,16 +244,21 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await run(() => { const line = ws.view.state.doc.line(2500); ws.view.dispatch({ selection: { anchor: line.to } }); ws.view.focus(); });
   await sleep(200);
   await measure("typing_big_note", () => typeText(" quick brown fox jumps", 40), null, { settle: 1800 });
-  await run(() => { const doc = ws.view.state.doc; const end = doc.length; ws.view.dispatch({ changes: { from: end, insert: "\n- first item" }, selection: { anchor: end + 13 } }); ws.view.focus(); });
-  await sleep(100);
+  // At the end of the note, with the caret's line on screen (and parsed, as it is by the time anyone reads it).
+  await run(() => { const doc = ws.view.state.doc; const end = doc.length; ws.view.dispatch({ changes: { from: end, insert: "\n- first item" }, selection: { anchor: end + 13 }, scrollIntoView: true }); ws.view.focus(); });
+  await sleep(300);
   await measure("enter_list_item", () => press("Enter"), `ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === "- "`);
   await measure("suggest_open", () => typeText("[[", 30), `!!document.querySelector(".cm-tooltip.cm-link-suggest li")`);
   await measure("suggest_type", () => typeText("riv", 40), `!!document.querySelector(".cm-tooltip.cm-link-suggest li")`, { settle: 300 });
   await measure("suggest_choose", () => press("Enter"), `!document.querySelector(".cm-link-suggest") && /\\[\\[[^\\]]+\\]\\]$/.test(ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text.slice(0, ws.view.state.selection.main.head - ws.view.state.doc.lineAt(ws.view.state.selection.main.head).from))`);
   await measure("suggest_esc", async () => { await typeText(" [[", 30); await sleep(150); await press("Escape"); }, `!document.querySelector(".cm-link-suggest") && ws.view.state.doc.sliceString(ws.view.state.selection.main.head - 2, ws.view.state.selection.main.head + 2) === "[[]]"`);
-  await measure("undo", () => chord("z"), "true", { settle: 200 });
-  await measure("redo", () => combo("z", 10), "true", { settle: 200 });
-  await sleep(1500);
+  const lineIs = (text) => `ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === ${JSON.stringify(text)}`;
+  await measure("undo", () => chord("z"), lineIs(out.suggest_choose.after.line), { settle: 200 });
+  await measure("redo", () => combo("z", 10), lineIs(out.suggest_esc.after.line), { settle: 200 });
+  // After the save, the link index and backlinks show the link just chosen.
+  const chosenName = [...(out.suggest_choose.after.line ?? "").matchAll(/\[\[([^\]|#]+)/g)].at(-1)?.[1];
+  const chosen = chosenName ? await evaluate(`ws.resolve(${JSON.stringify(chosenName)}, "Big note.md")`) : null;
+  out.edit_links = { chosen, indexed: await until(`!!ws.vault.links.outgoing["Big note.md"]?.includes(${JSON.stringify(chosen)})`), fresh: await linksFresh(), backlink: (await backlinksOf(chosen)).some((b) => b.from === "Big note.md" && b.text.includes(`[[${nameOf(chosen)}`)) };
 
   // ---- 6. Quick switcher and command palette ----
   await run(() => { ws.view.focus(); });
@@ -245,12 +267,14 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   out.before_switcher = await state();
   await measure("switcher_open", () => chord("o"), `!!document.querySelector(".prompt .suggestion-item")`);
   await measure("switcher_type", () => typeText("river s", 60), `document.querySelector(".prompt-input")?.value === "river s" && !!document.querySelector(".suggestion-item")`);
+  await measure("switcher_last_key", () => typeText("t", 0), `document.querySelector(".prompt-input")?.value === "river st"`);
   await measure("switcher_esc", () => press("Escape"), "!document.querySelector('.prompt')");
   await placeBig(3000);
   await sleep(300);
   out.before_palette = await state();
   await measure("palette_open", () => chord("p"), `!!document.querySelector(".prompt .suggestion-item")`);
   await measure("palette_type", () => typeText("toggle left", 50), `document.querySelector(".prompt-input")?.value === "toggle left"`);
+  await measure("palette_last_key", () => typeText(" s", 0), `document.querySelector(".prompt-input")?.value === "toggle left s"`);
   await measure("palette_esc", () => press("Escape"), "!document.querySelector('.prompt')");
   await placeBig(3500);
   await sleep(300);
@@ -261,23 +285,29 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await placeBig(3800);
   await sleep(300);
   out.before_confirm = await state();
-  await measure("confirm_esc", async () => {
-    await chord("p");
-    await sleep(150);
-    await typeText("delete current file", 15);
-    await sleep(150);
-    await press("Enter");
-    for (let i = 0; i < 50 && !(await evaluate("!!document.querySelector('.modal.mod-confirm')")); i++) await sleep(20);
-    await press("Escape");
-  }, "!document.querySelector('.modal.mod-confirm') && ws.active.path === 'Big note.md'", { settle: 400 });
-  // A long note just opened: Enter on a list item deep in it still continues the list.
+  await measure("confirm_esc", async () => { await palette("delete current file"); await until("!!document.querySelector('.modal.mod-confirm')", 1000); await press("Escape"); },
+    "!document.querySelector('.modal.mod-confirm') && ws.active.path === 'Big note.md'", { settle: 400 });
+  // A long note just opened and jumped into, before the background parse reaches the caret (about 100 ms
+  // at 5k), in three copies: a letter typed deep in it, Enter on a plain line, Enter on a list item (it still continues).
   await run(async (text) => {
     const { api } = await import("/src/api.ts");
-    await api.createNote("Long copy.md", text);
+    for (const name of ["Long letter.md", "Long plain.md", "Long copy.md"]) await api.createNote(name, text);
     await ws.vault.refreshFiles();
   }, await evaluate("ws.view.state.doc.toString()"));
+  const deepPlain = (p) => run(async (p) => {
+    await ws.open(p);
+    await new Promise((r) => requestAnimationFrame(r));
+    let { doc } = ws.view.state, at = doc.line(4500);
+    while (!/^[A-Za-z]/.test(at.text)) at = doc.line(at.number + 1);
+    ws.view.dispatch({ selection: { anchor: at.to }, scrollIntoView: true });
+    return ws.view.focus(), [doc.lines, doc.length];
+  }, p);
+  const [, chars] = await deepPlain("Long letter.md");
+  await measure("letter_fresh_long", () => typeText("x", 0), `ws.view.state.doc.length === ${chars + 1}`, { settle: 150 });
+  const [lines] = await deepPlain("Long plain.md");
+  await measure("enter_plain_fresh_long", () => press("Enter"), `ws.view.state.doc.lines === ${lines + 1} && ${lineIs("")}`, { settle: 150 });
   await run(async () => { await ws.open("Long copy.md"); await new Promise((r) => requestAnimationFrame(r)); const at = ws.view.state.doc.line(4500); ws.view.dispatch({ changes: { from: at.to, insert: "\n- item" }, selection: { anchor: at.to + 7 }, scrollIntoView: true }); ws.view.focus(); });
-  await measure("enter_list_fresh_long", () => press("Enter"), `ws.view.state.doc.lineAt(ws.view.state.selection.main.head).text === "- "`, { settle: 150 });
+  await measure("enter_list_fresh_long", () => press("Enter"), lineIs("- "), { settle: 150 });
   await measure("switcher_enter", async () => { await chord("o"); await sleep(150); await typeText(nameOf(notes[4]), 20); await sleep(200); await press("Enter"); }, opened(notes[4]));
   await measure("switcher_ctrl_enter", async () => { await chord("o"); await sleep(150); await typeText(nameOf(notes[5]), 20); await sleep(200); await combo("Enter", 2); }, `ws.tabs.some(t => t.path === ${JSON.stringify(notes[5])})`);
 
@@ -309,7 +339,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await measure("toggle_left_back", () => combo("[", 3), "!document.querySelector('.app-container').classList.contains('is-left-sidebar-collapsed')", { settle: 400 });
   await measure("toggle_right", () => combo("]", 3), "document.querySelector('.app-container').classList.contains('is-right-sidebar-collapsed')", { settle: 600 });
   await measure("toggle_right_back", () => combo("]", 3), "!document.querySelector('.app-container').classList.contains('is-right-sidebar-collapsed')", { settle: 600 });
-  for (const tab of ["Outgoing links", "Tags", "Outline", "Backlinks"]) await measure(`right_tab_${tab.split(" ")[0].toLowerCase()}`, () => click(`.mod-right-split [aria-label="${tab}"]`), "true", { settle: 300 });
+  for (const tab of ["Outgoing links", "Tags", "Outline", "Backlinks"]) await measure(`right_tab_${tab.split(" ")[0].toLowerCase()}`, () => click(`.mod-right-split [aria-label="${tab}"]`), `!!document.querySelector('.mod-right-split [aria-label="${tab}"].is-active')`, { settle: 300 });
   // Both docks resize by dragging their inner edge, as in Obsidian.
   const drag = async (side, dx) => {
     const handle = `.mod-${side}-split > .workspace-leaf-resize-handle`;
@@ -324,7 +354,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   for (const [side, dx] of [["left", 80], ["right", -80]]) {
     const width = `document.querySelector(".mod-${side}-split").getBoundingClientRect().width`;
     const before = await evaluate(width);
-    await measure(`resize_${side}`, () => drag(side, dx), "true", { settle: 300 });
+    await measure(`resize_${side}`, () => drag(side, dx), `Math.abs(${width} - ${before}) >= 79`, { settle: 300 });
     out[`resize_${side}`].grew = Math.round((await evaluate(width)) - before);
     // Kept for the next start, in the vault's saved layout.
     out[`resize_${side}`].saved = await evaluate(`(() => { try { return Math.round(JSON.parse(localStorage.getItem("grove.layout:" + ws.vault.path))?.${side}Width ?? -1) - Math.round(${width}); } catch { return null; } })()`);
@@ -337,7 +367,7 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await measure("folder_collapse", () => click('.nav-folder-title[data-path="Projects"]'), "document.querySelectorAll('.nav-file-title').length < 1500", { settle: 300 });
   await run(async () => { await ws.open(ws.vault.notes.find((x) => x.path.startsWith("Journal/")).path); });
   await sleep(300);
-  await measure("reveal_active", async () => { await chord("p"); await sleep(150); await typeText("reveal", 20); await sleep(150); await press("Enter"); }, `document.querySelector(".nav-files .tree-item-self.is-active")?.dataset.path === ws.active.path`, { settle: 300 });
+  await measure("reveal_active", () => palette("reveal"), `document.querySelector(".nav-files .tree-item-self.is-active")?.dataset.path === ws.active.path`, { settle: 300 });
 
   // ---- 7. New note and rename from the inline title ----
   await measure("new_note", () => chord("n"), `/^Untitled/.test(ws.active.path ?? "") && document.activeElement?.classList.contains("inline-title")`, { watchTitle: false });
@@ -357,9 +387,26 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   await run(async (p) => { await ws.open(p); ws.view.focus(); }, notes[7]);
   await sleep(200);
   const groupsBefore = await evaluate("ws.groups().length");
-  await measure("split_right", async () => { await chord("p"); await sleep(150); await typeText("split right", 20); await sleep(150); await press("Enter"); }, `ws.groups().length === ${groupsBefore + 1}`, { settle: 300 });
-  await measure("focus_left_pane", () => click(".workspace-split.mod-root .workspace-tabs:not(.mod-active) .cm-content"), "true", { settle: 200 });
+  await measure("split_right", () => palette("split right"), `ws.groups().length === ${groupsBefore + 1}`, { settle: 300 });
+  const otherPane = await evaluate("ws.groups().find((g) => g !== ws.layout.activeGroup)?.active.id ?? null");
+  await measure("focus_left_pane", () => click(".workspace-split.mod-root .workspace-tabs:not(.mod-active) .cm-content"), `ws.active.id === ${otherPane} && document.activeElement?.closest(".workspace-tabs.mod-active .cm-content") !== null`, { settle: 200 });
   await measure("close_split", async () => { await click(".workspace-split.mod-root .workspace-tabs:not(.mod-active) .cm-content"); await sleep(100); await chord("w"); }, `ws.groups().length === ${groupsBefore}`, { settle: 300 });
+
+  // Renaming a linked note from its inline title: links, counts and source text follow.
+  if (chosen) {
+    const renamedTo = chosen.replace(/[^/]+$/, "Retitled.md");
+    const before = await backlinksOf(chosen);
+    await run(async (p) => { await ws.open(p); }, chosen);
+    await sleep(300);
+    const status = await evaluate("__fx.state().backlinks");
+    // "Update links?" is asked by default: Enter takes Update.
+    await measure("rename_linked", async () => { await click(".workspace-tabs.mod-active .inline-title"); await chord("a"); await typeText("Retitled", 20); await press("Enter"); await until("!!document.querySelector('.modal.mod-confirm')", 2000); await press("Enter"); },
+      `ws.active.path === ${JSON.stringify(renamedTo)} && !!ws.vault.links.outgoing["Big note.md"]?.includes(${JSON.stringify(renamedTo)})`, { settle: 600, timeout: 8000, watchTitle: false });
+    const after = await backlinksOf(renamedTo);
+    const sources = (list) => JSON.stringify(list.map((b) => b.from).sort());
+    out.rename_links = { fresh: await linksFresh(), count: [before.length, after.length], sources: sources(before) === sources(after), text: after.every((b) => b.text.includes("Retitled")), status: [status, await evaluate("__fx.state().backlinks")],
+      old_gone: await evaluate(`![...Object.values(ws.vault.links.outgoing), ...Object.values(ws.vault.links.markdown)].some((v) => v.includes(${JSON.stringify(chosen)}))`) };
+  }
 
   console.log(JSON.stringify(out));
   if (REPORT) return;
@@ -378,6 +425,11 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
     check(!Object.keys(x.flashes).length, `${name}: flashed ${JSON.stringify(x.flashes)}`);
     check(a.tab === a.name && a.header === a.name && a.title === a.name, `${name}: labels ${JSON.stringify([a.tab, a.header, a.title])} for ${a.name}`);
   }
+  // Ctrl+Tab and Ctrl+Shift+Tab land on the neighbouring tab, not merely some note.
+  for (const name of ["ctrl_tab", "ctrl_shift_tab"]) {
+    const to = out[`${name}_to`] ?? {};
+    check(to.id !== to.from && to.path && sample(name).after.path === to.path, `${name}: went to ${sample(name).after.path}, expected tab ${to.id} (${to.path})`);
+  }
   // Coming back to a long note: caret and scroll where they were.
   for (const [name, before] of [["tab_back_click", "big_before"], ["tab_close_reopen", "big_before"], ["big_back", "big_mid"]]) {
     const a = sample(name).after, b = out[before];
@@ -387,11 +439,28 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   const typing = sample("typing_big_note");
   check(typing.long === 0 && typing.gap_max <= 20 && typing.event_max <= 16, `typing_big_note: ${typing.long} long tasks, max frame ${typing.gap_max} ms, input ${typing.event_max} ms`);
   for (const name of ["enter_list_item", "enter_list_fresh_long"]) check(sample(name).after.line === "- ", `${name}: Enter on a list item gave ${JSON.stringify(sample(name).after.line)}, not "- "`);
+  // Enter: keystroke to paint within 16 ms (no slow input event).
+  const enter = sample("enter_list_item");
+  check(enter.ms !== null && enter.long === 0 && enter.event_max <= 16, `enter_list_item: ${enter.ms} ms, ${enter.long} long tasks, slowest input ${enter.event_max} ms (budget 16)`);
+  // Just after a jump, CodeMirror spends up to 20 ms of each edit parsing toward the
+  // screen. A plain Enter costs what a letter does there (no parse of the note
+  // to the caret); a list Enter pays that parse once, within its 100 ms cap.
+  const [letter, plain, list] = ["letter_fresh_long", "enter_plain_fresh_long", "enter_list_fresh_long"].map(sample);
+  check(letter.ms !== null && plain.ms !== null && plain.long === 0 && plain.ms <= Math.max(16, letter.ms) + 8, `enter_plain_fresh_long: ${plain.ms} ms to the new line, a letter ${letter.ms} ms`);
+  check(list.ms !== null && list.js_max <= 100 && list.long_max <= 100, `enter_list_fresh_long: ${list.js_max} ms of JS, longest task ${list.long_max} ms (parse cap 100)`);
+  // The save and refresh after an edit: the index and backlinks have the new link.
+  const e = out.edit_links ?? {};
+  check(e.chosen && e.indexed && e.fresh && e.backlink, `edit: links after choosing [[${e.chosen}]] ${JSON.stringify(e)}`);
   check(sample("suggest_open").ms !== null && sample("suggest_choose").ms !== null, "[[ suggester: opened and chose a note");
   check(sample("suggest_esc").ms !== null, "[[ suggester: Esc keeps [[]] and closes");
   check(sample("undo").after.line === sample("suggest_choose").after.line && sample("redo").after.line === sample("suggest_esc").after.line, `undo/redo: ${sample("undo").after.line} / ${sample("redo").after.line}`);
   // Quick switcher, command palette, settings: open fast; Esc returns to the same caret and scroll.
   for (const name of ["switcher_open", "palette_open"]) check(sample(name).ms !== null && sample(name).ms <= 100 && sample(name).after.focus === "input", `${name}: ${sample(name).ms} ms, focus ${sample(name).after.focus}`);
+  // Each keystroke: at most 16 ms of JS, results painted within 50 ms of the last one.
+  for (const name of ["switcher_type", "switcher_last_key", "palette_type", "palette_last_key"]) {
+    const x = sample(name);
+    check(x.ms !== null && x.long === 0 && x.js_max <= 16 && (!name.endsWith("last_key") || x.ms <= 50), `${name}: ${x.ms} ms, ${x.long} long tasks, JS per key up to ${x.js_max} ms`);
+  }
   for (const [name, before] of [["switcher_esc", "before_switcher"], ["palette_esc", "before_palette"], ["settings_esc", "before_settings"], ["confirm_esc", "before_confirm"]]) {
     const a = sample(name).after, b = out[before];
     check(a.focus === "editor" && a.head === b.head && near(a.scroll, b.scroll), `${name}: focus ${a.focus}, caret ${a.head} scroll ${a.scroll}, was ${b.head} / ${b.scroll}`);
@@ -414,11 +483,15 @@ await withBrowser(async ({ send, evaluate, run, key, press, chord, click, move, 
   check(renamed.path === "Fresh name.md" && renamed.focus === "editor" && renamed.tab === "Fresh name" && renamed.header === "Fresh name" && renamed.treeActive === "Fresh name.md", `rename_enter: ${JSON.stringify(renamed)}`);
   check(out.rename_esc_title === "Untitled" && sample("rename_esc").after.focus === "editor", `rename_esc: title ${out.rename_esc_title}, focus ${sample("rename_esc").after.focus}`);
   for (const name of ["new_note", "rename_type", "rename_enter"]) check(!Object.keys(sample(name).flashes).length, `${name}: flashed ${JSON.stringify(sample(name).flashes)}`);
+  // A linked note renamed: no stale index entry, same backlink count, sources and status label, new text.
+  const r = out.rename_links ?? {};
+  check(sample("rename_linked").ms !== null && r.fresh && r.old_gone && r.count?.[0] > 0 && r.count[0] === r.count[1] && r.sources && r.text && r.status?.[0] === r.status?.[1], `rename_linked: ${JSON.stringify(r)}`);
   // Splits.
   check(sample("split_right").ms !== null && sample("close_split").ms !== null && sample("close_split").after.focus === "editor", `splits: split ${sample("split_right").ms} ms, close ${sample("close_split").ms} ms, focus ${sample("close_split").after.focus}`);
   // Known gap: a new note or a rename rebuilds every visible tree row (P6, file-tree virtualization).
-  const p6 = ["new_note", "rename_enter"].filter((x) => sample(x).long).map((x) => `${x} ${sample(x).long_max} ms`);
+  const p6 = ["new_note", "rename_enter", "rename_linked"].filter((x) => sample(x).long).map((x) => `${x} ${sample(x).long_max} ms`);
   if (p6.length) console.log(`KNOWN GAP (P6, tree rebuilt on every file-list change): long task ${p6.join(", ")}`);
+  console.log(`KNOWN COST (once per long note, just after a jump): list Enter parses to the caret, ${list.js_max} ms of JS`);
   if (n !== 5000) {
     console.log(`REPORT ONLY at ${n}: ${misses.length} misses`, JSON.stringify(misses));
     return;
