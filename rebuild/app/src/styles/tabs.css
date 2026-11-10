@@ -17,7 +17,8 @@
 }
 /* Tabs share the strip like Obsidian's: each is a full tab width while
    there is room, and they all shrink evenly when there is not, instead of
-   shrinking to fit their titles. The + button follows the last tab. */
+   shrinking to fit their titles. The + button follows the last tab. Slim
+   (28px, as measured in Obsidian), sitting on the strip's bottom edge. */
 .workspace-tab-header-container-inner {
   display: flex;
   align-items: flex-end;
@@ -28,13 +29,13 @@
   overflow: hidden;
 }
 .mod-root .workspace-tab-header {
-  height: 34px;
+  height: 28px;
   width: var(--tab-width);
   min-width: var(--tab-min-width);
   flex: 0 1 auto;
   position: relative;
-  padding: 1px 4px 4px;
-  border-radius: 10px 10px 0 0;
+  padding: 3px 3px 4px;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
   margin-bottom: -1px;
   -webkit-app-region: no-drag;
 }
@@ -45,10 +46,11 @@
 .workspace-tab-header-inner {
   display: flex;
   align-items: center;
+  position: relative;
   height: 100%;
-  padding: 0 3px 0 6px;
+  padding: 0 3px 0 7px;
   gap: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   color: var(--text-muted);
   /* the active tab's lighter "indicator" fades in rather than snapping */
   transition:
@@ -83,12 +85,20 @@
   flex: 1;
   white-space: nowrap;
 }
+/* The close button sits over the title's end instead of taking room from
+   it, so an inactive tab's title uses its whole width and nothing moves
+   when the button fades in on hover: the title fades out under it. The
+   active and pinned tabs, which always show it, keep its room clear. */
 .workspace-tab-header-inner-close-button {
-  --icon-size: 16px;
+  --icon-size: 14px;
   --icon-stroke: var(--icon-xs-stroke-width);
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  translate: 0 -50%;
   display: flex;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-s);
   color: var(--icon-color);
   opacity: 0;
   transition:
@@ -100,6 +110,14 @@
 .workspace-tab-header.is-active .workspace-tab-header-inner-close-button,
 .workspace-tab-header.is-pinned .workspace-tab-header-inner-close-button {
   opacity: 1;
+}
+.workspace-tab-header.is-active .workspace-tab-header-inner,
+.workspace-tab-header.is-pinned .workspace-tab-header-inner {
+  padding-right: 22px;
+}
+.workspace-tab-header:not(.is-active, .is-pinned):hover .workspace-tab-header-inner-title {
+  -webkit-mask-image: linear-gradient(to left, transparent 20px, #000 32px);
+  mask-image: linear-gradient(to left, transparent 20px, #000 32px);
 }
 .workspace-tab-header-inner-close-button:hover {
   background: var(--background-modifier-hover);
@@ -116,20 +134,16 @@
 .workspace-tab-header.is-linked .workspace-tab-header-status-icon {
   display: flex;
 }
-/* The new-tab control is centred beside the taller tab row. */
+/* "New tab" and the tab list are plain icon buttons, level with the tabs'
+   middle: hovering one lights only its own small rounded box. */
 .workspace-tab-header-new-tab,
 .workspace-tab-header-tab-list {
   align-self: flex-end;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   -webkit-app-region: no-drag;
 }
 .workspace-tab-header-new-tab {
-  align-self: stretch;
-  width: 24px;
-  height: 100%;
-  margin: 0 0 0 8px;
-  padding: 8px 0 6px;
-  justify-content: center;
+  margin-left: 4px;
 }
 .workspace-tab-header-spacer {
   flex: 1;

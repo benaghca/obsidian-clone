@@ -29,8 +29,8 @@ await withBrowser(async ({ send, run, click, press, chord, point, move, check })
     assert.equal(m.text.replace(/\s+/g, ''), '00-System/Howthisvaultworks');
     assert.ok(m.crumb.left >= m.nav.right && m.crumb.right <= m.actions.left);
     assert.ok(Math.abs(m.title.left - m.content.left) <= 1 && m.title.right <= m.view.right && m.title.left >= m.view.left);
-    assert.ok(m.overflow <= 1 && m.tab.height === 34 && Math.abs(parseFloat(m.font) - 25.888) < .1 && m.weight === '700', JSON.stringify(m));
-    check(true, `${width}px ${mode}: breadcrumb beside arrows; 34px tab; 25.9px bold title aligned with text and inside pane`);
+    assert.ok(m.overflow <= 1 && m.tab.height === 28 && Math.abs(parseFloat(m.font) - 25.888) < .1 && m.weight === '700', JSON.stringify(m));
+    check(true, `${width}px ${mode}: breadcrumb beside arrows; 28px tab; 25.9px bold title aligned with text and inside pane`);
     // Rename field stays in its column as it grows, including a long unbroken name.
     await click('.inline-title'); await chord('a');
     await send('Input.insertText', { text: 'Long title '.repeat(12) + 'x'.repeat(80) });
