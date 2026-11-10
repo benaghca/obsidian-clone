@@ -140,7 +140,29 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
   await sleep(250);
   check((await open(notes[3])) && !(await evaluate(`document.querySelector(${JSON.stringify(tab(notes[3]))}).classList.contains("is-linked")`)), "clicking a hovered tab's unlink icon unlinks it and doesn't close it");
   await kept("unlink", big);
-  if (!(await open(notes[3]))) await run(async (p) => { await ws.open(p, { where: "tab" }); ws.activate(ws.tabs.find((t) => t.path === "Big note.md")); }, notes[3]);
+  const reopen3 = async () => { if (!(await open(notes[3]))) await run(async (p) => { await ws.open(p, { where: "tab" }); ws.activate(ws.tabs.find((t) => t.path === "Big note.md")); }, notes[3]); };
+  await reopen3();
+
+  // ---- The same at the narrowest a tab gets (a crowded strip or a narrow split) ----
+  // A zero preferred width squeezes every tab to its minimum (--tab-min-width, 40 px).
+  await link(notes[3], notes[2]);
+  await run((sel) => document.querySelector(sel).style.setProperty("--tab-width", "0px"), STRIP);
+  await sleep(150);
+  await hoverSettled(await point(linkOf(notes[3])));
+  const narrow = await run((sel, l, c, plain) => {
+    const b = (e) => document.querySelector(e).getBoundingClientRect(), lb = b(l), cb = b(c);
+    return { width: b(sel).width, plain: b(plain).width, min: parseFloat(getComputedStyle(document.querySelector(plain)).minWidth), gap: Math.round(cb.left - lb.right),
+      hit: !!document.elementFromPoint(lb.x + lb.width / 2, lb.y + lb.height / 2)?.closest(".workspace-tab-header-status-icon") };
+  }, tab(notes[3]), linkOf(notes[3]), closeOf(notes[3]), tab(notes[1]));
+  check(narrow.plain === narrow.min && narrow.gap >= 0 && narrow.hit, `a linked tab at the minimum width keeps its unlink icon clear of the close button ${JSON.stringify(narrow)}`);
+  await refocus();
+  await press1(linkOf(notes[3]));
+  await sleep(250);
+  check((await open(notes[3])) && !(await evaluate(`document.querySelector(${JSON.stringify(tab(notes[3]))}).classList.contains("is-linked")`)), "at the minimum width, clicking the unlink icon unlinks the tab and doesn't close it");
+  await kept("unlink_narrow", big);
+  await run((sel) => document.querySelector(sel).style.removeProperty("--tab-width"), STRIP);
+  await reopen3();
+  await sleep(150);
 
   // ---- A middle press closes the tab over its buttons too, with no default (autoscroll, paste) ----
   await link(notes[3], notes[2]);

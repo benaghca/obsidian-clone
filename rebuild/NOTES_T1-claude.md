@@ -117,6 +117,38 @@ The Ctrl+Tab check now compares against the tab active just before the press. Th
 - **`npm run build`** and **`npm run audit:offline`:** passed.
 - **Screenshots** the suite rewrote were restored before committing.
 
+## Re-review fix: linked tabs at the minimum width (after `60ac3ae`)
+
+Codex's re-review of `e33299e` passed it with one fix required. A linked tab could still shrink to the strip's 40 px minimum, in a crowded strip or a narrow split. At that width the unlink icon and the close button overlap by 13 px, with the icon's centre under the "×", so aiming at unlink could close the tab.
+
+**In plain words:** a linked tab now stops shrinking at 56 px instead of 40. Its unlink icon and "×" stay side by side, so clicking unlink only ever unlinks. Other tabs still shrink to 40 px, and nothing else about the look changes.
+
+**What changed:**
+- **`styles/tabs.css`:** `.mod-root .workspace-tab-header.is-linked { min-width: max(var(--tab-min-width), 56px) }`.
+- **Why 56:** both buttons are 18 px. At 40 px they overlapped by 13 px, so they touch at 53 px; 56 leaves 3 px between them. It still follows the theme token if that is ever larger.
+- **I rejected hiding one control at tiny widths.** Either button hiding would still put the other where the user aims; reserving the room is simpler and never closes the tab by mistake.
+
+**Test (`scripts/test-tabs.mjs`):**
+- **Setup:** the strip's preferred tab width is set to 0, so every tab shrinks to its minimum. A plain tab must then measure exactly `--tab-min-width` (40 px), which proves the strip really is at the minimum.
+- **Checks on the hovered, inactive linked tab:**
+  - its unlink icon is clear of the close button;
+  - the unlink icon is what's under the pointer at its centre;
+  - clicking it unlinks the tab and keeps it open;
+  - the active note, focus and caret stay as they were.
+- **Against the old CSS:** it failed with `{"width":40,"plain":40,"min":40,"gap":-13,"hit":false}`, and the click closed the tab. It passes with the fix.
+
+**Line counts against `60ac3ae`:**
+- **App code:** CSS +5/−0 in `tabs.css`.
+- **Tests:** `test-tabs.mjs` +23/−1.
+- **T1 app code since `6c2a0af`:** net +29.
+- No new dependency and no Rust.
+
+**Results:**
+- **`flock /tmp/grove-npm-test.lock npm test` (with `posttest`):** exit 0. Vitest 99 files, 1,545 tests, and every browser script passed.
+- **`test-header.mjs`, `test-friction.mjs` and `test-r27e.mjs`, run on their own:** passed.
+- **`npm run build`** and **`npm run audit:offline`:** passed.
+- **Screenshots** the suite rewrote were restored before committing.
+
 ## Audit: what each item did before
 
 Measured in headless Chromium at 1280×1000, `?synthetic=5000`, five tabs open with the 5,000-line note active and the caret at line 2,000.
