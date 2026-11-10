@@ -67,8 +67,10 @@ export function createSidedocks(app: HTMLElement, pane: Pick<Panes, "holdColumn"
       const startWidth = width(side);
       const sign = side === "left" ? 1 : -1;
       app.classList.add("is-sidedock-resizing");
+      handle.classList.add("is-dragging");
       dragPointer(down, handle, (e) => setWidth(side, startWidth + sign * (e.clientX - down.clientX)), () => {
         app.classList.remove("is-sidedock-resizing");
+        handle.classList.remove("is-dragging");
         changes.emit(side);
       });
     });

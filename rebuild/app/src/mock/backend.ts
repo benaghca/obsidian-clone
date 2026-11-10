@@ -293,72 +293,87 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     if (walked?.revision !== revision) walked = { revision, ...walkLinks() };
     return walked;
   }
+  // Each file's links, kept while its text and the vault's file list are unchanged:
+  // the walk after an edit reads only the edited file again.
+  type FileLinks = { content: string; out: string[]; md: string[]; missing: string[]; hits: [string, Backlink][] };
+  let perFile = { list: "", links: new Map<string, FileLinks>() };
   function walkLinks(): { links: LinkIndex; backlinks: Record<string, Backlink[]> } {
+    const list = [...files.keys()].join("\n"), sameList = perFile.list === list;
     const notes = [...files.keys()].filter((path) => isNoteFile(path) || !/\.md$/i.test(path)).map((path) => ({ name: noteName(path), path }));
     const resolve = linkResolver(notes);
     const outgoing: Record<string, string[]> = {};
     const backlinks: Record<string, Backlink[]> = {};
     const markdown: Record<string, string[]> = {};
     const unresolved: Record<string, string[]> = {};
+    const kept = new Map<string, FileLinks>();
     for (const [path, f] of files) {
       if (isBinary(f.content) || (/\.md$/i.test(path) && !isNoteFile(path))) continue;
-      const out = new Set<string>();
-      const md = new Set<string>();
-      const missing = new Map<string, string>();
-      const unknown = (name: string) => missing.has(name.toLowerCase()) || missing.set(name.toLowerCase(), name);
-      let fence: { marker: string; len: number } | null = null;
-      f.content.split("\n").forEach((text, i) => {
-        const fm = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(text);
-        if (fence) {
-          if (fm && fm[1][0] === fence.marker && fm[1].length >= fence.len && !fm[2].trim()) fence = null;
-          return;
-        }
-        if (fm && !(fm[1][0] === "`" && fm[2].includes("`"))) {
-          fence = { marker: fm[1][0], len: fm[1].length };
-          return;
-        }
-        let scan = text;
-        if (text.includes("`")) {
-          const parts = text.split(/(`+)/);
-          for (let j = 1; j < parts.length; j += 2) {
-            const close = parts.indexOf(parts[j], j + 2);
-            if (close > 0) {
-              parts.fill(" ", j, close + 1);
-              j = close;
-            }
-          }
-          scan = parts.join("");
-        }
-        for (const m of scan.matchAll(WIKILINK)) {
-          const name = m[1].trim();
-          const target = resolve(name, path);
-          if (!target) {
-            unknown(name);
-            continue;
-          }
-          out.add(target);
-          (backlinks[target] ??= []).push({ from: path, line: i + 1, text });
-        }
-        for (const m of scan.matchAll(MDLINK)) {
-          const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
-          if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
-          const hit = resolve(raw, path);
-          if (hit) {
-            md.add(hit);
-            (backlinks[hit] ??= []).push({ from: path, line: i + 1, text });
-          }
-          else {
-            let name = markdownURL(raw).replace(/^\.\//, "");
-            if (isNoteFile(name)) name = name.slice(0, -3);
-            unknown(name);
-          }
-        }
-      });
-      if (out.size) outgoing[path] = [...out];
-      if (md.size) markdown[path] = [...md];
-      if (missing.size) unresolved[path] = [...missing.values()];
+      const before = perFile.links.get(path);
+      const links = sameList && before?.content === f.content ? before : fileLinks(path, f.content, resolve);
+      kept.set(path, links);
+      if (links.out.length) outgoing[path] = links.out;
+      if (links.md.length) markdown[path] = links.md;
+      if (links.missing.length) unresolved[path] = links.missing;
+      for (const [target, hit] of links.hits) (backlinks[target] ??= []).push(hit);
     }
+    perFile = { list, links: kept };
     return { links: { outgoing, markdown, unresolved }, backlinks };
+  }
+  function fileLinks(path: string, content: string, resolve: (target: string, from: string) => string | null): FileLinks {
+    const hits: [string, Backlink][] = [];
+    const out = new Set<string>();
+    const md = new Set<string>();
+    const missing = new Map<string, string>();
+    const unknown = (name: string) => missing.has(name.toLowerCase()) || missing.set(name.toLowerCase(), name);
+    let fence: { marker: string; len: number } | null = null;
+    content.split("\n").forEach((text, i) => {
+      const fm = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(text);
+      if (fence) {
+        if (fm && fm[1][0] === fence.marker && fm[1].length >= fence.len && !fm[2].trim()) fence = null;
+        return;
+      }
+      if (fm && !(fm[1][0] === "`" && fm[2].includes("`"))) {
+        fence = { marker: fm[1][0], len: fm[1].length };
+        return;
+      }
+      let scan = text;
+      if (text.includes("`")) {
+        const parts = text.split(/(`+)/);
+        for (let j = 1; j < parts.length; j += 2) {
+          const close = parts.indexOf(parts[j], j + 2);
+          if (close > 0) {
+            parts.fill(" ", j, close + 1);
+            j = close;
+          }
+        }
+        scan = parts.join("");
+      }
+      for (const m of scan.matchAll(WIKILINK)) {
+        const name = m[1].trim();
+        const target = resolve(name, path);
+        if (!target) {
+          unknown(name);
+          continue;
+        }
+        out.add(target);
+        hits.push([target, { from: path, line: i + 1, text }]);
+      }
+      for (const m of scan.matchAll(MDLINK)) {
+        const raw = (m[1] ?? m[2] ?? "").split("#")[0].trim();
+        if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw)) continue;
+        const hit = resolve(raw, path);
+        if (hit) {
+          md.add(hit);
+          hits.push([hit, { from: path, line: i + 1, text }]);
+        }
+        else {
+          let name = markdownURL(raw).replace(/^\.\//, "");
+          if (isNoteFile(name)) name = name.slice(0, -3);
+          unknown(name);
+        }
+      }
+    });
+    return { content, out: [...out], md: [...md], missing: [...missing.values()], hits };
   }
 
   /** Notes that might link to `paths`. Same rules as Rust `link_sources`. */

@@ -144,7 +144,8 @@ export function openPrompt<T>(opts: PromptOptions<T>) {
     closed = true;
     openCount--;
     overlay.remove();
-    if (restore) restoreFocus?.focus();
+    // preventScroll: focusing a long note's content would scroll its top into view.
+    if (restore) restoreFocus?.focus({ preventScroll: true });
   }
 
   input.addEventListener("input", () => update());
