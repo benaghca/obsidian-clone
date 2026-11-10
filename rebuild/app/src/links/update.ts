@@ -106,18 +106,21 @@ export async function updateLinks(
     for (;;) {
       while (isMoving()) await movesSettled();
       const at = generation;
+      const stale = () => (changed.get(n.path) ?? 0) > n.seen;
       let text = ws.editors.doc(n.path)?.toString();
-      if (text === undefined && (changed.get(n.path) ?? 0) > n.seen) {
+      if (text === undefined && stale()) {
         const now = await read(n);
         if (now === null) return 0;
-        if (at !== generation || isMoving()) {
+        // A move, or another change while it was being read (that reply may predate it): read again.
+        if (at !== generation || isMoving() || stale()) {
           rewrite(n, now);
           continue;
         }
         text = ws.editors.doc(n.path)?.toString() ?? now;
       }
       text ??= n.read!;
-      // From here to the write nothing waits, so the editor can't change in between.
+      // From here to the write nothing waits, so neither the editor nor the
+      // change marks can move on in between.
       const r = text === n.read && n.generation === generation ? n.result! : rewrite(n, text);
       if (!r.count) return 0;
       try {

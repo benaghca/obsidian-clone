@@ -47,6 +47,12 @@ Codex reviewed `8b7371a` independently: **FAIL**, with three required fixes. All
    - The same test passes when run against `9f78826`'s own code.
    - **The first fuzz missed this.** P1's random vaults never put both kinds in one moved folder: the old notes-first rule also scored 0 differences. Once 40% of the vaults held such a pair, notes-first scored 81 differences against `9f78826`, and taking the earliest pair alone still scored 77, because of the chained rewrites. With the chains replayed: **0 of 4,053**, then **0 of 8,091** on another seed.
 
+**Second review (Codex, on `299d2e7`): FAIL, one content-loss race left in the reread.** The three fixes above passed Codex's checks, including 1,500 independent comparisons of ordered rewrites against literal `9f78826` code. What remained:
+- **The race.** When a note not open in an editor had changed since it was read, `write()` read it again. After that read it checked for a later move, but not for another change that landed *during* the reread. A reply that started before that second change came back stale, and its rewrite was written over the newer text. In Codex's reproduction, `SECOND CHANGE` was lost and the note ended as `[[New/A]] FIRST CHANGE`.
+- **The fix (`links/update.ts`).** `read()` already records the change count before it sends the read. After each awaited reread, `write()` now checks that no change for that note arrived since. If one did, it keeps that text and goes round again, which reads it again. From that final check to handing the result to `updateNoteText`, nothing is awaited, so the change marks and the editor can't move on in between.
+- **The test (`links/updateRace.test.ts`, the on-disk change test, extended).** The in-memory disk now has a hook between taking a file's text and replying. On a second note's reread, it lets a second notified change land in that gap and then replies with the stale text. Before the fix the result was `[[New/A]] in 3\nFIRST CHANGE`, losing `SECOND CHANGE`, so the test fails on `299d2e7`. After the fix both changes are kept and both links rewritten.
+- **Numbers.** Nothing measured changed. The fix touches only the reread path, which runs only after an outside change, so the before/after tables stand as recorded.
+
 Not changed, as the brief allows:
 - A yield comes only between notes, so one very large note is still rewritten in one go. That's inherited, not new.
 - A note deleted while its links are being rewritten is written again, as before P1.
@@ -184,7 +190,7 @@ At 20k, the mock already loaded in about 1.5 s before P1 (the link-index work ha
 
 ## Tests
 
-- **`links/updateRace.test.ts`** (new, after the review): typing and new lines in loaded notes mid-move, a note changed on disk mid-move, and a second folder move mid-rewrite, all through the real `renameFile` and `updateNoteText`. See "Fixes after the review".
+- **`links/updateRace.test.ts`** (new, after the review): typing and new lines in loaded notes mid-move, a note changed on disk mid-move (including a second change during a slow reread, after the second review), and a second folder move mid-rewrite, all through the real `renameFile` and `updateNoteText`. See "Fixes after the review".
 - **`links/update.test.ts`** (new tests):
   - **64-note folder move, one pass vs one pass per pair.** The vault has clashing names across folders, headings, aliases, relative and partial paths, Markdown links with `%20` and escaped parentheses, image and drawing embeds, an extensionless file, code spans, fences, CRLF notes and unresolved links. Every written note equals the old per-pair loop's output, with over 500 links rewritten.
   - **Hashes of the literal pre-P1 code.** Five moves (folder rename, folder into a folder, subfolder out, one note, one image) × three link formats × both Wikilinks settings. The hashes were made by running `9f78826`'s own `updateLinks` / `internal.ts` beside the new code before committing, and that run also compared every written note directly: all 30 identical.
@@ -194,7 +200,7 @@ At 20k, the mock already loaded in about 1.5 s before P1 (the link-index work ha
 - **`workspace.test.ts`:** two cases built a fake vault without `fileRefs()`. They now use a real `Vault` over the same file list. The assertions are unchanged.
 - **Unchanged and passing:** `internal.test.ts`, `fixtures/parity/links.json`, `test-links-embeds-edge.mjs` (its rewrite and resolve cases).
 
-Full runs on the final tree, after the review fixes, first run, no retry:
+Full runs on the final tree, after both reviews' fixes (the reread fix included), first run, no retry:
 
 - `flock /tmp/grove-npm-test.lock npm test` (including `posttest`): exit 0. Vitest: 99 files, 1,544 tests. P0 at 5k passed, with the graph reported as the known gap (p95 33.4 ms, max 33.4 ms).
   - For the record: on `8b7371a`, the first full run had failed on the two `workspace.test.ts` fake vaults described above, and passed on the next run after they were fixed.
@@ -215,11 +221,11 @@ Checked with the browser bench, the tests and the code. No window was opened, so
 
 ## Line counts
 
-Net change by file, all of P1 (`git diff --numstat 9f78826`, after the review fixes, plus this notes file):
+Net change by file, all of P1 (`git diff --numstat 9f78826`, after both reviews' fixes, plus this notes file):
 
 | File | Added | Removed |
 |---|---:|---:|
-| `app/src/links/update.ts` | 153 | 33 |
+| `app/src/links/update.ts` | 156 | 33 |
 | `app/src/links/internal.ts` | 69 | 15 |
 | `app/src/fileOps.ts` | 28 | 2 |
 | `app/src/mock/backend.ts` | 25 | 10 |
@@ -227,21 +233,21 @@ Net change by file, all of P1 (`git diff --numstat 9f78826`, after the review fi
 | `app/src/editorHost.ts` | 2 | 6 |
 | `app/src/shell/hoverPreview.ts` | 1 | 1 |
 | `app/src/canvas/view.ts` | 1 | 1 |
-| **TypeScript, app code** | **284** | **73** |
+| **TypeScript, app code** | **287** | **73** |
 | `app/src/links/update.test.ts` | 163 | 16 |
-| `app/src/links/updateRace.test.ts` (new) | 145 | 0 |
+| `app/src/links/updateRace.test.ts` (new) | 162 | 0 |
 | `app/src/mock/backend.test.ts` | 28 | 0 |
 | `app/src/workspace.test.ts` | 8 | 3 |
-| **TypeScript, tests** | **344** | **19** |
+| **TypeScript, tests** | **361** | **19** |
 | `app/scripts/bench-feel.mjs` | 13 | 1 |
 | `app/scripts/test-feel.mjs` | 5 | 4 |
 | **JavaScript, scripts** | **18** | **5** |
 | `NOTES_P1-claude.md` | this file | |
 
-The review fixes alone, against `8b7371a`: `update.ts` +138 / −32, `internal.ts` +38 / −22, `fileOps.ts` +28 / −2, `workspace.ts` +3 / −3, `bench-feel.mjs` +1 / −1, and tests +186 / −17 (including the new `updateRace.test.ts`).
+The first review's fixes alone, against `8b7371a`: `update.ts` +138 / −32, `internal.ts` +38 / −22, `fileOps.ts` +28 / −2, `workspace.ts` +3 / −3, `bench-feel.mjs` +1 / −1, and tests +186 / −17 (including the new `updateRace.test.ts`). The second review's fix, against `299d2e7`: `update.ts` +6 / −3, `updateRace.test.ts` +21 / −4.
 
 - **No new dependency.**
-- **Files near 800 lines:** none touched comes close. `workspace.ts` is 701 lines, `mock/backend.ts` 563, `links/internal.ts` 365, `fileOps.ts` 262 and `links/update.ts` 191.
+- **Files near 800 lines:** none touched comes close. `workspace.ts` is 701 lines, `mock/backend.ts` 563, `links/internal.ts` 365, `fileOps.ts` 262 and `links/update.ts` 194.
 - **Dead code removed:** `editorHost.ts`'s private `files` cache and its `NoteLike` import, and `update.ts`'s per-pair loop and `seen` set.
 
 ## Left for P2 or later (not done here)

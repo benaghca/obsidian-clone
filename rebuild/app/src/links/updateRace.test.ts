@@ -13,6 +13,8 @@ const io = vi.hoisted(() => ({
   disk: new Map<string, string>(),
   /** Called after each write to disk, with the write's number. */
   onWrite: (_n: number) => {},
+  /** Awaited between taking a file's text and replying, so a read can go stale. */
+  beforeReply: async (_path: string) => {},
   writes: 0,
 }));
 vi.mock("../api", () => ({
@@ -20,6 +22,7 @@ vi.mock("../api", () => ({
     readNote: async (path: string) => {
       const text = io.disk.get(path);
       if (text === undefined) throw new Error(`no such file: ${path}`);
+      await io.beforeReply(path);
       return text;
     },
     writeNote: async (path: string, content: string) => {
@@ -79,6 +82,7 @@ beforeEach(() => {
   io.disk.clear();
   io.writes = 0;
   io.onWrite = () => {};
+  io.beforeReply = async () => {};
   states.clear();
   jobs = [];
   fileSettings.renamed = (from, to, before, sources) => void jobs.push(updateLinks(ws, from, to, before, sources, style, null));
@@ -108,18 +112,31 @@ test("typing in a loaded note while the update yields is kept, with or without a
   expect(text("S5.md")).toBe("[[New/A]] in 5\nend");
 });
 
-test("a note saved or changed on disk while the update yields keeps that change", async () => {
+test("a note saved or changed on disk while the update yields keeps that change, even one made during its reread", async () => {
   io.disk.set("Old/A.md", "a");
   for (let i = 0; i < 4; i++) io.disk.set(`S${i}.md`, `[[Old/A]] in ${i}`);
+  const change = (path: string, text: string) => {
+    io.disk.set(path, text);
+    ws.vault.written(path);
+  };
+  // After the first write, both S2 and S3 change on disk and are read again.
   io.onWrite = (n) => {
     if (n !== 1) return;
-    io.disk.set("S2.md", "[[Old/A]] in 2\nEXTERNAL [[Old/A#Part]]");
-    ws.vault.written("S2.md");
+    change("S2.md", "[[Old/A]] in 2\nEXTERNAL [[Old/A#Part]]");
+    change("S3.md", "[[Old/A]] in 3\nFIRST CHANGE");
+  };
+  // S3's reread is slow: a second change lands after it took the text and before it replies.
+  let reads = 0;
+  io.beforeReply = async (path) => {
+    if (path !== "S3.md" || ++reads !== 2) return;
+    await new Promise((r) => setTimeout(r, 0));
+    change("S3.md", "[[Old/A]] in 3\nFIRST CHANGE\nSECOND CHANGE [[Old/A]]");
   };
   await renameFile(ws, "Old", "New");
   await settle();
   expect(io.disk.get("S2.md")).toBe("[[New/A]] in 2\nEXTERNAL [[New/A#Part]]");
-  expect(io.disk.get("S3.md")).toBe("[[New/A]] in 3");
+  expect(io.disk.get("S3.md")).toBe("[[New/A]] in 3\nFIRST CHANGE\nSECOND CHANGE [[New/A]]");
+  expect(io.disk.get("S1.md")).toBe("[[New/A]] in 1");
 });
 
 test("moving the folder again while its links are rewritten leaves no old paths and no stale links", async () => {
