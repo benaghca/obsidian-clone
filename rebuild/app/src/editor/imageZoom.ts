@@ -34,7 +34,7 @@ export function zoomImage(source: HTMLImageElement, title: string) {
   const focused = document.activeElement as HTMLElement | null;
   const close = () => {
     removeEventListener("keydown", onKey, true);
-    focused?.focus();
+    focused?.focus({ preventScroll: true });
     glide(true);
     void animateOut(box);
   };

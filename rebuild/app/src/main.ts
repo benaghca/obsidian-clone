@@ -292,6 +292,7 @@ document.getElementById("app")!.replaceWith(app);
 if (popoutNote) app.classList.add("is-popout");
 
 const docks = createSidedocks(app, panes);
+sidebar.el.append(docks.resizeHandle("left"));
 rightSidebar.el.append(docks.resizeHandle("right"));
 Object.assign(parts, { panes, docks, left: sidebar, right: rightSidebar });
 
@@ -423,14 +424,14 @@ function rememberLayout() {
   if (!ws.vault.path || popoutNote) return;
   saveLayout(ws.vault.path, {
     rightOpen: !docks.isCollapsed("right"),
+    leftWidth: docks.width("left"),
     rightWidth: docks.width("right"),
     rightView: rightSidebar.view,
     fileSort: sidebar.sortOrder,
   });
 }
 docks.onChange((side) => {
-  if (side !== "right") return;
-  rightSidebar.sync();
+  if (side === "right") rightSidebar.sync();
   rememberLayout();
 });
 rightSidebar.onSelect(rememberLayout);
@@ -528,6 +529,7 @@ async function openDailyOnStartup() {
 
 async function restoreLayout() {
   const layout = loadLayout(ws.vault.path);
+  if (layout.leftWidth !== null) docks.setWidth("left", layout.leftWidth);
   docks.setWidth("right", layout.rightWidth);
   rightSidebar.select(layout.rightView);
   docks.setCollapsed("right", !layout.rightOpen, false);

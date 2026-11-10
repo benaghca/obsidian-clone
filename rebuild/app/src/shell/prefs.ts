@@ -7,18 +7,21 @@ import { RIGHT_VIEWS, type RightView } from "./rightSidebar";
 
 export interface VaultLayout {
   rightOpen: boolean;
+  /** Null until the left dock is resized: the theme's width. */
+  leftWidth: number | null;
   rightWidth: number;
   rightView: RightView;
   fileSort: SortOrder;
 }
 
-const DEFAULTS: VaultLayout = { rightOpen: false, rightWidth: 300, rightView: "backlinks", fileSort: "alphabetical" };
+const DEFAULTS: VaultLayout = { rightOpen: false, leftWidth: null, rightWidth: 300, rightView: "backlinks", fileSort: "alphabetical" };
 const key = (vaultPath: string) => `grove.layout:${vaultPath}`;
 
 export function loadLayout(vaultPath: string): VaultLayout {
   const saved = readStored(key(vaultPath), {}) as Partial<VaultLayout>;
   return {
     rightOpen: typeof saved.rightOpen === "boolean" ? saved.rightOpen : DEFAULTS.rightOpen,
+    leftWidth: typeof saved.leftWidth === "number" ? saved.leftWidth : DEFAULTS.leftWidth,
     rightWidth: typeof saved.rightWidth === "number" ? saved.rightWidth : DEFAULTS.rightWidth,
     rightView: RIGHT_VIEWS.includes(saved.rightView!) ? saved.rightView! : DEFAULTS.rightView,
     fileSort: SORT_ORDERS.some(([o]) => o === saved.fileSort) ? saved.fileSort! : DEFAULTS.fileSort,

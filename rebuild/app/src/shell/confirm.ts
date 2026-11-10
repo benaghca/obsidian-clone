@@ -50,7 +50,7 @@ export function confirmDialog(o: ConfirmOptions): Promise<{ ok: boolean; dontAsk
       finished = true;
       openCount--;
       void animateOut(overlay);
-      restoreFocus?.focus();
+      restoreFocus?.focus({ preventScroll: true });
       resolve({ ok, dontAskAgain: ok && box.checked });
     }
     yes.addEventListener("click", () => done(true));

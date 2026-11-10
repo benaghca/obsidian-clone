@@ -200,7 +200,7 @@ export function openSettings(sections: SettingsSection[], id?: string, onClose?:
     current = null;
     // Esc (and the other closes) return to the note. The overlay's removal
     // can drop focus on the way out, so the note is focused again if that happens.
-    const refocus = () => (onClose ? onClose() : restoreFocus?.focus());
+    const refocus = () => (onClose ? onClose() : restoreFocus?.focus({ preventScroll: true }));
     void animateOut(overlay).then(() => {
       if (document.activeElement === document.body) refocus();
     });
