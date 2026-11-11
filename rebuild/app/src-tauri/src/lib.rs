@@ -25,18 +25,17 @@ mod fsutil;
 mod index;
 mod lockdown;
 mod model;
+mod queue;
 mod vault;
 mod watch;
 
 use crate::index::NoteProperties;
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
+use crate::queue::{invoke_key, Reply, WriteQueue, WriteTicket};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
 use std::future::Future;
-use std::pin::Pin;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::task::{Context, Poll, Waker};
+use std::sync::{mpsc, Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
@@ -50,111 +49,15 @@ pub struct Inner {
     pub(crate) vault: Option<vault::Vault>,
 }
 
-enum Slot { Job(Box<dyn FnOnce() + Send>), Skip }
-#[derive(Default)]
-struct WorkerState { turn: u64, slots: BTreeMap<u64, Slot>, closed: bool }
-#[derive(Default)]
-pub(crate) struct QueueShared { next: AtomicU64, ingress: Mutex<BTreeMap<usize, u64>>, worker: Mutex<WorkerState>, ready: Condvar }
-pub(crate) struct WriteQueue { pub(crate) shared: Arc<QueueShared> }
-pub(crate) struct WriteTicket { shared: Arc<QueueShared>, ticket: u64, submitted: bool }
-struct ReplyState<T> { value: Option<T>, waker: Option<Waker> }
-pub(crate) struct Reply<T>(Arc<Mutex<ReplyState<T>>>);
-
-fn lock_m<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|e| e.into_inner()) }
 pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwrap_or_else(|e| e.into_inner()) }
 pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|e| e.into_inner()) }
 
-impl<T> Future for Reply<T> {
-    type Output = T;
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
-        let mut s = lock_m(&self.0);
-        if let Some(v) = s.value.take() { Poll::Ready(v) } else { s.waker = Some(cx.waker().clone()); Poll::Pending }
-    }
-}
-
-impl Default for WriteQueue {
-    fn default() -> Self {
-        let shared = Arc::new(QueueShared::default());
-        let w = Arc::clone(&shared);
-        std::thread::Builder::new().name("vault-write".into()).spawn(move || worker_loop(w)).expect("vault-write");
-        Self { shared }
-    }
-}
-
-impl Drop for WriteQueue {
-    fn drop(&mut self) { lock_m(&self.shared.worker).closed = true; self.shared.ready.notify_all(); }
-}
-
-fn worker_loop(shared: Arc<QueueShared>) {
-    while let Some(run) = {
-        let mut w = lock_m(&shared.worker);
-        loop {
-            let turn = w.turn;
-            match w.slots.remove(&turn) {
-                Some(Slot::Job(job)) => { w.turn += 1; break Some(job); }
-                Some(Slot::Skip) => w.turn += 1,
-                None if w.closed && w.slots.is_empty() => break None,
-                None => w = shared.ready.wait(w).unwrap_or_else(|e| e.into_inner()),
-            }
-        }
-    } { run(); }
-}
-
-impl WriteQueue {
-    pub(crate) fn reserve_ingress(&self, key: usize) {
-        lock_m(&self.shared.ingress).insert(key, self.shared.next.fetch_add(1, Ordering::SeqCst));
-    }
-    pub(crate) fn take_ingress(&self, key: usize) -> WriteTicket {
-        let ticket = lock_m(&self.shared.ingress).remove(&key).unwrap_or_else(|| self.shared.next.fetch_add(1, Ordering::SeqCst));
-        WriteTicket { shared: Arc::clone(&self.shared), ticket, submitted: false }
-    }
-}
-
-impl WriteTicket {
-    pub(crate) fn submit<T: Send + 'static>(mut self, f: impl FnOnce() -> T + Send + 'static) -> Reply<T> {
-        self.submitted = true;
-        let reply = Arc::new(Mutex::new(ReplyState { value: None, waker: None }));
-        let out = Reply(Arc::clone(&reply));
-        let job = Box::new(move || {
-            let val = f();
-            let waker = { let mut s = lock_m(&reply); s.value = Some(val); s.waker.take() };
-            if let Some(w) = waker { w.wake(); }
-        });
-        lock_m(&self.shared.worker).slots.insert(self.ticket, Slot::Job(job));
-        self.shared.ready.notify_one();
-        out
-    }
-}
-
-impl Drop for WriteTicket {
-    fn drop(&mut self) {
-        if !self.submitted { lock_m(&self.shared.worker).slots.insert(self.ticket, Slot::Skip); self.shared.ready.notify_one(); }
-    }
-}
-
-fn invoke_key<R: tauri::Runtime>(msg: &tauri::ipc::InvokeMessage<R>) -> usize { msg.command().as_ptr() as usize }
-
-impl<'de, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for WriteTicket {
-    fn from_command(cmd: tauri::ipc::CommandItem<'de, R>) -> Result<Self, tauri::ipc::InvokeError> {
-        Ok(cmd.message.webview_ref().state::<AppState>().write_queue.take_ingress(invoke_key(cmd.message)))
-    }
-}
-
-fn is_write_command(cmd: &str) -> bool {
-    matches!(cmd, "open_vault" | "create_vault" | "write_note" | "set_property" | "write_file_bytes"
-        | "create_note" | "create_folder" | "rename_path" | "delete_path" | "write_config")
-}
-
 fn wrap_handler(handler: impl Fn(tauri::ipc::Invoke) -> bool) -> impl Fn(tauri::ipc::Invoke) -> bool {
     move |invoke| {
-        let reserved = is_write_command(invoke.message.command()).then(|| {
-            let (state, key) = (invoke.message.webview_ref().state::<AppState>(), invoke_key(&invoke.message));
-            state.write_queue.reserve_ingress(key);
-            (Arc::clone(&state.write_queue.shared), key)
-        });
-        let handled = handler(invoke);
-        if !handled { if let Some((shared, key)) = reserved { let _ = WriteQueue { shared }.take_ingress(key); } }
-        handled
+        let is_write = WriteQueue::is_write_command(invoke.message.command());
+        let key = invoke_key(&invoke.message);
+        let shared = Arc::clone(&invoke.message.webview_ref().state::<AppState>().write_queue.shared);
+        WriteQueue::dispatch_ingress_shared(&shared, is_write, key, || handler(invoke))
     }
 }
 
@@ -193,8 +96,16 @@ pub fn run() {
             properties, tags, read_config, write_config, read_foreign_config,
             open_note_window, allow_frame_origin,
         ]))
-        .run(tauri::generate_context!())
-        .expect("error while running grove");
+        .build(tauri::generate_context!())
+        .expect("error while building grove")
+        .run(|app, event| match event {
+            tauri::RunEvent::ExitRequested { code, api, .. } => {
+                let handle = app.clone();
+                app.state::<AppState>().write_queue.on_exit_requested(code, || api.prevent_exit(), move |c| handle.exit(c));
+            }
+            tauri::RunEvent::Exit => app.state::<AppState>().write_queue.shutdown(),
+            _ => {}
+        });
 }
 
 /// Keeps WebKitGTK's GPU (DMA-BUF) renderer on where it works. Without it WebKit paints every
@@ -435,6 +346,23 @@ fn set_property(ticket: WriteTicket, window: tauri::Window, state: State<'_, App
     }
 }
 
+fn enqueue_write_file_bytes(
+    state: &AppState,
+    ticket: WriteTicket,
+    headers: &tauri::http::HeaderMap,
+    body: &tauri::ipc::InvokeBody,
+) -> Reply<Result<(FileEntry, bool), String>> {
+    let parsed = path_from_headers(headers).and_then(|path| {
+        Ok((path, bytes_from_body(body)?.to_vec(), replace_from_headers(headers)))
+    });
+    match parsed {
+        Ok((path, bytes, replace)) => write_vault(state, ticket, move |v| {
+            if replace { v.replace_file_bytes(&path, &bytes) } else { v.write_file_bytes(&path, &bytes).map(|entry| (entry, false)) }
+        }),
+        Err(err) => Reply::ready(Err(err)),
+    }
+}
+
 /// A new file's raw bytes (a pasted image or a dropped file), at most 20 MB.
 /// The path is the `x-grove-path` header, not a JSON field. Runs off the GTK thread.
 /// With `x-grove-replace: 1` a file already at the path is replaced (a drawing's PNG
@@ -443,16 +371,9 @@ fn set_property(ticket: WriteTicket, window: tauri::Window, state: State<'_, App
 /// that saved does not (it refreshes itself).
 #[tauri::command(async)]
 fn write_file_bytes(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> impl Future<Output = Result<FileEntry, String>> {
-    let parsed = path_from_headers(request.headers()).and_then(|path| {
-        Ok((path, bytes_from_body(request.body())?.to_vec(), replace_from_headers(request.headers())))
-    });
-    let fut = parsed.map(|(path, bytes, replace)| {
-        write_vault(&state, ticket, move |v| {
-            if replace { v.replace_file_bytes(&path, &bytes) } else { v.write_file_bytes(&path, &bytes).map(|entry| (entry, false)) }
-        })
-    });
+    let fut = enqueue_write_file_bytes(&state, ticket, request.headers(), request.body());
     async move {
-        let (entry, existed) = fut?.await?;
+        let (entry, existed) = fut.await?;
         let kind = if existed { model::ChangeKind::Modify } else { model::ChangeKind::Create };
         emit_other_windows(&window, kind, entry.path.clone());
         Ok(entry)
@@ -793,5 +714,84 @@ mod tests {
         tauri::async_runtime::block_on(slow).unwrap().unwrap();
         for w in writes { tauri::async_runtime::block_on(w).unwrap().unwrap(); }
         assert_eq!(super::read_vault(&state, |v| v.read_note("Note.md")).unwrap(), format!("w{}", workers - 1));
+    }
+
+    #[test]
+    fn shutdown_drains_accepted_writes_cancels_unclaimed_tickets_and_coordinates_exit() {
+        use std::{sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc}, time::Duration};
+        let dir = crate::fsutil::tmp_dir("shutdown-drain");
+        let state = Arc::new(test_state(&dir.path));
+        sync_write(&state, |v| v.create_note("Note.md", "initial")).unwrap();
+        let ((started_tx, started_rx), (release_tx, release_rx)) = (mpsc::channel(), mpsc::channel());
+        assert!(state.write_queue.dispatch_ingress("open_vault", 10, || true));
+        let (st0, root) = (Arc::clone(&state), dir.path.clone());
+        let slow = tauri::async_runtime::spawn(async move {
+            super::install_vault(&st0, st0.write_queue.take_ingress(10), move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                Ok(root)
+            }).await
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(state.write_queue.dispatch_ingress("write_note", 11, || true));
+        assert!(state.write_queue.dispatch_ingress("write_note", 12, || true));
+        let unsubmitted_ticket = state.write_queue.take_ingress(12);
+        assert!(state.write_queue.dispatch_ingress("write_note", 13, || true));
+        let save_reply = super::write_vault(&state, state.write_queue.take_ingress(13), |v| v.write_note("Note.md", "saved-before-quit"));
+        assert!(state.write_queue.dispatch_ingress("rename_path", 14, || true));
+        let rename_reply = super::write_vault(&state, state.write_queue.take_ingress(14), |v| v.rename_path("Note.md", "Sub/Moved.md"));
+        assert!(state.write_queue.dispatch_ingress("write_note", 15, || true));
+
+        let (prevented, (exit_tx, exit_rx)) = (Arc::new(AtomicBool::new(false)), mpsc::channel());
+        let prev_clone = Arc::clone(&prevented);
+        assert!(!state.write_queue.on_exit_requested(Some(0), move || prev_clone.store(true, Ordering::SeqCst), move |code| { exit_tx.send(code).unwrap(); }));
+        assert!(prevented.load(Ordering::SeqCst), "exit must be prevented while writes are draining");
+        assert!(exit_rx.recv_timeout(Duration::from_millis(30)).is_err(), "exit permitted before slow op and queued saves finished");
+
+        let orphaned_ran = Arc::new(AtomicBool::new(false));
+        state.write_queue.dispatch_ingress("write_note", 16, || true);
+        for ticket in [state.write_queue.take_ingress(11), unsubmitted_ticket, state.write_queue.take_ingress(16)] {
+            let ran = Arc::clone(&orphaned_ran);
+            let res = super::write_vault(&state, ticket, move |v| { ran.store(true, Ordering::SeqCst); v.write_note("Sub/Moved.md", "clobbered") });
+            assert_eq!(tauri::async_runtime::block_on(res).unwrap_err(), "vault write queue is closed");
+        }
+        assert!(!orphaned_ran.load(Ordering::SeqCst));
+
+        release_tx.send(()).unwrap();
+        assert_eq!(exit_rx.recv_timeout(Duration::from_secs(2)).expect("shutdown hung on unclaimed ticket"), 0);
+        assert!(state.write_queue.is_terminated(), "worker JoinHandle must be joined before exit is permitted");
+        assert!(!dir.path.join("Note.md").exists());
+        assert_eq!(std::fs::read_to_string(dir.path.join("Sub/Moved.md")).unwrap(), "saved-before-quit");
+        tauri::async_runtime::block_on(slow).unwrap().unwrap();
+        assert!(tauri::async_runtime::block_on(save_reply).is_ok() && tauri::async_runtime::block_on(rename_reply).is_ok());
+        assert!(state.write_queue.on_exit_requested(Some(0), || panic!("should not prevent after drain"), |_| {}));
+    }
+
+    #[test]
+    fn ingress_handler_wiring_malformed_requests_and_errors_do_not_stall_queue() {
+        let dir = crate::fsutil::tmp_dir("ingress-errors");
+        let state = test_state(&dir.path);
+        sync_write(&state, |v| v.create_note("Note.md", "start")).unwrap();
+        assert!(state.write_queue.dispatch_ingress("read_note", 1, || true));
+        state.write_queue.reserve_ingress(2);
+        assert!(!state.write_queue.dispatch_ingress("write_note", 2, || false));
+        assert!(tauri::async_runtime::block_on(super::write_vault(&state, state.write_queue.take_ingress(999), |v| v.write_note("Note.md", "unreserved"))).is_err());
+        assert!(state.write_queue.dispatch_ingress("write_note", 3, || true));
+        drop(state.write_queue.take_ingress(3));
+        assert!(state.write_queue.dispatch_ingress("write_file_bytes", 4, || true));
+        let (empty_hdrs, raw_body) = (tauri::http::HeaderMap::new(), tauri::ipc::InvokeBody::Raw(vec![1, 2, 3]));
+        assert_eq!(tauri::async_runtime::block_on(super::enqueue_write_file_bytes(&state, state.write_queue.take_ingress(4), &empty_hdrs, &raw_body)).unwrap_err(), "missing x-grove-path");
+        let mut hdrs = tauri::http::HeaderMap::new();
+        hdrs.insert(tauri::http::HeaderName::from_static("x-grove-path"), tauri::http::HeaderValue::from_static("pic.png"));
+        let json_body = tauri::ipc::InvokeBody::Json(serde_json::json!({}));
+        assert!(state.write_queue.dispatch_ingress("write_file_bytes", 5, || true));
+        assert_eq!(tauri::async_runtime::block_on(super::enqueue_write_file_bytes(&state, state.write_queue.take_ingress(5), &hdrs, &json_body)).unwrap_err(), "write_file_bytes expects a raw body, not JSON");
+        assert!(state.write_queue.dispatch_ingress("write_note", 6, || true));
+        assert!(tauri::async_runtime::block_on(super::write_vault(&state, state.write_queue.take_ingress(6), |v| v.write_note("../escape.md", "bad"))).is_err());
+        assert!(state.write_queue.dispatch_ingress("write_file_bytes", 7, || true));
+        assert_eq!(tauri::async_runtime::block_on(super::enqueue_write_file_bytes(&state, state.write_queue.take_ingress(7), &hdrs, &raw_body)).unwrap().0.path, "pic.png");
+        assert!(state.write_queue.dispatch_ingress("write_note", 8, || true));
+        tauri::async_runtime::block_on(super::write_vault(&state, state.write_queue.take_ingress(8), |v| v.write_note("Note.md", "recovered"))).unwrap();
+        assert_eq!(super::read_vault(&state, |v| v.read_note("Note.md")).unwrap(), "recovered");
     }
 }

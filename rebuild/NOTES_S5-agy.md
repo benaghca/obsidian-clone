@@ -6,6 +6,8 @@ Opening or creating a vault (`open_vault`, `create_vault`), saving a note (`writ
 
 In addition, the vault state lock is now an `RwLock` instead of a single `Mutex`, so read commands (such as `search_notes`, `link_index`, `read_note`, and `list_files`) share the lock and overlap with one another instead of queuing behind each other. Write commands reserve a monotonic FIFO ticket synchronously at IPC ingress (`wrap_handler` around `tauri::generate_handler![...]` before `respond_async_serialized` spawns the async task) and claim that ticket via `impl CommandArg for WriteTicket` (`take_ingress`), so queued saves, creates, and renames always execute in exact IPC submission order even if Tokio polls their spawned futures out of order.
 
+On app exit (`RunEvent::ExitRequested` / `RunEvent::Exit` / `Drop`), the queue seals ingress, cancels any unclaimed or unsubmitted reservations, drains all accepted jobs and the currently running job without holding the vault/queue locks or freezing GTK, and joins the `"vault-write"` worker thread before the process is allowed to exit.
+
 **Nothing visible changed:** layout, shortcuts, look, theme, IPC signatures, return payloads, and event emissions are all unchanged.
 
 ## What changed
@@ -28,15 +30,21 @@ Marked the remaining synchronous vault and write commands with `#[tauri::command
   - `read_vault(&AppState, impl FnOnce(&vault::Vault) -> Result<T, String>)`: acquires a shared read guard (`RwLockReadGuard`) for all read-only commands (`list_files`, `read_note`, `read_file_bytes`, `read_config`, `read_foreign_config`, `search`, `link_index`, `backlinks`, `link_sources`, `frontmatter`, `tags`, `properties`, `search_notes`, `search_lines`, `search_match`). `last_vault` also uses `read(&state.inner)`.
   - `write_vault(&AppState, WriteTicket, impl FnOnce(&mut vault::Vault) -> Result<T, String>) -> Reply<Result<T, String>>`: submits the mutating closure onto the dedicated `"vault-write"` worker thread under its pre-reserved FIFO ticket, where the worker takes an exclusive write guard (`RwLockWriteGuard`) for mutating commands (`write_note`, `set_property`, `write_file_bytes`, `create_note`, `create_folder`, `rename_path`, `delete_path`, `write_config`) and wakes the non-blocking `Reply` future when done.
 - Updated `install_vault` (`open_vault` / `create_vault`) to run `Vault::open` and `config::remember` on the `"vault-write"` thread *before* acquiring `lock(&inner)`, keeping the `RwLock` read lock free during vault scans and only taking the write lock briefly to swap `inner.vault`.
-- Updated `watch::flush_changes` and `watch::tests` (`rebuild/app/src-tauri/src/watch.rs`) to accept `&std::sync::RwLock<Inner>` (with `try_write()` in the rescan contention test).
+- Updated `watch::flush_changes` and `watch::tests` (`rebuild/app/src-tauri/src/watch.rs`) to accept `&std::sync::RwLock<Inner>` (with `try_write()` in the rescan contention test). S4's batch guard in `vault.rs` / `index.rs` is untouched.
 
-### 3. Synchronous IPC ingress reservation + dedicated `"vault-write"` worker (`WriteQueue` / `WriteTicket` / `Reply` in `lib.rs`)
-- Implemented using standard library primitives (`AtomicU64`, `Mutex`, `Condvar`, `BTreeMap`, `std::task::Waker`) with zero new dependencies.
-- **Synchronous IPC ingress ordering (P1 fix):** `wrap_handler` wraps `tauri::generate_handler![...]` and calls `state.write_queue.reserve_ingress(invoke_key(&invoke.message))` synchronously on the IPC caller thread before `#[tauri::command(async)]` (`respond_async_serialized`) calls `tauri::async_runtime::spawn`. When the spawned task runs, `WriteTicket::from_command` (`impl CommandArg for WriteTicket`, the first parameter of each write command) claims the pre-reserved ticket via `take_ingress`. If a write command fails before `ticket.submit(...)` (e.g., invalid arguments or headers in `write_file_bytes`), `Drop for WriteTicket` records `Slot::Skip` for that ticket so the worker immediately advances past it without stalling later writes.
-- **Non-blocking async runtime integration (P2 fix):** `WriteQueue::default()` spawns a single `"vault-write"` background thread (`worker_loop`) that drains `BTreeMap<u64, Slot>` in strict monotonic `turn` order (`0, 1, 2, ...`). `WriteTicket::submit` enqueues a `Slot::Job` and returns a `Reply<T>` (`Future` backed by `Option<Waker>`), so Tokio worker threads never block on queue `Condvar` waits, `RwLock` write-lock contention, `Vault::open` scans, or disk `fsync` I/O.
+### 3. Synchronous IPC ingress reservation, dedicated `"vault-write"` worker, and shutdown drain (`queue.rs`, `lib.rs`)
+- Implemented in `rebuild/app/src-tauri/src/queue.rs` using standard library primitives (`Mutex`, `Condvar`, `BTreeMap`, `JoinHandle`, `std::task::Waker`) with zero new dependencies.
+- **Synchronous IPC ingress ordering:** `wrap_handler` wraps `tauri::generate_handler![...]` and calls `WriteQueue::dispatch_ingress_shared` synchronously on the IPC caller thread before `#[tauri::command(async)]` (`respond_async_serialized`) spawns the async task. `reserve_ingress_shared` allocates `ticket = w.next_ticket` and records `Slot::Reserved` in `w.slots` under `Mutex<WorkerState>` so `w.slots` always covers `w.turn .. w.next_ticket` without gaps. When the spawned task runs, `WriteTicket::from_command` (`impl CommandArg for WriteTicket`, the first parameter of each write command) claims the pre-reserved ticket via `take_ingress`. If a command is unhandled (`!handled`) or fails before `ticket.submit(...)` (e.g., invalid arguments or headers in `enqueue_write_file_bytes`), `cancel_ingress_shared` or `Drop for WriteTicket` transitions `Slot::Reserved -> Slot::Skip` so the worker immediately advances past it without stalling later writes.
+- **Non-blocking async runtime integration:** `WriteQueue::default()` spawns a single `"vault-write"` thread (`worker_loop`) and retains its `JoinHandle<()>` in `QueueShared.handle`. `WriteTicket::submit` transitions `Slot::Reserved -> Slot::Job` (catching any panic to always settle the reply) and returns a `Reply<Result<T, String>>` (`Future` backed by `Option<Waker>`), so Tokio worker threads never block on queue waits, `RwLock` write-lock contention, `Vault::open` scans, or disk `fsync` I/O.
+- **Explicit queue drain and shutdown handshake:**
+  - `WriteQueue::begin_shutdown` sets `w.closing = true`, clears `w.ingress`, and converts all remaining `Slot::Reserved` entries into `Slot::Skip` while preserving all accepted `Slot::Job` entries. Any subsequent or orphaned `take_ingress` / `submit` call sees `w.closing` (or `ticket: None`) and immediately resolves to `Err("vault write queue is closed")` without running its closure.
+  - `WriteQueue::shutdown` calls `begin_shutdown` and joins the `"vault-write"` `JoinHandle` without holding the vault `RwLock` or `Mutex<WorkerState>`.
+  - In `lib.rs::run()`, `.build(tauri::generate_context!()).run(...)` coordinates with S1's window-close flush:
+    - On `RunEvent::ExitRequested`: `on_exit_requested` calls `begin_shutdown`. If `"vault-write"` is still running a job or has queued `Slot::Job`s (e.g., if S1's 2s close timeout elapsed during a slow operation or a `beforeunload` write arrived right before window destroy), it calls `api.prevent_exit()` (so GTK is never frozen) and spawns `"vault-write-drain"`, which waits for `shutdown()` (draining all accepted jobs and joining the worker thread) and then calls `app.exit(code)`. Once drained, the follow-up `ExitRequested` proceeds immediately.
+    - On `RunEvent::Exit` and `Drop for WriteQueue`: calls `shutdown()` so no exit path can reach `std::process::exit` before accepted writes have finished and the worker thread has been joined.
 
 ### 4. Leftover lock hold-time work (owned by other slices)
-- **Index map rebuild batching under the write lock (owned by S4):** `Index::rebuild_maps` inside `vault.rs` / `index.rs` still rebuilds derived maps inside each mutation while holding the write guard; S4 owns `rebuild_maps` call sites, `apply` batching, `rename_path` rebuild count, and `entry_for`.
+- **Index map rebuild batching under the write lock (owned by S4):** S4 owns `rebuild_maps` call sites, `apply` batching, `rename_path` rebuild count, and `entry_for` in `vault.rs` / `index.rs`.
 - **Incremental map updates / delta protocol (P2) & parallel scan (P3):** Full-clone payloads (`link_index`, `properties`, `tags`) and single-threaded `Vault::open` scanning remain as documented in `rebuild/RUST_PERF_PLAN.md` for P2/P3.
 
 ## How each regression test was proven to fail before and pass after
@@ -65,16 +73,28 @@ Marked the remaining synchronous vault and write commands with `#[tauri::command
      `queued writes starved async read while read lock was free: Timeout`
    - **After fix (non-blocking `Reply<T>` future + `"vault-write"` thread + `install_vault` scanning outside the `RwLock` write lock):** Passed (`ok`).
 
+5. **`tests::shutdown_drains_accepted_writes_cancels_unclaimed_tickets_and_coordinates_exit`**
+   - Holds `"vault-write"` in a slow `install_vault` operation, creates an unclaimed ingress reservation and a claimed-but-unsubmitted ticket, queues a save (`write_note`) and a rename (`rename_path`) behind them, plus a trailing unclaimed reservation, and requests exit via `on_exit_requested`. Asserts that `prevent_exit` is called immediately without blocking the caller, exit is withheld while the slow operation runs, orphaned/unclaimed/post-shutdown tickets are rejected with `Err("vault write queue is closed")` without running their closures, and once the slow operation releases, the drain completes the save and rename in order (`Sub/Moved.md` has `"saved-before-quit"`), joins the worker `JoinHandle`, and signals exit.
+   - **Before fix (on `ae04faa`, where `WriteQueue` discarded the worker `JoinHandle`, did not wait on shutdown, and left unclaimed tickets as missing slots in `w.slots`):** Failed with:
+     `shutdown hung behind unclaimed ticket and never drained save/rename: Timeout`
+   - **After fix:** Passed (`ok`).
+
+6. **`tests::ingress_handler_wiring_malformed_requests_and_errors_do_not_stall_queue`**
+   - Exercises `dispatch_ingress`, overwritten/cancelled reservations, unreserved non-zero keys, dropped `WriteTicket`s from simulated `CommandArg` deserialization failures, malformed `write_file_bytes` requests (`enqueue_write_file_bytes` with missing `x-grove-path` header or JSON body), and ordinary `Vault` errors (`../escape.md`), verifying each settles its reply and subsequent writes succeed.
+   - **Before fix (on `ae04faa`, where overwriting an unclaimed key in `reserve_ingress` leaked a ticket number and `take_ingress` allocated new tickets for unreserved keys):** Hung waiting for the leaked ticket and accepted unreserved keys.
+   - **After fix:** Passed (`ok`).
+
 ## Line changes, file sizes, and dependencies
 
 - **Net line change by language (vs. `46b072f`):**
-  - Rust (`.rs`): `+395 / -319` lines (net `+76` lines across 2 files; `+283 / -279`, net `+4` vs. `8c76624`)
-  - Markdown (`rebuild/NOTES_S5-agy.md`): `+90` lines (notes file)
+  - Rust (`.rs`): `+804 / -322` lines (net `+482` lines across 3 files)
+  - Markdown (`rebuild/NOTES_S5-agy.md`): `+98` lines (notes file)
 - **Net line change by file (vs. `46b072f`):**
-  - `rebuild/app/src-tauri/src/lib.rs`: `+391 / -315` lines (net `+76`, from `721` to `797` lines)
+  - `rebuild/app/src-tauri/src/lib.rs`: `+394 / -318` lines (net `+76`, from `721` to `797` lines)
+  - `rebuild/app/src-tauri/src/queue.rs`: `+406 / -0` lines (new module, `406` lines)
   - `rebuild/app/src-tauri/src/watch.rs`: `+4 / -4` lines (net `0`, `542` lines)
-  - `rebuild/NOTES_S5-agy.md`: `+90` lines (new file)
+  - `rebuild/NOTES_S5-agy.md`: `+98` lines (new file)
 - **Files near 800 lines:**
-  - Modified: `rebuild/app/src-tauri/src/lib.rs` is `797` lines (under the 800-line ceiling).
+  - Modified/added: `rebuild/app/src-tauri/src/lib.rs` (`797` lines), `rebuild/app/src-tauri/src/queue.rs` (`406` lines), `rebuild/app/src-tauri/src/watch.rs` (`542` lines) — all under the 800-line ceiling.
   - Pre-existing unmodified files in `src-tauri/src/`: `edit.rs` (`866` lines, owned by S3) and `vault.rs` (`864` lines, owned by S3/S4).
 - **New dependencies:** None (`Cargo.toml` and `Cargo.lock` untouched).
