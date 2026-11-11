@@ -183,3 +183,33 @@ Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
 - `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
 
 Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, including `grove-note-editor.png` and `grove-note-readonly.png`, were rewritten and put back with `git restore`. They are not in this commit.
+
+## Review 4
+
+Codex failed `4cdb34f`. Eight blockers. Sibling adoption and the peer workspace move and forget stay as they were. Nothing on screen changes. No new package. Rust was not edited. The backend still runs each write against the root that is current when the write arrives. This page names the vault the models belong to before any await, and sends the write only in the same turn that the backend root is still that vault.
+
+- **Page vault and backend root.** Opening the new vault sets the backend root when `open` returns. The page vault stays the old one until reload. A copy, a create, or a direct write that the still-old page accepts is tagged with the old vault, including while confirm is delayed and after a failed rollback. The queued create is stored under the old vault before the root flips.
+- **One journal key per window.** The store is `grove.saveHandoff.` plus this page's id. This page writes only its own key, then reads that key back. A write that does not read back does not reload and does not tell other windows to reload. An early failure puts the old root back, thaws, and flushes. Boot reads every key with that prefix. A newer note for the same vault and path drops the older copy from the other window's key. An empty old root still reloads, so a test that never set a vault is unchanged.
+- **Rename and delete.** Retarget and discard take the vault as well as the path. Notes, bytes, properties, and structural jobs for another vault stay byte for byte. Only the keys this page actually changed are written back.
+- **Holds.** A hold is a path predicate. Only the drain that owns it may write that path. Direct writes, queued writes, and retries all honor it. The rename moves the matching queue to the new path before the hold drops, then flushes. A delete still refuses when the flush fails. An eager flush after rename ingress still does not recreate the old path.
+- **Reload snapshot.** The preserve that runs as the reload goes out includes the latest settings text and any deferred attachment or property edit. A sealed settings write is queued and does not start a timer.
+- **Startup.** The stored bytes are replayed before settings load. A note or settings read still hits disk, then uses the recovered text when a replay write is in flight or still queued. The later flush writes the recovered content.
+- **Watchers.** While the page is sealed, or its vault is not the backend root, a foreign change does not drop a dirty note, canvas, or drawing. The vault change listener returns immediately. The old vault's accepted edits are stored before the backend root becomes the new vault.
+- **Peer completion.** The rename waits on the ack, raced with the retry delay, and drops a peer that has already left. The foreground wait is two seconds. The retries continue in the background. A timeout does not release a live peer's hold. A lost done notice is still sent again after half a second.
+
+Regressions are in `src/saveEpoch.test.ts` (13 tests): a copy and a direct write after `open` resolves, two windows plus a third page reading both records, a refused handoff write, a vault A mutation leaving vault B intact, overlapping drains, a retry during rename ingress, a peer retarget before release, settings and a deferred attachment on reload, a disk read during recovery, a late watcher while the page still belongs to the old vault, an ack that arrives without the backoff, and a peer that leaves before the ack. The source of the canvas and drawing views is checked for the foreign-change gate.
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, and pruning detached clean owners.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+No file is over 800 lines. The longest touched file is `src/noteEditors.ts` at 717. `src/saveLoss.test.ts` is 715. `src/workspace.ts` is 708 and was not edited. `src/vaultWrite.ts` is 594. New file: `src/saveEpoch.test.ts` (564).
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest. Vitest: 103 files, 1606 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 17.7 ms).
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1324 kB, `index-Bex78D2N.js`).
+- `npm run audit:offline` exited 0: 230 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.

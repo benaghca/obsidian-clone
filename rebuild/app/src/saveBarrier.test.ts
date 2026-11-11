@@ -10,6 +10,7 @@ import { NoteEditors } from "./noteEditors";
 import { installPathBarrier, usePathPeers } from "./pathBarrier";
 import { unsealWrites, writesSealed } from "./saveSeal";
 import { resetBackendRootForTests } from "./vaultRoot";
+import { resetHoldsForTests } from "./holdDrain";
 import { resetHandoffForTests } from "./vaultWrite";
 import { settings } from "./settings/store";
 import {
@@ -34,6 +35,7 @@ vi.mock("./api", () => ({
 }));
 
 const events = { shown() {}, loaded() {}, changed() {}, saved: vi.fn() };
+const handoffDisk = new Map<string, string>();
 
 function editors() {
   return new NoteEditors({} as never, events);
@@ -50,6 +52,15 @@ function renameWs(notes: NoteEditors, path: string): Workspace {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  handoffDisk.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => handoffDisk.get(key) ?? null,
+    setItem: (key: string, value: string) => { handoffDisk.set(key, value); },
+    removeItem: (key: string) => { handoffDisk.delete(key); },
+    key: (index: number) => [...handoffDisk.keys()][index] ?? null,
+    get length() { return handoffDisk.size; },
+    clear: () => { handoffDisk.clear(); },
+  });
   vi.stubGlobal("window", {
     setTimeout: (fn: TimerHandler, ms?: number, ...rest: unknown[]) => globalThis.setTimeout(fn, ms, ...rest),
     clearTimeout: (id?: ReturnType<typeof setTimeout>) => globalThis.clearTimeout(id),
@@ -68,6 +79,7 @@ afterEach(async () => {
   resetVaultSwitchForTests();
   unsealWrites();
   resetHandoffForTests();
+  resetHoldsForTests();
   resetBackendRootForTests();
   usePathPeers(undefined);
   discardCanvases(() => true);

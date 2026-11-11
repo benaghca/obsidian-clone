@@ -9,7 +9,7 @@ import { canvasesPending, saveCanvases } from "./canvas/pending";
 import { drawingsPending, saveDrawings } from "./drawing/pending";
 import { sealWrites, unsealWrites, writesSealed } from "./saveSeal";
 import { settings } from "./settings/store";
-import { backendRoot, setBackendRoot } from "./vaultRoot";
+import { backendRoot, setBackendRoot, setPageVault } from "./vaultRoot";
 import { flushHandoff, handoffPending, preserveAccepted, vaultQuiet } from "./vaultWrite";
 
 const BARRIER = "grove-save-barrier";
@@ -43,6 +43,8 @@ export interface SwitchIo {
   /** Labels of the other windows that must acknowledge the barrier. */
   others: string[];
   self: string;
+  /** Windows that still exist. A missing label has gone away and must not be waited on. */
+  listWindows?: () => Promise<string[]>;
 }
 
 interface SealHooks {
@@ -224,7 +226,9 @@ export function createVaultCoordinator(hooks: SealHooks) {
     await bus.listen(RELOAD, (payload) => {
       const body = bodyOf(payload);
       if (body.from === self) return;
-      preserveAccepted(body.vault ?? "");
+      // A missed acknowledge keeps this page. Reloading would drop the only copy.
+      // No vault id means there is nothing to store. A failed acknowledge keeps the page.
+      if (body.vault && !preserveAccepted(body.vault)) return;
       deps.reload();
     });
   }
@@ -247,6 +251,15 @@ export function createVaultCoordinator(hooks: SealHooks) {
     return false;
   }
 
+  /** Store the old vault's accepted bytes. False keeps the page and does not tell peers to reload. */
+  async function reloadPreserved(peers: SwitchIo, id: string, deps: VaultSwitchDeps, oldRoot: string): Promise<boolean> {
+    if (oldRoot && !preserveAccepted(oldRoot)) return false;
+    await emitReload(peers, id, oldRoot);
+    if (oldRoot && !preserveAccepted(oldRoot)) return false;
+    deps.reload();
+    return true;
+  }
+
   /**
    * Flush the old vault, agree with other windows, seal, then open.
    * An edit accepted after the seal puts the old root back and is written
@@ -264,7 +277,11 @@ export function createVaultCoordinator(hooks: SealHooks) {
     const warn = (message: string, err?: unknown) => deps.warn?.(message, err);
     try {
       oldRoot = deps.vault?.() ?? backendRoot();
-      if (oldRoot) setBackendRoot(oldRoot);
+      // The page keeps this identity until it actually reloads. open() may move the backend first.
+      if (oldRoot) {
+        setPageVault(oldRoot);
+        setBackendRoot(oldRoot);
+      }
       await vaultQuiet();
       // A previous attempt can leave a queue. Drain it before treating it as a reason to abort.
       if (handoffPending(backendRoot())) {
@@ -307,6 +324,13 @@ export function createVaultCoordinator(hooks: SealHooks) {
       try {
         const info = await deps.open(path, create);
         opened = true;
+        // Accepted edits are stored before the read root moves, then the backend epoch flips.
+        // The page vault stays on the old folder until reload.
+        if (oldRoot && !preserveAccepted(oldRoot)) {
+          // The backend already moved. Put the old vault back when we can, and do not reload.
+          setBackendRoot(info.path || path);
+          return rollback(peers, id, deps, oldRoot, warn, create);
+        }
         setBackendRoot(info.path || path);
       } catch (err) {
         unseal(id);
@@ -319,18 +343,20 @@ export function createVaultCoordinator(hooks: SealHooks) {
       // Peers have not reloaded yet, so a dirty check here can still roll the root back.
       if (lost || !peersClean || stillDirty(deps, oldRoot)) return rollback(peers, id, deps, oldRoot, warn, create);
       // Once RELOAD is sent, peers may already be on the new root. Preserve,
-      // then reload. Do not open the old root again: another dirty check only moves the race.
-      preserveAccepted(oldRoot);
-      await emitReload(peers, id, oldRoot);
-      preserveAccepted(oldRoot);
-      deps.reload();
+      // then reload. A failed acknowledge keeps this page. Do not open the old root again.
+      const reloaded = await reloadPreserved(peers, id, deps, oldRoot);
+      if (!reloaded) {
+        warn(create ? "Could not create vault while a save is still pending" : "Could not open vault while a save is still pending");
+        return false;
+      }
       return true;
     } catch (err) {
       if (opened && peers) {
-        preserveAccepted(oldRoot);
-        await emitReload(peers, id, oldRoot);
-        preserveAccepted(oldRoot);
-        deps.reload();
+        const reloaded = await reloadPreserved(peers, id, deps, oldRoot);
+        if (!reloaded) {
+          warn(create ? "Could not create vault while a save is still pending" : "Could not open vault while a save is still pending", err);
+          return false;
+        }
         return true;
       }
       unseal(id);
@@ -395,8 +421,9 @@ export async function switchIo(): Promise<SwitchIo | null> {
     const bus = await defaultBus();
     if (!bus) return null;
     const self = getCurrentWindow().label;
-    const others = (await getAllWindows()).map((win) => win.label).filter((label) => label !== self);
-    return { bus, others, self };
+    const labels = () => getAllWindows().then((wins) => wins.map((win) => win.label));
+    const others = (await labels()).filter((label) => label !== self);
+    return { bus, others, self, listWindows: labels };
   } catch {
     return null;
   }

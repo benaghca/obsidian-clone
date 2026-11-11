@@ -18,10 +18,10 @@ import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
 import { configEffects } from "./editor/config";
 import { retryDelay } from "./fileSave";
-import { drainingHold } from "./holdDrain";
+import { drainAllows, pathHeld, popPathHold, pushPathHold } from "./holdDrain";
 import { writesSealed } from "./saveSeal";
-import { backendRoot, bumpPathGen, pathGen } from "./vaultRoot";
-import { queuedNote, writeVaultNote } from "./vaultWrite";
+import { bumpPathGen, pageOwnsDisk, pageVault, pathGen, sourceVault } from "./vaultRoot";
+import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
@@ -406,6 +406,9 @@ export class NoteEditors {
         console.error(`Could not open ${path}`, err);
         return null;
       }
+      // A recovery write still in flight wins over the disk snapshot this read just took.
+      const recovered = authoritativeNote(pageVault() || sourceVault(), path);
+      if (recovered !== undefined) doc = recovered;
       const installed = this.states.get(path);
       if (installed) return installed;
       if ((this.loadEpoch.get(path) ?? 0) !== generation) continue;
@@ -452,6 +455,8 @@ export class NoteEditors {
 
   /** A loaded note changed on disk (not by us, nothing unsaved): take the new text. */
   async reload(path: string) {
+    // A batch queued against the old vault must not replace this page once the backend has moved.
+    if (!pageOwnsDisk()) return;
     // Even when this note is not loaded yet: the open that is in flight must not keep the old text.
     this.loadEpoch.set(path, (this.loadEpoch.get(path) ?? 0) + 1);
     if (!this.states.has(path) || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job) return;
@@ -531,12 +536,14 @@ export class NoteEditors {
   /** Block new writes for these paths until release. In-flight writes still finish. */
   hold(under: (path: string) => boolean): void {
     this.holds.push(under);
+    pushPathHold(under);
   }
 
   /** Drop one hold taken with the same function. */
   release(under: (path: string) => boolean): void {
     const at = this.holds.lastIndexOf(under);
     if (at >= 0) this.holds.splice(at, 1);
+    popPathHold(under);
   }
 
   /** True when a note still has text that has not reached disk. */
@@ -547,8 +554,8 @@ export class NoteEditors {
   /** A seal blocks every write. A hold blocks every write except the drain that runs before the rename or delete. */
   private blocked(path: string): boolean {
     if (writesSealed()) return true;
-    if (drainingHold()) return false;
-    return this.holds.some((under) => under(path));
+    if (drainAllows(path)) return false;
+    return this.holds.some((under) => under(path)) || pathHeld(path);
   }
 
   private scheduleSave(path: string) {
@@ -621,14 +628,14 @@ export class NoteEditors {
     // A direct write accepted after this edit owns the path. Do not put the older text back.
     // Leave it dirty when that write is still queued, so a delete will not skip it.
     if (slot.gen !== undefined && pathGen(path) > slot.gen) {
-      const queued = queuedNote(backendRoot(), path);
+      const queued = queuedNote(pageVault() || sourceVault(), path);
       if (!queued) this.dirty.delete(path);
       return !queued;
     }
     const text = state.doc.toString();
     let failed = false;
     try {
-      const status = await writeVaultNote(path, text, undefined, slot.gen);
+      const status = await writeVaultNote(path, text, undefined, slot.gen, sourceVault());
       if (status !== "sent") {
         this.dirty.add(path);
         this.scheduleSave(path);

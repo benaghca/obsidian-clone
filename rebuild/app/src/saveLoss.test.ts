@@ -12,6 +12,7 @@ import { NoteEditors } from "./noteEditors";
 import { bindCloseFlush, flushOpenSaves, QUIT_FLUSH_MS, requestClose } from "./quitFlush";
 import { unsealWrites, writesSealed } from "./saveSeal";
 import { resetBackendRootForTests } from "./vaultRoot";
+import { resetHoldsForTests } from "./holdDrain";
 import { resetHandoffForTests } from "./vaultWrite";
 import { settings } from "./settings/store";
 import { commitVaultSwitch, installVaultSwitch, localSaveBus, resetVaultSwitchForTests } from "./vaultSwitch";
@@ -30,6 +31,7 @@ vi.mock("./api", () => ({
 }));
 
 const events = { shown() {}, loaded() {}, changed() {}, saved: vi.fn() };
+const handoffDisk = new Map<string, string>();
 
 function editors() {
   return new NoteEditors({} as never, events);
@@ -38,6 +40,15 @@ function editors() {
 beforeEach(() => {
   vi.clearAllMocks();
   events.saved.mockClear();
+  handoffDisk.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => handoffDisk.get(key) ?? null,
+    setItem: (key: string, value: string) => { handoffDisk.set(key, value); },
+    removeItem: (key: string) => { handoffDisk.delete(key); },
+    key: (index: number) => [...handoffDisk.keys()][index] ?? null,
+    get length() { return handoffDisk.size; },
+    clear: () => { handoffDisk.clear(); },
+  });
   // Vitest's node environment has no DOM. Saves schedule through window.setTimeout,
   // forwarded to the global so fake timers still own the clock.
   vi.stubGlobal("window", {
@@ -58,6 +69,7 @@ afterEach(async () => {
   resetVaultSwitchForTests();
   unsealWrites();
   resetHandoffForTests();
+  resetHoldsForTests();
   resetBackendRootForTests();
   discardCanvases(() => true);
   discardDrawings(() => true);

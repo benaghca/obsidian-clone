@@ -6,6 +6,7 @@ import { retryDelay } from "./fileSave";
 import { beginHoldDrain, endHoldDrain } from "./holdDrain";
 import { isUnder, movedPath } from "./paths";
 import { type SwitchIo, switchIo } from "./vaultSwitch";
+import { flushHandoff } from "./vaultWrite";
 
 const HOLD = "grove-path-hold";
 const ACK = "grove-path-ack";
@@ -69,13 +70,28 @@ function sharedBus(io: SwitchIo | null | "local"): SwitchIo | null {
   return io;
 }
 
+function timerHost(): { setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout } {
+  if (typeof window !== "undefined" && typeof window.setTimeout === "function") return window;
+  return globalThis;
+}
+
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => { window.setTimeout(resolve, ms); });
+  return new Promise((resolve) => { timerHost().setTimeout(resolve, ms); });
+}
+
+/** Drop labels whose windows are gone. A peer that is still open stays pending. */
+async function dropDeparted(io: SwitchIo, pending: Set<string>): Promise<void> {
+  if (!io.listWindows) return;
+  let labels: string[];
+  try { labels = await io.listWindows(); } catch { return; }
+  const live = new Set(labels);
+  for (const label of [...pending]) if (!live.has(label)) pending.delete(label);
 }
 
 /**
- * Tell peers the path changed, and keep telling them until each one acks.
- * A lost emit leaves them held. The old path stays held until they ack.
+ * Tell peers the path changed. An ack wakes the wait at once. The foreground
+ * wait is bounded; retries continue in the background. A living peer stays
+ * held until it acks. A window that has gone is not waited on.
  */
 async function finishPeers(io: SwitchIo, id: string, ok: boolean, to: string | null): Promise<void> {
   if (!io.others.length) {
@@ -83,24 +99,33 @@ async function finishPeers(io: SwitchIo, id: string, ok: boolean, to: string | n
     return;
   }
   const pending = new Set(io.others);
+  let wake = () => {};
   const unlisten = await io.bus.listen(DONE_ACK, (payload) => {
     const body = bodyOf(payload);
     if (body.id !== id || !body.label || !pending.has(body.label)) return;
     pending.delete(body.label);
+    wake();
   });
-  try {
+  const finished = (async () => {
     let attempt = 0;
     while (pending.size) {
       try { await io.bus.emit(DONE, { id, from: io.self, ok, to }); } catch { /* retain the transaction and retry */ }
-      // A peer that follows the path in a microtask acks before the backoff.
-      for (let i = 0; i < 4 && pending.size; i++) await Promise.resolve();
+      await dropDeparted(io, pending);
       if (!pending.size) break;
-      await sleep(retryDelay(attempt));
+      const acked = new Promise<void>((resolve) => { wake = resolve; });
+      await Promise.race([acked, sleep(retryDelay(attempt))]);
       attempt += 1;
     }
-  } finally {
-    unlisten();
-  }
+  })();
+  let cancelBudget = () => {};
+  const budget = new Promise<void>((resolve) => {
+    const timer = timerHost().setTimeout(resolve, PEER_WAIT_MS);
+    cancelBudget = () => { timerHost().clearTimeout(timer); resolve(); };
+  });
+  await Promise.race([finished, budget]);
+  cancelBudget();
+  if (!pending.size) unlisten();
+  else void finished.finally(() => unlisten());
 }
 
 function askHold(io: SwitchIo, id: string, path: string): Promise<boolean> {
@@ -114,7 +139,7 @@ function askHold(io: SwitchIo, id: string, path: string): Promise<boolean> {
   const finish = (ok: boolean) => {
     if (settled) return;
     settled = true;
-    clearTimeout(timer);
+    timerHost().clearTimeout(timer);
     stop();
     resolveFinish(ok);
   };
@@ -126,7 +151,7 @@ function askHold(io: SwitchIo, id: string, path: string): Promise<boolean> {
     if (!pending.size) finish(true);
   }).then((unlisten) => {
     stop = unlisten;
-    timer = window.setTimeout(() => finish(false), PEER_WAIT_MS);
+    timer = timerHost().setTimeout(() => finish(false), PEER_WAIT_MS);
     return io.bus.emit(HOLD, { id, from: io.self, path }).then(() => done);
   });
 }
@@ -178,8 +203,11 @@ export async function installPathBarrier(ops: PathOps, io?: Pick<SwitchIo, "bus"
     ops.hold(under);
     void (async () => {
       let ok = false;
-      beginHoldDrain();
-      try { ok = (await ops.flush(under)) !== false; } catch { ok = false; }
+      beginHoldDrain(under);
+      try {
+        ok = (await ops.flush(under)) !== false;
+        await flushHandoff();
+      } catch { ok = false; }
       finally { endHoldDrain(); }
       await bus.emit(ACK, { id: body.id, label: self, ok });
     })();

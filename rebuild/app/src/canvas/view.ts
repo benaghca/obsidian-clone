@@ -4,6 +4,7 @@ import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { api } from "../api";
+import { deliverForeignChange } from "../vaultRoot";
 import { commands } from "../commands";
 import { IMAGE_EXT, embedPart } from "../editor/embeds";
 import { editorHost } from "../editor/host";
@@ -568,7 +569,9 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   }, true);
   const flush = () => { void save(); };
   window.addEventListener("beforeunload", flush);
-  const unwatch = ws.vault.onModified(changedPath => { if (changedPath === owned.path() && !owned.echoing) { owned.drop(); void load(); } });
+  const unwatch = ws.vault.onModified(changedPath => {
+    deliverForeignChange(changedPath === owned.path(), owned.echoing, () => owned.drop(), () => { void load(); });
+  });
   void load();
   return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); owned.detach(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
 }

@@ -8,7 +8,7 @@ import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveC
 import { beginHoldDrain, endHoldDrain } from "./holdDrain";
 import { coordinatePaths } from "./pathBarrier";
 import { writesSealed } from "./saveSeal";
-import { backendRoot } from "./vaultRoot";
+import { backendRoot, sourceVault } from "./vaultRoot";
 import { discardHandoff, flushHandoff, queueVaultCreate, retargetHandoff, writeVaultNote } from "./vaultWrite";
 import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings } from "./drawing/pending";
 import { emptyDrawing } from "./drawing/scene";
@@ -42,25 +42,16 @@ async function publish(ws: Workspace, entry: FileEntry): Promise<FileEntry> {
   return entry;
 }
 
-export async function createNote(ws: Workspace, path: string, content = ""): Promise<FileEntry> {
-  const vault = backendRoot();
-  // Sealed creates belong to the vault that was open when they were accepted.
-  // They must not run against the root a switch just opened.
-  if (writesSealed()) return publish(ws, await queueVaultCreate("note", path, content));
-  if (backendRoot() !== vault) {
-    console.warn("Could not create a note while a vault switch is saving");
-    throw new Error("Could not create a note while a vault switch is saving");
+export async function createNote(ws: Workspace, path: string, content = "", source = sourceVault()): Promise<FileEntry> {
+  // The vault captured by the caller is checked in the same turn as the create.
+  if (writesSealed() || backendRoot() !== source) {
+    return publish(ws, await queueVaultCreate("note", path, content, source));
   }
   return publish(ws, await api.createNote(path, content));
 }
 
-async function makeFolder(path: string): Promise<FileEntry> {
-  const vault = backendRoot();
-  if (writesSealed()) return queueVaultCreate("folder", path);
-  if (backendRoot() !== vault) {
-    console.warn("Could not create a folder while a vault switch is saving");
-    throw new Error("Could not create a folder while a vault switch is saving");
-  }
+async function makeFolder(path: string, source = sourceVault()): Promise<FileEntry> {
+  if (writesSealed() || backendRoot() !== source) return queueVaultCreate("folder", path, "", source);
   return api.createFolder(path);
 }
 
@@ -205,7 +196,7 @@ function staleRoot(vault: string): boolean {
 }
 
 async function relocateNow(ws: Workspace, from: string, to: string) {
-  const vault = backendRoot();
+  const vault = sourceVault();
   if (writesSealed()) {
     console.warn("Could not rename while a vault switch is saving");
     return;
@@ -227,12 +218,9 @@ async function relocateHeld(ws: Workspace, from: string, to: string, vault: stri
   holdSaves(ws, under);
   let moved = false;
   try {
-    beginHoldDrain();
-    try { await flushSaves(ws, under); } finally { endHoldDrain(); }
-    // Queued direct bytes land in the file before it moves. A failure does not abort:
-    // whatever is still queued is retargeted with the file and cannot recreate the source.
-    await flushHandoff();
-    // Every file, not only notes: an embed of a drawing or an image follows it too.
+    beginHoldDrain(under);
+    try { await flushSaves(ws, under); await flushHandoff(); } finally { endHoldDrain(); }
+    // A failed queue stays put and is retargeted with the file. It cannot recreate the source.
     const before = ws.vault.fileRefs();
     // Old-name links can stop resolving as soon as renamePath returns.
     const targets = before.filter((n) => under(n.path)).map((n) => n.path);
@@ -247,9 +235,11 @@ async function relocateHeld(ws: Workspace, from: string, to: string, vault: stri
     ws.editors.move(under, swap);
     retargetCanvases(under, swap);
     retargetDrawings(under, swap);
-    retargetHandoff(under, swap);
+    retargetHandoff(vault, under, swap);
     moved = true;
     releaseSaves(ws, under);
+    // The hold blocked a retry of the old path. The queue now names the new one.
+    await flushHandoff();
     await flushSaves(ws, (p) => isUnder(p, to));
     await ws.followMove(swap);
     fileSettings.renamed(from, to, before, sources);
@@ -279,10 +269,11 @@ async function flushSaves(ws: Workspace, which: (path: string) => boolean): Prom
 
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
+  const source = sourceVault();
   await Promise.all([ws.saveNow(path), saveCanvases((p) => p === path), saveDrawings((p) => p === path)]);
   const ext = viewFileExt(path) || ".md";
   const content = await (ext !== ".md" ? api.readNote(path) : ws.editors.text(path));
-  const entry = await createNote(ws, freeName(ws, path.slice(0, -ext.length), ext, true), content);
+  const entry = await createNote(ws, freeName(ws, path.slice(0, -ext.length), ext, true), content, source);
   await ws.open(entry.path);
   return entry.path;
 }
@@ -314,7 +305,7 @@ export async function mergeNote(ws: Workspace, path: string, into: string) {
  */
 export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
   if (!opts.confirmed && !(await fileSettings.confirmDelete(path))) return false;
-  const vault = backendRoot();
+  const vault = sourceVault();
   if (writesSealed()) return false;
   const under = (p: string) => isUnder(p, path);
   // Peers flush first. A failed flush here does not delete: the newest text
@@ -326,7 +317,7 @@ export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?
 async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boolean, vault: string): Promise<boolean> {
   holdSaves(ws, under);
   try {
-    beginHoldDrain();
+    beginHoldDrain(under);
     let flushed = false;
     try {
       // The queued snapshot first, so a newer direct write is in the file before it is trashed.
@@ -350,7 +341,7 @@ async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boo
   ws.editors.forget(under);
   discardCanvases(under);
   discardDrawings(under);
-  discardHandoff(under);
+  discardHandoff(vault, under);
   releaseSaves(ws, under);
   await ws.forget(under);
   return true;
@@ -362,9 +353,10 @@ async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boo
  * the note is loaded (so it is undoable and saved as usual), else on disk.
  */
 export async function updateNoteText(ws: Workspace, path: string, next: string) {
+  const source = sourceVault();
   const doc = ws.editors.doc(path);
   if (!doc) {
-    await track(writing, writeVaultNote(path, next, () => ws.vault.written(path)));
+    await track(writing, writeVaultNote(path, next, () => ws.vault.written(path), undefined, source));
     return;
   }
   const lines = next.split("\n");

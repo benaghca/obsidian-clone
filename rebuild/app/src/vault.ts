@@ -6,6 +6,7 @@
 // (workspace.ts) holds one, as `ws.vault`.
 
 import { api, type FileEntry, isTauri, type LinkIndex } from "./api";
+import { pageOwnsDisk } from "./vaultRoot";
 import type { NoteRef } from "./editor/host";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
@@ -120,6 +121,7 @@ export class Vault {
 
   /** A change on disk, not ours: the file list (or the files' times), loaded notes' text and the link index follow. */
   private async onChanged(kind: string, paths: string[]) {
+    if (!pageOwnsDisk()) return;
     if (kind !== "modify") await this.refreshFiles();
     else for (const path of paths) this.touch(path);
     if (kind !== "remove") for (const path of paths) await this.reload(path);

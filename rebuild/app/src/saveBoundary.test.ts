@@ -15,6 +15,7 @@ import { flushOpenSaves } from "./quitFlush";
 import { sealWrites, unsealWrites, writesSealed } from "./saveSeal";
 import type { Tab } from "./tabs";
 import { resetBackendRootForTests, setBackendRoot } from "./vaultRoot";
+import { resetHoldsForTests } from "./holdDrain";
 import {
   commitVaultSwitch,
   installVaultSwitch,
@@ -25,6 +26,7 @@ import {
   flushHandoff,
   handoffPending,
   queuedNote,
+  queuedStructural,
   restoreDurableHandoff,
   resetHandoffForTests,
   setDirtyCapture,
@@ -76,6 +78,11 @@ function renameWs(notes: NoteEditors, path: string): Workspace {
   } as unknown as Workspace;
 }
 
+function handoffValue(fragment: string): string {
+  for (const [key, value] of store) if (key.startsWith("grove.saveHandoff.") && value.includes(fragment)) return value;
+  return "";
+}
+
 function noteTab(path: string): Tab {
   return {
     id: 1,
@@ -97,6 +104,9 @@ beforeEach(() => {
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => { store.set(key, value); },
     removeItem: (key: string) => { store.delete(key); },
+    key: (index: number) => [...store.keys()][index] ?? null,
+    get length() { return store.size; },
+    clear: () => { store.clear(); },
   });
   vi.stubGlobal("window", {
     setTimeout: (fn: TimerHandler, ms?: number, ...rest: unknown[]) => globalThis.setTimeout(fn, ms, ...rest),
@@ -119,6 +129,7 @@ afterEach(async () => {
   resetVaultSwitchForTests();
   unsealWrites();
   resetHandoffForTests();
+  resetHoldsForTests();
   resetBackendRootForTests();
   usePathPeers(undefined);
   discardCanvases(() => true);
@@ -151,7 +162,8 @@ test("a peer edit after CONFIRM_ACK is kept for the old vault", async () => {
   expect(reload).toHaveBeenCalledOnce();
   expect(queuedNote("/vault-a", "Note.md")).toBe("after-ack");
   expect(api.writeNote).not.toHaveBeenCalled();
-  expect(store.get("grove.saveHandoff")).toContain("after-ack");
+  expect(handoffValue("after-ack")).toContain("after-ack");
+  expect(store.has("grove.saveHandoff")).toBe(false);
 });
 
 test("an edit during RELOAD is preserved and does not roll the root back", async () => {
@@ -207,10 +219,12 @@ test("a failed rollback keeps the dirty bytes and does not write them onto the n
   expect(api.writeNote).not.toHaveBeenCalled();
   expect(writesSealed()).toBe(true);
   expect(notes.doc("Note.md")?.toString()).toBe("kept-bytes");
-  const blob = store.get("grove.saveHandoff") ?? "";
+  const savedKey = [...store.keys()].find((key) => key.startsWith("grove.saveHandoff.") && (store.get(key) ?? "").includes("kept-bytes"));
+  const blob = savedKey ? store.get(savedKey) ?? "" : "";
   expect(blob).toContain("kept-bytes");
+  expect(store.has("grove.saveHandoff")).toBe(false);
   resetHandoffForTests();
-  store.set("grove.saveHandoff", blob);
+  store.set(savedKey ?? "grove.saveHandoff.restored", blob);
   restoreDurableHandoff();
   expect(queuedNote("/vault-a", "Note.md")).toBe("kept-bytes");
   unsealWrites();
@@ -292,9 +306,11 @@ test("a sealed copy waits for the vault it was accepted on", async () => {
   (ws.editors as { text: (path: string) => Promise<string> }).text = async () => "page-a";
   sealWrites();
   const pending = copyNote(ws, "Note.md");
+  await vi.waitFor(() => expect(queuedStructural().some((job) => job.vault === "/vault-a" && job.content === "page-a")).toBe(true));
   setBackendRoot("/vault-b");
   await flushHandoff();
   expect(api.createNote).not.toHaveBeenCalled();
+  expect(queuedStructural().every((job) => job.vault === "/vault-a")).toBe(true);
   setBackendRoot("/vault-a");
   unsealWrites();
   await flushHandoff();

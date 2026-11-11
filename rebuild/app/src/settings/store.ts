@@ -9,7 +9,8 @@ import { api } from "../api";
 import { retryDelay } from "../fileSave";
 import { listeners } from "../listeners";
 import { writesSealed } from "../saveSeal";
-import { writeVaultConfig } from "../vaultWrite";
+import { backendRoot, pageVault } from "../vaultRoot";
+import { authoritativeConfig, writeVaultConfig } from "../vaultWrite";
 import {
   defaults,
   FILES,
@@ -84,7 +85,9 @@ class SettingsStore {
     let found = false;
     const read = async (name: SettingsFile) => {
       try {
-        const text = await api.readConfig(name);
+        const disk = await api.readConfig(name);
+        const recovered = authoritativeConfig(pageVault() || backendRoot(), name);
+        const text = recovered ?? disk;
         if (text !== null) found = true;
         return text === null ? null : (JSON.parse(text) as unknown);
       } catch (err) {
@@ -161,6 +164,12 @@ class SettingsStore {
     this.changed("types.json", key);
   }
 
+  /** Files whose latest text has not reached disk, for the vault handoff. */
+  pendingText(): { name: SettingsFile; text: string }[] {
+    const files = new Set<SettingsFile>([...this.timers.keys(), ...this.retryTimers.keys(), ...this.failed]);
+    return [...files].map((name) => ({ name, text: this.snapshot(name) }));
+  }
+
   /** True when a settings file still has text that has not reached disk. */
   hasUnsaved(): boolean {
     return this.timers.size > 0 || this.retryTimers.size > 0 || this.failed.size > 0;
@@ -209,15 +218,16 @@ class SettingsStore {
     const retry = this.retryTimers.get(file);
     if (retry) clearTimeout(retry);
     this.retryTimers.delete(file);
-    if (writesSealed()) {
+    const source = pageVault() || backendRoot();
+    if (writesSealed() || (pageVault() && backendRoot() !== pageVault())) {
       this.failed.add(file);
-      this.timers.set(file, window.setTimeout(() => { void this.write(file); }, WRITE_DELAY));
+      void writeVaultConfig(file, this.snapshot(file), source);
       return;
     }
     const gen = this.generation.get(file) ?? 0;
     const text = this.snapshot(file);
     try {
-      const status = await writeVaultConfig(file, text);
+      const status = await writeVaultConfig(file, text, source);
       if (status === "queued") {
         this.failed.add(file);
         this.timers.set(file, window.setTimeout(() => { void this.write(file); }, WRITE_DELAY));

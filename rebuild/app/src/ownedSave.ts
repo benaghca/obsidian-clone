@@ -4,8 +4,9 @@
 // The view that last edited owns the snapshot a flush writes.
 
 import { fileSave, type FileSave } from "./fileSave";
-import { drainingHold } from "./holdDrain";
+import { drainAllows, pathHeld, popPathHold, pushPathHold } from "./holdDrain";
 import { writesSealed } from "./saveSeal";
+import { sourceVault } from "./vaultRoot";
 import { writeVaultNote } from "./vaultWrite";
 
 interface ViewHooks {
@@ -94,13 +95,14 @@ export function createOwnedSaves(delay: number): OwnedSaves {
       delay,
       text: () => slot.text,
       postpone: () => writesSealed()
-        || (!drainingHold() && holds.some((under) => under(slot.path)))
+        || (!drainAllows(slot.path) && (pathHeld(slot.path) || holds.some((under) => under(slot.path))))
         || (editorHook(owner)?.postpone() ?? false),
       write: async (text) => {
+        const source = sourceVault();
         const hook = editorHook(owner);
         const writerGen = hook?.gen ?? 0;
         hook?.begin?.(text);
-        const status = await writeVaultNote(slot.path, text);
+        const status = await writeVaultNote(slot.path, text, undefined, undefined, source);
         if (status !== "sent") throw new Error("sealed");
         owner.echoing = true;
         try {
@@ -174,11 +176,12 @@ export function createOwnedSaves(delay: number): OwnedSaves {
       return results.every(Boolean);
     },
 
-    hold(under) { holds.push(under); },
+    hold(under) { holds.push(under); pushPathHold(under); },
 
     release(under) {
       const at = holds.lastIndexOf(under);
       if (at >= 0) holds.splice(at, 1);
+      popPathHold(under);
     },
 
     retarget(under, swap) {

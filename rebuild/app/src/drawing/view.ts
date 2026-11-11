@@ -6,6 +6,7 @@
 // touched. Edits save through write_note after a short pause, like a canvas.
 
 import { api } from "../api";
+import { deliverForeignChange } from "../vaultRoot";
 import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
@@ -337,7 +338,9 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   });
   resize.observe(el);
   theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  const unwatch = ws.vault.onModified((changedPath) => { if (changedPath === owned.path() && !owned.echoing) { owned.drop(); load(); } });
+  const unwatch = ws.vault.onModified((changedPath) => {
+    deliverForeignChange(changedPath === owned.path(), owned.echoing, () => owned.drop(), () => { load(); });
+  });
 
   el.addEventListener("wheel", (event) => {
     event.preventDefault();

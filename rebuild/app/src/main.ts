@@ -34,8 +34,8 @@ import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveC
 import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings, snapshotDrawings } from "./drawing/pending";
 import { installPathBarrier } from "./pathBarrier";
 import { installVaultSwitch, savesPending } from "./vaultSwitch";
-import { setBackendRoot } from "./vaultRoot";
-import { replayHandoff, setDirtyCapture } from "./vaultWrite";
+import { setBackendRoot, setPageVault, sourceVault } from "./vaultRoot";
+import { discardHandoff, replayHandoff, retargetHandoff, setConfigCapture, setDirtyCapture } from "./vaultWrite";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
@@ -71,6 +71,7 @@ import { Workspace } from "./workspace";
 
 const ws = new Workspace();
 setDirtyCapture(() => [...ws.editors.snapshot(), ...snapshotCanvases(), ...snapshotDrawings()]);
+setConfigCapture(() => settings.pendingText());
 installHoverPreviews(ws);
 const bookmarks = new Bookmarks(ws);
 ws.propertyHost = propertyIndex(ws).host;
@@ -541,11 +542,13 @@ if (isTauri) {
       ws.editors.move(under, swap);
       retargetCanvases(under, swap);
       retargetDrawings(under, swap);
+      retargetHandoff(sourceVault(), under, swap);
     },
     discard(under) {
       ws.editors.forget(under);
       discardCanvases(under);
       discardDrawings(under);
+      discardHandoff(sourceVault(), under);
     },
     async moved(_from, _to, swap) {
       await ws.followMove(swap);
@@ -563,9 +566,10 @@ window.addEventListener("beforeunload", () => {
 await ws.vault.open(!!popoutNote);
 if (ws.vault.path) {
   setBackendRoot(ws.vault.path);
+  setPageVault(ws.vault.path);
   rememberVault({ path: ws.vault.path, name: ws.vault.name });
 }
-void replayHandoff();
+await replayHandoff();
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
 // A vault Grove hasn't set up yet takes Cinder's or Obsidian's folders (once, in the main window).
