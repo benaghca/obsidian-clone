@@ -117,9 +117,13 @@
   padding-right: 22px;
 }
 /* A linked tab never gets too narrow for both: its unlink icon (18px) and
-   close button (18px) stay side by side, so aiming at unlink can't close it. */
+   close button (18px) stay side by side, so aiming at unlink can't close it.
+   A view tab (graph, canvas...) also shows its view icon, so it needs more. */
 .mod-root .workspace-tab-header.is-linked {
   min-width: max(var(--tab-min-width), 56px);
+}
+.mod-root .workspace-tab-header.is-linked[data-icon] {
+  min-width: max(var(--tab-min-width), 76px);
 }
 .workspace-tab-header:not(.is-active, .is-pinned, .is-linked):hover .workspace-tab-header-inner-title {
   -webkit-mask-image: linear-gradient(to left, transparent 20px, #000 32px);

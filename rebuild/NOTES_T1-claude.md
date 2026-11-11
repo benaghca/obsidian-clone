@@ -117,6 +117,51 @@ The Ctrl+Tab check now compares against the tab active just before the press. Th
 - **`npm run build`** and **`npm run audit:offline`:** passed.
 - **Screenshots** the suite rewrote were restored before committing.
 
+## Re-review fix: linked view tabs at the minimum width (after `ea7b718`)
+
+Codex's re-review of `ea7b718` passed it with one fix required. Linked Graph, Canvas and other view tabs show a view icon before the title. At the 56 px linked minimum, that icon pushed the unlink icon 17 px under the close button, so clicking unlink could still close those tabs.
+
+**In plain words:** a linked tab that shows a view icon now stops shrinking at 76 px. Its view icon, unlink icon and "×" all fit side by side, so clicking unlink only unlinks. Nothing else changes:
+- plain tabs still shrink to 40 px;
+- linked note tabs still stop at 56 px;
+- no other tab is wider in a crowded strip.
+
+**What changed:**
+- **`styles/tabs.css`:** `.mod-root .workspace-tab-header.is-linked[data-icon] { min-width: max(var(--tab-min-width), 76px) }`.
+- **Which tabs it covers:** `tabStrip.ts` already sets `data-icon` on every tab that shows a view icon: graph, local graph, canvas, Bases, drawing, image and backlinks. So this one rule covers them all.
+- **Why 76:** the measured overlap was 17 px, so the targets touch at 73 px. 76 gives the same 2 px gap as a linked note tab.
+- **I rejected collapsing the view icon at the minimum width.** CSS can't tell from inside a tab that it's at its minimum. Doing it in JS would mean measuring tabs on every resize, which is more code for the same result.
+
+**Test (`scripts/test-tabs.mjs`):**
+- **Setup:** the minimum-width section now runs for three linked, inactive, hovered tabs:
+  - a note tab;
+  - a Graph tab;
+  - a Canvas tab, opened from a `T1 linked.canvas` file the test creates in the mock's in-memory vault.
+
+  The strip is first squeezed to the minimum; a plain tab measuring exactly 40 px confirms it.
+- **Checks on each tab:**
+  - the unlink icon is clear of the close button;
+  - the unlink icon is what's under the pointer at its centre;
+  - clicking it unlinks the tab and keeps it open;
+  - the active note, focus and caret stay as they were.
+- **Cleanup:** afterwards the view tabs are closed, so the rest of the script sees the same tabs as before.
+- **Against the old CSS (`ea7b718`):** the note tab passed, and Graph and Canvas both failed with `{"width":56,"gap":-17,"hit":false}`; their unlink click closed the tab. With the fix: note 56 px, gap 2; Graph and Canvas 76 px, gap 2; all clicks unlink.
+
+**Line counts against `ea7b718`:**
+- **App code:** CSS +5/−1 in `tabs.css`.
+- **Tests:** `test-tabs.mjs` +30/−15.
+- **T1 app code since `6c2a0af`:** net +33.
+- No new dependency and no Rust.
+
+**Results:**
+- **`test-header.mjs`, `test-r27e.mjs` and `test-tabs.mjs`, run on their own:** passed.
+- **`flock /tmp/grove-npm-test.lock npm test` (with `posttest`):**
+  - **First run: exit 1, again on the unrelated drawing timing check.** `src/drawing/scene.test.ts` measured a 20.9 ms median parse against its 20 ms limit, under suite load. Vitest stopping there means the later scripts and `posttest` didn't run.
+  - **Second run, same tree: exit 0.** Vitest 99 files, 1,545 tests, and every browser script passed.
+  - That check has now missed under load in three of this T1's full runs. It may need a looser margin or a quieter slot, in its own piece; it isn't changed here.
+- **`npm run build`** and **`npm run audit:offline`:** passed.
+- **Screenshots** the suite rewrote were restored before committing.
+
 ## Re-review fix: linked tabs at the minimum width (after `60ac3ae`)
 
 Codex's re-review of `e33299e` passed it with one fix required. A linked tab could still shrink to the strip's 40 px minimum, in a crowded strip or a narrow split. At that width the unlink icon and the close button overlap by 13 px, with the icon's centre under the "×", so aiming at unlink could close the tab.
@@ -125,7 +170,7 @@ Codex's re-review of `e33299e` passed it with one fix required. A linked tab cou
 
 **What changed:**
 - **`styles/tabs.css`:** `.mod-root .workspace-tab-header.is-linked { min-width: max(var(--tab-min-width), 56px) }`.
-- **Why 56:** both buttons are 18 px. At 40 px they overlapped by 13 px, so they touch at 53 px; 56 leaves 3 px between them. It still follows the theme token if that is ever larger.
+- **Why 56:** both buttons are 18 px. At 40 px they overlapped by 13 px, so they touch at about 53 px; at 56 the test measures 2 px between them (rounded). It still follows the theme token if that is ever larger.
 - **I rejected hiding one control at tiny widths.** Either button hiding would still put the other where the user aims; reserving the room is simpler and never closes the tab by mistake.
 
 **Test (`scripts/test-tabs.mjs`):**
