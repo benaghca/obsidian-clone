@@ -44,6 +44,10 @@ pub struct Vault {
     pub index: Index,
     own_writes: HashMap<String, Instant>,
     formats: Mutex<HashMap<String, NoteFormat>>,
+    /// Device and inode last seen for a path. A same-size replace in one
+    /// clock tick can share a [`Stamp`]; the id tells that apart from the file
+    /// that was indexed.
+    ids: HashMap<String, (u64, u64)>,
     rescan: Option<Arc<()>>,
 }
 
@@ -62,6 +66,7 @@ impl Vault {
             index,
             own_writes: HashMap::new(),
             formats: Mutex::new(HashMap::new()),
+            ids: HashMap::new(),
             rescan: None,
         })
     }
@@ -129,6 +134,7 @@ impl Vault {
         }
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
+        self.remember_id(&rel);
         Ok(())
     }
 
@@ -150,8 +156,7 @@ impl Vault {
     fn relocate_formats(&self, from: &str, to: &str) {
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
         // The destination was not on disk, so any cache there is stale. Drop it
-        // even when the source has no format. Watcher echoes call
-        // `relocate_format_map` directly and must not clear a format already moved.
+        // even when the source has no format. A watcher echo is not this path.
         evict_format_tree(&mut formats, to);
         relocate_format_map(&mut formats, from, to, &mut HashSet::new(), &mut HashSet::new());
     }
@@ -203,6 +208,7 @@ impl Vault {
             return Err(e.to_string());
         }
         self.index.refresh_path(&self.root, &rel);
+        self.remember_id(&rel);
         Ok((self.entry_for(&rel), existed))
     }
 
@@ -216,6 +222,7 @@ impl Vault {
         self.observe_format(&rel, Some(content));
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
+        self.remember_id(&rel);
         Ok(self.entry_for(&rel))
     }
 
@@ -228,6 +235,7 @@ impl Vault {
         }
         fs::create_dir_all(&full).map_err(|e| e.to_string())?;
         self.index.refresh_path(&self.root, &rel);
+        self.remember_id(&rel);
         Ok(self.entry_for(&rel))
     }
 
@@ -258,6 +266,8 @@ impl Vault {
             batch.relocate(&from_rel, &to_rel);
             batch.refresh_path(root, &to_rel);
         }
+        self.relocate_ids(&from_rel, &to_rel);
+        self.remember_id(&to_rel);
         Ok(())
     }
 
@@ -284,6 +294,7 @@ impl Vault {
             fs::rename(&full, &dest).map_err(|e| e.to_string())?;
         }
         self.remove_formats(&rel);
+        self.forget_id_tree(&rel);
         self.index.remove_tree(&rel);
         Ok(())
     }
@@ -341,20 +352,30 @@ impl Vault {
 
     /// Apply a watcher batch. Name maps rebuild once, after every path is updated.
     pub fn apply(&mut self, changes: &[VaultChanged]) {
-        // One unconsumed move per indexed source that has already left that
-        // path. Captured before `map_batch`, which makes a real move and an
-        // echo look the same. A source that is still on disk is a later file
-        // reusing the pathname, not this rename.
-        let mut moves: HashMap<String, u32> = HashMap::new();
+        // One departed identity for each indexed rename source that is no
+        // longer the file on disk. Captured before `map_batch`. A path that
+        // still matches the index is a later file, or the same file back from
+        // a round trip, and is not a move. Landing replaces the identity
+        // already at the destination instead of leaving it to be spent again.
+        let mut at: HashMap<String, u64> = HashMap::new();
+        let mut stayed: HashSet<String> = HashSet::new();
+        let mut next_id = 1u64;
         for change in changes {
-            if change.kind == ChangeKind::Rename && change.paths.len() == 2 {
-                let from = &change.paths[0];
-                if !moves.contains_key(from)
-                    && self.index.contains(from)
-                    && !indexed_path_remains(&self.root, &self.index, from)
-                {
-                    moves.insert(from.clone(), 1);
+            if change.kind != ChangeKind::Rename || change.paths.len() != 2 {
+                continue;
+            }
+            for path in [&change.paths[0], &change.paths[1]] {
+                if stayed.contains(path) || at.contains_key(path) {
+                    continue;
                 }
+                if self.index.contains(path) && indexed_path_remains(&self.root, &self.index, path, self.ids.get(path).copied()) {
+                    stayed.insert(path.clone());
+                }
+            }
+            let from = &change.paths[0];
+            if !at.contains_key(from) && self.index.contains(from) && !stayed.contains(from) {
+                at.insert(from.clone(), next_id);
+                next_id += 1;
             }
         }
         {
@@ -381,6 +402,7 @@ impl Vault {
                 }
             }
         }
+        self.track_ids(changes);
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
         if formats.is_empty() {
             return;
@@ -397,14 +419,24 @@ impl Vault {
                 ChangeKind::Rename if change.paths.len() == 2 => {
                     let from = &change.paths[0];
                     let to = &change.paths[1];
-                    // Consume the identity. A second copy of this hop, and a
-                    // replay of a later hop, find nothing left and keep the
-                    // destination. The next hop of A -> B -> C receives it.
-                    if from != to && moves.get(from).copied().unwrap_or(0) > 0 {
-                        *moves.get_mut(from).unwrap() -= 1;
-                        evict_format_tree(&mut formats, to);
-                        *moves.entry(to.clone()).or_insert(0) += 1;
+                    if from == to {
+                        continue;
                     }
+                    // No departed identity: the app already moved this path, or
+                    // this hop was already consumed. Leave both caches where
+                    // they are. Relocating here would copy a reused source's
+                    // format onto the destination.
+                    let Some(id) = at.remove(from) else {
+                        continue;
+                    };
+                    // The indexed file is still at `to`, so this move did not
+                    // replace it (a round trip that ended back on that path).
+                    if stayed.contains(to) {
+                        continue;
+                    }
+                    at.remove(to);
+                    evict_format_tree(&mut formats, to);
+                    at.insert(to.clone(), id);
                     relocate_format_map(&mut formats, from, to, &mut evict, &mut kept);
                 }
                 _ => {}
@@ -473,6 +505,64 @@ impl Vault {
         self.own_writes.insert(rel.to_string(), now + OWN_WRITE);
     }
 
+    fn remember_id(&mut self, rel: &str) {
+        let Ok(md) = fs::symlink_metadata(self.root.join(rel)) else {
+            self.ids.remove(rel);
+            return;
+        };
+        if let Some(id) = file_id(&md) {
+            self.ids.insert(rel.to_string(), id);
+        }
+    }
+
+    fn forget_id_tree(&mut self, rel: &str) {
+        let prefix = format!("{rel}/");
+        self.ids.retain(|k, _| k != rel && !k.starts_with(&prefix));
+    }
+
+    fn relocate_ids(&mut self, from: &str, to: &str) {
+        if from == to || self.ids.is_empty() {
+            return;
+        }
+        let prefix = format!("{from}/");
+        let keys: Vec<String> = self
+            .ids
+            .keys()
+            .filter(|k| *k == from || k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(id) = self.ids.remove(&key) {
+                let dest = if key == from { to.to_string() } else { format!("{to}{}", &key[from.len()..]) };
+                self.ids.insert(dest, id);
+            }
+        }
+    }
+
+    /// The index batch already ran. Point stored ids at the files now on disk.
+    fn track_ids(&mut self, changes: &[VaultChanged]) {
+        for change in changes {
+            match change.kind {
+                ChangeKind::Remove => {
+                    for path in &change.paths {
+                        self.forget_id_tree(path);
+                    }
+                }
+                ChangeKind::Rename if change.paths.len() == 2 => {
+                    self.relocate_ids(&change.paths[0], &change.paths[1]);
+                    self.remember_id(&change.paths[1]);
+                    self.remember_id(&change.paths[0]);
+                }
+                ChangeKind::Create | ChangeKind::Modify => {
+                    for path in &change.paths {
+                        self.remember_id(path);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     fn entry_for(&self, rel: &str) -> FileEntry {
         self.index.entry(rel).unwrap_or_else(|| FileEntry {
             path: rel.to_string(),
@@ -487,9 +577,10 @@ fn has_prefix_in(path: &str, set: &HashSet<&str>) -> bool {
 }
 
 /// Whether `rel` still has the node the index recorded. False after a real
-/// rename (the path is gone or a different file is there). Directories are
-/// stored with their modified time only.
-fn indexed_path_remains(root: &Path, index: &Index, rel: &str) -> bool {
+/// rename (the path is gone or a different file is there). `known` is the
+/// device and inode from the last vault write; a same-size replace can share
+/// a stamp. Directories without an id are compared by modified time only.
+fn indexed_path_remains(root: &Path, index: &Index, rel: &str, known: Option<(u64, u64)>) -> bool {
     let Some(stamp) = index.stamp(rel) else {
         return false;
     };
@@ -499,10 +590,27 @@ fn indexed_path_remains(root: &Path, index: &Index, rel: &str) -> bool {
     if md.is_dir() != index.is_dir(rel) {
         return false;
     }
+    if let (Some(known), Some(now)) = (known, file_id(&md)) {
+        return known == now;
+    }
     if md.is_dir() {
         return fsutil::mtime_ms(&md) == stamp.mtime_ms;
     }
     Stamp::of(&md) == stamp
+}
+
+/// Device and inode, so two files written in one clock tick stay distinct.
+fn file_id(md: &fs::Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((md.dev(), md.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = md;
+        None
+    }
 }
 
 fn evict_format_tree(formats: &mut HashMap<String, NoteFormat>, rel: &str) {
@@ -1034,6 +1142,114 @@ mod tests {
         ]);
         vault.write_note("B.md", "single\nnext").unwrap();
         assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// App rename of a plain single-line note, then a new CRLF file at the old
+    /// path, then the delayed echo. The echo must not give B the new file's
+    /// endings, and the new file keeps its own.
+    #[test]
+    fn replay_app_echo_keeps_reused_crlf_source_and_lf_dest() {
+        let dir = tmp_dir("eol-echo-crlf-src");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "a\r\nb\r\n").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        vault.write_note("A.md", "a\nnext\n").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+            ),
+            ("single\nnext".to_string(), "a\r\nnext\r\n".to_string())
+        );
+    }
+
+    /// The echo also must not replace a destination that already remembers CRLF
+    /// with the new file's format.
+    #[test]
+    fn replay_app_echo_keeps_dest_crlf_when_reused_source_has_bom() {
+        let dir = tmp_dir("eol-echo-bom-src");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "\u{feff}only\n").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        vault.write_note("A.md", "only\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+            ),
+            ("single\r\nnext".to_string(), "\u{feff}only\nnext".to_string())
+        );
+    }
+
+    /// B was indexed, then deleted, and A moved A → B → C. A second B → C must
+    /// not clear C. Coalesce drops the delete because B is a rename endpoint.
+    #[test]
+    fn replay_preindexed_intermediate_hop_keeps_crlf() {
+        let dir = tmp_dir("eol-indexed-hop");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("B.md"), "other\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::remove_file(dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("B.md"), dir.path.join("C.md")).unwrap();
+        let remove = notify::Event::new(notify::EventKind::Remove(notify::event::RemoveKind::File))
+            .add_path(dir.path.join("B.md"));
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[
+                remove,
+                rename_both(&dir.path, "A.md", "B.md", 1),
+                rename_both(&dir.path, "B.md", "C.md", 2),
+                rename_both(&dir.path, "B.md", "C.md", 3),
+            ],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("C.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("C.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// External A → B → A finishes with the original file back at A. B was
+    /// indexed and is gone. That must not clear A's remembered CRLF.
+    #[test]
+    fn replay_round_trip_back_to_resident_source_keeps_crlf() {
+        let dir = tmp_dir("eol-round-trip-home");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("B.md"), "other\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::remove_file(dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("B.md"), dir.path.join("A.md")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "A.md".into()] },
+        ]);
+        vault.write_note("A.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("A.md")).unwrap(), "single\r\nnext");
     }
 
     #[test]
