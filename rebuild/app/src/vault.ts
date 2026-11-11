@@ -12,6 +12,17 @@ import { listeners } from "./listeners";
 import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
+/** A hidden webview may never paint. The same batch still flushes this soon, once. */
+const FLUSH_LIMIT_MS = 50;
+
+function inTree(root: string, path: string) {
+  return path === root || path.startsWith(`${root}/`);
+}
+
+function dropTree(root: string, touch: Set<string>, reload: Set<string>) {
+  for (const path of [...touch]) if (inTree(root, path)) touch.delete(path);
+  for (const path of [...reload]) if (inTree(root, path)) reload.delete(path);
+}
 
 export class Vault {
   path = "";
@@ -38,6 +49,14 @@ export class Vault {
   private byPath = new Map<string, FileEntry>();
   /** Disk events waiting for this frame's single refresh. */
   private pending: { kind: string; paths: string[] }[] | null = null;
+  /** Bumped when a pending flush must not apply: a new open, or the page going away. */
+  private wave = 0;
+  /** Bumped when one of a batch's callbacks wins, so the other one does not run it again. */
+  private ticket = 0;
+  private frame: number | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private listenEpoch = 0;
+  private stopChanges: (() => void) | undefined;
   private linkTimer = 0;
   private filesRequest = 0;
   private linksRequest = 0;
@@ -52,10 +71,16 @@ export class Vault {
   constructor(
     private readonly changed: (change: "files" | "links") => void,
     private readonly reload: (path: string) => Promise<void>,
-  ) {}
+  ) {
+    if (typeof document !== "undefined") document.addEventListener("pagehide", () => this.abandon());
+  }
 
   /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
   async open(reuse = false) {
+    this.abandon();
+    this.stopChanges?.();
+    this.stopChanges = undefined;
+    const listen = ++this.listenEpoch;
     const last = await api.lastVault();
     let info = last;
     if (isTauri && !(reuse && last)) {
@@ -64,13 +89,23 @@ export class Vault {
         window.prompt("Vault folder to open", "/home/chris/workspaces/remote/grove-test-vault");
       info = path ? await api.openVault(path) : null;
     }
+    if (listen !== this.listenEpoch) return;
     if (info) {
       this.path = info.path;
       this.name = info.name;
     }
     await this.refreshFiles();
+    if (listen !== this.listenEpoch) return;
     void this.refreshLinks();
-    api.onVaultChanged((change) => void this.onChanged(change.kind, change.paths));
+    const stop = await api.onVaultChanged((change) => {
+      if (listen !== this.listenEpoch) return;
+      void this.onChanged(change.kind, change.paths);
+    });
+    if (listen !== this.listenEpoch) {
+      stop();
+      return;
+    }
+    this.stopChanges = stop;
   }
 
   async refreshFiles() {
@@ -140,21 +175,52 @@ export class Vault {
   }
 
   /**
-   * A change on disk, not ours. Events in one frame share one file-list read
-   * (when any event is not a modify), one touch per modified path, one reload
-   * per path, and one link-index read. A remove drops that path from the reload
-   * set; a later create, modify, or rename puts it back.
+   * A change on disk, not ours. Events that arrive before the frame, or before
+   * the fallback timer, share one file-list read (when any event is not a
+   * modify), one touch per path that is still here, one reload per such path,
+   * and one link-index read. A remove drops that path and everything inside
+   * it; a later create, modify, or rename puts a path back.
    */
   private onChanged(kind: string, paths: string[]) {
     const start = this.pending === null;
     (this.pending ??= []).push({ kind, paths });
-    if (!start) return;
-    const flush = () => void this.flushChanges();
-    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
-    else queueMicrotask(flush);
+    if (start) this.armFlush();
   }
 
-  private async flushChanges() {
+  /** One shot for this batch: the frame if it paints, otherwise the timer. */
+  private armFlush() {
+    const wave = this.wave;
+    const ticket = this.ticket;
+    const run = () => {
+      if (wave !== this.wave || ticket !== this.ticket) return;
+      this.ticket += 1;
+      this.disarm();
+      void this.flushChanges(wave);
+    };
+    if (typeof requestAnimationFrame === "function") this.frame = requestAnimationFrame(run);
+    if (typeof setTimeout === "function") this.timer = setTimeout(run, FLUSH_LIMIT_MS);
+    else if (this.frame === null) queueMicrotask(run);
+  }
+
+  private disarm() {
+    if (this.frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.frame);
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.frame = null;
+    this.timer = undefined;
+  }
+
+  /** Drop a queued or in-flight disk batch. A new open, or the page going away, must not apply it. */
+  private abandon() {
+    this.wave += 1;
+    this.ticket += 1;
+    this.pending = null;
+    this.disarm();
+    this.filesRequest += 1;
+    this.linksRequest += 1;
+  }
+
+  private async flushChanges(wave: number) {
+    if (wave !== this.wave) return;
     const batch = this.pending;
     this.pending = null;
     if (!batch?.length) return;
@@ -163,13 +229,25 @@ export class Vault {
     const reload = new Set<string>();
     for (const change of batch) {
       if (change.kind !== "modify") refresh = true;
-      else for (const path of change.paths) touch.add(path);
-      if (change.kind === "remove") for (const path of change.paths) reload.delete(path);
-      else for (const path of change.paths) reload.add(path);
+      if (change.kind === "remove") for (const path of change.paths) dropTree(path, touch, reload);
+      else if (change.kind === "rename") {
+        if (change.paths[0]) dropTree(change.paths[0], touch, reload);
+        for (const path of change.paths) reload.add(path);
+      } else if (change.kind === "modify") {
+        for (const path of change.paths) {
+          touch.add(path);
+          reload.add(path);
+        }
+      } else for (const path of change.paths) reload.add(path);
     }
     if (refresh) await this.refreshFiles();
+    if (wave !== this.wave) return;
     for (const path of touch) this.touch(path);
-    for (const path of reload) await this.reload(path);
+    for (const path of reload) {
+      if (wave !== this.wave) return;
+      await this.reload(path);
+    }
+    if (wave !== this.wave) return;
     void this.refreshLinks();
   }
 }
