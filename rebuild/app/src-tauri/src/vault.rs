@@ -7,7 +7,7 @@
 use crate::fsutil::{self, atomic_write};
 use crate::index::{Index, Stamp};
 use crate::model::{push_change, ChangeKind, FileEntry, VaultChanged};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -148,18 +148,8 @@ impl Vault {
     }
 
     fn relocate_formats(&self, from: &str, to: &str) {
-        if from == to {
-            return;
-        }
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
-        let (from_prefix, to_prefix) = (format!("{from}/"), format!("{to}/"));
-        formats.retain(|k, _| k != to && !k.starts_with(&to_prefix));
-        let keys: Vec<String> = formats.keys().filter(|k| *k == from || k.starts_with(&from_prefix)).cloned().collect();
-        for key in keys {
-            if let Some(fmt) = formats.remove(&key) {
-                formats.insert(if key == from { to.into() } else { format!("{to}{}", &key[from.len()..]) }, fmt);
-            }
-        }
+        relocate_format_map(&mut formats, from, to, &mut HashSet::new());
     }
 
     fn remove_formats(&self, rel: &str) {
@@ -371,29 +361,23 @@ impl Vault {
                 }
             }
         }
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        if formats.is_empty() {
+            return;
+        }
+        let mut evict = HashSet::new();
         for change in changes {
             match change.kind {
                 ChangeKind::Remove | ChangeKind::Create => {
-                    for path in &change.paths {
-                        self.remove_formats(path);
-                    }
+                    evict.extend(change.paths.iter().map(String::as_str));
                 }
                 ChangeKind::Rename if change.paths.len() == 2 => {
-                    self.relocate_formats(&change.paths[0], &change.paths[1]);
-                    if !self.index.contains(&change.paths[1]) {
-                        self.remove_formats(&change.paths[1]);
-                    }
-                }
-                ChangeKind::Modify => {
-                    for path in &change.paths {
-                        if !self.index.contains(path) || self.index.is_dir(path) {
-                            self.remove_formats(path);
-                        }
-                    }
+                    relocate_format_map(&mut formats, &change.paths[0], &change.paths[1], &mut evict);
                 }
                 _ => {}
             }
         }
+        formats.retain(|k, _| self.index.contains(k) && !self.index.is_dir(k) && !has_prefix_in(k, &evict));
     }
 
     /// Start recording index mutations before releasing the state lock to scan.
@@ -435,11 +419,12 @@ impl Vault {
                 created.push(path.clone());
             }
         }
-        for path in &created {
-            self.remove_formats(path);
-        }
         self.index = fresh;
-        self.formats.lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| self.index.contains(k) && !self.index.is_dir(k));
+        let created_set: HashSet<&str> = created.iter().map(String::as_str).collect();
+        self.formats
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|k, _| self.index.contains(k) && !self.index.is_dir(k) && !has_prefix_in(k, &created_set));
         let mut out = Vec::new();
         push_change(&mut out, ChangeKind::Remove, removed);
         push_change(&mut out, ChangeKind::Create, created);
@@ -459,6 +444,34 @@ impl Vault {
             name: rel.to_string(),
             ..FileEntry::default()
         })
+    }
+}
+
+fn has_prefix_in(path: &str, set: &HashSet<&str>) -> bool {
+    !set.is_empty() && (set.contains(path) || path.match_indices('/').any(|(i, _)| set.contains(&path[..i])))
+}
+
+fn relocate_format_map(
+    formats: &mut HashMap<String, NoteFormat>,
+    from: &str,
+    to: &str,
+    evict: &mut HashSet<&str>,
+) {
+    if from == to || formats.is_empty() {
+        return;
+    }
+    let prefix = format!("{from}/");
+    let keys: Vec<String> = formats
+        .keys()
+        .filter(|k| (*k == from || k.starts_with(&prefix)) && !has_prefix_in(k, evict))
+        .cloned()
+        .collect();
+    for key in keys {
+        if let Some(fmt) = formats.remove(&key) {
+            let dest = if key == from { to.into() } else { format!("{to}{}", &key[from.len()..]) };
+            evict.remove(dest.as_str());
+            formats.insert(dest, fmt);
+        }
     }
 }
 
@@ -662,6 +675,64 @@ mod tests {
         let formats = vault.formats.lock().unwrap();
         assert_eq!(formats.len(), 1);
         assert!(formats.contains_key("moved/Renamed.md"));
+    }
+
+    #[test]
+    fn app_rename_watcher_echo_preserves_cached_format() {
+        let dir = tmp_dir("eol-rename-echo");
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        fs::write(dir.path.join("sub/Note.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("sub/Note.md", "single").unwrap();
+        vault.rename_path("sub/Note.md", "sub/Renamed.md").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub/Note.md".into(), "sub/Renamed.md".into()],
+        }]);
+        vault.rename_path("sub", "moved").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub".into(), "moved".into()],
+        }]);
+        vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
+    }
+
+    #[test]
+    fn chained_watcher_renames_and_batched_eviction_keep_and_prune_formats() {
+        let dir = tmp_dir("eol-chain-rename");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::create_dir(dir.path.join("dir1")).unwrap();
+        fs::write(dir.path.join("dir1/Note.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("A.md", "single").unwrap();
+        vault.write_note("dir1/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("C.md")).unwrap();
+        fs::rename(dir.path.join("dir1"), dir.path.join("dir3")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir2".into(), "dir3".into()] },
+        ]);
+        vault.write_note("C.md", "single\nnext").unwrap();
+        vault.write_note("dir3/Note.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("C.md")).unwrap(), "single\r\nnext");
+        assert_eq!(fs::read_to_string(dir.path.join("dir3/Note.md")).unwrap(), "\u{feff}single\r\nnext");
+
+        let removed: Vec<String> = (0..200)
+            .map(|i| {
+                let p = format!("bulk/item-{i}.md");
+                vault.observe_format(&p, Some("a\r\nb\r\n"));
+                p
+            })
+            .collect();
+        let start = Instant::now();
+        vault.apply(&[VaultChanged { kind: ChangeKind::Remove, paths: removed }]);
+        assert!(start.elapsed() < Duration::from_millis(50));
+        assert_eq!(vault.formats.lock().unwrap().len(), 2);
     }
 
     #[test]

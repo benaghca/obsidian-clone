@@ -13,11 +13,14 @@ When Grove saves a note that already exists on disk with Windows CRLF (`\r\n`) l
   - `Vault` keeps a per-note `formats: Mutex<HashMap<String, NoteFormat>>` cache (`bom`, `crlf`), updated by `observe_format` on `read_note`, `write_note`, and `create_note` (storing only notes with `bom` or `crlf` and evicting entries that revert to plain LF without BOM).
   - When a file on disk has `\r\n`, `crlf` is `true`; when it has `\n` without `\r\n`, `crlf` is `false`; when it has no line breaks at all (single-line or empty), `observe_format` preserves the last remembered `crlf` for that note (and `bom` when empty).
   - `Vault::rename_path` relocates cached format entries (`relocate_formats`) only **after** `fs::create_dir_all` and `fs::rename` succeed, right before the S4 `self.index.map_batch()` block, so a failed rename never orphans the original path's format or populates the failed destination.
-  - `Vault::apply` keeps `self.formats` synchronized with watcher batches while preserving S4's single `map_batch` rebuild: two-sided `ChangeKind::Rename` events relocate cached format entries (and drop them if the destination no longer exists in the index), `ChangeKind::Remove` and `ChangeKind::Create` remove cached entries for removed or newly created/recreated paths, and `ChangeKind::Modify` (including atomic saves normalized from `Create` by `Vault::normalize`) preserves cached format for live files while removing entries if a path disappeared or became a directory.
-  - `Vault::finish_rescan` clears newly created paths and prunes `self.formats` to retain only live non-directory paths present in `self.index`.
+  - `Vault::apply` keeps `self.formats` synchronized with watcher batches while preserving S4's single `map_batch` rebuild:
+    - Rename relocation (`relocate_format_map`) is idempotent on replay: when an app `rename_path` has already moved `from` to `to`, the subsequent watcher rename echo finds no un-evicted keys at `from` and leaves `to`'s cached format intact.
+    - All `ChangeKind::Rename` moves in a batch are applied to `self.formats` in sequence before a single final `retain` prunes against the final `self.index`, so chained file and folder renames (`A -> B -> C`) within one watcher batch keep their cached format all the way to `C`.
+    - All `ChangeKind::Remove` and `ChangeKind::Create` paths in a batch are collected into a single `HashSet<&str>` (`evict`) and evicted together with final-index pruning in one `formats.retain` pass using `has_prefix_in`.
+  - `Vault::finish_rescan` evicts newly created paths and prunes `self.formats` to retain only live non-directory paths present in `self.index` in a single `retain` pass.
   - `NoteFormat::apply` normalizes line endings to `\r\n` (without doubling existing `\r\n`) and restores the leading `\u{feff}` (without doubling an existing BOM) before writing and updating the index via `upsert_note`. If both `bom` and `crlf` are `false`, it borrows `content` as-is with zero extra allocation.
 - **`rebuild/app/src-tauri/src/vault.rs` (`mod tests`):**
-  - Added seven regression tests:
+  - Added nine regression tests:
     1. `crlf_and_lf_notes_keep_their_line_endings_on_save`
     2. `utf8_bom_is_preserved_and_bomless_notes_do_not_gain_one`
     3. `bom_and_crlf_round_trip_while_new_notes_stay_lf_without_bom`
@@ -25,6 +28,8 @@ When Grove saves a note that already exists on disk with Windows CRLF (`\r\n`) l
     5. `crlf_and_bom_survive_single_line_or_empty_saves_and_renames` (Codex review 1 P2 fix)
     6. `failed_rename_keeps_original_format_and_leaves_destination_uncached` (Codex review 2 P2 fix 1)
     7. `watcher_apply_and_rescan_maintain_and_prune_format_cache` (Codex review 2 P2 fix 2)
+    8. `app_rename_watcher_echo_preserves_cached_format` (Codex review 3 P2 fix 1)
+    9. `chained_watcher_renames_and_batched_eviction_keep_and_prune_formats` (Codex review 3 P2 fix 2 + P3 batched eviction)
 
 ## Proof that each test failed before and passed after
 
@@ -43,7 +48,12 @@ For the second Codex P2 review fixes, both new regression tests were added and r
 
 - `failed_rename_keeps_original_format_and_leaves_destination_uncached`: **FAILED** on `9f59057` (`left: "single\nnext"`, `right: "single\r\nnext"` after `rename_path("Orig.md", "blocker/Dest.md")` failed in `create_dir_all` and prematurely relocated `"Orig.md"`'s cached format).
 - `watcher_apply_and_rescan_maintain_and_prune_format_cache`: **FAILED** on `9f59057` (`left: "single\nnext"`, `right: "single\r\nnext"` after external file and folder renames via `vault.apply`).
-- After the fixes and merging S4 (`4e364cc`), all 122 active Rust tests (including all 7 S3 tests and all 5 S4 `vault::batch_tests`) pass in `cargo test --offline`.
+
+For the third Codex P2/P3 review fixes, both new regression tests were added and run on commit `01ed722` **before** updating `relocate_format_map` and `apply`:
+
+- `app_rename_watcher_echo_preserves_cached_format`: **FAILED** on `01ed722` (`left: "single\nnext"`, `right: "single\r\nnext"` after `rename_path` was followed by its watcher `ChangeKind::Rename` echo).
+- `chained_watcher_renames_and_batched_eviction_keep_and_prune_formats`: **FAILED** on `01ed722` (`left: "single\nnext"`, `right: "single\r\nnext"` after a single watcher batch with chained `A.md -> B.md -> C.md` and `dir1 -> dir2 -> dir3` renames).
+- After the fixes, all 124 active Rust tests (including all 9 S3 tests and all 5 S4 `vault::batch_tests`) pass in `cargo test --offline`.
 
 ## Invalid UTF-8 handling
 
@@ -53,10 +63,10 @@ For the second Codex P2 review fixes, both new regression tests were added and r
 ## Line counts and dependencies
 
 - **Net line change by language / file (vs `rebuild/integration`):**
-  - Rust (`rebuild/app/src-tauri/src/vault.rs`): `+253 / -14` (net `+239` lines: `+96` lines in production code, `+143` lines in tests).
+  - Rust (`rebuild/app/src-tauri/src/vault.rs`): `+331 / -21` (net `+310` lines: `+109` lines in production code, `+201` lines in tests).
   - TypeScript / CSS / JSON: `0` lines changed.
 - **Files near/over 800 lines:**
-  - `rebuild/app/src-tauri/src/vault.rs`: `1111` lines (`468` lines of implementation + `643` lines of `#[cfg(test)] mod tests`). Kept in `vault.rs` so `rebuild/integration` merges cleanly without file-split conflicts.
+  - `rebuild/app/src-tauri/src/vault.rs`: `1182` lines (`481` lines of implementation + `701` lines of `#[cfg(test)] mod tests`). Kept in `vault.rs` so `rebuild/integration` merges cleanly without file-split conflicts.
   - `rebuild/app/src-tauri/src/edit.rs`: `866` lines (unchanged).
   - `rebuild/app/src-tauri/src/lib.rs`: `721` lines (unchanged).
 - **New dependencies:** None.
