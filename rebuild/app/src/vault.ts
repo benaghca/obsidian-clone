@@ -12,16 +12,141 @@ import { listeners } from "./listeners";
 import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
+/** A hidden webview may never paint. The same batch still flushes this soon, once. */
+const FLUSH_LIMIT_MS = 50;
+
+/** Prefix-segment steps in the latest disk-batch reduction. A full scan of every queued path shows up here. */
+export let batchVisits = 0;
+
+type Tomb = { removedAt: number; kids: Map<string, Tomb> | null };
+type Stamp = { path: string; at: number };
+
+function tomb(): Tomb {
+  return { removedAt: 0, kids: null };
+}
+
+/** Walk one path. Each segment is one visit, whether or not the prefix was removed. */
+function walk(root: Tomb, path: string, make: boolean): Tomb | null {
+  let at = root;
+  for (const part of path.split("/")) {
+    batchVisits += 1;
+    let kids = at.kids;
+    if (!kids) {
+      if (!make) return null;
+      kids = at.kids = new Map();
+    }
+    let next = kids.get(part);
+    if (!next) {
+      if (!make) return null;
+      next = tomb();
+      kids.set(part, next);
+    }
+    at = next;
+  }
+  return at;
+}
+
+/** True when this path, or a folder above it, was removed after `addedAt`. */
+function buried(root: Tomb, path: string, addedAt: number): boolean {
+  let at = root;
+  for (const part of path.split("/")) {
+    batchVisits += 1;
+    const next = at.kids?.get(part);
+    if (!next) return false;
+    if (next.removedAt > addedAt) return true;
+    at = next;
+  }
+  return false;
+}
+
+/** Paths in first-seen order. A later recreate appends; a repeat while still live keeps its place. */
+class Marks {
+  private list: Stamp[] = [];
+  private index = new Map<string, number>();
+
+  add(path: string, at: number, tombs: Tomb) {
+    const have = this.index.get(path);
+    if (have === undefined || buried(tombs, path, this.list[have]!.at)) {
+      this.index.set(path, this.list.length);
+      this.list.push({ path, at });
+    } else this.list[have]!.at = at;
+  }
+
+  live(tombs: Tomb): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const mark of this.list) {
+      if (seen.has(mark.path) || buried(tombs, mark.path, mark.at)) continue;
+      seen.add(mark.path);
+      out.push(mark.path);
+    }
+    return out;
+  }
+}
+
+function reduceBatch(batch: { kind: string; paths: string[] }[]) {
+  batchVisits = 0;
+  let refresh = false;
+  let seq = 0;
+  const tombs = tomb();
+  const touch = new Marks();
+  const reload = new Marks();
+  const bury = (path: string) => {
+    const node = walk(tombs, path, true);
+    if (node) node.removedAt = ++seq;
+  };
+  for (const change of batch) {
+    if (change.kind !== "modify") refresh = true;
+    if (change.kind === "remove") for (const path of change.paths) bury(path);
+    else if (change.kind === "rename") {
+      if (change.paths[0]) bury(change.paths[0]);
+      for (const path of change.paths) reload.add(path, ++seq, tombs);
+    } else if (change.kind === "modify") {
+      for (const path of change.paths) {
+        const at = ++seq;
+        touch.add(path, at, tombs);
+        reload.add(path, at, tombs);
+      }
+    } else for (const path of change.paths) reload.add(path, ++seq, tombs);
+  }
+  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs) };
+}
 
 export class Vault {
   path = "";
   name = "";
-  files: FileEntry[] = [];
+  /** The current file list. Assigning a new array rebuilds the path lookup. */
+  get files(): FileEntry[] {
+    return this.fileList;
+  }
+
+  set files(files: FileEntry[]) {
+    this.fileList = files;
+    const byPath = new Map<string, FileEntry>();
+    for (const file of files) if (!byPath.has(file.path)) byPath.set(file.path, file);
+    this.byPath = byPath;
+  }
+
   notes: NoteRef[] = [];
   links: LinkIndex = { outgoing: {} };
   /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
   isExcluded: (path: string) => boolean = () => false;
 
+  private fileList: FileEntry[] = [];
+  /** First entry wins when one path is listed twice, matching a list scan that stops at the first hit. */
+  private byPath = new Map<string, FileEntry>();
+  /** Disk events waiting for this frame's single refresh. */
+  private pending: { kind: string; paths: string[] }[] | null = null;
+  /** Bumped when a pending flush must not apply: a new open, or the page going away. */
+  private wave = 0;
+  /** After the page goes away, disk events wait until it is shown again or the vault opens. */
+  private suspended = false;
+  /** Bumped when one of a batch's callbacks wins, so the other one does not run it again. */
+  private ticket = 0;
+  private frame: number | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  private listenEpoch = 0;
+  private stopChanges: (() => void) | undefined;
   private linkTimer = 0;
   private filesRequest = 0;
   private linksRequest = 0;
@@ -36,10 +161,20 @@ export class Vault {
   constructor(
     private readonly changed: (change: "files" | "links") => void,
     private readonly reload: (path: string) => Promise<void>,
-  ) {}
+  ) {
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", () => this.abandon());
+      window.addEventListener("pageshow", () => { this.suspended = false; });
+    }
+  }
 
   /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
   async open(reuse = false) {
+    this.abandon();
+    this.suspended = false;
+    this.stopChanges?.();
+    this.stopChanges = undefined;
+    const listen = ++this.listenEpoch;
     const last = await api.lastVault();
     let info = last;
     if (isTauri && !(reuse && last)) {
@@ -48,13 +183,23 @@ export class Vault {
         window.prompt("Vault folder to open", "/home/chris/workspaces/remote/grove-test-vault");
       info = path ? await api.openVault(path) : null;
     }
+    if (listen !== this.listenEpoch) return;
     if (info) {
       this.path = info.path;
       this.name = info.name;
     }
     await this.refreshFiles();
+    if (listen !== this.listenEpoch) return;
     void this.refreshLinks();
-    api.onVaultChanged((change) => void this.onChanged(change.kind, change.paths));
+    const stop = await api.onVaultChanged((change) => {
+      if (listen !== this.listenEpoch) return;
+      void this.onChanged(change.kind, change.paths);
+    });
+    if (listen !== this.listenEpoch) {
+      stop();
+      return;
+    }
+    this.stopChanges = stop;
   }
 
   async refreshFiles() {
@@ -100,13 +245,18 @@ export class Vault {
     return this.targets.exists(target, from);
   }
 
+  /** The list entry for `path`, or none. */
+  entry(path: string): FileEntry | undefined {
+    return this.byPath.get(path);
+  }
+
   isFolder(path: string) {
-    return this.files.some((f) => f.path === path && f.is_dir);
+    return this.byPath.get(path)?.is_dir === true;
   }
 
   /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
   private touch(path: string) {
-    const entry = this.files.find((f) => f.path === path);
+    const entry = this.byPath.get(path);
     if (entry) entry.mtime_ms = Date.now();
     this.modified.emit(path);
   }
@@ -118,11 +268,67 @@ export class Vault {
     this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
   }
 
-  /** A change on disk, not ours: the file list (or the files' times), loaded notes' text and the link index follow. */
-  private async onChanged(kind: string, paths: string[]) {
-    if (kind !== "modify") await this.refreshFiles();
-    else for (const path of paths) this.touch(path);
-    if (kind !== "remove") for (const path of paths) await this.reload(path);
+  /**
+   * A change on disk, not ours. Events that arrive before the frame, or before
+   * the fallback timer, share one file-list read (when any event is not a
+   * modify), one touch per path that is still here, one reload per such path,
+   * and one link-index read. A remove drops that path and everything inside
+   * it; a later create, modify, or rename puts a path back.
+   */
+  private onChanged(kind: string, paths: string[]) {
+    if (this.suspended) return;
+    const start = this.pending === null;
+    (this.pending ??= []).push({ kind, paths });
+    if (start) this.armFlush();
+  }
+
+  /** One shot for this batch: the frame if it paints, otherwise the timer. */
+  private armFlush() {
+    const wave = this.wave;
+    const ticket = this.ticket;
+    const run = () => {
+      if (wave !== this.wave || ticket !== this.ticket) return;
+      this.ticket += 1;
+      this.disarm();
+      void this.flushChanges(wave);
+    };
+    if (typeof requestAnimationFrame === "function") this.frame = requestAnimationFrame(run);
+    if (typeof setTimeout === "function") this.timer = setTimeout(run, FLUSH_LIMIT_MS);
+    else if (this.frame === null) queueMicrotask(run);
+  }
+
+  private disarm() {
+    if (this.frame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(this.frame);
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.frame = null;
+    this.timer = undefined;
+  }
+
+  /** Drop a queued or in-flight disk batch. A new open, or the page going away, must not apply it. */
+  private abandon() {
+    this.wave += 1;
+    this.ticket += 1;
+    this.suspended = true;
+    this.pending = null;
+    this.disarm();
+    this.filesRequest += 1;
+    this.linksRequest += 1;
+  }
+
+  private async flushChanges(wave: number) {
+    if (wave !== this.wave) return;
+    const batch = this.pending;
+    this.pending = null;
+    if (!batch?.length) return;
+    const { refresh, touch, reload } = reduceBatch(batch);
+    if (refresh) await this.refreshFiles();
+    if (wave !== this.wave) return;
+    for (const path of touch) this.touch(path);
+    for (const path of reload) {
+      if (wave !== this.wave) return;
+      await this.reload(path);
+    }
+    if (wave !== this.wave) return;
     void this.refreshLinks();
   }
 }
