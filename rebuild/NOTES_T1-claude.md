@@ -117,6 +117,52 @@ The Ctrl+Tab check now compares against the tab active just before the press. Th
 - **`npm run build`** and **`npm run audit:offline`:** passed.
 - **Screenshots** the suite rewrote were restored before committing.
 
+## Re-review fix: unlinked view tabs at the minimum width (after `b6ebede`)
+
+Codex's re-review of `b6ebede` confirmed the linked-tab fix and required one more. An unlinked Graph or Canvas tab could still shrink to 40 px. There, on hover, its close button covered 11 px of the view icon, including the icon's centre. A pinned tab's pin covered it the same way. So a click meant to select an inactive Graph or Canvas tab could close it, or unpin it.
+
+**In plain words:** a tab that shows a view icon (Graph, Canvas, Bases, drawing, image and so on) now stops shrinking at 53 px. Its icon stays clear of the "×" or pin, so clicking the icon always selects the tab. Nothing else changes:
+- plain note tabs still go down to 40 px;
+- linked tabs keep their 56 px (note) and 76 px (view) minimums.
+
+**What changed:**
+- **`styles/tabs.css`:** `.mod-root .workspace-tab-header[data-icon] { min-width: max(var(--tab-min-width), 53px) }`.
+- **Why 53:** 40 px plus the measured 11 px overlap, plus the same 2 px gap as the linked tabs.
+- **The linked rules still win.** They are more specific, so linked tabs keep their own minimums.
+- **I rejected collapsing the icon at the minimum,** for the same reason as before: CSS can't tell when a tab is at its minimum.
+
+**Test (`scripts/test-tabs.mjs`):** in the squeezed-strip section, for an inactive unlinked Graph tab, Canvas tab and pinned Graph tab, with the pointer on the view icon:
+- the icon is clear of the close button or pin;
+- the close button or pin isn't what's under the icon's centre;
+- clicking the icon's centre selects the tab and keeps it open, and pinned if it was;
+- focus doesn't land in the tab strip;
+- switching back to the note restores its focus and caret.
+
+**Against the old CSS (`b6ebede`):** all three failed with `{"width":40,"gap":-11,"hit":false}`. The Graph and Canvas clicks closed their tabs, and the pinned Graph click unpinned it. With the fix all three are 53 px wide, with a 2 px gap, and select.
+
+**Test fixes along the way:**
+- **Switching back to the note.** The script now switches with `ws.activate` instead of a click. At 40 px the active tab is almost entirely its always-visible close button, so a click at its centre closed the note.
+- **A step that loses its view tab reopens it,** so a regression lists every miss instead of crashing.
+
+**Seen, not changed:** in a strip squeezed to 40 px, the active note tab is almost all close button, so clicking its centre closes it. This fix doesn't change it: the active tab always shows its 18 px button, and only 34 px of the tab is inside its padding. I didn't check how the pre-T1 layout behaved here. Clicking the tab you're on doesn't need to do anything, but a mistaken close is possible. Fixing it would need a wider active tab, which would widen crowded strips, or hiding its "×" at the minimum, which CSS can't detect. It's recorded for a decision, not changed here.
+
+**Separate commit, optional per the brief: the drawing parse check.** `src/drawing/scene.test.ts` "parses a 5,000-element drawing" kept missing its flat 20 ms limit under full-suite load. It measured 20.3, 20.66 and 20.9 ms in T1 runs, with `JSON.parse` alone up to 20.1 ms. Alone it takes about 11.5–11.8 ms.
+- **Change:** the flat limit is now 25 ms, still about twice the isolated time.
+- **Kept as is:** the tighter relative check, under `JSON.parse` × 1.25 + 2 ms, which held in every failing run, and the 50 ms parse-plus-read check.
+
+**Line counts against `b6ebede`:**
+- **App code:** CSS +5/−0 in `tabs.css`.
+- **Tests:** `test-tabs.mjs` +23/−0; `scene.test.ts` +4/−2, in its own commit.
+- **T1 app code since `6c2a0af`:** net +38.
+- No new dependency and no Rust.
+
+**Results:**
+- **`test-tabs.mjs` and `test-header.mjs`, run on their own:** passed.
+- **`scene.test.ts`, run alone three times:** passed (median 11.8 ms).
+- **`flock /tmp/grove-npm-test.lock npm test` (with `posttest`), with both changes:** exit 0 on the first run. Vitest 99 files, 1,545 tests, and every browser script passed.
+- **`npm run build`** and **`npm run audit:offline`:** passed.
+- **Screenshots** the suite rewrote were restored before committing.
+
 ## Re-review fix: linked view tabs at the minimum width (after `ea7b718`)
 
 Codex's re-review of `ea7b718` passed it with one fix required. Linked Graph, Canvas and other view tabs show a view icon before the title. At the 56 px linked minimum, that icon pushed the unlink icon 17 px under the close button, so clicking unlink could still close those tabs.

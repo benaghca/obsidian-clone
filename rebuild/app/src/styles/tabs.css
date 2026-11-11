@@ -116,6 +116,11 @@
 .workspace-tab-header.is-linked .workspace-tab-header-inner {
   padding-right: 22px;
 }
+/* A view tab (graph, canvas...) keeps its icon clear of the close button or
+   pin even at its narrowest, so clicking the icon selects the tab. */
+.mod-root .workspace-tab-header[data-icon] {
+  min-width: max(var(--tab-min-width), 53px);
+}
 /* A linked tab never gets too narrow for both: its unlink icon (18px) and
    close button (18px) stay side by side, so aiming at unlink can't close it.
    A view tab (graph, canvas...) also shows its view icon, so it needs more. */

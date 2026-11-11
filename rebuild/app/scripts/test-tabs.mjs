@@ -173,6 +173,29 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
     check((await evaluate(`!!document.querySelector(${JSON.stringify(header)}) && !document.querySelector(${JSON.stringify(header)}).classList.contains("is-linked")`)), `at the minimum width, clicking a linked ${name} tab's unlink icon unlinks it and doesn't close it`);
     await kept(`unlink_narrow_${name}`, big);
   }
+  // Unlinked view tabs at the minimum: a click on the view icon selects the tab, never closes or unpins it.
+  const pin = (type) => run((type) => ws.togglePin(ws.tabs.find((t) => t.type === type)), type);
+  for (const [name, type, icon, pinned] of [["graph", "graph", "git-fork", false], ["canvas", "canvas", "layout-dashboard", false], ["pinned graph", "graph", "git-fork", true]]) {
+    const header = viewTab(icon), iconSel = `${header} .workspace-tab-header-inner-icon`, closeSel = `${header} .workspace-tab-header-inner-close-button`;
+    await run(async (type) => { if (!ws.tabs.some((t) => t.type === type)) { const big = ws.active; if (type === "graph") ws.openView("graph", "tab"); else await ws.open("T1 linked.canvas", { where: "tab" }); ws.activate(big); } }, type);
+    if (pinned) await pin(type);
+    // Back to the note without clicking it: at 40 px the active tab is mostly its close button.
+    await run(() => ws.activate(ws.tabs.find((t) => t.path === "Big note.md"))); await sleep(200); await refocus();
+    await hoverSettled(await point(iconSel));
+    const at = await run((h, i, c) => {
+      const b = (e) => document.querySelector(e).getBoundingClientRect(), ib = b(i), cb = b(c);
+      return { width: b(h).width, gap: Math.round(cb.left - ib.right), hit: !document.elementFromPoint(ib.x + ib.width / 2, ib.y + ib.height / 2)?.closest(".workspace-tab-header-inner-close-button") };
+    }, header, iconSel, closeSel);
+    if (REPORT) console.log("icon", name, JSON.stringify(at));
+    check(at.gap >= 0 && at.hit, `an inactive ${name} tab at the minimum width keeps its view icon clear of the ${pinned ? "pin" : "close button"} ${JSON.stringify(at)}`);
+    await press1(iconSel);
+    await sleep(300);
+    const sel = await run((type, strip) => { const t = ws.tabs.find((x) => x.type === type); return { open: !!t, active: ws.active === t, pinned: !!t?.pinned, strip: !!document.activeElement?.closest(strip) }; }, type, STRIP);
+    check(sel.open && sel.active && sel.pinned === pinned && !sel.strip, `at the minimum width, clicking an inactive ${name} tab's icon selects it, keeps it open${pinned ? " and pinned" : ""}, and leaves focus out of the strip ${JSON.stringify(sel)}`);
+    await run(() => ws.activate(ws.tabs.find((t) => t.path === "Big note.md"))); await sleep(200); await refocus();
+    await kept(`select_narrow_${name.replace(" ", "_")}`, big);
+    if (pinned && sel.open) await pin(type);
+  }
   await run((sel) => { document.querySelector(sel).style.removeProperty("--tab-width"); ws.closeTabs(ws.tabs.filter((t) => t.type)); }, STRIP);
   await sleep(300);
   await refocus();
