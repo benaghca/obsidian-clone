@@ -31,6 +31,12 @@ tauri-plugin-opener = "2"
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_40"] }
 
+[dev-dependencies]
+# Empty feature of the tauri crate already in the build. It only exposes
+# `tauri::test` (MockRuntime) so the headless smoke can invoke commands
+# without a WebKit window. No extra crates.
+tauri = { version = "2", features = ["test"] }
+
 [features]
 # `tauri build` turns this on so the webview embeds ../dist.
 # A plain `cargo build` leaves it off and loads devUrl instead, so the

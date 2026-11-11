@@ -21,6 +21,8 @@ mod config;
 mod edit;
 #[cfg(test)]
 mod edit_fuzz;
+#[cfg(test)]
+mod smoke;
 mod fsutil;
 mod index;
 mod lockdown;
@@ -53,7 +55,7 @@ pub struct Inner {
 pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwrap_or_else(|e| e.into_inner()) }
 pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|e| e.into_inner()) }
 
-fn wrap_handler(handler: impl Fn(tauri::ipc::Invoke) -> bool) -> impl Fn(tauri::ipc::Invoke) -> bool {
+fn wrap_handler<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool) -> impl Fn(tauri::ipc::Invoke<R>) -> bool {
     move |invoke| {
         let is_write = WriteQueue::is_write_command(invoke.message.command());
         let key = invoke_key(&invoke.message);
@@ -197,7 +199,7 @@ fn install_vault(state: &AppState, ticket: WriteTicket, prepare: impl FnOnce() -
     })
 }
 
-fn emit_other_windows(window: &tauri::Window, kind: model::ChangeKind, path: String) {
+fn emit_other_windows<R: tauri::Runtime>(window: &tauri::Window<R>, kind: model::ChangeKind, path: String) {
     let change = model::VaultChanged { kind, paths: vec![path] };
     let me = window.label().to_owned();
     let _ = window.emit_filter("vault-changed", change, |target| match target {
@@ -336,14 +338,14 @@ fn bytes_from_body(body: &tauri::ipc::InvokeBody) -> Result<&[u8], String> {
 }
 
 #[tauri::command(async)]
-fn write_note(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, path: String, content: String) -> impl Future<Output = Result<(), String>> {
+fn write_note<R: tauri::Runtime>(ticket: WriteTicket, window: tauri::Window<R>, state: State<'_, AppState>, path: String, content: String) -> impl Future<Output = Result<(), String>> {
     let fut = write_vault(&state, ticket, move |v| v.write_note(&path, &content).map(|()| path));
     async move { emit_other_windows(&window, model::ChangeKind::Modify, fut.await?); Ok(()) }
 }
 
 /// Fresh-file property CAS, off the GTK thread; only real writes notify other windows.
 #[tauri::command(async)]
-fn set_property(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, path: String, edit: edit::PropertyEdit, dry_run: Option<bool>) -> impl Future<Output = Result<edit::EditResult, String>> {
+fn set_property<R: tauri::Runtime>(ticket: WriteTicket, window: tauri::Window<R>, state: State<'_, AppState>, path: String, edit: edit::PropertyEdit, dry_run: Option<bool>) -> impl Future<Output = Result<edit::EditResult, String>> {
     let dry_run = dry_run.unwrap_or(false);
     let fut = write_vault(&state, ticket, move |v| v.set_property(&path, &edit, dry_run).map(|r| (r, path)));
     async move {
@@ -367,7 +369,7 @@ fn enqueue_write_file_bytes(state: &AppState, ticket: WriteTicket, headers: &tau
 /// Other windows get a `vault-changed` `create` (`modify` for a replaced file); the window
 /// that saved does not (it refreshes itself).
 #[tauri::command(async)]
-fn write_file_bytes(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> impl Future<Output = Result<FileEntry, String>> {
+fn write_file_bytes<R: tauri::Runtime>(ticket: WriteTicket, window: tauri::Window<R>, state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> impl Future<Output = Result<FileEntry, String>> {
     let fut = enqueue_write_file_bytes(&state, ticket, request.headers(), request.body());
     async move {
         let (entry, existed) = fut.await?;
@@ -486,6 +488,15 @@ fn search_match(state: State<'_, AppState>, queries: Vec<String>) -> Result<Vec<
     read_vault(&state, |v| Ok(v.index.search_match(&queries)))
 }
 
+/// Registers the commands the headless smoke invokes. The command macros exist
+/// only in this module, so the handler cannot be built from `smoke`.
+#[cfg(test)]
+fn smoke_commands(
+    builder: tauri::Builder<tauri::test::MockRuntime>,
+) -> tauri::Builder<tauri::test::MockRuntime> {
+    builder.invoke_handler(wrap_handler(tauri::generate_handler![open_vault, write_note, rename_path]))
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -557,8 +568,9 @@ mod tests {
             "create_note", "create_folder", "rename_path", "delete_path", "write_config",
             "read_clipboard_image", "write_clipboard_image",
         ] {
-            let needle = format!("\nfn {name}(");
-            let idx = src.find(&needle).unwrap_or_else(|| panic!("missing {name}"));
+            let plain = format!("\nfn {name}(");
+            let generic = format!("\nfn {name}<");
+            let idx = src.find(&plain).or_else(|| src.find(&generic)).unwrap_or_else(|| panic!("missing {name}"));
             let before = &src[..idx];
             let start = before.rfind("\n#[").map(|i| i + 1).unwrap();
             let attr = before[start..].trim();
