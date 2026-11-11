@@ -2,7 +2,8 @@
 // for them once their chunks are warm, and a restored workspace paints the
 // real view with the tab (no empty heavy tab, no base embed popping in later).
 // The production build then holds those chunks: an inactive restored tab, a
-// keyboard switch, a close onto that tab, the local graph, a tilde base fence,
+// keyboard switch, a close onto that tab, the local graph, a tilde base fence
+// (including an inactive restored note, a close onto it, and a history step),
 // and a warm graph opened while a canvas is still loading.
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
@@ -344,8 +345,8 @@ async function withDist(test) {
       await sleep(50);
     };
     const key = async (keyName, modifiers = 0, type = "keyDown") => {
-      const virtual = { Enter: 13, Escape: 27, Control: 17, Tab: 9, Backspace: 8, Shift: 16, Alt: 18 }[keyName] ?? (keyName.length === 1 ? keyName.toUpperCase().charCodeAt(0) : 0);
-      const code = keyName === "Tab" ? "Tab" : keyName === "Control" ? "ControlLeft" : keyName.length === 1 ? `Key${keyName.toUpperCase()}` : keyName;
+      const virtual = { Enter: 13, Escape: 27, Control: 17, Tab: 9, Backspace: 8, Shift: 16, Alt: 18, ArrowLeft: 37, ArrowRight: 39 }[keyName] ?? (keyName.length === 1 ? keyName.toUpperCase().charCodeAt(0) : 0);
+      const code = keyName === "Tab" || keyName === "ArrowLeft" || keyName === "ArrowRight" ? keyName : keyName === "Control" ? "ControlLeft" : keyName === "Alt" ? "AltLeft" : keyName.length === 1 ? `Key${keyName.toUpperCase()}` : keyName;
       await send("Input.dispatchKeyEvent", { type, key: keyName, code, modifiers, windowsVirtualKeyCode: virtual });
     };
     const press = async (keyName, modifiers = 0) => { await key(keyName, modifiers); await key(keyName, modifiers, "keyUp"); };
@@ -489,6 +490,46 @@ await withDist(async ({ check, evaluate, waitFor, holds, click, key, press, rele
   await release("base");
   await waitFor(`(document.querySelector(".cm-content")?.textContent ?? "").includes("Before the tilde.") && !!document.querySelector(".internal-embed.bases-embed .bases-view")`, "the opened tilde note did not mount its base with the text");
   await gap("opened tilde fence after load");
+
+  const restoredInactiveTilde = savedWorkspace([noteTab("Welcome.md"), noteTab("L2 tilde.md")], 0);
+  const tildeHidden = `!(document.querySelector(".cm-content")?.textContent ?? "").includes("Before the tilde.") && !document.querySelector(".bases-view")`;
+  const tildeShown = `(document.querySelector(".cm-content")?.textContent ?? "").includes("Before the tilde.") && !!document.querySelector(".internal-embed.bases-embed .bases-view")`;
+  const tildeHeader = `document.querySelector(".workspace-tabs.mod-active .workspace-tab-header.is-active")?.getAttribute("aria-label") === "L2 tilde.md"`;
+
+  await open(["base"], restoredInactiveTilde, savedLayout("backlinks", false));
+  await ready("inactive tilde");
+  await waitHeld("base");
+  await waitFor(`!!document.querySelector('.workspace-tabs.mod-active .workspace-tab-header[aria-label="L2 tilde.md"]:not(.is-active)')`, "the restored tilde note was not left inactive");
+  await click(`.workspace-tabs.mod-active .workspace-tab-header[aria-label="L2 tilde.md"] .workspace-tab-header-inner-title`);
+  await holds(`${welcomeHeader} && ${tildeHidden}`, 400, "clicking an unloaded base note committed it before the Bases chunks loaded");
+  await gap("inactive tilde");
+  await release("base");
+  await waitFor(`${tildeHeader} && ${tildeShown}`, "the inactive tilde note did not show its base with the text");
+  await gap("inactive tilde after load");
+
+  await open(["base"], restoredInactiveTilde, savedLayout("backlinks", false));
+  await ready("close onto tilde");
+  await waitHeld("base");
+  await click(".workspace-tabs.mod-active .workspace-tab-header.is-active .workspace-tab-header-inner-close-button");
+  await holds(`${welcomeHeader} && !!document.querySelector('.workspace-tabs.mod-active .workspace-tab-header[aria-label="Welcome.md"]') && ${tildeHidden}`, 400, "closing onto an unloaded base note committed it before the Bases chunks loaded");
+  await gap("close onto tilde");
+  await release("base");
+  await waitFor(`!document.querySelector('.workspace-tab-header[aria-label="Welcome.md"]:not(.is-closing)') && ${tildeHeader} && ${tildeShown}`, "the close did not fall through to the tilde note with its base");
+  await gap("close onto tilde after load");
+
+  await open(["base"], savedWorkspace([{ ...noteTab("Welcome.md"), back: ["L2 tilde.md"] }], 0), savedLayout("backlinks", false));
+  await ready("history tilde");
+  await waitHeld("base");
+  await key("Control", 2);
+  await key("Alt", 3);
+  await press("ArrowLeft", 3);
+  await key("Alt", 2, "keyUp");
+  await key("Control", 0, "keyUp");
+  await holds(`${welcomeHeader} && ${tildeHidden}`, 400, "history opened an unloaded base note before the Bases chunks loaded");
+  await gap("history tilde");
+  await release("base");
+  await waitFor(`${tildeHeader} && ${tildeShown}`, "history did not show the tilde note with its base");
+  await gap("history tilde after load");
 
   await open(["canvas"], null, savedLayout("backlinks", false));
   await ready("graph over canvas");

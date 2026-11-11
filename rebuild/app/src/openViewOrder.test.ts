@@ -20,15 +20,19 @@ const gate = vi.hoisted(() => {
 
 vi.mock("./api", () => ({ api: {}, isTauri: false }));
 
+const noteWantsBase = (text: string) => text.includes("~~~base") || text.includes("```base");
+
 vi.mock("./viewLoad", () => ({
   kindReady: (type?: string) => !type || !gate.heavy.has(type) || gate.ready.has(type),
-  notesReady: () => true,
-  preloadKinds: (types: Iterable<string | undefined>) => {
+  notesReady: (notes: readonly string[] = []) => !notes.some(noteWantsBase) || gate.ready.has("base"),
+  preloadKinds: (types: Iterable<string | undefined>, notes: readonly string[] = []) => {
     const need = [...types].filter((type): type is string => !!type && gate.heavy.has(type) && !gate.ready.has(type));
-    if (!need.length) return Promise.resolve();
+    const baseNote = notes.some(noteWantsBase) && !gate.ready.has("base");
+    if (!need.length && !baseNote) return Promise.resolve();
     return new Promise<void>((resolve) => {
       gate.waiters.push(() => {
         for (const kind of need) gate.ready.add(kind);
+        if (baseNote) gate.ready.add("base");
         resolve();
       });
     });
@@ -66,9 +70,9 @@ function orderHost() {
   return { host, shown, tab };
 }
 
-function leaf(path: string | null, type?: Tab["type"]): Tab {
+function leaf(path: string | null, type?: Tab["type"], id = path === null ? 2 : 1): Tab {
   return {
-    id: path === null ? 2 : 1,
+    id,
     path,
     back: [],
     forward: [],
@@ -143,6 +147,169 @@ test("activating a cold canvas tab waits to commit it", async () => {
   await flush();
   expect(group.active).toBe(canvas);
   expect(shown).toEqual(["canvas"]);
+});
+
+function noteHost(paths: string[], active: string, docs: Map<string, string>) {
+  const tabs = paths.map((path, index) => leaf(path, undefined, index + 1));
+  const layout = new Layout(tabs[0]!);
+  const group = layout.activeGroup;
+  for (const tab of tabs.slice(1)) layout.addTab(group, tab);
+  group.active = tabs.find((tab) => tab.path === active) ?? tabs[0]!;
+  const shown: string[] = [];
+  const host = Object.assign(Object.create(Workspace.prototype), {
+    layout,
+    opens: new WeakMap(),
+    origins: new WeakMap(),
+    closed: [] as unknown[],
+    editors: {
+      shows: () => false,
+      present: () => { shown.push(group.active.path ?? group.active.type ?? "blank"); },
+      viewOf: () => ({ focus() {} }),
+      rememberTab: () => {},
+      drop: () => {},
+      doc: (path: string) => {
+        const text = docs.get(path);
+        return text === undefined ? undefined : { toString: () => text };
+      },
+      load: vi.fn(async (path: string) => {
+        if (!docs.has(path)) docs.set(path, "loaded");
+        const text = docs.get(path)!;
+        return { doc: { toString: () => text } };
+      }),
+    },
+    settle: () => {},
+  });
+  return { host, shown, group, tabs };
+}
+
+test("a loaded note whose bases are ready commits in this turn", () => {
+  gate.ready.add("base");
+  const docs = new Map([["Welcome.md", "hello"], ["L2 tilde.md", "Before\n\n~~~base\n"]]);
+  const { host, group, tabs } = noteHost(["Welcome.md", "L2 tilde.md"], "Welcome.md", docs);
+  Workspace.prototype.activate.call(host as never, tabs[1]);
+  expect(group.active).toBe(tabs[1]);
+});
+
+test("activating an unloaded base note waits to commit it", async () => {
+  const docs = new Map([["Welcome.md", "hello"]]);
+  const { host, group, tabs } = noteHost(["Welcome.md", "L2 tilde.md"], "Welcome.md", docs);
+  const tilde = tabs[1]!;
+  host.editors.load.mockImplementation(async (path: string) => {
+    docs.set(path, "Before\n\n~~~base\n");
+    return { doc: { toString: () => docs.get(path)! } };
+  });
+  Workspace.prototype.activate.call(host as never, tilde);
+  expect(group.active.path).toBe("Welcome.md");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(group.active.path).toBe("Welcome.md");
+  await flush();
+  expect(group.active).toBe(tilde);
+});
+
+test("closing onto an unloaded base note waits to commit it", async () => {
+  const docs = new Map([["Welcome.md", "hello"]]);
+  const { host, group, tabs } = noteHost(["Welcome.md", "L2 tilde.md"], "Welcome.md", docs);
+  host.editors.load.mockImplementation(async (path: string) => {
+    docs.set(path, "Before\n\n~~~base\n");
+    return { doc: { toString: () => docs.get(path)! } };
+  });
+  Workspace.prototype.closeTabs.call(host as never, [tabs[0]]);
+  expect(group.tabs.map((tab) => tab.path)).toEqual(["Welcome.md", "L2 tilde.md"]);
+  expect(group.active.path).toBe("Welcome.md");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(group.active.path).toBe("Welcome.md");
+  await flush();
+  expect(group.tabs.map((tab) => tab.path)).toEqual(["L2 tilde.md"]);
+  expect(group.active.path).toBe("L2 tilde.md");
+});
+
+test("a warm close keeps its note when a cold tab was selected first", async () => {
+  const a = leaf("A.md", undefined, 1);
+  const c = leaf("C.md", undefined, 2);
+  const b = leaf(null, "canvas", 3);
+  const layout = new Layout(a);
+  const group = layout.activeGroup;
+  layout.addTab(group, c);
+  layout.addTab(group, b, group.tabs.length);
+  const shown: string[] = [];
+  const host = Object.assign(Object.create(Workspace.prototype), {
+    layout,
+    opens: new WeakMap(),
+    origins: new WeakMap(),
+    closed: [] as unknown[],
+    editors: {
+      shows: () => false,
+      present: () => { shown.push(group.active.type ?? group.active.path ?? "blank"); },
+      viewOf: () => ({ focus() {} }),
+      rememberTab: () => {},
+      drop: () => {},
+    },
+    settle: () => {},
+  });
+  Workspace.prototype.activate.call(host as never, b);
+  expect(group.active).toBe(a);
+  Workspace.prototype.closeTabs.call(host as never, [a]);
+  expect(group.active).toBe(c);
+  expect(group.tabs).toEqual([c, b]);
+  await flush();
+  expect(group.active).toBe(c);
+  expect(shown).not.toContain("canvas");
+
+  gate.ready.delete("canvas");
+  const kept = leaf("A.md", undefined, 4);
+  const other = leaf("C.md", undefined, 5);
+  const canvas = leaf(null, "canvas", 6);
+  const layout2 = new Layout(kept);
+  const group2 = layout2.activeGroup;
+  layout2.addTab(group2, other);
+  layout2.addTab(group2, canvas, group2.tabs.length);
+  const again = Object.assign(Object.create(Workspace.prototype), {
+    layout: layout2,
+    opens: new WeakMap(),
+    origins: new WeakMap(),
+    closed: [] as unknown[],
+    editors: host.editors,
+    settle: () => {},
+  });
+  Workspace.prototype.activate.call(again as never, canvas);
+  expect(group2.active).toBe(kept);
+  Workspace.prototype.closeTabs.call(again as never, [other]);
+  expect(group2.active).toBe(kept);
+  expect(group2.tabs).toEqual([kept, canvas]);
+  await flush();
+  expect(group2.active).toBe(canvas);
+});
+
+test("history into a warm base note commits in this turn", async () => {
+  gate.ready.add("base");
+  const docs = new Map([["Welcome.md", "hello"], ["L2 tilde.md", "Before\n\n~~~base\n"]]);
+  const { host, group, tabs } = noteHost(["Welcome.md"], "Welcome.md", docs);
+  tabs[0]!.back = ["L2 tilde.md"];
+  const traveling = Workspace.prototype.travel.call(host as never, -1);
+  expect(group.active.path).toBe("L2 tilde.md");
+  await traveling;
+});
+
+test("history into an unloaded base note waits to present it", async () => {
+  const docs = new Map<string, string>([["Welcome.md", "hello"]]);
+  const { host, group, tabs } = noteHost(["Welcome.md"], "Welcome.md", docs);
+  tabs[0]!.back = ["L2 tilde.md"];
+  host.editors.load.mockImplementation(async (path: string) => {
+    docs.set(path, "Before\n\n~~~base\n");
+    return { doc: { toString: () => docs.get(path)! } };
+  });
+  host.editors.shows = () => true;
+  host.editors.viewOf = () => ({ state: { doc: { length: 0 }, selection: { main: { anchor: 0, head: 0 } } }, focus() {}, dispatch() {} });
+  const traveling = Workspace.prototype.travel.call(host as never, -1);
+  expect(group.active.path).toBe("Welcome.md");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(group.active.path).toBe("Welcome.md");
+  await flush();
+  await traveling;
+  expect(group.active.path).toBe("L2 tilde.md");
 });
 
 test("closing onto a cold canvas waits, and closing the cold tab itself does not", async () => {

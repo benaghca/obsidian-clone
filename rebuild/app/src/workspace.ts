@@ -188,23 +188,52 @@ export class Workspace {
   }
 
   /**
+   * A loaded note's document, or null when `path` is a note this host has not
+   * loaded. Undefined when there is nothing to read (no path, or a stub editor).
+   */
+  private loadedDoc(path: string | null): { toString(): string } | null | undefined {
+    if (!path) return undefined;
+    const read = this.editors.doc;
+    if (typeof read !== "function") return undefined;
+    return read.call(this.editors, path) ?? null;
+  }
+
+  /**
    * Text of a note tab that is already loaded, when this host can read it.
-   * Null when there is nothing to wait on (a view tab, an unloaded note, or
-   * a stub editor). An unloaded note keeps the existing async present path.
+   * Null for a view, an empty note, an unloaded note, or a stub editor.
    */
   private noteText(tab: Tab): string | null {
-    if (tab.type || !tab.path) return null;
-    const read = this.editors.doc;
-    if (typeof read !== "function") return null;
-    const text = read.call(this.editors, tab.path)?.toString() ?? "";
+    if (tab.type) return null;
+    const doc = this.loadedDoc(tab.path);
+    if (doc == null) return null;
+    const text = doc.toString();
     return text ? text : null;
+  }
+
+  /** True when committing `tab` would load a note before we know if it embeds a base. */
+  private noteUnloaded(tab: Tab): boolean {
+    return !tab.type && this.loadedDoc(tab.path) === null;
   }
 
   /** False when committing `tab` would paint before its chunk, or before a base embed. */
   private tabReady(tab: Tab): boolean {
     if (!kindReady(tab.type)) return false;
+    if (this.noteUnloaded(tab)) return false;
     const text = this.noteText(tab);
     return text === null || notesReady([text]);
+  }
+
+  /**
+   * Load an unloaded note, then the chunks its text needs. A tab that is
+   * already ready returns without waiting, so a warm select stays in this turn.
+   */
+  private async prepareTab(tab: Tab): Promise<void> {
+    if (this.noteUnloaded(tab) && tab.path && typeof this.editors.load === "function") {
+      await this.editors.load(tab.path);
+    }
+    if (this.tabReady(tab)) return;
+    const text = this.noteText(tab);
+    await preloadKinds([tab.type], text ? [text] : []);
   }
 
   /**
@@ -232,13 +261,13 @@ export class Workspace {
       this.opens.delete(group);
       return;
     }
-    // A warm tab still commits in this turn. A cold one keeps the previous
-    // tab on screen until its chunk is in hand, and a newer navigation wins.
+    // A warm tab still commits in this turn. A cold view, or a note whose
+    // text is not loaded yet, keeps the previous tab on screen until the
+    // chunk is in hand. A newer navigation wins.
     if (!this.tabReady(tab)) {
       const mine = Symbol();
       this.opens.set(group, mine);
-      const text = this.noteText(tab);
-      void preloadKinds([tab.type], text ? [text] : []).then(() => {
+      void this.prepareTab(tab).then(() => {
         if (!this.layout.groups().includes(group) || !group.tabs.includes(tab) || this.opens.get(group) !== mine) return;
         this.opens.delete(group);
         this.show(group, tab);
@@ -276,29 +305,32 @@ export class Workspace {
    * its space to its sibling, except the last one, which shows a new empty
    * tab (Obsidian's "New tab").
    */
-  closeTabs(close: Tab[]) {
+  closeTabs(close: Tab[], prepared = false) {
     const gone = new Set(close);
     const waits: { group: Group; tab: Tab }[] = [];
-    for (const group of this.layout.groups()) {
-      const doomed = group.tabs.filter((t) => gone.has(t));
-      if (!doomed.length) continue;
-      const next = this.successorAfterClose(group, doomed);
-      if (next && !this.tabReady(next)) waits.push({ group, tab: next });
+    if (!prepared) {
+      for (const group of this.layout.groups()) {
+        const doomed = group.tabs.filter((t) => gone.has(t));
+        if (!doomed.length) continue;
+        const next = this.successorAfterClose(group, doomed);
+        if (next && !this.tabReady(next)) waits.push({ group, tab: next });
+      }
     }
-    // Closing onto a cold view waits, and leaves every tab where it is until
-    // that view can paint. A later navigation replaces the token and cancels this.
+    // Closing onto a cold view, or a note not loaded yet, waits and leaves
+    // every tab where it is until that destination can paint. A later
+    // navigation replaces the token and cancels this. `prepared` commits one
+    // retry after that wait, so a note that failed to load cannot loop.
     if (waits.length) {
       const tokens = waits.map(({ group }) => {
         const mine = Symbol();
         this.opens.set(group, mine);
         return [group, mine] as const;
       });
-      const notes = waits.map(({ tab }) => this.noteText(tab)).filter((text): text is string => text !== null);
-      void preloadKinds(waits.map(({ tab }) => tab.type), notes).then(() => {
+      void Promise.all(waits.map(({ tab }) => this.prepareTab(tab))).then(() => {
         if (tokens.some(([group, mine]) => !this.layout.groups().includes(group) || this.opens.get(group) !== mine)) return;
         for (const [group] of tokens) this.opens.delete(group);
         const still = close.filter((tab) => this.layout.groupOf(tab));
-        if (still.length) this.closeTabs(still);
+        if (still.length) this.closeTabs(still, true);
       });
       return;
     }
@@ -307,13 +339,22 @@ export class Workspace {
     for (const group of this.layout.groups()) {
       const doomed = group.tabs.filter((t) => gone.has(t));
       if (!doomed.length) continue;
+      const before = group.active;
       for (const tab of doomed) {
         this.rememberClosed(tab, group);
         const origin = this.origins.get(tab), back = group.active === tab && !tab.path && !tab.type && !tab.back.length && !tab.forward.length;
         this.layout.removeTab(tab);
         if (back && origin && group.tabs.includes(origin)) group.active = origin;
       }
-      if (group.tabs.length) continue;
+      // A close that lands on a new tab is newer than a selection or a
+      // replacement still waiting on a chunk. A new tab or split did not
+      // take this token, so it is left alone. Dropping it here does not
+      // cancel a close that is still waiting: that close returns above,
+      // before any tab is removed.
+      if (group.tabs.length) {
+        if (group.active !== before) this.opens.delete(group);
+        continue;
+      }
       if (this.layout.groups().length > 1) {
         this.editors.drop(group);
         this.layout.removeGroup(group);
@@ -322,6 +363,7 @@ export class Workspace {
         const blank = this.blankTab();
         group.tabs.push(blank);
         group.active = blank;
+        this.opens.delete(group);
       }
     }
     this.presentAll();
@@ -672,14 +714,36 @@ export class Workspace {
     const previous = this.opens.get(group);
     const mine = Symbol();
     this.opens.set(group, mine);
+    const stale = () => this.opens.get(group) !== mine || group.active !== tab || !this.layout.groups().includes(group);
     const parsed = parseViewEntry(entry);
-    if (!parsed && !(await this.editors.load(entry))) {
-      this.restoreOpen(group, mine, previous);
-      return;
+    if (parsed) {
+      if (!kindReady(parsed.type)) {
+        await preloadKinds([parsed.type]);
+        if (stale()) return;
+      }
+    } else {
+      // A note already in memory, with its base chunks warm, steps back in
+      // this turn. An unloaded note is read first, and a base fence waits
+      // for the Bases chunks before the tab changes. Read the document
+      // inline so a stub editor that has no helper methods still awaits load.
+      const read = this.editors.doc;
+      const doc = typeof read === "function" ? read.call(this.editors, entry) ?? null : null;
+      let text = doc ? doc.toString() : null;
+      if (text === null) {
+        const state = await this.editors.load(entry);
+        if (!state) {
+          this.restoreOpen(group, mine, previous);
+          return;
+        }
+        if (stale()) return;
+        text = state.doc?.toString() ?? "";
+      }
+      if (text && !notesReady([text])) {
+        await preloadKinds([], [text]);
+        if (stale()) return;
+      }
     }
-    if (parsed && !kindReady(parsed.type)) await preloadKinds([parsed.type]);
-    // A note opened while this history step was loading is newer than this step.
-    if (this.opens.get(group) !== mine || group.active !== tab || !this.layout.groups().includes(group)) return;
+    if (stale()) return;
     const step = stepHistory(tab, dir, this.caretIn(group));
     if (!step) return;
     tab.type = parsed?.type;
