@@ -16,7 +16,9 @@ When Grove saves a note that already exists on disk with Windows CRLF (`\r\n`) l
   - `Vault::apply` keeps `self.formats` synchronized with watcher batches while preserving S4's single `map_batch` rebuild:
     - Rename relocation (`relocate_format_map`) is idempotent on replay: when an app `rename_path` has already moved `from` to `to`, the subsequent watcher rename echo finds no un-evicted keys at `from` and leaves `to`'s cached format intact.
     - All `ChangeKind::Rename` moves in a batch are applied to `self.formats` in sequence before a single final `retain` prunes against the final `self.index`, so chained file and folder renames (`A -> B -> C`) within one watcher batch keep their cached format all the way to `C`.
+    - A note moved in that batch is recorded in `kept`. A later `Create` of its new parent folder is still an evict prefix, but the retain keeps the relocated note, so `Rename(A.md -> New/A.md)` followed by `Create(New)` does not forget CRLF.
     - All `ChangeKind::Remove` and `ChangeKind::Create` paths in a batch are collected into a single `HashSet<&str>` (`evict`) and evicted together with final-index pruning in one `formats.retain` pass using `has_prefix_in`.
+    - A successful app `rename_path` drops the destination's cached format (the path and anything under it) before moving the source, including when the source has no cached format. Watcher echoes still go through `relocate_format_map` only, so a replay does not clear a format the app rename already moved.
   - `Vault::finish_rescan` evicts newly created paths and prunes `self.formats` to retain only live non-directory paths present in `self.index` in a single `retain` pass.
   - `NoteFormat::apply` normalizes line endings to `\r\n` (without doubling existing `\r\n`) and restores the leading `\u{feff}` (without doubling an existing BOM) before writing and updating the index via `upsert_note`. If both `bom` and `crlf` are `false`, it borrows `content` as-is with zero extra allocation.
 - **`rebuild/app/src-tauri/src/vault.rs` (`mod tests`):**
@@ -30,6 +32,8 @@ When Grove saves a note that already exists on disk with Windows CRLF (`\r\n`) l
     7. `watcher_apply_and_rescan_maintain_and_prune_format_cache` (Codex review 2 P2 fix 2)
     8. `app_rename_watcher_echo_preserves_cached_format` (Codex review 3 P2 fix 1)
     9. `chained_watcher_renames_and_batched_eviction_keep_and_prune_formats` (Codex review 3 P2 fix 2 + P3 batched eviction)
+    10. `destination_dir_create_keeps_relocated_crlf_format` (Codex review 4 P2 fix 1)
+    11. `external_delete_then_app_rename_drops_stale_destination_format` (Codex review 4 P2 fix 2)
 
 ## Proof that each test failed before and passed after
 
@@ -55,6 +59,12 @@ For the third Codex P2/P3 review fixes, both new regression tests were added and
 - `chained_watcher_renames_and_batched_eviction_keep_and_prune_formats`: **FAILED** on `01ed722` (`left: "single\nnext"`, `right: "single\r\nnext"` after a single watcher batch with chained `A.md -> B.md -> C.md` and `dir1 -> dir2 -> dir3` renames).
 - After the fixes, all 124 active Rust tests (including all 9 S3 tests and all 5 S4 `vault::batch_tests`) pass in `cargo test --offline`.
 
+For the fourth Codex review, both new regressions were added and run on commit `f42e98f` **before** updating `relocate_formats` and the `apply` retain:
+
+- `destination_dir_create_keeps_relocated_crlf_format`: **FAILED** on `f42e98f` (`left: "single\nnext"`, `right: "single\r\nnext"`). The coalesced and normalized batch was `Rename(A.md, New/A.md)` then `Create(New)`, and the next multiline save wrote LF.
+- `external_delete_then_app_rename_drops_stale_destination_format`: **FAILED** on `f42e98f` (`left: "single\r\nnext"`, `right: "single\nnext"`). `B.md` was cached CRLF, deleted on disk before any watcher event, then a plain LF `A.md` was renamed onto `B.md`. The next multiline save inherited CRLF. The test also applies the watcher rename echo before that save.
+- After the fixes, those two tests pass, and `cargo test --offline` in `rebuild/app/src-tauri` passes: 126 tests, 0 failed, 4 ignored. No older assertion was weakened. S4's `map_batch` block was not edited.
+
 ## Invalid UTF-8 handling
 
 - **Presentation (`read_note`):** Left unchanged (`String::from_utf8_lossy` with BOM stripped), as required by the brief so that no visible UI or editor presentation changes.
@@ -62,11 +72,6 @@ For the third Codex P2/P3 review fixes, both new regression tests were added and
 
 ## Line counts and dependencies
 
-- **Net line change by language / file (vs `rebuild/integration`):**
-  - Rust (`rebuild/app/src-tauri/src/vault.rs`): `+331 / -21` (net `+310` lines: `+109` lines in production code, `+201` lines in tests).
-  - TypeScript / CSS / JSON: `0` lines changed.
-- **Files near/over 800 lines:**
-  - `rebuild/app/src-tauri/src/vault.rs`: `1182` lines (`481` lines of implementation + `701` lines of `#[cfg(test)] mod tests`). Kept in `vault.rs` so `rebuild/integration` merges cleanly without file-split conflicts.
-  - `rebuild/app/src-tauri/src/edit.rs`: `866` lines (unchanged).
-  - `rebuild/app/src-tauri/src/lib.rs`: `721` lines (unchanged).
+- **This commit (`vault.rs` only, on top of `f42e98f`):** Rust `+78 / -6` (net `+72`). No TypeScript, CSS, or JSON.
+- **File length:** `rebuild/app/src-tauri/src/vault.rs` is `1254` lines (`537` through the line before `#[cfg(test)]`, `717` in the test module). It is over 800 lines. It stays one file so the integration merge does not split `vault.rs` while S4 also edits it. `edit.rs` and `lib.rs` were not changed. The S4 `map_batch` guard in `apply` was not changed.
 - **New dependencies:** None.

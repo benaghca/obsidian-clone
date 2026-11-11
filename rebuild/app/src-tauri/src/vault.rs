@@ -149,12 +149,16 @@ impl Vault {
 
     fn relocate_formats(&self, from: &str, to: &str) {
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
-        relocate_format_map(&mut formats, from, to, &mut HashSet::new());
+        // The destination was not on disk, so any cache there is stale. Drop it
+        // even when the source has no format. Watcher echoes call
+        // `relocate_format_map` directly and must not clear a format already moved.
+        evict_format_tree(&mut formats, to);
+        relocate_format_map(&mut formats, from, to, &mut HashSet::new(), &mut HashSet::new());
     }
 
     fn remove_formats(&self, rel: &str) {
-        let prefix = format!("{rel}/");
-        self.formats.lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k != rel && !k.starts_with(&prefix));
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        evict_format_tree(&mut formats, rel);
     }
 
     /// A new attachment's bytes. The same path checks as `write_note` (inside the vault, no `..`,
@@ -366,18 +370,29 @@ impl Vault {
             return;
         }
         let mut evict = HashSet::new();
+        // Notes whose format this batch just moved. A create of their new parent
+        // folder is also in `evict` and must not drop that relocated identity.
+        let mut kept = HashSet::new();
         for change in changes {
             match change.kind {
                 ChangeKind::Remove | ChangeKind::Create => {
                     evict.extend(change.paths.iter().map(String::as_str));
                 }
                 ChangeKind::Rename if change.paths.len() == 2 => {
-                    relocate_format_map(&mut formats, &change.paths[0], &change.paths[1], &mut evict);
+                    relocate_format_map(
+                        &mut formats,
+                        &change.paths[0],
+                        &change.paths[1],
+                        &mut evict,
+                        &mut kept,
+                    );
                 }
                 _ => {}
             }
         }
-        formats.retain(|k, _| self.index.contains(k) && !self.index.is_dir(k) && !has_prefix_in(k, &evict));
+        formats.retain(|k, _| {
+            self.index.contains(k) && !self.index.is_dir(k) && (kept.contains(k) || !has_prefix_in(k, &evict))
+        });
     }
 
     /// Start recording index mutations before releasing the state lock to scan.
@@ -451,11 +466,17 @@ fn has_prefix_in(path: &str, set: &HashSet<&str>) -> bool {
     !set.is_empty() && (set.contains(path) || path.match_indices('/').any(|(i, _)| set.contains(&path[..i])))
 }
 
+fn evict_format_tree(formats: &mut HashMap<String, NoteFormat>, rel: &str) {
+    let prefix = format!("{rel}/");
+    formats.retain(|k, _| k != rel && !k.starts_with(&prefix));
+}
+
 fn relocate_format_map(
     formats: &mut HashMap<String, NoteFormat>,
     from: &str,
     to: &str,
     evict: &mut HashSet<&str>,
+    kept: &mut HashSet<String>,
 ) {
     if from == to || formats.is_empty() {
         return;
@@ -468,8 +489,9 @@ fn relocate_format_map(
         .collect();
     for key in keys {
         if let Some(fmt) = formats.remove(&key) {
-            let dest = if key == from { to.into() } else { format!("{to}{}", &key[from.len()..]) };
+            let dest = if key == from { to.to_string() } else { format!("{to}{}", &key[from.len()..]) };
             evict.remove(dest.as_str());
+            kept.insert(dest.clone());
             formats.insert(dest, fmt);
         }
     }
@@ -733,6 +755,56 @@ mod tests {
         vault.apply(&[VaultChanged { kind: ChangeKind::Remove, paths: removed }]);
         assert!(start.elapsed() < Duration::from_millis(50));
         assert_eq!(vault.formats.lock().unwrap().len(), 2);
+    }
+
+    /// Create of the destination folder must not drop a format just moved into it.
+    #[test]
+    fn destination_dir_create_keeps_relocated_crlf_format() {
+        let dir = tmp_dir("eol-dest-dir");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::create_dir(dir.path.join("New")).unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("New/A.md")).unwrap();
+        let create = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::Folder))
+            .add_path(dir.path.join("New"));
+        let rename = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::Both,
+        )))
+        .add_path(dir.path.join("A.md"))
+        .add_path(dir.path.join("New/A.md"))
+        .set_tracker(1);
+        let changes = vault.normalize(crate::watch::coalesce(&dir.path, &[create, rename], |_| false));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "New/A.md".into()] },
+                VaultChanged { kind: ChangeKind::Create, paths: vec!["New".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("New/A.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("New/A.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// An app rename onto an externally deleted path must not inherit that path's old format.
+    #[test]
+    fn external_delete_then_app_rename_drops_stale_destination_format() {
+        let dir = tmp_dir("eol-stale-dest");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        fs::write(dir.path.join("B.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.write_note("B.md", "single").unwrap();
+        fs::remove_file(dir.path.join("B.md")).unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        // The watcher echo of that rename must not put the stale format back.
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\nnext");
     }
 
     #[test]
