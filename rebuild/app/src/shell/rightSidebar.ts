@@ -2,8 +2,8 @@
 // Calendar and Local graph, switched with icon tabs at the top like Obsidian's.
 // Only the selected view, and only while the sidebar is open, does any work.
 
-import { createGraphView } from "../graph/view";
 import { listeners } from "../listeners";
+import { graphViews } from "../viewLoad";
 import type { Workspace } from "../workspace";
 import { createBacklinksView } from "./backlinksView";
 import { createCalendarView } from "./calendarView";
@@ -29,7 +29,7 @@ export function createRightSidebar(
   searchFor: (query: string) => void,
   graphMenu: (path: string, at: { x: number; y: number }) => void,
 ) {
-  const views: Record<RightView, SideView> = {
+  const views: Record<RightView, SideView | null> = {
     backlinks: createBacklinksView(ws),
     outgoing: createOutgoingView(ws),
     tags: createTagsView(ws, searchFor),
@@ -37,8 +37,13 @@ export function createRightSidebar(
     outline: createOutlineView(ws),
     fileprops: createFilePropertiesView(ws),
     calendar: createCalendarView(ws),
-    localgraph: createLocalGraphView(ws, searchFor, graphMenu),
+    // The graph module installs a window listener when it evaluates, so it
+    // stays unloaded until this view is actually shown.
+    localgraph: null,
   };
+  function localGraph(): SideView {
+    return (views.localgraph ??= createLocalGraphView(ws, searchFor, graphMenu));
+  }
   const selected = listeners<[RightView]>();
   let current: RightView = "backlinks";
   const tabs = viewTabs(
@@ -52,13 +57,25 @@ export function createRightSidebar(
       ["calendar", "calendar", "Calendar"],
       ["localgraph", "git-fork", "Local graph"],
     ],
-    (name: RightView) => views[name].el,
+    (name: RightView) => (name === "localgraph" ? localGraph() : views[name]!).el,
     select,
   );
 
   function select(name: RightView) {
     const changed = name !== current;
     current = name;
+    // The button and the view change together. Until the graph module is in
+    // hand the previous tab stays selected, so the dock never marks Local
+    // graph over Backlinks (or flashes empty).
+    if (name === "localgraph" && !graphViews.ready()) {
+      void graphViews.load().then(() => {
+        if (current !== name) return;
+        tabs.show(name);
+        sync();
+      });
+      if (changed) selected.emit(name);
+      return;
+    }
     tabs.show(name);
     sync();
     if (changed) selected.emit(name);
@@ -67,7 +84,7 @@ export function createRightSidebar(
   /** Re-check which view should be working (after the sidebar opens or closes). */
   function sync() {
     const open = isOpen();
-    for (const [name, view] of Object.entries(views) as [RightView, SideView][]) view.setActive(open && name === current);
+    for (const name of RIGHT_VIEWS) views[name]?.setActive(open && name === current);
   }
 
   // The tab row scrolls sideways with its scrollbar hidden (sidedock.css), so
@@ -95,7 +112,7 @@ export function createRightSidebar(
       tabs.buttons.get(view)!.hidden = !enabled;
       const available = RIGHT_VIEWS.filter((v) => !tabs.buttons.get(v)!.hidden);
       if (!enabled && current === view && available.length) select(available[0]);
-      if (!enabled && current === view) views[view].setActive(false);
+      if (!enabled && current === view) views[view]?.setActive(false);
       return available.length > 0;
     },
   };
@@ -108,7 +125,9 @@ export function createRightSidebar(
  */
 function createLocalGraphView(ws: Workspace, searchFor: (query: string) => void, menu: (path: string, at: { x: number; y: number }) => void): SideView {
   let file: string | null = ws.active.path;
-  const view = createGraphView({
+  const mod = graphViews.get();
+  if (!mod) throw new Error("The local graph was opened before it loaded.");
+  const view = mod.createGraphView({
     ws,
     local: true,
     file: () => file,

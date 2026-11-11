@@ -8,14 +8,12 @@
 // DOM is kept per group and per split and only moved when the tree changes,
 // so a split, a close or a tab move never rebuilds an editor.
 
-import { canvasViewports } from "../canvas/navigation";
-import { createCanvasView } from "../canvas/view";
-import { createDrawingView } from "../drawing/view";
-import { createBaseView } from "../bases/view";
+import { canvasViewports } from "../canvas/viewports";
 import { commands } from "../commands";
 import type { Direction, LayoutNode, Split } from "../layout";
 import { duration, easing } from "../motion";
-import { createGraphView, type GraphView } from "../graph/view";
+import type { GraphView } from "../graph/view";
+import { baseViews, canvasViews, drawingViews, graphViews, preloadKinds } from "../viewLoad";
 import { renameError, renameFile } from "../fileOps";
 import { EditorView } from "@codemirror/view";
 import { editAt, readingMode } from "../editor/render";
@@ -99,7 +97,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
   /** The pane that last showed a note while active: a local graph tab opens notes there. */
   let notePane: Group | null = null;
 
-  function graphFor(tab: Tab): GraphView {
+  function graphFor(tab: Tab): GraphView | null {
     let g = graphs.get(tab);
     if (g && g.type !== tab.type) {
       g.view.dispose();
@@ -107,8 +105,10 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       g = undefined;
     }
     if (!g) {
+      const mod = graphViews.get();
+      if (!mod) return null;
       const local = tab.type === "localgraph";
-      const view = createGraphView({
+      const view = mod.createGraphView({
         ws,
         local,
         file: () => tab.viewFile ?? null,
@@ -521,19 +521,36 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       const image = tab.type === "image" ? (tab.viewFile ?? null) : null;
       const board = tab.type === "canvas" || tab.type === "base" ? tab.viewFile ?? null : null;
       const drawingFile = tab.type === "drawing" ? tab.viewFile ?? null : null;
+      // The chunk is not in memory yet. Leave whatever is on screen; the
+      // workspace normally waits for the chunk before this tab is shown.
+      const waiting =
+        (tab.type === "canvas" && !!board && !canvasViews.ready()) ||
+        (tab.type === "base" && !!board && !baseViews.ready()) ||
+        (tab.type === "drawing" && !!drawingFile && !drawingViews.ready()) ||
+        ((tab.type === "graph" || tab.type === "localgraph") && !graphViews.ready());
+      if (waiting) {
+        void preloadKinds([tab.type]).then(() => {
+          if (group.active === tab) render();
+        });
+        return;
+      }
       if (tab.type !== "canvas") canvasViewports.delete(tab);
       if (board !== canvasPath || tab !== canvasTab) {
         canvas?.dispose();
         canvasPath = board;
         canvasTab = tab;
-        canvas = board ? tab.type === "base" ? createBaseView(ws, board, group) : createCanvasView(ws, board, group, tab) : null;
+        canvas = board
+          ? tab.type === "base"
+            ? baseViews.get()!.createBaseView(ws, board, group)
+            : canvasViews.get()!.createCanvasView(ws, board, group, tab)
+          : null;
         if (canvas) { leaf.append(canvas.el); canvas.el.focus({ preventScroll: true }); }
       }
       if (drawingFile !== drawingPath || tab !== drawingTab) {
         drawing?.dispose();
         drawingPath = drawingFile;
         drawingTab = tab;
-        drawing = drawingFile ? createDrawingView(ws, drawingFile, tab) : null;
+        drawing = drawingFile ? drawingViews.get()!.createDrawingView(ws, drawingFile, tab) : null;
         if (drawing) { leaf.append(drawing.el); drawing.el.focus({ preventScroll: true }); }
       }
       const graph = tab.type === "graph" || tab.type === "localgraph" ? graphFor(tab) : null;

@@ -35,10 +35,10 @@ import { applyAppearance, applyPageSettings } from "./settings/appearance";
 import { existingDailyNote } from "./settings/dateFormat";
 import { excluder } from "./settings/exclude";
 import { importForeignSettings } from "./settings/importSettings";
-import { isSettingsOpen, openSettings } from "./settings/modal";
+import { bindSettings, isSettingsOpen, openSettings } from "./settings/gate";
 import type { PluginId } from "./settings/schema";
-import { settingsSections } from "./settings/sections";
 import { type SettingsFile, settings } from "./settings/store";
+import { preloadKinds, warmHeavyViews } from "./viewLoad";
 import { confirmDialog, isConfirmOpen } from "./shell/confirm";
 import { installTooltips, h, iconButton } from "./shell/dom";
 import { icon, type IconName } from "./shell/icons";
@@ -72,9 +72,7 @@ ws.propertyHost = propertyIndex(ws).host;
 const parts = {
   ws,
   bookmarks,
-  openSettings: (section?: string) => openSettings(sections(), section, () => {
-    if (ws.active.path) ws.view.focus();
-  }),
+  openSettings: (section?: string) => openSettings(section),
   toggleBacklinksInDocument: () => ws.toggleBacklinks(),
   editorMenuAtCaret: () => {
     const view = ws.view;
@@ -298,11 +296,12 @@ Object.assign(parts, { panes, docks, left: sidebar, right: rightSidebar });
 
 // ----- settings -----
 
-const sections = () =>
-  settingsSections({
-    ws,
-    ribbon: { actions: RIBBON.filter(ribbonPluginOn), isShown: (id) => !ribbonHidden.has(id), setShown: setRibbonShown },
-  });
+bindSettings(() => ({
+  ws,
+  ribbon: { actions: RIBBON.filter(ribbonPluginOn), isShown: (id) => !ribbonHidden.has(id), setShown: setRibbonShown },
+}), () => {
+  if (ws.active.path) ws.view.focus();
+});
 
 const appSettings = () => settings.get("app.json");
 ws.newTabMode = () => (appSettings().defaultViewMode === "preview" ? "reading" : appSettings().livePreview ? "live" : "source");
@@ -512,6 +511,7 @@ else {
   await openDailyOnStartup();
 }
 syncTitle();
+warmHeavyViews();
 warmUpPromptGlyphs();
 
 /** Settings → Daily notes → Open daily note on startup: today's note, once per window, after the layout is back. */
@@ -531,6 +531,7 @@ async function restoreLayout() {
   const layout = loadLayout(ws.vault.path);
   if (layout.leftWidth !== null) docks.setWidth("left", layout.leftWidth);
   docks.setWidth("right", layout.rightWidth);
+  if (layout.rightOpen && layout.rightView === "localgraph") await preloadKinds(["localgraph"]);
   rightSidebar.select(layout.rightView);
   docks.setCollapsed("right", !layout.rightOpen, false);
   sidebar.setSortOrder(layout.fileSort);
