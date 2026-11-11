@@ -341,6 +341,17 @@ impl Vault {
 
     /// Apply a watcher batch. Name maps rebuild once, after every path is updated.
     pub fn apply(&mut self, changes: &[VaultChanged]) {
+        // Sources the index still has. An app rename has already removed its
+        // source, so the watcher echo is absent here. Captured before `map_batch`.
+        let mut live_from = HashSet::new();
+        for change in changes {
+            if change.kind == ChangeKind::Rename
+                && change.paths.len() == 2
+                && self.index.contains(&change.paths[0])
+            {
+                live_from.insert(change.paths[0].clone());
+            }
+        }
         {
             let root = &self.root;
             let mut batch = self.index.map_batch();
@@ -373,19 +384,25 @@ impl Vault {
         // Notes whose format this batch just moved. A create of their new parent
         // folder is also in `evict` and must not drop that relocated identity.
         let mut kept = HashSet::new();
+        // Destinations of a real move in this batch. The next hop of A -> B -> C
+        // is not itself in the pre-batch index, but it is still that same move.
+        let mut carried = HashSet::new();
         for change in changes {
             match change.kind {
                 ChangeKind::Remove | ChangeKind::Create => {
                     evict.extend(change.paths.iter().map(String::as_str));
                 }
                 ChangeKind::Rename if change.paths.len() == 2 => {
-                    relocate_format_map(
-                        &mut formats,
-                        &change.paths[0],
-                        &change.paths[1],
-                        &mut evict,
-                        &mut kept,
-                    );
+                    let from = &change.paths[0];
+                    let to = &change.paths[1];
+                    if from != to && (live_from.contains(from) || carried.contains(from)) {
+                        // The index had not applied this move, so the destination's
+                        // cached format belongs to the old file. An echo is not
+                        // `live_from` and must not clear the format already moved.
+                        evict_format_tree(&mut formats, to);
+                        carried.insert(to.clone());
+                    }
+                    relocate_format_map(&mut formats, from, to, &mut evict, &mut kept);
                 }
                 _ => {}
             }
@@ -805,6 +822,41 @@ mod tests {
         }]);
         vault.write_note("B.md", "single\nnext").unwrap();
         assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\nnext");
+    }
+
+    /// External delete of B then rename of A onto B, coalesced to one Rename.
+    /// A plain LF source must not inherit B's cached CRLF or BOM.
+    #[test]
+    fn external_delete_and_rename_does_not_inherit_destination_format() {
+        fn case(label: &str, source_save: &str, dest_seed: &str, dest_save: &str) -> String {
+            let dir = tmp_dir(label);
+            fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+            fs::write(dir.path.join("B.md"), dest_seed).unwrap();
+            let mut vault = Vault::open(dir.path.clone()).unwrap();
+            vault.write_note("A.md", source_save).unwrap();
+            vault.write_note("B.md", dest_save).unwrap();
+            fs::remove_file(dir.path.join("B.md")).unwrap();
+            fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+            let remove = notify::Event::new(notify::EventKind::Remove(notify::event::RemoveKind::File))
+                .add_path(dir.path.join("B.md"));
+            let rename = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::Both,
+            )))
+            .add_path(dir.path.join("A.md"))
+            .add_path(dir.path.join("B.md"))
+            .set_tracker(1);
+            let changes = vault.normalize(crate::watch::coalesce(&dir.path, &[remove, rename], |_| false));
+            assert_eq!(
+                changes,
+                vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+            );
+            vault.apply(&changes);
+            vault.write_note("B.md", "single\nnext").unwrap();
+            fs::read_to_string(dir.path.join("B.md")).unwrap()
+        }
+        let lf = case("eol-ext-rename-lf", "single", "a\r\nb\r\n", "single");
+        let bom = case("eol-ext-rename-bom", "", "\u{feff}a\r\nb\r\n", "");
+        assert_eq!((lf.as_str(), bom.as_str()), ("single\nnext", "single\nnext"));
     }
 
     #[test]

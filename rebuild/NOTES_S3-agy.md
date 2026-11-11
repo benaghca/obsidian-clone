@@ -18,7 +18,8 @@ When Grove saves a note that already exists on disk with Windows CRLF (`\r\n`) l
     - All `ChangeKind::Rename` moves in a batch are applied to `self.formats` in sequence before a single final `retain` prunes against the final `self.index`, so chained file and folder renames (`A -> B -> C`) within one watcher batch keep their cached format all the way to `C`.
     - A note moved in that batch is recorded in `kept`. A later `Create` of its new parent folder is still an evict prefix, but the retain keeps the relocated note, so `Rename(A.md -> New/A.md)` followed by `Create(New)` does not forget CRLF.
     - All `ChangeKind::Remove` and `ChangeKind::Create` paths in a batch are collected into a single `HashSet<&str>` (`evict`) and evicted together with final-index pruning in one `formats.retain` pass using `has_prefix_in`.
-    - A successful app `rename_path` drops the destination's cached format (the path and anything under it) before moving the source, including when the source has no cached format. Watcher echoes still go through `relocate_format_map` only, so a replay does not clear a format the app rename already moved.
+    - A successful app `rename_path` drops the destination's cached format (the path and anything under it) before moving the source, including when the source has no cached format.
+    - A watcher rename does the same when it is a real external move. Before `map_batch`, `apply` records sources the index still contains. Those renames, and later hops in the same batch (`A -> B -> C`), drop the destination format even when the source has no cached format. An app-rename echo is not in that set, so it does not clear a format the app rename already moved.
   - `Vault::finish_rescan` evicts newly created paths and prunes `self.formats` to retain only live non-directory paths present in `self.index` in a single `retain` pass.
   - `NoteFormat::apply` normalizes line endings to `\r\n` (without doubling existing `\r\n`) and restores the leading `\u{feff}` (without doubling an existing BOM) before writing and updating the index via `upsert_note`. If both `bom` and `crlf` are `false`, it borrows `content` as-is with zero extra allocation.
 - **`rebuild/app/src-tauri/src/vault.rs` (`mod tests`):**
@@ -34,6 +35,7 @@ When Grove saves a note that already exists on disk with Windows CRLF (`\r\n`) l
     9. `chained_watcher_renames_and_batched_eviction_keep_and_prune_formats` (Codex review 3 P2 fix 2 + P3 batched eviction)
     10. `destination_dir_create_keeps_relocated_crlf_format` (Codex review 4 P2 fix 1)
     11. `external_delete_then_app_rename_drops_stale_destination_format` (Codex review 4 P2 fix 2)
+    12. `external_delete_and_rename_does_not_inherit_destination_format` (Codex review 5 P2 fix)
 
 ## Proof that each test failed before and passed after
 
@@ -65,6 +67,11 @@ For the fourth Codex review, both new regressions were added and run on commit `
 - `external_delete_then_app_rename_drops_stale_destination_format`: **FAILED** on `f42e98f` (`left: "single\r\nnext"`, `right: "single\nnext"`). `B.md` was cached CRLF, deleted on disk before any watcher event, then a plain LF `A.md` was renamed onto `B.md`. The next multiline save inherited CRLF. The test also applies the watcher rename echo before that save.
 - After the fixes, those two tests pass, and `cargo test --offline` in `rebuild/app/src-tauri` passes: 126 tests, 0 failed, 4 ignored. No older assertion was weakened. S4's `map_batch` block was not edited.
 
+For the fifth Codex review, `external_delete_and_rename_does_not_inherit_destination_format` was added and run on commit `59a0d69` **before** teaching `apply` to retire a real external destination:
+
+- **FAILED** on `59a0d69` (`left: ("single\r\nnext", "\u{feff}single\r\nnext")`, `right: ("single\nnext", "single\nnext")`). Both cases delete `B.md` externally and rename plain `A.md` onto it. Coalesce leaves only `Rename(A.md, B.md)`. The single-line LF source inherited CRLF. The empty LF source inherited the stale BOM and CRLF.
+- After the fix, that test passes. The app-echo, parent-create, and chained-rename regressions still pass. `cargo test --offline` in `rebuild/app/src-tauri` passes: 127 tests, 0 failed, 4 ignored. No older assertion was weakened. The `map_batch` block was not edited.
+
 ## Invalid UTF-8 handling
 
 - **Presentation (`read_note`):** Left unchanged (`String::from_utf8_lossy` with BOM stripped), as required by the brief so that no visible UI or editor presentation changes.
@@ -72,6 +79,6 @@ For the fourth Codex review, both new regressions were added and run on commit `
 
 ## Line counts and dependencies
 
-- **This commit (`vault.rs` only, on top of `f42e98f`):** Rust `+78 / -6` (net `+72`). No TypeScript, CSS, or JSON.
-- **File length:** `rebuild/app/src-tauri/src/vault.rs` is `1254` lines (`537` through the line before `#[cfg(test)]`, `717` in the test module). It is over 800 lines. It stays one file so the integration merge does not split `vault.rs` while S4 also edits it. `edit.rs` and `lib.rs` were not changed. The S4 `map_batch` guard in `apply` was not changed.
+- **This commit (on top of `59a0d69`):** Rust `rebuild/app/src-tauri/src/vault.rs` `+59 / -7` (net `+52`: about `+17` in `apply`, `+35` in the new test). Markdown `rebuild/NOTES_S3-agy.md` `+10 / -3`. No TypeScript, CSS, or JSON.
+- **File length:** `rebuild/app/src-tauri/src/vault.rs` is `1306` lines (`554` through the line before `#[cfg(test)]`, `752` in the test module). It is over 800 lines. It stays one file so the integration merge does not split `vault.rs` while S4 also edits it. `edit.rs` and `lib.rs` were not changed. The S4 `map_batch` guard in `apply` was not changed.
 - **New dependencies:** None.
