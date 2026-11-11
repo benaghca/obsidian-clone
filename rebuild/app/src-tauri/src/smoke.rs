@@ -7,10 +7,11 @@
 use super::{smoke_commands, AppState, Inner};
 use crate::fsutil::tmp_dir;
 use crate::model::ChangeKind;
+use crate::queue::WriteQueue;
 use notify::event::{DataChange, ModifyKind};
 use notify::{Event, EventKind};
 use std::fs;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, RwLock};
 use std::time::Duration;
 use tauri::test::{get_ipc_response, mock_builder, mock_context, noop_assets, INVOKE_KEY};
 use tauri::{Listener, Manager};
@@ -52,10 +53,11 @@ fn save_rename_and_flush_round_trip_through_ipc() {
     let (watch_tx, _watch_rx) = mpsc::channel();
     let app = smoke_commands(mock_builder())
         .manage(AppState {
-            inner: std::sync::Mutex::new(Inner {
+            inner: Arc::new(RwLock::new(Inner {
                 config_dir: dir.path.join("cfg"),
                 vault: None,
-            }),
+            })),
+            write_queue: WriteQueue::default(),
             watch_tx,
         })
         .build(mock_context(noop_assets()))
@@ -121,7 +123,8 @@ fn save_rename_and_flush_round_trip_through_ipc() {
     assert!(saver_rx.try_recv().is_err());
     assert!(other_rx.try_recv().is_err(), "rename_path does not emit");
 
-    // Close the windows. The bytes have to already be on disk: a new open reads them back.
+    // Dropping these handles does not close, destroy, or quit, and it does not
+    // drain a pending save. The bytes are already on disk; a new open reads them back.
     drop(saver);
     drop(other);
     let root = {
@@ -158,4 +161,130 @@ fn save_rename_and_flush_round_trip_through_ipc() {
     );
     assert_eq!(vault.read_note("external.md").unwrap(), external);
     assert_eq!(vault.read_note("Renamed.md").unwrap(), body);
+}
+
+fn smoke_app(config_dir: &std::path::Path) -> tauri::App<tauri::test::MockRuntime> {
+    let (watch_tx, _watch_rx) = mpsc::channel();
+    smoke_commands(mock_builder())
+        .manage(AppState {
+            inner: Arc::new(RwLock::new(Inner {
+                config_dir: config_dir.to_path_buf(),
+                vault: None,
+            })),
+            write_queue: WriteQueue::default(),
+            watch_tx,
+        })
+        .build(mock_context(noop_assets()))
+        .expect("mock app")
+}
+
+fn request(cmd: &str, body: serde_json::Value) -> tauri::webview::InvokeRequest {
+    tauri::webview::InvokeRequest {
+        cmd: cmd.into(),
+        callback: tauri::ipc::CallbackFn(0),
+        error: tauri::ipc::CallbackFn(1),
+        url: "tauri://localhost".parse().unwrap(),
+        body: tauri::ipc::InvokeBody::Json(body),
+        headers: Default::default(),
+        invoke_key: INVOKE_KEY.to_string(),
+    }
+}
+
+/// Spawn the command and return immediately. The caller decides how long to wait.
+fn dispatch(
+    window: &tauri::WebviewWindow<tauri::test::MockRuntime>,
+    cmd: &str,
+    body: serde_json::Value,
+) -> mpsc::Receiver<tauri::ipc::InvokeResponse> {
+    let (tx, rx) = mpsc::sync_channel(1);
+    window.as_ref().clone().on_message(
+        request(cmd, body),
+        Box::new(move |_window, _cmd, response, _callback, _error| {
+            let _ = tx.send(response);
+        }),
+    );
+    rx
+}
+
+fn expect_ok(rx: &mpsc::Receiver<tauri::ipc::InvokeResponse>, cmd: &str) {
+    match rx.recv_timeout(Duration::from_secs(2)) {
+        Ok(tauri::ipc::InvokeResponse::Ok(_)) => {}
+        Ok(tauri::ipc::InvokeResponse::Err(err)) => panic!("{cmd} failed: {err:?}"),
+        Err(_) => panic!("{cmd} stalled"),
+    }
+}
+
+/// A missing argument must settle the reserved ticket. The next save still runs.
+#[test]
+fn malformed_write_does_not_stall_the_next_ipc_save() {
+    let dir = tmp_dir("s8-smoke-malformed");
+    let app = smoke_app(&dir.path.join("cfg"));
+    let saver = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("saver window");
+    expect_ok(
+        &dispatch(
+            &saver,
+            "open_vault",
+            serde_json::json!({ "path": dir.path.display().to_string() }),
+        ),
+        "open_vault",
+    );
+    let bad = dispatch(&saver, "write_note", serde_json::json!({ "path": "Note.md" }));
+    match bad.recv_timeout(Duration::from_secs(2)) {
+        Ok(tauri::ipc::InvokeResponse::Err(_)) => {}
+        Ok(tauri::ipc::InvokeResponse::Ok(body)) => panic!("missing content was accepted: {body:?}"),
+        Err(_) => panic!("malformed write_note stalled the queue"),
+    }
+    let body = "after the bad request\n";
+    expect_ok(
+        &dispatch(
+            &saver,
+            "write_note",
+            serde_json::json!({ "path": "Note.md", "content": body }),
+        ),
+        "write_note",
+    );
+    assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), body);
+}
+
+/// Write and rename are both accepted before either reply. Poll order must not rename first.
+#[test]
+fn in_flight_write_then_rename_keeps_ipc_submission_order() {
+    let dir = tmp_dir("s8-smoke-order");
+    let app = smoke_app(&dir.path.join("cfg"));
+    let saver = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .expect("saver window");
+    expect_ok(
+        &dispatch(
+            &saver,
+            "open_vault",
+            serde_json::json!({ "path": dir.path.display().to_string() }),
+        ),
+        "open_vault",
+    );
+    expect_ok(
+        &dispatch(
+            &saver,
+            "write_note",
+            serde_json::json!({ "path": "Note.md", "content": "initial\n" }),
+        ),
+        "write_note",
+    );
+    let body = "queued-body\n";
+    let write = dispatch(
+        &saver,
+        "write_note",
+        serde_json::json!({ "path": "Note.md", "content": body }),
+    );
+    let rename = dispatch(
+        &saver,
+        "rename_path",
+        serde_json::json!({ "from": "Note.md", "to": "Queued.md" }),
+    );
+    expect_ok(&write, "write_note");
+    expect_ok(&rename, "rename_path");
+    assert!(!dir.path.join("Note.md").exists(), "rename ran before the queued write");
+    assert_eq!(fs::read_to_string(dir.path.join("Queued.md")).unwrap(), body);
 }

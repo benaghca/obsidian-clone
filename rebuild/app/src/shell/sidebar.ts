@@ -8,7 +8,7 @@ import { commands } from "../commands";
 import { slideHeight } from "../motion";
 import { deleteFile, fileSettings, newFolder, renameError, renameFile } from "../fileOps";
 import { listeners } from "../listeners";
-import { compareFiles, compareNames, explorerName, isNoteFile, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
+import { explorerName, isNoteFile, noteName, parentDir, SORT_ORDERS, type SortOrder } from "../paths";
 import { readStored, store } from "../storage";
 import { whereFromEvent } from "../tabs";
 import type { Workspace } from "../workspace";
@@ -19,6 +19,7 @@ import { isMenuOpen, type MenuItems, SEPARATOR, showMenu } from "./menu";
 import type { Menus } from "./menus";
 import { isPromptOpen } from "./prompt";
 import { createSearchView } from "./searchView";
+import { buildTree, type TreeNode } from "./sidebarTree";
 import { viewTabs } from "./sideView";
 import { startTreeDrag } from "./treeDrag";
 import { selectGesture, selectionRange, topLevelPaths, treeKeyAction } from "./treeSelect";
@@ -118,38 +119,6 @@ export function createSidebar(ws: Workspace, bookmarks: Bookmarks, menus: () => 
     /** The footer under the views (vault name; the settings button goes here). */
     footer,
   };
-}
-
-interface TreeNode {
-  entry: FileEntry;
-  children: TreeNode[];
-}
-
-function buildTree(files: FileEntry[], order: SortOrder): TreeNode[] {
-  const root: TreeNode[] = [];
-  const dirs = new Map<string, TreeNode>();
-  const sorted = [...files].sort((a, b) => a.path.split("/").length - b.path.split("/").length);
-  for (const entry of sorted) {
-    const node: TreeNode = { entry, children: [] };
-    const slash = entry.path.lastIndexOf("/");
-    const parent = slash < 0 ? null : dirs.get(entry.path.slice(0, slash));
-    (parent ? parent.children : root).push(node);
-    if (entry.is_dir) dirs.set(entry.path, node);
-  }
-  const byName = (a: TreeNode, b: TreeNode) => compareNames(a.entry.name, b.entry.name);
-  const inOrder = compareFiles(order);
-  // Folders first, by name (reversed for Z to A); files in the chosen order.
-  const compare = (a: TreeNode, b: TreeNode) => {
-    if (a.entry.is_dir !== b.entry.is_dir) return Number(b.entry.is_dir) - Number(a.entry.is_dir);
-    if (a.entry.is_dir) return order === "alphabeticalReverse" ? byName(b, a) : byName(a, b);
-    return inOrder(a.entry, b.entry);
-  };
-  const sortNodes = (nodes: TreeNode[]) => {
-    nodes.sort(compare);
-    for (const n of nodes) sortNodes(n.children);
-  };
-  sortNodes(root);
-  return root;
 }
 
 /** A row's (or the list's) right-click menu. The row keeps an outline until the menu closes. */

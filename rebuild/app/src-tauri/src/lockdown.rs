@@ -4,8 +4,8 @@
 //! config cannot express:
 //!
 //! - every navigation (a link, a dropped URL, script setting `location`, a frame load) is checked.
-//!   The app's own origin is always allowed: `tauri://localhost` (or `http(s)://tauri.localhost` on
-//!   Windows) in release builds, plus the dev server origin in dev builds. A *child* frame may also
+//!   The app's own origin is always allowed: `tauri://localhost`, or `http(s)://tauri.localhost` on
+//!   Windows and Android, in release builds, plus the dev server origin in dev builds. A *child* frame may also
 //!   load an `http(s)` origin the page registered with `allow_frame_origin`. The main frame may not;
 //! - every new-window request (`window.open`, `target=_blank`) is denied, registered origin or not.
 //!
@@ -264,11 +264,19 @@ fn enable_spellchecker(window: &tauri::WebviewWindow) {
 fn enable_spellchecker(_window: &tauri::WebviewWindow) {}
 
 /// True for URLs that belong to the app itself.
+///
+/// Tauri 2.12.4 (`protocol::origin`) serves the custom protocol as
+/// `tauri://localhost` except on Windows and Android, where wry 0.57's
+/// workaround serves it as `http://tauri.localhost`, or `https://tauri.localhost`
+/// when the webview sets `use_https_scheme`. Grove does not set that flag. On
+/// every other target an `http(s)` host of that name is a real local server
+/// (port 80 or 443) and must not pass either navigation guard.
 pub fn is_app_url(url: &Url, dev_url: Option<&Url>) -> bool {
     match url.scheme() {
         "tauri" => url.host_str() == Some("localhost"),
         "http" | "https" => {
-            url.host_str() == Some("tauri.localhost")
+            ((cfg!(windows) || cfg!(target_os = "android"))
+                && url.host_str() == Some("tauri.localhost"))
                 || dev_url.is_some_and(|dev| dev.origin() == url.origin())
         }
         // The blank page a webview starts on before it loads the app.
@@ -379,11 +387,17 @@ mod tests {
     fn release_builds_allow_only_the_app_origin() {
         assert!(is_app_url(&url("tauri://localhost/"), None));
         assert!(is_app_url(&url("tauri://localhost/index.html#x"), None));
-        assert!(is_app_url(&url("http://tauri.localhost/"), None));
-        assert!(is_app_url(
-            &url("https://tauri.localhost/assets/a.js"),
-            None
-        ));
+        // `http(s)://tauri.localhost` is the app only on the targets where Tauri
+        // serves the custom protocol that way. See `http_tauri_localhost_is_app_only_on_the_workaround_targets`.
+        let workaround = cfg!(windows) || cfg!(target_os = "android");
+        assert_eq!(
+            is_app_url(&url("http://tauri.localhost/"), None),
+            workaround
+        );
+        assert_eq!(
+            is_app_url(&url("https://tauri.localhost/assets/a.js"), None),
+            workaround
+        );
         assert!(is_app_url(&url("about:blank"), None));
 
         assert!(!is_app_url(&url("http://localhost:1420/"), None));
@@ -406,6 +420,72 @@ mod tests {
         assert!(!is_encoded("a.md#top"));
         assert!(!is_encoded("../a.md/"));
         assert!(!is_encoded("https://example.com"));
+    }
+
+    /// Tauri 2.12.4 `protocol::origin`: Windows and Android serve the app as
+    /// `http(s)://tauri.localhost`. Everywhere else it is `tauri://localhost`, and
+    /// that http(s) name is a local server (port 80 or 443). Both navigation
+    /// guards must refuse it there, including when a dev server is configured.
+    #[test]
+    fn http_tauri_localhost_is_app_only_on_the_workaround_targets() {
+        let local = url("http://tauri.localhost/");
+        let secure = url("https://tauri.localhost/index.html");
+        let dev = url("http://localhost:1420");
+        let app_here = cfg!(windows) || cfg!(target_os = "android");
+        assert_eq!(is_app_url(&local, None), app_here);
+        assert_eq!(is_app_url(&secure, None), app_here);
+        assert_eq!(is_app_url(&local, Some(&dev)), app_here);
+        assert_eq!(main_frame_document_allowed(&local, None), app_here);
+        assert_eq!(main_frame_document_allowed(&secure, Some(&dev)), app_here);
+        let frames = FrameOrigins::new();
+        for place in [NavFrame::Main, NavFrame::Child, NavFrame::Unknown] {
+            assert_eq!(
+                navigation_allowed(&local, None, &frames, place),
+                app_here,
+                "{place:?}"
+            );
+            assert_eq!(
+                navigation_allowed(&secure, Some(&dev), &frames, place),
+                app_here,
+                "{place:?}"
+            );
+        }
+        // Port 80 under any other name, and a look-alike host, stay refused.
+        assert!(!is_app_url(&url("http://127.0.0.1/"), None));
+        assert!(!is_app_url(&url("http://localhost/"), None));
+        assert!(!is_app_url(
+            &url("https://tauri.localhost.example.com/"),
+            None
+        ));
+    }
+
+    /// The asset protocol is off (Grove does not enable tauri's `protocol-asset`
+    /// feature), and nothing in the app loads `asset:` or `http://asset.localhost`.
+    /// Images, drawings and attachments use `blob:` and `data:`.
+    #[test]
+    fn csp_does_not_allow_the_unused_asset_protocol() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tauri.conf.json");
+        let text = std::fs::read_to_string(&path).expect("read tauri.conf.json");
+        let value: serde_json::Value = serde_json::from_str(&text).expect("parse tauri.conf.json");
+        let security = &value["app"]["security"];
+        for name in ["csp", "devCsp"] {
+            let policy = &security[name];
+            assert_eq!(
+                policy["img-src"].as_str(),
+                Some("'self' data: blob:"),
+                "{name} img-src"
+            );
+            assert_eq!(
+                policy["media-src"].as_str(),
+                Some("'self' blob:"),
+                "{name} media-src"
+            );
+            let flat = policy.to_string();
+            assert!(
+                !flat.contains("asset:") && !flat.contains("asset.localhost"),
+                "{name} still names the asset protocol"
+            );
+        }
     }
 
     #[test]

@@ -196,10 +196,56 @@ await withBrowser(async ({ send, evaluate, run, press, chord, key, move, point }
     await kept(`select_narrow_${name.replace(" ", "_")}`, big);
     if (pinned && sel.open) await pin(type);
   }
+  // ---- T2: plain tabs at 40 px hide their close button, so a click on the middle selects ----
+  // Two extra plain tabs (closed again below), so the steps after this see the same tabs.
+  const shown = (sel) => run((sel) => { const e = document.querySelector(sel), cs = getComputedStyle(e); return cs.display !== "none" && cs.visibility !== "hidden" && cs.opacity !== "0" && e.getClientRects().length > 0; }, sel);
+  // A regression closes tabs these steps go on to use: reopen them (the note at its caret) so every miss is listed.
+  const ensure = (p, head = null) => run(async (p, head) => { if (ws.tabs.some((t) => t.path === p)) return; const was = ws.active; await ws.open(p, { where: "tab" });
+    if (head !== null) ws.view.dispatch({ selection: { anchor: head }, scrollIntoView: true }); else if (was) ws.activate(was); }, p, head);
+  const toBig = async () => { await ensure("Big note.md", big.head); await run(() => ws.activate(ws.tabs.find((t) => t.path === "Big note.md"))); await sleep(200); await refocus(); };
+  const [p9, p10] = [notes[9], notes[10]];
+  await run(async (ps) => { ws.closeTabs(ws.tabs.filter((t) => t.type)); for (const p of ps) await ws.open(p, { where: "tab" }); }, [p9, p10]);
+  await toBig();
+  await move({ x: 800, y: 500 }); await sleep(250);
+  const bigBox = await run((sel) => document.querySelector(sel).getBoundingClientRect().width, tab("Big note.md"));
+  check(bigBox === 40 && !(await shown(closeOf("Big note.md"))), `the active plain tab at 40 px hides its close button (${bigBox} px wide, shown ${await shown(closeOf("Big note.md"))})`);
+  await press1(tab("Big note.md")); await sleep(250);
+  check((await open("Big note.md")) && (await where()).path === "Big note.md", "a click on the middle of the active 40 px tab keeps it open and active");
+  await kept("narrow_click_active", big);
+  await toBig();
+  await hoverSettled(await point(tab(p9)));
+  check(!(await shown(closeOf(p9))), `hovering an inactive 40 px tab doesn't show its close button (shown ${await shown(closeOf(p9))})`);
+  await press1(tab(p9)); await sleep(300);
+  const sel9 = await where();
+  check((await open(p9)) && sel9.path === p9 && sel9.focus, `a click on the middle of an inactive 40 px tab selects it with focus in its note (${sel9.path}, focus ${sel9.focus})`);
+  await ensure(p9); await toBig();
+  await run((p) => ws.togglePin(ws.tabs.find((t) => t.path === p)), p9); await sleep(200);
+  await hoverSettled(await point(tab(p9)));
+  const pinShown = await shown(closeOf(p9));
+  await press1(tab(p9)); await sleep(300);
+  const pin9 = await run((p) => { const t = ws.tabs.find((x) => x.path === p); return { open: !!t, active: ws.active === t, pinned: !!t?.pinned }; }, p9);
+  check(pinShown && pin9.open && pin9.active && pin9.pinned, `a pinned 40 px tab keeps its pin as a marker, and a click on its middle selects it and keeps it pinned (pin shown ${pinShown}, ${JSON.stringify(pin9)})`);
+  await run((p) => { const t = ws.tabs.find((x) => x.path === p); if (t?.pinned) ws.togglePin(t); }, p9);
+  await toBig();
+  await press1(tab(p10), "middle"); await sleep(300);
+  check(!(await open(p10)) && (await where()).path === "Big note.md", "at 40 px a middle click still closes a tab");
+  await kept("narrow_middle_close", big);
+  await ensure(p9);
+  await run((p) => ws.activate(ws.tabs.find((t) => t.path === p)), p9); await sleep(200); await refocus();
+  await chord("w"); await sleep(300);
+  check(!(await open(p9)), "at 40 px Ctrl+W still closes the active tab");
+  await kept("narrow_ctrl_w", big);
+  await toBig();
   await run((sel) => { document.querySelector(sel).style.removeProperty("--tab-width"); ws.closeTabs(ws.tabs.filter((t) => t.type)); }, STRIP);
   await sleep(300);
   await refocus();
   await reopen3();
+  // Back at a normal width: the active tab shows its close button again, and hover shows an inactive one's.
+  await move({ x: 800, y: 500 }); await sleep(250);
+  const wideActive = await shown(closeOf("Big note.md"));
+  await hoverSettled(await point(tab(notes[1])));
+  check(wideActive && (await shown(closeOf(notes[1]))), `at a normal width the active tab shows its close button (${wideActive}) and hovering an inactive tab shows its own`);
+  await move({ x: 800, y: 500 });
   await sleep(150);
 
   // ---- A middle press closes the tab over its buttons too, with no default (autoscroll, paste) ----

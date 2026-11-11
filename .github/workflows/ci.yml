@@ -26,7 +26,7 @@ jobs:
         working-directory: ui/editor
         run: npm ci && npm run typecheck
 
-  # Grove. `npm ci` and `cargo fetch` are the only steps that use the network.
+  # Grove. apt, the setup actions, `npm ci`, and `cargo fetch` use the network.
   # `npm test` runs `posttest` on its own. The headless backend smoke is one of
   # the `cargo test --offline` tests (`smoke::save_rename_and_flush_round_trip_through_ipc`).
   # Ubuntu 24.04 runner images already include Google Chrome, which Grove's feel
