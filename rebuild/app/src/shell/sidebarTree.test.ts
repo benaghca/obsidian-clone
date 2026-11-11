@@ -118,6 +118,20 @@ test("equal names keep the listed order", () => {
   expect(buildTree([folder("B"), folder("A")], "alphabetical").map((node) => node.entry.path)).toEqual(["B", "A"]);
 });
 
+test("a missing parent keeps the shallower path first when names and times tie", () => {
+  const file = (path: string): FileEntry => ({ path, name: "Readme", is_dir: false, mtime_ms: 1, ctime_ms: 1, size: 0 });
+  const folder = (path: string): FileEntry => ({ path, name: "Box", is_dir: true, mtime_ms: 0, ctime_ms: 0, size: 0 });
+  // Deeper path is listed first, and its folder is absent, so both sit at the root.
+  const files = [file("Missing/Readme.md"), file("Readme.md")];
+  const folders = [folder("Missing/Box"), folder("Box")];
+  const sameDepth = [file("b/Readme.md"), file("a/Readme.md")];
+  for (const order of ORDERS) {
+    expect(buildTree(files, order).map((node) => node.entry.path), order).toEqual(["Readme.md", "Missing/Readme.md"]);
+    expect(buildTree(folders, order).map((node) => node.entry.path), order).toEqual(["Box", "Missing/Box"]);
+    expect(buildTree(sameDepth, order).map((node) => node.entry.path), order).toEqual(["b/Readme.md", "a/Readme.md"]);
+  }
+});
+
 const ORDERS: SortOrder[] = [
   "alphabetical",
   "alphabeticalReverse",
