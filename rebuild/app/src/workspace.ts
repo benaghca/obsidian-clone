@@ -71,6 +71,8 @@ export class Workspace {
   private moves = listeners<[(path: string) => string]>();
   private shownKey = "";
   private closed: ClosedTab[] = [];
+  /** A new empty tab's tab it was opened from: closing it while still empty goes back there. */
+  private origins = new WeakMap<Tab, Tab>();
 
   constructor() {
     const host = createEditorHost(this);
@@ -173,6 +175,7 @@ export class Workspace {
     const tab = this.blankTab();
     // Ctrl+T and the + button land at the end. Opening a file in a new tab
     // still sits just after the current one (layout.addTab's default).
+    this.origins.set(tab, group.active);
     this.layout.addTab(group, tab, group.tabs.length);
     this.select(group, tab);
   }
@@ -224,7 +227,9 @@ export class Workspace {
       if (!doomed.length) continue;
       for (const tab of doomed) {
         this.rememberClosed(tab, group);
+        const origin = this.origins.get(tab), back = group.active === tab && !tab.path && !tab.type && !tab.back.length && !tab.forward.length;
         this.layout.removeTab(tab);
+        if (back && origin && group.tabs.includes(origin)) group.active = origin;
       }
       if (group.tabs.length) continue;
       if (this.layout.groups().length > 1) {

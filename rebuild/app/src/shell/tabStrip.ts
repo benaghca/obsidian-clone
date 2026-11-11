@@ -40,17 +40,21 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
 
   function tabHeader(tab: Tab) {
     const title = h("div", { class: "workspace-tab-header-inner-title" });
+    // The tab's buttons keep a left press to themselves; a middle press
+    // reaches the tab, which closes it, from anywhere on it.
+    const own = (e: PointerEvent) => e.button !== 1 && e.stopPropagation();
     // Linked with another tab ("Link with tab..."): a click unlinks it.
     const linked = h(
       "div",
-      { class: "workspace-tab-header-status-icon mod-linked", "aria-label": "Unlink tab", onpointerdown: (e: PointerEvent) => e.stopPropagation(), onclick: () => ws.setLink(tab, null) },
+      { class: "workspace-tab-header-status-icon mod-linked", "aria-label": "Unlink tab", onpointerdown: own, onclick: () => ws.setLink(tab, null) },
       icon("link", 14),
     );
     // Close button; on a pinned tab, a pin that unpins it (as in Obsidian).
+    // Pressing it, like pressing the tab, leaves focus in the note.
     const close = h("div", {
       class: "workspace-tab-header-inner-close-button",
-      onpointerdown: (e: PointerEvent) => e.stopPropagation(),
-      onmousedown: (e: MouseEvent) => e.stopPropagation(),
+      onpointerdown: own,
+      onmousedown: (e: MouseEvent) => e.preventDefault(),
       onclick: () => (tab.pinned ? ws.togglePin(tab) : ws.closeTab(tab)),
     });
     const el = h(
@@ -65,9 +69,10 @@ export function createTabStrip(ws: Workspace, group: Group, menus: () => Menus, 
             startTabDrag(e, tab, ws, views);
           }
         },
-        // Middle-click must not paste or autoscroll.
+        // A press keeps focus in the note (a tab isn't a focus target), and
+        // a middle press doesn't paste or autoscroll.
         onmousedown: (e: MouseEvent) => {
-          if (e.button === 1) e.preventDefault();
+          if (e.button <= 1) e.preventDefault();
         },
         oncontextmenu: (e: MouseEvent) => {
           e.preventDefault();

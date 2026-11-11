@@ -133,7 +133,8 @@ await withBrowser(async ({ send, run, move, click, check }) => {
     const ink = separatorColumns(Buffer.from(shot.data, 'base64'));
     check(ink.faint >= 4 && ink.dark >= 8, `${kind} separators are faint and the numbers stay dark (${ink.faint} faint columns, ${ink.dark} dark)`);
   }
-  check(chrome.headerBorder === '1px' && rgb(chrome.headerColor) === 'rgb(228,228,228)', `the sidebar tab row has a 1px bottom line (${chrome.headerBorder} ${chrome.headerColor})`);
+  // T1 (Chris, 10 Nov): the sidebar tab row has no line under it, like the main tab strip.
+  check(chrome.headerBorder === '0px', `the sidebar tab row has no bottom line (${chrome.headerBorder} ${chrome.headerColor})`);
   check(Math.abs(chrome.ribbon.y - 40) < 0.6 && Math.abs(chrome.ribbon.w - 44) < 0.6 && Math.abs(chrome.ribbon.h - 760) < 1, `the ribbon starts under the tab row (${chrome.ribbon.x},${chrome.ribbon.y} ${chrome.ribbon.w}×${chrome.ribbon.h})`);
   check(Math.abs(chrome.toggle.w - 44) < 0.6 && chrome.toggle.h === 39 && Math.abs(chrome.toggle.y) < 0.6 && Math.abs(chrome.actionY - 48) < 1, `the sidebar toggle is 44×39 in the row above, and an action stays at y=48 (${chrome.toggle.w}×${chrome.toggle.h} at ${chrome.toggle.y}, action ${chrome.actionY})`);
 

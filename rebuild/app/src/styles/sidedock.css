@@ -145,6 +145,7 @@
 .mod-left-split > .workspace-leaf-resize-handle.is-dragging {
   background: linear-gradient(to left, var(--background-modifier-border-hover) 2px, transparent 2px);
 }
+/* No line under the row: it runs straight into the panel, like the main tab strip. */
 .mod-sidedock > .workspace-tab-header-container {
   height: var(--header-height);
   display: flex;
@@ -152,11 +153,6 @@
   gap: 3px;
   padding: 0 8px;
   flex: none;
-  border-bottom: 1px solid var(--background-modifier-border);
-}
-/* Measured on the light theme's sidebar tab row. The shared border token stays 224. */
-.theme-light .mod-sidedock > .workspace-tab-header-container {
-  border-bottom-color: #e4e4e4;
 }
 .mod-sidedock > .workspace-tab-header-container .workspace-tab-header {
   width: 28px;

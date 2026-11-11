@@ -159,7 +159,10 @@ export function startTabDrag(down: PointerEvent, tab: Tab, ws: Workspace, views:
   function finish(drop: boolean) {
     listening.abort();
     if (!dragging) {
-      if (drop) ws.activate(tab);
+      if (!drop) return;
+      // A click: that tab's note, with the caret, even when it was already showing.
+      ws.activate(tab);
+      if (tab.path && ws.active === tab && !ws.view.hasFocus) ws.view.focus();
       return;
     }
     if (drop) {
