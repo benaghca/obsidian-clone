@@ -4,7 +4,9 @@
 // workspace waits for the chunks it is about to show so the first paint of
 // that view is the real view.
 
-function slot<T>(importer: () => Promise<T>) {
+import { hasBaseFence } from "./editor/embeds";
+
+function slot<T>(importer: () => Promise<T>, mark?: string) {
   let mod: T | null = null;
   let pending: Promise<T> | null = null;
   return {
@@ -13,21 +15,24 @@ function slot<T>(importer: () => Promise<T>) {
     load(): Promise<T> {
       return (pending ??= importer().then((loaded) => {
         mod = loaded;
+        // Set only after the module is stored, so a test that sees the mark
+        // knows kindReady is already true. Not shown in the UI.
+        if (mark && typeof document !== "undefined") document.documentElement.dataset[mark] = "ready";
         return loaded;
       }));
     },
   };
 }
 
-export const canvasViews = slot(() => import("./canvas/view"));
-export const baseViews = slot(() => import("./bases/view"));
-export const baseEmbeds = slot(() => import("./bases/embed"));
-export const graphViews = slot(() => import("./graph/view"));
-export const drawingViews = slot(() => import("./drawing/view"));
+export const canvasViews = slot(() => import("./canvas/view"), "groveCanvas");
+export const baseViews = slot(() => import("./bases/view"), "groveBase");
+export const baseEmbeds = slot(() => import("./bases/embed"), "groveEmbed");
+export const graphViews = slot(() => import("./graph/view"), "groveGraph");
+export const drawingViews = slot(() => import("./drawing/view"), "groveDrawing");
 
-/** A note that draws a base: a ```base block, or a ![[….base]] embed. */
+/** A note that draws a base: a fence the editor accepts, or a ![[….base]] embed. */
 export function noteNeedsBase(text: string): boolean {
-  return /```[ \t]*base\b/i.test(text) || /!\[[^\]]*\.base(?:[#|\]])/i.test(text);
+  return hasBaseFence(text) || /!\[[^\]]*\.base(?:[#|\]])/i.test(text);
 }
 
 const HEAVY_ATTR = "data-grove-heavy";

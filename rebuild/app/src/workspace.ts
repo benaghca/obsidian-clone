@@ -187,9 +187,66 @@ export class Workspace {
     if (group) this.select(group, tab);
   }
 
+  /**
+   * Text of a note tab that is already loaded, when this host can read it.
+   * Null when there is nothing to wait on (a view tab, an unloaded note, or
+   * a stub editor). An unloaded note keeps the existing async present path.
+   */
+  private noteText(tab: Tab): string | null {
+    if (tab.type || !tab.path) return null;
+    const read = this.editors.doc;
+    if (typeof read !== "function") return null;
+    const text = read.call(this.editors, tab.path)?.toString() ?? "";
+    return text ? text : null;
+  }
+
+  /** False when committing `tab` would paint before its chunk, or before a base embed. */
+  private tabReady(tab: Tab): boolean {
+    if (!kindReady(tab.type)) return false;
+    const text = this.noteText(tab);
+    return text === null || notesReady([text]);
+  }
+
+  /**
+   * The tab left active after `doomed` leave `group`, replaying the same
+   * neighbour and empty-tab rules as the close itself. Null when the group
+   * would collapse or be given a blank tab (nothing heavy to wait for).
+   */
+  private successorAfterClose(group: Group, doomed: readonly Tab[]): Tab | null {
+    let active = group.active;
+    const remaining = group.tabs.slice();
+    for (const tab of doomed) {
+      const i = remaining.indexOf(tab);
+      if (i < 0) continue;
+      const origin = this.origins.get(tab);
+      const back = active === tab && !tab.path && !tab.type && !tab.back.length && !tab.forward.length;
+      remaining.splice(i, 1);
+      if (back && origin && remaining.includes(origin)) active = origin;
+      else if (active === tab && remaining.length) active = remaining[Math.min(i, remaining.length - 1)];
+    }
+    return remaining.includes(active) ? active : null;
+  }
+
   private select(group: Group, tab: Tab) {
+    if (group.active === tab && this.layout.activeGroup === group && this.editors.shows(group, tab)) {
+      this.opens.delete(group);
+      return;
+    }
+    // A warm tab still commits in this turn. A cold one keeps the previous
+    // tab on screen until its chunk is in hand, and a newer navigation wins.
+    if (!this.tabReady(tab)) {
+      const mine = Symbol();
+      this.opens.set(group, mine);
+      const text = this.noteText(tab);
+      void preloadKinds([tab.type], text ? [text] : []).then(() => {
+        if (!this.layout.groups().includes(group) || !group.tabs.includes(tab) || this.opens.get(group) !== mine) return;
+        this.opens.delete(group);
+        this.show(group, tab);
+        if (tab.path) this.editors.viewOf(group).focus();
+      });
+      return;
+    }
     this.opens.delete(group);
-    if (group.active === tab && this.layout.activeGroup === group && this.editors.shows(group, tab)) return;
     this.show(group, tab);
     if (tab.path) this.editors.viewOf(group).focus();
   }
@@ -221,6 +278,30 @@ export class Workspace {
    */
   closeTabs(close: Tab[]) {
     const gone = new Set(close);
+    const waits: { group: Group; tab: Tab }[] = [];
+    for (const group of this.layout.groups()) {
+      const doomed = group.tabs.filter((t) => gone.has(t));
+      if (!doomed.length) continue;
+      const next = this.successorAfterClose(group, doomed);
+      if (next && !this.tabReady(next)) waits.push({ group, tab: next });
+    }
+    // Closing onto a cold view waits, and leaves every tab where it is until
+    // that view can paint. A later navigation replaces the token and cancels this.
+    if (waits.length) {
+      const tokens = waits.map(({ group }) => {
+        const mine = Symbol();
+        this.opens.set(group, mine);
+        return [group, mine] as const;
+      });
+      const notes = waits.map(({ tab }) => this.noteText(tab)).filter((text): text is string => text !== null);
+      void preloadKinds(waits.map(({ tab }) => tab.type), notes).then(() => {
+        if (tokens.some(([group, mine]) => !this.layout.groups().includes(group) || this.opens.get(group) !== mine)) return;
+        for (const [group] of tokens) this.opens.delete(group);
+        const still = close.filter((tab) => this.layout.groupOf(tab));
+        if (still.length) this.closeTabs(still);
+      });
+      return;
+    }
     let layoutChanged = false;
     const wasActive = this.active;
     for (const group of this.layout.groups()) {
@@ -625,6 +706,11 @@ export class Workspace {
    */
   openView(type: ViewType, where: OpenWhere = false, file: string | null = null) {
     const from = this.activeGroup;
+    // A pane replacement, warm or cold, is the newest intent. A new tab or
+    // split must not cancel an open already in flight.
+    const replaces = !where;
+    const mine = Symbol();
+    if (replaces) this.opens.set(from, mine);
     const go = () => {
       const active = from.active;
       const { group, tab, layoutChanged } = this.target(from, where, where === "tab" || !!active.path || !!active.type);
@@ -637,9 +723,6 @@ export class Workspace {
       go();
       return;
     }
-    const replaces = !where;
-    const mine = Symbol();
-    if (replaces) this.opens.set(from, mine);
     void preloadKinds([type]).then(() => {
       if (!this.layout.groups().includes(from)) return;
       if (replaces && this.opens.get(from) !== mine) return;

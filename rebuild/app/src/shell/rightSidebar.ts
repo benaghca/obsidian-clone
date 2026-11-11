@@ -64,10 +64,10 @@ export function createRightSidebar(
   function select(name: RightView) {
     const changed = name !== current;
     current = name;
-    // The button marks the choice at once. The previous view stays until the
-    // graph module is in hand, so the dock never flashes empty.
+    // The button and the view change together. Until the graph module is in
+    // hand the previous tab stays selected, so the dock never marks Local
+    // graph over Backlinks (or flashes empty).
     if (name === "localgraph" && !graphViews.ready()) {
-      for (const [n, button] of tabs.buttons) button.classList.toggle("is-active", n === name);
       void graphViews.load().then(() => {
         if (current !== name) return;
         tabs.show(name);

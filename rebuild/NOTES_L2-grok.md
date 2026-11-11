@@ -35,14 +35,16 @@ In the dev app, with the chunks already warm, opening each one left the view in 
 
 A reload that restored a canvas (with the local graph dock open), a base, a drawing, and a note with a base block never showed the tab without its view. A watcher on the document sampled 15 to 18 mutations on each reload and did not flag a gap. The stylesheets for these views stay on the first page, except the kanban, list, and cards sheets (7 KB), which arrive with the base chunk before that view is shown.
 
+Switching to a heavy tab that was not the one on screen, with Ctrl+Tab or a click, waits until that chunk is in hand before the tab header or the editor changes. Closing onto one does the same. The Local graph button stays on the previous view until the graph is actually there. A note with a `~~~base` fence waits the same way a backtick fence does. Opening a warm graph while a canvas is still loading keeps the graph: the late canvas does not replace it. A new tab or a split still does not cancel an open that is already on its way. Once a chunk is warm, the open is still the same turn as before. The production check holds the chunks, uses the idle scheduler (not the dev shortcut), and covers those routes.
+
 ## Tests
 
 `scripts/test-startup-chunk.mjs` builds and checks that the startup JavaScript does not contain those views, that each one still exists in some other chunk, and that nothing in the preload list is one of them.
 
-`scripts/test-lazy-views.mjs` opens each view and reloads a saved workspace. Both run from `npm test`.
+`scripts/test-lazy-views.mjs` opens each view, reloads a saved workspace, and, against the production build, holds a chunk to check the cold routes above. Both run from `npm test`.
 
-Feel and friction budgets were not changed. The graph gap stays the known one. The locked `npm test` passed, including those budgets, the startup-chunk check, and the lazy-view check. `npm run build` passed. `npm run audit:offline` passed. The audit still accepts only the bare `https://` prefix a paste handler writes in front of a www address. That prefix now lives in the local chunks that hold the handlers, not in the entry file.
+Feel and friction budgets were not changed. The graph gap stays the known one. The locked `npm test` passed, including those budgets, the startup-chunk check, and the lazy-view check. `cargo test --offline` passed. `npm run build` passed. `npm run audit:offline` passed. The audit still accepts only the bare `https://` prefix a paste handler writes in front of a www address. That prefix now lives in the local chunks that hold the handlers, not in the entry file.
 
 ## Size of the change
 
-542 lines added, net, not counting this note. Most of that is the loader, the settings gate, and the two tests. The edits in `main.ts` and `workspace.ts` stay small. `noteEditors.ts` and `fileOps.ts` were not touched.
+1200 lines added, net, not counting this note. Most of that is the loader, the settings gate, and the tests. The edits in `main.ts` and `workspace.ts` stay small. `noteEditors.ts` and `fileOps.ts` were not touched.

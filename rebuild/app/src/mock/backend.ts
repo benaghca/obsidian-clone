@@ -142,6 +142,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       put("L2.base", "views:\n  - type: table\n    name: View\n");
       put("L2.excalidraw", "{\"type\":\"excalidraw\",\"version\":2,\"source\":\"grove\",\"elements\":[],\"appState\":{\"gridSize\":null,\"viewBackgroundColor\":\"#ffffff\"},\"files\":{}}\n");
       put("L2 embed.md", "Before the base.\n\n```base\nviews:\n  - type: table\n    name: View\n```\n");
+      put("L2 tilde.md", "Before the tilde.\n\n~~~base\nviews:\n  - type: table\n    name: View\n~~~\n");
     }
   }
   // Folders made with create_folder that hold no files yet.
