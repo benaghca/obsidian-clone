@@ -325,11 +325,7 @@ fn bytes_from_body(body: &tauri::ipc::InvokeBody) -> Result<&[u8], String> {
 #[tauri::command(async)]
 fn write_note(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, path: String, content: String) -> impl Future<Output = Result<(), String>> {
     let fut = write_vault(&state, ticket, move |v| v.write_note(&path, &content).map(|()| path));
-    async move {
-        let path = fut.await?;
-        emit_other_windows(&window, model::ChangeKind::Modify, path);
-        Ok(())
-    }
+    async move { emit_other_windows(&window, model::ChangeKind::Modify, fut.await?); Ok(()) }
 }
 
 /// Fresh-file property CAS, off the GTK thread; only real writes notify other windows.
@@ -339,26 +335,14 @@ fn set_property(ticket: WriteTicket, window: tauri::Window, state: State<'_, App
     let fut = write_vault(&state, ticket, move |v| v.set_property(&path, &edit, dry_run).map(|r| (r, path)));
     async move {
         let (result, path) = fut.await?;
-        if !dry_run && result.done() {
-            emit_other_windows(&window, model::ChangeKind::Modify, path);
-        }
+        if !dry_run && result.done() { emit_other_windows(&window, model::ChangeKind::Modify, path); }
         Ok(result)
     }
 }
 
-fn enqueue_write_file_bytes(
-    state: &AppState,
-    ticket: WriteTicket,
-    headers: &tauri::http::HeaderMap,
-    body: &tauri::ipc::InvokeBody,
-) -> Reply<Result<(FileEntry, bool), String>> {
-    let parsed = path_from_headers(headers).and_then(|path| {
-        Ok((path, bytes_from_body(body)?.to_vec(), replace_from_headers(headers)))
-    });
-    match parsed {
-        Ok((path, bytes, replace)) => write_vault(state, ticket, move |v| {
-            if replace { v.replace_file_bytes(&path, &bytes) } else { v.write_file_bytes(&path, &bytes).map(|entry| (entry, false)) }
-        }),
+fn enqueue_write_file_bytes(state: &AppState, ticket: WriteTicket, headers: &tauri::http::HeaderMap, body: &tauri::ipc::InvokeBody) -> Reply<Result<(FileEntry, bool), String>> {
+    match path_from_headers(headers).and_then(|path| Ok((path, bytes_from_body(body)?.to_vec(), replace_from_headers(headers)))) {
+        Ok((path, bytes, replace)) => write_vault(state, ticket, move |v| if replace { v.replace_file_bytes(&path, &bytes) } else { v.write_file_bytes(&path, &bytes).map(|entry| (entry, false)) }),
         Err(err) => Reply::ready(Err(err)),
     }
 }
@@ -374,8 +358,7 @@ fn write_file_bytes(ticket: WriteTicket, window: tauri::Window, state: State<'_,
     let fut = enqueue_write_file_bytes(&state, ticket, request.headers(), request.body());
     async move {
         let (entry, existed) = fut.await?;
-        let kind = if existed { model::ChangeKind::Modify } else { model::ChangeKind::Create };
-        emit_other_windows(&window, kind, entry.path.clone());
+        emit_other_windows(&window, if existed { model::ChangeKind::Modify } else { model::ChangeKind::Create }, entry.path.clone());
         Ok(entry)
     }
 }
@@ -595,7 +578,6 @@ mod tests {
         tauri::async_runtime::block_on(super::install_vault(&state, state.write_queue.take_ingress(0), move || Ok(r))).unwrap();
         state
     }
-
     fn sync_write<T: Send + 'static>(state: &super::AppState, f: impl FnOnce(&mut crate::vault::Vault) -> Result<T, String> + Send + 'static) -> Result<T, String> {
         tauri::async_runtime::block_on(super::write_vault(state, state.write_queue.take_ingress(0), f))
     }
@@ -616,11 +598,7 @@ mod tests {
                 v.read_note("Note.md")
             }));
             r1_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-            let r2 = s.spawn(move || super::read_vault(state, |v| {
-                r2_tx.send(()).unwrap();
-                assert_eq!(v.index.search("initial", 10).len(), 1);
-                v.read_note("Note.md")
-            }));
+            let r2 = s.spawn(move || super::read_vault(state, |v| { r2_tx.send(()).unwrap(); assert_eq!(v.index.search("initial", 10).len(), 1); v.read_note("Note.md") }));
             assert_eq!(r2.join().unwrap().unwrap(), "initial");
             let we = Arc::clone(&write_entered);
             let w = s.spawn(move || sync_write(state, move |v| { we.store(true, Ordering::SeqCst); v.write_note("Note.md", "updated") }));
@@ -631,12 +609,7 @@ mod tests {
             w.join().unwrap().unwrap();
             for i in 0..4 {
                 let aw = Arc::clone(&active_writers);
-                s.spawn(move || sync_write(state, move |v| {
-                    assert_eq!(aw.fetch_add(1, Ordering::SeqCst), 0);
-                    let res = v.write_note("Note.md", &format!("v{i}"));
-                    assert_eq!(aw.fetch_sub(1, Ordering::SeqCst), 1);
-                    res
-                }).unwrap());
+                s.spawn(move || sync_write(state, move |v| { assert_eq!(aw.fetch_add(1, Ordering::SeqCst), 0); let res = v.write_note("Note.md", &format!("v{i}")); assert_eq!(aw.fetch_sub(1, Ordering::SeqCst), 1); res }).unwrap());
             }
         });
     }
@@ -645,10 +618,8 @@ mod tests {
     fn queued_writes_and_renames_stay_in_submission_order() {
         use std::{sync::Arc, time::Duration};
         let dir = crate::fsutil::tmp_dir("write-order");
-        let state = Arc::new(test_state(&dir.path));
+        let (state, order, mut joins) = (Arc::new(test_state(&dir.path)), Arc::new(std::sync::Mutex::new(Vec::new())), Vec::new());
         sync_write(&state, |v| v.create_note("Note.md", "zero")).unwrap();
-        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let mut joins = Vec::new();
         for (key, delay_ms, label, op) in [
             (1usize, 40u64, "write-1", Box::new(|v: &mut crate::vault::Vault| v.write_note("Note.md", "first")) as Box<dyn FnOnce(&mut crate::vault::Vault) -> Result<(), String> + Send>),
             (2, 20, "write-2", Box::new(|v| v.write_note("Note.md", "second"))),
@@ -659,8 +630,7 @@ mod tests {
             let (st, ord) = (Arc::clone(&state), Arc::clone(&order));
             joins.push(tauri::async_runtime::spawn(async move {
                 if delay_ms > 0 { std::thread::sleep(Duration::from_millis(delay_ms)); }
-                let ticket = st.write_queue.take_ingress(key);
-                super::write_vault(&st, ticket, move |v| { ord.lock().unwrap().push(label); op(v) }).await
+                super::write_vault(&st, st.write_queue.take_ingress(key), move |v| { ord.lock().unwrap().push(label); op(v) }).await
             }));
         }
         for j in joins { tauri::async_runtime::block_on(j).unwrap().unwrap(); }
@@ -679,35 +649,20 @@ mod tests {
         state.write_queue.reserve_ingress(100);
         let (st0, root) = (Arc::clone(&state), dir.path.clone());
         let slow = tauri::async_runtime::spawn(async move {
-            let ticket = st0.write_queue.take_ingress(100);
-            super::install_vault(&st0, ticket, move || {
-                started_tx.send(()).unwrap();
-                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-                Ok(root)
-            }).await
+            super::install_vault(&st0, st0.write_queue.take_ingress(100), move || { started_tx.send(()).unwrap(); release_rx.recv_timeout(Duration::from_secs(2)).unwrap(); Ok(root) }).await
         });
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8) * 2;
         let mut writes = Vec::new();
         for i in 0..workers {
-            let key = 200 + i;
+            let (key, st) = (200 + i, Arc::clone(&state));
             state.write_queue.reserve_ingress(key);
-            let st = Arc::clone(&state);
-            writes.push(tauri::async_runtime::spawn(async move {
-                let ticket = st.write_queue.take_ingress(key);
-                super::write_vault(&st, ticket, move |v| v.write_note("Note.md", &format!("w{i}"))).await
-            }));
+            writes.push(tauri::async_runtime::spawn(async move { super::write_vault(&st, st.write_queue.take_ingress(key), move |v| v.write_note("Note.md", &format!("w{i}"))).await }));
         }
         std::thread::sleep(Duration::from_millis(30));
-        let ((read_tx, read_rx), (ipc_tx, ipc_rx)) = (mpsc::channel(), mpsc::channel());
-        let st_read = Arc::clone(&state);
-        tauri::async_runtime::spawn(async move {
-            read_tx.send(super::read_vault(&st_read, |v| v.read_note("Note.md")).unwrap()).unwrap();
-        });
-        tauri::async_runtime::spawn(async move {
-            let origins = crate::lockdown::FrameOrigins::new();
-            ipc_tx.send(origins.allow("https://example.com")).unwrap();
-        });
+        let ((read_tx, read_rx), (ipc_tx, ipc_rx), st_read) = (mpsc::channel(), mpsc::channel(), Arc::clone(&state));
+        tauri::async_runtime::spawn(async move { read_tx.send(super::read_vault(&st_read, |v| v.read_note("Note.md")).unwrap()).unwrap(); });
+        tauri::async_runtime::spawn(async move { ipc_tx.send(crate::lockdown::FrameOrigins::new().allow("https://example.com")).unwrap(); });
         assert_eq!(read_rx.recv_timeout(Duration::from_millis(300)).expect("queued writes starved async read"), "hello");
         assert!(ipc_rx.recv_timeout(Duration::from_millis(300)).expect("queued writes starved unrelated async IPC").is_ok());
         release_tx.send(()).unwrap();
@@ -734,37 +689,79 @@ mod tests {
         });
         started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(state.write_queue.dispatch_ingress("write_note", 11, || true));
-        assert!(state.write_queue.dispatch_ingress("write_note", 12, || true));
-        let unsubmitted_ticket = state.write_queue.take_ingress(12);
-        assert!(state.write_queue.dispatch_ingress("write_note", 13, || true));
-        let save_reply = super::write_vault(&state, state.write_queue.take_ingress(13), |v| v.write_note("Note.md", "saved-before-quit"));
-        assert!(state.write_queue.dispatch_ingress("rename_path", 14, || true));
-        let rename_reply = super::write_vault(&state, state.write_queue.take_ingress(14), |v| v.rename_path("Note.md", "Sub/Moved.md"));
-        assert!(state.write_queue.dispatch_ingress("write_note", 15, || true));
+        let st_delayed = Arc::clone(&state);
+        let delayed_save = tauri::async_runtime::spawn(async move {
+            std::thread::sleep(Duration::from_millis(30));
+            super::write_vault(&st_delayed, st_delayed.write_queue.take_ingress(11), |v| v.write_note("Note.md", "saved-before-quit")).await
+        });
+        assert!(state.write_queue.dispatch_ingress("rename_path", 12, || true));
+        let rename_reply = super::write_vault(&state, state.write_queue.take_ingress(12), |v| v.rename_path("Note.md", "Sub/Moved.md"));
+        state.write_queue.reserve_ingress(13);
+        assert!(state.write_queue.dispatch_ingress("write_note", 14, || true));
 
         let (prevented, (exit_tx, exit_rx)) = (Arc::new(AtomicBool::new(false)), mpsc::channel());
         let prev_clone = Arc::clone(&prevented);
         assert!(!state.write_queue.on_exit_requested(Some(0), move || prev_clone.store(true, Ordering::SeqCst), move |code| { exit_tx.send(code).unwrap(); }));
         assert!(prevented.load(Ordering::SeqCst), "exit must be prevented while writes are draining");
-        assert!(exit_rx.recv_timeout(Duration::from_millis(30)).is_err(), "exit permitted before slow op and queued saves finished");
-
+        assert!(exit_rx.recv_timeout(Duration::from_millis(15)).is_err(), "exit permitted before slow op and delayed save finished");
         let orphaned_ran = Arc::new(AtomicBool::new(false));
         state.write_queue.dispatch_ingress("write_note", 16, || true);
-        for ticket in [state.write_queue.take_ingress(11), unsubmitted_ticket, state.write_queue.take_ingress(16)] {
+        for k in [13, 16] {
             let ran = Arc::clone(&orphaned_ran);
-            let res = super::write_vault(&state, ticket, move |v| { ran.store(true, Ordering::SeqCst); v.write_note("Sub/Moved.md", "clobbered") });
+            let res = super::write_vault(&state, state.write_queue.take_ingress(k), move |v| { ran.store(true, Ordering::SeqCst); v.write_note("Sub/Moved.md", "clobbered") });
             assert_eq!(tauri::async_runtime::block_on(res).unwrap_err(), "vault write queue is closed");
         }
-        assert!(!orphaned_ran.load(Ordering::SeqCst));
-
         release_tx.send(()).unwrap();
-        assert_eq!(exit_rx.recv_timeout(Duration::from_secs(2)).expect("shutdown hung on unclaimed ticket"), 0);
+        assert_eq!(exit_rx.recv_timeout(Duration::from_secs(2)).expect("shutdown hung on abandoned ticket"), 0);
         assert!(state.write_queue.is_terminated(), "worker JoinHandle must be joined before exit is permitted");
         assert!(!dir.path.join("Note.md").exists());
         assert_eq!(std::fs::read_to_string(dir.path.join("Sub/Moved.md")).unwrap(), "saved-before-quit");
         tauri::async_runtime::block_on(slow).unwrap().unwrap();
-        assert!(tauri::async_runtime::block_on(save_reply).is_ok() && tauri::async_runtime::block_on(rename_reply).is_ok());
+        tauri::async_runtime::block_on(delayed_save).unwrap().expect("delayed pre-shutdown save was rejected");
+        assert!(tauri::async_runtime::block_on(rename_reply).is_ok());
+        let ran2 = Arc::clone(&orphaned_ran);
+        let ab_res = super::write_vault(&state, state.write_queue.take_ingress(14), move |v| { ran2.store(true, Ordering::SeqCst); v.write_note("Sub/Moved.md", "clobbered") });
+        assert_eq!(tauri::async_runtime::block_on(ab_res).unwrap_err(), "vault write queue is closed");
+        assert!(!orphaned_ran.load(Ordering::SeqCst));
         assert!(state.write_queue.on_exit_requested(Some(0), || panic!("should not prevent after drain"), |_| {}));
+    }
+
+    #[test]
+    fn exit_drain_spawn_failure_falls_back_without_blocking_or_losing_exit() {
+        use std::{sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc}, time::Duration};
+        let dir = crate::fsutil::tmp_dir("spawn-fail-fallback");
+        let state = Arc::new(test_state(&dir.path));
+        sync_write(&state, |v| v.create_note("Note.md", "initial")).unwrap();
+        let ((started_tx, started_rx), (release_tx, release_rx)) = (mpsc::channel(), mpsc::channel());
+        assert!(state.write_queue.dispatch_ingress("open_vault", 20, || true));
+        let (st0, root) = (Arc::clone(&state), dir.path.clone());
+        let slow = tauri::async_runtime::spawn(async move {
+            super::install_vault(&st0, st0.write_queue.take_ingress(20), move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                Ok(root)
+            }).await
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(state.write_queue.dispatch_ingress("write_note", 21, || true));
+        let save_reply = super::write_vault(&state, state.write_queue.take_ingress(21), |v| v.write_note("Note.md", "saved-via-fallback"));
+        state.write_queue.shared.fail_drain_spawn.store(true, Ordering::SeqCst);
+        let ((call_done_tx, call_done_rx), (exit_tx, exit_rx), prevented) = (mpsc::channel(), mpsc::channel(), Arc::new(AtomicBool::new(false)));
+        let (st_exit, prev_clone) = (Arc::clone(&state), Arc::clone(&prevented));
+        std::thread::spawn(move || {
+            let res = st_exit.write_queue.on_exit_requested(Some(7), move || prev_clone.store(true, Ordering::SeqCst), move |code| { exit_tx.send(code).unwrap(); });
+            call_done_tx.send(res).unwrap();
+        });
+        assert!(!call_done_rx.recv_timeout(Duration::from_millis(50)).expect("on_exit_requested blocked the calling thread when drain spawn failed"));
+        assert!(prevented.load(Ordering::SeqCst));
+        assert!(exit_rx.recv_timeout(Duration::from_millis(20)).is_err());
+        release_tx.send(()).unwrap();
+        assert_eq!(exit_rx.recv_timeout(Duration::from_secs(2)).expect("failed drain spawn lost the exit request"), 7);
+        assert_eq!(std::fs::read_to_string(dir.path.join("Note.md")).unwrap(), "saved-via-fallback");
+        tauri::async_runtime::block_on(slow).unwrap().unwrap();
+        assert!(tauri::async_runtime::block_on(save_reply).is_ok());
+        assert!(state.write_queue.on_exit_requested(Some(7), || panic!("should not prevent after drain"), |_| {}));
+        assert!(state.write_queue.is_terminated());
     }
 
     #[test]

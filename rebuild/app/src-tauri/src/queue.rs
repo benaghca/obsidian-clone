@@ -1,14 +1,17 @@
 //! Serialized FIFO write queue and shutdown drain for vault mutations.
 //!
 //! Write commands reserve a monotonic ticket synchronously at IPC ingress (`wrap_handler` /
-//! `dispatch_ingress`) before `#[tauri::command(async)]` spawns its task on Tauri's async runtime.
-//! The spawned task claims that ticket via `CommandArg for WriteTicket` (`take_ingress`) and
-//! submits the mutation closure (`WriteTicket::submit`), returning a non-blocking `Reply` future
-//! resolved by the dedicated `"vault-write"` worker thread.
+//! `dispatch_ingress_shared`) before `#[tauri::command(async)]` spawns its task on Tauri's async
+//! runtime. Once the command handler accepts the invoke, the slot becomes `Slot::Pending`. The
+//! spawned task claims that ticket via `CommandArg for WriteTicket` (`take_ingress`) and submits
+//! the mutation closure (`WriteTicket::submit`), returning a non-blocking `Reply` future resolved
+//! by the dedicated `"vault-write"` worker thread.
 //!
-//! On shutdown (`on_exit_requested`, `shutdown`, or `Drop`), the queue seals ingress, cancels any
-//! unclaimed or unsubmitted reservations (`Slot::Reserved -> Slot::Skip`), drains all accepted
-//! `Slot::Job` entries and the currently running job in FIFO order, and joins the worker thread.
+//! On shutdown (`on_exit_requested`, `shutdown`, or `Drop`), the queue seals new ingress, cancels
+//! bare unclaimed `Slot::Reserved` tickets immediately, keeps pre-shutdown `Slot::Pending`
+//! requests until they submit or fail (bounded by `PENDING_SHUTDOWN_WAIT` so a dead handler cannot
+//! hang exit forever), drains all accepted `Slot::Job` entries and the currently running job in
+//! FIFO order, and joins the worker thread.
 
 use crate::AppState;
 use std::collections::BTreeMap;
@@ -18,10 +21,14 @@ use std::pin::Pin;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle, ThreadId};
+use std::time::{Duration, Instant};
 use tauri::Manager;
+
+const PENDING_SHUTDOWN_WAIT: Duration = Duration::from_millis(120);
 
 enum Slot {
     Reserved,
+    Pending,
     Job(Box<dyn FnOnce() + Send>),
     Skip,
 }
@@ -36,6 +43,9 @@ struct WorkerState {
     closing: bool,
     drained: bool,
     exit_waiter_spawned: bool,
+    drain_thread_active: bool,
+    shutdown_deadline: Option<Instant>,
+    pending_exit: Option<(i32, Box<dyn FnOnce(i32) + Send>)>,
     worker_thread: Option<ThreadId>,
 }
 
@@ -44,6 +54,8 @@ pub(crate) struct QueueShared {
     worker: Mutex<WorkerState>,
     ready: Condvar,
     handle: Mutex<Option<JoinHandle<()>>>,
+    #[cfg(test)]
+    pub(crate) fail_drain_spawn: std::sync::atomic::AtomicBool,
 }
 
 pub(crate) struct WriteQueue {
@@ -110,6 +122,7 @@ impl Drop for WriteQueue {
 
 fn worker_loop(shared: Arc<QueueShared>) {
     lock_m(&shared.worker).worker_thread = Some(thread::current().id());
+    let mut fallback_exit = None;
     while let Some(run) = {
         let mut w = lock_m(&shared.worker);
         loop {
@@ -120,16 +133,46 @@ fn worker_loop(shared: Arc<QueueShared>) {
                         unreachable!()
                     };
                     w.turn += 1;
+                    w.shutdown_deadline = None;
                     w.running = true;
                     break Some(job);
                 }
                 Some(Slot::Skip) => {
                     w.slots.remove(&turn);
                     w.turn += 1;
+                    w.shutdown_deadline = None;
                 }
-                Some(Slot::Reserved) | None => {
+                Some(Slot::Reserved | Slot::Pending) => {
+                    if w.closing {
+                        let deadline = *w
+                            .shutdown_deadline
+                            .get_or_insert_with(|| Instant::now() + PENDING_SHUTDOWN_WAIT);
+                        if let Some(rem) = deadline.checked_duration_since(Instant::now()) {
+                            if !rem.is_zero() {
+                                w = shared
+                                    .ready
+                                    .wait_timeout(w, rem)
+                                    .unwrap_or_else(|e| e.into_inner())
+                                    .0;
+                                continue;
+                            }
+                        }
+                        w.ingress.clear();
+                        for slot in w.slots.values_mut() {
+                            if matches!(slot, Slot::Reserved | Slot::Pending) {
+                                *slot = Slot::Skip;
+                            }
+                        }
+                        continue;
+                    }
+                    w = shared.ready.wait(w).unwrap_or_else(|e| e.into_inner());
+                }
+                None => {
                     if w.closing && w.slots.is_empty() {
                         w.drained = true;
+                        if !w.drain_thread_active {
+                            fallback_exit = w.pending_exit.take();
+                        }
                         break None;
                     }
                     w = shared.ready.wait(w).unwrap_or_else(|e| e.into_inner());
@@ -147,6 +190,9 @@ fn worker_loop(shared: Arc<QueueShared>) {
         }
         let _guard = RunGuard(&shared);
         run();
+    }
+    if let Some((code, req)) = fallback_exit {
+        req(code);
     }
 }
 
@@ -177,9 +223,27 @@ impl WriteQueue {
             return handler();
         }
         Self::reserve_ingress_shared(shared, key);
+        struct Guard<'a> {
+            shared: &'a QueueShared,
+            key: usize,
+            armed: bool,
+        }
+        impl Drop for Guard<'_> {
+            fn drop(&mut self) {
+                if self.armed {
+                    WriteQueue::cancel_ingress_shared(self.shared, self.key);
+                }
+            }
+        }
+        let mut guard = Guard {
+            shared,
+            key,
+            armed: true,
+        };
         let handled = handler();
-        if !handled {
-            Self::cancel_ingress_shared(shared, key);
+        if handled {
+            guard.armed = false;
+            Self::activate_ingress_shared(shared, key);
         }
         handled
     }
@@ -198,9 +262,18 @@ impl WriteQueue {
         w.next_ticket += 1;
         w.slots.insert(ticket, Slot::Reserved);
         if let Some(old) = w.ingress.insert(key, ticket) {
-            if matches!(w.slots.get(&old), Some(Slot::Reserved)) {
+            if matches!(w.slots.get(&old), Some(Slot::Reserved | Slot::Pending)) {
                 w.slots.insert(old, Slot::Skip);
                 shared.ready.notify_one();
+            }
+        }
+    }
+
+    fn activate_ingress_shared(shared: &QueueShared, key: usize) {
+        let mut w = lock_m(&shared.worker);
+        if let Some(&ticket) = w.ingress.get(&key) {
+            if matches!(w.slots.get(&ticket), Some(Slot::Reserved)) {
+                w.slots.insert(ticket, Slot::Pending);
             }
         }
     }
@@ -213,7 +286,7 @@ impl WriteQueue {
     pub(crate) fn cancel_ingress_shared(shared: &QueueShared, key: usize) {
         let mut w = lock_m(&shared.worker);
         if let Some(ticket) = w.ingress.remove(&key) {
-            if matches!(w.slots.get(&ticket), Some(Slot::Reserved)) {
+            if matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
                 w.slots.insert(ticket, Slot::Skip);
                 drop(w);
                 shared.ready.notify_one();
@@ -223,24 +296,20 @@ impl WriteQueue {
 
     pub(crate) fn take_ingress(&self, key: usize) -> WriteTicket {
         let mut w = lock_m(&self.shared.worker);
-        if w.closing {
-            return WriteTicket {
-                shared: Arc::clone(&self.shared),
-                ticket: None,
-                submitted: true,
-            };
-        }
         if let Some(ticket) = w.ingress.remove(&key) {
-            return WriteTicket {
-                shared: Arc::clone(&self.shared),
-                ticket: Some(ticket),
-                submitted: false,
-            };
+            if matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
+                w.slots.insert(ticket, Slot::Pending);
+                return WriteTicket {
+                    shared: Arc::clone(&self.shared),
+                    ticket: Some(ticket),
+                    submitted: false,
+                };
+            }
         }
-        if key == 0 {
+        if !w.closing && key == 0 {
             let ticket = w.next_ticket;
             w.next_ticket += 1;
-            w.slots.insert(ticket, Slot::Reserved);
+            w.slots.insert(ticket, Slot::Pending);
             return WriteTicket {
                 shared: Arc::clone(&self.shared),
                 ticket: Some(ticket),
@@ -254,13 +323,20 @@ impl WriteQueue {
         }
     }
 
-    /// Seal ingress, cancel any unclaimed/unsubmitted reservations, and report whether all
-    /// accepted jobs and the running job have already finished.
+    /// Seal new ingress, cancel bare unclaimed `Slot::Reserved` entries while keeping live
+    /// pre-shutdown `Slot::Pending` handlers, and report whether all work has already finished.
     pub(crate) fn begin_shutdown(shared: &QueueShared) -> bool {
         let mut w = lock_m(&shared.worker);
         if !w.closing {
             w.closing = true;
-            w.ingress.clear();
+            let abandoned: Vec<usize> = w
+                .ingress
+                .iter()
+                .filter_map(|(&k, &t)| matches!(w.slots.get(&t), Some(Slot::Reserved)).then_some(k))
+                .collect();
+            for k in abandoned {
+                w.ingress.remove(&k);
+            }
             for slot in w.slots.values_mut() {
                 if matches!(slot, Slot::Reserved) {
                     *slot = Slot::Skip;
@@ -298,33 +374,65 @@ impl WriteQueue {
             self.shutdown();
             return true;
         }
-        prevent_exit();
+        let exit_code = code.unwrap_or(0);
+        let req_box: Box<dyn FnOnce(i32) + Send> = Box::new(request_exit);
         let should_spawn = {
             let mut w = lock_m(&self.shared.worker);
-            if w.exit_waiter_spawned {
-                false
+            if w.drained {
+                None
             } else {
-                w.exit_waiter_spawned = true;
-                true
+                w.pending_exit = Some((exit_code, req_box));
+                if w.exit_waiter_spawned {
+                    Some(false)
+                } else {
+                    w.exit_waiter_spawned = true;
+                    w.drain_thread_active = true;
+                    Some(true)
+                }
             }
         };
+        let Some(should_spawn) = should_spawn else {
+            self.shutdown();
+            return true;
+        };
+        prevent_exit();
         if should_spawn {
             let shared = Arc::clone(&self.shared);
-            let exit_code = code.unwrap_or(0);
-            let mut req = Some(request_exit);
-            if thread::Builder::new()
-                .name("vault-write-drain".into())
-                .spawn({
-                    let shared = Arc::clone(&shared);
-                    let f = req.take().unwrap();
-                    move || {
+            #[cfg(test)]
+            let force_fail = self
+                .shared
+                .fail_drain_spawn
+                .swap(false, std::sync::atomic::Ordering::SeqCst);
+            #[cfg(not(test))]
+            let force_fail = false;
+            let spawned = if force_fail {
+                Err(std::io::Error::other("injected drain spawn failure"))
+            } else {
+                thread::Builder::new()
+                    .name("vault-write-drain".into())
+                    .spawn(move || {
                         Self::shutdown_shared(&shared);
-                        f(exit_code);
+                        let pending = lock_m(&shared.worker).pending_exit.take();
+                        if let Some((c, f)) = pending {
+                            f(c);
+                        }
+                    })
+            };
+            if spawned.is_err() {
+                let finished_pending = {
+                    let mut w = lock_m(&self.shared.worker);
+                    w.drain_thread_active = false;
+                    w.exit_waiter_spawned = false;
+                    if w.drained {
+                        w.pending_exit.take()
+                    } else {
+                        None
                     }
-                })
-                .is_err()
-            {
-                Self::shutdown_shared(&shared);
+                };
+                if let Some((c, f)) = finished_pending {
+                    self.shutdown();
+                    f(c);
+                }
             }
         }
         false
@@ -346,7 +454,7 @@ impl WriteTicket {
             return Reply::ready(Err("vault write queue is closed".into()));
         };
         let mut w = lock_m(&self.shared.worker);
-        if w.closing || !matches!(w.slots.get(&ticket), Some(Slot::Reserved)) {
+        if !matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
             return Reply::ready(Err("vault write queue is closed".into()));
         }
         let reply = Arc::new(Mutex::new(ReplyState {
@@ -380,7 +488,7 @@ impl Drop for WriteTicket {
         if !self.submitted {
             if let Some(ticket) = self.ticket {
                 let mut w = lock_m(&self.shared.worker);
-                if matches!(w.slots.get(&ticket), Some(Slot::Reserved)) {
+                if matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
                     w.slots.insert(ticket, Slot::Skip);
                     drop(w);
                     self.shared.ready.notify_one();
