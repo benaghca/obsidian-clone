@@ -7,11 +7,11 @@
 use crate::fsutil::{self, atomic_write};
 use crate::index::{Index, Stamp};
 use crate::model::{push_change, ChangeKind, FileEntry, VaultChanged};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How long a `write_note` suppresses watcher events for that path.
@@ -22,10 +22,32 @@ pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// The files `read_file_bytes` reads: images an embed can show.
 const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
 
+#[derive(Clone, Copy, Default)]
+struct NoteFormat {
+    bom: bool,
+    crlf: bool,
+}
+
+impl NoteFormat {
+    fn apply(self, content: &str) -> std::borrow::Cow<'_, str> {
+        if !self.bom && !self.crlf {
+            return content.into();
+        }
+        let body = content.strip_prefix('\u{feff}').unwrap_or(content);
+        let body = if self.crlf { body.replace("\r\n", "\n").replace('\n', "\r\n") } else { body.to_string() };
+        (if self.bom { format!("\u{feff}{body}") } else { body }).into()
+    }
+}
+
 pub struct Vault {
     pub root: PathBuf,
     pub index: Index,
     own_writes: HashMap<String, Instant>,
+    formats: Mutex<HashMap<String, NoteFormat>>,
+    /// Device and inode last seen for a path. A same-size replace in one
+    /// clock tick can share a [`Stamp`]; the id tells that apart from the file
+    /// that was indexed.
+    ids: HashMap<String, (u64, u64)>,
     rescan: Option<Arc<()>>,
 }
 
@@ -43,6 +65,8 @@ impl Vault {
             root,
             index,
             own_writes: HashMap::new(),
+            formats: Mutex::new(HashMap::new()),
+            ids: HashMap::new(),
             rescan: None,
         })
     }
@@ -52,11 +76,14 @@ impl Vault {
     }
 
     pub fn read_note(&self, path: &str) -> Result<String, String> {
-        let (_rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
+        let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
         if !full.is_file() {
             return Err(format!("no such file: {path}"));
         }
         let bytes = fs::read(&full).map_err(|e| e.to_string())?;
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            self.observe_format(&rel, Some(text));
+        }
         let text = String::from_utf8_lossy(&bytes);
         Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
     }
@@ -94,14 +121,49 @@ impl Vault {
         if full.is_dir() {
             return Err(format!("not a file: {path}"));
         }
+        let existing = match fs::read(&full) {
+            Ok(bytes) => Some(String::from_utf8(bytes).map_err(|_| "Note is not UTF-8".to_string())?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.to_string()),
+        };
+        let written = self.observe_format(&rel, existing.as_deref()).apply(content);
         self.mark_own(&rel);
-        if let Err(e) = atomic_write(&full, content.as_bytes()) {
+        if let Err(e) = atomic_write(&full, written.as_bytes()) {
             self.own_writes.remove(&rel);
             return Err(e.to_string());
         }
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
+        self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
+        self.remember_id(&rel);
         Ok(())
+    }
+
+    fn observe_format(&self, rel: &str, existing: Option<&str>) -> NoteFormat {
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = formats.get(rel).copied().unwrap_or_default();
+        let fmt = existing.map_or_else(NoteFormat::default, |s| NoteFormat {
+            bom: if s.is_empty() { prev.bom } else { s.starts_with('\u{feff}') },
+            crlf: if s.contains("\r\n") { true } else if s.contains('\n') { false } else { prev.crlf },
+        });
+        if fmt.bom || fmt.crlf {
+            formats.insert(rel.to_string(), fmt);
+        } else {
+            formats.remove(rel);
+        }
+        fmt
+    }
+
+    fn relocate_formats(&self, from: &str, to: &str) {
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        // The destination was not on disk, so any cache there is stale. Drop it
+        // even when the source has no format. A watcher echo is not this path.
+        evict_format_tree(&mut formats, to);
+        relocate_format_map(&mut formats, from, to, &mut HashSet::new(), &mut HashSet::new());
+    }
+
+    fn remove_formats(&self, rel: &str) {
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        evict_format_tree(&mut formats, rel);
     }
 
     /// A new attachment's bytes. The same path checks as `write_note` (inside the vault, no `..`,
@@ -146,6 +208,7 @@ impl Vault {
             return Err(e.to_string());
         }
         self.index.refresh_path(&self.root, &rel);
+        self.remember_id(&rel);
         Ok((self.entry_for(&rel), existed))
     }
 
@@ -155,8 +218,11 @@ impl Vault {
             return Err(format!("already exists: {rel}"));
         }
         atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
+        self.remove_formats(&rel);
+        self.observe_format(&rel, Some(content));
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
+        self.remember_id(&rel);
         Ok(self.entry_for(&rel))
     }
 
@@ -169,6 +235,7 @@ impl Vault {
         }
         fs::create_dir_all(&full).map_err(|e| e.to_string())?;
         self.index.refresh_path(&self.root, &rel);
+        self.remember_id(&rel);
         Ok(self.entry_for(&rel))
     }
 
@@ -191,6 +258,7 @@ impl Vault {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         fs::rename(&from_full, &to_full).map_err(|e| e.to_string())?;
+        self.relocate_formats(&from_rel, &to_rel);
         // One map rebuild for the move and the reload of the destination.
         {
             let root = &self.root;
@@ -198,6 +266,8 @@ impl Vault {
             batch.relocate(&from_rel, &to_rel);
             batch.refresh_path(root, &to_rel);
         }
+        self.relocate_ids(&from_rel, &to_rel);
+        self.remember_id(&to_rel);
         Ok(())
     }
 
@@ -223,6 +293,8 @@ impl Vault {
             }
             fs::rename(&full, &dest).map_err(|e| e.to_string())?;
         }
+        self.remove_formats(&rel);
+        self.forget_id_tree(&rel);
         self.index.remove_tree(&rel);
         Ok(())
     }
@@ -280,28 +352,103 @@ impl Vault {
 
     /// Apply a watcher batch. Name maps rebuild once, after every path is updated.
     pub fn apply(&mut self, changes: &[VaultChanged]) {
-        let root = &self.root;
-        let mut batch = self.index.map_batch();
+        // One departed identity for each indexed rename source that is no
+        // longer the file on disk. Captured before `map_batch`. A path that
+        // still matches the index is a later file, or the same file back from
+        // a round trip, and is not a move. Landing replaces the identity
+        // already at the destination instead of leaving it to be spent again.
+        let mut at: HashMap<String, u64> = HashMap::new();
+        let mut stayed: HashSet<String> = HashSet::new();
+        let mut next_id = 1u64;
         for change in changes {
-            match change.kind {
-                ChangeKind::Remove => {
-                    for path in &change.paths {
-                        batch.remove_tree(path);
-                    }
+            if change.kind != ChangeKind::Rename || change.paths.len() != 2 {
+                continue;
+            }
+            for path in [&change.paths[0], &change.paths[1]] {
+                if stayed.contains(path) || at.contains_key(path) {
+                    continue;
                 }
-                ChangeKind::Rename => {
-                    if change.paths.len() == 2 {
-                        batch.relocate(&change.paths[0], &change.paths[1]);
-                        batch.refresh_path(root, &change.paths[1]);
-                    }
+                if self.index.contains(path) && indexed_path_remains(&self.root, &self.index, path, self.ids.get(path).copied()) {
+                    stayed.insert(path.clone());
                 }
-                ChangeKind::Create | ChangeKind::Modify => {
-                    for path in &change.paths {
-                        batch.refresh_path(root, path);
+            }
+            let from = &change.paths[0];
+            if !at.contains_key(from) && self.index.contains(from) && !stayed.contains(from) {
+                at.insert(from.clone(), next_id);
+                next_id += 1;
+            }
+        }
+        {
+            let root = &self.root;
+            let mut batch = self.index.map_batch();
+            for change in changes {
+                match change.kind {
+                    ChangeKind::Remove => {
+                        for path in &change.paths {
+                            batch.remove_tree(path);
+                        }
+                    }
+                    ChangeKind::Rename => {
+                        if change.paths.len() == 2 {
+                            batch.relocate(&change.paths[0], &change.paths[1]);
+                            batch.refresh_path(root, &change.paths[1]);
+                        }
+                    }
+                    ChangeKind::Create | ChangeKind::Modify => {
+                        for path in &change.paths {
+                            batch.refresh_path(root, path);
+                        }
                     }
                 }
             }
         }
+        self.track_ids(changes);
+        // The batch above relocates every rename, including an echo of a move
+        // the app already applied. Put a source that is still the indexed file
+        // back, or the final format prune drops it and the file list loses it.
+        self.restore_echo_sources(&stayed, changes);
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        if formats.is_empty() {
+            return;
+        }
+        let mut evict = HashSet::new();
+        // Notes whose format this batch just moved. A create of their new parent
+        // folder is also in `evict` and must not drop that relocated identity.
+        let mut kept = HashSet::new();
+        for change in changes {
+            match change.kind {
+                ChangeKind::Remove | ChangeKind::Create => {
+                    evict.extend(change.paths.iter().map(String::as_str));
+                }
+                ChangeKind::Rename if change.paths.len() == 2 => {
+                    let from = &change.paths[0];
+                    let to = &change.paths[1];
+                    if from == to {
+                        continue;
+                    }
+                    // No departed identity: the app already moved this path, or
+                    // this hop was already consumed. Leave both caches where
+                    // they are. Relocating here would copy a reused source's
+                    // format onto the destination.
+                    let Some(id) = at.remove(from) else {
+                        continue;
+                    };
+                    // The indexed file is still at `to`, so this move did not
+                    // replace it (a round trip that ended back on that path).
+                    if stayed.contains(to) {
+                        continue;
+                    }
+                    at.remove(to);
+                    evict_format_tree(&mut formats, to);
+                    at.insert(to.clone(), id);
+                    relocate_format_map(&mut formats, from, to, &mut evict, &mut kept);
+                }
+                _ => {}
+            }
+        }
+        formats.retain(|k, _| {
+            self.index.contains(k) && !self.index.is_dir(k) && (kept.contains(k) || !has_prefix_in(k, &evict))
+        });
     }
 
     /// Start recording index mutations before releasing the state lock to scan.
@@ -344,6 +491,11 @@ impl Vault {
             }
         }
         self.index = fresh;
+        let created_set: HashSet<&str> = created.iter().map(String::as_str).collect();
+        self.formats
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|k, _| self.index.contains(k) && !self.index.is_dir(k) && !has_prefix_in(k, &created_set));
         let mut out = Vec::new();
         push_change(&mut out, ChangeKind::Remove, removed);
         push_change(&mut out, ChangeKind::Create, created);
@@ -357,12 +509,169 @@ impl Vault {
         self.own_writes.insert(rel.to_string(), now + OWN_WRITE);
     }
 
+    fn remember_id(&mut self, rel: &str) {
+        let Ok(md) = fs::symlink_metadata(self.root.join(rel)) else {
+            self.ids.remove(rel);
+            return;
+        };
+        if let Some(id) = file_id(&md) {
+            self.ids.insert(rel.to_string(), id);
+        }
+    }
+
+    fn forget_id_tree(&mut self, rel: &str) {
+        let prefix = format!("{rel}/");
+        self.ids.retain(|k, _| k != rel && !k.starts_with(&prefix));
+    }
+
+    fn relocate_ids(&mut self, from: &str, to: &str) {
+        if from == to || self.ids.is_empty() {
+            return;
+        }
+        let prefix = format!("{from}/");
+        let keys: Vec<String> = self
+            .ids
+            .keys()
+            .filter(|k| *k == from || k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(id) = self.ids.remove(&key) {
+                let dest = if key == from { to.to_string() } else { format!("{to}{}", &key[from.len()..]) };
+                self.ids.insert(dest, id);
+            }
+        }
+    }
+
+    /// The index batch already ran. Point stored ids at the files now on disk.
+    fn track_ids(&mut self, changes: &[VaultChanged]) {
+        for change in changes {
+            match change.kind {
+                ChangeKind::Remove => {
+                    for path in &change.paths {
+                        self.forget_id_tree(path);
+                    }
+                }
+                ChangeKind::Rename if change.paths.len() == 2 => {
+                    self.relocate_ids(&change.paths[0], &change.paths[1]);
+                    self.remember_id(&change.paths[1]);
+                    self.remember_id(&change.paths[0]);
+                }
+                ChangeKind::Create | ChangeKind::Modify => {
+                    for path in &change.paths {
+                        self.remember_id(path);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `map_batch` already ran. A verified echo still relocated the source's
+    /// index node. When that file is on disk, index it again. The destination
+    /// stays as the batch refreshed it. Name maps rebuild once.
+    fn restore_echo_sources(&mut self, stayed: &HashSet<String>, changes: &[VaultChanged]) {
+        let mut missing: Vec<&str> = Vec::new();
+        for change in changes {
+            if change.kind != ChangeKind::Rename || change.paths.len() != 2 {
+                continue;
+            }
+            let from = change.paths[0].as_str();
+            if from == change.paths[1].as_str() || !stayed.contains(from) || self.index.contains(from) {
+                continue;
+            }
+            if !missing.contains(&from) {
+                missing.push(from);
+            }
+        }
+        if missing.is_empty() {
+            return;
+        }
+        let root = &self.root;
+        let mut batch = self.index.map_batch();
+        for path in missing {
+            batch.refresh_path(root, path);
+        }
+    }
+
     fn entry_for(&self, rel: &str) -> FileEntry {
         self.index.entry(rel).unwrap_or_else(|| FileEntry {
             path: rel.to_string(),
             name: rel.to_string(),
             ..FileEntry::default()
         })
+    }
+}
+
+fn has_prefix_in(path: &str, set: &HashSet<&str>) -> bool {
+    !set.is_empty() && (set.contains(path) || path.match_indices('/').any(|(i, _)| set.contains(&path[..i])))
+}
+
+/// Whether `rel` still has the node the index recorded. False after a real
+/// rename (the path is gone or a different file is there). `known` is the
+/// device and inode from the last vault write; a same-size replace can share
+/// a stamp. Directories without an id are compared by modified time only.
+fn indexed_path_remains(root: &Path, index: &Index, rel: &str, known: Option<(u64, u64)>) -> bool {
+    let Some(stamp) = index.stamp(rel) else {
+        return false;
+    };
+    let Ok(md) = fs::symlink_metadata(root.join(rel)) else {
+        return false;
+    };
+    if md.is_dir() != index.is_dir(rel) {
+        return false;
+    }
+    if let (Some(known), Some(now)) = (known, file_id(&md)) {
+        return known == now;
+    }
+    if md.is_dir() {
+        return fsutil::mtime_ms(&md) == stamp.mtime_ms;
+    }
+    Stamp::of(&md) == stamp
+}
+
+/// Device and inode, so two files written in one clock tick stay distinct.
+fn file_id(md: &fs::Metadata) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some((md.dev(), md.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = md;
+        None
+    }
+}
+
+fn evict_format_tree(formats: &mut HashMap<String, NoteFormat>, rel: &str) {
+    let prefix = format!("{rel}/");
+    formats.retain(|k, _| k != rel && !k.starts_with(&prefix));
+}
+
+fn relocate_format_map(
+    formats: &mut HashMap<String, NoteFormat>,
+    from: &str,
+    to: &str,
+    evict: &mut HashSet<&str>,
+    kept: &mut HashSet<String>,
+) {
+    if from == to || formats.is_empty() {
+        return;
+    }
+    let prefix = format!("{from}/");
+    let keys: Vec<String> = formats
+        .keys()
+        .filter(|k| (*k == from || k.starts_with(&prefix)) && !has_prefix_in(k, evict))
+        .cloned()
+        .collect();
+    for key in keys {
+        if let Some(fmt) = formats.remove(&key) {
+            let dest = if key == from { to.to_string() } else { format!("{to}{}", &key[from.len()..]) };
+            evict.remove(dest.as_str());
+            kept.insert(dest.clone());
+            formats.insert(dest, fmt);
+        }
     }
 }
 
@@ -414,6 +723,15 @@ mod tests {
         vault.list_files().into_iter().find(|e| e.path == path).unwrap()
     }
 
+    fn rename_both(root: &Path, from: &str, to: &str, tracker: usize) -> notify::Event {
+        notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::Both,
+        )))
+        .add_path(root.join(from))
+        .add_path(root.join(to))
+        .set_tracker(tracker)
+    }
+
     #[test]
     fn canvas_is_listed_and_read_without_rewriting_unknown_fields() {
         let dir = tmp_dir("canvas");
@@ -423,6 +741,682 @@ mod tests {
         assert!(vault.list_files().iter().any(|f| f.path == "Board.canvas"));
         assert_eq!(vault.read_note("Board.canvas").unwrap(), source);
         assert_eq!(fs::read_to_string(dir.path.join("Board.canvas")).unwrap(), source);
+    }
+
+    #[test]
+    fn crlf_and_lf_notes_keep_their_line_endings_on_save() {
+        let dir = tmp_dir("eol-crlf");
+        fs::write(dir.path.join("Crlf.md"), "first\r\nsecond\r\n").unwrap();
+        fs::write(dir.path.join("Lf.md"), "first\nsecond\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("Crlf.md", "first\nrevised\n").unwrap();
+        vault.write_note("Lf.md", "first\nrevised\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Crlf.md")).unwrap(), "first\r\nrevised\r\n");
+        assert_eq!(fs::read_to_string(dir.path.join("Lf.md")).unwrap(), "first\nrevised\n");
+    }
+
+    #[test]
+    fn utf8_bom_is_preserved_and_bomless_notes_do_not_gain_one() {
+        let dir = tmp_dir("eol-bom");
+        fs::write(dir.path.join("Bom.md"), "\u{feff}first\nsecond\n").unwrap();
+        fs::write(dir.path.join("Plain.md"), "first\nsecond\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let text = vault.read_note("Bom.md").unwrap();
+        assert_eq!(text, "first\nsecond\n");
+        vault.write_note("Bom.md", &text.replace("second", "revised")).unwrap();
+        vault.write_note("Plain.md", "first\nrevised\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Bom.md")).unwrap(), "\u{feff}first\nrevised\n");
+        assert_eq!(fs::read_to_string(dir.path.join("Plain.md")).unwrap(), "first\nrevised\n");
+    }
+
+    #[test]
+    fn bom_and_crlf_round_trip_while_new_notes_stay_lf_without_bom() {
+        let dir = tmp_dir("eol-both");
+        fs::write(dir.path.join("Win.md"), "\u{feff}---\r\nstatus: todo\r\n---\r\nbody\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let editor_doc = vault.read_note("Win.md").unwrap().replace("\r\n", "\n");
+        vault.write_note("Win.md", &editor_doc.replace("todo", "done")).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path.join("Win.md")).unwrap(),
+            "\u{feff}---\r\nstatus: done\r\n---\r\nbody\r\n"
+        );
+        vault.write_note("New.md", "fresh\nnote\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("New.md")).unwrap(), "fresh\nnote\n");
+        vault.create_note("Created.md", "").unwrap();
+        vault.write_note("Created.md", "fresh\nnote\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Created.md")).unwrap(), "fresh\nnote\n");
+    }
+
+    #[test]
+    fn write_note_does_not_overwrite_non_utf8_bytes_with_replacement_chars() {
+        let dir = tmp_dir("eol-utf8");
+        fs::write(dir.path.join("Latin1.md"), b"caf\xe9\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let lossy = vault.read_note("Latin1.md").unwrap();
+        assert_eq!(lossy, "caf\u{fffd}\r\n");
+        assert!(vault.write_note("Latin1.md", &lossy.replace("\r\n", "\n")).is_err());
+        assert_eq!(fs::read(dir.path.join("Latin1.md")).unwrap(), b"caf\xe9\r\n");
+    }
+
+    #[test]
+    fn crlf_and_bom_survive_single_line_or_empty_saves_and_renames() {
+        let dir = tmp_dir("eol-single");
+        fs::write(dir.path.join("Crlf.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("Empty.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        fs::write(dir.path.join("sub/Move.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("Crlf.md", "single").unwrap();
+        vault.write_note("Crlf.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Crlf.md")).unwrap(), "single\r\nnext");
+
+        vault.write_note("Empty.md", "").unwrap();
+        vault.write_note("Empty.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Empty.md")).unwrap(), "\u{feff}single\r\nnext");
+
+        vault.write_note("sub/Move.md", "single").unwrap();
+        vault.rename_path("sub/Move.md", "sub/Renamed.md").unwrap();
+        vault.rename_path("sub", "moved").unwrap();
+        vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
+    }
+
+    #[test]
+    fn failed_rename_keeps_original_format_and_leaves_destination_uncached() {
+        let dir = tmp_dir("eol-fail-rename");
+        fs::write(dir.path.join("Orig.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("blocker"), "x").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("Orig.md", "single").unwrap();
+        assert!(vault.rename_path("Orig.md", "blocker/Dest.md").is_err());
+        vault.write_note("Orig.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Orig.md")).unwrap(), "single\r\nnext");
+        assert!(!vault.formats.lock().unwrap().contains_key("blocker/Dest.md"));
+    }
+
+    #[test]
+    fn watcher_apply_and_rescan_maintain_and_prune_format_cache() {
+        let dir = tmp_dir("eol-watch-rescan");
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        fs::write(dir.path.join("sub/Note.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("Gone.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("sub/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("sub/Note.md"), dir.path.join("sub/Renamed.md")).unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub/Note.md".into(), "sub/Renamed.md".into()],
+        }]);
+        fs::rename(dir.path.join("sub"), dir.path.join("moved")).unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub".into(), "moved".into()],
+        }]);
+        let atomic = vault.normalize(vec![VaultChanged {
+            kind: ChangeKind::Create,
+            paths: vec!["moved/Renamed.md".into()],
+        }]);
+        vault.apply(&atomic);
+        vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
+
+        vault.write_note("Gone.md", "single").unwrap();
+        fs::remove_file(dir.path.join("Gone.md")).unwrap();
+        vault.apply(&[VaultChanged { kind: ChangeKind::Remove, paths: vec!["Gone.md".into()] }]);
+        fs::write(dir.path.join("Gone.md"), "fresh").unwrap();
+        vault.apply(&[VaultChanged { kind: ChangeKind::Create, paths: vec!["Gone.md".into()] }]);
+        vault.write_note("Gone.md", "fresh\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Gone.md")).unwrap(), "fresh\nnext");
+
+        for i in 0..5 {
+            let p = format!("churn-{i}.md");
+            fs::write(dir.path.join(&p), "a\r\nb\r\n").unwrap();
+            vault.read_note(&p).unwrap();
+            fs::remove_file(dir.path.join(&p)).unwrap();
+        }
+        assert_eq!(vault.formats.lock().unwrap().len(), 6);
+        let token = vault.begin_rescan();
+        let fresh = Index::scan(&vault.root);
+        vault.finish_rescan(&token, fresh);
+        let formats = vault.formats.lock().unwrap();
+        assert_eq!(formats.len(), 1);
+        assert!(formats.contains_key("moved/Renamed.md"));
+    }
+
+    #[test]
+    fn app_rename_watcher_echo_preserves_cached_format() {
+        let dir = tmp_dir("eol-rename-echo");
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        fs::write(dir.path.join("sub/Note.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("sub/Note.md", "single").unwrap();
+        vault.rename_path("sub/Note.md", "sub/Renamed.md").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub/Note.md".into(), "sub/Renamed.md".into()],
+        }]);
+        vault.rename_path("sub", "moved").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub".into(), "moved".into()],
+        }]);
+        vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
+    }
+
+    #[test]
+    fn chained_watcher_renames_and_batched_eviction_keep_and_prune_formats() {
+        let dir = tmp_dir("eol-chain-rename");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::create_dir(dir.path.join("dir1")).unwrap();
+        fs::write(dir.path.join("dir1/Note.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("A.md", "single").unwrap();
+        vault.write_note("dir1/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("C.md")).unwrap();
+        fs::rename(dir.path.join("dir1"), dir.path.join("dir3")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir2".into(), "dir3".into()] },
+        ]);
+        vault.write_note("C.md", "single\nnext").unwrap();
+        vault.write_note("dir3/Note.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("C.md")).unwrap(), "single\r\nnext");
+        assert_eq!(fs::read_to_string(dir.path.join("dir3/Note.md")).unwrap(), "\u{feff}single\r\nnext");
+
+        let removed: Vec<String> = (0..200)
+            .map(|i| {
+                let p = format!("bulk/item-{i}.md");
+                vault.observe_format(&p, Some("a\r\nb\r\n"));
+                p
+            })
+            .collect();
+        let start = Instant::now();
+        vault.apply(&[VaultChanged { kind: ChangeKind::Remove, paths: removed }]);
+        assert!(start.elapsed() < Duration::from_millis(50));
+        assert_eq!(vault.formats.lock().unwrap().len(), 2);
+    }
+
+    /// Create of the destination folder must not drop a format just moved into it.
+    #[test]
+    fn destination_dir_create_keeps_relocated_crlf_format() {
+        let dir = tmp_dir("eol-dest-dir");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::create_dir(dir.path.join("New")).unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("New/A.md")).unwrap();
+        let create = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::Folder))
+            .add_path(dir.path.join("New"));
+        let rename = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::Both,
+        )))
+        .add_path(dir.path.join("A.md"))
+        .add_path(dir.path.join("New/A.md"))
+        .set_tracker(1);
+        let changes = vault.normalize(crate::watch::coalesce(&dir.path, &[create, rename], |_| false));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "New/A.md".into()] },
+                VaultChanged { kind: ChangeKind::Create, paths: vec!["New".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("New/A.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("New/A.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// An app rename onto an externally deleted path must not inherit that path's old format.
+    #[test]
+    fn external_delete_then_app_rename_drops_stale_destination_format() {
+        let dir = tmp_dir("eol-stale-dest");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        fs::write(dir.path.join("B.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.write_note("B.md", "single").unwrap();
+        fs::remove_file(dir.path.join("B.md")).unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        // The watcher echo of that rename must not put the stale format back.
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\nnext");
+    }
+
+    /// External delete of B then rename of A onto B, coalesced to one Rename.
+    /// A plain LF source must not inherit B's cached CRLF or BOM.
+    #[test]
+    fn external_delete_and_rename_does_not_inherit_destination_format() {
+        fn case(label: &str, source_save: &str, dest_seed: &str, dest_save: &str) -> String {
+            let dir = tmp_dir(label);
+            fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+            fs::write(dir.path.join("B.md"), dest_seed).unwrap();
+            let mut vault = Vault::open(dir.path.clone()).unwrap();
+            vault.write_note("A.md", source_save).unwrap();
+            vault.write_note("B.md", dest_save).unwrap();
+            fs::remove_file(dir.path.join("B.md")).unwrap();
+            fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+            let remove = notify::Event::new(notify::EventKind::Remove(notify::event::RemoveKind::File))
+                .add_path(dir.path.join("B.md"));
+            let rename = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+                notify::event::RenameMode::Both,
+            )))
+            .add_path(dir.path.join("A.md"))
+            .add_path(dir.path.join("B.md"))
+            .set_tracker(1);
+            let changes = vault.normalize(crate::watch::coalesce(&dir.path, &[remove, rename], |_| false));
+            assert_eq!(
+                changes,
+                vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+            );
+            vault.apply(&changes);
+            vault.write_note("B.md", "single\nnext").unwrap();
+            fs::read_to_string(dir.path.join("B.md")).unwrap()
+        }
+        let lf = case("eol-ext-rename-lf", "single", "a\r\nb\r\n", "single");
+        let bom = case("eol-ext-rename-bom", "", "\u{feff}a\r\nb\r\n", "");
+        assert_eq!((lf.as_str(), bom.as_str()), ("single\nnext", "single\nnext"));
+    }
+
+    /// Two coalesced `Rename(A, B)` records (distinct trackers). The second must
+    /// not wipe the format the first one just moved.
+    #[test]
+    fn replay_duplicate_coalesced_file_rename_keeps_crlf() {
+        let dir = tmp_dir("eol-replay-file");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[
+                rename_both(&dir.path, "A.md", "B.md", 1),
+                rename_both(&dir.path, "A.md", "B.md", 2),
+            ],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// Same replay for a folder: the note moved with the folder keeps CRLF.
+    #[test]
+    fn replay_duplicate_coalesced_folder_rename_keeps_crlf() {
+        let dir = tmp_dir("eol-replay-folder");
+        fs::create_dir(dir.path.join("dir1")).unwrap();
+        fs::write(dir.path.join("dir1/Note.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("dir1/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("dir1"), dir.path.join("dir2")).unwrap();
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[
+                rename_both(&dir.path, "dir1", "dir2", 1),
+                rename_both(&dir.path, "dir1", "dir2", 2),
+            ],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("dir2/Note.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("dir2/Note.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// A later hop repeated in the same batch must not drop the format the first
+    /// hop already carried forward.
+    #[test]
+    fn replay_repeated_chain_hop_keeps_crlf() {
+        let dir = tmp_dir("eol-replay-hop");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::create_dir(dir.path.join("dir1")).unwrap();
+        fs::write(dir.path.join("dir1/Note.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.write_note("dir1/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("C.md")).unwrap();
+        fs::rename(dir.path.join("dir1"), dir.path.join("dir3")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir2".into(), "dir3".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir2".into(), "dir3".into()] },
+        ]);
+        vault.write_note("C.md", "single\nnext").unwrap();
+        vault.write_note("dir3/Note.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("C.md")).unwrap(), "single\r\nnext");
+        assert_eq!(fs::read_to_string(dir.path.join("dir3/Note.md")).unwrap(), "\u{feff}single\r\nnext");
+    }
+
+    /// App rename, then a new plain file at the old path, then the watcher echo.
+    /// The echo is the old move, not a move of the new file.
+    #[test]
+    fn replay_app_rename_reused_source_echo_keeps_crlf() {
+        let dir = tmp_dir("eol-echo-reused");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "plain\n").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// The new file at the old path really is renamed onto the destination.
+    /// That replacement still drops the format the app move left behind.
+    #[test]
+    fn replay_reused_source_external_rename_drops_stale_format() {
+        let dir = tmp_dir("eol-reused-real");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "plain\n").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[rename_both(&dir.path, "A.md", "B.md", 1)],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+        );
+        vault.apply(&changes);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\nnext");
+    }
+
+    /// A → B → A → B in one batch is a second real move, not a duplicate pair.
+    /// The format has to finish on B.
+    #[test]
+    fn replay_round_trip_keeps_crlf_on_the_final_hop() {
+        let dir = tmp_dir("eol-round-trip");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "A.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+        ]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// App rename of a plain single-line note, then a new CRLF file at the old
+    /// path, then the delayed echo. The echo must not give B the new file's
+    /// endings, and the new file keeps its own.
+    #[test]
+    fn replay_app_echo_keeps_reused_crlf_source_and_lf_dest() {
+        let dir = tmp_dir("eol-echo-crlf-src");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "a\r\nb\r\n").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        vault.write_note("A.md", "a\nnext\n").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+            ),
+            ("single\nnext".to_string(), "a\r\nnext\r\n".to_string())
+        );
+    }
+
+    /// The echo also must not replace a destination that already remembers CRLF
+    /// with the new file's format.
+    #[test]
+    fn replay_app_echo_keeps_dest_crlf_when_reused_source_has_bom() {
+        let dir = tmp_dir("eol-echo-bom-src");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "\u{feff}only\n").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        vault.write_note("A.md", "only\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+            ),
+            ("single\r\nnext".to_string(), "\u{feff}only\nnext".to_string())
+        );
+    }
+
+    /// B was indexed, then deleted, and A moved A → B → C. A second B → C must
+    /// not clear C. Coalesce drops the delete because B is a rename endpoint.
+    #[test]
+    fn replay_preindexed_intermediate_hop_keeps_crlf() {
+        let dir = tmp_dir("eol-indexed-hop");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("B.md"), "other\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::remove_file(dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("B.md"), dir.path.join("C.md")).unwrap();
+        let remove = notify::Event::new(notify::EventKind::Remove(notify::event::RemoveKind::File))
+            .add_path(dir.path.join("B.md"));
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[
+                remove,
+                rename_both(&dir.path, "A.md", "B.md", 1),
+                rename_both(&dir.path, "B.md", "C.md", 2),
+                rename_both(&dir.path, "B.md", "C.md", 3),
+            ],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("C.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("C.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// External A → B → A finishes with the original file back at A. B was
+    /// indexed and is gone. That must not clear A's remembered CRLF.
+    #[test]
+    fn replay_round_trip_back_to_resident_source_keeps_crlf() {
+        let dir = tmp_dir("eol-round-trip-home");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("B.md"), "other\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::remove_file(dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        fs::rename(dir.path.join("B.md"), dir.path.join("A.md")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "A.md".into()] },
+        ]);
+        vault.write_note("A.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("A.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// Single-line save before the echo. CRLF is only in the cache, so pruning
+    /// the recreated source cannot be repaired from the bytes on disk.
+    #[test]
+    fn replay_echo_single_line_keeps_reused_crlf_source() {
+        let dir = tmp_dir("eol-echo-single-crlf");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "a\r\nb\r\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("only\r\nnext".to_string(), "single\nnext".to_string())
+        );
+    }
+
+    /// Same echo, with the new source remembering a BOM and the destination
+    /// remembering CRLF. Both files stay indexed and keep their own bytes.
+    #[test]
+    fn replay_echo_single_line_keeps_reused_bom_source() {
+        let dir = tmp_dir("eol-echo-single-bom");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "\u{feff}only\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("\u{feff}only\nnext".to_string(), "single\r\nnext".to_string())
+        );
+    }
+
+    /// Coalesce drops creates and modifies on a rename endpoint, so the echo
+    /// batch has no later refresh of the recreated source.
+    #[test]
+    fn replay_echo_single_line_coalesce_keeps_reused_crlf_source() {
+        let dir = tmp_dir("eol-echo-single-crlf-coalesce");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "a\r\nb\r\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        let create = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::File))
+            .add_path(dir.path.join("A.md"));
+        let modify = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Data(
+            notify::event::DataChange::Any,
+        )))
+        .add_path(dir.path.join("A.md"));
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[create, rename_both(&dir.path, "A.md", "B.md", 1), modify],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+        );
+        vault.apply(&changes);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("only\r\nnext".to_string(), "single\nnext".to_string())
+        );
+    }
+
+    /// The coalesced echo also keeps a BOM-only cache on the recreated source
+    /// and the CRLF cache on the destination.
+    #[test]
+    fn replay_echo_single_line_coalesce_keeps_reused_bom_source() {
+        let dir = tmp_dir("eol-echo-single-bom-coalesce");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "\u{feff}only\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        let create = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::File))
+            .add_path(dir.path.join("A.md"));
+        let modify = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Data(
+            notify::event::DataChange::Any,
+        )))
+        .add_path(dir.path.join("A.md"));
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[create, rename_both(&dir.path, "A.md", "B.md", 1), modify],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+        );
+        vault.apply(&changes);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("\u{feff}only\nnext".to_string(), "single\r\nnext".to_string())
+        );
     }
 
     #[test]
