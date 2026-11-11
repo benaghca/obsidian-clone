@@ -220,9 +220,13 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
 
   // The editor is created just below and fills this in. A gesture still in progress waits.
   const gate = { busy: () => false, prepare: (): string | null => null };
+  // Filled in once the editor exists. A clean sibling copies the saved scene
+  // into its own model; the writing view is not called.
+  let takeSibling = (_text: string) => {};
   const owned = attachDrawing(path, {
     postpone: () => gate.busy(),
     prepare: () => gate.prepare(),
+    adopt: (text) => takeSibling(text),
     begin: (text) => {
       textSeen = text;
       ours.push(text);
@@ -267,6 +271,18 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   gate.prepare = () => {
     editor.endLive();
     return scene ? serializeScene(scene) : null;
+  };
+  takeSibling = (text) => {
+    const parsed = parseScene(text);
+    if (!parsed.ok || text === textSeen) return;
+    scene = parsed.scene;
+    textSeen = text;
+    ours.length = 0;
+    const dark = document.documentElement.classList.contains("theme-dark");
+    darkSeen = dark;
+    editor.reset();
+    if (text.length > HEAVY_TEXT) paint(parsed.scene, dark);
+    else mount(text, dark);
   };
 
   function load() {

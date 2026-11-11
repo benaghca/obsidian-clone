@@ -18,8 +18,10 @@ import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
 import { configEffects } from "./editor/config";
 import { retryDelay } from "./fileSave";
+import { drainingHold } from "./holdDrain";
 import { writesSealed } from "./saveSeal";
-import { writeVaultNote } from "./vaultWrite";
+import { backendRoot, bumpPathGen, pathGen } from "./vaultRoot";
+import { queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
@@ -45,6 +47,8 @@ interface Pane {
 interface SaveSlot {
   path: string;
   job?: Promise<boolean>;
+  /** Generation of the edit this slot is saving. A newer one wins. */
+  gen?: number;
 }
 
 /** What the editors tell the workspace. */
@@ -336,7 +340,10 @@ export class NoteEditors {
     for (const tr of trs) {
       if (!tr.docChanged || tr.annotation(copied)) continue;
       this.forward(path, tr, view);
-      if (!tr.isUserEvent("external")) this.scheduleSave(path);
+      if (!tr.isUserEvent("external")) {
+        this.slot(path).gen = bumpPathGen(path);
+        this.scheduleSave(path);
+      }
     }
     this.events.changed();
   }
@@ -437,7 +444,10 @@ export class NoteEditors {
     if (!state) return;
     const tr = state.update(spec);
     this.states.set(path, tr.state);
-    if (tr.docChanged && !tr.isUserEvent("external")) this.scheduleSave(path);
+    if (tr.docChanged && !tr.isUserEvent("external")) {
+      this.slot(path).gen = bumpPathGen(path);
+      this.scheduleSave(path);
+    }
   }
 
   /** A loaded note changed on disk (not by us, nothing unsaved): take the new text. */
@@ -534,10 +544,10 @@ export class NoteEditors {
     return this.pending(which).size > 0;
   }
 
-  /** A seal blocks every write. A hold blocks timers; an explicit flush still writes. */
-  private blocked(path: string, eager: boolean): boolean {
+  /** A seal blocks every write. A hold blocks every write except the drain that runs before the rename or delete. */
+  private blocked(path: string): boolean {
     if (writesSealed()) return true;
-    if (eager) return false;
+    if (drainingHold()) return false;
     return this.holds.some((under) => under(path));
   }
 
@@ -578,7 +588,7 @@ export class NoteEditors {
       });
     }
     let job!: Promise<boolean>;
-    const written = this.write(slot, eager).finally(() => {
+    const written = this.write(slot).finally(() => {
       if (slot.job === job) slot.job = undefined;
     });
     job = written.then((ok) => {
@@ -594,7 +604,7 @@ export class NoteEditors {
     return job;
   }
 
-  private async write(slot: SaveSlot, eager = false): Promise<boolean> {
+  private async write(slot: SaveSlot): Promise<boolean> {
     this.clearTimer(this.saveTimers, slot.path);
     this.clearTimer(this.retryTimers, slot.path);
     const path = slot.path;
@@ -603,15 +613,22 @@ export class NoteEditors {
       this.dirty.delete(path);
       return true;
     }
-    if (this.blocked(path, eager)) {
+    if (this.blocked(path)) {
       this.dirty.add(path);
       this.scheduleSave(path);
       return false;
     }
+    // A direct write accepted after this edit owns the path. Do not put the older text back.
+    // Leave it dirty when that write is still queued, so a delete will not skip it.
+    if (slot.gen !== undefined && pathGen(path) > slot.gen) {
+      const queued = queuedNote(backendRoot(), path);
+      if (!queued) this.dirty.delete(path);
+      return !queued;
+    }
     const text = state.doc.toString();
     let failed = false;
     try {
-      const status = await writeVaultNote(path, text);
+      const status = await writeVaultNote(path, text, undefined, slot.gen);
       if (status !== "sent") {
         this.dirty.add(path);
         this.scheduleSave(path);
@@ -651,6 +668,17 @@ export class NoteEditors {
     this.retryAttempt.delete(landed);
     this.events.saved(landed);
     return true;
+  }
+
+  /** Dirty note text, for a vault handoff that has to survive reload. */
+  snapshot(): { path: string; text: string; gen: number }[] {
+    const out: { path: string; text: string; gen: number }[] = [];
+    for (const path of this.dirty) {
+      const text = this.states.get(path)?.doc.toString();
+      if (text === undefined) continue;
+      out.push({ path, text, gen: this.slots.get(path)?.gen ?? pathGen(path) });
+    }
+    return out;
   }
 
   /** Paths with a waiting edit, a timer, or a write still in flight. */

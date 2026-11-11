@@ -9,6 +9,8 @@ import { deleteFile, renameFile, updateNoteText } from "./fileOps";
 import { NoteEditors } from "./noteEditors";
 import { installPathBarrier, usePathPeers } from "./pathBarrier";
 import { unsealWrites, writesSealed } from "./saveSeal";
+import { resetBackendRootForTests } from "./vaultRoot";
+import { resetHandoffForTests } from "./vaultWrite";
 import { settings } from "./settings/store";
 import {
   commitVaultSwitch,
@@ -65,6 +67,8 @@ beforeEach(() => {
 afterEach(async () => {
   resetVaultSwitchForTests();
   unsealWrites();
+  resetHandoffForTests();
+  resetBackendRootForTests();
   usePathPeers(undefined);
   discardCanvases(() => true);
   discardDrawings(() => true);

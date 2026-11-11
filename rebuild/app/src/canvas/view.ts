@@ -72,6 +72,14 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   let selectAfterDraw: string | undefined, editAfterDraw: string | undefined, building = false, cancelAutoEdit = 0;
   const owned = attachCanvas(path, {
     onWrote: () => { ws.vault.written(owned.path()); },
+    // A sibling pane adopts the saved board. It does not drop, and it does not become dirty.
+    adopt: (text) => {
+      if (text === source) return;
+      source = text;
+      undo = [];
+      redo = [];
+      void draw();
+    },
   });
   function save() { return owned.flush(); }
   function changed(next: string, redraw = false) {

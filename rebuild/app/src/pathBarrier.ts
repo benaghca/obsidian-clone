@@ -2,12 +2,15 @@
 // saves of that path first. Holds are per page, so a pop-out would otherwise
 // write the old path back after this window moved or trashed it.
 
+import { retryDelay } from "./fileSave";
+import { beginHoldDrain, endHoldDrain } from "./holdDrain";
 import { isUnder, movedPath } from "./paths";
 import { type SwitchIo, switchIo } from "./vaultSwitch";
 
 const HOLD = "grove-path-hold";
 const ACK = "grove-path-ack";
 const DONE = "grove-path-done";
+const DONE_ACK = "grove-path-done-ack";
 const PEER_WAIT_MS = 2_000;
 
 export interface PathOps {
@@ -16,6 +19,10 @@ export interface PathOps {
   flush(under: (path: string) => boolean): Promise<boolean>;
   retarget(under: (path: string) => boolean, swap: (path: string) => string): void;
   discard(under: (path: string) => boolean): void;
+  /** Workspace tabs, history, and move listeners. Ack waits until this settles. */
+  moved?(from: string, to: string, swap: (path: string) => string): Promise<void> | void;
+  /** Workspace tabs and history after a delete. Ack waits until this settles. */
+  removed?(under: (path: string) => boolean): Promise<void> | void;
 }
 
 interface PathBody {
@@ -62,8 +69,38 @@ function sharedBus(io: SwitchIo | null | "local"): SwitchIo | null {
   return io;
 }
 
-function emitDone(io: SwitchIo, id: string, ok: boolean, to: string | null): Promise<void> {
-  return io.bus.emit(DONE, { id, from: io.self, ok, to }).then(() => {}, () => {});
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => { window.setTimeout(resolve, ms); });
+}
+
+/**
+ * Tell peers the path changed, and keep telling them until each one acks.
+ * A lost emit leaves them held. The old path stays held until they ack.
+ */
+async function finishPeers(io: SwitchIo, id: string, ok: boolean, to: string | null): Promise<void> {
+  if (!io.others.length) {
+    try { await io.bus.emit(DONE, { id, from: io.self, ok, to }); } catch { /* no peer is waiting */ }
+    return;
+  }
+  const pending = new Set(io.others);
+  const unlisten = await io.bus.listen(DONE_ACK, (payload) => {
+    const body = bodyOf(payload);
+    if (body.id !== id || !body.label || !pending.has(body.label)) return;
+    pending.delete(body.label);
+  });
+  try {
+    let attempt = 0;
+    while (pending.size) {
+      try { await io.bus.emit(DONE, { id, from: io.self, ok, to }); } catch { /* retain the transaction and retry */ }
+      // A peer that follows the path in a microtask acks before the backoff.
+      for (let i = 0; i < 4 && pending.size; i++) await Promise.resolve();
+      if (!pending.size) break;
+      await sleep(retryDelay(attempt));
+      attempt += 1;
+    }
+  } finally {
+    unlisten();
+  }
 }
 
 function askHold(io: SwitchIo, id: string, path: string): Promise<boolean> {
@@ -109,17 +146,17 @@ export async function coordinatePaths(from: string, to: string | null, run: () =
   const agreed = await askHold(io, id, from);
   if (!agreed) {
     console.warn(to === null ? "Could not delete while a window is still saving" : "Could not rename while a window is still saving");
-    await emitDone(io, id, false, to);
+    await finishPeers(io, id, false, to);
     return false;
   }
   let ok = false;
   try {
     ok = await run();
   } catch (err) {
-    await emitDone(io, id, false, to);
+    await finishPeers(io, id, false, to);
     throw err;
   }
-  await emitDone(io, id, ok, to);
+  await finishPeers(io, id, ok, to);
   return ok;
 }
 
@@ -141,24 +178,50 @@ export async function installPathBarrier(ops: PathOps, io?: Pick<SwitchIo, "bus"
     ops.hold(under);
     void (async () => {
       let ok = false;
+      beginHoldDrain();
       try { ok = (await ops.flush(under)) !== false; } catch { ok = false; }
+      finally { endHoldDrain(); }
       await bus.emit(ACK, { id: body.id, label: self, ok });
     })();
   });
   await bus.listen(DONE, (payload) => {
     const body = bodyOf(payload);
     if (!body.id || body.from === self) return;
+    const ack = () => { void bus.emit(DONE_ACK, { id: body.id, label: self, ok: true }); };
     const mine = held.get(body.id);
-    held.delete(body.id);
-    if (!mine) return;
+    // Already applied (a retry). Ack again so the initiator can stop.
+    if (!mine) { ack(); return; }
+    const settle = (follow: Promise<void> | void | undefined, after: () => void) => {
+      if (follow && typeof follow.then === "function") {
+        void follow.then(() => {
+          if (!held.has(body.id!)) return;
+          held.delete(body.id!);
+          ack();
+          after();
+        }, () => { /* stay held; the initiator retries DONE */ });
+        return;
+      }
+      held.delete(body.id!);
+      ack();
+      after();
+    };
     if (body.ok && body.to) {
       const next = body.to;
-      ops.retarget(mine.under, (path) => movedPath(path, mine.from, next));
-      ops.release(mine.under);
-      void ops.flush((path) => isUnder(path, next));
+      const swap = (path: string) => movedPath(path, mine.from, next);
+      ops.retarget(mine.under, swap);
+      settle(ops.moved?.(mine.from, next, swap), () => {
+        ops.release(mine.under);
+        void ops.flush((path) => isUnder(path, next));
+      });
       return;
     }
-    if (body.ok) ops.discard(mine.under);
+    if (body.ok) {
+      ops.discard(mine.under);
+      settle(ops.removed?.(mine.under), () => { ops.release(mine.under); });
+      return;
+    }
+    held.delete(body.id);
+    ack();
     ops.release(mine.under);
   });
 }

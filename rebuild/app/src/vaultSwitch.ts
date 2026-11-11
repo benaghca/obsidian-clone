@@ -9,7 +9,8 @@ import { canvasesPending, saveCanvases } from "./canvas/pending";
 import { drawingsPending, saveDrawings } from "./drawing/pending";
 import { sealWrites, unsealWrites, writesSealed } from "./saveSeal";
 import { settings } from "./settings/store";
-import { flushHandoff, handoffPending, vaultQuiet } from "./vaultWrite";
+import { backendRoot, setBackendRoot } from "./vaultRoot";
+import { flushHandoff, handoffPending, preserveAccepted, vaultQuiet } from "./vaultWrite";
 
 const BARRIER = "grove-save-barrier";
 const ACK = "grove-save-ack";
@@ -55,6 +56,8 @@ interface BarrierBody {
   from?: string;
   label?: string;
   ok?: boolean;
+  /** Vault the bytes belong to. Peers preserve into this id before they reload. */
+  vault?: string;
 }
 
 /** In-memory bus for tests. Listeners are registered before the returned promise resolves. */
@@ -92,18 +95,22 @@ async function flushLocal(deps: SaveBarrier): Promise<boolean> {
   return notes && canvases && drawings && prefs;
 }
 
-function stillDirty(deps: SaveBarrier): boolean {
-  return deps.dirty() || handoffPending();
+function stillDirty(deps: SaveBarrier, also?: string): boolean {
+  // A queue for the vault we are leaving still counts, even after open has moved the root.
+  return deps.dirty()
+    || handoffPending(backendRoot())
+    || (!!also && also !== backendRoot() && handoffPending(also));
 }
 
-async function emitReload(io: SwitchIo, id: string): Promise<void> {
-  try { await io.bus.emit(RELOAD, { id, from: io.self }); } catch { /* this page still reloads */ }
+async function emitReload(io: SwitchIo, id: string, vault: string): Promise<void> {
+  try { await io.bus.emit(RELOAD, { id, from: io.self, vault }); } catch { /* this page still reloads */ }
 }
 
 async function restoreRoot(deps: VaultSwitchDeps, oldRoot: string): Promise<boolean> {
   if (!oldRoot) return false;
   try {
-    await deps.open(oldRoot, false);
+    const info = await deps.open(oldRoot, false);
+    setBackendRoot(info.path || oldRoot);
     return true;
   } catch {
     return false;
@@ -212,9 +219,12 @@ export function createVaultCoordinator(hooks: SealHooks) {
       const ok = !cancelled.has(body.id) && !stillDirty(deps);
       void bus.emit(CONFIRM_ACK, { id: body.id, label: self, ok });
     });
-    // The sender reloads itself. Other windows reload from the event.
+    // Preserve first, then reload, with no await between. A keystroke that
+    // landed after CONFIRM_ACK is still in the editors at this moment.
     await bus.listen(RELOAD, (payload) => {
-      if (bodyOf(payload).from === self) return;
+      const body = bodyOf(payload);
+      if (body.from === self) return;
+      preserveAccepted(body.vault ?? "");
       deps.reload();
     });
   }
@@ -230,10 +240,11 @@ export function createVaultCoordinator(hooks: SealHooks) {
       return false;
     }
     // The new root is already open and the old one did not come back.
-    // Stay sealed and reload. Writing now would put the old vault's text on the new one.
-    deps.reload();
-    void emitReload(peers, id);
-    return true;
+    // Stay sealed. Do not reload and do not write: the bytes are in the
+    // durable handoff and the editors, and a write now would land on the new vault.
+    preserveAccepted(oldRoot);
+    warn(create ? "Could not create vault while a save is still pending" : "Could not open vault while a save is still pending");
+    return false;
   }
 
   /**
@@ -249,12 +260,23 @@ export function createVaultCoordinator(hooks: SealHooks) {
     const id = ourId;
     let opened = false;
     let peers: SwitchIo | null = null;
+    let oldRoot = "";
     const warn = (message: string, err?: unknown) => deps.warn?.(message, err);
     try {
+      oldRoot = deps.vault?.() ?? backendRoot();
+      if (oldRoot) setBackendRoot(oldRoot);
       await vaultQuiet();
+      // A previous attempt can leave a queue. Drain it before treating it as a reason to abort.
+      if (handoffPending(backendRoot())) {
+        const drained = await flushHandoff();
+        if (!drained) {
+          warn(create ? "Could not create vault while a save is still pending" : "Could not open vault while a save is still pending");
+          return false;
+        }
+      }
       const clean = await flushLocal(deps);
       if (lost) return false;
-      if (!clean || stillDirty(deps)) {
+      if (!clean || stillDirty(deps, oldRoot)) {
         warn(create ? "Could not create vault while a save is still pending" : "Could not open vault while a save is still pending");
         return false;
       }
@@ -274,7 +296,7 @@ export function createVaultCoordinator(hooks: SealHooks) {
       }
       seal(id);
       await vaultQuiet();
-      if (lost || stillDirty(deps)) {
+      if (lost || stillDirty(deps, oldRoot)) {
         unseal(id);
         await thawPeers(peers, id);
         await flushLocal(deps);
@@ -282,31 +304,38 @@ export function createVaultCoordinator(hooks: SealHooks) {
         warn(create ? "Could not create vault while a save is still pending" : "Could not open vault while a save is still pending");
         return false;
       }
-      const oldRoot = deps.vault?.() ?? "";
       try {
-        await deps.open(path, create);
+        const info = await deps.open(path, create);
         opened = true;
+        setBackendRoot(info.path || path);
       } catch (err) {
         unseal(id);
         await thawPeers(peers, id);
+        await flushHandoff();
         warn(create ? "Could not create vault" : "Could not open vault", err);
         return false;
       }
       const peersClean = await waitFor(peers, id, CONFIRM_ACK, CONFIRM, false);
-      if (lost || !peersClean || stillDirty(deps)) return rollback(peers, id, deps, oldRoot, warn, create);
-      await emitReload(peers, id);
-      // A keystroke during the peer notice still belongs to the old vault.
-      if (lost || stillDirty(deps)) return rollback(peers, id, deps, oldRoot, warn, create);
+      // Peers have not reloaded yet, so a dirty check here can still roll the root back.
+      if (lost || !peersClean || stillDirty(deps, oldRoot)) return rollback(peers, id, deps, oldRoot, warn, create);
+      // Once RELOAD is sent, peers may already be on the new root. Preserve,
+      // then reload. Do not open the old root again: another dirty check only moves the race.
+      preserveAccepted(oldRoot);
+      await emitReload(peers, id, oldRoot);
+      preserveAccepted(oldRoot);
       deps.reload();
       return true;
     } catch (err) {
       if (opened && peers) {
-        await emitReload(peers, id);
+        preserveAccepted(oldRoot);
+        await emitReload(peers, id, oldRoot);
+        preserveAccepted(oldRoot);
         deps.reload();
         return true;
       }
       unseal(id);
       if (peers) await thawPeers(peers, id);
+      await flushHandoff();
       warn(create ? "Could not create vault" : "Could not open vault", err);
       return false;
     } finally {

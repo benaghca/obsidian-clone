@@ -7,6 +7,7 @@ import { saveCanvases } from "./canvas/pending";
 import { saveDrawings } from "./drawing/pending";
 import { retryDelay } from "./fileSave";
 import { settings } from "./settings/store";
+import { flushHandoff } from "./vaultWrite";
 
 /** How long a close waits for pending saves before the window is destroyed. */
 export const QUIT_FLUSH_MS = 2_000;
@@ -20,7 +21,9 @@ export async function flushOpenSaves(notes: () => Promise<unknown>): Promise<boo
     saveDrawings().then((ok) => ok !== false, () => false),
     settings.flush().then((ok) => ok !== false, () => false),
   ]);
-  return note && canvas && drawing && pref;
+  // After the editors, so an older queued snapshot cannot overwrite a newer edit.
+  const hand = await flushHandoff().then((ok) => ok !== false, () => false);
+  return note && canvas && drawing && pref && hand;
 }
 
 export interface CloseWindow {

@@ -53,6 +53,11 @@ export function canvasesPending(which: (path: string) => boolean = () => true): 
   return owned.pending(which);
 }
 
+/** Dirty canvas text a vault reload has to keep. */
+export function snapshotCanvases(): { path: string; text: string; gen: number }[] {
+  return owned.snapshot();
+}
+
 /** Write the waiting edits of every canvas whose path passes `which`. */
 export async function saveCanvases(which: (path: string) => boolean = () => true): Promise<boolean> {
   const jobs = [

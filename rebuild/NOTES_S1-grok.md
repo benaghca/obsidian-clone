@@ -155,3 +155,31 @@ Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted. On
 - `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
 
 Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, including `grove-note-editor.png` and `grove-note-readonly.png`, were rewritten and put back with `git restore`. They are not in this commit.
+
+## Review 3
+
+Codex failed `c263f9b`. Seven blockers. A sealed edit, a create, or a rename could still land in the wrong vault or under the old name. Nothing on screen changes. No new package. Rust was not edited. The backend still runs each write against the root that is current when the write arrives. This page checks that root in the same turn as the call, and keeps a copy of the bytes until that root is the one they belong to.
+
+- **Confirm is not the commit.** Before any page reloads, the dirty note, canvas, and drawing text is stored for the old vault (`grove.saveHandoff`). A keystroke after the peers agree, and a keystroke while the reload event is going out, is in that store. Once the reload has been sent, this page does not open the old vault again. If putting the old vault back fails, the page stays sealed, does not reload, and does not write the old text onto the new vault. The stored bytes are written when that vault is the backend root again.
+- **Create, copy, and new folder.** Those calls used to go straight to the backend. While saves are sealed they wait in the same store, tagged with the vault that was open when they started. They run only when that vault is the backend root. A rename or delete that was waiting on other windows checks the root again in the same turn as `renamePath` or `deletePath`. If the root has moved, the call does not happen.
+- **Eager flush during a hold.** Only the flush that runs before the rename or delete, and the peer flush that answers a hold, may write while a path is held. Ctrl+S, close, a second barrier, and closing the view do not write the old name after the rename has been sent. A queued note for the old path is moved to the new path after the rename, and dropped after a successful delete. A delete does not run when that queue, or the editor flush, fails.
+- **The queue is durable.** A rejected open drains it. A failed replay retries (half a second, then the usual backoff). Close flushes the open editors first, then the queue, so a newer edit is not overwritten by an older snapshot of the same path. An editor that is newer than a queued snapshot writes. An editor that is older stays dirty while the newer snapshot is still queued, so a delete cannot skip it.
+- **Two panes of one canvas or drawing.** The pane that saved tells a clean sibling to take that saved text. A sibling that has a newer unsaved edit is left alone. The writing pane still ignores its own echo, so the notification does not drop the view.
+- **Peer rename and delete.** The other window moves or forgets the workspace tab, the history, the recent list, and the views, and only then says the barrier is done. The hold stays until that answer arrives. If the done notice is lost, it is sent again. The old path stays held after a rename that already happened. A later edit is written to the new path.
+
+Regressions are in `src/saveBoundary.test.ts` (12 tests): a peer edit after confirm, an edit during reload, a failed rollback, a rejected open after a queued write, a failed replay then close, an older queued snapshot against a newer edit, a sealed copy, a rename and a delete that resume after the root changes, eager note, canvas, drawing, and peer flushes after rename ingress, two canvas panes and two drawing panes, a lost done notice with a real tab, and a peer delete that clears that tab.
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, and pruning detached clean owners.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+No file is over 800 lines. The longest touched file is `src/noteEditors.ts` at 710. `src/workspace.ts` is 708 and was not edited. `src/saveLoss.test.ts` is 703. `src/saveBoundary.test.ts` is 557. New files: `src/vaultRoot.ts` (32), `src/holdDrain.ts` (16), `src/saveBoundary.test.ts` (557).
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest. Vitest: 102 files, 1593 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1318 kB, `index-Y4L6APrl.js`).
+- `npm run audit:offline` exited 0: 230 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, including `grove-note-editor.png` and `grove-note-readonly.png`, were rewritten and put back with `git restore`. They are not in this commit.

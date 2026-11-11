@@ -11,6 +11,8 @@ import { fileSave } from "./fileSave";
 import { NoteEditors } from "./noteEditors";
 import { bindCloseFlush, flushOpenSaves, QUIT_FLUSH_MS, requestClose } from "./quitFlush";
 import { unsealWrites, writesSealed } from "./saveSeal";
+import { resetBackendRootForTests } from "./vaultRoot";
+import { resetHandoffForTests } from "./vaultWrite";
 import { settings } from "./settings/store";
 import { commitVaultSwitch, installVaultSwitch, localSaveBus, resetVaultSwitchForTests } from "./vaultSwitch";
 import type { Workspace } from "./workspace";
@@ -55,6 +57,8 @@ beforeEach(() => {
 afterEach(async () => {
   resetVaultSwitchForTests();
   unsealWrites();
+  resetHandoffForTests();
+  resetBackendRootForTests();
   discardCanvases(() => true);
   discardDrawings(() => true);
   vi.useRealTimers();

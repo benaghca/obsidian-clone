@@ -30,10 +30,12 @@ import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
 import { bindCloseFlush, flushOpenSaves, requestClose } from "./quitFlush";
-import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases } from "./canvas/pending";
-import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings } from "./drawing/pending";
+import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases, snapshotCanvases } from "./canvas/pending";
+import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings, snapshotDrawings } from "./drawing/pending";
 import { installPathBarrier } from "./pathBarrier";
 import { installVaultSwitch, savesPending } from "./vaultSwitch";
+import { setBackendRoot } from "./vaultRoot";
+import { replayHandoff, setDirtyCapture } from "./vaultWrite";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
@@ -68,6 +70,7 @@ import { readStored, store } from "./storage";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
+setDirtyCapture(() => [...ws.editors.snapshot(), ...snapshotCanvases(), ...snapshotDrawings()]);
 installHoverPreviews(ws);
 const bookmarks = new Bookmarks(ws);
 ws.propertyHost = propertyIndex(ws).host;
@@ -544,6 +547,12 @@ if (isTauri) {
       discardCanvases(under);
       discardDrawings(under);
     },
+    async moved(_from, _to, swap) {
+      await ws.followMove(swap);
+    },
+    async removed(under) {
+      await ws.forget(under);
+    },
   }).catch((err) => console.error("Could not coordinate renames", err));
 }
 window.addEventListener("beforeunload", () => {
@@ -552,7 +561,11 @@ window.addEventListener("beforeunload", () => {
 });
 
 await ws.vault.open(!!popoutNote);
-if (ws.vault.path) rememberVault({ path: ws.vault.path, name: ws.vault.name });
+if (ws.vault.path) {
+  setBackendRoot(ws.vault.path);
+  rememberVault({ path: ws.vault.path, name: ws.vault.name });
+}
+void replayHandoff();
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
 // A vault Grove hasn't set up yet takes Cinder's or Obsidian's folders (once, in the main window).
