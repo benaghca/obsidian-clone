@@ -518,3 +518,68 @@ fn query_search_counts_overlaps_adjacencies_and_unicode() {
         json!({"props.md":[{"line":2,"text":"status: draft"}]})
     );
 }
+
+#[test]
+fn partial_path_suffix_matches_today_and_does_not_scan() {
+    let mut idx = Index::from_notes(&[
+        ("zz/sub/note.md", ""),
+        ("a/b/sub/note.md", ""),
+        ("a/x/note.md", ""),
+        ("m/x/note.md", ""),
+        ("A/same/n.md", ""),
+        ("a/same/n.md", ""),
+        ("n/ab/note.md", ""),
+        ("longpath/ab/note", ""),
+        ("z/cd/note", ""),
+        ("long/cd/note.md", ""),
+        ("Dir/Folder/Note.md", ""),
+        ("Pre/MiX/Note.md", ""),
+        ("dir/.md", ""),
+        ("deep/assets/pic.png", ""),
+        ("x/sub/note/file.md", ""),
+    ]);
+    assert_eq!(idx.resolve("Root.md", "a/x/note").as_deref(), Some("a/x/note.md"));
+    assert_eq!(idx.resolve("Root.md", "sub/note").as_deref(), Some("zz/sub/note.md"));
+    assert_eq!(idx.resolve("Root.md", "x/note").as_deref(), Some("a/x/note.md"));
+    assert_eq!(idx.resolve("Root.md", "same/n").as_deref(), Some("A/same/n.md"));
+    assert_eq!(idx.resolve("Root.md", "ab/note").as_deref(), Some("n/ab/note.md"));
+    assert_eq!(idx.resolve("Root.md", "cd/note").as_deref(), Some("z/cd/note"));
+    assert_eq!(
+        idx.resolve("Root.md", "folder/note").as_deref(),
+        Some("Dir/Folder/Note.md")
+    );
+    assert_eq!(idx.resolve("Root.md", "mix/note").as_deref(), Some("Pre/MiX/Note.md"));
+    assert_eq!(
+        idx.resolve("Root.md", "assets/pic.png").as_deref(),
+        Some("deep/assets/pic.png")
+    );
+    assert_eq!(idx.resolve("Root.md", "no/such").as_deref(), None);
+    assert_eq!(idx.resolve("Root.md", "dir/.md").as_deref(), None);
+    // `x/sub/note` is a shorter folder than `zz/sub/note.md`. A folder is not a target.
+    assert_eq!(idx.resolve("Root.md", "sub/note").as_deref(), Some("zz/sub/note.md"));
+
+    let _ = take_suffix_scans();
+    for target in [
+        "sub/note",
+        "x/note",
+        "same/n",
+        "ab/note",
+        "cd/note",
+        "folder/note",
+        "mix/note",
+        "assets/pic.png",
+        "no/such",
+        "dir/.md",
+        "missing/path",
+    ] {
+        let _ = idx.resolve("Root.md", target);
+    }
+    assert_eq!(take_suffix_scans(), 0, "partial paths walked the file list");
+
+    idx.relocate("zz/sub/note.md", "moved/place.md");
+    assert_eq!(
+        idx.resolve("Root.md", "sub/note").as_deref(),
+        Some("a/b/sub/note.md")
+    );
+    assert_eq!(take_suffix_scans(), 0);
+}

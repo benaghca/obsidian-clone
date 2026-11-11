@@ -93,15 +93,32 @@ function normalise(path: string): string | null {
   return out.join("/");
 }
 
+interface SuffixHit {
+  path: string;
+  /** Index in the snapshot. The smaller one wins when two tails hit different notes. */
+  at: number;
+}
+
 interface NoteIndex {
   length: number;
   /** Lowercase path to the original path. Two paths that differ only by case: the later one wins. */
   byPath: Map<string, string>;
   /** `note.name`, lowercased, in the order the notes appear. */
   byName: Map<string, NoteLike[]>;
+  /** Slash-aligned suffix of `/${path lower}`, first snapshot note only. */
+  bySuffix: Map<string, SuffixHit>;
 }
 
 const noteIndexes = new WeakMap<NoteLike[], NoteIndex>();
+
+/** Notes a partial-path lookup walked. `takePathScans` resets it. The suffix map does not walk. */
+let pathScans = 0;
+
+export function takePathScans(): number {
+  const n = pathScans;
+  pathScans = 0;
+  return n;
+}
 
 /**
  * One path and name index for a file snapshot. Callers pass the same array for
@@ -114,14 +131,23 @@ function indexNotes(notes: NoteLike[]): NoteIndex {
   if (cached && cached.length === notes.length) return cached;
   const byPath = new Map<string, string>();
   const byName = new Map<string, NoteLike[]>();
-  for (const n of notes) {
+  const bySuffix = new Map<string, SuffixHit>();
+  for (let at = 0; at < notes.length; at++) {
+    const n = notes[at];
     byPath.set(n.path.toLowerCase(), n.path);
     const key = n.name.toLowerCase();
     const group = byName.get(key);
     if (group) group.push(n);
     else byName.set(key, [n]);
+    if (namelessMd(n.path)) continue;
+    const padded = `/${n.path.toLowerCase()}`;
+    for (let i = 0; i < padded.length; i++) {
+      if (padded.charCodeAt(i) !== 47) continue;
+      const suffix = padded.slice(i);
+      if (!bySuffix.has(suffix)) bySuffix.set(suffix, { path: n.path, at });
+    }
   }
-  const index = { length: notes.length, byPath, byName };
+  const index = { length: notes.length, byPath, byName, bySuffix };
   noteIndexes.set(notes, index);
   return index;
 }
@@ -133,7 +159,7 @@ function indexNotes(notes: NoteLike[]): NoteIndex {
  * Markdown link destinations may be percent-encoded.
  * `index` belongs to `notes` (see `indexNotes`).
  */
-function resolveIndexed(notes: NoteLike[], index: NoteIndex, target: string, from: string | null): string | null {
+function resolveIndexed(index: NoteIndex, target: string, from: string | null): string | null {
   const t = bareTarget(target);
   if (!t) return null;
   const withMd = /\.md$/i.test(t) ? t : `${t}.md`;
@@ -150,9 +176,15 @@ function resolveIndexed(notes: NoteLike[], index: NoteIndex, target: string, fro
   if (t.includes("/")) {
     const hit = find(normalise(`${fromDir}/${bare}`));
     if (hit) return hit;
-    // A partial path: any note (or file) whose path ends with it. First in the snapshot wins.
+    // A partial path: the same ends-with test as before, read from the suffix map.
+    // First in the snapshot wins, including when the `.md` tail and the raw tail hit different notes.
     const tails = [`/${withMd.toLowerCase()}`, `/${t.toLowerCase()}`];
-    return notes.find((n) => !namelessMd(n.path) && tails.some((tail) => `/${n.path.toLowerCase()}`.endsWith(tail)))?.path ?? null;
+    let best: SuffixHit | undefined;
+    for (const tail of tails) {
+      const found = index.bySuffix.get(tail);
+      if (found && (!best || found.at < best.at)) best = found;
+    }
+    return best?.path ?? null;
   }
   const name = nameOf(withMd).toLowerCase();
   const matches = (index.byName.get(name) ?? []).filter((n) => !namelessMd(n.path));
@@ -163,11 +195,11 @@ function resolveIndexed(notes: NoteLike[], index: NoteIndex, target: string, fro
 
 /** Resolve every target against one snapshot. The index is built once for `notes`. */
 export function linkResolver(notes: NoteLike[]): (target: string, from: string | null) => string | null {
-  return (target, from) => resolveIndexed(notes, indexNotes(notes), target, from);
+  return (target, from) => resolveIndexed(indexNotes(notes), target, from);
 }
 
 export function resolveLink(target: string, from: string | null, notes: NoteLike[]): string | null {
-  return resolveIndexed(notes, indexNotes(notes), target, from);
+  return resolveIndexed(indexNotes(notes), target, from);
 }
 
 /**
@@ -296,7 +328,7 @@ export function rewriteLinks(
   const next = (target: string, after: number): { path: string; order: number } | null => {
     let best: { to: string; order: number; after: NoteLike[] } | null = null;
     for (const g of indexed) {
-      const hit = resolveIndexed(g.before, g.index, target, from);
+      const hit = resolveIndexed(g.index, target, from);
       const m = hit === null ? undefined : g.moved.get(hit);
       if (m && m.order > after && (!best || m.order < best.order)) best = { ...m, after: g.after };
     }

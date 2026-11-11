@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatLink, linkResolver, linkTargets, relativePath, resolveLink, rewriteLinks } from "./internal";
+import { formatLink, linkResolver, linkTargets, relativePath, resolveLink, rewriteLinks, takePathScans } from "./internal";
 
 const notes = [
   { name: "Ideas", path: "Ideas.md" },
@@ -52,6 +52,39 @@ test("the same snapshot resolves case, clashes, partial paths and a later edit",
   const resolve = linkResolver(notes);
   expect(resolve("Plan", "Archive/Other.md")).toBe(resolveLink("Plan", "Archive/Other.md", notes));
   expect(resolve("../Plan", "Projects/Sub/Deep note.md")).toBe("Projects/Plan.md");
+});
+
+test("partial paths keep today's winner and do not walk the file list", () => {
+  const rawFirst = [
+    { name: "note", path: "other/folder/note" },
+    { name: "Note", path: "x/folder/note.md" },
+  ];
+  expect(resolveLink("folder/note", null, rawFirst)).toBe("other/folder/note");
+  expect(resolveLink("folder/note", null, [rawFirst[1], rawFirst[0]])).toBe("x/folder/note.md");
+  expect(resolveLink("Folder/Note", null, [{ name: "Note", path: "Dir/Folder/Note.md" }])).toBe("Dir/Folder/Note.md");
+  expect(resolveLink("dir/pic.png", null, [{ name: "pic.png", path: "assets/dir/pic.png" }])).toBe("assets/dir/pic.png");
+  expect(resolveLink("no/such", null, rawFirst)).toBeNull();
+  expect(resolveLink("/Sub/Note", null, [{ name: "Note", path: "X/Sub/Note.md" }])).toBeNull();
+  expect(resolveLink("/Sub/Note", null, [{ name: "Note", path: "Sub/Note.md" }])).toBe("Sub/Note.md");
+  const exact = [{ name: "Note", path: "Long/Sub/Note.md" }, { name: "Note", path: "Sub/Note.md" }];
+  expect(resolveLink("Sub/Note", null, exact)).toBe("Sub/Note.md");
+  expect(resolveLink("dir/.md", null, [{ name: ".md", path: "dir/.md" }])).toBeNull();
+  expect(resolveLink(".MD", null, [{ name: ".MD", path: ".MD" }])).toBeNull();
+  const growing = [{ name: "A", path: "A.md" }];
+  expect(resolveLink("Sub/Note", null, growing)).toBeNull();
+  growing.push({ name: "Note", path: "Z/Sub/Note.md" });
+  expect(resolveLink("Sub/Note", null, growing)).toBe("Z/Sub/Note.md");
+
+  const notes = Array.from({ length: 400 }, (_, i) => ({ name: `N${i}`, path: `d${i % 20}/N${i}.md` }));
+  notes.push({ name: "Note", path: "Z/Sub/Note.md" }, { name: "pic.png", path: "assets/dir/pic.png" });
+  const resolve = linkResolver(notes);
+  takePathScans();
+  expect(resolve("Sub/Note", null)).toBe("Z/Sub/Note.md");
+  expect(resolve("dir/pic.png", "d0/N0.md")).toBe("assets/dir/pic.png");
+  expect(resolve("no/such", null)).toBeNull();
+  expect(resolve("Missing/Path", "d0/N0.md")).toBeNull();
+  for (let i = 0; i < 8; i++) expect(resolve("gone/missing", null)).toBeNull();
+  expect(takePathScans()).toBe(0);
 });
 
 test("renaming a note rewrites the links to it, keeping headings and display text, not code", () => {

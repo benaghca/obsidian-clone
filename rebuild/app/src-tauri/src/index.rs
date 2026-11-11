@@ -34,10 +34,12 @@ use std::path::Path;
 // Real name-map rebuilds, and file nodes visited by `Index::list`.
 // `take_*` resets the counter. A deferred rebuild counts when the maps are
 // built, not once per file that asked. `entry` does not visit the list.
+// `take_suffix_scans` stays 0: a partial path reads `by_suffix` and does not walk files.
 #[cfg(test)]
 thread_local! {
     static REBUILD_MAPS_CALLS: Cell<usize> = const { Cell::new(0) };
     static LIST_WALKS: Cell<usize> = const { Cell::new(0) };
+    static SUFFIX_SCANS: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -58,6 +60,11 @@ fn count_rebuild_maps() {
 #[cfg(test)]
 fn count_list_walk(nodes: usize) {
     LIST_WALKS.with(|cell| cell.set(cell.get() + nodes));
+}
+
+#[cfg(test)]
+pub(crate) fn take_suffix_scans() -> usize {
+    SUFFIX_SCANS.with(|cell| cell.replace(0))
 }
 
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
@@ -104,6 +111,9 @@ pub struct Index {
     by_name: HashMap<String, Vec<String>>,
     by_alias: HashMap<String, String>,
     by_path_lower: HashMap<String, String>,
+    // Partial path (`folder/note`) to the shortest file, then the smaller original path.
+    // A key is a slash-aligned tail (`/note.md`), not the whole path. Rebuilt with the other maps.
+    by_suffix: HashMap<String, String>,
     // While > 0, `rebuild_maps` only marks the maps stale. The outermost
     // `MapBatch` rebuilds once. `apply` and `rename_path` hold that guard
     // until every path in the batch is in its final place.
@@ -464,22 +474,11 @@ impl Index {
                 return Some(found.clone());
             }
         }
-        // A partial path: the shortest file path that ends with it.
+        // A partial path: the shortest file path that ends with it, then the smaller original path.
         let low = raw.trim_start_matches('/').to_lowercase();
         let suf = format!("/{low}");
         let suf_md = format!("/{low}.md");
-        self.files
-            .iter()
-            .filter(|(path, node)| {
-                if node.is_dir || nameless_md(path) {
-                    return false;
-                }
-                let pl = path.to_lowercase();
-                pl.ends_with(&suf) || pl.ends_with(&suf_md)
-            })
-            .map(|(path, _)| path)
-            .min_by(|a, b| a.len().cmp(&b.len()).then(a.cmp(b)))
-            .cloned()
+        better_suffix(self.by_suffix.get(&suf), self.by_suffix.get(&suf_md)).cloned()
     }
 
     fn has_child(&self, rel: &str) -> bool {
@@ -583,12 +582,19 @@ impl Index {
         self.by_name.clear();
         self.by_alias.clear();
         self.by_path_lower.clear();
+        let mut suffixes: HashMap<String, String> = HashMap::new();
         let mut names: HashMap<String, Vec<String>> = HashMap::new();
         for (path, node) in &self.files {
             if node.is_dir {
                 continue;
             }
-            self.by_path_lower.insert(path.to_lowercase(), path.clone());
+            let lower = path.to_lowercase();
+            if !nameless_md(path) {
+                for (i, _) in lower.match_indices('/') {
+                    remember_suffix(&mut suffixes, &lower[i..], path);
+                }
+            }
+            self.by_path_lower.insert(lower, path.clone());
             let key = display_name(path, false).to_lowercase();
             if !key.is_empty() {
                 names.entry(key).or_default().push(path.clone());
@@ -605,6 +611,7 @@ impl Index {
             list.sort();
         }
         self.by_name = names;
+        self.by_suffix = suffixes;
     }
 
     #[cfg(test)]
@@ -660,6 +667,27 @@ fn parent_path(path: &str) -> &str {
     match path.rfind('/') {
         Some(i) => &path[..i],
         None => "",
+    }
+}
+
+fn better_suffix<'a>(a: Option<&'a String>, b: Option<&'a String>) -> Option<&'a String> {
+    match (a, b) {
+        (Some(a), Some(b)) if a.len() < b.len() || (a.len() == b.len() && a.as_str() <= b.as_str()) => {
+            Some(a)
+        }
+        (Some(_), Some(b)) => Some(b),
+        (Some(a), None) => Some(a),
+        (None, b) => b,
+    }
+}
+
+fn remember_suffix(map: &mut HashMap<String, String>, key: &str, path: &str) {
+    let keep = match map.get(key) {
+        Some(old) => old.len() < path.len() || (old.len() == path.len() && old.as_str() <= path),
+        None => false,
+    };
+    if !keep {
+        map.insert(key.to_string(), path.to_string());
     }
 }
 
