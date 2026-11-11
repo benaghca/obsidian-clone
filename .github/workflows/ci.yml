@@ -1,5 +1,5 @@
-# Checks every push and pull request: the Rust tests, the front end's type check, and the
-# front-end unit tests (plain Node, no browser).
+# Checks every push and pull request.
+# `test` is Cinder (the repo root). `grove` is the rebuild app. They fail on their own.
 name: checks
 
 on:
@@ -25,3 +25,48 @@ jobs:
       - name: Type check
         working-directory: ui/editor
         run: npm ci && npm run typecheck
+
+  # Grove. apt, the setup actions, `npm ci`, and `cargo fetch` use the network.
+  # `npm test` runs `posttest` on its own. The headless backend smoke is one of
+  # the `cargo test --offline` tests (`smoke::save_rename_and_flush_round_trip_through_ipc`).
+  # Ubuntu 24.04 runner images already include Google Chrome, which Grove's feel
+  # tests launch headless. This job does not start Grove or a visible window.
+  grove:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries for the desktop window (WebKitGTK)
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev libxdo-dev
+      - name: Headless browser for Grove's feel tests
+        run: |
+          browser="$(command -v google-chrome || command -v google-chrome-stable || command -v chromium || command -v chromium-browser || true)"
+          if [ -z "$browser" ]; then
+            echo "Grove npm test needs Chromium or Chrome on PATH (google-chrome, chromium, or chromium-browser)."
+            exit 1
+          fi
+          echo "GROVE_BROWSER=$browser" >> "$GITHUB_ENV"
+          "$browser" --version
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rebuild/app/src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: rebuild/app/package-lock.json
+      - name: Install Node dependencies
+        working-directory: rebuild/app
+        run: npm ci
+      - name: Type check
+        working-directory: rebuild/app
+        run: npx tsc --noEmit
+      - name: Front-end tests
+        working-directory: rebuild/app
+        run: npm test
+      - name: Fetch Rust crates
+        working-directory: rebuild/app/src-tauri
+        run: cargo fetch
+      - name: Rust tests
+        working-directory: rebuild/app/src-tauri
+        run: cargo test --offline

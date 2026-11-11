@@ -188,7 +188,8 @@ await withBrowser(async ({ send, run, press, chord, key, click, check }) => {
   await click('.workspace-tab-header.is-active .workspace-tab-header-inner-close-button');
   await sleep(200);
   open = await tabs();
-  check(open.length === beforeClose.length - 1 && open.at(-1).id === beforeClose.at(-2).id && open.at(-1).active, 'the tab close button removes the empty tab and shows its neighbour');
+  // T1 review: an untouched new tab closes back to the tab it was opened from (Welcome), not its neighbour.
+  check(open.length === beforeClose.length - 1 && open.at(-1).id === beforeClose.at(-2).id && open.find((t) => t.active)?.path === 'Welcome.md', `the tab close button removes the empty tab and goes back to Welcome, where it was opened (${open.map((t) => (t.active ? '*' : '') + (t.path ?? 'new')).join(', ')})`);
 
   const noteHost = (await tabs()).find((t) => t.path === null);
   assert.ok(noteHost, 'an empty tab remains for New note');

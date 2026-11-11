@@ -4,8 +4,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api, type FileEntry } from "./api";
 import canvasViewSource from "./canvas/view.ts?raw";
 import drawingViewSource from "./drawing/view.ts?raw";
-import { copyNote, renameFile } from "./fileOps";
-import { beginHoldDrain, endHoldDrain, pathHeld, resetHoldsForTests } from "./holdDrain";
+import { copyNote, deleteFile, renameFile } from "./fileOps";
+import { beginHoldDrain, pathHeld, resetHoldsForTests } from "./holdDrain";
 import mainSource from "./main.ts?raw";
 import { NoteEditors } from "./noteEditors";
 import { createOwnedSaves } from "./ownedSave";
@@ -31,6 +31,7 @@ import {
   flushHandoff,
   preserveAccepted,
   queuedConfig,
+  queuedCopy,
   queuedNote,
   queuedStructural,
   replayHandoff,
@@ -68,7 +69,7 @@ type VaultModule = typeof import("./vaultWrite");
 const entry = (path: string): FileEntry => ({ path, name: path, is_dir: false, mtime_ms: 0, ctime_ms: 0, size: 1 });
 
 /** A query string is a second module instance. tsc has no declaration for it. */
-async function realm(which: "a" | "b" | "c" | "alpha" | "beta" | "reload"): Promise<VaultModule> {
+async function realm(which: "a" | "b" | "c" | "alpha" | "beta" | "reload" | "keep" | "replay" | "fresh" | "peer" | "later"): Promise<VaultModule> {
   switch (which) {
     case "a":
       // @ts-expect-error Vite query instance
@@ -88,6 +89,21 @@ async function realm(which: "a" | "b" | "c" | "alpha" | "beta" | "reload"): Prom
     case "reload":
       // @ts-expect-error Vite query instance
       return import("./vaultWrite.ts?handoff=reload") as Promise<VaultModule>;
+    case "keep":
+      // @ts-expect-error Vite query instance
+      return import("./vaultWrite.ts?window=keep") as Promise<VaultModule>;
+    case "replay":
+      // @ts-expect-error Vite query instance
+      return import("./vaultWrite.ts?window=replay") as Promise<VaultModule>;
+    case "fresh":
+      // @ts-expect-error Vite query instance
+      return import("./vaultWrite.ts?window=fresh") as Promise<VaultModule>;
+    case "peer":
+      // @ts-expect-error Vite query instance
+      return import("./vaultWrite.ts?window=peer") as Promise<VaultModule>;
+    case "later":
+      // @ts-expect-error Vite query instance
+      return import("./vaultWrite.ts?window=later") as Promise<VaultModule>;
   }
 }
 const events = { shown() {}, loaded() {}, changed() {}, saved: vi.fn() };
@@ -317,10 +333,10 @@ test("a drain for one path does not let a held path write", async () => {
   notes.change("X.md", { changes: { from: 0, to: 3, insert: "xxxx" } });
   const held = (path: string) => path === "X.md";
   notes.hold(held);
-  beginHoldDrain((path) => path === "Y.md");
+  const endDrain = beginHoldDrain((path) => path === "Y.md");
   await expect(notes.flush()).resolves.toBe(false);
   expect(api.writeNote).not.toHaveBeenCalled();
-  endHoldDrain();
+  endDrain();
   notes.release(held);
 });
 
@@ -548,6 +564,142 @@ test("a peer that leaves does not keep the rename waiting or lose its hold", asy
   expect(settled).toBe(true);
   expect(pathHeld("Old.md")).toBe(true);
   await pending;
+});
+
+test("replaying one window does not erase a note the other window acknowledged later", async () => {
+  const keep = await realm("keep");
+  sealWrites();
+  await keep.writeVaultNote("A.md", "only-a");
+  const replay = await realm("replay");
+  expect(replay.queuedNote("/vault-a", "A.md")).toBe("only-a");
+  expect(replay.queuedNote("/vault-a", "B.md")).toBeUndefined();
+  await keep.writeVaultNote("B.md", "only-b");
+  unsealWrites();
+  setBackendRoot("/vault-a");
+  setPageVault("/vault-a");
+  await replay.flushHandoff();
+  expect(api.writeNote).toHaveBeenCalledWith("A.md", "only-a");
+  expect(api.writeNote).not.toHaveBeenCalledWith("B.md", "only-b");
+  const fresh = await realm("fresh");
+  expect(fresh.queuedNote("/vault-a", "B.md")).toBe("only-b");
+  expect(fresh.queuedNote("/vault-a", "A.md")).toBeUndefined();
+});
+
+test("an earlier drain finishing does not authorize the path a later drain still holds", async () => {
+  vi.useFakeTimers();
+  const notes = editors();
+  await notes.load("X.md");
+  await notes.load("Y.md");
+  const release = new Map<string, () => void>();
+  const real = notes.flush.bind(notes);
+  vi.spyOn(notes, "flush").mockImplementation((which) => {
+    const onlyX = !!which && which("X.md") && !which("Y.md");
+    const onlyY = !!which && which("Y.md") && !which("X.md");
+    const path = onlyX ? "X.md" : onlyY ? "Y.md" : "";
+    if (!path) return real(which);
+    return new Promise((resolve) => {
+      release.set(path, () => { void real(which).then(resolve); });
+    });
+  });
+  let releaseRename: () => void = () => {};
+  vi.mocked(api.renamePath).mockImplementation((from: string) => {
+    if (from !== "X.md") return Promise.resolve();
+    return new Promise((resolve) => { releaseRename = () => resolve(undefined); });
+  });
+  const ws = renameWs(notes, "X.md");
+  ws.vault.files.push({ path: "Y.md" } as never);
+  const pendingX = renameFile(ws, "X.md", "Moved");
+  const pendingY = renameFile(ws, "Y.md", "Other");
+  await vi.waitFor(() => expect(release.size).toBe(2));
+  release.get("X.md")!();
+  await vi.waitFor(() => expect(api.renamePath).toHaveBeenCalledWith("X.md", "Moved.md"));
+  notes.change("X.md", { changes: { from: 0, to: 0, insert: "eager" } });
+  await notes.flush();
+  expect(api.writeNote).not.toHaveBeenCalled();
+  expect(pathHeld("X.md")).toBe(true);
+  release.get("Y.md")!();
+  releaseRename();
+  await pendingX;
+  await pendingY;
+});
+
+test("a peer that fails to flush its queued text refuses the delete", async () => {
+  const peer = await realm("peer");
+  sealWrites();
+  await peer.writeVaultNote("Gone.md", "newest-text");
+  unsealWrites();
+  vi.mocked(api.writeNote).mockRejectedValue(new Error("full"));
+  const bus = localSaveBus();
+  usePathPeers({ bus, others: ["note-1"], self: "main", listWindows: async () => ["main", "note-1"] });
+  await installPathBarrier({
+    hold() {},
+    release() {},
+    flush: async () => true,
+    retarget() {},
+    discard() {},
+    handoff: () => peer.flushHandoff(),
+  }, { bus, self: "note-1" });
+  const ws = renameWs(editors(), "Gone.md");
+  await expect(deleteFile(ws, "Gone.md")).resolves.toBe(false);
+  expect(api.deletePath).not.toHaveBeenCalled();
+  expect(peer.queuedNote("/vault-a", "Gone.md")).toBe("newest-text");
+  const later = await realm("later");
+  expect(later.queuedNote("/vault-a", "Gone.md")).toBe("newest-text");
+});
+
+test("a closed note and a canvas copy read the vault the page still belongs to", async () => {
+  const notes = editors();
+  const ws = copyWs(notes);
+  ws.vault.files.push({ path: "Closed.md" } as never, { path: "Board.canvas" } as never);
+  const bus = localSaveBus();
+  let copyingNote = Promise.resolve("");
+  let copyingCanvas = Promise.resolve("");
+  await bus.listen("grove-save-barrier", (payload) => {
+    const body = payload as { id?: string };
+    void bus.emit("grove-save-ack", { id: body.id, label: "note-1", ok: true });
+  });
+  await bus.listen("grove-save-confirm", async (payload) => {
+    const body = payload as { id?: string };
+    expect(backendRoot()).toBe("/vault-b");
+    expect(pageVault()).toBe("/vault-a");
+    const reads = vi.mocked(api.readNote).mock.calls.length;
+    copyingNote = copyNote(ws, "Closed.md");
+    copyingCanvas = copyNote(ws, "Board.canvas");
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(vi.mocked(api.readNote).mock.calls.length).toBe(reads);
+    expect(queuedCopy("/vault-a", "Closed.md")).toBe("Closed 1.md");
+    expect(queuedCopy("/vault-a", "Board.canvas")).toBe("Board 1.canvas");
+    await bus.emit("grove-save-confirm-ack", { id: body.id, label: "note-1", ok: true });
+  });
+  const reads: string[] = [];
+  vi.mocked(api.readNote).mockImplementation(async (path: string) => {
+    reads.push(`${backendRoot()} ${path}`);
+    return backendRoot() === "/vault-a" ? (path.endsWith(".canvas") ? "canvas-a" : "note-a") : "from-b";
+  });
+  vi.mocked(api.createNote).mockImplementation(async (path: string) => entry(path));
+  const open = vi.fn(async (path: string) => {
+    if (path === "/vault-a") throw new Error("restore failed");
+    return { path, name: "B" };
+  });
+  await expect(commitVaultSwitch("/vault-b", false, {
+    flushNotes: async () => true,
+    dirty: () => false,
+    vault: () => "/vault-a",
+    open,
+    reload: vi.fn(),
+  }, { bus, others: ["note-1"], self: "main" })).resolves.toBe(false);
+  expect(reads).toEqual([]);
+  expect(api.createNote).not.toHaveBeenCalled();
+  unsealWrites();
+  setBackendRoot("/vault-a");
+  setPageVault("/vault-a");
+  await flushHandoff();
+  await copyingNote;
+  await copyingCanvas;
+  expect(api.createNote).toHaveBeenCalledWith("Closed 1.md", "note-a");
+  expect(api.createNote).toHaveBeenCalledWith("Board 1.canvas", "canvas-a");
+  expect(reads.every((line) => line.startsWith("/vault-a"))).toBe(true);
+  expect(api.createNote).not.toHaveBeenCalledWith(expect.anything(), "from-b");
 });
 
 test("boot waits for recovery and the switch stores bytes before the read root moves", () => {

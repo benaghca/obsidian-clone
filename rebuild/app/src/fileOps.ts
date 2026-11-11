@@ -4,13 +4,13 @@
 // (Workspace.followMove, Workspace.forget).
 
 import { api, type FileEntry } from "./api";
-import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases } from "./canvas/pending";
-import { beginHoldDrain, endHoldDrain } from "./holdDrain";
+import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases, snapshotCanvases } from "./canvas/pending";
+import { beginHoldDrain } from "./holdDrain";
 import { coordinatePaths } from "./pathBarrier";
 import { writesSealed } from "./saveSeal";
 import { backendRoot, sourceVault } from "./vaultRoot";
-import { discardHandoff, flushHandoff, queueVaultCreate, retargetHandoff, writeVaultNote } from "./vaultWrite";
-import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings } from "./drawing/pending";
+import { discardHandoff, flushHandoff, queueVaultCopy, queueVaultCreate, retargetHandoff, writeVaultNote } from "./vaultWrite";
+import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings, snapshotDrawings } from "./drawing/pending";
 import { emptyDrawing } from "./drawing/scene";
 import type { ViewMode } from "./editor/editor";
 import type { NoteRef } from "./editor/host";
@@ -218,8 +218,8 @@ async function relocateHeld(ws: Workspace, from: string, to: string, vault: stri
   holdSaves(ws, under);
   let moved = false;
   try {
-    beginHoldDrain(under);
-    try { await flushSaves(ws, under); await flushHandoff(); } finally { endHoldDrain(); }
+    const endDrain = beginHoldDrain(under);
+    try { await flushSaves(ws, under); await flushHandoff(); } finally { endDrain(); }
     // A failed queue stays put and is retargeted with the file. It cannot recreate the source.
     const before = ws.vault.fileRefs();
     // Old-name links can stop resolving as soon as renamePath returns.
@@ -267,13 +267,38 @@ async function flushSaves(ws: Workspace, which: (path: string) => boolean): Prom
   return results.every((ok) => ok !== false);
 }
 
+/** Text this page already holds for `path`, so a copy does not read another vault. */
+function loadedCopy(ws: Workspace, path: string, ext: string): string | undefined {
+  if (ext === ".md") return ws.editors.doc(path)?.toString();
+  const rows = ext === ".canvas" ? snapshotCanvases() : snapshotDrawings();
+  return rows.find((row) => row.path === path)?.text;
+}
+
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
   const source = sourceVault();
   await Promise.all([ws.saveNow(path), saveCanvases((p) => p === path), saveDrawings((p) => p === path)]);
   const ext = viewFileExt(path) || ".md";
-  const content = await (ext !== ".md" ? api.readNote(path) : ws.editors.text(path));
-  const entry = await createNote(ws, freeName(ws, path.slice(0, -ext.length), ext, true), content, source);
+  const dest = freeName(ws, path.slice(0, -ext.length), ext, true);
+  const snap = loadedCopy(ws, path, ext);
+  // A loaded note or canvas is this page's text, even while a switch is sealed.
+  if (snap !== undefined) {
+    const entry = await createNote(ws, dest, snap, source);
+    await ws.open(entry.path);
+    return entry.path;
+  }
+  // A closed file is read only while `source` is still the backend, in the
+  // same turn as the read. Otherwise the read waits until that vault is current.
+  let content: string | null = null;
+  if (backendRoot() === source && !writesSealed()) content = await api.readNote(path);
+  if (content === null || backendRoot() !== source || writesSealed()) {
+    const entry = await queueVaultCopy(source, path, dest);
+    await ws.vault.refreshFiles();
+    ws.vault.written(entry.path);
+    await ws.open(entry.path);
+    return entry.path;
+  }
+  const entry = await createNote(ws, dest, content, source);
   await ws.open(entry.path);
   return entry.path;
 }
@@ -317,13 +342,13 @@ export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?
 async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boolean, vault: string): Promise<boolean> {
   holdSaves(ws, under);
   try {
-    beginHoldDrain(under);
+    const endDrain = beginHoldDrain(under);
     let flushed = false;
     try {
       // The queued snapshot first, so a newer direct write is in the file before it is trashed.
       const handed = await flushHandoff();
       flushed = handed && await flushSaves(ws, under);
-    } finally { endHoldDrain(); }
+    } finally { endDrain(); }
     if (!flushed) {
       releaseSaves(ws, under);
       return false;

@@ -7,13 +7,26 @@
 
 import { api, type FileEntry } from "./api";
 import { retryDelay } from "./fileSave";
+import {
+  ackKey,
+  dropKey,
+  HANDOFF_PREFIX,
+  itemKey,
+  itemKind,
+  pageStoreOf,
+  storage,
+  storedKeys,
+  stripLegacy,
+  writeItem,
+  type ItemKind,
+  type StoredHandoff,
+} from "./handoffStore";
 import { drainAllows, pathHeld } from "./holdDrain";
 import { writesSealed } from "./saveSeal";
 import { backendRoot, bumpPathGen, pathGen, sourceVault } from "./vaultRoot";
 
-const PREFIX = "grove.saveHandoff.";
 const pageId = `${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
-const STORE = PREFIX + pageId;
+const STORE = HANDOFF_PREFIX + pageId;
 
 interface NoteHandoff {
   vault: string;
@@ -57,6 +70,14 @@ interface PropHandoff {
   resolve?: (result: unknown) => void;
 }
 
+interface CopyHandoff {
+  vault: string;
+  from: string;
+  path: string;
+  key: string;
+  resolve?: (entry: FileEntry) => void;
+}
+
 interface LaterJob {
   vault: string;
   run: () => Promise<void>;
@@ -73,7 +94,18 @@ interface ConfigSnap {
   text: string;
 }
 
-interface StoredHandoff {
+interface RawHandoff {
+  vault?: string;
+  path?: string;
+  from?: string;
+  name?: string;
+  text?: string;
+  gen?: number;
+  kind?: string;
+  content?: string;
+  op?: string;
+  b64?: string;
+  edit?: unknown;
   notes?: { vault: string; path: string; text: string; gen?: number }[];
   configs?: { vault: string; name: string; text: string }[];
   structural?: { vault: string; kind: string; path: string; content?: string }[];
@@ -87,6 +119,7 @@ const configs = new Map<string, ConfigHandoff>();
 const structural: StructHandoff[] = [];
 const bytesJobs: BytesHandoff[] = [];
 const propJobs: PropHandoff[] = [];
+const copies: CopyHandoff[] = [];
 const later: LaterJob[] = [];
 const sending = new Map<string, string>();
 const sendingConfig = new Map<string, string>();
@@ -113,6 +146,7 @@ export function handoffPending(vault = backendRoot()): boolean {
   if (structural.some((job) => job.vault === vault)) return true;
   if (bytesJobs.some((job) => job.vault === vault)) return true;
   if (propJobs.some((job) => job.vault === vault)) return true;
+  if (copies.some((job) => job.vault === vault)) return true;
   if (later.some((job) => job.vault === vault)) return true;
   return false;
 }
@@ -137,6 +171,10 @@ export function queuedProp(vault: string, path: string): unknown {
   return propJobs.find((job) => job.vault === vault && job.path === path)?.edit;
 }
 
+export function queuedCopy(vault: string, from: string): string | undefined {
+  return copies.find((job) => job.vault === vault && job.from === from)?.path;
+}
+
 /** Queued text, or a recovery write that has left the queue but not finished. */
 export function authoritativeNote(vault: string, path: string): string | undefined {
   return sending.get(noteKey(vault, path)) ?? notes.get(noteKey(vault, path))?.text;
@@ -157,36 +195,90 @@ function canSubmit(vault: string, path?: string): boolean {
   return true;
 }
 
+function moveItemKey(oldKey: string, kind: ItemKind, id: string): string {
+  const next = itemKey(pageStoreOf(oldKey), kind, id);
+  if (oldKey !== next && itemKind(oldKey)) dropKey(oldKey);
+  return next;
+}
+
 export function retargetHandoff(vault: string, under: (path: string) => boolean, swap: (path: string) => string): void {
-  const touched = new Set<string>();
   for (const saved of [...notes.values()]) {
     if (saved.vault !== vault || !under(saved.path)) continue;
-    touched.add(saved.key);
+    const from = saved.path;
     notes.delete(noteKey(saved.vault, saved.path));
     saved.path = swap(saved.path);
-    const key = noteKey(saved.vault, saved.path);
-    const prev = notes.get(key);
-    if (!prev || prev.gen <= saved.gen) notes.set(key, saved);
-    else touched.add(prev.key);
+    const id = noteKey(saved.vault, saved.path);
+    const prev = notes.get(id);
+    if (itemKind(saved.key)) saved.key = moveItemKey(saved.key, "n", id);
+    else stripLegacy(saved.key, (body) => ({
+      ...body,
+      notes: (body.notes ?? []).filter((note) => !(note.vault === vault && note.path === from)),
+    }));
+    if (!prev || prev.gen <= saved.gen) {
+      notes.set(id, saved);
+      if (itemKind(saved.key)) writeItem(saved.key, { vault: saved.vault, path: saved.path, text: saved.text, gen: saved.gen });
+    }
   }
-  for (const job of structural) if (job.vault === vault && under(job.path)) { touched.add(job.key); job.path = swap(job.path); }
-  for (const job of bytesJobs) if (job.vault === vault && under(job.path)) { touched.add(job.key); job.path = swap(job.path); }
-  for (const job of propJobs) if (job.vault === vault && under(job.path)) { touched.add(job.key); job.path = swap(job.path); }
-  persistKeys(touched);
+  for (const job of structural) if (job.vault === vault && under(job.path)) {
+    job.path = swap(job.path);
+    if (itemKind(job.key)) {
+      job.key = moveItemKey(job.key, "s", `${job.vault}\0${job.path}\0${job.kind}`);
+      writeItem(job.key, { vault: job.vault, kind: job.kind, path: job.path, content: job.content });
+    }
+  }
+  for (const job of bytesJobs) if (job.vault === vault && under(job.path)) {
+    job.path = swap(job.path);
+    if (itemKind(job.key)) {
+      job.key = moveItemKey(job.key, "b", `${job.vault}\0${job.path}\0${job.op}`);
+      writeItem(job.key, { vault: job.vault, path: job.path, op: job.op, b64: job.b64 });
+    }
+  }
+  for (const job of propJobs) if (job.vault === vault && under(job.path)) {
+    job.path = swap(job.path);
+    if (itemKind(job.key)) {
+      job.key = moveItemKey(job.key, "p", `${job.vault}\0${job.path}`);
+      writeItem(job.key, { vault: job.vault, path: job.path, edit: job.edit });
+    }
+  }
 }
 
 export function discardHandoff(vault: string, under: (path: string) => boolean): void {
-  const touched = new Set<string>();
+  const legacy = new Set<string>();
   for (const saved of [...notes.values()]) {
-    if (saved.vault === vault && under(saved.path)) {
-      touched.add(saved.key);
-      notes.delete(noteKey(saved.vault, saved.path));
-    }
+    if (saved.vault !== vault || !under(saved.path)) continue;
+    notes.delete(noteKey(saved.vault, saved.path));
+    if (itemKind(saved.key)) dropKey(saved.key);
+    else legacy.add(saved.key);
   }
-  for (let i = structural.length - 1; i >= 0; i--) if (structural[i].vault === vault && under(structural[i].path)) { touched.add(structural[i].key); structural.splice(i, 1); }
-  for (let i = bytesJobs.length - 1; i >= 0; i--) if (bytesJobs[i].vault === vault && under(bytesJobs[i].path)) { touched.add(bytesJobs[i].key); bytesJobs.splice(i, 1); }
-  for (let i = propJobs.length - 1; i >= 0; i--) if (propJobs[i].vault === vault && under(propJobs[i].path)) { touched.add(propJobs[i].key); propJobs.splice(i, 1); }
-  persistKeys(touched);
+  for (let i = structural.length - 1; i >= 0; i--) if (structural[i].vault === vault && under(structural[i].path)) {
+    const job = structural.splice(i, 1)[0];
+    if (itemKind(job.key)) dropKey(job.key);
+    else legacy.add(job.key);
+  }
+  for (let i = bytesJobs.length - 1; i >= 0; i--) if (bytesJobs[i].vault === vault && under(bytesJobs[i].path)) {
+    const job = bytesJobs.splice(i, 1)[0];
+    if (itemKind(job.key)) dropKey(job.key);
+    else legacy.add(job.key);
+  }
+  for (let i = propJobs.length - 1; i >= 0; i--) if (propJobs[i].vault === vault && under(propJobs[i].path)) {
+    const job = propJobs.splice(i, 1)[0];
+    if (itemKind(job.key)) dropKey(job.key);
+    else legacy.add(job.key);
+  }
+  for (let i = copies.length - 1; i >= 0; i--) if (copies[i].vault === vault && (under(copies[i].from) || under(copies[i].path))) {
+    const job = copies.splice(i, 1)[0];
+    if (itemKind(job.key)) dropKey(job.key);
+    else legacy.add(job.key);
+  }
+  for (const key of legacy) {
+    stripLegacy(key, (body) => ({
+      ...body,
+      notes: (body.notes ?? []).filter((note) => !(note.vault === vault && under(note.path))),
+      structural: (body.structural ?? []).filter((job) => !(job.vault === vault && under(job.path))),
+      bytes: (body.bytes ?? []).filter((job) => !(job.vault === vault && under(job.path))),
+      props: (body.props ?? []).filter((job) => !(job.vault === vault && under(job.path))),
+    }));
+  }
 }
 
 export function vaultQuiet(): Promise<void> {
@@ -200,104 +292,75 @@ function track<T>(work: Promise<T>): Promise<T> {
   return done;
 }
 
-function storage(): Storage | null {
-  try {
-    if (typeof localStorage === "undefined") return null;
-    return localStorage;
-  } catch {
-    return null;
-  }
-}
-
-function storedKeys(disk: Storage): string[] {
-  const out: string[] = [];
-  try {
-    for (let i = 0; i < disk.length; i++) {
-      const key = disk.key(i);
-      if (key && key.startsWith(PREFIX)) out.push(key);
-    }
-  } catch { /* a storage that cannot be listed keeps the keys we already know */ }
-  return out;
-}
-
-function bodyOf(key: string): StoredHandoff {
-  const mine = (row: { key: string }) => row.key === key;
-  return {
-    notes: [...notes.values()].filter(mine).map(({ vault, path, text, gen }) => ({ vault, path, text, gen })),
-    configs: [...configs.values()].filter(mine).map(({ vault, name, text }) => ({ vault, name, text })),
-    structural: structural.filter(mine).map(({ vault, kind, path, content }) => ({ vault, kind, path, content })),
-    bytes: bytesJobs.filter(mine).map(({ vault, path, op, b64 }) => ({ vault, path, op, b64 })),
-    props: propJobs.filter(mine).map(({ vault, path, edit }) => ({ vault, path, edit })),
-  };
-}
-
-function emptyBody(body: StoredHandoff): boolean {
-  return !body.notes?.length && !body.configs?.length && !body.structural?.length && !body.bytes?.length && !body.props?.length;
-}
-
-/** Write one page's record and read it back. False when storage refuses or disagrees. */
-function persistKey(key: string): boolean {
-  const disk = storage();
-  if (!disk) return false;
-  const body = bodyOf(key);
-  try {
-    if (emptyBody(body)) {
-      disk.removeItem(key);
-      return disk.getItem(key) === null;
-    }
-    const json = JSON.stringify(body);
-    disk.setItem(key, json);
-    return disk.getItem(key) === json;
-  } catch {
-    return false;
-  }
-}
-
-function persistKeys(keys: Iterable<string>): boolean {
-  let ok = true;
-  for (const key of keys) if (!persistKey(key)) ok = false;
-  return ok;
+function ownKey(kind: ItemKind, id: string): string {
+  return itemKey(STORE, kind, id);
 }
 
 function persistOwn(): boolean {
-  knownKeys.add(STORE);
-  const ok = persistKey(STORE);
-  if (ok) releaseLosers(bodyOf(STORE));
+  const disk = storage();
+  if (!disk) return false;
+  let ok = true;
+  const live = new Set<string>();
+  const put = (key: string, value: unknown) => {
+    live.add(key);
+    knownKeys.add(key);
+    if (!writeItem(key, value)) ok = false;
+  };
+  for (const note of notes.values()) {
+    if (!note.key.startsWith(STORE + ".")) continue;
+    put(note.key, { vault: note.vault, path: note.path, text: note.text, gen: note.gen });
+  }
+  for (const config of configs.values()) {
+    if (!config.key.startsWith(STORE + ".")) continue;
+    put(config.key, { vault: config.vault, name: config.name, text: config.text });
+  }
+  for (const job of structural) {
+    if (!job.key.startsWith(STORE + ".")) continue;
+    put(job.key, { vault: job.vault, kind: job.kind, path: job.path, content: job.content });
+  }
+  for (const job of bytesJobs) {
+    if (!job.key.startsWith(STORE + ".")) continue;
+    put(job.key, { vault: job.vault, path: job.path, op: job.op, b64: job.b64 });
+  }
+  for (const job of propJobs) {
+    if (!job.key.startsWith(STORE + ".")) continue;
+    put(job.key, { vault: job.vault, path: job.path, edit: job.edit });
+  }
+  for (const job of copies) {
+    if (!job.key.startsWith(STORE + ".")) continue;
+    put(job.key, { vault: job.vault, from: job.from, path: job.path });
+  }
+  for (const key of storedKeys(disk)) {
+    if (!key.startsWith(STORE + ".")) continue;
+    if (!live.has(key) && !dropKey(key)) ok = false;
+  }
+  if (ok) releaseLosers();
   return ok;
 }
 
-/** Drop an older copy of a note this page just committed, so a later boot cannot bring it back. */
-function releaseLosers(body: StoredHandoff): void {
-  const mine = new Map<string, number>();
-  for (const note of body.notes ?? []) mine.set(noteKey(note.vault, note.path), note.gen ?? 0);
-  if (!mine.size) return;
+/** Drop an older per-item copy of a note this page just committed. */
+function releaseLosers(): void {
+  const mine = [...notes.values()].filter((note) => note.key.startsWith(STORE + "."));
+  if (!mine.length) return;
   const disk = storage();
   if (!disk) return;
   for (const key of storedKeys(disk)) {
-    if (key === STORE) continue;
-    const raw = disk.getItem(key);
-    if (!raw) continue;
-    let saved: StoredHandoff | null = null;
-    try { saved = JSON.parse(raw) as StoredHandoff; } catch { saved = null; }
-    if (!saved || !Array.isArray(saved.notes)) continue;
-    let changed = false;
-    const kept = saved.notes.filter((note) => {
-      if (!note || typeof note.path !== "string" || typeof note.vault !== "string") return true;
-      const gen = mine.get(noteKey(note.vault, note.path));
-      if (gen === undefined || gen < (note.gen ?? 0)) return true;
-      changed = true;
-      return false;
-    });
-    if (!changed) continue;
-    const next: StoredHandoff = { ...saved, notes: kept };
-    try {
-      if (emptyBody(next)) {
-        disk.removeItem(key);
-      } else {
-        const json = JSON.stringify(next);
-        disk.setItem(key, json);
-      }
-    } catch { /* the newer copy is already in this page's record */ }
+    if (key.startsWith(STORE + ".")) continue;
+    if (itemKind(key) === "n") {
+      const raw = disk.getItem(key);
+      if (!raw) continue;
+      let other: { vault?: string; path?: string; gen?: number };
+      try { other = JSON.parse(raw) as { vault?: string; path?: string; gen?: number }; } catch { continue; }
+      const hit = mine.find((note) => note.vault === other.vault && note.path === other.path && note.gen >= (other.gen ?? 0));
+      if (!hit || disk.getItem(key) !== raw) continue;
+      try { disk.removeItem(key); } catch { /* the other page's newer bytes stay */ }
+      continue;
+    }
+    if (itemKind(key)) continue;
+    stripLegacy(key, (body) => ({
+      ...body,
+      notes: (body.notes ?? []).filter((note) => !mine.some((ours) => ours.vault === note.vault && ours.path === note.path && ours.gen >= (note.gen ?? 0))),
+    }));
   }
 }
 
@@ -305,13 +368,13 @@ function rememberNote(saved: NoteHandoff, write = true): void {
   const id = noteKey(saved.vault, saved.path);
   const prev = notes.get(id);
   if (prev && prev.gen > saved.gen) return;
-  notes.set(id, { ...saved, key: STORE, notify: saved.notify ?? prev?.notify });
-  knownKeys.add(STORE);
+  const key = ownKey("n", id);
+  notes.set(id, { ...saved, key, notify: saved.notify ?? prev?.notify });
   if (write) persistOwn();
 }
 
 function rememberConfig(saved: ConfigHandoff, write = true): void {
-  configs.set(configKey(saved.vault, saved.name), { ...saved, key: STORE });
+  configs.set(configKey(saved.vault, saved.name), { ...saved, key: ownKey("c", configKey(saved.vault, saved.name)) });
   if (write) persistOwn();
 }
 
@@ -340,9 +403,37 @@ function loadStored(): void {
   if (!disk) return;
   for (const key of storedKeys(disk)) {
     knownKeys.add(key);
-    let saved: StoredHandoff | null = null;
-    try { saved = JSON.parse(disk.getItem(key) ?? "null") as StoredHandoff | null; } catch { saved = null; }
+    let saved: RawHandoff | null = null;
+    try { saved = JSON.parse(disk.getItem(key) ?? "null") as RawHandoff; } catch { saved = null; }
     if (!saved || typeof saved !== "object") continue;
+    const kind = itemKind(key);
+    if (kind === "n") { takeNote(key, saved); continue; }
+    if (kind === "c") {
+      if (typeof saved.vault !== "string" || typeof saved.name !== "string" || typeof saved.text !== "string") continue;
+      const id = configKey(saved.vault, saved.name);
+      if (!configs.has(id)) configs.set(id, { vault: saved.vault, name: saved.name, text: saved.text, key });
+      continue;
+    }
+    if (kind === "s") {
+      if ((saved.kind !== "note" && saved.kind !== "folder") || typeof saved.path !== "string" || typeof saved.vault !== "string") continue;
+      structural.push({ vault: saved.vault, kind: saved.kind, path: saved.path, content: saved.content ?? "", key });
+      continue;
+    }
+    if (kind === "b") {
+      if ((saved.op !== "write" && saved.op !== "replace") || typeof saved.path !== "string" || typeof saved.b64 !== "string" || typeof saved.vault !== "string") continue;
+      bytesJobs.push({ vault: saved.vault, path: saved.path, op: saved.op, b64: saved.b64, key });
+      continue;
+    }
+    if (kind === "p") {
+      if (typeof saved.path !== "string" || typeof saved.vault !== "string") continue;
+      propJobs.push({ vault: saved.vault, path: saved.path, edit: saved.edit, key });
+      continue;
+    }
+    if (kind === "y") {
+      if (typeof saved.vault !== "string" || typeof saved.from !== "string" || typeof saved.path !== "string") continue;
+      copies.push({ vault: saved.vault, from: saved.from, path: saved.path, key });
+      continue;
+    }
     for (const note of saved.notes ?? []) takeNote(key, note);
     for (const config of saved.configs ?? []) {
       if (!config || typeof config.vault !== "string" || typeof config.name !== "string" || typeof config.text !== "string") continue;
@@ -354,7 +445,7 @@ function loadStored(): void {
       structural.push({ vault: job.vault, kind: job.kind, path: job.path, content: job.content ?? "", key });
     }
     for (const job of saved.bytes ?? []) {
-      if (!job || (job.op !== "write" && job.op !== "replace") || typeof job.path !== "string" || typeof job.b64 !== "string") continue;
+      if (!job || (job.op !== "write" && job.op !== "replace") || typeof job.path !== "string" || typeof job.b64 !== "string" || typeof job.vault !== "string") continue;
       bytesJobs.push({ vault: job.vault, path: job.path, op: job.op, b64: job.b64, key });
     }
     for (const job of saved.props ?? []) {
@@ -421,7 +512,7 @@ export async function writeVaultConfig(name: string, text: string, source = sour
 
 export function queueVaultCreate(kind: "note" | "folder", path: string, content = "", source = sourceVault()): Promise<FileEntry> {
   return new Promise((resolve) => {
-    structural.push({ vault: source, kind, path, content, key: STORE, resolve });
+    structural.push({ vault: source, kind, path, content, key: ownKey("s", `${source}\0${path}\0${kind}`), resolve });
     persistOwn();
   });
 }
@@ -433,7 +524,7 @@ export function submitBytes(source: string, path: string, bytes: Uint8Array, op:
     return track(work).then(() => {});
   }
   return new Promise((resolve) => {
-    bytesJobs.push({ vault: source, path, op, b64: encodeBytes(bytes), key: STORE, resolve });
+    bytesJobs.push({ vault: source, path, op, b64: encodeBytes(bytes), key: ownKey("b", `${source}\0${path}\0${op}`), resolve });
     persistOwn();
   });
 }
@@ -442,7 +533,15 @@ export function submitBytes(source: string, path: string, bytes: Uint8Array, op:
 export function submitProperty(source: string, path: string, edit: unknown): Promise<unknown> {
   if (canSubmit(source, path)) return track(api.setProperty(path, edit as never, false));
   return new Promise((resolve) => {
-    propJobs.push({ vault: source, path, edit, key: STORE, resolve });
+    propJobs.push({ vault: source, path, edit, key: ownKey("p", `${source}\0${path}`), resolve });
+    persistOwn();
+  });
+}
+
+/** Read `from` and create `path` only once `source` is the backend again. */
+export function queueVaultCopy(source: string, from: string, path: string): Promise<FileEntry> {
+  return new Promise((resolve) => {
+    copies.push({ vault: source, from, path, key: ownKey("y", `${source}\0${from}\0${path}`), resolve });
     persistOwn();
   });
 }
@@ -473,9 +572,8 @@ export async function flushHandoff(): Promise<boolean> {
   const jobs = structural.filter((job) => job.vault === vault && !heldBack(job.path));
   const files = bytesJobs.filter((job) => job.vault === vault && !heldBack(job.path));
   const props = propJobs.filter((job) => job.vault === vault && !heldBack(job.path));
+  const copyJobs = copies.filter((job) => job.vault === vault && !heldBack(job.from) && !heldBack(job.path));
   const deferred = later.filter((job) => job.vault === vault);
-  const touched = new Set<string>();
-  for (const row of [...noteEntries, ...configEntries, ...jobs, ...files, ...props]) touched.add(row.key);
   for (const note of noteEntries) notes.delete(noteKey(note.vault, note.path));
   for (const config of configEntries) configs.delete(configKey(config.vault, config.name));
   const pull = <T>(list: T[], job: T) => {
@@ -485,16 +583,22 @@ export async function flushHandoff(): Promise<boolean> {
   for (const job of jobs) pull(structural, job);
   for (const job of files) pull(bytesJobs, job);
   for (const job of props) pull(propJobs, job);
+  for (const job of copyJobs) pull(copies, job);
   for (const job of deferred) pull(later, job);
+  const ack = (key: string, edit: (body: StoredHandoff) => StoredHandoff) => ackKey(key, edit);
   let failed = false;
   await Promise.all([
     ...noteEntries.map(async (saved) => {
-      if (pathGen(saved.path) > saved.gen) return;
       const id = noteKey(saved.vault, saved.path);
+      if (pathGen(saved.path) > saved.gen) {
+        ack(saved.key, (body) => ({ ...body, notes: (body.notes ?? []).filter((note) => !(note.vault === saved.vault && note.path === saved.path)) }));
+        return;
+      }
       sending.set(id, saved.text);
       try {
         await track(api.writeNote(saved.path, saved.text));
         try { saved.notify?.(); } catch { /* the bytes landed */ }
+        ack(saved.key, (body) => ({ ...body, notes: (body.notes ?? []).filter((note) => !(note.vault === saved.vault && note.path === saved.path && (note.gen ?? 0) <= saved.gen)) }));
       } catch {
         failed = true;
         if (!notes.has(id)) notes.set(id, saved);
@@ -505,6 +609,7 @@ export async function flushHandoff(): Promise<boolean> {
       sendingConfig.set(id, saved.text);
       try {
         await track(api.writeConfig(saved.name, saved.text));
+        ack(saved.key, (body) => ({ ...body, configs: (body.configs ?? []).filter((config) => !(config.vault === saved.vault && config.name === saved.name)) }));
       } catch {
         failed = true;
         if (!configs.has(id)) configs.set(id, saved);
@@ -515,6 +620,7 @@ export async function flushHandoff(): Promise<boolean> {
         const entry = job.kind === "folder"
           ? await track(api.createFolder(job.path))
           : await track(api.createNote(job.path, job.content));
+        ack(job.key, (body) => ({ ...body, structural: (body.structural ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path && row.kind === job.kind)) }));
         job.resolve?.(entry);
       } catch {
         failed = true;
@@ -526,6 +632,7 @@ export async function flushHandoff(): Promise<boolean> {
         const raw = decodeBytes(job.b64);
         if (job.op === "replace") await track(api.replaceFileBytes(job.path, raw));
         else await track(api.writeFileBytes(job.path, raw));
+        ack(job.key, (body) => ({ ...body, bytes: (body.bytes ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path && row.op === job.op)) }));
         job.resolve?.();
       } catch {
         failed = true;
@@ -535,10 +642,32 @@ export async function flushHandoff(): Promise<boolean> {
     ...props.map(async (job) => {
       try {
         const result = await track(api.setProperty(job.path, job.edit as never, false));
+        ack(job.key, (body) => ({ ...body, props: (body.props ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path)) }));
         job.resolve?.(result);
       } catch {
         failed = true;
         if (!propJobs.includes(job)) propJobs.push(job);
+      }
+    }),
+    ...copyJobs.map(async (job) => {
+      try {
+        if (backendRoot() !== job.vault || writesSealed()) {
+          failed = true;
+          if (!copies.includes(job)) copies.push(job);
+          return;
+        }
+        const content = await api.readNote(job.from);
+        if (backendRoot() !== job.vault || writesSealed()) {
+          failed = true;
+          if (!copies.includes(job)) copies.push(job);
+          return;
+        }
+        const entry = await api.createNote(job.path, content);
+        ack(job.key, (body) => body);
+        job.resolve?.(entry);
+      } catch {
+        failed = true;
+        if (!copies.includes(job)) copies.push(job);
       }
     }),
     ...deferred.map(async (job) => {
@@ -550,7 +679,6 @@ export async function flushHandoff(): Promise<boolean> {
       }
     }),
   ]);
-  persistKeys(touched);
   if (failed) scheduleRetry();
   else if (!handoffPending(vault)) clearRetry();
   return !failed;
@@ -566,6 +694,7 @@ export function restoreDurableHandoff(): void {
   structural.splice(0);
   bytesJobs.splice(0);
   propJobs.splice(0);
+  copies.splice(0);
   later.splice(0);
   sending.clear();
   sendingConfig.clear();
@@ -578,6 +707,7 @@ export function resetHandoffForTests(): void {
   structural.splice(0);
   bytesJobs.splice(0);
   propJobs.splice(0);
+  copies.splice(0);
   later.splice(0);
   sending.clear();
   sendingConfig.clear();

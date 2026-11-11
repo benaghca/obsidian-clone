@@ -339,6 +339,11 @@ export class NoteEmbedWidget extends DrawnWidget {
 }
 
 const BASE_FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*base[ \t]*$/;
+
+/** True when a line is a base fence the editor draws (backticks or tildes). */
+export function hasBaseFence(text: string): boolean {
+  return text.split("\n").some((line) => BASE_FENCE.test(line.endsWith("\r") ? line.slice(0, -1) : line));
+}
 const closingFence = (open: string) => new RegExp(`^ {0,3}${open[0]}{${open.length},}[ \t]*$`);
 
 /** A ```base block's YAML, from its lines (fences included); null when it is another code block. */

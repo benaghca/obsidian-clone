@@ -2,14 +2,14 @@
    window corner for the frameless window's buttons, and backlinks under
    the note. */
 
-/* tab strip: the top ones double as the title bar */
+/* tab strip: the top ones double as the title bar. No line under it: the
+   active tab, in the note's colour, runs straight into the note. */
 .mod-root .workspace-tab-header-container {
   height: var(--header-height);
   flex: none;
   display: flex;
   align-items: flex-end;
   background: var(--background-secondary);
-  border-bottom: 1px solid var(--background-modifier-border);
   padding: 0 4px 0 8px;
 }
 .mod-root .workspace-tabs.mod-top > .workspace-tab-header-container {
@@ -17,7 +17,8 @@
 }
 /* Tabs share the strip like Obsidian's: each is a full tab width while
    there is room, and they all shrink evenly when there is not, instead of
-   shrinking to fit their titles. The + button follows the last tab. */
+   shrinking to fit their titles. The + button follows the last tab. Slim
+   (28px, as measured in Obsidian), sitting on the strip's bottom edge. */
 .workspace-tab-header-container-inner {
   display: flex;
   align-items: flex-end;
@@ -28,15 +29,16 @@
   overflow: hidden;
 }
 .mod-root .workspace-tab-header {
-  height: 34px;
+  height: 28px;
   width: var(--tab-width);
   min-width: var(--tab-min-width);
   flex: 0 1 auto;
   position: relative;
-  padding: 1px 4px 4px;
-  border-radius: 10px 10px 0 0;
-  margin-bottom: -1px;
+  padding: 3px 3px 4px;
+  border-radius: var(--radius-m) var(--radius-m) 0 0;
   -webkit-app-region: no-drag;
+  /* its own width decides whether it has room for a close button (below) */
+  container-type: inline-size;
 }
 /* opening and closing tabs grow and shrink (Web Animations in pane.ts) */
 .mod-root .workspace-tab-header.is-closing {
@@ -45,10 +47,11 @@
 .workspace-tab-header-inner {
   display: flex;
   align-items: center;
+  position: relative;
   height: 100%;
-  padding: 0 3px 0 6px;
+  padding: 0 3px 0 7px;
   gap: 2px;
-  border-radius: 4px;
+  border-radius: var(--radius-s);
   color: var(--text-muted);
   /* the active tab's lighter "indicator" fades in rather than snapping */
   transition:
@@ -83,12 +86,21 @@
   flex: 1;
   white-space: nowrap;
 }
+/* The close button sits over the title's end instead of taking room from
+   it, so an inactive tab's title uses its whole width and nothing moves
+   when the button fades in on hover: the title fades out under it. The
+   active and pinned tabs, which always show it, keep its room clear, and
+   so do linked tabs, whose unlink icon sits just before it. */
 .workspace-tab-header-inner-close-button {
-  --icon-size: 16px;
+  --icon-size: 14px;
   --icon-stroke: var(--icon-xs-stroke-width);
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  translate: 0 -50%;
   display: flex;
   padding: 2px;
-  border-radius: 8px;
+  border-radius: var(--radius-s);
   color: var(--icon-color);
   opacity: 0;
   transition:
@@ -100,6 +112,49 @@
 .workspace-tab-header.is-active .workspace-tab-header-inner-close-button,
 .workspace-tab-header.is-pinned .workspace-tab-header-inner-close-button {
   opacity: 1;
+}
+.workspace-tab-header.is-active .workspace-tab-header-inner,
+.workspace-tab-header.is-pinned .workspace-tab-header-inner,
+.workspace-tab-header.is-linked .workspace-tab-header-inner {
+  padding-right: 22px;
+}
+/* A view tab (graph, canvas...) keeps its icon clear of the close button or
+   pin even at its narrowest, so clicking the icon selects the tab. */
+.mod-root .workspace-tab-header[data-icon] {
+  min-width: max(var(--tab-min-width), 53px);
+}
+/* A linked tab never gets too narrow for both: its unlink icon (18px) and
+   close button (18px) stay side by side, so aiming at unlink can't close it.
+   A view tab (graph, canvas...) also shows its view icon, so it needs more. */
+.mod-root .workspace-tab-header.is-linked {
+  min-width: max(var(--tab-min-width), 56px);
+}
+.mod-root .workspace-tab-header.is-linked[data-icon] {
+  min-width: max(var(--tab-min-width), 76px);
+}
+.workspace-tab-header:not(.is-active, .is-pinned, .is-linked):hover .workspace-tab-header-inner-title {
+  -webkit-mask-image: linear-gradient(to left, transparent 20px, #000 32px);
+  mask-image: linear-gradient(to left, transparent 20px, #000 32px);
+}
+/* Squeezed under 53px (the narrowest a tab with a view icon or a link gets,
+   so only plain tabs), a tab would be mostly close button: it hides, and a
+   click anywhere selects the tab. Middle-click and Ctrl+W still close it. A
+   pinned tab keeps its pin as a marker, but the pin takes no clicks. The
+   query reads the tab's content box, inside its 3px side padding. */
+@container (width < 47px) {
+  .mod-root .workspace-tab-header:not(.is-pinned) .workspace-tab-header-inner-close-button {
+    display: none;
+  }
+  .mod-root .workspace-tab-header.is-pinned .workspace-tab-header-inner-close-button {
+    pointer-events: none;
+  }
+  .mod-root .workspace-tab-header:not(.is-pinned) .workspace-tab-header-inner {
+    padding-right: 3px;
+  }
+  .mod-root .workspace-tab-header .workspace-tab-header-inner-title {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
 }
 .workspace-tab-header-inner-close-button:hover {
   background: var(--background-modifier-hover);
@@ -116,20 +171,16 @@
 .workspace-tab-header.is-linked .workspace-tab-header-status-icon {
   display: flex;
 }
-/* The new-tab control is centred beside the taller tab row. */
+/* "New tab" and the tab list are plain icon buttons, level with the tabs'
+   middle: hovering one lights only its own small rounded box. */
 .workspace-tab-header-new-tab,
 .workspace-tab-header-tab-list {
   align-self: flex-end;
-  margin-bottom: 2px;
+  margin-bottom: 1px;
   -webkit-app-region: no-drag;
 }
 .workspace-tab-header-new-tab {
-  align-self: stretch;
-  width: 24px;
-  height: 100%;
-  margin: 0 0 0 8px;
-  padding: 8px 0 6px;
-  justify-content: center;
+  margin-left: 4px;
 }
 .workspace-tab-header-spacer {
   flex: 1;

@@ -4,11 +4,10 @@ import { canvasHelp, canvasReadOnly, canvasSettings } from "./controls";
 import type { CanvasNode } from "./model";
 import { glideCamera, type Camera } from "./present";
 import type { Tab } from "../tabs";
+import { canvasViewports } from "./viewports";
 
 interface Bounds { left: number; top: number; right: number; bottom: number }
-interface Viewport { path: string; cx: number; cy: number; scale: number }
-// Only live tabs retain a viewport. This is never part of saved layout/JSON.
-export const canvasViewports = new WeakMap<Tab, Viewport>();
+export { canvasViewports };
 const clamp = (scale: number) => Math.max(1 / 16, Math.min(2, scale));
 
 // One immutable band sheet. The view applies attributes to rings, titles and

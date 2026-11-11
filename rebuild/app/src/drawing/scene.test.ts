@@ -301,7 +301,9 @@ describe("speed", () => {
   // Fields a renderer reads from every element on its first draw.
   const FIELDS = ["x", "y", "width", "height", "angle", "strokeColor", "backgroundColor", "fillStyle", "strokeWidth", "strokeStyle", "roughness", "opacity", "seed", "isDeleted", "groupIds", "roundness", "boundElements", "points", "endArrowhead", "text", "fontSize", "textAlign", "containerId"] as const;
 
-  it("parses a 5,000-element drawing in under 20 ms", () => {
+  // About 11.5 ms alone. Under full-suite load the median has reached 20.3–20.9 ms (JSON.parse alone
+  // up to 20.1 ms), so the flat limit is 25 ms. The ratio to JSON.parse below is the tighter check.
+  it("parses a 5,000-element drawing in under 25 ms", () => {
     const text = bigDrawing(5000);
     const median = (f: () => unknown) => {
       for (let i = 0; i < 3; i++) f();
@@ -321,7 +323,7 @@ describe("speed", () => {
     console.log(`5,000 elements (${(text.length / 1e6).toFixed(1)} MB): parseScene median ${parse.toFixed(1)} ms, JSON.parse alone ${json.toFixed(1)} ms, parse + every field read ${draw.toFixed(1)} ms`);
     expect(scene.elements).toHaveLength(5000);
     expect(stringifyScene(scene)).toBe(text);
-    expect(parse).toBeLessThan(20);
+    expect(parse).toBeLessThan(25);
     // The model adds little to JSON.parse, which is the floor for any parser here.
     expect(parse).toBeLessThan(json * 1.25 + 2);
     expect(draw).toBeLessThan(50);

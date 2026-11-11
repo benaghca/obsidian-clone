@@ -213,3 +213,30 @@ Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
 - `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
 
 Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
+
+## Review 5
+
+Codex failed `10e3eb0`. Five blockers. `rebuild/integration` at `af0fcc3` (newer than the review's `2a9ede5` anchor; it includes the S3 merge) was merged in. The only textual conflict was `src/vault.ts`. S9's batched scheduler stays. S1's ownership guard is applied when a batch is admitted and again before it touches files. Nothing on screen changes. No new package. This slice did not edit Rust; the Rust in the merge is integration's.
+
+- **Journal items.** Each accepted note, config, create, byte job, property edit, and copy is its own key: `grove.saveHandoff.` plus this page's id, a kind letter, and the id. A successful replay removes only that key. It does not rebuild another window's record from this page's cache. An older per-item note is dropped only after a fresh read still shows a generation this page already has. A legacy single-blob key is edited by reading it again at that moment, so a note another window added after this page loaded stays in the blob.
+- **Drains.** `beginHoldDrain` returns a disposer for that drain's own token. Finishing an earlier drain does not remove a later drain's authorization. Two overlapping renames can finish out of order, and the path the later drain still holds cannot be written.
+- **Peer delete.** The ack is true only when the path flush and this page's handoff flush both succeed. A failed queued text stays in that page's journal. The initiator does not delete.
+- **Copy.** A loaded note, canvas, or drawing copies the snapshot already in memory, including while the page is sealed. A closed file is read only in a turn where the backend is still the vault the copy was accepted on and the page is not sealed. If that read comes back after the root moved or the page sealed, those bytes are discarded and the copy waits until that vault is the backend again.
+- **Watcher batch.** S9 still coalesces on a frame, with a 50 ms fallback, one refresh, and the prefix/tombstone reducer. `onChanged` returns when the page is suspended or does not own the disk. A batch that loses ownership before it applies is dropped, including after `refreshFiles` and before each reload and the link refresh. It does not run later when the page owns the disk again.
+
+Regressions: replaying one window leaves the other window's later note in storage (`src/saveEpoch.test.ts`, 17 tests); an earlier rename drain finishing does not authorize the path a later drain still holds; a peer that fails its queued text refuses the delete and the text is still recoverable; a closed note and a canvas copied while confirm is delayed read the vault the page still belongs to. `src/vault.events.test.ts` checks that a batch already framed does not reload once the backend root is no longer the page vault. The sealed loaded-note copy still queues a structural create of the editor text.
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, pruning detached clean owners, and a product-wide conflict policy. S5 still runs each write against the root that is current when the write arrives.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+`src/vaultWrite.ts` is 724 lines. The storage helpers are `src/handoffStore.ts` (111). Each page's journal maps stay in `vaultWrite.ts`. `src/workspace.ts` is 902 because integration's copy is 895; this slice did not add a feature there.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest (`TEST_EXIT:0`). Vitest: 108 files, 1644 tests passed. The known graph feel gap is still there (p95 33.4 ms, over_20ms 59/185) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 16.9 ms).
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The app index is `index-BAKOCWYJ.js` (183.66 kB). The largest chunk is `menu-WcLcfhgn.js` (261.14 kB). The log printed no chunk-size warning.
+- `npm run audit:offline` exited 0: 236 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.

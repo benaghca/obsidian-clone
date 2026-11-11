@@ -3,7 +3,7 @@
 // write the old path back after this window moved or trashed it.
 
 import { retryDelay } from "./fileSave";
-import { beginHoldDrain, endHoldDrain } from "./holdDrain";
+import { beginHoldDrain } from "./holdDrain";
 import { isUnder, movedPath } from "./paths";
 import { type SwitchIo, switchIo } from "./vaultSwitch";
 import { flushHandoff } from "./vaultWrite";
@@ -18,6 +18,8 @@ export interface PathOps {
   hold(under: (path: string) => boolean): void;
   release(under: (path: string) => boolean): void;
   flush(under: (path: string) => boolean): Promise<boolean>;
+  /** Queued direct writes for this page. Defaults to this page's journal. */
+  handoff?(): Promise<boolean>;
   retarget(under: (path: string) => boolean, swap: (path: string) => string): void;
   discard(under: (path: string) => boolean): void;
   /** Workspace tabs, history, and move listeners. Ack waits until this settles. */
@@ -203,12 +205,14 @@ export async function installPathBarrier(ops: PathOps, io?: Pick<SwitchIo, "bus"
     ops.hold(under);
     void (async () => {
       let ok = false;
-      beginHoldDrain(under);
+      const endDrain = beginHoldDrain(under);
       try {
         ok = (await ops.flush(under)) !== false;
-        await flushHandoff();
+        // A failed queued snapshot must refuse the delete. The bytes stay queued.
+        const handed = await (ops.handoff ?? flushHandoff)();
+        if (!handed) ok = false;
       } catch { ok = false; }
-      finally { endHoldDrain(); }
+      finally { endDrain(); }
       await bus.emit(ACK, { id: body.id, label: self, ok });
     })();
   });

@@ -302,8 +302,9 @@ test("an older queued snapshot does not overwrite a newer editor edit", async ()
 
 test("a sealed copy waits for the vault it was accepted on", async () => {
   const notes = editors();
+  vi.mocked(api.readNote).mockResolvedValue("page-a");
+  await notes.load("Note.md");
   const ws = renameWs(notes, "Note.md");
-  (ws.editors as { text: (path: string) => Promise<string> }).text = async () => "page-a";
   sealWrites();
   const pending = copyNote(ws, "Note.md");
   await vi.waitFor(() => expect(queuedStructural().some((job) => job.vault === "/vault-a" && job.content === "page-a")).toBe(true));

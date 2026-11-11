@@ -109,8 +109,9 @@ fn flush(app: &AppHandle, events: &[Event]) {
 }
 
 /// `scan` is injectable so tests can write while the state lock is released.
-fn flush_changes(
-    inner: &std::sync::Mutex<Inner>,
+/// Crate-visible so the headless smoke can run one flush without a watcher thread.
+pub(crate) fn flush_changes(
+    inner: &std::sync::RwLock<Inner>,
     events: &[Event],
     scan: impl FnOnce(&Path) -> Result<Index, String>,
 ) -> Vec<VaultChanged> {
@@ -325,8 +326,8 @@ mod tests {
         vec![Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan)]
     }
 
-    fn state(root: &Path) -> std::sync::Mutex<Inner> {
-        std::sync::Mutex::new(Inner {
+    fn state(root: &Path) -> std::sync::RwLock<Inner> {
+        std::sync::RwLock::new(Inner {
             config_dir: root.join(".grove"),
             vault: Some(crate::vault::Vault::open(root.to_path_buf()).unwrap()),
         })
@@ -343,7 +344,7 @@ mod tests {
         // Acquiring the mutex here also proves that the full scan isn't under it.
         let changes = flush_changes(&inner, &rescanning(), |root| {
             let fresh = Index::scan(root)?;
-            let mut guard = inner.try_lock().expect("scan must not hold the state lock");
+            let mut guard = inner.try_write().expect("scan must not hold the state lock");
             let vault = guard.vault.as_mut().unwrap();
             vault.write_note("saved.md", "---\nstatus: new\n---\n[[created]]\nlatest").unwrap();
             vault.write_note("new-parent/own.md", "latest").unwrap();
