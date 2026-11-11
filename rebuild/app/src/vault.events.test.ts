@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, type FileEntry } from "./api";
+import { sealWrites, unsealWrites } from "./saveSeal";
 import { Vault, batchVisits } from "./vault";
 import { resetBackendRootForTests, setBackendRoot, setPageVault } from "./vaultRoot";
 
@@ -62,6 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  unsealWrites();
   resetBackendRootForTests();
   vi.unstubAllGlobals();
 });
@@ -442,5 +444,38 @@ it("does not apply a batch once the page no longer owns the vault", async () => 
   expect(frames).toHaveLength(0);
   setBackendRoot("/vault-a");
   await settle();
+  expect(reload).not.toHaveBeenCalled();
+});
+
+it("does not publish another vault's file list when the switch rolls back", async () => {
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const { vault, changed } = await openVault(reload);
+  setBackendRoot("/vault-a");
+  setPageVault("/vault-a");
+  vi.mocked(api.listFiles).mockResolvedValueOnce([file("A.md")]);
+  await vault.refreshFiles();
+  expect(vault.entry("A.md")?.path).toBe("A.md");
+  const filesNotices = changed.mock.calls.filter((call) => call[0] === "files").length;
+
+  let releaseList: (files: FileEntry[]) => void = () => {};
+  vi.mocked(api.listFiles).mockImplementation(() => new Promise((resolve) => { releaseList = resolve; }));
+  emit({ kind: "create", paths: ["New.md"] });
+  expect(frames).toHaveLength(1);
+  frames.shift()!(0);
+  await Promise.resolve();
+  sealWrites();
+  setBackendRoot("/vault-b");
+  releaseList([file("OnlyB.md")]);
+  await microtasks();
+  await microtasks();
+  setBackendRoot("/vault-a");
+  unsealWrites();
+  await microtasks();
+
+  expect(vault.files.map((entry) => entry.path)).toEqual(["A.md"]);
+  expect(vault.notes.map((note) => note.path)).toEqual(["A.md"]);
+  expect(vault.entry("OnlyB.md")).toBeUndefined();
+  expect(vault.entry("A.md")?.path).toBe("A.md");
+  expect(changed.mock.calls.filter((call) => call[0] === "files")).toHaveLength(filesNotices);
   expect(reload).not.toHaveBeenCalled();
 });

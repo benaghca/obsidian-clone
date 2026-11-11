@@ -66,6 +66,8 @@ interface PropHandoff {
   vault: string;
   path: string;
   edit: unknown;
+  /** Submission order. Distinct edits of one file each keep their own number. */
+  ord: number;
   key: string;
   resolve?: (result: unknown) => void;
 }
@@ -106,6 +108,7 @@ interface RawHandoff {
   op?: string;
   b64?: string;
   edit?: unknown;
+  ord?: number;
   notes?: { vault: string; path: string; text: string; gen?: number }[];
   configs?: { vault: string; name: string; text: string }[];
   structural?: { vault: string; kind: string; path: string; content?: string }[];
@@ -119,6 +122,7 @@ const configs = new Map<string, ConfigHandoff>();
 const structural: StructHandoff[] = [];
 const bytesJobs: BytesHandoff[] = [];
 const propJobs: PropHandoff[] = [];
+let propSeq = 0;
 const copies: CopyHandoff[] = [];
 const later: LaterJob[] = [];
 const sending = new Map<string, string>();
@@ -236,8 +240,8 @@ export function retargetHandoff(vault: string, under: (path: string) => boolean,
   for (const job of propJobs) if (job.vault === vault && under(job.path)) {
     job.path = swap(job.path);
     if (itemKind(job.key)) {
-      job.key = moveItemKey(job.key, "p", `${job.vault}\0${job.path}`);
-      writeItem(job.key, { vault: job.vault, path: job.path, edit: job.edit });
+      job.key = moveItemKey(job.key, "p", `${job.vault}\0${job.path}\0${job.ord}`);
+      writeItem(job.key, { vault: job.vault, path: job.path, edit: job.edit, ord: job.ord });
     }
   }
 }
@@ -324,7 +328,7 @@ function persistOwn(): boolean {
   }
   for (const job of propJobs) {
     if (!job.key.startsWith(STORE + ".")) continue;
-    put(job.key, { vault: job.vault, path: job.path, edit: job.edit });
+    put(job.key, { vault: job.vault, path: job.path, edit: job.edit, ord: job.ord });
   }
   for (const job of copies) {
     if (!job.key.startsWith(STORE + ".")) continue;
@@ -424,11 +428,7 @@ function loadStored(): void {
       bytesJobs.push({ vault: saved.vault, path: saved.path, op: saved.op, b64: saved.b64, key });
       continue;
     }
-    if (kind === "p") {
-      if (typeof saved.path !== "string" || typeof saved.vault !== "string") continue;
-      propJobs.push({ vault: saved.vault, path: saved.path, edit: saved.edit, key });
-      continue;
-    }
+    if (kind === "p") { takeProp(key, saved); continue; }
     if (kind === "y") {
       if (typeof saved.vault !== "string" || typeof saved.from !== "string" || typeof saved.path !== "string") continue;
       copies.push({ vault: saved.vault, from: saved.from, path: saved.path, key });
@@ -448,11 +448,16 @@ function loadStored(): void {
       if (!job || (job.op !== "write" && job.op !== "replace") || typeof job.path !== "string" || typeof job.b64 !== "string" || typeof job.vault !== "string") continue;
       bytesJobs.push({ vault: job.vault, path: job.path, op: job.op, b64: job.b64, key });
     }
-    for (const job of saved.props ?? []) {
-      if (!job || typeof job.path !== "string" || typeof job.vault !== "string") continue;
-      propJobs.push({ vault: job.vault, path: job.path, edit: job.edit, key });
-    }
+    for (const job of saved.props ?? []) takeProp(key, job);
   }
+  propJobs.sort((a, b) => a.ord - b.ord);
+}
+
+function takeProp(key: string, saved: { vault?: string; path?: string; edit?: unknown; ord?: number } | undefined): void {
+  if (!saved || typeof saved.path !== "string" || typeof saved.vault !== "string") return;
+  const ord = typeof saved.ord === "number" ? saved.ord : ++propSeq;
+  if (ord > propSeq) propSeq = ord;
+  propJobs.push({ vault: saved.vault, path: saved.path, edit: saved.edit, ord, key });
 }
 
 loadStored();
@@ -532,8 +537,9 @@ export function submitBytes(source: string, path: string, bytes: Uint8Array, op:
 /** A property edit accepted for `source`, replayed with the same payload. */
 export function submitProperty(source: string, path: string, edit: unknown): Promise<unknown> {
   if (canSubmit(source, path)) return track(api.setProperty(path, edit as never, false));
+  const ord = ++propSeq;
   return new Promise((resolve) => {
-    propJobs.push({ vault: source, path, edit, key: ownKey("p", `${source}\0${path}`), resolve });
+    propJobs.push({ vault: source, path, edit, ord, key: ownKey("p", `${source}\0${path}\0${ord}`), resolve });
     persistOwn();
   });
 }
@@ -639,16 +645,20 @@ export async function flushHandoff(): Promise<boolean> {
         if (!bytesJobs.includes(job)) bytesJobs.push(job);
       }
     }),
-    ...props.map(async (job) => {
-      try {
-        const result = await track(api.setProperty(job.path, job.edit as never, false));
-        ack(job.key, (body) => ({ ...body, props: (body.props ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path)) }));
-        job.resolve?.(result);
-      } catch {
-        failed = true;
-        if (!propJobs.includes(job)) propJobs.push(job);
+    (async () => {
+      for (let i = 0; i < props.length; i++) {
+        const job = props[i];
+        try {
+          const result = await track(api.setProperty(job.path, job.edit as never, false));
+          ack(job.key, (body) => ({ ...body, props: (body.props ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path)) }));
+          job.resolve?.(result);
+        } catch {
+          failed = true;
+          for (const left of props.slice(i)) if (!propJobs.includes(left)) propJobs.push(left);
+          return;
+        }
       }
-    }),
+    })(),
     ...copyJobs.map(async (job) => {
       try {
         if (backendRoot() !== job.vault || writesSealed()) {

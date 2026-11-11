@@ -8,9 +8,18 @@ let root = "";
 let page = "";
 let clock = 0;
 const gens = new Map<string, number>();
+const rootWatchers = new Set<() => void>();
 
 export function setBackendRoot(path: string): void {
+  if (root === path) return;
   root = path;
+  for (const hear of rootWatchers) hear();
+}
+
+/** Fired when the backend root actually changes. In-flight list reads must not install after this. */
+export function onBackendRootChange(hear: () => void): () => void {
+  rootWatchers.add(hear);
+  return () => { rootWatchers.delete(hear); };
 }
 
 export function backendRoot(): string {

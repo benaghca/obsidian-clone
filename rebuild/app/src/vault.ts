@@ -7,7 +7,7 @@
 
 import { api, type FileEntry, isTauri, type LinkIndex } from "./api";
 import type { NoteRef } from "./editor/host";
-import { pageOwnsDisk } from "./vaultRoot";
+import { backendRoot, onBackendRootChange, pageOwnsDisk } from "./vaultRoot";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
 import { isNoteFile, noteName } from "./paths";
@@ -167,6 +167,12 @@ export class Vault {
       window.addEventListener("pagehide", () => this.abandon());
       window.addEventListener("pageshow", () => { this.suspended = false; });
     }
+    // A root change invalidates a list that was started on the previous vault.
+    // Rollback bumps the root again, so that reply still cannot install.
+    onBackendRootChange(() => {
+      this.filesRequest += 1;
+      this.linksRequest += 1;
+    });
   }
 
   /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
@@ -205,8 +211,11 @@ export class Vault {
 
   async refreshFiles() {
     const mine = ++this.filesRequest;
+    const vault = backendRoot();
     const files = await api.listFiles();
-    if (mine !== this.filesRequest) return;
+    // The reply is the vault that was current when the read ran. Install it
+    // only if that vault is still this page's backend.
+    if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
@@ -216,8 +225,9 @@ export class Vault {
 
   async refreshLinks() {
     const mine = ++this.linksRequest;
+    const vault = backendRoot();
     const links = await api.linkIndex();
-    if (mine !== this.linksRequest) return;
+    if (mine !== this.linksRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     this.links = links;
     this.changed("links");
   }

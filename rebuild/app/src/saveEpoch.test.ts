@@ -69,7 +69,7 @@ type VaultModule = typeof import("./vaultWrite");
 const entry = (path: string): FileEntry => ({ path, name: path, is_dir: false, mtime_ms: 0, ctime_ms: 0, size: 1 });
 
 /** A query string is a second module instance. tsc has no declaration for it. */
-async function realm(which: "a" | "b" | "c" | "alpha" | "beta" | "reload" | "keep" | "replay" | "fresh" | "peer" | "later"): Promise<VaultModule> {
+async function realm(which: "a" | "b" | "c" | "alpha" | "beta" | "reload" | "keep" | "replay" | "fresh" | "peer" | "later" | "props"): Promise<VaultModule> {
   switch (which) {
     case "a":
       // @ts-expect-error Vite query instance
@@ -104,6 +104,9 @@ async function realm(which: "a" | "b" | "c" | "alpha" | "beta" | "reload" | "kee
     case "later":
       // @ts-expect-error Vite query instance
       return import("./vaultWrite.ts?window=later") as Promise<VaultModule>;
+    case "props":
+      // @ts-expect-error Vite query instance
+      return import("./vaultWrite.ts?window=props") as Promise<VaultModule>;
   }
 }
 const events = { shown() {}, loaded() {}, changed() {}, saved: vi.fn() };
@@ -700,6 +703,22 @@ test("a closed note and a canvas copy read the vault the page still belongs to",
   expect(api.createNote).toHaveBeenCalledWith("Board 1.canvas", "canvas-a");
   expect(reads.every((line) => line.startsWith("/vault-a"))).toBe(true);
   expect(api.createNote).not.toHaveBeenCalledWith(expect.anything(), "from-b");
+});
+
+test("two property edits of one file both reach disk after a new page", async () => {
+  sealWrites();
+  const status = { key: "status", expect: null, to: { type: "text", value: "todo" } };
+  const priority = { key: "priority", expect: null, to: { type: "number", value: 1 } };
+  void submitProperty("/vault-a", "Note.md", status);
+  void submitProperty("/vault-a", "Note.md", priority);
+  expect(api.setProperty).not.toHaveBeenCalled();
+  const next = await realm("props");
+  unsealWrites();
+  setBackendRoot("/vault-a");
+  setPageVault("/vault-a");
+  await next.flushHandoff();
+  expect(api.setProperty).toHaveBeenNthCalledWith(1, "Note.md", status, false);
+  expect(api.setProperty).toHaveBeenNthCalledWith(2, "Note.md", priority, false);
 });
 
 test("boot waits for recovery and the switch stores bytes before the read root moves", () => {

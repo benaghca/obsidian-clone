@@ -240,3 +240,27 @@ Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
 - `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
 
 Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
+
+## Review 6
+
+Codex failed `0c14907`. The five earlier findings stay fixed. Two blockers. Nothing on screen changes. No new package. Rust was not edited.
+
+- **Property edits.** Each queued property edit gets its own journal key, with a submission number. A second edit of the same file no longer replaces the first in storage. A new page restores them in that order and writes them one after another. A failed edit keeps itself and every later edit queued.
+- **File list.** `refreshFiles` installs a list only when the request is still current, the backend root is the one captured when the read started, and this page owns the disk. A backend-root change drops in-flight file and link replies. A list that comes back from the other vault during a switch is not published, and rollback does not need to undo it because it was never installed.
+
+Regressions: two property edits of `Note.md` are still both written after a fresh journal realm (`src/saveEpoch.test.ts`, 18 tests). An in-flight file list of vault B, then a rollback to A, leaves A's files, notes, and path lookup in place and does not emit another files change (`src/vault.events.test.ts`).
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, pruning detached clean owners, and a product-wide conflict policy.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+`src/vaultWrite.ts` is 734 lines. `src/saveEpoch.test.ts` is 735. `src/vault.ts` is 353.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest (`TEST_EXIT:0`). Vitest: 108 files, 1646 tests passed. The known graph feel gap is still there (p95 33.4 ms, over_20ms 64/180) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 17.0 ms). Two earlier locked runs stopped on existing frame-timing checks (canvas link frames, then kanban sideways scroll max 33.3 ms against a 25 ms cap). Those checks passed in this run. No assertion was weakened.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The app index is `index-DPzdTJIA.js` (183.77 kB). The largest chunk is `menu-BVHRymps.js` (261.14 kB). The log printed no chunk-size warning.
+- `npm run audit:offline` exited 0: 236 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
