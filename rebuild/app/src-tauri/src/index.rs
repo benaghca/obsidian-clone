@@ -5,6 +5,7 @@
 //! `[[path/note]]` and `[[../note]]` resolve as vault paths. Frontmatter `alias` / `aliases`
 //! are used only when no note has that name. Links inside fenced or inline code are skipped.
 
+mod file_map;
 mod parse;
 pub(crate) mod props;
 pub use props::NoteProperties;
@@ -34,13 +35,15 @@ use std::path::Path;
 // Real name-map rebuilds, and file nodes visited by `Index::list`.
 // `take_*` resets the counter. A deferred rebuild counts when the maps are
 // built, not once per file that asked. `entry` does not visit the list.
-// `take_suffix_scans` stays 0: a partial path reads `by_suffix` and does not walk files.
+// Walking the file list itself is counted in `file_map` (`take_file_visits`).
 #[cfg(test)]
 thread_local! {
     static REBUILD_MAPS_CALLS: Cell<usize> = const { Cell::new(0) };
     static LIST_WALKS: Cell<usize> = const { Cell::new(0) };
-    static SUFFIX_SCANS: Cell<usize> = const { Cell::new(0) };
 }
+
+#[cfg(test)]
+pub(crate) use file_map::take_file_visits;
 
 #[cfg(test)]
 pub(crate) fn take_rebuild_maps_calls() -> usize {
@@ -60,11 +63,6 @@ fn count_rebuild_maps() {
 #[cfg(test)]
 fn count_list_walk(nodes: usize) {
     LIST_WALKS.with(|cell| cell.set(cell.get() + nodes));
-}
-
-#[cfg(test)]
-pub(crate) fn take_suffix_scans() -> usize {
-    SUFFIX_SCANS.with(|cell| cell.replace(0))
 }
 
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
@@ -104,7 +102,7 @@ struct Node {
 
 #[derive(Default)]
 pub struct Index {
-    files: BTreeMap<String, Node>,
+    files: file_map::Files,
     // Present only while the watcher scans without the state lock. Unlike echo
     // suppression, this journal cannot expire before the replacement is installed.
     rescan_changes: Option<BTreeSet<String>>,

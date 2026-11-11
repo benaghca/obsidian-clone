@@ -10,14 +10,16 @@ The search view already draws a page of rows (the first screenful immediately, t
 
 ## What the tests did before the change
 
-The counters sat on the old walks. I ran the new tests first, then replaced the walks.
+The first counters sat on the old walks. I ran the new tests first, then replaced the walks. Those counters were not incremented by the suffix map, so a later review asked for checks that move when a real walk returns. The page test now counts `path` and `name` reads on the warmed snapshot through a Proxy. The Rust test counts nodes yielded by walking the file map (`iter`, `keys`, `values`, `retain`). Point lookups do not count. Search still counts real map builds and collator sorts.
 
 | Check | Before | After |
 | --- | --- | --- |
-| 12 partial path links against 402 notes | walked 4,824 notes (`takePathScans`) | 0 |
-| 11 partial paths against a 44-node Rust index | walked 484 file nodes (`take_suffix_scans`) | 0 |
+| 12 partial path links against 402 notes | 9,648 `path` reads when the old `notes.find` is put back (two reads a note) | 0 |
+| 11 partial paths against a 44-node Rust index | 484 file-map yields when the old `files.iter` scan is put back | 0 |
 | 4 search replies on one file list | 4 map builds and 4 collator sorts | 1 and 1 |
 | A new array, or a push, on that list | (each reply rebuilt) | builds once |
+
+Restoring either scan failed only that zero check. The same tests' resolution expects still passed, including a file whose whole name is `.md`.
 
 The resolution checks in those tests passed on the old code. So did the existing search-order test: "Note 10", "Note 2", "Note 2" stay `b.md`, `c.md`, `a.MD`, the reverse exclusion stays `a.MD`, `c.md`, and a later modified time still puts `a.MD` first. No older assertion was weakened.
 
@@ -43,7 +45,7 @@ Those 50 search replies built the map 0 times. The first reply on a new file lis
 
 `npm run audit:offline` in `rebuild/app`: `tsc --noEmit`, the production build, and the offline audit passed.
 
-`flock /tmp/grove-npm-test.lock npm test` in `rebuild/app` exited 0. Discovery passed 6, feel at 5,000 notes passed, vitest passed 100 files and 1,548 tests, the later headless scripts passed, and posttest passed (bases, kanban, and the property-edit fuzz). Feel still reports the known graph gap: p95 33.4 ms, held until `GROVE_FEEL_STRICT_GRAPH=1`.
+`flock /tmp/grove-npm-test.lock npm test` in `rebuild/app` exited 0 again after this review fix. Discovery passed 6, feel at 5,000 notes passed, vitest passed 100 files and 1,548 tests, the later headless scripts passed, and posttest passed (bases, kanban, and the property-edit fuzz). Feel still reports the known graph gap: p95 33.4 ms, held until `GROVE_FEEL_STRICT_GRAPH=1`.
 
 The desktop app was not opened. The task forbids a GUI window. The headless suite is what ran.
 
@@ -55,11 +57,12 @@ Against `0358537`:
 
 | File | Lines | Change |
 | --- | --- | --- |
-| `rebuild/app/src/links/internal.ts` | 397 | +40 / −8 |
-| `rebuild/app/src/links/internal.test.ts` | 289 | +34 / −1 |
+| `rebuild/app/src/links/internal.ts` | 388 | +31 / −8 |
+| `rebuild/app/src/links/internal.test.ts` | 299 | +43 / −0 |
 | `rebuild/app/src/shell/searchRead.ts` | 96 | +59 / −5 |
 | `rebuild/app/src/shell/searchRead.test.ts` | 71 | +71 / −0, new |
-| `rebuild/app/src-tauri/src/index.rs` | 738 | +42 / −14 |
-| `rebuild/app/src-tauri/src/index/tests.rs` | 585 | +65 / −0 |
+| `rebuild/app/src-tauri/src/index.rs` | 736 | +41 / −15 |
+| `rebuild/app/src-tauri/src/index/file_map.rs` | 128 | +128 / −0, new |
+| `rebuild/app/src-tauri/src/index/tests.rs` | 589 | +69 / −0 |
 
-Net code: +311 / −28, plus this note.
+Net code: +442 / −28, plus this note. The file map's walks are what the Rust test counts. `get` does not count.

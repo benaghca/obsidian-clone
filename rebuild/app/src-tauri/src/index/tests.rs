@@ -558,7 +558,9 @@ fn partial_path_suffix_matches_today_and_does_not_scan() {
     // `x/sub/note` is a shorter folder than `zz/sub/note.md`. A folder is not a target.
     assert_eq!(idx.resolve("Root.md", "sub/note").as_deref(), Some("zz/sub/note.md"));
 
-    let _ = take_suffix_scans();
+    // Each node a file-list walk yields. The suffix map does not walk, so this stays 0.
+    // Restoring `files.iter()` in `resolve_path` counts every node of every lookup.
+    let _ = take_file_visits();
     for target in [
         "sub/note",
         "x/note",
@@ -574,12 +576,14 @@ fn partial_path_suffix_matches_today_and_does_not_scan() {
     ] {
         let _ = idx.resolve("Root.md", target);
     }
-    assert_eq!(take_suffix_scans(), 0, "partial paths walked the file list");
+    assert_eq!(take_file_visits(), 0, "partial paths walked the file list");
 
     idx.relocate("zz/sub/note.md", "moved/place.md");
+    // The move rebuilds the maps and may walk the file list. The lookup after it must not.
+    let _ = take_file_visits();
     assert_eq!(
         idx.resolve("Root.md", "sub/note").as_deref(),
         Some("a/b/sub/note.md")
     );
-    assert_eq!(take_suffix_scans(), 0);
+    assert_eq!(take_file_visits(), 0, "partial path after a move walked the file list");
 }

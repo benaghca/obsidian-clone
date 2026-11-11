@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { formatLink, linkResolver, linkTargets, relativePath, resolveLink, rewriteLinks, takePathScans } from "./internal";
+import { formatLink, linkResolver, linkTargets, relativePath, resolveLink, rewriteLinks } from "./internal";
 
 const notes = [
   { name: "Ideas", path: "Ideas.md" },
@@ -77,14 +77,24 @@ test("partial paths keep today's winner and do not walk the file list", () => {
 
   const notes = Array.from({ length: 400 }, (_, i) => ({ name: `N${i}`, path: `d${i % 20}/N${i}.md` }));
   notes.push({ name: "Note", path: "Z/Sub/Note.md" }, { name: "pic.png", path: "assets/dir/pic.png" });
-  const resolve = linkResolver(notes);
-  takePathScans();
+  // Reads of `path` and `name` on this snapshot. The suffix map keeps the strings it
+  // needs, so a later partial-path lookup does not touch the notes. `notes.find` would.
+  let reads = 0;
+  const watched = notes.map((note) => new Proxy(note, {
+    get(target, prop, receiver) {
+      if (prop === "path" || prop === "name") reads += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  }));
+  const resolve = linkResolver(watched);
+  expect(resolve("Sub/Note", null)).toBe("Z/Sub/Note.md");
+  reads = 0;
   expect(resolve("Sub/Note", null)).toBe("Z/Sub/Note.md");
   expect(resolve("dir/pic.png", "d0/N0.md")).toBe("assets/dir/pic.png");
   expect(resolve("no/such", null)).toBeNull();
   expect(resolve("Missing/Path", "d0/N0.md")).toBeNull();
   for (let i = 0; i < 8; i++) expect(resolve("gone/missing", null)).toBeNull();
-  expect(takePathScans()).toBe(0);
+  expect(reads).toBe(0);
 });
 
 test("renaming a note rewrites the links to it, keeping headings and display text, not code", () => {

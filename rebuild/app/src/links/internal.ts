@@ -111,15 +111,6 @@ interface NoteIndex {
 
 const noteIndexes = new WeakMap<NoteLike[], NoteIndex>();
 
-/** Notes a partial-path lookup walked. `takePathScans` resets it. The suffix map does not walk. */
-let pathScans = 0;
-
-export function takePathScans(): number {
-  const n = pathScans;
-  pathScans = 0;
-  return n;
-}
-
 /**
  * One path and name index for a file snapshot. Callers pass the same array for
  * every link in that snapshot (the mock link index, a rename, the open vault's
