@@ -54,6 +54,49 @@ test("the same snapshot resolves case, clashes, partial paths and a later edit",
   expect(resolve("../Plan", "Projects/Sub/Deep note.md")).toBe("Projects/Plan.md");
 });
 
+test("partial paths keep today's winner and do not walk the file list", () => {
+  const rawFirst = [
+    { name: "note", path: "other/folder/note" },
+    { name: "Note", path: "x/folder/note.md" },
+  ];
+  expect(resolveLink("folder/note", null, rawFirst)).toBe("other/folder/note");
+  expect(resolveLink("folder/note", null, [rawFirst[1], rawFirst[0]])).toBe("x/folder/note.md");
+  expect(resolveLink("Folder/Note", null, [{ name: "Note", path: "Dir/Folder/Note.md" }])).toBe("Dir/Folder/Note.md");
+  expect(resolveLink("dir/pic.png", null, [{ name: "pic.png", path: "assets/dir/pic.png" }])).toBe("assets/dir/pic.png");
+  expect(resolveLink("no/such", null, rawFirst)).toBeNull();
+  expect(resolveLink("/Sub/Note", null, [{ name: "Note", path: "X/Sub/Note.md" }])).toBeNull();
+  expect(resolveLink("/Sub/Note", null, [{ name: "Note", path: "Sub/Note.md" }])).toBe("Sub/Note.md");
+  const exact = [{ name: "Note", path: "Long/Sub/Note.md" }, { name: "Note", path: "Sub/Note.md" }];
+  expect(resolveLink("Sub/Note", null, exact)).toBe("Sub/Note.md");
+  expect(resolveLink("dir/.md", null, [{ name: ".md", path: "dir/.md" }])).toBeNull();
+  expect(resolveLink(".MD", null, [{ name: ".MD", path: ".MD" }])).toBeNull();
+  const growing = [{ name: "A", path: "A.md" }];
+  expect(resolveLink("Sub/Note", null, growing)).toBeNull();
+  growing.push({ name: "Note", path: "Z/Sub/Note.md" });
+  expect(resolveLink("Sub/Note", null, growing)).toBe("Z/Sub/Note.md");
+
+  const notes = Array.from({ length: 400 }, (_, i) => ({ name: `N${i}`, path: `d${i % 20}/N${i}.md` }));
+  notes.push({ name: "Note", path: "Z/Sub/Note.md" }, { name: "pic.png", path: "assets/dir/pic.png" });
+  // Reads of `path` and `name` on this snapshot. The suffix map keeps the strings it
+  // needs, so a later partial-path lookup does not touch the notes. `notes.find` would.
+  let reads = 0;
+  const watched = notes.map((note) => new Proxy(note, {
+    get(target, prop, receiver) {
+      if (prop === "path" || prop === "name") reads += 1;
+      return Reflect.get(target, prop, receiver);
+    },
+  }));
+  const resolve = linkResolver(watched);
+  expect(resolve("Sub/Note", null)).toBe("Z/Sub/Note.md");
+  reads = 0;
+  expect(resolve("Sub/Note", null)).toBe("Z/Sub/Note.md");
+  expect(resolve("dir/pic.png", "d0/N0.md")).toBe("assets/dir/pic.png");
+  expect(resolve("no/such", null)).toBeNull();
+  expect(resolve("Missing/Path", "d0/N0.md")).toBeNull();
+  for (let i = 0; i < 8; i++) expect(resolve("gone/missing", null)).toBeNull();
+  expect(reads).toBe(0);
+});
+
 test("renaming a note rewrites the links to it, keeping headings and display text, not code", () => {
   const before = [...notes, { name: "Old", path: "Old.md" }];
   const after = [...notes, { name: "New name", path: "Folder/New name.md" }];
