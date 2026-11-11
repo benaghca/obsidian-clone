@@ -66,16 +66,12 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
   const world = h("div", { class: "canvas-world" });
   const el = h("div", { class: "view-content canvas-view", "aria-label": "Canvas", tabindex: "0" }, world);
-  let gone = false, generation = 0, loading = 0, source = "", notifying = false;
+  let gone = false, generation = 0, loading = 0, source = "";
   let undo: string[] = [], redo: string[] = [];
   let stopText: ((paint?: boolean) => void) | undefined;
   let selectAfterDraw: string | undefined, editAfterDraw: string | undefined, building = false, cancelAutoEdit = 0;
   const owned = attachCanvas(path, {
-    onWrote: () => {
-      // Our own save. Mark it before anyone hears, including when a newer edit arrived mid-write.
-      notifying = true;
-      try { ws.vault.written(owned.path()); } finally { notifying = false; }
-    },
+    onWrote: () => { ws.vault.written(owned.path()); },
   });
   function save() { return owned.flush(); }
   function changed(next: string, redraw = false) {
@@ -564,7 +560,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   }, true);
   const flush = () => { void save(); };
   window.addEventListener("beforeunload", flush);
-  const unwatch = ws.vault.onModified(changedPath => { if (changedPath === owned.path() && !notifying) { owned.drop(); void load(); } });
+  const unwatch = ws.vault.onModified(changedPath => { if (changedPath === owned.path() && !owned.echoing) { owned.drop(); void load(); } });
   void load();
   return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); owned.detach(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
 }

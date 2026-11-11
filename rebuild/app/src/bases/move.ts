@@ -1,5 +1,7 @@
 // K5: one property per move. Open documents use the editor; closed notes use Rust CAS.
 import type { NoteProperties } from "../api";
+import { runOnVault } from "../vaultWrite";
+import { writesSealed } from "../saveSeal";
 import { type PropertyType } from "../editor/frontmatter";
 import { editProperty, type PropertyEdit, type EditResult } from "../editor/propertyEdit";
 import { h } from "../shell/dom";
@@ -35,6 +37,14 @@ export async function writeProperty(ws: Workspace, path: string, edit: PropertyE
   if (!ws.editors.isLoaded(path)) {
     const { api } = await (nativeAPI ??= import("../api"));
     if (ws.editors.isLoaded(path)) return writeProperty(ws, path, edit, dryRun);
+    if (!dryRun && writesSealed()) {
+      let result!: EditResult;
+      await runOnVault(async () => {
+        result = await api.setProperty(path, edit, false);
+        if (result.status === "done" || result.status === "unchanged") ws.vault.written(path);
+      });
+      return result;
+    }
     const result = await api.setProperty(path, edit, dryRun);
     if (!dryRun && (result.status === "done" || result.status === "unchanged")) ws.vault.written(path);
     return result;

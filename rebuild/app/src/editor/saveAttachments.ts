@@ -3,6 +3,7 @@
 // 20 MB cap stay one path.
 
 import { api } from "../api";
+import { runOnVault } from "../vaultWrite";
 import { settings } from "../settings/store";
 import type { Workspace } from "../workspace";
 import { attachmentPaths } from "./attachments";
@@ -30,7 +31,7 @@ export async function writeAttachments(ws: Workspace, from: string | null, files
   const saved: string[] = [];
   for (let i = 0; i < incoming.length; i++) {
     try {
-      await api.writeFileBytes(paths[i], incoming[i].bytes);
+      await runOnVault(async () => { await api.writeFileBytes(paths[i], incoming[i].bytes); });
       saved.push(paths[i]);
     } catch (err) {
       console.warn("Grove could not save an attachment", paths[i], err);

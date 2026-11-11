@@ -50,7 +50,6 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   let chunkTimer = 0;
   let gone = false;
   let patches = 0;
-  let notifying = false;
   // Texts this tab wrote lately: a watcher event that reads one back is our own save.
   const ours: string[] = [];
   const patchDefs = new Map<string, Element>();
@@ -229,10 +228,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       ours.push(text);
       if (ours.length > 4) ours.shift();
     },
-    onWrote: () => {
-      notifying = true;
-      try { ws.vault.written(owned.path()); } finally { notifying = false; }
-    },
+    onWrote: () => { ws.vault.written(owned.path()); },
   });
 
   function changed() {
@@ -325,7 +321,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   });
   resize.observe(el);
   theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  const unwatch = ws.vault.onModified((changedPath) => { if (changedPath === owned.path() && !notifying) { owned.drop(); load(); } });
+  const unwatch = ws.vault.onModified((changedPath) => { if (changedPath === owned.path() && !owned.echoing) { owned.drop(); load(); } });
 
   el.addEventListener("wheel", (event) => {
     event.preventDefault();

@@ -1,10 +1,11 @@
 // One debounced writer per canvas or drawing path. Closing the tab drops the
 // view, not the unsaved text: the writer stays until the bytes land or the
 // file is deleted. A second view of the same path adopts that writer.
+// The view that last edited owns the snapshot a flush writes.
 
-import { api } from "./api";
 import { fileSave, type FileSave } from "./fileSave";
 import { writesSealed } from "./saveSeal";
+import { writeVaultNote } from "./vaultWrite";
 
 interface ViewHooks {
   begin: ((text: string) => void) | null;
@@ -19,6 +20,11 @@ interface Owner {
   disk: FileSave;
   stack: ViewHooks[];
   dropped: boolean;
+  /** The view that last edited. Its prepare wins over a sibling opened later. */
+  editor: ViewHooks | null;
+  /** Explicit flushes in progress. Holds block timers, not these. */
+  authorize: number;
+  echoing: boolean;
 }
 
 export interface OwnedHooks {
@@ -41,6 +47,8 @@ export interface OwnedHandle {
   /** This view is gone. Dirty text stays owned until it saves or is discarded. */
   detach(): void;
   readonly dirty: boolean;
+  /** True while this path's write is telling the vault, so a sibling does not drop a newer edit. */
+  readonly echoing: boolean;
 }
 
 export interface OwnedSaves {
@@ -53,13 +61,16 @@ export interface OwnedSaves {
   pending(which?: (path: string) => boolean): boolean;
 }
 
+function editorHook(owner: Owner): ViewHooks | null {
+  if (owner.editor && owner.stack.includes(owner.editor)) return owner.editor;
+  // The editing view left. Keep the snapshot it stored; a sibling must not replace it.
+  if (owner.editor) return null;
+  return owner.stack.at(-1) ?? null;
+}
+
 export function createOwnedSaves(delay: number): OwnedSaves {
   const owners = new Map<string, Owner>();
   const holds: Array<(path: string) => boolean> = [];
-
-  function blocked(path: string): boolean {
-    return writesSealed() || holds.some((under) => under(path));
-  }
 
   function make(path: string): Owner {
     const slot = { path, text: "" };
@@ -68,15 +79,23 @@ export function createOwnedSaves(delay: number): OwnedSaves {
       disk: null as unknown as FileSave,
       stack: [],
       dropped: false,
+      editor: null,
+      authorize: 0,
+      echoing: false,
     };
     owner.disk = fileSave({
       delay,
       text: () => slot.text,
-      postpone: () => blocked(slot.path) || (owner.stack.at(-1)?.postpone() ?? false),
+      postpone: () => writesSealed()
+        || (owner.authorize === 0 && holds.some((under) => under(slot.path)))
+        || (editorHook(owner)?.postpone() ?? false),
       write: async (text) => {
-        owner.stack.at(-1)?.begin?.(text);
-        await api.writeNote(slot.path, text);
-        owner.stack.at(-1)?.onWrote?.(text);
+        const hook = editorHook(owner);
+        hook?.begin?.(text);
+        const status = await writeVaultNote(slot.path, text);
+        if (status !== "sent") throw new Error("sealed");
+        owner.echoing = true;
+        try { hook?.onWrote?.(text); } finally { owner.echoing = false; }
       },
       onError: (err) => console.error(`Could not save ${slot.path}`, err),
     });
@@ -85,12 +104,20 @@ export function createOwnedSaves(delay: number): OwnedSaves {
   }
 
   async function flushOwner(owner: Owner): Promise<boolean> {
-    const prepared = owner.stack.at(-1)?.prepare() ?? null;
-    if (prepared !== null && prepared !== owner.slot.text) {
-      owner.slot.text = prepared;
-      if (!owner.disk.dirty) owner.disk.touch();
+    const hook = editorHook(owner);
+    if (hook) {
+      const prepared = hook.prepare() ?? null;
+      if (prepared !== null && prepared !== owner.slot.text) {
+        owner.slot.text = prepared;
+        if (!owner.disk.dirty) owner.disk.touch();
+      }
     }
-    return owner.disk.flush();
+    owner.authorize += 1;
+    try {
+      return await owner.disk.flush();
+    } finally {
+      owner.authorize -= 1;
+    }
   }
 
   return {
@@ -107,8 +134,8 @@ export function createOwnedSaves(delay: number): OwnedSaves {
       return {
         path: () => owner.slot.path,
         text: () => owner.slot.text,
-        setText: (text) => { owner.slot.text = text; },
-        touch: () => owner.disk.touch(),
+        setText: (text) => { owner.slot.text = text; owner.editor = mine; },
+        touch: () => { owner.editor = mine; owner.disk.touch(); },
         flush: () => flushOwner(owner),
         drop: () => owner.disk.drop(),
         detach() {
@@ -123,6 +150,7 @@ export function createOwnedSaves(delay: number): OwnedSaves {
           });
         },
         get dirty() { return owner.disk.dirty; },
+        get echoing() { return owner.echoing; },
       };
     },
 
@@ -160,6 +188,7 @@ export function createOwnedSaves(delay: number): OwnedSaves {
         owner.dropped = true;
         owner.disk.drop();
         owner.stack.length = 0;
+        owner.editor = null;
         owners.delete(path);
       }
     },

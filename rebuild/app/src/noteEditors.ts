@@ -19,6 +19,7 @@ import { api } from "./api";
 import { configEffects } from "./editor/config";
 import { retryDelay } from "./fileSave";
 import { writesSealed } from "./saveSeal";
+import { writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
@@ -533,8 +534,11 @@ export class NoteEditors {
     return this.pending(which).size > 0;
   }
 
-  private blocked(path: string): boolean {
-    return writesSealed() || this.holds.some((under) => under(path));
+  /** A seal blocks every write. A hold blocks timers; an explicit flush still writes. */
+  private blocked(path: string, eager: boolean): boolean {
+    if (writesSealed()) return true;
+    if (eager) return false;
+    return this.holds.some((under) => under(path));
   }
 
   private scheduleSave(path: string) {
@@ -574,7 +578,7 @@ export class NoteEditors {
       });
     }
     let job!: Promise<boolean>;
-    const written = this.write(slot).finally(() => {
+    const written = this.write(slot, eager).finally(() => {
       if (slot.job === job) slot.job = undefined;
     });
     job = written.then((ok) => {
@@ -590,7 +594,7 @@ export class NoteEditors {
     return job;
   }
 
-  private async write(slot: SaveSlot): Promise<boolean> {
+  private async write(slot: SaveSlot, eager = false): Promise<boolean> {
     this.clearTimer(this.saveTimers, slot.path);
     this.clearTimer(this.retryTimers, slot.path);
     const path = slot.path;
@@ -599,7 +603,7 @@ export class NoteEditors {
       this.dirty.delete(path);
       return true;
     }
-    if (this.blocked(path)) {
+    if (this.blocked(path, eager)) {
       this.dirty.add(path);
       this.scheduleSave(path);
       return false;
@@ -607,7 +611,12 @@ export class NoteEditors {
     const text = state.doc.toString();
     let failed = false;
     try {
-      await api.writeNote(path, text);
+      const status = await writeVaultNote(path, text);
+      if (status !== "sent") {
+        this.dirty.add(path);
+        this.scheduleSave(path);
+        return false;
+      }
     } catch (err) {
       console.error(`Could not save ${path}`, err);
       failed = true;

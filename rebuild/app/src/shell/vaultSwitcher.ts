@@ -87,6 +87,7 @@ async function useVault(ws: Workspace, path: string, create: boolean) {
   await commitVaultSwitch(path, create, {
     flushNotes: () => ws.editors.flush(),
     dirty: () => savesPending(ws.editors),
+    vault: () => ws.vault.path ?? "",
     reload: () => location.reload(),
     warn: (message, err) => console.warn(message, err ?? ""),
     open: async (folder, creating) => {

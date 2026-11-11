@@ -5,6 +5,9 @@
 
 import { api, type FileEntry } from "./api";
 import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases } from "./canvas/pending";
+import { coordinatePaths } from "./pathBarrier";
+import { writesSealed } from "./saveSeal";
+import { writeVaultNote } from "./vaultWrite";
 import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings } from "./drawing/pending";
 import { emptyDrawing } from "./drawing/scene";
 import type { ViewMode } from "./editor/editor";
@@ -175,13 +178,23 @@ function relocate(ws: Workspace, from: string, to: string): Promise<void> {
 }
 
 async function relocateNow(ws: Workspace, from: string, to: string) {
+  if (writesSealed()) {
+    console.warn("Could not rename while a vault switch is saving");
+    return;
+  }
   if (ws.vault.isFolder(from) && isUnder(parentDir(to).toLowerCase(), from.toLowerCase())) throw new Error("A folder cannot move into itself.");
   const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
+  // Other windows flush and hold this path before the rename. A failed peer
+  // save aborts quietly: there is no dialog, and the file stays where it is.
+  await coordinatePaths(from, to, () => relocateHeld(ws, from, to));
+}
+
+async function relocateHeld(ws: Workspace, from: string, to: string): Promise<boolean> {
   const under = (p: string) => isUnder(p, from);
   // Hold before the gap, after draining writes that already left. A keystroke
   // or a retry during linkSources/renamePath stays dirty and does not recreate
-  // the source once the rename has removed it.
+  // the source once the rename has removed it. The flush itself still writes.
   holdSaves(ws, under);
   let moved = false;
   try {
@@ -201,6 +214,7 @@ async function relocateNow(ws: Workspace, from: string, to: string) {
     await flushSaves(ws, (p) => isUnder(p, to));
     await ws.followMove(swap);
     fileSettings.renamed(from, to, before, sources);
+    return true;
   } catch (err) {
     if (!moved) releaseSaves(ws, under);
     throw err;
@@ -219,8 +233,9 @@ function releaseSaves(ws: Workspace, under: (path: string) => boolean) {
   releaseDrawings(under);
 }
 
-function flushSaves(ws: Workspace, which: (path: string) => boolean) {
-  return Promise.all([ws.editors.flush(which), saveCanvases(which), saveDrawings(which)]);
+async function flushSaves(ws: Workspace, which: (path: string) => boolean): Promise<boolean> {
+  const results = await Promise.all([ws.editors.flush(which), saveCanvases(which), saveDrawings(which)]);
+  return results.every((ok) => ok !== false);
 }
 
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */
@@ -260,11 +275,21 @@ export async function mergeNote(ws: Workspace, path: string, into: string) {
  */
 export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
   if (!opts.confirmed && !(await fileSettings.confirmDelete(path))) return false;
+  if (writesSealed()) return false;
   const under = (p: string) => isUnder(p, path);
-  // Hold so a failed save's retry cannot recreate the file after it is gone.
+  // Peers flush first. A failed flush here does not delete: the newest text
+  // would be missing from the trash. The hold stops a retry from recreating
+  // the file only after the delete has succeeded.
+  return coordinatePaths(path, null, () => deleteHeld(ws, path, under));
+}
+
+async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boolean): Promise<boolean> {
   holdSaves(ws, under);
   try {
-    await flushSaves(ws, under);
+    if (!(await flushSaves(ws, under))) {
+      releaseSaves(ws, under);
+      return false;
+    }
     await api.deletePath(path, fileSettings.permanentDelete());
   } catch (err) {
     releaseSaves(ws, under);
@@ -286,8 +311,7 @@ export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?
 export async function updateNoteText(ws: Workspace, path: string, next: string) {
   const doc = ws.editors.doc(path);
   if (!doc) {
-    await track(writing, api.writeNote(path, next));
-    ws.vault.written(path);
+    await track(writing, writeVaultNote(path, next, () => ws.vault.written(path)));
     return;
   }
   const lines = next.split("\n");

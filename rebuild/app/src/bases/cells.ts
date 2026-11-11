@@ -1,5 +1,6 @@
 import { Text } from "@codemirror/state";
 import { api } from "../api";
+import { writeVaultNote } from "../vaultWrite";
 import { addProperty, asType, fits, readFrontmatter, setValue, type Property, type PropertyType } from "../editor/frontmatter";
 import { propertyValue } from "../editor/properties";
 import type { Group } from "../tabs";
@@ -15,7 +16,7 @@ async function setCell(ws: Workspace, path: string, key: string, type: PropertyT
   if (p && p.type === type && JSON.stringify(p.value) === JSON.stringify(value)) return;
   const changes = p ? setValue(fm!, p, value, type) : addProperty(fm, key, type, value);
   if (ws.editors.isLoaded(path)) ws.editors.change(path, { changes, userEvent: "input.property", scrollIntoView: false });
-  else { await api.writeNote(path, doc.replace(changes.from, changes.to, Text.of(changes.insert.split("\n"))).toString()); ws.vault.written(path); }
+  else { await writeVaultNote(path, doc.replace(changes.from, changes.to, Text.of(changes.insert.split("\n"))).toString(), () => ws.vault.written(path)); }
 }
 export function cellEditor(ws: Workspace, group: Group, path: string, key: string, kind: PropertyType, prop: Property | undefined, changed: () => void, error: (e: unknown) => void) {
   key = noteKey(key);

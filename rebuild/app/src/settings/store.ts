@@ -9,6 +9,7 @@ import { api } from "../api";
 import { retryDelay } from "../fileSave";
 import { listeners } from "../listeners";
 import { writesSealed } from "../saveSeal";
+import { writeVaultConfig } from "../vaultWrite";
 import {
   defaults,
   FILES,
@@ -125,7 +126,8 @@ class SettingsStore {
         clearTimeout(this.timers.get(file));
         this.timers.delete(file);
         try {
-          await api.writeConfig(file, serialize(FILES[file], this.values.get(file) as never, this.extras.get(file)));
+          const status = await writeVaultConfig(file, serialize(FILES[file], this.values.get(file) as never, this.extras.get(file)));
+          if (status === "queued") return;
         } catch (err) {
           console.warn(`Settings: could not save .grove/${file}`, err);
           failed.push(file);
@@ -215,7 +217,12 @@ class SettingsStore {
     const gen = this.generation.get(file) ?? 0;
     const text = this.snapshot(file);
     try {
-      await api.writeConfig(file, text);
+      const status = await writeVaultConfig(file, text);
+      if (status === "queued") {
+        this.failed.add(file);
+        this.timers.set(file, window.setTimeout(() => { void this.write(file); }, WRITE_DELAY));
+        return;
+      }
     } catch (err) {
       console.warn(`Settings: could not save .grove/${file}`, err);
       this.failed.add(file);

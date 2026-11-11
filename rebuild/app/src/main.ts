@@ -30,6 +30,9 @@ import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
 import { bindCloseFlush, flushOpenSaves, requestClose } from "./quitFlush";
+import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases } from "./canvas/pending";
+import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings } from "./drawing/pending";
+import { installPathBarrier } from "./pathBarrier";
 import { installVaultSwitch, savesPending } from "./vaultSwitch";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
@@ -512,6 +515,36 @@ if (isTauri) {
     dirty: () => savesPending(ws.editors),
     reload: () => location.reload(),
   }).catch((err) => console.error("Could not coordinate vault switches", err));
+  void installPathBarrier({
+    hold(under) {
+      ws.editors.hold(under);
+      holdCanvases(under);
+      holdDrawings(under);
+    },
+    release(under) {
+      ws.editors.release(under);
+      releaseCanvases(under);
+      releaseDrawings(under);
+    },
+    async flush(under) {
+      const [notes, canvases, drawings] = await Promise.all([
+        ws.editors.flush(under),
+        saveCanvases(under),
+        saveDrawings(under),
+      ]);
+      return notes !== false && canvases !== false && drawings !== false;
+    },
+    retarget(under, swap) {
+      ws.editors.move(under, swap);
+      retargetCanvases(under, swap);
+      retargetDrawings(under, swap);
+    },
+    discard(under) {
+      ws.editors.forget(under);
+      discardCanvases(under);
+      discardDrawings(under);
+    },
+  }).catch((err) => console.error("Could not coordinate renames", err));
 }
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();

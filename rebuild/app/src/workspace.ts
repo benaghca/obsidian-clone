@@ -7,6 +7,7 @@
 
 import { EditorView } from "@codemirror/view";
 import { api } from "./api";
+import { writeVaultNote } from "./vaultWrite";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, EmbedHost, PropertyHost } from "./editor/host";
@@ -197,8 +198,10 @@ export class Workspace {
     // Write directly, not through the autosave (which only logs a failure): a failed save or open keeps the tab.
     const doc = this.editors.doc(path);
     if (doc) {
-      await api.writeNote(path, doc.toString());
-      this.vault.written(path);
+      // A sealed switch keeps the bytes for the old vault. Opening the window
+      // now would show the note against the root that is about to change.
+      const status = await writeVaultNote(path, doc.toString(), () => this.vault.written(path));
+      if (status === "queued") return;
     }
     await api.openNoteWindow(path);
     // Navigating or typing in the tab during the awaits keeps it here too.

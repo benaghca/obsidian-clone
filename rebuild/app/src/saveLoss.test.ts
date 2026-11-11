@@ -12,7 +12,7 @@ import { NoteEditors } from "./noteEditors";
 import { bindCloseFlush, flushOpenSaves, QUIT_FLUSH_MS, requestClose } from "./quitFlush";
 import { unsealWrites, writesSealed } from "./saveSeal";
 import { settings } from "./settings/store";
-import { commitVaultSwitch, installVaultSwitch, localSaveBus } from "./vaultSwitch";
+import { commitVaultSwitch, installVaultSwitch, localSaveBus, resetVaultSwitchForTests } from "./vaultSwitch";
 import type { Workspace } from "./workspace";
 
 vi.mock("./api", () => ({
@@ -53,6 +53,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  resetVaultSwitchForTests();
   unsealWrites();
   discardCanvases(() => true);
   discardDrawings(() => true);
@@ -513,22 +514,29 @@ test("a canvas edited during rename is written only to the new path", async () =
   expect(api.writeNote).toHaveBeenCalledWith("New.canvas", '{"nodes":2}');
 });
 
-test("a failed canvas or drawing save does not recreate the file after delete", async () => {
+test("a failed canvas or drawing save refuses the delete and keeps the text", async () => {
   vi.useFakeTimers();
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});
   vi.mocked(api.writeNote).mockRejectedValue(new Error("full"));
   const notes = editors();
   for (const [attach, path] of [[attachCanvas, "Gone.canvas"], [attachDrawing, "Gone.excalidraw"]] as const) {
     vi.mocked(api.writeNote).mockClear();
+    vi.mocked(api.deletePath).mockClear();
     const owned = attach(path);
     owned.setText("v1");
     owned.touch();
     await vi.advanceTimersByTimeAsync(300);
     expect(api.writeNote).toHaveBeenCalledTimes(1);
-    await deleteFile(renameWs(notes, path), path, { confirmed: true });
-    await vi.advanceTimersByTimeAsync(10_000);
-    expect(api.writeNote).toHaveBeenCalledTimes(1);
-    expect(api.deletePath).toHaveBeenCalledWith(path, false);
+    await expect(deleteFile(renameWs(notes, path), path, { confirmed: true })).resolves.toBe(false);
+    expect(api.deletePath).not.toHaveBeenCalled();
+    expect(owned.dirty).toBe(true);
+    expect(owned.text()).toBe("v1");
+    vi.mocked(api.writeNote).mockResolvedValue(undefined);
+    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.waitFor(() => expect(api.writeNote).toHaveBeenLastCalledWith(path, "v1"));
+    discardCanvases(() => true);
+    discardDrawings(() => true);
+    vi.mocked(api.writeNote).mockRejectedValue(new Error("full"));
   }
   spy.mockRestore();
 });

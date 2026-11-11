@@ -2,6 +2,7 @@
 // tab (createBaseView) or in a note (embed.ts). Only the visible rows have DOM;
 // source YAML is read once, and the existing property index supplies changed note metadata.
 import { api, type FileEntry } from "../api";
+import { writeVaultNote } from "../vaultWrite";
 import { fits, asType, type Property, type PropertyType } from "../editor/frontmatter";
 import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
@@ -237,7 +238,7 @@ export function baseChange(input: BaseChange): BaseRefresh {
 /** A .base file as the place a base's YAML is read from and written to. */
 export const baseFile = (ws: Workspace, path: string): BaseFile => ({
   read: () => api.readNote(path),
-  async write(text) { await api.writeNote(path, text); ws.vault.written(path); },
+  async write(text) { await writeVaultNote(path, text, () => ws.vault.written(path)); },
 });
 
 export interface BaseOptions {
