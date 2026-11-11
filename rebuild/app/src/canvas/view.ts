@@ -4,7 +4,6 @@ import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { api } from "../api";
-import { fileSave } from "../fileSave";
 import { commands } from "../commands";
 import { IMAGE_EXT, embedPart } from "../editor/embeds";
 import { editorHost } from "../editor/host";
@@ -35,7 +34,7 @@ import { canvasWork } from "./work";
 import { canvasBodies } from "./bodies";
 import { linkFrameBody } from "./linkFrame";
 import { canvasEdges } from "./edges";
-import { holdCanvasWrite, trackCanvas } from "./pending";
+import { attachCanvas } from "./pending";
 
 const NS = "http://www.w3.org/2000/svg";
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>, ...children: SVGElement[]) {
@@ -71,23 +70,20 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   let undo: string[] = [], redo: string[] = [];
   let stopText: ((paint?: boolean) => void) | undefined;
   let selectAfterDraw: string | undefined, editAfterDraw: string | undefined, building = false, cancelAutoEdit = 0;
-  const disk = fileSave({
-    delay: 300,
-    text: () => source,
-    write: async (text) => {
-      await api.writeNote(path, text);
+  const owned = attachCanvas(path, {
+    onWrote: () => {
       // Our own save. Mark it before anyone hears, including when a newer edit arrived mid-write.
       notifying = true;
-      try { ws.vault.written(path); } finally { notifying = false; }
+      try { ws.vault.written(owned.path()); } finally { notifying = false; }
     },
-    onError(err) { console.error(`Could not save ${path}`, err); },
   });
-  function save() { return holdCanvasWrite(path, disk.flush().then(() => {})); }
+  function save() { return owned.flush(); }
   function changed(next: string, redraw = false) {
     if (next === source) return;
     source = next;
     navigation.updateHistory(undo.some(text => text !== source), redo.some(text => text !== source));
-    disk.touch();
+    owned.setText(next);
+    owned.touch();
     if (redraw) draw();
   }
   function history(forward: boolean) {
@@ -147,12 +143,17 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   const openCreateMenu = (box: { x: number; y: number; width: number; height: number }, at: { x: number; y: number }) =>
     cardActions.createMenu({ ...box, atStart: true }, at);
   async function load() {
+    if (owned.dirty) {
+      source = owned.text(); undo = []; redo = [];
+      draw();
+      return;
+    }
     const mine = ++loading;
     let text: string;
-    try { text = await api.readNote(path); } catch { text = ""; }
-    if (gone || mine !== loading) return;
+    try { text = await api.readNote(owned.path()); } catch { text = ""; }
+    if (gone || mine !== loading || owned.dirty) return;
     if (text === source && world.childElementCount) return;
-    disk.drop();
+    owned.drop();
     source = text; undo = []; redo = [];
     draw();
   }
@@ -563,8 +564,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   }, true);
   const flush = () => { void save(); };
   window.addEventListener("beforeunload", flush);
-  const untrack = trackCanvas({ path, save });
-  const unwatch = ws.vault.onModified(changedPath => { if (changedPath === path && !notifying) { disk.drop(); void load(); } });
+  const unwatch = ws.vault.onModified(changedPath => { if (changedPath === owned.path() && !notifying) { owned.drop(); void load(); } });
   void load();
-  return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); untrack(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); owned.detach(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
 }

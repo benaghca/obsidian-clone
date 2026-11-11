@@ -18,6 +18,7 @@ import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
 import { configEffects } from "./editor/config";
 import { retryDelay } from "./fileSave";
+import { writesSealed } from "./saveSeal";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
@@ -81,6 +82,8 @@ export class NoteEditors {
   private dirty = new Set<string>();
   /** Path identity for an in-flight save, so a rename can retarget it. */
   private slots = new Map<string, SaveSlot>();
+  /** Renames and deletes hold these paths so a new save cannot use the old name. */
+  private holds: Array<(path: string) => boolean> = [];
   private reloads = new Map<string, symbol>();
   /** Bumped when a note changes on disk, so an in-flight `load` does not publish the old text. */
   private loadEpoch = new Map<string, number>();
@@ -211,7 +214,7 @@ export class NoteEditors {
   /** Remember where a pane's tab is in its note, and let go of the note. */
   private stash(pane: Pane) {
     this.rememberPane(pane);
-    this.release(pane);
+    this.releasePane(pane);
   }
 
   private rememberPane(pane: Pane) {
@@ -239,7 +242,7 @@ export class NoteEditors {
    * its own selection and scroll), so a note on screen always has its main
    * state on screen and edits never have to update a hidden copy.
    */
-  private release(pane: Pane) {
+  private releasePane(pane: Pane) {
     const path = pane.path;
     pane.tab = null;
     pane.path = null;
@@ -484,7 +487,7 @@ export class NoteEditors {
 
   /** Notes that were deleted: no pane shows them and nothing is kept. */
   forget(under: (path: string) => boolean) {
-    for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.release(pane);
+    for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.releasePane(pane);
     for (const p of [...this.states.keys()].filter(under)) this.states.delete(p);
     for (const p of [...this.scrollTops.keys()].filter(under)) this.scrollTops.delete(p);
     this.dropSaves(under);
@@ -514,6 +517,26 @@ export class NoteEditors {
 
   // ----- saving -----
 
+  /** Block new writes for these paths until release. In-flight writes still finish. */
+  hold(under: (path: string) => boolean): void {
+    this.holds.push(under);
+  }
+
+  /** Drop one hold taken with the same function. */
+  release(under: (path: string) => boolean): void {
+    const at = this.holds.lastIndexOf(under);
+    if (at >= 0) this.holds.splice(at, 1);
+  }
+
+  /** True when a note still has text that has not reached disk. */
+  hasUnsaved(which: (path: string) => boolean = () => true): boolean {
+    return this.pending(which).size > 0;
+  }
+
+  private blocked(path: string): boolean {
+    return writesSealed() || this.holds.some((under) => under(path));
+  }
+
   private scheduleSave(path: string) {
     const slot = this.slot(path);
     this.dirty.add(slot.path);
@@ -537,13 +560,17 @@ export class NoteEditors {
     }, retryDelay(n)));
   }
 
-  /** Write `path` now. False: the write failed, or the path moved and the follow-up has not finished. */
-  private save(path: string): Promise<boolean> {
+  /**
+   * Write `path` now. False: the write failed, or the path moved and the follow-up has not finished.
+   * A timer-driven follow-up (`eager` false) leaves a debounce that has not elapsed yet; flush does not.
+   */
+  private save(path: string, eager = false): Promise<boolean> {
     const slot = this.slot(path);
     if (slot.job) {
       return slot.job.then(() => {
         const at = slot.path;
-        return this.dirty.has(at) || this.saveTimers.has(at) || this.retryTimers.has(at) ? this.save(at) : true;
+        if (!eager && this.saveTimers.has(at)) return true;
+        return this.dirty.has(at) || this.saveTimers.has(at) || this.retryTimers.has(at) ? this.save(at, eager) : true;
       });
     }
     let job!: Promise<boolean>;
@@ -552,7 +579,11 @@ export class NoteEditors {
     });
     job = written.then((ok) => {
       // The file was renamed while this write was in flight: put the same text at the new path.
-      if (slot.path !== path && this.dirty.has(slot.path)) return this.save(slot.path);
+      // A timer-driven save still waits out the debounce a newer keystroke just armed.
+      if (slot.path !== path && this.dirty.has(slot.path)) {
+        if (!eager && this.saveTimers.has(slot.path)) return true;
+        return this.save(slot.path, eager);
+      }
       return ok;
     });
     slot.job = job;
@@ -567,6 +598,11 @@ export class NoteEditors {
     if (!state) {
       this.dirty.delete(path);
       return true;
+    }
+    if (this.blocked(path)) {
+      this.dirty.add(path);
+      this.scheduleSave(path);
+      return false;
     }
     const text = state.doc.toString();
     let failed = false;
@@ -629,7 +665,7 @@ export class NoteEditors {
     for (let pass = 0; pass < 8; pass++) {
       const paths = [...this.pending(which)].filter((path) => !backedOff.has(path));
       if (!paths.length) return ![...this.retryTimers.keys()].some(which);
-      await Promise.all(paths.map((path) => this.save(path)));
+      await Promise.all(paths.map((path) => this.save(path, true)));
       for (const path of this.retryTimers.keys()) if (which(path)) backedOff.add(path);
     }
     return !this.pending(which).size;

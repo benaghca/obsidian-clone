@@ -1,6 +1,8 @@
-// Open canvas tabs save their edits after a short pause. Closing the window
-// writes what is waiting and waits for it. A tab that has already closed can
-// still have a write in flight; that promise stays here until it settles.
+// Open canvas tabs save their edits after a short pause. The writer is owned
+// by the path, so a closed tab's failed save is still flushed on quit, and a
+// rename retargets it instead of leaving a retry on the old path.
+
+import { createOwnedSaves, type OwnedHandle, type OwnedHooks } from "../ownedSave";
 
 interface PendingCanvas {
   readonly path: string;
@@ -10,6 +12,7 @@ interface PendingCanvas {
 
 const open = new Set<PendingCanvas>();
 const inflight = new Set<{ path: string; work: Promise<void> }>();
+const owned = createOwnedSaves(300);
 
 /** Track an open canvas tab until the returned function is called. */
 export function trackCanvas(canvas: PendingCanvas): () => void {
@@ -25,10 +28,37 @@ export function holdCanvasWrite(path: string, work: Promise<void>): Promise<void
   return work;
 }
 
-/** Write the waiting edits of every open canvas whose path passes `which`. */
-export async function saveCanvases(which: (path: string) => boolean = () => true): Promise<void> {
-  await Promise.all([
+/** The one writer for this canvas path. A later view of the same path adopts it. */
+export function attachCanvas(path: string, hooks?: OwnedHooks): OwnedHandle {
+  return owned.attach(path, hooks);
+}
+
+export function holdCanvases(under: (path: string) => boolean): void {
+  owned.hold(under);
+}
+
+export function releaseCanvases(under: (path: string) => boolean): void {
+  owned.release(under);
+}
+
+export function retargetCanvases(under: (path: string) => boolean, swap: (path: string) => string): void {
+  owned.retarget(under, swap);
+}
+
+export function discardCanvases(under: (path: string) => boolean): void {
+  owned.discard(under);
+}
+
+export function canvasesPending(which: (path: string) => boolean = () => true): boolean {
+  return owned.pending(which);
+}
+
+/** Write the waiting edits of every canvas whose path passes `which`. */
+export async function saveCanvases(which: (path: string) => boolean = () => true): Promise<boolean> {
+  const jobs = [
     ...[...open].filter((canvas) => which(canvas.path)).map((canvas) => canvas.save()),
     ...[...inflight].filter((entry) => which(entry.path)).map((entry) => entry.work),
-  ]);
+  ];
+  const [saved] = await Promise.all([owned.save(which), Promise.all(jobs)]);
+  return saved;
 }

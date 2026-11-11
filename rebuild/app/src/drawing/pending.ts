@@ -1,7 +1,8 @@
-// Open drawing tabs save their edits after a short pause. A rename, a move,
-// a delete, a copy or an export of that file first writes what is waiting,
-// so the file on disk is the drawing as shown and no late save lands at the
-// old path. Free of the DOM, so the file operations can use it.
+// Open drawing tabs save their edits after a short pause. The writer is owned
+// by the path, so a rename, a move or a delete cannot leave a retry that
+// recreates the old file. Free of the DOM, so file operations can use it.
+
+import { createOwnedSaves, type OwnedHandle, type OwnedHooks } from "../ownedSave";
 
 interface PendingDrawing {
   /** The file the tab saves to. */
@@ -13,6 +14,7 @@ interface PendingDrawing {
 const open = new Set<PendingDrawing>();
 /** Writes that already started, including from a tab that has since closed. */
 const inflight = new Set<{ path: string; work: Promise<void> }>();
+const owned = createOwnedSaves(300);
 
 /** Track an open drawing tab until the returned function is called. */
 export function trackDrawing(drawing: PendingDrawing): () => void {
@@ -28,10 +30,37 @@ export function holdDrawingWrite(path: string, work: Promise<void>): Promise<voi
   return work;
 }
 
-/** Write the waiting edits of every open drawing whose path passes `which`. */
-export async function saveDrawings(which: (path: string) => boolean = () => true): Promise<void> {
-  await Promise.all([
-    ...[...open].filter((d) => which(d.path)).map((d) => d.save()),
+/** The one writer for this drawing path. A later view of the same path adopts it. */
+export function attachDrawing(path: string, hooks?: OwnedHooks): OwnedHandle {
+  return owned.attach(path, hooks);
+}
+
+export function holdDrawings(under: (path: string) => boolean): void {
+  owned.hold(under);
+}
+
+export function releaseDrawings(under: (path: string) => boolean): void {
+  owned.release(under);
+}
+
+export function retargetDrawings(under: (path: string) => boolean, swap: (path: string) => string): void {
+  owned.retarget(under, swap);
+}
+
+export function discardDrawings(under: (path: string) => boolean): void {
+  owned.discard(under);
+}
+
+export function drawingsPending(which: (path: string) => boolean = () => true): boolean {
+  return owned.pending(which);
+}
+
+/** Write the waiting edits of every drawing whose path passes `which`. */
+export async function saveDrawings(which: (path: string) => boolean = () => true): Promise<boolean> {
+  const jobs = [
+    ...[...open].filter((drawing) => which(drawing.path)).map((drawing) => drawing.save()),
     ...[...inflight].filter((entry) => which(entry.path)).map((entry) => entry.work),
-  ]);
+  ];
+  const [saved] = await Promise.all([owned.save(which), Promise.all(jobs)]);
+  return saved;
 }

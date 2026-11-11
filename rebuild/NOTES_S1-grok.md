@@ -14,14 +14,16 @@ Those paths are closed. A failed save stays dirty and is tried again (half a sec
 
 ## What changed
 
-- `src/quitFlush.ts` listens for Tauri's close request, calls `preventDefault` before the first await, flushes notes, canvases, drawings, and settings, and then destroys the window. The wait is raced with 2 seconds (`QUIT_FLUSH_MS`). A second close request joins the same wait. Grove's X still flushes and then calls `close()`, which runs this same handler. `beforeunload` starts the same flush but cannot wait. `core:window:allow-destroy` was added next to `allow-close` in `src-tauri/capabilities/default.json`. `src-tauri/src/lib.rs` was not touched.
+- `src/quitFlush.ts` listens for Tauri's close request, calls `preventDefault` before the first await, flushes notes, canvases, drawings, and settings, and then destroys the window. A flush that returns false is retried with the usual backoff until the saves are clean or 2 seconds from the start of the close (`QUIT_FLUSH_MS`). A second close request joins the same wait. Grove's X only calls `close()`, so that handler owns the deadline. A hung write cannot keep the button from starting it. `beforeunload` starts the same flush but cannot wait. `core:window:allow-destroy` was added next to `allow-close` in `src-tauri/capabilities/default.json`. `src-tauri/src/lib.rs` was not touched.
 - `src/noteEditors.ts` keeps a dirty set apart from the timers. `move()` re-keys the save timer, the retry timer, the dirty set, and the in-flight slot, and the timer reads the path when it fires. If the write already started at the old path, a follow-up write uses the new path. `flush` / `saveNow` resolve `false` when the write failed. A keystroke that lands during the write is included before `flush` resolves. `reload` will not replace text that is still dirty or in flight.
 - `src/fileOps.ts` `mergeNote` returns before `deleteFile` when `saveNow` is not successful. `src/workspace.ts` `saveNow` returns that boolean.
 - Canvas and drawing saves share `src/fileSave.ts` (debounce, dirty, backoff, flush). The two loops were the same shape; the note loop stays in `noteEditors.ts` because a rename has to retarget the path. This is not a new pending-saves service. Open canvases are tracked in `src/canvas/pending.ts`, the same way drawings already were. A write that has started is remembered with its path, so closing the tab does not drop it, and a rename of one file does not wait on an unrelated write.
 - `src/settings/store.ts` `flush` returns a promise that settles when the write settles. A failed settings write is retried on the same backoff and is included the next time `flush` runs.
 - `src/readOrdering.test.ts` gives the reload stub the new maps (`dirty`, `retryTimers`, `slots`). `reload` reads those fields directly so that stub, which is not a `NoteEditors` instance, still runs the real body. No assertion there was weakened.
 
-Out of scope, left as they were: a visible failure notice, conflict detection, CRLF/BOM, index batching, moving Rust commands off the GTK thread, and re-keying a canvas or drawing path when its file is renamed. An external change still wins over a canvas or drawing edit that has not been saved.
+A canvas or drawing is owned by its path (`src/ownedSave.ts`). Rename retargets that writer. Delete discards it so a retry cannot recreate the file. Closing the tab keeps a failed save, and opening the file again uses the same writer. An external change still wins over a canvas or drawing edit that has not been saved.
+
+Out of scope, left as they were: a visible failure notice, conflict detection, CRLF/BOM, index batching, and moving Rust commands off the GTK thread. Direct process exit is S5's worker shutdown. This slice does not add a Rust `ExitRequested` hook, and destroying the page on the 2 second timeout does not cancel a write the worker has already accepted.
 
 ## How the tests were proved
 
@@ -85,9 +87,24 @@ Net change is about +688 lines, almost all TypeScript, plus one JSON permission 
 
 No file is over 800 lines. The longest touched file is `src/workspace.ts` at 705, four lines above where it started. Rust was not changed, so `cargo test` was not run.
 
+## Review fixes
+
+Codex failed `89bd364`. A pending or retrying save must not outlive the vault or the path it belongs to. Still nothing on screen: no notice, toast, status mark, or dialog.
+
+- **Vault switch.** `useVault` opened the new vault and then reloaded, so the old page's `beforeunload` could write vault A's text onto the same name in vault B. `commitVaultSwitch` flushes notes, canvases, drawings, and settings while the root is still the old vault. If anything is still dirty, the switch stops and the retries stay armed. There is no notice. Pop-out windows share the backend root, so each window flushes on its own page and answers before this page seals. This page seals only after they agree, and it seals before `openVault` / `createVault`, so a timer here cannot write after the root changes. The seal stays up across the reload. A write that never settles is awaited. The switch does not time out and then open. A keystroke in the sealed gap between open and reload is lost. That is rare, and it is the alternative to writing into the new vault. `core:window:allow-get-all-windows` lists the other windows. If that list fails, the switch stops and nothing is sealed.
+- **Rename and delete.** Notes, canvases, and drawings are held before `renamePath` or `deletePath`. A write already sent finishes on the old path. A keystroke or a retry during the IPC does not send another write until the rename has retargeted the path, or until a failed rename releases the old path. `save` does not wait on the rename, or the flush inside the rename would deadlock. Delete drops the owned canvas and drawing retry after the file is gone. A failed delete releases the hold and leaves the retry.
+- **Close.** All four save kinds report clean or dirty. A dirty result is retried until clean or the same 2 second deadline, counted from the start of the close. Grove's X calls `requestClose`, which is only `win.close()`.
+- **Canvas and drawing tabs.** The path owns the dirty text. Disposing the tab does not forget a failed save, and a second view of the file adopts it. Quit flushes that writer along with any tab that is still open.
+- **Settings.** Each real change bumps a generation. `flush` writes the newest snapshot. An older write finishing does not clear a newer one.
+- **Debounce.** A follow-up that a timer started waits out the rest of the 300 ms. `flush` still writes immediately. Settings stay at 500 ms.
+
+Red proof for this pass: the new tests were run with the old order put back inside the fixed files (open the vault before any flush, no hold across rename, close destroys when the flush returns false and does not retry, settings `flush` only joins the write already in flight, closing a canvas drops its writer, delete does not discard the retry, the X button flushes and then calls `close()`, and a follow-up save ignores a debounce that has not elapsed). `npx vitest run src/saveLoss.test.ts`: 16 failed, 10 passed. The new vault, rename-while-in-flight, canvas rename, delete, closed-tab, close-retry, settings-generation, X-button, and debounce tests failed. One older settings test also failed under that mutation, because `flush` no longer started a write. The failed-rename test still passed: the rename threw before the path moved, so the timer still wrote the old path. Restored the fix and ran `saveLoss.test.ts`, `fileOps.test.ts`, `links/updateRace.test.ts`, and `readOrdering.test.ts`: 4 files, 55 tests passed.
+
+Browser verification was skipped. Nothing visible changes, and the brief forbids opening Grove, Tauri, or a visible browser. No window was opened for this pass. The locked `npm test` still launches its own headless Chromium.
+
 ## Commands
 
-From `rebuild/app` on `rebuild/s1-grok`:
+The first commit (`89bd364`), from `rebuild/app` on `rebuild/s1-grok`:
 
 - `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest. Vitest: 100 files, 1556 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset.
 - `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains.
@@ -96,3 +113,11 @@ From `rebuild/app` on `rebuild/s1-grok`:
 The suite rewrote screenshots under `rebuild/round*-shots`. Those were put back with `git restore` and are not in this commit.
 
 `scripts/test-canvas-notes.mjs` was not changed. On this worktree `node_modules` had been a symlink into another worktree, so Vite served `@codemirror/view` without rewriting its imports and that script failed here and on unmodified `46b072f`. A local copy of `node_modules` (gitignored, not part of this commit) made the script pass. No Grove window was opened. The suite's own headless Chromium is the browser run.
+
+This review pass, still from `rebuild/app` on `rebuild/s1-grok`, one `flock /tmp/grove-npm-test.lock` for all three:
+
+- `npm test` exited 0, including posttest. Vitest: 100 files, 1571 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1306 kB).
+- `npm run audit:offline` exited 0: 226 source files, dist, CSP, capabilities, and dependencies checked.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots` were rewritten and put back with `git restore`. They are not in this commit. Rust was not changed, so `cargo test` was not run. No file is over 800 lines. `src/saveLoss.test.ts` is 691. New files: `src/saveSeal.ts`, `src/ownedSave.ts`, `src/vaultSwitch.ts`.

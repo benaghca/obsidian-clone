@@ -4,7 +4,8 @@
 // (Workspace.followMove, Workspace.forget).
 
 import { api, type FileEntry } from "./api";
-import { saveDrawings } from "./drawing/pending";
+import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases } from "./canvas/pending";
+import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings } from "./drawing/pending";
 import { emptyDrawing } from "./drawing/scene";
 import type { ViewMode } from "./editor/editor";
 import type { NoteRef } from "./editor/host";
@@ -178,22 +179,53 @@ async function relocateNow(ws: Workspace, from: string, to: string) {
   const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
   const under = (p: string) => isUnder(p, from);
-  await Promise.all([ws.editors.flush(under), saveDrawings(under)]);
-  // Every file, not only notes: an embed of a drawing or an image follows it too.
-  const before = ws.vault.fileRefs();
-  // Old-name links can stop resolving as soon as renamePath returns.
-  const targets = before.filter((n) => under(n.path)).map((n) => n.path);
-  const sources = targets.length ? await api.linkSources(targets) : [];
-  await api.renamePath(from, to);
-  const swap = (p: string) => movedPath(p, from, to);
-  ws.editors.move(under, swap);
-  await ws.followMove(swap);
-  fileSettings.renamed(from, to, before, sources);
+  // Hold before the gap, after draining writes that already left. A keystroke
+  // or a retry during linkSources/renamePath stays dirty and does not recreate
+  // the source once the rename has removed it.
+  holdSaves(ws, under);
+  let moved = false;
+  try {
+    await flushSaves(ws, under);
+    // Every file, not only notes: an embed of a drawing or an image follows it too.
+    const before = ws.vault.fileRefs();
+    // Old-name links can stop resolving as soon as renamePath returns.
+    const targets = before.filter((n) => under(n.path)).map((n) => n.path);
+    const sources = targets.length ? await api.linkSources(targets) : [];
+    await api.renamePath(from, to);
+    const swap = (p: string) => movedPath(p, from, to);
+    ws.editors.move(under, swap);
+    retargetCanvases(under, swap);
+    retargetDrawings(under, swap);
+    moved = true;
+    releaseSaves(ws, under);
+    await flushSaves(ws, (p) => isUnder(p, to));
+    await ws.followMove(swap);
+    fileSettings.renamed(from, to, before, sources);
+  } catch (err) {
+    if (!moved) releaseSaves(ws, under);
+    throw err;
+  }
+}
+
+function holdSaves(ws: Workspace, under: (path: string) => boolean) {
+  ws.editors.hold(under);
+  holdCanvases(under);
+  holdDrawings(under);
+}
+
+function releaseSaves(ws: Workspace, under: (path: string) => boolean) {
+  ws.editors.release(under);
+  releaseCanvases(under);
+  releaseDrawings(under);
+}
+
+function flushSaves(ws: Workspace, which: (path: string) => boolean) {
+  return Promise.all([ws.editors.flush(which), saveCanvases(which), saveDrawings(which)]);
 }
 
 /** Obsidian's "Make a copy": number the name beside the file, keeping its extension and exact contents. */
 export async function copyNote(ws: Workspace, path: string): Promise<string> {
-  await Promise.all([ws.saveNow(path), saveDrawings((p) => p === path)]);
+  await Promise.all([ws.saveNow(path), saveCanvases((p) => p === path), saveDrawings((p) => p === path)]);
   const ext = viewFileExt(path) || ".md";
   const content = await (ext !== ".md" ? api.readNote(path) : ws.editors.text(path));
   const entry = await createNote(ws, freeName(ws, path.slice(0, -ext.length), ext, true), content);
@@ -229,10 +261,19 @@ export async function mergeNote(ws: Workspace, path: string, into: string) {
 export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?: boolean } = {}): Promise<boolean> {
   if (!opts.confirmed && !(await fileSettings.confirmDelete(path))) return false;
   const under = (p: string) => isUnder(p, path);
-  // A drawing's waiting save is written first, so closing its tab can't write the file back.
-  await Promise.all([ws.editors.flush(under), saveDrawings(under)]);
-  await api.deletePath(path, fileSettings.permanentDelete());
+  // Hold so a failed save's retry cannot recreate the file after it is gone.
+  holdSaves(ws, under);
+  try {
+    await flushSaves(ws, under);
+    await api.deletePath(path, fileSettings.permanentDelete());
+  } catch (err) {
+    releaseSaves(ws, under);
+    throw err;
+  }
   ws.editors.forget(under);
+  discardCanvases(under);
+  discardDrawings(under);
+  releaseSaves(ws, under);
   await ws.forget(under);
   return true;
 }

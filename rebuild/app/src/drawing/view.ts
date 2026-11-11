@@ -6,13 +6,12 @@
 // touched. Edits save through write_note after a short pause, like a canvas.
 
 import { api } from "../api";
-import { fileSave } from "../fileSave";
 import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
 import type { Workspace } from "../workspace";
 import { drawingEditor } from "./editor";
-import { holdDrawingWrite, trackDrawing } from "./pending";
+import { attachDrawing } from "./pending";
 import { openDrawingImages, renderDrawing, type DrawingPicture } from "./render";
 import { findElement, parseScene, serializeScene, type Point, type Scene } from "./scene";
 
@@ -22,7 +21,6 @@ let prefixes = 0;
 const MIN_SCALE = 1 / 64;
 const MAX_SCALE = 16;
 const HEAVY_TEXT = 80_000;
-const SAVE_DELAY = 300;
 const BULK = 150;
 const clampScale = (scale: number) => Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
 
@@ -222,28 +220,30 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   }
 
   // The editor is created just below and fills this in. A gesture still in progress waits.
-  const gate = { busy: () => false };
-  const disk = fileSave({
-    delay: SAVE_DELAY,
+  const gate = { busy: () => false, prepare: (): string | null => null };
+  const owned = attachDrawing(path, {
     postpone: () => gate.busy(),
-    text: () => (scene ? serializeScene(scene) : ""),
-    write: async (text) => {
+    prepare: () => gate.prepare(),
+    begin: (text) => {
       textSeen = text;
       ours.push(text);
       if (ours.length > 4) ours.shift();
-      await api.writeNote(path, text);
-      notifying = true;
-      try { ws.vault.written(path); } finally { notifying = false; }
     },
-    onError: (err) => console.error(`Could not save ${path}`, err),
+    onWrote: () => {
+      notifying = true;
+      try { ws.vault.written(owned.path()); } finally { notifying = false; }
+    },
   });
 
-  function changed() { disk.touch(); }
+  function changed() {
+    if (!scene) return;
+    owned.setText(serializeScene(scene));
+    owned.touch();
+  }
 
-  function persist(): Promise<void> {
-    editor.endLive();
-    if (gone || !scene) return Promise.resolve();
-    return holdDrawingWrite(path, disk.flush().then(() => {}));
+  function persist(): Promise<boolean> {
+    if (gone || !scene) return Promise.resolve(true);
+    return owned.flush();
   }
 
   const toScene = (clientX: number, clientY: number): Point => {
@@ -268,18 +268,24 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     changed,
   });
   gate.busy = () => editor.busy;
+  gate.prepare = () => {
+    editor.endLive();
+    return scene ? serializeScene(scene) : null;
+  };
 
   function load() {
     const gen = ++loadGen;
     // Keep the current paint running until different content replaces it.
     // Duplicate watcher events may read identical bytes during chunked paint.
+    const adopt = owned.dirty;
     clearTimeout(parseTimer);
-    void api.readNote(path).then((text) => {
+    void (adopt ? Promise.resolve(owned.text()) : api.readNote(owned.path())).then((text) => {
       if (gen !== loadGen) return;
       const dark = document.documentElement.classList.contains("theme-dark");
       if ((text === textSeen || ours.includes(text)) && dark === darkSeen && svgOf()) return;
       // Someone else changed the file: it wins over edits not yet saved, as on a canvas.
-      disk.drop();
+      // Reopening a dirty drawing keeps the owned text instead.
+      if (!adopt) owned.drop();
       ours.length = 0;
       textSeen = text;
       darkSeen = dark;
@@ -319,7 +325,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   });
   resize.observe(el);
   theme.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
-  const unwatch = ws.vault.onModified((changedPath) => { if (changedPath === path && !notifying) load(); });
+  const unwatch = ws.vault.onModified((changedPath) => { if (changedPath === owned.path() && !notifying) { owned.drop(); load(); } });
 
   el.addEventListener("wheel", (event) => {
     event.preventDefault();
@@ -367,10 +373,9 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   const flush = () => { void persist(); };
   window.addEventListener("beforeunload", flush);
   // Finish text that is still being typed before writing. A rename flushes,
-  // then moves the file, then closes this tab: text finished only on close
-  // would be written at the old path and bring that file back. A drag in
+  // then moves the file, then closes this tab: the path-owned writer follows
+  // the new path, so this close does not bring the old file back. A drag in
   // progress is dropped, the same as closing the tab.
-  const untrack = trackDrawing({ path, save: persist });
 
   load();
   return {
@@ -381,7 +386,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       flush();
       gone = true;
       window.removeEventListener("beforeunload", flush);
-      untrack();
+      owned.detach();
       loadGen++;
       chunkGen++;
       clearTimeout(parseTimer);

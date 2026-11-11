@@ -8,6 +8,7 @@
 import { api } from "../api";
 import { retryDelay } from "../fileSave";
 import { listeners } from "../listeners";
+import { writesSealed } from "../saveSeal";
 import {
   defaults,
   FILES,
@@ -34,9 +35,12 @@ class SettingsStore {
   private timers = new Map<SettingsFile, number>();
   private retryTimers = new Map<SettingsFile, number>();
   private retryAttempt = new Map<SettingsFile, number>();
-  /** Files whose last write failed. flush() tries them again. */
+  /** Bumped on every real change. An older write must not clear a newer one. */
+  private generation = new Map<SettingsFile, number>();
+  /** Files whose latest text is not on disk. flush() tries them again. */
   private failed = new Set<SettingsFile>();
-  private pendingWrites = new Map<SettingsFile, Promise<void>>();
+  /** Writes for one file run one after another, so a newer snapshot waits its turn. */
+  private chains = new Map<SettingsFile, Promise<void>>();
   private changes = listeners<[file: SettingsFile | null, key: string | null]>();
   /** Called with the file and key that changed (both null after a load). */
   readonly on = this.changes.on;
@@ -155,51 +159,83 @@ class SettingsStore {
     this.changed("types.json", key);
   }
 
-  /** Write everything still waiting (the window is closing). Resolves when those writes settle. */
-  flush(): Promise<void> {
-    const files = new Set<SettingsFile>([...this.timers.keys(), ...this.failed]);
-    const jobs: Promise<void>[] = [];
-    for (const file of files) if (!this.pendingWrites.has(file)) jobs.push(this.write(file));
-    for (const job of this.pendingWrites.values()) jobs.push(job);
-    return Promise.all(jobs).then(() => undefined);
+  /** True when a settings file still has text that has not reached disk. */
+  hasUnsaved(): boolean {
+    return this.timers.size > 0 || this.retryTimers.size > 0 || this.failed.size > 0;
+  }
+
+  /**
+   * Write everything still waiting, including a change that landed while an
+   * older snapshot was in flight. False when the newest text is still dirty.
+   */
+  async flush(): Promise<boolean> {
+    for (let pass = 0; pass < 8; pass++) {
+      const files = new Set<SettingsFile>([...this.timers.keys(), ...this.retryTimers.keys(), ...this.failed]);
+      if (!files.size) return true;
+      await Promise.all([...files].map((file) => this.write(file)));
+    }
+    return !this.hasUnsaved();
   }
 
   /** Tell the listeners at once, and write the file a moment later. */
   private changed(file: SettingsFile, key: string) {
     this.changes.emit(file, key);
+    this.generation.set(file, (this.generation.get(file) ?? 0) + 1);
+    this.failed.add(file);
+    this.retryAttempt.delete(file);
+    const retry = this.retryTimers.get(file);
+    if (retry) clearTimeout(retry);
+    this.retryTimers.delete(file);
     clearTimeout(this.timers.get(file));
-    this.timers.set(
-      file,
-      window.setTimeout(() => this.write(file), WRITE_DELAY),
-    );
+    this.timers.set(file, window.setTimeout(() => { void this.write(file); }, WRITE_DELAY));
   }
 
+  /** Queue one attempt behind whatever write of this file is already running. */
   private write(file: SettingsFile): Promise<void> {
+    const prev = this.chains.get(file) ?? Promise.resolve();
+    const job = prev.then(() => this.writeOnce(file));
+    this.chains.set(file, job.then(() => {}, () => {}));
+    return job;
+  }
+
+  private async writeOnce(file: SettingsFile): Promise<void> {
+    // Clear the timer only as this attempt takes its snapshot, so a change
+    // that arrives while the write is in flight keeps the timer it just armed.
     const timer = this.timers.get(file);
     if (timer) clearTimeout(timer);
     this.timers.delete(file);
     const retry = this.retryTimers.get(file);
     if (retry) clearTimeout(retry);
     this.retryTimers.delete(file);
-    const text =
-      file === "hotkeys.json"
-        ? serializeHotkeys(this.hotkeyMap)
-        : file === "types.json"
-          ? serializeTypes(this.typeMap)
-          : serialize(FILES[file], this.values.get(file) as never, this.extras.get(file));
-    const job = api.writeConfig(file, text).then(() => {
-      this.failed.delete(file);
-      this.retryAttempt.delete(file);
-    }, (err) => {
+    if (writesSealed()) {
+      this.failed.add(file);
+      this.timers.set(file, window.setTimeout(() => { void this.write(file); }, WRITE_DELAY));
+      return;
+    }
+    const gen = this.generation.get(file) ?? 0;
+    const text = this.snapshot(file);
+    try {
+      await api.writeConfig(file, text);
+    } catch (err) {
       console.warn(`Settings: could not save .grove/${file}`, err);
       this.failed.add(file);
+      if ((this.generation.get(file) ?? 0) !== gen || this.timers.has(file)) return;
       const n = this.retryAttempt.get(file) ?? 0;
       this.retryAttempt.set(file, n + 1);
       this.retryTimers.set(file, window.setTimeout(() => { void this.write(file); }, retryDelay(n)));
-    });
-    this.pendingWrites.set(file, job);
-    void job.finally(() => { if (this.pendingWrites.get(file) === job) this.pendingWrites.delete(file); });
-    return job;
+      return;
+    }
+    if ((this.generation.get(file) ?? 0) !== gen || this.timers.has(file)) return;
+    this.failed.delete(file);
+    this.retryAttempt.delete(file);
+  }
+
+  private snapshot(file: SettingsFile): string {
+    return file === "hotkeys.json"
+      ? serializeHotkeys(this.hotkeyMap)
+      : file === "types.json"
+        ? serializeTypes(this.typeMap)
+        : serialize(FILES[file], this.values.get(file) as never, this.extras.get(file));
   }
 }
 

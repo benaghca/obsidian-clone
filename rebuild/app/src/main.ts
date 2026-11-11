@@ -29,7 +29,8 @@ import { openDailyNote } from "./editorHost";
 import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
-import { bindCloseFlush, flushOpenSaves } from "./quitFlush";
+import { bindCloseFlush, flushOpenSaves, requestClose } from "./quitFlush";
+import { installVaultSwitch, savesPending } from "./vaultSwitch";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
@@ -451,8 +452,8 @@ async function addWindowControls() {
       { class: "titlebar-buttons" },
       iconButton(icon("minus"), "Minimize", () => void win.minimize(), "titlebar-button"),
       iconButton(icon("square"), "Maximize", () => void win.toggleMaximize(), "titlebar-button mod-maximize"),
-      // Unsaved edits are written first. close() also runs the close-requested handler, which flushes again and waits.
-      iconButton(icon("x"), "Close", () => void flushOpenSaves(() => ws.editors.flush()).finally(() => win.close()), "titlebar-button mod-close"),
+      // close() runs the close-requested handler, which flushes, retries, and enforces the deadline.
+      iconButton(icon("x"), "Close", () => requestClose(win), "titlebar-button mod-close"),
     ),
   );
   // The headers under the buttons leave exactly their width free (it varies
@@ -505,6 +506,12 @@ if (isTauri) {
       console.error("Could not keep saves on close", err);
     }
   })();
+  // Pop-outs share the backend vault. A switch in either window waits for both.
+  void installVaultSwitch({
+    flushNotes: () => ws.editors.flush(),
+    dirty: () => savesPending(ws.editors),
+    reload: () => location.reload(),
+  }).catch((err) => console.error("Could not coordinate vault switches", err));
 }
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();
