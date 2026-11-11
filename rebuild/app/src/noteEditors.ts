@@ -17,6 +17,7 @@ import { Annotation, EditorSelection, type EditorState, Prec, type Text, Transac
 import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
 import { configEffects } from "./editor/config";
+import { retryDelay } from "./fileSave";
 import { countsField } from "./editor/counts";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
@@ -36,6 +37,12 @@ interface Pane {
   /** The tab and note on screen (null: the empty "New tab" state). */
   tab: Tab | null;
   path: string | null;
+}
+
+/** A note's path while a save is in flight. `move` updates `path` so the write follows a rename. */
+interface SaveSlot {
+  path: string;
+  job?: Promise<boolean>;
 }
 
 /** What the editors tell the workspace. */
@@ -68,6 +75,12 @@ export class NoteEditors {
   /** Last scroll position per note, for a tab arriving at it through history. */
   private scrollTops = new Map<string, number>();
   private saveTimers = new Map<string, number>();
+  private retryTimers = new Map<string, number>();
+  private retryAttempt = new Map<string, number>();
+  /** Latest text is not on disk. Kept apart from the timers: a failed save has no timer until its retry is armed. */
+  private dirty = new Set<string>();
+  /** Path identity for an in-flight save, so a rename can retarget it. */
+  private slots = new Map<string, SaveSlot>();
   private reloads = new Map<string, symbol>();
   /** Bumped when a note changes on disk, so an in-flight `load` does not publish the old text. */
   private loadEpoch = new Map<string, number>();
@@ -427,7 +440,7 @@ export class NoteEditors {
   async reload(path: string) {
     // Even when this note is not loaded yet: the open that is in flight must not keep the old text.
     this.loadEpoch.set(path, (this.loadEpoch.get(path) ?? 0) + 1);
-    if (!this.states.has(path) || this.saveTimers.has(path)) return;
+    if (!this.states.has(path) || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job) return;
     const before = this.doc(path);
     const mine = Symbol();
     this.reloads.set(path, mine);
@@ -436,21 +449,37 @@ export class NoteEditors {
     this.reloads.delete(path);
     const current = this.doc(path);
     // A newer reload or local typing while the read ran takes precedence.
-    if (text === null || !current || current !== before || this.saveTimers.has(path) || text === current.toString()) return;
+    if (text === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job || text === current.toString()) return;
     this.change(path, { changes: { from: 0, to: current.length, insert: text }, userEvent: "external" });
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }
 
   /** Paths under a moved folder (or a moved note) follow it. */
   move(under: (path: string) => boolean, swap: (path: string) => string) {
-    for (const map of [this.states, this.scrollTops, this.owners] as Map<string, unknown>[]) {
-      for (const [key, value] of [...map]) {
-        if (!under(key)) continue;
-        map.delete(key);
-        map.set(swap(key), value);
-      }
+    this.rekey(this.states, under, swap);
+    this.rekey(this.scrollTops, under, swap);
+    this.rekey(this.owners, under, swap);
+    this.rekey(this.saveTimers, under, swap);
+    this.rekey(this.retryTimers, under, swap);
+    this.rekey(this.retryAttempt, under, swap);
+    const dirty = new Set<string>();
+    for (const path of this.dirty) dirty.add(under(path) ? swap(path) : path);
+    this.dirty = dirty;
+    for (const [key, slot] of [...this.slots]) {
+      if (!under(key)) continue;
+      this.slots.delete(key);
+      slot.path = swap(key);
+      this.slots.set(slot.path, slot);
     }
     for (const pane of this.panes.values()) if (pane.path) pane.path = swap(pane.path);
+  }
+
+  private rekey<T>(map: Map<string, T>, under: (path: string) => boolean, swap: (path: string) => string) {
+    for (const [key, value] of [...map]) {
+      if (!under(key)) continue;
+      map.delete(key);
+      map.set(swap(key), value);
+    }
   }
 
   /** Notes that were deleted: no pane shows them and nothing is kept. */
@@ -458,35 +487,151 @@ export class NoteEditors {
     for (const pane of this.panes.values()) if (pane.path && under(pane.path)) this.release(pane);
     for (const p of [...this.states.keys()].filter(under)) this.states.delete(p);
     for (const p of [...this.scrollTops.keys()].filter(under)) this.scrollTops.delete(p);
+    this.dropSaves(under);
+  }
+
+  private dropSaves(under: (path: string) => boolean) {
+    for (const path of [...this.saveTimers.keys()]) if (under(path)) this.clearTimer(this.saveTimers, path);
+    for (const path of [...this.retryTimers.keys()]) if (under(path)) this.clearTimer(this.retryTimers, path);
+    for (const path of [...this.retryAttempt.keys()]) if (under(path)) this.retryAttempt.delete(path);
+    for (const path of [...this.dirty]) if (under(path)) this.dirty.delete(path);
+    for (const path of [...this.slots.keys()]) if (under(path)) this.slots.delete(path);
+  }
+
+  private clearTimer(map: Map<string, number>, path: string) {
+    clearTimeout(map.get(path));
+    map.delete(path);
+  }
+
+  private slot(path: string): SaveSlot {
+    let slot = this.slots.get(path);
+    if (!slot) {
+      slot = { path };
+      this.slots.set(path, slot);
+    }
+    return slot;
   }
 
   // ----- saving -----
 
   private scheduleSave(path: string) {
-    clearTimeout(this.saveTimers.get(path));
-    this.saveTimers.set(path, window.setTimeout(() => void this.save(path), SAVE_DELAY));
+    const slot = this.slot(path);
+    this.dirty.add(slot.path);
+    this.retryAttempt.delete(slot.path);
+    this.clearTimer(this.retryTimers, slot.path);
+    this.clearTimer(this.saveTimers, slot.path);
+    // The callback reads slot.path when it fires, so a rename in between saves the new path.
+    this.saveTimers.set(slot.path, window.setTimeout(() => {
+      this.saveTimers.delete(slot.path);
+      void this.save(slot.path);
+    }, SAVE_DELAY));
   }
 
-  private async save(path: string) {
-    this.saveTimers.delete(path);
+  private scheduleRetry(slot: SaveSlot) {
+    const n = this.retryAttempt.get(slot.path) ?? 0;
+    this.retryAttempt.set(slot.path, n + 1);
+    this.clearTimer(this.retryTimers, slot.path);
+    this.retryTimers.set(slot.path, window.setTimeout(() => {
+      this.retryTimers.delete(slot.path);
+      void this.save(slot.path);
+    }, retryDelay(n)));
+  }
+
+  /** Write `path` now. False: the write failed, or the path moved and the follow-up has not finished. */
+  private save(path: string): Promise<boolean> {
+    const slot = this.slot(path);
+    if (slot.job) {
+      return slot.job.then(() => {
+        const at = slot.path;
+        return this.dirty.has(at) || this.saveTimers.has(at) || this.retryTimers.has(at) ? this.save(at) : true;
+      });
+    }
+    let job!: Promise<boolean>;
+    const written = this.write(slot).finally(() => {
+      if (slot.job === job) slot.job = undefined;
+    });
+    job = written.then((ok) => {
+      // The file was renamed while this write was in flight: put the same text at the new path.
+      if (slot.path !== path && this.dirty.has(slot.path)) return this.save(slot.path);
+      return ok;
+    });
+    slot.job = job;
+    return job;
+  }
+
+  private async write(slot: SaveSlot): Promise<boolean> {
+    this.clearTimer(this.saveTimers, slot.path);
+    this.clearTimer(this.retryTimers, slot.path);
+    const path = slot.path;
     const state = this.states.get(path);
-    if (!state) return;
+    if (!state) {
+      this.dirty.delete(path);
+      return true;
+    }
+    const text = state.doc.toString();
+    let failed = false;
     try {
-      await api.writeNote(path, state.doc.toString());
+      await api.writeNote(path, text);
     } catch (err) {
       console.error(`Could not save ${path}`, err);
-      return;
+      failed = true;
     }
-    this.events.saved(path);
+    const landed = slot.path;
+    if (!this.states.has(landed)) {
+      this.dirty.delete(landed);
+      return true;
+    }
+    if (landed !== path) {
+      this.dirty.add(landed);
+      return false;
+    }
+    const latest = this.states.get(landed);
+    const moved = !!latest && latest.doc.toString() !== text;
+    if (failed) {
+      this.dirty.add(landed);
+      // A newer keystroke is written on the next pass. Backoff waits only when this text itself failed.
+      if (moved) {
+        if (!this.saveTimers.has(landed)) this.scheduleSave(landed);
+        return false;
+      }
+      this.scheduleRetry(slot);
+      return false;
+    }
+    if (moved) {
+      this.dirty.add(landed);
+      if (!this.saveTimers.has(landed) && !this.retryTimers.has(landed)) this.scheduleSave(landed);
+      return false;
+    }
+    this.dirty.delete(landed);
+    this.retryAttempt.delete(landed);
+    this.events.saved(landed);
+    return true;
   }
 
-  /** Save now whatever is waiting to be saved, for the notes `which` picks (all by default). */
-  async flush(which: (path: string) => boolean = () => true) {
-    await Promise.all(
-      [...this.saveTimers.keys()].filter(which).map((path) => {
-        clearTimeout(this.saveTimers.get(path));
-        return this.save(path);
-      }),
-    );
+  /** Paths with a waiting edit, a timer, or a write still in flight. */
+  private pending(which: (path: string) => boolean): Set<string> {
+    const paths = new Set<string>();
+    for (const path of this.dirty) if (which(path)) paths.add(path);
+    for (const path of this.saveTimers.keys()) if (which(path)) paths.add(path);
+    for (const path of this.retryTimers.keys()) if (which(path)) paths.add(path);
+    for (const [path, slot] of this.slots) if (slot.job && which(path)) paths.add(path);
+    return paths;
+  }
+
+  /**
+   * Save now whatever is waiting, for the notes `which` picks (all by default).
+   * A keystroke that lands while the write is in flight is written too.
+   * Resolves false when a write failed and that note is still dirty.
+   */
+  async flush(which: (path: string) => boolean = () => true): Promise<boolean> {
+    // A failed write is tried once per flush, then left on its backoff. A newer keystroke is written in the next pass.
+    const backedOff = new Set<string>();
+    for (let pass = 0; pass < 8; pass++) {
+      const paths = [...this.pending(which)].filter((path) => !backedOff.has(path));
+      if (!paths.length) return ![...this.retryTimers.keys()].some(which);
+      await Promise.all(paths.map((path) => this.save(path)));
+      for (const path of this.retryTimers.keys()) if (which(path)) backedOff.add(path);
+    }
+    return !this.pending(which).size;
   }
 }

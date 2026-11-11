@@ -6,6 +6,7 @@
 // commands change settings.
 
 import { api } from "../api";
+import { retryDelay } from "../fileSave";
 import { listeners } from "../listeners";
 import {
   defaults,
@@ -31,6 +32,11 @@ class SettingsStore {
   private hotkeyMap: Record<string, StoredHotkey[]> = {};
   private typeMap: Record<string, string> = {};
   private timers = new Map<SettingsFile, number>();
+  private retryTimers = new Map<SettingsFile, number>();
+  private retryAttempt = new Map<SettingsFile, number>();
+  /** Files whose last write failed. flush() tries them again. */
+  private failed = new Set<SettingsFile>();
+  private pendingWrites = new Map<SettingsFile, Promise<void>>();
   private changes = listeners<[file: SettingsFile | null, key: string | null]>();
   /** Called with the file and key that changed (both null after a load). */
   readonly on = this.changes.on;
@@ -149,12 +155,13 @@ class SettingsStore {
     this.changed("types.json", key);
   }
 
-  /** Write everything still waiting (the window is closing). */
-  flush() {
-    for (const [file, timer] of [...this.timers]) {
-      clearTimeout(timer);
-      this.write(file);
-    }
+  /** Write everything still waiting (the window is closing). Resolves when those writes settle. */
+  flush(): Promise<void> {
+    const files = new Set<SettingsFile>([...this.timers.keys(), ...this.failed]);
+    const jobs: Promise<void>[] = [];
+    for (const file of files) if (!this.pendingWrites.has(file)) jobs.push(this.write(file));
+    for (const job of this.pendingWrites.values()) jobs.push(job);
+    return Promise.all(jobs).then(() => undefined);
   }
 
   /** Tell the listeners at once, and write the file a moment later. */
@@ -167,15 +174,32 @@ class SettingsStore {
     );
   }
 
-  private write(file: SettingsFile) {
+  private write(file: SettingsFile): Promise<void> {
+    const timer = this.timers.get(file);
+    if (timer) clearTimeout(timer);
     this.timers.delete(file);
+    const retry = this.retryTimers.get(file);
+    if (retry) clearTimeout(retry);
+    this.retryTimers.delete(file);
     const text =
       file === "hotkeys.json"
         ? serializeHotkeys(this.hotkeyMap)
         : file === "types.json"
           ? serializeTypes(this.typeMap)
           : serialize(FILES[file], this.values.get(file) as never, this.extras.get(file));
-    api.writeConfig(file, text).catch((err) => console.warn(`Settings: could not save .grove/${file}`, err));
+    const job = api.writeConfig(file, text).then(() => {
+      this.failed.delete(file);
+      this.retryAttempt.delete(file);
+    }, (err) => {
+      console.warn(`Settings: could not save .grove/${file}`, err);
+      this.failed.add(file);
+      const n = this.retryAttempt.get(file) ?? 0;
+      this.retryAttempt.set(file, n + 1);
+      this.retryTimers.set(file, window.setTimeout(() => { void this.write(file); }, retryDelay(n)));
+    });
+    this.pendingWrites.set(file, job);
+    void job.finally(() => { if (this.pendingWrites.get(file) === job) this.pendingWrites.delete(file); });
+    return job;
   }
 }
 

@@ -694,8 +694,12 @@ export class Workspace {
     this.settle();
   }
 
-  /** Save a note now (Obsidian's "Save current file"), if it has changes waiting. */
-  async saveNow(path = this.active.path) {
-    if (path) await this.editors.flush((p) => p === path);
+  /**
+   * Save a note now (Obsidian's "Save current file"), if it has changes waiting.
+   * False when that write failed and the note is still dirty.
+   */
+  async saveNow(path = this.active.path): Promise<boolean> {
+    if (!path) return true;
+    return this.editors.flush((p) => p === path);
   }
 }

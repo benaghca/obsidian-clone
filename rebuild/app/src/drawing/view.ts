@@ -6,12 +6,13 @@
 // touched. Edits save through write_note after a short pause, like a canvas.
 
 import { api } from "../api";
+import { fileSave } from "../fileSave";
 import { dragPointer, h, keyButton } from "../shell/dom";
 import { icon } from "../shell/icons";
 import type { Tab } from "../tabs";
 import type { Workspace } from "../workspace";
 import { drawingEditor } from "./editor";
-import { trackDrawing } from "./pending";
+import { holdDrawingWrite, trackDrawing } from "./pending";
 import { openDrawingImages, renderDrawing, type DrawingPicture } from "./render";
 import { findElement, parseScene, serializeScene, type Point, type Scene } from "./scene";
 
@@ -49,11 +50,9 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   let chunkGen = 0;
   let parseTimer = 0;
   let chunkTimer = 0;
-  let saveTimer = 0;
   let gone = false;
   let patches = 0;
   let notifying = false;
-  let writing = Promise.resolve();
   // Texts this tab wrote lately: a watcher event that reads one back is our own save.
   const ours: string[] = [];
   const patchDefs = new Map<string, Element>();
@@ -222,29 +221,29 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     emptyScene = !scene.elements.some((e) => !e.isDeleted);
   }
 
-  function save() {
-    clearTimeout(saveTimer);
-    saveTimer = 0;
-    if (gone || !scene) return;
-    // Mid-gesture the scene holds unstamped live frames: wait for the gesture to end.
-    // A closed tab must not keep rescheduling this.
-    if (editor.busy) { changed(); return; }
-    const text = serializeScene(scene);
-    textSeen = text;
-    ours.push(text);
-    if (ours.length > 4) ours.shift();
-    writing = writing.then(async () => {
-      try {
-        await api.writeNote(path, text);
-        notifying = true;
-        try { ws.vault.written(path); } finally { notifying = false; }
-      } catch (err) { console.error(`Could not save ${path}`, err); }
-    });
-  }
+  // The editor is created just below and fills this in. A gesture still in progress waits.
+  const gate = { busy: () => false };
+  const disk = fileSave({
+    delay: SAVE_DELAY,
+    postpone: () => gate.busy(),
+    text: () => (scene ? serializeScene(scene) : ""),
+    write: async (text) => {
+      textSeen = text;
+      ours.push(text);
+      if (ours.length > 4) ours.shift();
+      await api.writeNote(path, text);
+      notifying = true;
+      try { ws.vault.written(path); } finally { notifying = false; }
+    },
+    onError: (err) => console.error(`Could not save ${path}`, err),
+  });
 
-  function changed() {
-    clearTimeout(saveTimer);
-    saveTimer = window.setTimeout(save, SAVE_DELAY);
+  function changed() { disk.touch(); }
+
+  function persist(): Promise<void> {
+    editor.endLive();
+    if (gone || !scene) return Promise.resolve();
+    return holdDrawingWrite(path, disk.flush().then(() => {}));
   }
 
   const toScene = (clientX: number, clientY: number): Point => {
@@ -268,6 +267,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
     repaint,
     changed,
   });
+  gate.busy = () => editor.busy;
 
   function load() {
     const gen = ++loadGen;
@@ -279,8 +279,7 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       const dark = document.documentElement.classList.contains("theme-dark");
       if ((text === textSeen || ours.includes(text)) && dark === darkSeen && svgOf()) return;
       // Someone else changed the file: it wins over edits not yet saved, as on a canvas.
-      clearTimeout(saveTimer);
-      saveTimer = 0;
+      disk.drop();
       ours.length = 0;
       textSeen = text;
       darkSeen = dark;
@@ -365,23 +364,13 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
   }, true);
   el.addEventListener("auxclick", (event) => { if (event.button === 1) event.preventDefault(); });
 
-  const flush = () => {
-    editor.endLive();
-    if (saveTimer) save();
-  };
+  const flush = () => { void persist(); };
   window.addEventListener("beforeunload", flush);
   // Finish text that is still being typed before writing. A rename flushes,
   // then moves the file, then closes this tab: text finished only on close
   // would be written at the old path and bring that file back. A drag in
   // progress is dropped, the same as closing the tab.
-  const untrack = trackDrawing({
-    path,
-    save: () => {
-      editor.endLive();
-      if (saveTimer) save();
-      return writing;
-    },
-  });
+  const untrack = trackDrawing({ path, save: persist });
 
   load();
   return {
@@ -391,8 +380,6 @@ export function createDrawingView(ws: Workspace, path: string, tab: Tab) {
       editor.dispose();
       flush();
       gone = true;
-      clearTimeout(saveTimer);
-      saveTimer = 0;
       window.removeEventListener("beforeunload", flush);
       untrack();
       loadGen++;

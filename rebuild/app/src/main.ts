@@ -29,6 +29,7 @@ import { openDailyNote } from "./editorHost";
 import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
+import { bindCloseFlush, flushOpenSaves } from "./quitFlush";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
@@ -450,8 +451,8 @@ async function addWindowControls() {
       { class: "titlebar-buttons" },
       iconButton(icon("minus"), "Minimize", () => void win.minimize(), "titlebar-button"),
       iconButton(icon("square"), "Maximize", () => void win.toggleMaximize(), "titlebar-button mod-maximize"),
-      // Unsaved edits are written first, so closing a window loses nothing.
-      iconButton(icon("x"), "Close", () => void ws.editors.flush().finally(() => win.close()), "titlebar-button mod-close"),
+      // Unsaved edits are written first. close() also runs the close-requested handler, which flushes again and waits.
+      iconButton(icon("x"), "Close", () => void flushOpenSaves(() => ws.editors.flush()).finally(() => win.close()), "titlebar-button mod-close"),
     ),
   );
   // The headers under the buttons leave exactly their width free (it varies
@@ -493,10 +494,21 @@ ws.on((change) => {
   clearTimeout(workspaceTimer);
   workspaceTimer = window.setTimeout(rememberWorkspace, 500);
 });
+// Compositor close, Alt+F4, and Grove's own close button all emit close-requested.
+// The handler prevents the immediate destroy, writes everything still waiting, then destroys.
+if (isTauri) {
+  void (async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await bindCloseFlush(getCurrentWindow(), () => flushOpenSaves(() => ws.editors.flush()));
+    } catch (err) {
+      console.error("Could not keep saves on close", err);
+    }
+  })();
+}
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();
-  settings.flush();
-  void ws.editors.flush();
+  void flushOpenSaves(() => ws.editors.flush());
 });
 
 await ws.vault.open(!!popoutNote);

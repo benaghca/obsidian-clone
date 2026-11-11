@@ -214,7 +214,8 @@ export async function mergeNote(ws: Workspace, path: string, into: string) {
   const doc = ws.editors.doc(into) ?? target.doc;
   const sep = !doc.length ? "" : doc.sliceString(doc.length - 1) === "\n" ? "\n" : "\n\n";
   ws.editors.change(into, { changes: { from: doc.length, insert: sep + text } });
-  await ws.saveNow(into);
+  // A failed save leaves the merged text in the target and the source on disk.
+  if (!(await ws.saveNow(into))) return;
   const showing = ws.layout.tabs().filter((t) => t.path === path);
   await deleteFile(ws, path, { confirmed: true });
   ws.reopen(showing, into);
