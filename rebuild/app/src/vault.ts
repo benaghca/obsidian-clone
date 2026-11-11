@@ -16,12 +16,28 @@ const LINK_INDEX_DELAY = 1000;
 export class Vault {
   path = "";
   name = "";
-  files: FileEntry[] = [];
+  /** The current file list. Assigning a new array rebuilds the path lookup. */
+  get files(): FileEntry[] {
+    return this.fileList;
+  }
+
+  set files(files: FileEntry[]) {
+    this.fileList = files;
+    const byPath = new Map<string, FileEntry>();
+    for (const file of files) if (!byPath.has(file.path)) byPath.set(file.path, file);
+    this.byPath = byPath;
+  }
+
   notes: NoteRef[] = [];
   links: LinkIndex = { outgoing: {} };
   /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
   isExcluded: (path: string) => boolean = () => false;
 
+  private fileList: FileEntry[] = [];
+  /** First entry wins when one path is listed twice, matching a list scan that stops at the first hit. */
+  private byPath = new Map<string, FileEntry>();
+  /** Disk events waiting for this frame's single refresh. */
+  private pending: { kind: string; paths: string[] }[] | null = null;
   private linkTimer = 0;
   private filesRequest = 0;
   private linksRequest = 0;
@@ -100,13 +116,18 @@ export class Vault {
     return this.targets.exists(target, from);
   }
 
+  /** The list entry for `path`, or none. */
+  entry(path: string): FileEntry | undefined {
+    return this.byPath.get(path);
+  }
+
   isFolder(path: string) {
-    return this.files.some((f) => f.path === path && f.is_dir);
+    return this.byPath.get(path)?.is_dir === true;
   }
 
   /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
   private touch(path: string) {
-    const entry = this.files.find((f) => f.path === path);
+    const entry = this.byPath.get(path);
     if (entry) entry.mtime_ms = Date.now();
     this.modified.emit(path);
   }
@@ -118,11 +139,37 @@ export class Vault {
     this.linkTimer = window.setTimeout(() => void this.refreshLinks(), LINK_INDEX_DELAY);
   }
 
-  /** A change on disk, not ours: the file list (or the files' times), loaded notes' text and the link index follow. */
-  private async onChanged(kind: string, paths: string[]) {
-    if (kind !== "modify") await this.refreshFiles();
-    else for (const path of paths) this.touch(path);
-    if (kind !== "remove") for (const path of paths) await this.reload(path);
+  /**
+   * A change on disk, not ours. Events in one frame share one file-list read
+   * (when any event is not a modify), one touch per modified path, one reload
+   * per path, and one link-index read. A remove drops that path from the reload
+   * set; a later create, modify, or rename puts it back.
+   */
+  private onChanged(kind: string, paths: string[]) {
+    const start = this.pending === null;
+    (this.pending ??= []).push({ kind, paths });
+    if (!start) return;
+    const flush = () => void this.flushChanges();
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(flush);
+    else queueMicrotask(flush);
+  }
+
+  private async flushChanges() {
+    const batch = this.pending;
+    this.pending = null;
+    if (!batch?.length) return;
+    let refresh = false;
+    const touch = new Set<string>();
+    const reload = new Set<string>();
+    for (const change of batch) {
+      if (change.kind !== "modify") refresh = true;
+      else for (const path of change.paths) touch.add(path);
+      if (change.kind === "remove") for (const path of change.paths) reload.delete(path);
+      else for (const path of change.paths) reload.add(path);
+    }
+    if (refresh) await this.refreshFiles();
+    for (const path of touch) this.touch(path);
+    for (const path of reload) await this.reload(path);
     void this.refreshLinks();
   }
 }
