@@ -25,9 +25,40 @@ mod search_props_edge;
 use crate::fsutil::{self, is_ignored_rel};
 use crate::model::{FileEntry, LinkIndex, SearchHit};
 use parse::{clean_target, parse_note, Note};
+#[cfg(test)]
+use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
+
+// Real name-map rebuilds, and file nodes visited by `Index::list`.
+// `take_*` resets the counter. A deferred rebuild counts when the maps are
+// built, not once per file that asked. `entry` does not visit the list.
+#[cfg(test)]
+thread_local! {
+    static REBUILD_MAPS_CALLS: Cell<usize> = const { Cell::new(0) };
+    static LIST_WALKS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn take_rebuild_maps_calls() -> usize {
+    REBUILD_MAPS_CALLS.with(|cell| cell.replace(0))
+}
+
+#[cfg(test)]
+pub(crate) fn take_list_walks() -> usize {
+    LIST_WALKS.with(|cell| cell.replace(0))
+}
+
+#[cfg(test)]
+fn count_rebuild_maps() {
+    REBUILD_MAPS_CALLS.with(|cell| cell.set(cell.get() + 1));
+}
+
+#[cfg(test)]
+fn count_list_walk(nodes: usize) {
+    LIST_WALKS.with(|cell| cell.set(cell.get() + nodes));
+}
 
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 
@@ -73,6 +104,42 @@ pub struct Index {
     by_name: HashMap<String, Vec<String>>,
     by_alias: HashMap<String, String>,
     by_path_lower: HashMap<String, String>,
+    // While > 0, `rebuild_maps` only marks the maps stale. The outermost
+    // `MapBatch` rebuilds once. `apply` and `rename_path` hold that guard
+    // until every path in the batch is in its final place.
+    defer_depth: u32,
+    maps_dirty: bool,
+}
+
+/// Holds name-map rebuilds, then rebuilds once on drop if anything asked.
+/// Nested guards rebuild on the outermost drop.
+#[must_use = "hold the guard until the batch's last file change"]
+pub(crate) struct MapBatch<'a> {
+    index: &'a mut Index,
+}
+
+impl Drop for MapBatch<'_> {
+    fn drop(&mut self) {
+        self.index.defer_depth -= 1;
+        if self.index.defer_depth == 0 && self.index.maps_dirty {
+            self.index.maps_dirty = false;
+            self.index.rebuild_maps();
+        }
+    }
+}
+
+impl MapBatch<'_> {
+    pub(crate) fn remove_tree(&mut self, rel: &str) {
+        self.index.remove_tree(rel);
+    }
+
+    pub(crate) fn relocate(&mut self, from: &str, to: &str) {
+        self.index.relocate(from, to);
+    }
+
+    pub(crate) fn refresh_path(&mut self, root: &Path, rel: &str) {
+        self.index.refresh_path(root, rel);
+    }
 }
 
 impl Index {
@@ -85,17 +152,17 @@ impl Index {
     }
 
     pub fn list(&self) -> Vec<FileEntry> {
+        #[cfg(test)]
+        count_list_walk(self.files.len());
         self.files
             .iter()
-            .map(|(path, node)| FileEntry {
-                path: path.clone(),
-                name: display_name(path, node.is_dir),
-                is_dir: node.is_dir,
-                mtime_ms: node.stamp.mtime_ms,
-                ctime_ms: node.stamp.ctime_ms,
-                size: node.stamp.size,
-            })
+            .map(|(path, node)| file_entry(path, node))
             .collect()
+    }
+
+    /// One file-list row, read from that path's node.
+    pub(crate) fn entry(&self, rel: &str) -> Option<FileEntry> {
+        self.files.get(rel).map(|node| file_entry(rel, node))
     }
 
     pub fn contains(&self, rel: &str) -> bool {
@@ -300,6 +367,12 @@ impl Index {
         }
     }
 
+    /// Rebuild name maps once when the guard drops, not once per file in the batch.
+    pub(crate) fn map_batch(&mut self) -> MapBatch<'_> {
+        self.defer_depth += 1;
+        MapBatch { index: self }
+    }
+
     pub fn remove_tree(&mut self, rel: &str) {
         self.changed_during_rescan(rel);
         let prefix = format!("{rel}/");
@@ -500,6 +573,13 @@ impl Index {
     }
 
     fn rebuild_maps(&mut self) {
+        if self.defer_depth > 0 {
+            self.maps_dirty = true;
+            return;
+        }
+        self.maps_dirty = false;
+        #[cfg(test)]
+        count_rebuild_maps();
         self.by_name.clear();
         self.by_alias.clear();
         self.by_path_lower.clear();
@@ -554,6 +634,17 @@ pub fn is_note_path(path: &str) -> bool {
 /// The whole file name is `.md` in any case. That is not a note.
 fn nameless_md(path: &str) -> bool {
     basename(path).eq_ignore_ascii_case(".md")
+}
+
+fn file_entry(path: &str, node: &Node) -> FileEntry {
+    FileEntry {
+        path: path.to_string(),
+        name: display_name(path, node.is_dir),
+        is_dir: node.is_dir,
+        mtime_ms: node.stamp.mtime_ms,
+        ctime_ms: node.stamp.ctime_ms,
+        size: node.stamp.size,
+    }
 }
 
 fn display_name(path: &str, is_dir: bool) -> String {
