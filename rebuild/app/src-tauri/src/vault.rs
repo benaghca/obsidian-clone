@@ -191,8 +191,13 @@ impl Vault {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         fs::rename(&from_full, &to_full).map_err(|e| e.to_string())?;
-        self.index.relocate(&from_rel, &to_rel);
-        self.index.refresh_path(&self.root, &to_rel);
+        // One map rebuild for the move and the reload of the destination.
+        {
+            let root = &self.root;
+            let mut batch = self.index.map_batch();
+            batch.relocate(&from_rel, &to_rel);
+            batch.refresh_path(root, &to_rel);
+        }
         Ok(())
     }
 
@@ -273,23 +278,26 @@ impl Vault {
         out
     }
 
+    /// Apply a watcher batch. Name maps rebuild once, after every path is updated.
     pub fn apply(&mut self, changes: &[VaultChanged]) {
+        let root = &self.root;
+        let mut batch = self.index.map_batch();
         for change in changes {
             match change.kind {
                 ChangeKind::Remove => {
                     for path in &change.paths {
-                        self.index.remove_tree(path);
+                        batch.remove_tree(path);
                     }
                 }
                 ChangeKind::Rename => {
                     if change.paths.len() == 2 {
-                        self.index.relocate(&change.paths[0], &change.paths[1]);
-                        self.index.refresh_path(&self.root, &change.paths[1]);
+                        batch.relocate(&change.paths[0], &change.paths[1]);
+                        batch.refresh_path(root, &change.paths[1]);
                     }
                 }
                 ChangeKind::Create | ChangeKind::Modify => {
                     for path in &change.paths {
-                        self.index.refresh_path(&self.root, path);
+                        batch.refresh_path(root, path);
                     }
                 }
             }
@@ -350,15 +358,11 @@ impl Vault {
     }
 
     fn entry_for(&self, rel: &str) -> FileEntry {
-        self.index
-            .list()
-            .into_iter()
-            .find(|e| e.path == rel)
-            .unwrap_or_else(|| FileEntry {
-                path: rel.to_string(),
-                name: rel.to_string(),
-                ..FileEntry::default()
-            })
+        self.index.entry(rel).unwrap_or_else(|| FileEntry {
+            path: rel.to_string(),
+            name: rel.to_string(),
+            ..FileEntry::default()
+        })
     }
 }
 
@@ -862,3 +866,7 @@ mod tests {
         assert_eq!(out[1].paths, vec!["a.md".to_string()]);
     }
 }
+
+#[cfg(test)]
+#[path = "vault_batch_tests.rs"]
+mod batch_tests;
