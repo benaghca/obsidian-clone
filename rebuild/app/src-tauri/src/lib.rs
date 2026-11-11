@@ -32,12 +32,15 @@ use crate::index::NoteProperties;
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{mpsc, Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{mpsc, Arc, Condvar, Mutex, MutexGuard, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::task::{Context, Poll, Waker};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
-    pub(crate) inner: RwLock<Inner>,
+    pub(crate) inner: Arc<RwLock<Inner>>,
     pub(crate) write_queue: WriteQueue,
     pub(crate) watch_tx: mpsc::Sender<WatchMsg>,
 }
@@ -47,43 +50,113 @@ pub struct Inner {
     pub(crate) vault: Option<vault::Vault>,
 }
 
+enum Slot { Job(Box<dyn FnOnce() + Send>), Skip }
 #[derive(Default)]
-pub(crate) struct WriteQueue { next: AtomicU64, turn: Mutex<u64>, ready: Condvar }
+struct WorkerState { turn: u64, slots: BTreeMap<u64, Slot>, closed: bool }
+#[derive(Default)]
+pub(crate) struct QueueShared { next: AtomicU64, ingress: Mutex<BTreeMap<usize, u64>>, worker: Mutex<WorkerState>, ready: Condvar }
+pub(crate) struct WriteQueue { pub(crate) shared: Arc<QueueShared> }
+pub(crate) struct WriteTicket { shared: Arc<QueueShared>, ticket: u64, submitted: bool }
+struct ReplyState<T> { value: Option<T>, waker: Option<Waker> }
+pub(crate) struct Reply<T>(Arc<Mutex<ReplyState<T>>>);
 
-pub(crate) struct WriteTicket<'a> { queue: &'a WriteQueue, ticket: u64, waited: bool }
+fn lock_m<T>(m: &Mutex<T>) -> MutexGuard<'_, T> { m.lock().unwrap_or_else(|e| e.into_inner()) }
+pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwrap_or_else(|e| e.into_inner()) }
+pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|e| e.into_inner()) }
+
+impl<T> Future for Reply<T> {
+    type Output = T;
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<T> {
+        let mut s = lock_m(&self.0);
+        if let Some(v) = s.value.take() { Poll::Ready(v) } else { s.waker = Some(cx.waker().clone()); Poll::Pending }
+    }
+}
+
+impl Default for WriteQueue {
+    fn default() -> Self {
+        let shared = Arc::new(QueueShared::default());
+        let w = Arc::clone(&shared);
+        std::thread::Builder::new().name("vault-write".into()).spawn(move || worker_loop(w)).expect("vault-write");
+        Self { shared }
+    }
+}
+
+impl Drop for WriteQueue {
+    fn drop(&mut self) { lock_m(&self.shared.worker).closed = true; self.shared.ready.notify_all(); }
+}
+
+fn worker_loop(shared: Arc<QueueShared>) {
+    while let Some(run) = {
+        let mut w = lock_m(&shared.worker);
+        loop {
+            let turn = w.turn;
+            match w.slots.remove(&turn) {
+                Some(Slot::Job(job)) => { w.turn += 1; break Some(job); }
+                Some(Slot::Skip) => w.turn += 1,
+                None if w.closed && w.slots.is_empty() => break None,
+                None => w = shared.ready.wait(w).unwrap_or_else(|e| e.into_inner()),
+            }
+        }
+    } { run(); }
+}
 
 impl WriteQueue {
-    pub(crate) fn enqueue(&self) -> WriteTicket<'_> {
-        WriteTicket { queue: self, ticket: self.next.fetch_add(1, Ordering::SeqCst), waited: false }
+    pub(crate) fn reserve_ingress(&self, key: usize) {
+        lock_m(&self.shared.ingress).insert(key, self.shared.next.fetch_add(1, Ordering::SeqCst));
+    }
+    pub(crate) fn take_ingress(&self, key: usize) -> WriteTicket {
+        let ticket = lock_m(&self.shared.ingress).remove(&key).unwrap_or_else(|| self.shared.next.fetch_add(1, Ordering::SeqCst));
+        WriteTicket { shared: Arc::clone(&self.shared), ticket, submitted: false }
     }
 }
 
-impl WriteTicket<'_> {
-    fn wait(&mut self) {
-        if !self.waited {
-            let mut turn = self.queue.turn.lock().unwrap_or_else(|err| err.into_inner());
-            while *turn != self.ticket {
-                turn = self.queue.ready.wait(turn).unwrap_or_else(|err| err.into_inner());
-            }
-            self.waited = true;
-        }
-    }
-    pub(crate) fn run<T>(mut self, state: &AppState, f: impl FnOnce(&mut vault::Vault) -> Result<T, String>) -> Result<T, String> {
-        self.wait();
-        f(lock(&state.inner).vault.as_mut().ok_or("no vault open")?)
+impl WriteTicket {
+    pub(crate) fn submit<T: Send + 'static>(mut self, f: impl FnOnce() -> T + Send + 'static) -> Reply<T> {
+        self.submitted = true;
+        let reply = Arc::new(Mutex::new(ReplyState { value: None, waker: None }));
+        let out = Reply(Arc::clone(&reply));
+        let job = Box::new(move || {
+            let val = f();
+            let waker = { let mut s = lock_m(&reply); s.value = Some(val); s.waker.take() };
+            if let Some(w) = waker { w.wake(); }
+        });
+        lock_m(&self.shared.worker).slots.insert(self.ticket, Slot::Job(job));
+        self.shared.ready.notify_one();
+        out
     }
 }
 
-impl Drop for WriteTicket<'_> {
+impl Drop for WriteTicket {
     fn drop(&mut self) {
-        self.wait();
-        *self.queue.turn.lock().unwrap_or_else(|err| err.into_inner()) += 1;
-        self.queue.ready.notify_all();
+        if !self.submitted { lock_m(&self.shared.worker).slots.insert(self.ticket, Slot::Skip); self.shared.ready.notify_one(); }
     }
 }
 
-pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwrap_or_else(|err| err.into_inner()) }
-pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|err| err.into_inner()) }
+fn invoke_key<R: tauri::Runtime>(msg: &tauri::ipc::InvokeMessage<R>) -> usize { msg.command().as_ptr() as usize }
+
+impl<'de, R: tauri::Runtime> tauri::ipc::CommandArg<'de, R> for WriteTicket {
+    fn from_command(cmd: tauri::ipc::CommandItem<'de, R>) -> Result<Self, tauri::ipc::InvokeError> {
+        Ok(cmd.message.webview_ref().state::<AppState>().write_queue.take_ingress(invoke_key(cmd.message)))
+    }
+}
+
+fn is_write_command(cmd: &str) -> bool {
+    matches!(cmd, "open_vault" | "create_vault" | "write_note" | "set_property" | "write_file_bytes"
+        | "create_note" | "create_folder" | "rename_path" | "delete_path" | "write_config")
+}
+
+fn wrap_handler(handler: impl Fn(tauri::ipc::Invoke) -> bool) -> impl Fn(tauri::ipc::Invoke) -> bool {
+    move |invoke| {
+        let reserved = is_write_command(invoke.message.command()).then(|| {
+            let (state, key) = (invoke.message.webview_ref().state::<AppState>(), invoke_key(&invoke.message));
+            state.write_queue.reserve_ingress(key);
+            (Arc::clone(&state.write_queue.shared), key)
+        });
+        let handled = handler(invoke);
+        if !handled { if let Some((shared, key)) = reserved { let _ = WriteQueue { shared }.take_ingress(key); } }
+        handled
+    }
+}
 
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -92,23 +165,13 @@ pub fn run() {
         // Only the front end's own trusted-click handler may open links. The
         // plugin's injected page script would also send any <a target=_blank>
         // click (even a scripted one) to the system browser, so it is off.
-        .plugin(
-            tauri_plugin_opener::Builder::new()
-                .open_js_links_on_click(false)
-                .build(),
-        )
+        .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .setup(|app| {
             let (tx, rx) = mpsc::channel();
-            let config_dir = app
-                .path()
-                .app_config_dir()
-                .unwrap_or_else(|_| fallback_config_dir());
+            let config_dir = app.path().app_config_dir().unwrap_or_else(|_| fallback_config_dir());
             let _ = std::fs::create_dir_all(&config_dir);
             app.manage(AppState {
-                inner: RwLock::new(Inner {
-                    config_dir,
-                    vault: None,
-                }),
+                inner: Arc::new(RwLock::new(Inner { config_dir, vault: None })),
                 write_queue: WriteQueue::default(),
                 watch_tx: tx.clone(),
             });
@@ -122,38 +185,14 @@ pub fn run() {
             lockdown::create_main_window(app.handle())?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            open_vault,
-            create_vault,
-            last_vault,
-            list_files,
-            read_note,
-            read_file_bytes,
-            read_clipboard_image,
-            write_clipboard_image,
-            set_property,
-            write_note,
-            write_file_bytes,
-            create_note,
-            create_folder,
-            rename_path,
-            delete_path,
-            search,
-            search_notes,
-            search_lines,
-            search_match,
-            link_index,
-            backlinks,
-            link_sources,
-            frontmatter,
-            properties,
-            tags,
-            read_config,
-            write_config,
-            read_foreign_config,
-            open_note_window,
-            allow_frame_origin,
-        ])
+        .invoke_handler(wrap_handler(tauri::generate_handler![
+            open_vault, create_vault, last_vault, list_files, read_note, read_file_bytes,
+            read_clipboard_image, write_clipboard_image, set_property, write_note, write_file_bytes,
+            create_note, create_folder, rename_path, delete_path, search, search_notes,
+            search_lines, search_match, link_index, backlinks, link_sources, frontmatter,
+            properties, tags, read_config, write_config, read_foreign_config,
+            open_note_window, allow_frame_origin,
+        ]))
         .run(tauri::generate_context!())
         .expect("error while running grove");
 }
@@ -204,9 +243,7 @@ fn fallback_config_dir() -> std::path::PathBuf {
         return std::path::PathBuf::from(config).join("com.benaghca.grove");
     }
     if let Some(home) = std::env::var_os("HOME") {
-        return std::path::PathBuf::from(home)
-            .join(".config")
-            .join("com.benaghca.grove");
+        return std::path::PathBuf::from(home).join(".config").join("com.benaghca.grove");
     }
     std::env::temp_dir().join("grove")
 }
@@ -216,42 +253,48 @@ fn read_vault<T>(state: &AppState, f: impl FnOnce(&vault::Vault) -> Result<T, St
     f(read(&state.inner).vault.as_ref().ok_or("no vault open")?)
 }
 
-/// Run a mutating `f` on the open vault in FIFO submission order.
-fn write_vault<T>(state: &AppState, f: impl FnOnce(&mut vault::Vault) -> Result<T, String>) -> Result<T, String> {
-    state.write_queue.enqueue().run(state, f)
+/// Run a mutating `f` on the open vault on the dedicated writer in FIFO ingress order.
+fn write_vault<T: Send + 'static>(state: &AppState, ticket: WriteTicket, f: impl FnOnce(&mut vault::Vault) -> Result<T, String> + Send + 'static) -> Reply<Result<T, String>> {
+    let inner = Arc::clone(&state.inner);
+    ticket.submit(move || f(lock(&inner).vault.as_mut().ok_or("no vault open")?))
 }
 
 /// Remember `raw`, watch it, and hand back its name. Shared by open and create.
-fn install_vault(state: &AppState, prepare: impl FnOnce() -> Result<std::path::PathBuf, String>) -> Result<VaultInfo, String> {
-    let mut ticket = state.write_queue.enqueue();
-    ticket.wait();
-    let opened = vault::Vault::open(prepare()?)?;
-    let info = VaultInfo::from_path(&opened.root);
-    let root = opened.root.clone();
-    {
-        let mut inner = lock(&state.inner);
-        config::remember(&inner.config_dir, &root)?;
-        inner.vault = Some(opened);
-    }
-    let _ = state.watch_tx.send(WatchMsg::Watch(root));
-    Ok(info)
+fn install_vault(state: &AppState, ticket: WriteTicket, prepare: impl FnOnce() -> Result<std::path::PathBuf, String> + Send + 'static) -> Reply<Result<VaultInfo, String>> {
+    let (inner, watch_tx) = (Arc::clone(&state.inner), state.watch_tx.clone());
+    ticket.submit(move || {
+        let opened = vault::Vault::open(prepare()?)?;
+        let (info, root) = (VaultInfo::from_path(&opened.root), opened.root.clone());
+        let config_dir = read(&inner).config_dir.clone();
+        config::remember(&config_dir, &root)?;
+        lock(&inner).vault = Some(opened);
+        let _ = watch_tx.send(WatchMsg::Watch(root));
+        Ok(info)
+    })
+}
+
+fn emit_other_windows(window: &tauri::Window, kind: model::ChangeKind, path: String) {
+    let change = model::VaultChanged { kind, paths: vec![path] };
+    let me = window.label().to_owned();
+    let _ = window.emit_filter("vault-changed", change, |target| match target {
+        tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => *label != me,
+        _ => false,
+    });
 }
 
 #[tauri::command(async)]
-fn open_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
-    install_vault(&state, || {
+fn open_vault(ticket: WriteTicket, state: State<'_, AppState>, path: String) -> Reply<Result<VaultInfo, String>> {
+    install_vault(&state, ticket, move || {
         let raw = fsutil::expand_user(path.trim());
-        if !raw.is_dir() {
-            return Err(format!("not a folder: {}", raw.display()));
-        }
+        if !raw.is_dir() { return Err(format!("not a folder: {}", raw.display())); }
         Ok(raw)
     })
 }
 
 /// A new empty vault folder, then the same remember-and-watch path as `open_vault`.
 #[tauri::command(async)]
-fn create_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
-    install_vault(&state, || fsutil::create_vault_dir(&path))
+fn create_vault(ticket: WriteTicket, state: State<'_, AppState>, path: String) -> Reply<Result<VaultInfo, String>> {
+    install_vault(&state, ticket, move || fsutil::create_vault_dir(&path))
 }
 
 #[tauri::command(async)]
@@ -272,10 +315,7 @@ fn read_note(state: State<'_, AppState>, path: String) -> Result<String, String>
 
 /// Sent as raw bytes (an ArrayBuffer in the page), not as a JSON array of numbers.
 #[tauri::command(async)]
-fn read_file_bytes(
-    state: State<'_, AppState>,
-    path: String,
-) -> Result<tauri::ipc::Response, String> {
+fn read_file_bytes(state: State<'_, AppState>, path: String) -> Result<tauri::ipc::Response, String> {
     read_vault(&state, |v| v.read_file_bytes(&path)).map(tauri::ipc::Response::new)
 }
 
@@ -285,9 +325,7 @@ fn read_file_bytes(
 fn write_clipboard_image(request: tauri::ipc::Request<'_>) -> Result<(), String> {
     match request.body() {
         tauri::ipc::InvokeBody::Raw(bytes) => clipboard::write_clipboard_png(bytes),
-        tauri::ipc::InvokeBody::Json(_) => {
-            Err("write_clipboard_image expects a raw body, not JSON".into())
-        }
+        tauri::ipc::InvokeBody::Json(_) => Err("write_clipboard_image expects a raw body, not JSON".into()),
     }
 }
 
@@ -314,9 +352,7 @@ fn encode_grove_path(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
     for &byte in path.as_bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
-                out.push(byte as char);
-            }
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => out.push(byte as char),
             _ => {
                 out.push('%');
                 out.push(HEX[(byte >> 4) as usize] as char);
@@ -343,9 +379,7 @@ fn decode_grove_path(value: &str) -> Result<String, String> {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' {
-            if i + 2 >= bytes.len() {
-                return Err("invalid x-grove-path".into());
-            }
+            if i + 2 >= bytes.len() { return Err("invalid x-grove-path".into()); }
             let hi = hex_val(bytes[i + 1]).ok_or("invalid x-grove-path")?;
             let lo = hex_val(bytes[i + 2]).ok_or("invalid x-grove-path")?;
             out.push((hi << 4) | lo);
@@ -361,75 +395,44 @@ fn decode_grove_path(value: &str) -> Result<String, String> {
 }
 
 fn path_from_headers(headers: &tauri::http::HeaderMap) -> Result<String, String> {
-    let value = headers
-        .get(WRITE_PATH_HEADER)
-        .ok_or("missing x-grove-path")?
-        .to_str()
-        .map_err(|_| "invalid x-grove-path")?;
+    let value = headers.get(WRITE_PATH_HEADER).ok_or("missing x-grove-path")?.to_str().map_err(|_| "invalid x-grove-path")?;
     decode_grove_path(value)
 }
 
 /// Whether `x-grove-replace` is `1`. Anything else, or no header, keeps the file that is there.
 fn replace_from_headers(headers: &tauri::http::HeaderMap) -> bool {
-    headers
-        .get(REPLACE_HEADER)
-        .is_some_and(|value| value.as_bytes() == b"1")
+    headers.get(REPLACE_HEADER).is_some_and(|value| value.as_bytes() == b"1")
 }
 
 fn bytes_from_body(body: &tauri::ipc::InvokeBody) -> Result<&[u8], String> {
     match body {
         tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes),
-        tauri::ipc::InvokeBody::Json(_) => {
-            Err("write_file_bytes expects a raw body, not JSON".into())
-        }
+        tauri::ipc::InvokeBody::Json(_) => Err("write_file_bytes expects a raw body, not JSON".into()),
     }
 }
 
 #[tauri::command(async)]
-fn write_note(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    path: String,
-    content: String,
-) -> Result<(), String> {
-    write_vault(&state, |v| v.write_note(&path, &content))?;
-    let change = model::VaultChanged {
-        kind: model::ChangeKind::Modify,
-        paths: vec![path],
-    };
-    let me = window.label().to_owned();
-    let _ = window.emit_filter("vault-changed", change, |target| match target {
-        tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => *label != me,
-        _ => false,
-    });
-    Ok(())
+fn write_note(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, path: String, content: String) -> impl Future<Output = Result<(), String>> {
+    let fut = write_vault(&state, ticket, move |v| v.write_note(&path, &content).map(|()| path));
+    async move {
+        let path = fut.await?;
+        emit_other_windows(&window, model::ChangeKind::Modify, path);
+        Ok(())
+    }
 }
 
 /// Fresh-file property CAS, off the GTK thread; only real writes notify other windows.
 #[tauri::command(async)]
-fn set_property(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    path: String,
-    edit: edit::PropertyEdit,
-    dry_run: Option<bool>,
-) -> Result<edit::EditResult, String> {
+fn set_property(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, path: String, edit: edit::PropertyEdit, dry_run: Option<bool>) -> impl Future<Output = Result<edit::EditResult, String>> {
     let dry_run = dry_run.unwrap_or(false);
-    let result = write_vault(&state, |v| v.set_property(&path, &edit, dry_run))?;
-    if !dry_run && result.done() {
-        let change = model::VaultChanged {
-            kind: model::ChangeKind::Modify,
-            paths: vec![path],
-        };
-        let me = window.label().to_owned();
-        let _ = window.emit_filter("vault-changed", change, |target| match target {
-            tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => {
-                *label != me
-            }
-            _ => false,
-        });
+    let fut = write_vault(&state, ticket, move |v| v.set_property(&path, &edit, dry_run).map(|r| (r, path)));
+    async move {
+        let (result, path) = fut.await?;
+        if !dry_run && result.done() {
+            emit_other_windows(&window, model::ChangeKind::Modify, path);
+        }
+        Ok(result)
     }
-    Ok(result)
 }
 
 /// A new file's raw bytes (a pasted image or a dropped file), at most 20 MB.
@@ -439,35 +442,21 @@ fn set_property(
 /// Other windows get a `vault-changed` `create` (`modify` for a replaced file); the window
 /// that saved does not (it refreshes itself).
 #[tauri::command(async)]
-fn write_file_bytes(
-    window: tauri::Window,
-    state: State<'_, AppState>,
-    request: tauri::ipc::Request<'_>,
-) -> Result<FileEntry, String> {
-    let path = path_from_headers(request.headers())?;
-    let bytes = bytes_from_body(request.body())?;
-    let replace = replace_from_headers(request.headers());
-    let (entry, existed) = write_vault(&state, |v| {
-        if replace {
-            v.replace_file_bytes(&path, bytes)
-        } else {
-            v.write_file_bytes(&path, bytes).map(|entry| (entry, false))
-        }
-    })?;
-    let change = model::VaultChanged {
-        kind: if existed {
-            model::ChangeKind::Modify
-        } else {
-            model::ChangeKind::Create
-        },
-        paths: vec![entry.path.clone()],
-    };
-    let me = window.label().to_owned();
-    let _ = window.emit_filter("vault-changed", change, |target| match target {
-        tauri::EventTarget::WebviewWindow { label } | tauri::EventTarget::Window { label } => *label != me,
-        _ => false,
+fn write_file_bytes(ticket: WriteTicket, window: tauri::Window, state: State<'_, AppState>, request: tauri::ipc::Request<'_>) -> impl Future<Output = Result<FileEntry, String>> {
+    let parsed = path_from_headers(request.headers()).and_then(|path| {
+        Ok((path, bytes_from_body(request.body())?.to_vec(), replace_from_headers(request.headers())))
     });
-    Ok(entry)
+    let fut = parsed.map(|(path, bytes, replace)| {
+        write_vault(&state, ticket, move |v| {
+            if replace { v.replace_file_bytes(&path, &bytes) } else { v.write_file_bytes(&path, &bytes).map(|entry| (entry, false)) }
+        })
+    });
+    async move {
+        let (entry, existed) = fut?.await?;
+        let kind = if existed { model::ChangeKind::Modify } else { model::ChangeKind::Create };
+        emit_other_windows(&window, kind, entry.path.clone());
+        Ok(entry)
+    }
 }
 
 /// "Open in new window": the note (a percent-encoded vault path) in a window of its own.
@@ -478,32 +467,29 @@ async fn open_note_window(app: AppHandle, note: String) -> Result<(), String> {
 
 /// Register one http(s) origin so an embedded frame may load it. The main frame may not.
 #[tauri::command(async)]
-fn allow_frame_origin(
-    origins: State<'_, lockdown::FrameOrigins>,
-    origin: String,
-) -> Result<(), String> {
+fn allow_frame_origin(origins: State<'_, lockdown::FrameOrigins>, origin: String) -> Result<(), String> {
     origins.allow(&origin)
 }
 
 #[tauri::command(async)]
-fn create_note(state: State<'_, AppState>, path: String, content: String) -> Result<FileEntry, String> {
-    write_vault(&state, |v| v.create_note(&path, &content))
+fn create_note(ticket: WriteTicket, state: State<'_, AppState>, path: String, content: String) -> Reply<Result<FileEntry, String>> {
+    write_vault(&state, ticket, move |v| v.create_note(&path, &content))
 }
 
 #[tauri::command(async)]
-fn create_folder(state: State<'_, AppState>, path: String) -> Result<FileEntry, String> {
-    write_vault(&state, |v| v.create_folder(&path))
+fn create_folder(ticket: WriteTicket, state: State<'_, AppState>, path: String) -> Reply<Result<FileEntry, String>> {
+    write_vault(&state, ticket, move |v| v.create_folder(&path))
 }
 
 #[tauri::command(async)]
-fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Result<(), String> {
-    write_vault(&state, |v| v.rename_path(&from, &to))
+fn rename_path(ticket: WriteTicket, state: State<'_, AppState>, from: String, to: String) -> Reply<Result<(), String>> {
+    write_vault(&state, ticket, move |v| v.rename_path(&from, &to))
 }
 
 /// `permanent` (optional, default false) removes the file instead of moving it to `.trash/`.
 #[tauri::command(async)]
-fn delete_path(state: State<'_, AppState>, path: String, permanent: Option<bool>) -> Result<(), String> {
-    write_vault(&state, |v| v.delete_path(&path, permanent.unwrap_or(false)))
+fn delete_path(ticket: WriteTicket, state: State<'_, AppState>, path: String, permanent: Option<bool>) -> Reply<Result<(), String>> {
+    write_vault(&state, ticket, move |v| v.delete_path(&path, permanent.unwrap_or(false)))
 }
 
 /// A settings file from the vault's `.grove/` folder (`None` if missing).
@@ -514,8 +500,8 @@ fn read_config(state: State<'_, AppState>, name: String) -> Result<Option<String
 
 /// Write a settings file (JSON) into the vault's `.grove/` folder, atomically.
 #[tauri::command(async)]
-fn write_config(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
-    write_vault(&state, |v| v.write_config(&name, &content))
+fn write_config(ticket: WriteTicket, state: State<'_, AppState>, name: String, content: String) -> Reply<Result<(), String>> {
+    write_vault(&state, ticket, move |v| v.write_config(&name, &content))
 }
 
 /// One allowlisted Cinder or Obsidian settings file (`None` if missing). Never writes.
@@ -593,57 +579,32 @@ mod tests {
 
         let (_, rest) = lib.split_once("tauri::generate_handler![").unwrap();
         let (handler, _) = rest.split_once(']').unwrap();
-        let names: Vec<&str> = handler
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .collect();
+        let names: Vec<&str> = handler.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
         assert!(!names.is_empty());
 
         for name in names {
             let quoted = format!("\"{name}\"");
-            assert!(
-                build.contains(&quoted),
-                "command `{name}` in generate_handler! is missing from build.rs"
-            );
+            assert!(build.contains(&quoted), "command `{name}` in generate_handler! is missing from build.rs");
             let perm = format!("\"allow-{}\"", name.replace('_', "-"));
-            assert!(
-                cap.contains(&perm),
-                "command `{name}` in generate_handler! is missing {perm} in capabilities/default.json"
-            );
+            assert!(cap.contains(&perm), "command `{name}` in generate_handler! is missing {perm} in capabilities/default.json");
         }
     }
 
     #[test]
     fn presentation_may_fullscreen_the_window() {
         let cap = include_str!("../capabilities/default.json");
-        assert!(
-            cap.contains("\"core:window:allow-set-fullscreen\""),
-            "presentation mode needs core:window:allow-set-fullscreen"
-        );
+        assert!(cap.contains("\"core:window:allow-set-fullscreen\""), "presentation mode needs core:window:allow-set-fullscreen");
     }
 
     #[test]
     fn grove_path_header_round_trips() {
-        for path in [
-            "pics/shot.png",
-            "Pasted image 20261023201500.png",
-            "café.png",
-            "100%.png",
-            "a/b",
-        ] {
+        for path in ["pics/shot.png", "Pasted image 20261023201500.png", "café.png", "100%.png", "a/b"] {
             let encoded = super::encode_grove_path(path);
-            assert!(
-                encoded.is_ascii() && !encoded.contains(' '),
-                "{path} -> {encoded}"
-            );
+            assert!(encoded.is_ascii() && !encoded.contains(' '), "{path} -> {encoded}");
             assert_eq!(super::decode_grove_path(&encoded).unwrap(), path);
         }
         assert_eq!(super::encode_grove_path("pics/shot.png"), "pics/shot.png");
-        assert_eq!(
-            super::encode_grove_path("Pasted image 20261023201500.png"),
-            "Pasted%20image%2020261023201500.png"
-        );
+        assert_eq!(super::encode_grove_path("Pasted image 20261023201500.png"), "Pasted%20image%2020261023201500.png");
         // A plus is not a space.
         assert_eq!(super::decode_grove_path("a+b").unwrap(), "a+b");
         assert_eq!(super::decode_grove_path("%2f").unwrap(), "/");
@@ -658,25 +619,15 @@ mod tests {
         let mut headers = tauri::http::HeaderMap::new();
         headers.insert(
             tauri::http::HeaderName::from_static("x-grove-path"),
-            tauri::http::HeaderValue::from_str(&super::encode_grove_path(
-                "Pasted image 20261023201500.png",
-            ))
-            .unwrap(),
+            tauri::http::HeaderValue::from_str(&super::encode_grove_path("Pasted image 20261023201500.png")).unwrap(),
         );
-        assert_eq!(
-            super::path_from_headers(&headers).unwrap(),
-            "Pasted image 20261023201500.png"
-        );
+        assert_eq!(super::path_from_headers(&headers).unwrap(), "Pasted image 20261023201500.png");
         let raw = tauri::ipc::InvokeBody::Raw(vec![1, 2, 3]);
         assert_eq!(super::bytes_from_body(&raw).unwrap(), &[1, 2, 3]);
-        let json =
-            tauri::ipc::InvokeBody::Json(serde_json::json!({ "path": "a.png", "bytes": [1] }));
+        let json = tauri::ipc::InvokeBody::Json(serde_json::json!({ "path": "a.png", "bytes": [1] }));
         let err = super::bytes_from_body(&json).unwrap_err();
         assert_eq!(err, "write_file_bytes expects a raw body, not JSON");
-        assert_eq!(
-            super::path_from_headers(&tauri::http::HeaderMap::new()).unwrap_err(),
-            "missing x-grove-path"
-        );
+        assert_eq!(super::path_from_headers(&tauri::http::HeaderMap::new()).unwrap_err(), "missing x-grove-path");
     }
 
     /// `#[tauri::command(async)]` runs the body inside `async_runtime::spawn`, which is
@@ -694,10 +645,7 @@ mod tests {
             let before = &src[..idx];
             let start = before.rfind("\n#[").map(|i| i + 1).unwrap();
             let attr = before[start..].trim();
-            assert!(
-                attr.contains("tauri::command(async)"),
-                "{name} must be an async command so it stays off the GTK thread: {attr}"
-            );
+            assert!(attr.contains("tauri::command(async)"), "{name} must be an async command so it stays off the GTK thread: {attr}");
         }
 
         let dir = crate::fsutil::tmp_dir("write-10mb");
@@ -720,21 +668,25 @@ mod tests {
 
     fn test_state(root: &std::path::Path) -> super::AppState {
         let (watch_tx, _rx) = std::sync::mpsc::channel();
-        let inner = std::sync::RwLock::new(super::Inner { config_dir: root.join(".cfg"), vault: None });
+        let inner = std::sync::Arc::new(std::sync::RwLock::new(super::Inner { config_dir: root.join(".cfg"), vault: None }));
         let state = super::AppState { inner, write_queue: super::WriteQueue::default(), watch_tx };
-        super::install_vault(&state, || Ok(root.to_path_buf())).unwrap();
+        let r = root.to_path_buf();
+        tauri::async_runtime::block_on(super::install_vault(&state, state.write_queue.take_ingress(0), move || Ok(r))).unwrap();
         state
+    }
+
+    fn sync_write<T: Send + 'static>(state: &super::AppState, f: impl FnOnce(&mut crate::vault::Vault) -> Result<T, String> + Send + 'static) -> Result<T, String> {
+        tauri::async_runtime::block_on(super::write_vault(state, state.write_queue.take_ingress(0), f))
     }
 
     #[test]
     fn reads_overlap_while_writes_stay_exclusive() {
-        use std::{sync::atomic::{AtomicBool, AtomicUsize, Ordering}, time::Duration};
+        use std::{sync::{atomic::{AtomicBool, AtomicUsize, Ordering}, Arc}, time::Duration};
         let dir = crate::fsutil::tmp_dir("rwlock-overlap");
         let state = &test_state(&dir.path);
-        super::write_vault(state, |v| v.create_note("Note.md", "initial")).unwrap();
-        let ((r1_tx, r1_rx), (r2_tx, r2_rx), (rel_tx, rel_rx)) =
-            (std::sync::mpsc::channel(), std::sync::mpsc::channel(), std::sync::mpsc::channel());
-        let (write_entered, active_writers) = (&AtomicBool::new(false), &AtomicUsize::new(0));
+        sync_write(state, |v| v.create_note("Note.md", "initial")).unwrap();
+        let ((r1_tx, r1_rx), (r2_tx, r2_rx), (rel_tx, rel_rx)) = (std::sync::mpsc::channel(), std::sync::mpsc::channel(), std::sync::mpsc::channel());
+        let (write_entered, active_writers) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicUsize::new(0)));
         std::thread::scope(|s| {
             let r1 = s.spawn(move || super::read_vault(state, |v| {
                 r1_tx.send(()).unwrap();
@@ -749,20 +701,19 @@ mod tests {
                 v.read_note("Note.md")
             }));
             assert_eq!(r2.join().unwrap().unwrap(), "initial");
-            let w = s.spawn(move || super::write_vault(state, |v| {
-                write_entered.store(true, Ordering::SeqCst);
-                v.write_note("Note.md", "updated")
-            }));
+            let we = Arc::clone(&write_entered);
+            let w = s.spawn(move || sync_write(state, move |v| { we.store(true, Ordering::SeqCst); v.write_note("Note.md", "updated") }));
             std::thread::sleep(Duration::from_millis(20));
             assert!(!write_entered.load(Ordering::SeqCst));
             rel_tx.send(()).unwrap();
             assert_eq!(r1.join().unwrap().unwrap(), "initial");
             w.join().unwrap().unwrap();
             for i in 0..4 {
-                s.spawn(move || super::write_vault(state, |v| {
-                    assert_eq!(active_writers.fetch_add(1, Ordering::SeqCst), 0);
+                let aw = Arc::clone(&active_writers);
+                s.spawn(move || sync_write(state, move |v| {
+                    assert_eq!(aw.fetch_add(1, Ordering::SeqCst), 0);
                     let res = v.write_note("Note.md", &format!("v{i}"));
-                    assert_eq!(active_writers.fetch_sub(1, Ordering::SeqCst), 1);
+                    assert_eq!(aw.fetch_sub(1, Ordering::SeqCst), 1);
                     res
                 }).unwrap());
             }
@@ -771,23 +722,76 @@ mod tests {
 
     #[test]
     fn queued_writes_and_renames_stay_in_submission_order() {
-        use std::time::Duration;
+        use std::{sync::Arc, time::Duration};
         let dir = crate::fsutil::tmp_dir("write-order");
-        let state = &test_state(&dir.path);
-        super::write_vault(state, |v| v.create_note("Note.md", "zero")).unwrap();
-        let order = &std::sync::Mutex::new(Vec::new());
-        let (t1, t2, t3, t4) = (
-            state.write_queue.enqueue(), state.write_queue.enqueue(),
-            state.write_queue.enqueue(), state.write_queue.enqueue(),
-        );
-        std::thread::scope(|s| {
-            s.spawn(move || { std::thread::sleep(Duration::from_millis(30)); t1.run(state, |v| { order.lock().unwrap().push("write-1"); v.write_note("Note.md", "first") }).unwrap(); });
-            s.spawn(move || { std::thread::sleep(Duration::from_millis(10)); t2.run(state, |v| { order.lock().unwrap().push("write-2"); v.write_note("Note.md", "second") }).unwrap(); });
-            s.spawn(move || { t3.run(state, |v| { order.lock().unwrap().push("rename"); v.rename_path("Note.md", "Sub/Moved.md") }).unwrap(); });
-            s.spawn(move || { t4.run(state, |v| { order.lock().unwrap().push("write-moved"); v.write_note("Sub/Moved.md", "final") }).unwrap(); });
-        });
+        let state = Arc::new(test_state(&dir.path));
+        sync_write(&state, |v| v.create_note("Note.md", "zero")).unwrap();
+        let order = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut joins = Vec::new();
+        for (key, delay_ms, label, op) in [
+            (1usize, 40u64, "write-1", Box::new(|v: &mut crate::vault::Vault| v.write_note("Note.md", "first")) as Box<dyn FnOnce(&mut crate::vault::Vault) -> Result<(), String> + Send>),
+            (2, 20, "write-2", Box::new(|v| v.write_note("Note.md", "second"))),
+            (3, 0, "rename", Box::new(|v| v.rename_path("Note.md", "Sub/Moved.md"))),
+            (4, 0, "write-moved", Box::new(|v| v.write_note("Sub/Moved.md", "final"))),
+        ] {
+            state.write_queue.reserve_ingress(key);
+            let (st, ord) = (Arc::clone(&state), Arc::clone(&order));
+            joins.push(tauri::async_runtime::spawn(async move {
+                if delay_ms > 0 { std::thread::sleep(Duration::from_millis(delay_ms)); }
+                let ticket = st.write_queue.take_ingress(key);
+                super::write_vault(&st, ticket, move |v| { ord.lock().unwrap().push(label); op(v) }).await
+            }));
+        }
+        for j in joins { tauri::async_runtime::block_on(j).unwrap().unwrap(); }
         assert_eq!(*order.lock().unwrap(), vec!["write-1", "write-2", "rename", "write-moved"]);
         assert!(!dir.path.join("Note.md").exists());
-        assert_eq!(super::read_vault(state, |v| v.read_note("Sub/Moved.md")).unwrap(), "final");
+        assert_eq!(super::read_vault(&state, |v| v.read_note("Sub/Moved.md")).unwrap(), "final");
+    }
+
+    #[test]
+    fn queued_writes_do_not_starve_async_reads_and_ipc() {
+        use std::{sync::{mpsc, Arc}, time::Duration};
+        let dir = crate::fsutil::tmp_dir("async-responsive");
+        let state = Arc::new(test_state(&dir.path));
+        sync_write(&state, |v| v.create_note("Note.md", "hello")).unwrap();
+        let ((started_tx, started_rx), (release_tx, release_rx)) = (mpsc::channel(), mpsc::channel());
+        state.write_queue.reserve_ingress(100);
+        let (st0, root) = (Arc::clone(&state), dir.path.clone());
+        let slow = tauri::async_runtime::spawn(async move {
+            let ticket = st0.write_queue.take_ingress(100);
+            super::install_vault(&st0, ticket, move || {
+                started_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                Ok(root)
+            }).await
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let workers = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(8) * 2;
+        let mut writes = Vec::new();
+        for i in 0..workers {
+            let key = 200 + i;
+            state.write_queue.reserve_ingress(key);
+            let st = Arc::clone(&state);
+            writes.push(tauri::async_runtime::spawn(async move {
+                let ticket = st.write_queue.take_ingress(key);
+                super::write_vault(&st, ticket, move |v| v.write_note("Note.md", &format!("w{i}"))).await
+            }));
+        }
+        std::thread::sleep(Duration::from_millis(30));
+        let ((read_tx, read_rx), (ipc_tx, ipc_rx)) = (mpsc::channel(), mpsc::channel());
+        let st_read = Arc::clone(&state);
+        tauri::async_runtime::spawn(async move {
+            read_tx.send(super::read_vault(&st_read, |v| v.read_note("Note.md")).unwrap()).unwrap();
+        });
+        tauri::async_runtime::spawn(async move {
+            let origins = crate::lockdown::FrameOrigins::new();
+            ipc_tx.send(origins.allow("https://example.com")).unwrap();
+        });
+        assert_eq!(read_rx.recv_timeout(Duration::from_millis(300)).expect("queued writes starved async read"), "hello");
+        assert!(ipc_rx.recv_timeout(Duration::from_millis(300)).expect("queued writes starved unrelated async IPC").is_ok());
+        release_tx.send(()).unwrap();
+        tauri::async_runtime::block_on(slow).unwrap().unwrap();
+        for w in writes { tauri::async_runtime::block_on(w).unwrap().unwrap(); }
+        assert_eq!(super::read_vault(&state, |v| v.read_note("Note.md")).unwrap(), format!("w{}", workers - 1));
     }
 }
