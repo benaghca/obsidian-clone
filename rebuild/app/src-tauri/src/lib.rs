@@ -28,6 +28,7 @@ mod model;
 mod queue;
 mod vault;
 mod watch;
+mod write_dispatch;
 
 use crate::index::NoteProperties;
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
@@ -57,7 +58,19 @@ fn wrap_handler(handler: impl Fn(tauri::ipc::Invoke) -> bool) -> impl Fn(tauri::
         let is_write = WriteQueue::is_write_command(invoke.message.command());
         let key = invoke_key(&invoke.message);
         let shared = Arc::clone(&invoke.message.webview_ref().state::<AppState>().write_queue.shared);
-        WriteQueue::dispatch_ingress_shared(&shared, is_write, key, || handler(invoke))
+        if !is_write {
+            return handler(invoke);
+        }
+        // The lease is moved into the spawned future, so dropping that task before
+        // `take_ingress` skips the save. A live lease or ticket withholds exit.
+        let Some(lease) = WriteQueue::arm_accepted(&shared, key) else {
+            return handler(invoke);
+        };
+        let message = invoke.message;
+        let resolver = invoke.resolver;
+        let acl = invoke.acl;
+        resolver.respond_async_serialized(async move { write_dispatch::run(lease, message, acl, key).await });
+        true
     }
 }
 
@@ -671,124 +684,6 @@ mod tests {
         assert_eq!(super::read_vault(&state, |v| v.read_note("Note.md")).unwrap(), format!("w{}", workers - 1));
     }
 
-    #[test]
-    fn shutdown_drains_accepted_writes_cancels_unclaimed_tickets_and_coordinates_exit() {
-        use std::{sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc}, time::Duration};
-        let dir = crate::fsutil::tmp_dir("shutdown-drain");
-        let state = Arc::new(test_state(&dir.path));
-        sync_write(&state, |v| v.create_note("Note.md", "initial")).unwrap();
-        let ((started_tx, started_rx), (release_tx, release_rx)) = (mpsc::channel(), mpsc::channel());
-        assert!(state.write_queue.dispatch_ingress("open_vault", 10, || true));
-        let (st0, root) = (Arc::clone(&state), dir.path.clone());
-        let slow = tauri::async_runtime::spawn(async move {
-            super::install_vault(&st0, st0.write_queue.take_ingress(10), move || {
-                started_tx.send(()).unwrap();
-                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-                Ok(root)
-            }).await
-        });
-        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(state.write_queue.dispatch_ingress("write_note", 11, || true));
-        let st_delayed = Arc::clone(&state);
-        let delayed_save = tauri::async_runtime::spawn(async move {
-            std::thread::sleep(Duration::from_millis(30));
-            super::write_vault(&st_delayed, st_delayed.write_queue.take_ingress(11), |v| v.write_note("Note.md", "saved-before-quit")).await
-        });
-        assert!(state.write_queue.dispatch_ingress("rename_path", 12, || true));
-        let rename_reply = super::write_vault(&state, state.write_queue.take_ingress(12), |v| v.rename_path("Note.md", "Sub/Moved.md"));
-        state.write_queue.reserve_ingress(13);
-        assert!(state.write_queue.dispatch_ingress("write_note", 14, || true));
+    mod queue_exit;
 
-        let (prevented, (exit_tx, exit_rx)) = (Arc::new(AtomicBool::new(false)), mpsc::channel());
-        let prev_clone = Arc::clone(&prevented);
-        assert!(!state.write_queue.on_exit_requested(Some(0), move || prev_clone.store(true, Ordering::SeqCst), move |code| { exit_tx.send(code).unwrap(); }));
-        assert!(prevented.load(Ordering::SeqCst), "exit must be prevented while writes are draining");
-        assert!(exit_rx.recv_timeout(Duration::from_millis(15)).is_err(), "exit permitted before slow op and delayed save finished");
-        let orphaned_ran = Arc::new(AtomicBool::new(false));
-        state.write_queue.dispatch_ingress("write_note", 16, || true);
-        for k in [13, 16] {
-            let ran = Arc::clone(&orphaned_ran);
-            let res = super::write_vault(&state, state.write_queue.take_ingress(k), move |v| { ran.store(true, Ordering::SeqCst); v.write_note("Sub/Moved.md", "clobbered") });
-            assert_eq!(tauri::async_runtime::block_on(res).unwrap_err(), "vault write queue is closed");
-        }
-        release_tx.send(()).unwrap();
-        assert_eq!(exit_rx.recv_timeout(Duration::from_secs(2)).expect("shutdown hung on abandoned ticket"), 0);
-        assert!(state.write_queue.is_terminated(), "worker JoinHandle must be joined before exit is permitted");
-        assert!(!dir.path.join("Note.md").exists());
-        assert_eq!(std::fs::read_to_string(dir.path.join("Sub/Moved.md")).unwrap(), "saved-before-quit");
-        tauri::async_runtime::block_on(slow).unwrap().unwrap();
-        tauri::async_runtime::block_on(delayed_save).unwrap().expect("delayed pre-shutdown save was rejected");
-        assert!(tauri::async_runtime::block_on(rename_reply).is_ok());
-        let ran2 = Arc::clone(&orphaned_ran);
-        let ab_res = super::write_vault(&state, state.write_queue.take_ingress(14), move |v| { ran2.store(true, Ordering::SeqCst); v.write_note("Sub/Moved.md", "clobbered") });
-        assert_eq!(tauri::async_runtime::block_on(ab_res).unwrap_err(), "vault write queue is closed");
-        assert!(!orphaned_ran.load(Ordering::SeqCst));
-        assert!(state.write_queue.on_exit_requested(Some(0), || panic!("should not prevent after drain"), |_| {}));
-    }
-
-    #[test]
-    fn exit_drain_spawn_failure_falls_back_without_blocking_or_losing_exit() {
-        use std::{sync::{atomic::{AtomicBool, Ordering}, mpsc, Arc}, time::Duration};
-        let dir = crate::fsutil::tmp_dir("spawn-fail-fallback");
-        let state = Arc::new(test_state(&dir.path));
-        sync_write(&state, |v| v.create_note("Note.md", "initial")).unwrap();
-        let ((started_tx, started_rx), (release_tx, release_rx)) = (mpsc::channel(), mpsc::channel());
-        assert!(state.write_queue.dispatch_ingress("open_vault", 20, || true));
-        let (st0, root) = (Arc::clone(&state), dir.path.clone());
-        let slow = tauri::async_runtime::spawn(async move {
-            super::install_vault(&st0, st0.write_queue.take_ingress(20), move || {
-                started_tx.send(()).unwrap();
-                release_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-                Ok(root)
-            }).await
-        });
-        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
-        assert!(state.write_queue.dispatch_ingress("write_note", 21, || true));
-        let save_reply = super::write_vault(&state, state.write_queue.take_ingress(21), |v| v.write_note("Note.md", "saved-via-fallback"));
-        state.write_queue.shared.fail_drain_spawn.store(true, Ordering::SeqCst);
-        let ((call_done_tx, call_done_rx), (exit_tx, exit_rx), prevented) = (mpsc::channel(), mpsc::channel(), Arc::new(AtomicBool::new(false)));
-        let (st_exit, prev_clone) = (Arc::clone(&state), Arc::clone(&prevented));
-        std::thread::spawn(move || {
-            let res = st_exit.write_queue.on_exit_requested(Some(7), move || prev_clone.store(true, Ordering::SeqCst), move |code| { exit_tx.send(code).unwrap(); });
-            call_done_tx.send(res).unwrap();
-        });
-        assert!(!call_done_rx.recv_timeout(Duration::from_millis(50)).expect("on_exit_requested blocked the calling thread when drain spawn failed"));
-        assert!(prevented.load(Ordering::SeqCst));
-        assert!(exit_rx.recv_timeout(Duration::from_millis(20)).is_err());
-        release_tx.send(()).unwrap();
-        assert_eq!(exit_rx.recv_timeout(Duration::from_secs(2)).expect("failed drain spawn lost the exit request"), 7);
-        assert_eq!(std::fs::read_to_string(dir.path.join("Note.md")).unwrap(), "saved-via-fallback");
-        tauri::async_runtime::block_on(slow).unwrap().unwrap();
-        assert!(tauri::async_runtime::block_on(save_reply).is_ok());
-        assert!(state.write_queue.on_exit_requested(Some(7), || panic!("should not prevent after drain"), |_| {}));
-        assert!(state.write_queue.is_terminated());
-    }
-
-    #[test]
-    fn ingress_handler_wiring_malformed_requests_and_errors_do_not_stall_queue() {
-        let dir = crate::fsutil::tmp_dir("ingress-errors");
-        let state = test_state(&dir.path);
-        sync_write(&state, |v| v.create_note("Note.md", "start")).unwrap();
-        assert!(state.write_queue.dispatch_ingress("read_note", 1, || true));
-        state.write_queue.reserve_ingress(2);
-        assert!(!state.write_queue.dispatch_ingress("write_note", 2, || false));
-        assert!(tauri::async_runtime::block_on(super::write_vault(&state, state.write_queue.take_ingress(999), |v| v.write_note("Note.md", "unreserved"))).is_err());
-        assert!(state.write_queue.dispatch_ingress("write_note", 3, || true));
-        drop(state.write_queue.take_ingress(3));
-        assert!(state.write_queue.dispatch_ingress("write_file_bytes", 4, || true));
-        let (empty_hdrs, raw_body) = (tauri::http::HeaderMap::new(), tauri::ipc::InvokeBody::Raw(vec![1, 2, 3]));
-        assert_eq!(tauri::async_runtime::block_on(super::enqueue_write_file_bytes(&state, state.write_queue.take_ingress(4), &empty_hdrs, &raw_body)).unwrap_err(), "missing x-grove-path");
-        let mut hdrs = tauri::http::HeaderMap::new();
-        hdrs.insert(tauri::http::HeaderName::from_static("x-grove-path"), tauri::http::HeaderValue::from_static("pic.png"));
-        let json_body = tauri::ipc::InvokeBody::Json(serde_json::json!({}));
-        assert!(state.write_queue.dispatch_ingress("write_file_bytes", 5, || true));
-        assert_eq!(tauri::async_runtime::block_on(super::enqueue_write_file_bytes(&state, state.write_queue.take_ingress(5), &hdrs, &json_body)).unwrap_err(), "write_file_bytes expects a raw body, not JSON");
-        assert!(state.write_queue.dispatch_ingress("write_note", 6, || true));
-        assert!(tauri::async_runtime::block_on(super::write_vault(&state, state.write_queue.take_ingress(6), |v| v.write_note("../escape.md", "bad"))).is_err());
-        assert!(state.write_queue.dispatch_ingress("write_file_bytes", 7, || true));
-        assert_eq!(tauri::async_runtime::block_on(super::enqueue_write_file_bytes(&state, state.write_queue.take_ingress(7), &hdrs, &raw_body)).unwrap().0.path, "pic.png");
-        assert!(state.write_queue.dispatch_ingress("write_note", 8, || true));
-        tauri::async_runtime::block_on(super::write_vault(&state, state.write_queue.take_ingress(8), |v| v.write_note("Note.md", "recovered"))).unwrap();
-        assert_eq!(super::read_vault(&state, |v| v.read_note("Note.md")).unwrap(), "recovered");
-    }
 }

@@ -1,30 +1,29 @@
 //! Serialized FIFO write queue and shutdown drain for vault mutations.
 //!
 //! Write commands reserve a monotonic ticket synchronously at IPC ingress (`wrap_handler` /
-//! `dispatch_ingress_shared`) before `#[tauri::command(async)]` spawns its task on Tauri's async
-//! runtime. Once the command handler accepts the invoke, the slot becomes `Slot::Pending`. The
-//! spawned task claims that ticket via `CommandArg for WriteTicket` (`take_ingress`) and submits
-//! the mutation closure (`WriteTicket::submit`), returning a non-blocking `Reply` future resolved
-//! by the dedicated `"vault-write"` worker thread.
+//! `arm_accepted`) and move the `IngressLease` into the future passed to
+//! `respond_async_serialized`, before that future is polled. The slot is `Slot::Pending` while
+//! the lease is held. The task claims it with `take_ingress` and submits the mutation
+//! (`WriteTicket::submit`), returning a non-blocking `Reply` future resolved by the dedicated
+//! `"vault-write"` worker thread.
 //!
-//! On shutdown (`on_exit_requested`, `shutdown`, or `Drop`), the queue seals new ingress, cancels
-//! bare unclaimed `Slot::Reserved` tickets immediately, keeps pre-shutdown `Slot::Pending`
-//! requests until they submit or fail (bounded by `PENDING_SHUTDOWN_WAIT` so a dead handler cannot
-//! hang exit forever), drains all accepted `Slot::Job` entries and the currently running job in
-//! FIFO order, and joins the worker thread.
+//! On shutdown (`on_exit_requested`, `shutdown`, or `Drop`), the queue seals new ingress and
+//! cancels only reservations that can no longer run: bare unclaimed `Slot::Reserved` tickets, a
+//! dropped `IngressLease` (the handler future is gone before `take_ingress`), or a dropped
+//! `WriteTicket` (claimed, never submitted). A save accepted before shutdown is waited out and
+//! written. Nothing is skipped because a timer fired. Jobs then drain in FIFO order and the
+//! worker thread is joined.
 
 use crate::AppState;
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::task::{Context, Poll, Waker};
 use std::thread::{self, JoinHandle, ThreadId};
-use std::time::{Duration, Instant};
 use tauri::Manager;
-
-const PENDING_SHUTDOWN_WAIT: Duration = Duration::from_millis(120);
 
 enum Slot {
     Reserved,
@@ -44,7 +43,8 @@ struct WorkerState {
     drained: bool,
     exit_waiter_spawned: bool,
     drain_thread_active: bool,
-    shutdown_deadline: Option<Instant>,
+    /// `true` while an `IngressLease` still owns this ticket (accepted, not yet claimed).
+    owners: BTreeMap<u64, Arc<AtomicBool>>,
     pending_exit: Option<(i32, Box<dyn FnOnce(i32) + Send>)>,
     worker_thread: Option<ThreadId>,
 }
@@ -66,6 +66,20 @@ pub(crate) struct WriteTicket {
     shared: Arc<QueueShared>,
     ticket: Option<u64>,
     submitted: bool,
+}
+
+/// Owns an accepted reservation until `take_ingress` claims it.
+/// Dropping it skips the slot: the handler is gone and will never submit.
+pub(crate) struct IngressLease {
+    shared: Arc<QueueShared>,
+    ticket: u64,
+    live: Arc<AtomicBool>,
+}
+
+#[cfg(test)]
+pub(crate) struct IngressDispatch {
+    pub handled: bool,
+    pub lease: Option<IngressLease>,
 }
 
 struct ReplyState<T> {
@@ -133,38 +147,17 @@ fn worker_loop(shared: Arc<QueueShared>) {
                         unreachable!()
                     };
                     w.turn += 1;
-                    w.shutdown_deadline = None;
                     w.running = true;
                     break Some(job);
                 }
                 Some(Slot::Skip) => {
                     w.slots.remove(&turn);
                     w.turn += 1;
-                    w.shutdown_deadline = None;
                 }
+                // Reserved: handler not finished accepting, or a bare reserve.
+                // Pending: accepted lease still held, or a WriteTicket not yet submitted.
+                // Only a drop of that owner turns the slot into Skip.
                 Some(Slot::Reserved | Slot::Pending) => {
-                    if w.closing {
-                        let deadline = *w
-                            .shutdown_deadline
-                            .get_or_insert_with(|| Instant::now() + PENDING_SHUTDOWN_WAIT);
-                        if let Some(rem) = deadline.checked_duration_since(Instant::now()) {
-                            if !rem.is_zero() {
-                                w = shared
-                                    .ready
-                                    .wait_timeout(w, rem)
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .0;
-                                continue;
-                            }
-                        }
-                        w.ingress.clear();
-                        for slot in w.slots.values_mut() {
-                            if matches!(slot, Slot::Reserved | Slot::Pending) {
-                                *slot = Slot::Skip;
-                            }
-                        }
-                        continue;
-                    }
                     w = shared.ready.wait(w).unwrap_or_else(|e| e.into_inner());
                 }
                 None => {
@@ -213,46 +206,95 @@ impl WriteQueue {
         )
     }
 
-    pub(crate) fn dispatch_ingress_shared(
+    #[cfg(test)]
+    fn dispatch_ingress_shared(
         shared: &Arc<QueueShared>,
         is_write: bool,
         key: usize,
         handler: impl FnOnce() -> bool,
-    ) -> bool {
+    ) -> IngressDispatch {
         if !is_write {
-            return handler();
+            return IngressDispatch {
+                handled: handler(),
+                lease: None,
+            };
         }
-        Self::reserve_ingress_shared(shared, key);
-        struct Guard<'a> {
-            shared: &'a QueueShared,
-            key: usize,
-            armed: bool,
-        }
-        impl Drop for Guard<'_> {
-            fn drop(&mut self) {
-                if self.armed {
-                    WriteQueue::cancel_ingress_shared(self.shared, self.key);
-                }
-            }
-        }
-        let mut guard = Guard {
-            shared,
-            key,
-            armed: true,
+        let Some(lease) = Self::arm_lease(shared, key, false) else {
+            return IngressDispatch {
+                handled: handler(),
+                lease: None,
+            };
         };
         let handled = handler();
-        if handled {
-            guard.armed = false;
-            Self::activate_ingress_shared(shared, key);
+        if !handled {
+            drop(lease);
+            return IngressDispatch {
+                handled: false,
+                lease: None,
+            };
         }
-        handled
+        Self::activate_ingress_shared(shared, key);
+        IngressDispatch {
+            handled: true,
+            lease: Some(lease),
+        }
+    }
+
+    /// Reserve the next ticket and hand the caller an `IngressLease` that owns it until
+    /// `take_ingress`. `pending` marks the handler as already accepted.
+    fn arm_lease(shared: &Arc<QueueShared>, key: usize, pending: bool) -> Option<IngressLease> {
+        let mut w = lock_m(&shared.worker);
+        if w.closing {
+            return None;
+        }
+        let ticket = w.next_ticket;
+        w.next_ticket += 1;
+        let live = Arc::new(AtomicBool::new(true));
+        w.slots.insert(
+            ticket,
+            if pending {
+                Slot::Pending
+            } else {
+                Slot::Reserved
+            },
+        );
+        w.owners.insert(ticket, Arc::clone(&live));
+        if let Some(old) = w.ingress.insert(key, ticket) {
+            Self::supersede(&mut w, old);
+            shared.ready.notify_one();
+        }
+        Some(IngressLease {
+            shared: Arc::clone(shared),
+            ticket,
+            live,
+        })
+    }
+
+    /// IPC accepted this write. The returned lease must be moved into the handler future.
+    pub(crate) fn arm_accepted(shared: &Arc<QueueShared>, key: usize) -> Option<IngressLease> {
+        Self::arm_lease(shared, key, true)
+    }
+
+    fn supersede(w: &mut WorkerState, ticket: u64) {
+        if let Some(live) = w.owners.remove(&ticket) {
+            live.store(false, Ordering::SeqCst);
+        }
+        if matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
+            w.slots.insert(ticket, Slot::Skip);
+        }
     }
 
     #[cfg(test)]
-    pub(crate) fn dispatch_ingress(&self, cmd: &str, key: usize, handler: impl FnOnce() -> bool) -> bool {
+    pub(crate) fn dispatch_ingress(
+        &self,
+        cmd: &str,
+        key: usize,
+        handler: impl FnOnce() -> bool,
+    ) -> IngressDispatch {
         Self::dispatch_ingress_shared(&self.shared, Self::is_write_command(cmd), key, handler)
     }
 
+    #[cfg(test)]
     pub(crate) fn reserve_ingress_shared(shared: &QueueShared, key: usize) {
         let mut w = lock_m(&shared.worker);
         if w.closing {
@@ -269,6 +311,7 @@ impl WriteQueue {
         }
     }
 
+    #[cfg(test)]
     fn activate_ingress_shared(shared: &QueueShared, key: usize) {
         let mut w = lock_m(&shared.worker);
         if let Some(&ticket) = w.ingress.get(&key) {
@@ -283,21 +326,13 @@ impl WriteQueue {
         Self::reserve_ingress_shared(&self.shared, key);
     }
 
-    pub(crate) fn cancel_ingress_shared(shared: &QueueShared, key: usize) {
-        let mut w = lock_m(&shared.worker);
-        if let Some(ticket) = w.ingress.remove(&key) {
-            if matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
-                w.slots.insert(ticket, Slot::Skip);
-                drop(w);
-                shared.ready.notify_one();
-            }
-        }
-    }
-
     pub(crate) fn take_ingress(&self, key: usize) -> WriteTicket {
         let mut w = lock_m(&self.shared.worker);
         if let Some(ticket) = w.ingress.remove(&key) {
             if matches!(w.slots.get(&ticket), Some(Slot::Reserved | Slot::Pending)) {
+                if let Some(live) = w.owners.remove(&ticket) {
+                    live.store(false, Ordering::SeqCst);
+                }
                 w.slots.insert(ticket, Slot::Pending);
                 return WriteTicket {
                     shared: Arc::clone(&self.shared),
@@ -323,24 +358,27 @@ impl WriteQueue {
         }
     }
 
-    /// Seal new ingress, cancel bare unclaimed `Slot::Reserved` entries while keeping live
-    /// pre-shutdown `Slot::Pending` handlers, and report whether all work has already finished.
+    /// Seal new ingress. Bare `Slot::Reserved` entries with no lease are skipped. Accepted
+    /// leases and claimed tickets stay until their owner submits or drops.
     pub(crate) fn begin_shutdown(shared: &QueueShared) -> bool {
         let mut w = lock_m(&shared.worker);
         if !w.closing {
             w.closing = true;
-            let abandoned: Vec<usize> = w
-                .ingress
+            let dead: Vec<u64> = w
+                .slots
                 .iter()
-                .filter_map(|(&k, &t)| matches!(w.slots.get(&t), Some(Slot::Reserved)).then_some(k))
+                .filter_map(|(&ticket, slot)| {
+                    let owned = w
+                        .owners
+                        .get(&ticket)
+                        .is_some_and(|live| live.load(Ordering::SeqCst));
+                    (matches!(slot, Slot::Reserved) && !owned).then_some(ticket)
+                })
                 .collect();
-            for k in abandoned {
-                w.ingress.remove(&k);
-            }
-            for slot in w.slots.values_mut() {
-                if matches!(slot, Slot::Reserved) {
-                    *slot = Slot::Skip;
-                }
+            for ticket in dead {
+                w.slots.insert(ticket, Slot::Skip);
+                w.ingress.retain(|_, t| *t != ticket);
+                w.owners.remove(&ticket);
             }
             shared.ready.notify_all();
         }
@@ -480,6 +518,25 @@ impl WriteTicket {
         drop(w);
         self.shared.ready.notify_one();
         out
+    }
+}
+
+impl Drop for IngressLease {
+    fn drop(&mut self) {
+        let mut w = lock_m(&self.shared.worker);
+        if !self.live.swap(false, Ordering::SeqCst) {
+            return;
+        }
+        w.owners.remove(&self.ticket);
+        if matches!(
+            w.slots.get(&self.ticket),
+            Some(Slot::Reserved | Slot::Pending)
+        ) {
+            w.slots.insert(self.ticket, Slot::Skip);
+            w.ingress.retain(|_, t| *t != self.ticket);
+            drop(w);
+            self.shared.ready.notify_one();
+        }
     }
 }
 
