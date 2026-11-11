@@ -36,7 +36,8 @@ You may add a small script under `rebuild/app/scripts/` and, if useful, a dedica
 
 - You own `.github/workflows/ci.yml`, new scripts under `rebuild/app/scripts/` (and maybe `rebuild/app/src-tauri/tests/` or a new Rust test file), and a narrow `package.json` script addition if needed.
 - Do **not** change application source to land this, except a tiny test-only hook if a smoke is otherwise impossible — and explain it in the notes. Prefer zero production-code edits.
-- Do **not** edit `src/links/internal.ts` (S6), `src/shell/sidebar.ts` (S7), `src/vault.ts` (S9), or S1's save-loop files.
+- Do **not** edit `src/shell/sidebar.ts` (S7), `src/vault.ts` (S9), or S1's save-loop files.
+- Do **not** edit `src/links/internal.ts`, `src/editor/livePreview.ts`, `src/shell/searchRead.ts`, `src/shell/searchView.ts`, or the Rust link resolver in `index.rs` (L1). The earlier S6 brief was withdrawn for that reason.
 - Do **not** rewrite S3/S4/S5 Rust command or vault/index behavior. A new Rust test file that only *uses* the existing API is fine.
 
 ## Tests

@@ -28,7 +28,8 @@ Fable's estimate was 4–6 h for perhaps half the hitch when combined with the f
 
 - You own `src/shell/sidebar.ts` and tests that cover `buildTree` / explorer render (you may add `src/shell/sidebarTree.test.ts` or extend an existing shell test). There is already `treeSelect.test.ts` / `treeDrag.test.ts`.
 - Do **not** edit `src/fileOps.ts`, `src/workspace.ts`, `src/main.ts`, `src/noteEditors.ts`, or other S1 files.
-- Do **not** edit `src/vault.ts` (S9), `src/links/internal.ts` (S6), or CI / E2E files (S8).
+- Do **not** edit `src/vault.ts` (S9), or CI / E2E files (S8).
+- Do **not** edit `src/links/internal.ts`, `src/editor/livePreview.ts`, `src/shell/searchRead.ts`, `src/shell/searchView.ts`, or the Rust link resolver in `index.rs` (L1 covers finding 10 and the page half of finding 9). The earlier S6 brief for path-style links was withdrawn for that reason.
 - Do **not** edit `src-tauri/` (S3, S4, S5).
 
 ## Tests

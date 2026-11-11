@@ -32,7 +32,8 @@ Preserve existing request-id dropping of stale `refreshFiles` / `refreshLinks` r
 
 - You own `src/vault.ts` and a new or existing vitest file for it (for example `src/vault.events.test.ts`).
 - Do **not** edit `src/workspace.ts`, `src/main.ts`, `src/fileOps.ts`, `src/noteEditors.ts` (S1).
-- Do **not** edit `src/links/internal.ts` (S6), `src/shell/sidebar.ts` (S7), or CI / E2E files (S8).
+- Do **not** edit `src/shell/sidebar.ts` (S7), or CI / E2E files (S8).
+- Do **not** edit `src/links/internal.ts`, `src/editor/livePreview.ts`, `src/shell/searchRead.ts`, `src/shell/searchView.ts`, or the Rust link resolver (L1). If you must keep `linkExists` working, leave its body and `linkTargets` wiring alone — L1 may make a tiny edit there. Keep your diff to `onChanged`, the path-to-entry map, `isFolder`, and `touch`.
 - Do **not** edit `src-tauri/` (S3, S4, S5). Do not change the Rust watcher protocol.
 
 ## Tests

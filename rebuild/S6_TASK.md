@@ -1,3 +1,11 @@
+# S6: SUPERSEDED — do not build this piece
+
+**This brief is withdrawn.** After it was written, `rebuild/L1_TASK.md` was added and worktree `~/workspaces/remote/grove-l1` (`rebuild/l1-grok`) was created to cover **finding 10** (TypeScript and Rust) and the page half of **finding 9**. Building this S6 brief would overlap L1 on `src/links/internal.ts` and related files.
+
+Do not start a builder on `rebuild/s6-grok`. Leave this file in the repo as a record only.
+
+---
+
 # S6: Stop broken path-style links from scanning the whole vault (TypeScript)
 
 From Fable 5.2's 10 Nov 2026 read-only review of Grove. This is the **TypeScript half of finding 10**. Chris approved starting this work provided nothing visible changes. Build on `rebuild/s6-grok` from the brief commit on `rebuild/integration`. Grok 4.7 builds; Codex will review later, read-only. Commit locally. Never push.
