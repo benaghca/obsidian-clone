@@ -94,15 +94,34 @@ impl Vault {
         if full.is_dir() {
             return Err(format!("not a file: {path}"));
         }
+        let existing = match fs::read(&full) {
+            Ok(bytes) => Some(String::from_utf8(bytes).map_err(|_| "Note is not UTF-8".to_string())?),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e.to_string()),
+        };
+        let written = preserve_note_format(existing.as_deref(), content);
         self.mark_own(&rel);
-        if let Err(e) = atomic_write(&full, content.as_bytes()) {
+        if let Err(e) = atomic_write(&full, written.as_bytes()) {
             self.own_writes.remove(&rel);
             return Err(e.to_string());
         }
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
+        self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
         Ok(())
     }
+}
+
+fn preserve_note_format<'a>(existing: Option<&str>, content: &'a str) -> std::borrow::Cow<'a, str> {
+    let (bom, crlf) = existing.map_or((false, false), |s| (s.starts_with('\u{feff}'), s.contains("\r\n")));
+    if !bom && !crlf {
+        return content.into();
+    }
+    let body = content.strip_prefix('\u{feff}').unwrap_or(content);
+    let body = if crlf { body.replace("\r\n", "\n").replace('\n', "\r\n") } else { body.to_string() };
+    (if bom { format!("\u{feff}{body}") } else { body }).into()
+}
+
+impl Vault {
 
     /// A new attachment's bytes. The same path checks as `write_note` (inside the vault, no `..`,
     /// no symlink out, nothing in a hidden folder). Fails if anything is already at `path` or the
@@ -419,6 +438,61 @@ mod tests {
         assert!(vault.list_files().iter().any(|f| f.path == "Board.canvas"));
         assert_eq!(vault.read_note("Board.canvas").unwrap(), source);
         assert_eq!(fs::read_to_string(dir.path.join("Board.canvas")).unwrap(), source);
+    }
+
+    #[test]
+    fn crlf_and_lf_notes_keep_their_line_endings_on_save() {
+        let dir = tmp_dir("eol-crlf");
+        fs::write(dir.path.join("Crlf.md"), "first\r\nsecond\r\n").unwrap();
+        fs::write(dir.path.join("Lf.md"), "first\nsecond\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("Crlf.md", "first\nrevised\n").unwrap();
+        vault.write_note("Lf.md", "first\nrevised\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Crlf.md")).unwrap(), "first\r\nrevised\r\n");
+        assert_eq!(fs::read_to_string(dir.path.join("Lf.md")).unwrap(), "first\nrevised\n");
+    }
+
+    #[test]
+    fn utf8_bom_is_preserved_and_bomless_notes_do_not_gain_one() {
+        let dir = tmp_dir("eol-bom");
+        fs::write(dir.path.join("Bom.md"), "\u{feff}first\nsecond\n").unwrap();
+        fs::write(dir.path.join("Plain.md"), "first\nsecond\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let text = vault.read_note("Bom.md").unwrap();
+        assert_eq!(text, "first\nsecond\n");
+        vault.write_note("Bom.md", &text.replace("second", "revised")).unwrap();
+        vault.write_note("Plain.md", "first\nrevised\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Bom.md")).unwrap(), "\u{feff}first\nrevised\n");
+        assert_eq!(fs::read_to_string(dir.path.join("Plain.md")).unwrap(), "first\nrevised\n");
+    }
+
+    #[test]
+    fn bom_and_crlf_round_trip_while_new_notes_stay_lf_without_bom() {
+        let dir = tmp_dir("eol-both");
+        fs::write(dir.path.join("Win.md"), "\u{feff}---\r\nstatus: todo\r\n---\r\nbody\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let editor_doc = vault.read_note("Win.md").unwrap().replace("\r\n", "\n");
+        vault.write_note("Win.md", &editor_doc.replace("todo", "done")).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.path.join("Win.md")).unwrap(),
+            "\u{feff}---\r\nstatus: done\r\n---\r\nbody\r\n"
+        );
+        vault.write_note("New.md", "fresh\nnote\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("New.md")).unwrap(), "fresh\nnote\n");
+        vault.create_note("Created.md", "").unwrap();
+        vault.write_note("Created.md", "fresh\nnote\n").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Created.md")).unwrap(), "fresh\nnote\n");
+    }
+
+    #[test]
+    fn write_note_does_not_overwrite_non_utf8_bytes_with_replacement_chars() {
+        let dir = tmp_dir("eol-utf8");
+        fs::write(dir.path.join("Latin1.md"), b"caf\xe9\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        let lossy = vault.read_note("Latin1.md").unwrap();
+        assert_eq!(lossy, "caf\u{fffd}\r\n");
+        assert!(vault.write_note("Latin1.md", &lossy.replace("\r\n", "\n")).is_err());
+        assert_eq!(fs::read(dir.path.join("Latin1.md")).unwrap(), b"caf\xe9\r\n");
     }
 
     #[test]
