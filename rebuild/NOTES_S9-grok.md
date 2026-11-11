@@ -47,6 +47,16 @@ The overlapping file-list test already passed before the fix. It still passes, s
 
 After these fixes, `cargo test --offline` in `rebuild/app/src-tauri` passed (115 tests, 4 ignored) and `flock /tmp/grove-npm-test.lock npm test` passed, including posttest. One earlier `npm test` failed in the feel harness on hitch budgets while the machine was busy. The same suite then passed.
 
+## Review fixes, second pass
+
+Codex re-reviewed `b75f78b` as pass-with-fixes. Two things were still wrong. Each rename walked every path already queued, so 5,000 unrelated renames took 25,040,027 visits on the UI thread. `pagehide` was listened for on `document`, and the test called that callback itself. The browser fires `pagehide` on `window`, and it does not bubble.
+
+Removals are now tombstones in a prefix tree. Each path is checked once, against the folders above it, and a later create or modify of that path wins. The same 5,000 renames, with the folder-remove and recreate cases in front of them, stay under 8 visits per rename. I ran that test on `b75f78b` first: the visit count was 25,040,027, above the limit of 40,000. After the tree, the same test passes, and the older descendant assertions still hold.
+
+`pagehide` and `pageshow` are listened for on `window`. The test dispatches those events on `window`. After `pagehide`, the vault-changed subscription does not start another batch. `pageshow` accepts events again. That test failed on `b75f78b` because a modify after the dispatched `pagehide` still queued a frame.
+
+After this pass, `flock /tmp/grove-npm-test.lock npm test` passed, including posttest.
+
 ## Size
 
 No new dependency.
@@ -55,9 +65,9 @@ TypeScript, against `2d4c13c`:
 
 | File | Lines now | Change |
 | --- | --- | --- |
-| `rebuild/app/src/vault.ts` | 253 | +135 / −10 |
-| `rebuild/app/src/vault.events.test.ts` | 383 | +383 / −0, new |
+| `rebuild/app/src/vault.ts` | 334 | +216 / −10 |
+| `rebuild/app/src/vault.events.test.ts` | 418 | +418 / −0, new |
 
-Net TypeScript against `2d4c13c`: +518 / −10. Markdown: this file only, 63 lines.
+Net TypeScript against `2d4c13c`: +634 / −10. Markdown: this file only, 73 lines.
 
-Nothing is near 800 lines. `vault.ts` was 128 lines and is 253. The Rust watcher, `workspace.ts`, and the other slices' files were not edited.
+Nothing is near 800 lines. `vault.ts` was 128 lines and is 334. The Rust watcher, `workspace.ts`, and the other slices' files were not edited.

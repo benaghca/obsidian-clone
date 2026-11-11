@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, type FileEntry } from "./api";
-import { Vault } from "./vault";
+import { Vault, batchVisits } from "./vault";
 
 vi.mock("./api", () => ({
   api: {
@@ -361,23 +361,58 @@ it("keeps the later file list when two refreshes are in flight", async () => {
 });
 
 it("cancels a pending flush when the page is going away", async () => {
-  const hide: Array<() => void> = [];
-  vi.stubGlobal("document", {
-    addEventListener(type: string, fn: () => void) {
-      if (type === "pagehide") hide.push(fn);
-    },
-    removeEventListener() {},
-  });
+  const page = new EventTarget();
+  vi.stubGlobal("window", page);
   const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
   const { vault } = await openVault(reload);
   const modified: string[] = [];
   vault.onModified((path) => modified.push(path));
   emit({ kind: "modify", paths: ["A.md"] });
   expect(frames).toHaveLength(1);
-  expect(hide).toHaveLength(1);
-  hide[0]!();
+  page.dispatchEvent(new Event("pagehide"));
   frames.shift()!(0);
   await microtasks();
+  emit({ kind: "modify", paths: ["B.md"] });
+  expect(frames).toHaveLength(0);
   expect(reload).not.toHaveBeenCalled();
   expect(modified).toEqual([]);
+
+  page.dispatchEvent(new Event("pageshow"));
+  emit({ kind: "create", paths: ["C.md"] });
+  await settle();
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["C.md"]);
+});
+
+it("reduces thousands of renames without scanning every earlier path", async () => {
+  queueFallback();
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const { vault } = await openVault(reload);
+  const modified: string[] = [];
+  vault.onModified((path) => modified.push(path));
+  const lists = vi.mocked(api.listFiles).mock.calls.length;
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+
+  emit({ kind: "modify", paths: ["Folder/a.md", "Folder/sub/b.md", "Folder2/x.md", "Other.md"] });
+  emit({ kind: "remove", paths: ["Folder"] });
+  emit({ kind: "modify", paths: ["Gone.md"] });
+  emit({ kind: "remove", paths: ["Gone.md"] });
+  emit({ kind: "remove", paths: ["Back.md"] });
+  emit({ kind: "create", paths: ["Back.md"] });
+  emit({ kind: "modify", paths: ["Folder/a.md"] });
+  emit({ kind: "modify", paths: ["Dir/a.md"] });
+  emit({ kind: "rename", paths: ["Dir", "Away"] });
+  const n = 5000;
+  for (let i = 0; i < n; i++) emit({ kind: "rename", paths: [`f${i}.md`, `g${i}.md`] });
+  await settle();
+
+  const reloaded = reload.mock.calls.map((call) => call[0]);
+  expect(modified).toEqual(["Folder2/x.md", "Other.md", "Folder/a.md"]);
+  expect(reloaded.slice(0, 6)).toEqual(["Folder2/x.md", "Other.md", "Back.md", "Folder/a.md", "Dir", "Away"]);
+  expect(reloaded).toHaveLength(6 + n * 2);
+  expect(reloaded[6]).toBe("f0.md");
+  expect(reloaded.at(-1)).toBe(`g${n - 1}.md`);
+  for (const path of ["Folder", "Folder/sub/b.md", "Gone.md", "Dir/a.md"]) expect(reloaded).not.toContain(path);
+  expect(batchVisits).toBeLessThan(n * 8);
+  expect(vi.mocked(api.listFiles)).toHaveBeenCalledTimes(lists + 1);
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
 });

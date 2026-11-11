@@ -15,13 +15,101 @@ const LINK_INDEX_DELAY = 1000;
 /** A hidden webview may never paint. The same batch still flushes this soon, once. */
 const FLUSH_LIMIT_MS = 50;
 
-function inTree(root: string, path: string) {
-  return path === root || path.startsWith(`${root}/`);
+/** Prefix-segment steps in the latest disk-batch reduction. A full scan of every queued path shows up here. */
+export let batchVisits = 0;
+
+type Tomb = { removedAt: number; kids: Map<string, Tomb> | null };
+type Stamp = { path: string; at: number };
+
+function tomb(): Tomb {
+  return { removedAt: 0, kids: null };
 }
 
-function dropTree(root: string, touch: Set<string>, reload: Set<string>) {
-  for (const path of [...touch]) if (inTree(root, path)) touch.delete(path);
-  for (const path of [...reload]) if (inTree(root, path)) reload.delete(path);
+/** Walk one path. Each segment is one visit, whether or not the prefix was removed. */
+function walk(root: Tomb, path: string, make: boolean): Tomb | null {
+  let at = root;
+  for (const part of path.split("/")) {
+    batchVisits += 1;
+    let kids = at.kids;
+    if (!kids) {
+      if (!make) return null;
+      kids = at.kids = new Map();
+    }
+    let next = kids.get(part);
+    if (!next) {
+      if (!make) return null;
+      next = tomb();
+      kids.set(part, next);
+    }
+    at = next;
+  }
+  return at;
+}
+
+/** True when this path, or a folder above it, was removed after `addedAt`. */
+function buried(root: Tomb, path: string, addedAt: number): boolean {
+  let at = root;
+  for (const part of path.split("/")) {
+    batchVisits += 1;
+    const next = at.kids?.get(part);
+    if (!next) return false;
+    if (next.removedAt > addedAt) return true;
+    at = next;
+  }
+  return false;
+}
+
+/** Paths in first-seen order. A later recreate appends; a repeat while still live keeps its place. */
+class Marks {
+  private list: Stamp[] = [];
+  private index = new Map<string, number>();
+
+  add(path: string, at: number, tombs: Tomb) {
+    const have = this.index.get(path);
+    if (have === undefined || buried(tombs, path, this.list[have]!.at)) {
+      this.index.set(path, this.list.length);
+      this.list.push({ path, at });
+    } else this.list[have]!.at = at;
+  }
+
+  live(tombs: Tomb): string[] {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const mark of this.list) {
+      if (seen.has(mark.path) || buried(tombs, mark.path, mark.at)) continue;
+      seen.add(mark.path);
+      out.push(mark.path);
+    }
+    return out;
+  }
+}
+
+function reduceBatch(batch: { kind: string; paths: string[] }[]) {
+  batchVisits = 0;
+  let refresh = false;
+  let seq = 0;
+  const tombs = tomb();
+  const touch = new Marks();
+  const reload = new Marks();
+  const bury = (path: string) => {
+    const node = walk(tombs, path, true);
+    if (node) node.removedAt = ++seq;
+  };
+  for (const change of batch) {
+    if (change.kind !== "modify") refresh = true;
+    if (change.kind === "remove") for (const path of change.paths) bury(path);
+    else if (change.kind === "rename") {
+      if (change.paths[0]) bury(change.paths[0]);
+      for (const path of change.paths) reload.add(path, ++seq, tombs);
+    } else if (change.kind === "modify") {
+      for (const path of change.paths) {
+        const at = ++seq;
+        touch.add(path, at, tombs);
+        reload.add(path, at, tombs);
+      }
+    } else for (const path of change.paths) reload.add(path, ++seq, tombs);
+  }
+  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs) };
 }
 
 export class Vault {
@@ -51,6 +139,8 @@ export class Vault {
   private pending: { kind: string; paths: string[] }[] | null = null;
   /** Bumped when a pending flush must not apply: a new open, or the page going away. */
   private wave = 0;
+  /** After the page goes away, disk events wait until it is shown again or the vault opens. */
+  private suspended = false;
   /** Bumped when one of a batch's callbacks wins, so the other one does not run it again. */
   private ticket = 0;
   private frame: number | null = null;
@@ -72,12 +162,16 @@ export class Vault {
     private readonly changed: (change: "files" | "links") => void,
     private readonly reload: (path: string) => Promise<void>,
   ) {
-    if (typeof document !== "undefined") document.addEventListener("pagehide", () => this.abandon());
+    if (typeof window !== "undefined") {
+      window.addEventListener("pagehide", () => this.abandon());
+      window.addEventListener("pageshow", () => { this.suspended = false; });
+    }
   }
 
   /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
   async open(reuse = false) {
     this.abandon();
+    this.suspended = false;
     this.stopChanges?.();
     this.stopChanges = undefined;
     const listen = ++this.listenEpoch;
@@ -182,6 +276,7 @@ export class Vault {
    * it; a later create, modify, or rename puts a path back.
    */
   private onChanged(kind: string, paths: string[]) {
+    if (this.suspended) return;
     const start = this.pending === null;
     (this.pending ??= []).push({ kind, paths });
     if (start) this.armFlush();
@@ -213,6 +308,7 @@ export class Vault {
   private abandon() {
     this.wave += 1;
     this.ticket += 1;
+    this.suspended = true;
     this.pending = null;
     this.disarm();
     this.filesRequest += 1;
@@ -224,22 +320,7 @@ export class Vault {
     const batch = this.pending;
     this.pending = null;
     if (!batch?.length) return;
-    let refresh = false;
-    const touch = new Set<string>();
-    const reload = new Set<string>();
-    for (const change of batch) {
-      if (change.kind !== "modify") refresh = true;
-      if (change.kind === "remove") for (const path of change.paths) dropTree(path, touch, reload);
-      else if (change.kind === "rename") {
-        if (change.paths[0]) dropTree(change.paths[0], touch, reload);
-        for (const path of change.paths) reload.add(path);
-      } else if (change.kind === "modify") {
-        for (const path of change.paths) {
-          touch.add(path);
-          reload.add(path);
-        }
-      } else for (const path of change.paths) reload.add(path);
-    }
+    const { refresh, touch, reload } = reduceBatch(batch);
     if (refresh) await this.refreshFiles();
     if (wave !== this.wave) return;
     for (const path of touch) this.touch(path);
