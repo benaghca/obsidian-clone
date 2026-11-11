@@ -14,7 +14,8 @@
     "test:geometry": "node scripts/test-geometry.mjs",
     "test:fixes": "node scripts/test-round19-fixes.mjs",
     "test:header": "node scripts/test-header.mjs",
-    "test:drag": "node scripts/test-explorer-drag.mjs"
+    "test:drag": "node scripts/test-explorer-drag.mjs",
+    "test:smoke": "bash scripts/smoke-backend.sh"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

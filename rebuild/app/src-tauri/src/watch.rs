@@ -109,7 +109,8 @@ fn flush(app: &AppHandle, events: &[Event]) {
 }
 
 /// `scan` is injectable so tests can write while the state lock is released.
-fn flush_changes(
+/// Crate-visible so the headless smoke can run one flush without a watcher thread.
+pub(crate) fn flush_changes(
     inner: &std::sync::Mutex<Inner>,
     events: &[Event],
     scan: impl FnOnce(&Path) -> Result<Index, String>,

@@ -21,6 +21,8 @@ mod config;
 mod edit;
 #[cfg(test)]
 mod edit_fuzz;
+#[cfg(test)]
+mod smoke;
 mod fsutil;
 mod index;
 mod lockdown;
@@ -345,8 +347,8 @@ fn bytes_from_body(body: &tauri::ipc::InvokeBody) -> Result<&[u8], String> {
 }
 
 #[tauri::command]
-fn write_note(
-    window: tauri::Window,
+fn write_note<R: tauri::Runtime>(
+    window: tauri::Window<R>,
     state: State<'_, AppState>,
     path: String,
     content: String,
@@ -579,6 +581,15 @@ fn search_match(
     queries: Vec<String>,
 ) -> Result<Vec<Vec<String>>, String> {
     with_vault(&state, |v| Ok(v.index.search_match(&queries)))
+}
+
+/// Registers the commands the headless smoke invokes. The command macros exist
+/// only in this module, so the handler cannot be built from `smoke`.
+#[cfg(test)]
+fn smoke_commands(
+    builder: tauri::Builder<tauri::test::MockRuntime>,
+) -> tauri::Builder<tauri::test::MockRuntime> {
+    builder.invoke_handler(tauri::generate_handler![open_vault, write_note, rename_path])
 }
 
 #[cfg(test)]
