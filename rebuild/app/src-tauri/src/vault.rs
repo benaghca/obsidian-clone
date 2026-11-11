@@ -139,14 +139,22 @@ impl Vault {
             bom: if s.is_empty() { prev.bom } else { s.starts_with('\u{feff}') },
             crlf: if s.contains("\r\n") { true } else if s.contains('\n') { false } else { prev.crlf },
         });
-        formats.insert(rel.to_string(), fmt);
+        if fmt.bom || fmt.crlf {
+            formats.insert(rel.to_string(), fmt);
+        } else {
+            formats.remove(rel);
+        }
         fmt
     }
 
     fn relocate_formats(&self, from: &str, to: &str) {
+        if from == to {
+            return;
+        }
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
-        let prefix = format!("{from}/");
-        let keys: Vec<String> = formats.keys().filter(|k| *k == from || k.starts_with(&prefix)).cloned().collect();
+        let (from_prefix, to_prefix) = (format!("{from}/"), format!("{to}/"));
+        formats.retain(|k, _| k != to && !k.starts_with(&to_prefix));
+        let keys: Vec<String> = formats.keys().filter(|k| *k == from || k.starts_with(&from_prefix)).cloned().collect();
         for key in keys {
             if let Some(fmt) = formats.remove(&key) {
                 formats.insert(if key == from { to.into() } else { format!("{to}{}", &key[from.len()..]) }, fmt);
@@ -244,11 +252,11 @@ impl Vault {
         if to_full.exists() {
             return Err(format!("already exists: {to_rel}"));
         }
-        self.relocate_formats(&from_rel, &to_rel);
         if let Some(parent) = to_full.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         fs::rename(&from_full, &to_full).map_err(|e| e.to_string())?;
+        self.relocate_formats(&from_rel, &to_rel);
         // One map rebuild for the move and the reload of the destination.
         {
             let root = &self.root;
@@ -339,26 +347,51 @@ impl Vault {
 
     /// Apply a watcher batch. Name maps rebuild once, after every path is updated.
     pub fn apply(&mut self, changes: &[VaultChanged]) {
-        let root = &self.root;
-        let mut batch = self.index.map_batch();
+        {
+            let root = &self.root;
+            let mut batch = self.index.map_batch();
+            for change in changes {
+                match change.kind {
+                    ChangeKind::Remove => {
+                        for path in &change.paths {
+                            batch.remove_tree(path);
+                        }
+                    }
+                    ChangeKind::Rename => {
+                        if change.paths.len() == 2 {
+                            batch.relocate(&change.paths[0], &change.paths[1]);
+                            batch.refresh_path(root, &change.paths[1]);
+                        }
+                    }
+                    ChangeKind::Create | ChangeKind::Modify => {
+                        for path in &change.paths {
+                            batch.refresh_path(root, path);
+                        }
+                    }
+                }
+            }
+        }
         for change in changes {
             match change.kind {
-                ChangeKind::Remove => {
+                ChangeKind::Remove | ChangeKind::Create => {
                     for path in &change.paths {
-                        batch.remove_tree(path);
+                        self.remove_formats(path);
                     }
                 }
-                ChangeKind::Rename => {
-                    if change.paths.len() == 2 {
-                        batch.relocate(&change.paths[0], &change.paths[1]);
-                        batch.refresh_path(root, &change.paths[1]);
+                ChangeKind::Rename if change.paths.len() == 2 => {
+                    self.relocate_formats(&change.paths[0], &change.paths[1]);
+                    if !self.index.contains(&change.paths[1]) {
+                        self.remove_formats(&change.paths[1]);
                     }
                 }
-                ChangeKind::Create | ChangeKind::Modify => {
+                ChangeKind::Modify => {
                     for path in &change.paths {
-                        batch.refresh_path(root, path);
+                        if !self.index.contains(path) || self.index.is_dir(path) {
+                            self.remove_formats(path);
+                        }
                     }
                 }
+                _ => {}
             }
         }
     }
@@ -402,7 +435,11 @@ impl Vault {
                 created.push(path.clone());
             }
         }
+        for path in &created {
+            self.remove_formats(path);
+        }
         self.index = fresh;
+        self.formats.lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| self.index.contains(k) && !self.index.is_dir(k));
         let mut out = Vec::new();
         push_change(&mut out, ChangeKind::Remove, removed);
         push_change(&mut out, ChangeKind::Create, created);
@@ -561,6 +598,70 @@ mod tests {
         vault.rename_path("sub", "moved").unwrap();
         vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
         assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
+    }
+
+    #[test]
+    fn failed_rename_keeps_original_format_and_leaves_destination_uncached() {
+        let dir = tmp_dir("eol-fail-rename");
+        fs::write(dir.path.join("Orig.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("blocker"), "x").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("Orig.md", "single").unwrap();
+        assert!(vault.rename_path("Orig.md", "blocker/Dest.md").is_err());
+        vault.write_note("Orig.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Orig.md")).unwrap(), "single\r\nnext");
+        assert!(!vault.formats.lock().unwrap().contains_key("blocker/Dest.md"));
+    }
+
+    #[test]
+    fn watcher_apply_and_rescan_maintain_and_prune_format_cache() {
+        let dir = tmp_dir("eol-watch-rescan");
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        fs::write(dir.path.join("sub/Note.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("Gone.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("sub/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("sub/Note.md"), dir.path.join("sub/Renamed.md")).unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub/Note.md".into(), "sub/Renamed.md".into()],
+        }]);
+        fs::rename(dir.path.join("sub"), dir.path.join("moved")).unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["sub".into(), "moved".into()],
+        }]);
+        let atomic = vault.normalize(vec![VaultChanged {
+            kind: ChangeKind::Create,
+            paths: vec!["moved/Renamed.md".into()],
+        }]);
+        vault.apply(&atomic);
+        vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
+
+        vault.write_note("Gone.md", "single").unwrap();
+        fs::remove_file(dir.path.join("Gone.md")).unwrap();
+        vault.apply(&[VaultChanged { kind: ChangeKind::Remove, paths: vec!["Gone.md".into()] }]);
+        fs::write(dir.path.join("Gone.md"), "fresh").unwrap();
+        vault.apply(&[VaultChanged { kind: ChangeKind::Create, paths: vec!["Gone.md".into()] }]);
+        vault.write_note("Gone.md", "fresh\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Gone.md")).unwrap(), "fresh\nnext");
+
+        for i in 0..5 {
+            let p = format!("churn-{i}.md");
+            fs::write(dir.path.join(&p), "a\r\nb\r\n").unwrap();
+            vault.read_note(&p).unwrap();
+            fs::remove_file(dir.path.join(&p)).unwrap();
+        }
+        assert_eq!(vault.formats.lock().unwrap().len(), 6);
+        let token = vault.begin_rescan();
+        let fresh = Index::scan(&vault.root);
+        vault.finish_rescan(&token, fresh);
+        let formats = vault.formats.lock().unwrap();
+        assert_eq!(formats.len(), 1);
+        assert!(formats.contains_key("moved/Renamed.md"));
     }
 
     #[test]
