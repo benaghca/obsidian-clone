@@ -1,8 +1,9 @@
 //! One open vault: filesystem operations plus the in-memory index.
 //!
-//! `write_note` records the path for [`OWN_WRITE`] so the watcher can drop the echo of that
-//! save. The index is updated before the call returns, so the next `list_files`, `search`, or
-//! `link_index` already sees the change.
+//! `write_note` records the stamp of that save so the watcher can drop the echo of those
+//! bytes. A later edit with any other mtime, size, or file identity is a normal external
+//! change. The index is updated before the call returns, so the next `list_files`, `search`,
+//! or `link_index` already sees the change.
 
 use crate::fsutil::{self, atomic_write};
 use crate::index::{Index, Stamp};
@@ -12,10 +13,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
-
-/// How long a `write_note` suppresses watcher events for that path.
-pub const OWN_WRITE: Duration = Duration::from_millis(500);
+use std::time::SystemTime;
 
 /// Largest image `read_file_bytes` hands to an embed.
 pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
@@ -39,10 +37,20 @@ impl NoteFormat {
     }
 }
 
+/// Stamp of a file Grove itself wrote. The watcher ignores an event for this
+/// path only while the file on disk is still that write.
+#[derive(Clone, Copy)]
+struct OwnWrite {
+    mtime_ms: u64,
+    size: u64,
+    /// Device and inode. A same-size replace in one mtime tick is a different file.
+    id: Option<(u64, u64)>,
+}
+
 pub struct Vault {
     pub root: PathBuf,
     pub index: Index,
-    own_writes: HashMap<String, Instant>,
+    own_writes: HashMap<String, OwnWrite>,
     formats: Mutex<HashMap<String, NoteFormat>>,
     /// Device and inode last seen for a path. A same-size replace in one
     /// clock tick can share a [`Stamp`]; the id tells that apart from the file
@@ -127,14 +135,13 @@ impl Vault {
             Err(e) => return Err(e.to_string()),
         };
         let written = self.observe_format(&rel, existing.as_deref()).apply(content);
-        self.mark_own(&rel);
         if let Err(e) = atomic_write(&full, written.as_bytes()) {
-            self.own_writes.remove(&rel);
             return Err(e.to_string());
         }
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
         self.remember_id(&rel);
+        self.record_own(&rel, &md);
         Ok(())
     }
 
@@ -202,13 +209,13 @@ impl Vault {
         if full.is_dir() {
             return Err(format!("not a file: {rel}"));
         }
-        self.mark_own(&rel);
         if let Err(e) = atomic_write(&full, bytes) {
-            self.own_writes.remove(&rel);
             return Err(e.to_string());
         }
         self.index.refresh_path(&self.root, &rel);
+        let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.remember_id(&rel);
+        self.record_own(&rel, &md);
         Ok((self.entry_for(&rel), existed))
     }
 
@@ -223,6 +230,7 @@ impl Vault {
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
         self.remember_id(&rel);
+        self.record_own(&rel, &md);
         Ok(self.entry_for(&rel))
     }
 
@@ -267,6 +275,7 @@ impl Vault {
             batch.refresh_path(root, &to_rel);
         }
         self.relocate_ids(&from_rel, &to_rel);
+        self.relocate_own(&from_rel, &to_rel);
         self.remember_id(&to_rel);
         Ok(())
     }
@@ -295,6 +304,7 @@ impl Vault {
         }
         self.remove_formats(&rel);
         self.forget_id_tree(&rel);
+        self.forget_own_tree(&rel);
         self.index.remove_tree(&rel);
         Ok(())
     }
@@ -324,12 +334,25 @@ impl Vault {
         atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())
     }
 
-    pub fn is_own_write(&self, rel: &str, now: Instant) -> bool {
-        self.own_writes.get(rel).is_some_and(|until| now < *until)
-    }
-
-    pub fn gc_own_writes(&mut self, now: Instant) {
-        self.own_writes.retain(|_, until| *until > now);
+    /// True when `rel` is still the file Grove wrote. A missing file, or any
+    /// other mtime, size, or identity, is someone else's change.
+    pub fn is_own_write(&self, rel: &str) -> bool {
+        let Some(own) = self.own_writes.get(rel) else {
+            return false;
+        };
+        let Ok(md) = fs::symlink_metadata(self.root.join(rel)) else {
+            return false;
+        };
+        if md.file_type().is_symlink() || !md.is_file() {
+            return false;
+        }
+        if fsutil::mtime_ms(&md) != own.mtime_ms || md.len() != own.size {
+            return false;
+        }
+        match (own.id, file_id(&md)) {
+            (Some(known), Some(now)) => known == now,
+            _ => true,
+        }
     }
 
     /// Turn a create of a path we already know about into a modify (an editor's atomic save).
@@ -403,6 +426,7 @@ impl Vault {
             }
         }
         self.track_ids(changes);
+        self.track_own(changes);
         // The batch above relocates every rename, including an echo of a move
         // the app already applied. Put a source that is still the indexed file
         // back, or the final format prune drops it and the file list loses it.
@@ -503,10 +527,57 @@ impl Vault {
         out
     }
 
-    pub(crate) fn mark_own(&mut self, rel: &str) {
-        let now = Instant::now();
-        self.gc_own_writes(now);
-        self.own_writes.insert(rel.to_string(), now + OWN_WRITE);
+    pub(crate) fn record_own(&mut self, rel: &str, md: &fs::Metadata) {
+        self.own_writes.insert(
+            rel.to_string(),
+            OwnWrite {
+                mtime_ms: fsutil::mtime_ms(md),
+                size: md.len(),
+                id: file_id(md),
+            },
+        );
+    }
+
+    fn forget_own_tree(&mut self, rel: &str) {
+        let prefix = format!("{rel}/");
+        self.own_writes.retain(|k, _| k != rel && !k.starts_with(&prefix));
+    }
+
+    fn relocate_own(&mut self, from: &str, to: &str) {
+        if from == to || self.own_writes.is_empty() {
+            return;
+        }
+        let prefix = format!("{from}/");
+        let keys: Vec<String> = self
+            .own_writes
+            .keys()
+            .filter(|k| *k == from || k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(own) = self.own_writes.remove(&key) {
+                let dest = if key == from { to.to_string() } else { format!("{to}{}", &key[from.len()..]) };
+                self.own_writes.insert(dest, own);
+            }
+        }
+    }
+
+    /// The index batch already ran. Keep each own-write stamp with the file
+    /// that moved, and drop it when the file is removed.
+    fn track_own(&mut self, changes: &[VaultChanged]) {
+        for change in changes {
+            match change.kind {
+                ChangeKind::Remove => {
+                    for path in &change.paths {
+                        self.forget_own_tree(path);
+                    }
+                }
+                ChangeKind::Rename if change.paths.len() == 2 => {
+                    self.relocate_own(&change.paths[0], &change.paths[1]);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn remember_id(&mut self, rel: &str) {
@@ -718,6 +789,7 @@ mod tests {
     use super::*;
     use crate::fsutil::tmp_dir;
     use std::fs;
+    use std::time::{Duration, Instant};
 
     fn listed(vault: &Vault, path: &str) -> FileEntry {
         vault.list_files().into_iter().find(|e| e.path == path).unwrap()
@@ -1439,7 +1511,7 @@ mod tests {
             vault.read_note("Old.md").unwrap(),
             "see [[Target]]\nrevised\n"
         );
-        assert!(vault.is_own_write("Old.md", Instant::now()));
+        assert!(vault.is_own_write("Old.md"));
         let names: Vec<_> = fs::read_dir(&dir.path)
             .unwrap()
             .flatten()

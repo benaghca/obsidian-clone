@@ -2,8 +2,9 @@
 //!
 //! Notify events sit for ~100ms of quiet (and at most ~400ms) so a burst becomes a few
 //! `vault-changed` events. Temp files and `.obsidian` / `.git` / `.trash` / `.grove` / `.cinder` are dropped.
-//! A path written by `write_note` in the last 500ms is dropped too. Rename events carry
-//! `[from, to]`; a move into `.trash` is reported as `remove`.
+//! An event is dropped only when the file is still Grove's own last write (same mtime,
+//! size, and file identity). Any other change is reported. Rename events carry `[from, to]`;
+//! a move into `.trash` is reported as `remove`.
 
 use crate::model::{push_change, ChangeKind, VaultChanged};
 use crate::{lock, AppState, Inner};
@@ -120,12 +121,10 @@ pub(crate) fn flush_changes(
         let Some(vault) = inner.vault.as_mut() else {
             return Vec::new();
         };
-        let now = Instant::now();
         if !events.iter().any(|event| event.need_rescan()) {
-            let raw = coalesce(&vault.root, events, |path| vault.is_own_write(path, now));
+            let raw = coalesce(&vault.root, events, |path| vault.is_own_write(path));
             let changes = vault.normalize(raw);
             vault.apply(&changes);
-            vault.gc_own_writes(now);
             return changes;
         }
         (vault.root.clone(), vault.begin_rescan())
@@ -137,7 +136,6 @@ pub(crate) fn flush_changes(
         return Vec::new();
     };
     let changes = vault.finish_rescan(&token, fresh);
-    vault.gc_own_writes(Instant::now());
     changes
 }
 
@@ -151,7 +149,7 @@ struct RenamePart {
 
 /// Group a burst of notify events into contract events.
 ///
-/// `suppress` drops creates, modifies, and removes of a path (our own `write_note`).
+/// `suppress` drops creates, modifies, and removes of a path that is still our own write.
 /// A two-sided rename is kept: that is a real move, not the temp-file rename a save uses.
 pub fn coalesce(
     root: &Path,
@@ -353,9 +351,9 @@ mod tests {
             vault.write_file_bytes("image.png", b"png").unwrap();
             vault.rename_path("moved.md", "folder/moved.md").unwrap();
             vault.delete_path("removed.md", true).unwrap();
-            // A long scan plus later saves may garbage-collect all echo suppression.
-            vault.gc_own_writes(Instant::now() + crate::vault::OWN_WRITE);
-            assert!(!vault.is_own_write("saved.md", Instant::now()));
+            // Suppression follows the bytes we wrote, not a timer, so it is still
+            // ours after a long scan. The journal does not depend on it.
+            assert!(vault.is_own_write("saved.md"));
             // An unrelated external change still generates an event after the swap.
             fs::write(root.join("external.md"), "external").unwrap();
             let mut fresh = fresh;
@@ -539,5 +537,179 @@ mod tests {
                 .any(|change| change.paths.iter().any(|p| p == "n.md")),
             "expected n.md in {out:?} from {events:?}"
         );
+    }
+
+    fn modify_of(root: &Path, rel: &str) -> Event {
+        kind(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            vec![root.join(rel)],
+        )
+    }
+
+    /// An editor, git, or sync tool that lands inside the old 500 ms window is
+    /// a normal external change. The timer used to drop it.
+    #[test]
+    fn outside_edit_just_after_a_save_is_reported() {
+        let dir = tmp_dir("stamp-outside");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-marker")
+                .unwrap();
+        }
+        fs::write(dir.path.join("Note.md"), "external-marker").unwrap();
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "Note.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["Note.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(!vault.is_own_write("Note.md"));
+        assert_eq!(vault.index.search("external-marker", 10).len(), 1);
+        assert!(vault.index.search("grove-marker", 10).is_empty());
+    }
+
+    /// The modify from our own save, and the temp-file rename that save uses,
+    /// must not become `vault-changed`.
+    #[test]
+    fn own_write_echo_produces_no_vault_changed() {
+        let dir = tmp_dir("stamp-echo");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-marker")
+                .unwrap();
+        }
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "Note.md")], Index::scan).is_empty());
+        let save = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![
+                dir.path.join(format!(".Note.md.9{TEMP_MARK}")),
+                dir.path.join("Note.md"),
+            ],
+        )
+        .set_tracker(3);
+        assert!(flush_changes(&inner, &[save], Index::scan).is_empty());
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.is_own_write("Note.md"));
+        assert_eq!(vault.index.search("grove-marker", 10).len(), 1);
+        assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), "grove-marker");
+    }
+
+    /// Same length and the original mtime, but a new inode: a replace in one
+    /// clock tick. That is not our file, so the modify is reported.
+    #[test]
+    fn same_size_new_inode_replace_is_reported() {
+        let dir = tmp_dir("stamp-inode");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard.vault.as_mut().unwrap().write_note("Note.md", "aaaa").unwrap();
+        }
+        let note = dir.path.join("Note.md");
+        let before = fs::metadata(&note).unwrap();
+        let mtime = before.modified().unwrap();
+        let before_ms = crate::fsutil::mtime_ms(&before);
+        #[cfg(unix)]
+        let before_ino = {
+            use std::os::unix::fs::MetadataExt;
+            before.ino()
+        };
+        let tmp = dir.path.join("swap.md");
+        fs::write(&tmp, "bbbb").unwrap();
+        fs::rename(&tmp, &note).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&note)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        let after = fs::metadata(&note).unwrap();
+        assert_eq!(crate::fsutil::mtime_ms(&after), before_ms);
+        assert_eq!(after.len(), 4);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_ne!(after.ino(), before_ino);
+        }
+        {
+            let guard = lock(&inner);
+            assert!(!guard.vault.as_ref().unwrap().is_own_write("Note.md"));
+        }
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "Note.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["Note.md"]));
+        let guard = lock(&inner);
+        assert_eq!(guard.vault.as_ref().unwrap().index.search("bbbb", 10).len(), 1);
+    }
+
+    /// Dropping our echo must not drop a different file's remove in the same batch.
+    #[test]
+    fn own_echo_does_not_hide_another_files_remove() {
+        let dir = tmp_dir("stamp-batch");
+        fs::write(dir.path.join("Note.md"), "old").unwrap();
+        fs::write(dir.path.join("Other.md"), "other").unwrap();
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-marker")
+                .unwrap();
+        }
+        fs::remove_file(dir.path.join("Other.md")).unwrap();
+        let remove = kind(EventKind::Remove(RemoveKind::File), vec![dir.path.join("Other.md")]);
+        let changes = flush_changes(
+            &inner,
+            &[modify_of(&dir.path, "Note.md"), remove],
+            Index::scan,
+        );
+        assert_eq!(changes, one(ChangeKind::Remove, &["Other.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.is_own_write("Note.md"));
+        assert!(vault.index.contains("Note.md"));
+        assert!(!vault.index.contains("Other.md"));
+        assert_eq!(vault.index.search("grove-marker", 10).len(), 1);
+    }
+
+    /// A real rename is still reported. The stamp moves with the file, so a
+    /// later modify of those same bytes is quiet.
+    #[test]
+    fn external_rename_is_reported_and_keeps_the_stamp() {
+        let dir = tmp_dir("stamp-rename");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard.vault.as_mut().unwrap().write_note("A.md", "grove-marker").unwrap();
+        }
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        let changes = flush_changes(&inner, &[rename], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Rename, &["A.md", "B.md"]));
+        {
+            let guard = lock(&inner);
+            let vault = guard.vault.as_ref().unwrap();
+            assert!(!vault.is_own_write("A.md"));
+            assert!(vault.is_own_write("B.md"));
+            assert!(!vault.index.contains("A.md"));
+            assert!(vault.index.contains("B.md"));
+        }
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan).is_empty());
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.is_own_write("B.md"));
+        assert_eq!(vault.index.search("grove-marker", 10).len(), 1);
     }
 }

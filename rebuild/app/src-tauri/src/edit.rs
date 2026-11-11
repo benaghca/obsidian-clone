@@ -501,10 +501,10 @@ impl crate::vault::Vault {
                 self.index.refresh_path(&self.root, &rel);
                 return Err(error.to_string());
             }
-            self.mark_own(&rel);
             let md = fs::metadata(&full).map_err(|e| e.to_string())?;
             self.index
                 .upsert_note(&self.root, &rel, updated, Stamp::of(&md));
+            self.record_own(&rel, &md);
             prepared.result.stamp(fsutil::mtime_ms(&md));
             return Ok(prepared.result);
         }
@@ -615,12 +615,14 @@ mod tests {
             serde_json::to_value(vault.index.properties(None)).unwrap(),
             index
         );
-        assert!(!vault.is_own_write(path, Instant::now()));
+        // The create recorded this file. A dry run must leave that stamp alone.
+        assert!(vault.is_own_write(path));
         fs::write(
             &full,
             "\u{feff}---\r\nstatus: todo\r\n---\r\nchanged body #new [[Target]]",
         )
         .unwrap();
+        assert!(!vault.is_own_write(path));
         vault.create_note("Target.md", "target").unwrap();
         let result = vault
             .set_property(path, &edit("status: todo", "doing"), false)
@@ -630,7 +632,7 @@ mod tests {
             fs::read_to_string(&full).unwrap(),
             "\u{feff}---\r\nstatus: doing\r\n---\r\nchanged body #new [[Target]]"
         );
-        assert!(vault.is_own_write(path, Instant::now()));
+        assert!(vault.is_own_write(path));
         assert_eq!(
             vault.index.properties(None)[path].props[0].value,
             Value::Text("doing".into())
