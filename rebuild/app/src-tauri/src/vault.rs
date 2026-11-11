@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 /// How long a `write_note` suppresses watcher events for that path.
@@ -22,10 +22,28 @@ pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
 /// The files `read_file_bytes` reads: images an embed can show.
 const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
 
+#[derive(Clone, Copy, Default)]
+struct NoteFormat {
+    bom: bool,
+    crlf: bool,
+}
+
+impl NoteFormat {
+    fn apply(self, content: &str) -> std::borrow::Cow<'_, str> {
+        if !self.bom && !self.crlf {
+            return content.into();
+        }
+        let body = content.strip_prefix('\u{feff}').unwrap_or(content);
+        let body = if self.crlf { body.replace("\r\n", "\n").replace('\n', "\r\n") } else { body.to_string() };
+        (if self.bom { format!("\u{feff}{body}") } else { body }).into()
+    }
+}
+
 pub struct Vault {
     pub root: PathBuf,
     pub index: Index,
     own_writes: HashMap<String, Instant>,
+    formats: Mutex<HashMap<String, NoteFormat>>,
     rescan: Option<Arc<()>>,
 }
 
@@ -43,6 +61,7 @@ impl Vault {
             root,
             index,
             own_writes: HashMap::new(),
+            formats: Mutex::new(HashMap::new()),
             rescan: None,
         })
     }
@@ -52,11 +71,14 @@ impl Vault {
     }
 
     pub fn read_note(&self, path: &str) -> Result<String, String> {
-        let (_rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
+        let (rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
         if !full.is_file() {
             return Err(format!("no such file: {path}"));
         }
         let bytes = fs::read(&full).map_err(|e| e.to_string())?;
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            self.observe_format(&rel, Some(text));
+        }
         let text = String::from_utf8_lossy(&bytes);
         Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
     }
@@ -99,7 +121,7 @@ impl Vault {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => return Err(e.to_string()),
         };
-        let written = preserve_note_format(existing.as_deref(), content);
+        let written = self.observe_format(&rel, existing.as_deref()).apply(content);
         self.mark_own(&rel);
         if let Err(e) = atomic_write(&full, written.as_bytes()) {
             self.own_writes.remove(&rel);
@@ -109,19 +131,33 @@ impl Vault {
         self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
         Ok(())
     }
-}
 
-fn preserve_note_format<'a>(existing: Option<&str>, content: &'a str) -> std::borrow::Cow<'a, str> {
-    let (bom, crlf) = existing.map_or((false, false), |s| (s.starts_with('\u{feff}'), s.contains("\r\n")));
-    if !bom && !crlf {
-        return content.into();
+    fn observe_format(&self, rel: &str, existing: Option<&str>) -> NoteFormat {
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = formats.get(rel).copied().unwrap_or_default();
+        let fmt = existing.map_or_else(NoteFormat::default, |s| NoteFormat {
+            bom: if s.is_empty() { prev.bom } else { s.starts_with('\u{feff}') },
+            crlf: if s.contains("\r\n") { true } else if s.contains('\n') { false } else { prev.crlf },
+        });
+        formats.insert(rel.to_string(), fmt);
+        fmt
     }
-    let body = content.strip_prefix('\u{feff}').unwrap_or(content);
-    let body = if crlf { body.replace("\r\n", "\n").replace('\n', "\r\n") } else { body.to_string() };
-    (if bom { format!("\u{feff}{body}") } else { body }).into()
-}
 
-impl Vault {
+    fn relocate_formats(&self, from: &str, to: &str) {
+        let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
+        let prefix = format!("{from}/");
+        let keys: Vec<String> = formats.keys().filter(|k| *k == from || k.starts_with(&prefix)).cloned().collect();
+        for key in keys {
+            if let Some(fmt) = formats.remove(&key) {
+                formats.insert(if key == from { to.into() } else { format!("{to}{}", &key[from.len()..]) }, fmt);
+            }
+        }
+    }
+
+    fn remove_formats(&self, rel: &str) {
+        let prefix = format!("{rel}/");
+        self.formats.lock().unwrap_or_else(|e| e.into_inner()).retain(|k, _| k != rel && !k.starts_with(&prefix));
+    }
 
     /// A new attachment's bytes. The same path checks as `write_note` (inside the vault, no `..`,
     /// no symlink out, nothing in a hidden folder). Fails if anything is already at `path` or the
@@ -174,6 +210,8 @@ impl Vault {
             return Err(format!("already exists: {rel}"));
         }
         atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
+        self.remove_formats(&rel);
+        self.observe_format(&rel, Some(content));
         let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
         Ok(self.entry_for(&rel))
@@ -206,6 +244,7 @@ impl Vault {
         if to_full.exists() {
             return Err(format!("already exists: {to_rel}"));
         }
+        self.relocate_formats(&from_rel, &to_rel);
         if let Some(parent) = to_full.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
@@ -237,6 +276,7 @@ impl Vault {
             }
             fs::rename(&full, &dest).map_err(|e| e.to_string())?;
         }
+        self.remove_formats(&rel);
         self.index.remove_tree(&rel);
         Ok(())
     }
@@ -493,6 +533,30 @@ mod tests {
         assert_eq!(lossy, "caf\u{fffd}\r\n");
         assert!(vault.write_note("Latin1.md", &lossy.replace("\r\n", "\n")).is_err());
         assert_eq!(fs::read(dir.path.join("Latin1.md")).unwrap(), b"caf\xe9\r\n");
+    }
+
+    #[test]
+    fn crlf_and_bom_survive_single_line_or_empty_saves_and_renames() {
+        let dir = tmp_dir("eol-single");
+        fs::write(dir.path.join("Crlf.md"), "a\r\nb\r\n").unwrap();
+        fs::write(dir.path.join("Empty.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        fs::create_dir(dir.path.join("sub")).unwrap();
+        fs::write(dir.path.join("sub/Move.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+
+        vault.write_note("Crlf.md", "single").unwrap();
+        vault.write_note("Crlf.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Crlf.md")).unwrap(), "single\r\nnext");
+
+        vault.write_note("Empty.md", "").unwrap();
+        vault.write_note("Empty.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("Empty.md")).unwrap(), "\u{feff}single\r\nnext");
+
+        vault.write_note("sub/Move.md", "single").unwrap();
+        vault.rename_path("sub/Move.md", "sub/Renamed.md").unwrap();
+        vault.rename_path("sub", "moved").unwrap();
+        vault.write_note("moved/Renamed.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("moved/Renamed.md")).unwrap(), "single\r\nnext");
     }
 
     #[test]
