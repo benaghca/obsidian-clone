@@ -12,6 +12,7 @@ import { headingPos } from "./editor/headings";
 import type { EditorHost, EmbedHost, PropertyHost } from "./editor/host";
 import { isDrawingPath } from "./drawing/render";
 import { IMAGE_EXT } from "./editor/embeds";
+import { kindReady, notesReady, preloadKinds } from "./viewLoad";
 import { createEditorHost } from "./editorHost";
 import { type Edge, Layout } from "./layout";
 import { formatLink, type LinkStyle, resolveLink } from "./links/internal";
@@ -478,9 +479,25 @@ export class Workspace {
     const replaces = !opts.where;
     const mine = Symbol();
     if (replaces) this.opens.set(from, mine);
-    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path) || isDrawingPath(path)) return this.openAttachment(path, opts.where ?? false, from);
+    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path) || isDrawingPath(path)) {
+      const kind = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : isDrawingPath(path) ? "drawing" : undefined;
+      // Already-loaded chunks stay on this turn. A missing one is fetched
+      // before the tab changes, so the pane never shows an empty board.
+      if (kind && !kindReady(kind)) {
+        await preloadKinds([kind]);
+        if (!this.layout.groups().includes(from) || (replaces && this.opens.get(from) !== mine)) return;
+      }
+      return this.openAttachment(path, opts.where ?? false, from);
+    }
     const state = await this.editors.load(path);
     if (!state || !this.layout.groups().includes(from) || (replaces && this.opens.get(from) !== mine)) return;
+    // A real note has a document. Ordering tests resolve a token with none;
+    // that note cannot embed a base, so there is nothing to preload.
+    const text = state.doc?.toString() ?? "";
+    if (!notesReady([text])) {
+      await preloadKinds([], [text]);
+      if (!this.layout.groups().includes(from) || (replaces && this.opens.get(from) !== mine)) return;
+    }
     let where = opts.where ?? false;
     const current = from.active;
     // A pinned tab keeps its note; anything else opened from it gets a new tab.
@@ -579,6 +596,7 @@ export class Workspace {
       this.restoreOpen(group, mine, previous);
       return;
     }
+    if (parsed && !kindReady(parsed.type)) await preloadKinds([parsed.type]);
     // A note opened while this history step was loading is newer than this step.
     if (this.opens.get(group) !== mine || group.active !== tab || !this.layout.groups().includes(group)) return;
     const step = stepHistory(tab, dir, this.caretIn(group));
@@ -606,11 +624,27 @@ export class Workspace {
    * if it is empty, else a new tab, or a new pane to the right or below.
    */
   openView(type: ViewType, where: OpenWhere = false, file: string | null = null) {
-    const active = this.activeGroup.active;
-    const { group, tab, layoutChanged } = this.target(this.activeGroup, where, where === "tab" || !!active.path || !!active.type);
-    tab.type = type;
-    tab.viewFile = type === "localgraph" || type === "backlinks" ? file : undefined;
-    this.show(group, tab, layoutChanged);
+    const from = this.activeGroup;
+    const go = () => {
+      const active = from.active;
+      const { group, tab, layoutChanged } = this.target(from, where, where === "tab" || !!active.path || !!active.type);
+      tab.type = type;
+      tab.viewFile = type === "localgraph" || type === "backlinks" ? file : undefined;
+      this.show(group, tab, layoutChanged);
+    };
+    // A warm view opens in this turn. A cold one waits, and a newer navigation wins.
+    if (kindReady(type)) {
+      go();
+      return;
+    }
+    const replaces = !where;
+    const mine = Symbol();
+    if (replaces) this.opens.set(from, mine);
+    void preloadKinds([type]).then(() => {
+      if (!this.layout.groups().includes(from)) return;
+      if (replaces && this.opens.get(from) !== mine) return;
+      go();
+    });
   }
 
   /** A local graph tab now follows another note. */
@@ -647,6 +681,14 @@ export class Workspace {
     const layout = Layout.fromJSON<Tab, SavedTab>(root, (s) => this.loadTab(s), active);
     if (!layout || !layout.tabs().some((t) => t.path || t.type)) return false;
     await Promise.all(layout.groups().map((g) => (g.active.path ? this.editors.load(g.active.path) : null)));
+    const types = layout.groups().map((g) => g.active.type);
+    const notes: string[] = [];
+    for (const g of layout.groups()) {
+      const doc = g.active.path ? this.editors.doc(g.active.path) : undefined;
+      if (doc) notes.push(doc.toString());
+    }
+    // The tabs about to be painted load first, so the first frame is the real view.
+    if (types.some((t) => !kindReady(t)) || !notesReady(notes)) await preloadKinds(types, notes);
     this.editors.dropAll();
     this.layout = layout;
     this.presentAll();

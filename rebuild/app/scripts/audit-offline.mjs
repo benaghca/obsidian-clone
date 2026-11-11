@@ -85,8 +85,8 @@ const ALLOW = [
   {
     rule: "url",
     match: /^https:\/\/$/,
-    files: /^(?:src\/editor\/clipboard\.ts|dist\/assets\/index-[\w-]+\.js)$/,
-    why: "The clipboard handler prefixes a pasted www. address with https:// when wrapping it in a markdown link; text only, never requested",
+    files: /^(?:src\/editor\/clipboard\.ts|dist\/assets\/[\w-]+\.js)$/,
+    why: "Paste handlers prefix a pasted www. address with https:// when they make a markdown link. The text is never requested. Code splitting puts that prefix in whichever local chunk holds the handler",
   },
 ];
 

@@ -136,6 +136,13 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
   const vault: VaultInfo = saved ?? { path: SAMPLE_PATH, name: "Sample Vault" };
   if (vault.path === SAMPLE_PATH) {
     for (const [path, content] of Object.entries(vaultFiles)) put(path, content);
+    // Opt-in files for the startup-chunk restore check. A normal load stays the sample vault.
+    if (new URLSearchParams(location.search).has("l2fixtures")) {
+      put("L2.canvas", "{\"nodes\":[],\"edges\":[]}\n");
+      put("L2.base", "views:\n  - type: table\n    name: View\n");
+      put("L2.excalidraw", "{\"type\":\"excalidraw\",\"version\":2,\"source\":\"grove\",\"elements\":[],\"appState\":{\"gridSize\":null,\"viewBackgroundColor\":\"#ffffff\"},\"files\":{}}\n");
+      put("L2 embed.md", "Before the base.\n\n```base\nviews:\n  - type: table\n    name: View\n```\n");
+    }
   }
   // Folders made with create_folder that hold no files yet.
   const emptyDirs = new Set<string>();

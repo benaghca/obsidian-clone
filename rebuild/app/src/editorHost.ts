@@ -8,12 +8,12 @@
 // shows it, or when the file changes.
 
 import { api, type FileEntry } from "./api";
-import { mountBaseEmbed } from "./bases/embed";
 import { isolateHistory } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
 import { embedFor } from "./editor/attachments";
 import { writeAttachments } from "./editor/saveAttachments";
-import { editorHost, type EditorHost, type EmbedHost } from "./editor/host";
+import { editorHost, type BaseEmbed, type EditorHost, type EmbedHost } from "./editor/host";
+import { baseEmbeds } from "./viewLoad";
 import { toggledTask } from "./editor/render";
 import { resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
@@ -223,6 +223,28 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     watch(path, fn) {
       return kept(watchers, path, () => listeners()).on(fn);
     },
-    base: (parent, embed, view) => mountBaseEmbed(ws, parent, embed, view),
+    base: (parent, embed, view) => {
+      const live = baseEmbeds.get();
+      if (live) return live.mountBaseEmbed(ws, parent, embed, view);
+      // The note was shown before the chunk arrived. Keep the reserved box
+      // and fill it when the module is ready; nothing is swapped for a spinner.
+      let current = embed;
+      let handle: { update(next: BaseEmbed): void; destroy(): void } | null = null;
+      let dead = false;
+      void baseEmbeds.load().then((mod) => {
+        if (dead) return;
+        handle = mod.mountBaseEmbed(ws, parent, current, view);
+      });
+      return {
+        update(next) {
+          current = next;
+          handle?.update(next);
+        },
+        destroy() {
+          dead = true;
+          handle?.destroy();
+        },
+      };
+    },
   };
 }
