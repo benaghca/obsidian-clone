@@ -32,11 +32,13 @@ use crate::index::NoteProperties;
 use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
-use std::sync::{mpsc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{mpsc, Condvar, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct AppState {
-    pub(crate) inner: Mutex<Inner>,
+    pub(crate) inner: RwLock<Inner>,
+    pub(crate) write_queue: WriteQueue,
     pub(crate) watch_tx: mpsc::Sender<WatchMsg>,
 }
 
@@ -45,9 +47,43 @@ pub struct Inner {
     pub(crate) vault: Option<vault::Vault>,
 }
 
-pub(crate) fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|err| err.into_inner())
+#[derive(Default)]
+pub(crate) struct WriteQueue { next: AtomicU64, turn: Mutex<u64>, ready: Condvar }
+
+pub(crate) struct WriteTicket<'a> { queue: &'a WriteQueue, ticket: u64, waited: bool }
+
+impl WriteQueue {
+    pub(crate) fn enqueue(&self) -> WriteTicket<'_> {
+        WriteTicket { queue: self, ticket: self.next.fetch_add(1, Ordering::SeqCst), waited: false }
+    }
 }
+
+impl WriteTicket<'_> {
+    fn wait(&mut self) {
+        if !self.waited {
+            let mut turn = self.queue.turn.lock().unwrap_or_else(|err| err.into_inner());
+            while *turn != self.ticket {
+                turn = self.queue.ready.wait(turn).unwrap_or_else(|err| err.into_inner());
+            }
+            self.waited = true;
+        }
+    }
+    pub(crate) fn run<T>(mut self, state: &AppState, f: impl FnOnce(&mut vault::Vault) -> Result<T, String>) -> Result<T, String> {
+        self.wait();
+        f(lock(&state.inner).vault.as_mut().ok_or("no vault open")?)
+    }
+}
+
+impl Drop for WriteTicket<'_> {
+    fn drop(&mut self) {
+        self.wait();
+        *self.queue.turn.lock().unwrap_or_else(|err| err.into_inner()) += 1;
+        self.queue.ready.notify_all();
+    }
+}
+
+pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwrap_or_else(|err| err.into_inner()) }
+pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|err| err.into_inner()) }
 
 pub fn run() {
     #[cfg(target_os = "linux")]
@@ -69,10 +105,11 @@ pub fn run() {
                 .unwrap_or_else(|_| fallback_config_dir());
             let _ = std::fs::create_dir_all(&config_dir);
             app.manage(AppState {
-                inner: Mutex::new(Inner {
+                inner: RwLock::new(Inner {
                     config_dir,
                     vault: None,
                 }),
+                write_queue: WriteQueue::default(),
                 watch_tx: tx.clone(),
             });
             app.manage(lockdown::FrameOrigins::new());
@@ -174,18 +211,21 @@ fn fallback_config_dir() -> std::path::PathBuf {
     std::env::temp_dir().join("grove")
 }
 
-/// Run `f` on the open vault, or fail when none is open.
-fn with_vault<T>(
-    state: &AppState,
-    f: impl FnOnce(&mut vault::Vault) -> Result<T, String>,
-) -> Result<T, String> {
-    let mut inner = lock(&state.inner);
-    f(inner.vault.as_mut().ok_or("no vault open")?)
+/// Run a read-only `f` on the open vault, or fail when none is open.
+fn read_vault<T>(state: &AppState, f: impl FnOnce(&vault::Vault) -> Result<T, String>) -> Result<T, String> {
+    f(read(&state.inner).vault.as_ref().ok_or("no vault open")?)
+}
+
+/// Run a mutating `f` on the open vault in FIFO submission order.
+fn write_vault<T>(state: &AppState, f: impl FnOnce(&mut vault::Vault) -> Result<T, String>) -> Result<T, String> {
+    state.write_queue.enqueue().run(state, f)
 }
 
 /// Remember `raw`, watch it, and hand back its name. Shared by open and create.
-fn install_vault(state: &AppState, raw: std::path::PathBuf) -> Result<VaultInfo, String> {
-    let opened = vault::Vault::open(raw)?;
+fn install_vault(state: &AppState, prepare: impl FnOnce() -> Result<std::path::PathBuf, String>) -> Result<VaultInfo, String> {
+    let mut ticket = state.write_queue.enqueue();
+    ticket.wait();
+    let opened = vault::Vault::open(prepare()?)?;
     let info = VaultInfo::from_path(&opened.root);
     let root = opened.root.clone();
     {
@@ -197,36 +237,37 @@ fn install_vault(state: &AppState, raw: std::path::PathBuf) -> Result<VaultInfo,
     Ok(info)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn open_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
-    let raw = fsutil::expand_user(path.trim());
-    if !raw.is_dir() {
-        return Err(format!("not a folder: {}", raw.display()));
-    }
-    install_vault(&state, raw)
+    install_vault(&state, || {
+        let raw = fsutil::expand_user(path.trim());
+        if !raw.is_dir() {
+            return Err(format!("not a folder: {}", raw.display()));
+        }
+        Ok(raw)
+    })
 }
 
 /// A new empty vault folder, then the same remember-and-watch path as `open_vault`.
-#[tauri::command]
+#[tauri::command(async)]
 fn create_vault(state: State<'_, AppState>, path: String) -> Result<VaultInfo, String> {
-    let raw = fsutil::create_vault_dir(&path)?;
-    install_vault(&state, raw)
+    install_vault(&state, || fsutil::create_vault_dir(&path))
 }
 
 #[tauri::command(async)]
 fn last_vault(state: State<'_, AppState>) -> Result<Option<VaultInfo>, String> {
-    let inner = lock(&state.inner);
+    let inner = read(&state.inner);
     Ok(config::last_vault(&inner.config_dir).map(|path| VaultInfo::from_path(&path)))
 }
 
 #[tauri::command(async)]
 fn list_files(state: State<'_, AppState>) -> Result<Vec<FileEntry>, String> {
-    with_vault(&state, |v| Ok(v.list_files()))
+    read_vault(&state, |v| Ok(v.list_files()))
 }
 
 #[tauri::command(async)]
 fn read_note(state: State<'_, AppState>, path: String) -> Result<String, String> {
-    with_vault(&state, |v| v.read_note(&path))
+    read_vault(&state, |v| v.read_note(&path))
 }
 
 /// Sent as raw bytes (an ArrayBuffer in the page), not as a JSON array of numbers.
@@ -235,7 +276,7 @@ fn read_file_bytes(
     state: State<'_, AppState>,
     path: String,
 ) -> Result<tauri::ipc::Response, String> {
-    with_vault(&state, |v| v.read_file_bytes(&path)).map(tauri::ipc::Response::new)
+    read_vault(&state, |v| v.read_file_bytes(&path)).map(tauri::ipc::Response::new)
 }
 
 /// Put a PNG (the raw body) on the system clipboard, off the GTK thread: a drawing's
@@ -344,14 +385,14 @@ fn bytes_from_body(body: &tauri::ipc::InvokeBody) -> Result<&[u8], String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn write_note(
     window: tauri::Window,
     state: State<'_, AppState>,
     path: String,
     content: String,
 ) -> Result<(), String> {
-    with_vault(&state, |v| v.write_note(&path, &content))?;
+    write_vault(&state, |v| v.write_note(&path, &content))?;
     let change = model::VaultChanged {
         kind: model::ChangeKind::Modify,
         paths: vec![path],
@@ -374,7 +415,7 @@ fn set_property(
     dry_run: Option<bool>,
 ) -> Result<edit::EditResult, String> {
     let dry_run = dry_run.unwrap_or(false);
-    let result = with_vault(&state, |v| v.set_property(&path, &edit, dry_run))?;
+    let result = write_vault(&state, |v| v.set_property(&path, &edit, dry_run))?;
     if !dry_run && result.done() {
         let change = model::VaultChanged {
             kind: model::ChangeKind::Modify,
@@ -406,7 +447,7 @@ fn write_file_bytes(
     let path = path_from_headers(request.headers())?;
     let bytes = bytes_from_body(request.body())?;
     let replace = replace_from_headers(request.headers());
-    let (entry, existed) = with_vault(&state, |v| {
+    let (entry, existed) = write_vault(&state, |v| {
         if replace {
             v.replace_file_bytes(&path, bytes)
         } else {
@@ -444,141 +485,102 @@ fn allow_frame_origin(
     origins.allow(&origin)
 }
 
-#[tauri::command]
-fn create_note(
-    state: State<'_, AppState>,
-    path: String,
-    content: String,
-) -> Result<FileEntry, String> {
-    with_vault(&state, |v| v.create_note(&path, &content))
+#[tauri::command(async)]
+fn create_note(state: State<'_, AppState>, path: String, content: String) -> Result<FileEntry, String> {
+    write_vault(&state, |v| v.create_note(&path, &content))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn create_folder(state: State<'_, AppState>, path: String) -> Result<FileEntry, String> {
-    with_vault(&state, |v| v.create_folder(&path))
+    write_vault(&state, |v| v.create_folder(&path))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn rename_path(state: State<'_, AppState>, from: String, to: String) -> Result<(), String> {
-    with_vault(&state, |v| v.rename_path(&from, &to))
+    write_vault(&state, |v| v.rename_path(&from, &to))
 }
 
 /// `permanent` (optional, default false) removes the file instead of moving it to `.trash/`.
-#[tauri::command]
-fn delete_path(
-    state: State<'_, AppState>,
-    path: String,
-    permanent: Option<bool>,
-) -> Result<(), String> {
-    with_vault(&state, |v| v.delete_path(&path, permanent.unwrap_or(false)))
+#[tauri::command(async)]
+fn delete_path(state: State<'_, AppState>, path: String, permanent: Option<bool>) -> Result<(), String> {
+    write_vault(&state, |v| v.delete_path(&path, permanent.unwrap_or(false)))
 }
 
 /// A settings file from the vault's `.grove/` folder (`None` if missing).
 #[tauri::command(async)]
 fn read_config(state: State<'_, AppState>, name: String) -> Result<Option<String>, String> {
-    with_vault(&state, |v| v.read_config(&name))
+    read_vault(&state, |v| v.read_config(&name))
 }
 
 /// Write a settings file (JSON) into the vault's `.grove/` folder, atomically.
-#[tauri::command]
+#[tauri::command(async)]
 fn write_config(state: State<'_, AppState>, name: String, content: String) -> Result<(), String> {
-    with_vault(&state, |v| v.write_config(&name, &content))
+    write_vault(&state, |v| v.write_config(&name, &content))
 }
 
 /// One allowlisted Cinder or Obsidian settings file (`None` if missing). Never writes.
 #[tauri::command(async)]
-fn read_foreign_config(
-    state: State<'_, AppState>,
-    source: String,
-    name: String,
-) -> Result<Option<String>, String> {
-    with_vault(&state, |v| v.read_foreign_config(&source, &name))
+fn read_foreign_config(state: State<'_, AppState>, source: String, name: String) -> Result<Option<String>, String> {
+    read_vault(&state, |v| v.read_foreign_config(&source, &name))
 }
 
 #[tauri::command(async)]
 fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<SearchHit>, String> {
-    with_vault(&state, |v| Ok(v.index.search(&query, limit)))
+    read_vault(&state, |v| Ok(v.index.search(&query, limit)))
 }
 
 #[tauri::command(async)]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
-    with_vault(&state, |v| Ok(v.index.link_index()))
+    read_vault(&state, |v| Ok(v.index.link_index()))
 }
 
 /// Linked mentions for the requested target paths only; empty targets are omitted.
 #[tauri::command(async)]
-fn backlinks(
-    state: State<'_, AppState>,
-    paths: Vec<String>,
-) -> Result<BTreeMap<String, Vec<Backlink>>, String> {
-    with_vault(&state, |v| Ok(v.index.backlinks(&paths)))
+fn backlinks(state: State<'_, AppState>, paths: Vec<String>) -> Result<BTreeMap<String, Vec<Backlink>>, String> {
+    read_vault(&state, |v| Ok(v.index.backlinks(&paths)))
 }
 
 /// Notes that might link to `paths`, for a rename. Fetched before `rename_path`.
 #[tauri::command(async)]
 fn link_sources(state: State<'_, AppState>, paths: Vec<String>) -> Result<Vec<String>, String> {
-    with_vault(&state, |v| Ok(v.index.link_sources(&paths)))
+    read_vault(&state, |v| Ok(v.index.link_sources(&paths)))
 }
 
 /// Each note's frontmatter block (only `paths`' when given), for the properties index.
 #[tauri::command(async)]
-fn frontmatter(
-    state: State<'_, AppState>,
-    paths: Option<Vec<String>>,
-) -> Result<BTreeMap<String, String>, String> {
-    with_vault(&state, |v| Ok(v.index.frontmatter(paths.as_deref())))
+fn frontmatter(state: State<'_, AppState>, paths: Option<Vec<String>>) -> Result<BTreeMap<String, String>, String> {
+    read_vault(&state, |v| Ok(v.index.frontmatter(paths.as_deref())))
 }
 
 /// Each note's tags (only `paths`' when given), for the Tags view, `tag:` search, the graph and
 /// Bases. Notes without tags are left out.
 #[tauri::command(async)]
-fn tags(
-    state: State<'_, AppState>,
-    paths: Option<Vec<String>>,
-) -> Result<BTreeMap<String, Vec<String>>, String> {
-    with_vault(&state, |v| Ok(v.index.tags(paths.as_deref())))
+fn tags(state: State<'_, AppState>, paths: Option<Vec<String>>) -> Result<BTreeMap<String, Vec<String>>, String> {
+    read_vault(&state, |v| Ok(v.index.tags(paths.as_deref())))
 }
 
 /// Saved properties parsed once while indexing; source-only/no-frontmatter notes are omitted.
 #[tauri::command(async)]
-fn properties(
-    state: State<'_, AppState>,
-    paths: Option<Vec<String>>,
-) -> Result<BTreeMap<String, NoteProperties>, String> {
-    with_vault(&state, |v| Ok(v.index.properties(paths.as_deref())))
+fn properties(state: State<'_, AppState>, paths: Option<Vec<String>>) -> Result<BTreeMap<String, NoteProperties>, String> {
+    read_vault(&state, |v| Ok(v.index.properties(paths.as_deref())))
 }
 
 /// Matching notes and exact occurrence counts, in vault path order.
 #[tauri::command(async)]
-fn search_notes(
-    state: State<'_, AppState>,
-    query: String,
-    match_case: bool,
-) -> Result<Vec<SearchNote>, String> {
-    with_vault(&state, |v| Ok(v.index.search_notes(&query, match_case)))
+fn search_notes(state: State<'_, AppState>, query: String, match_case: bool) -> Result<Vec<SearchNote>, String> {
+    read_vault(&state, |v| Ok(v.index.search_notes(&query, match_case)))
 }
 
 /// A separately evaluated page of shown lines; paths no longer matching are omitted.
 #[tauri::command(async)]
-fn search_lines(
-    state: State<'_, AppState>,
-    query: String,
-    match_case: bool,
-    paths: Vec<String>,
-    limit: u32,
-) -> Result<BTreeMap<String, Vec<SearchLine>>, String> {
-    with_vault(&state, |v| {
-        Ok(v.index.search_lines(&query, match_case, &paths, limit))
-    })
+fn search_lines(state: State<'_, AppState>, query: String, match_case: bool, paths: Vec<String>, limit: u32) -> Result<BTreeMap<String, Vec<SearchLine>>, String> {
+    read_vault(&state, |v| Ok(v.index.search_lines(&query, match_case, &paths, limit)))
 }
 
 /// Graph filter/colour-group matches, including attachments but never folders.
 #[tauri::command(async)]
-fn search_match(
-    state: State<'_, AppState>,
-    queries: Vec<String>,
-) -> Result<Vec<Vec<String>>, String> {
-    with_vault(&state, |v| Ok(v.index.search_match(&queries)))
+fn search_match(state: State<'_, AppState>, queries: Vec<String>) -> Result<Vec<Vec<String>>, String> {
+    read_vault(&state, |v| Ok(v.index.search_match(&queries)))
 }
 
 #[cfg(test)]
@@ -682,11 +684,13 @@ mod tests {
     #[test]
     fn write_10mb_stays_off_the_calling_thread() {
         let src = include_str!("lib.rs");
-        for name in ["write_file_bytes", "read_clipboard_image", "write_clipboard_image"] {
+        for name in [
+            "open_vault", "create_vault", "write_note", "set_property", "write_file_bytes",
+            "create_note", "create_folder", "rename_path", "delete_path", "write_config",
+            "read_clipboard_image", "write_clipboard_image",
+        ] {
             let needle = format!("\nfn {name}(");
-            let idx = src
-                .find(&needle)
-                .unwrap_or_else(|| panic!("missing {name}"));
+            let idx = src.find(&needle).unwrap_or_else(|| panic!("missing {name}"));
             let before = &src[..idx];
             let start = before.rfind("\n#[").map(|i| i + 1).unwrap();
             let attr = before[start..].trim();
@@ -708,14 +712,82 @@ mod tests {
             vault.write_file_bytes("ten.bin", &bytes).expect("write");
             tx.send((writer, started.elapsed())).expect("send");
         });
-        let (writer, elapsed) = rx
-            .recv_timeout(std::time::Duration::from_secs(60))
-            .expect("10 MB write did not finish");
+        let (writer, elapsed) = rx.recv_timeout(std::time::Duration::from_secs(60)).expect("10 MB write did not finish");
         assert_ne!(writer, caller, "10 MB write ran on the calling thread");
-        assert_eq!(
-            std::fs::metadata(dir.path.join("ten.bin")).unwrap().len(),
-            10 * 1024 * 1024
-        );
+        assert_eq!(std::fs::metadata(dir.path.join("ten.bin")).unwrap().len(), 10 * 1024 * 1024);
         eprintln!("write_10mb_ms={:.1}", elapsed.as_secs_f64() * 1000.0);
+    }
+
+    fn test_state(root: &std::path::Path) -> super::AppState {
+        let (watch_tx, _rx) = std::sync::mpsc::channel();
+        let inner = std::sync::RwLock::new(super::Inner { config_dir: root.join(".cfg"), vault: None });
+        let state = super::AppState { inner, write_queue: super::WriteQueue::default(), watch_tx };
+        super::install_vault(&state, || Ok(root.to_path_buf())).unwrap();
+        state
+    }
+
+    #[test]
+    fn reads_overlap_while_writes_stay_exclusive() {
+        use std::{sync::atomic::{AtomicBool, AtomicUsize, Ordering}, time::Duration};
+        let dir = crate::fsutil::tmp_dir("rwlock-overlap");
+        let state = &test_state(&dir.path);
+        super::write_vault(state, |v| v.create_note("Note.md", "initial")).unwrap();
+        let ((r1_tx, r1_rx), (r2_tx, r2_rx), (rel_tx, rel_rx)) =
+            (std::sync::mpsc::channel(), std::sync::mpsc::channel(), std::sync::mpsc::channel());
+        let (write_entered, active_writers) = (&AtomicBool::new(false), &AtomicUsize::new(0));
+        std::thread::scope(|s| {
+            let r1 = s.spawn(move || super::read_vault(state, |v| {
+                r1_tx.send(()).unwrap();
+                r2_rx.recv_timeout(Duration::from_millis(200)).expect("second read was blocked by the first read");
+                rel_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+                v.read_note("Note.md")
+            }));
+            r1_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let r2 = s.spawn(move || super::read_vault(state, |v| {
+                r2_tx.send(()).unwrap();
+                assert_eq!(v.index.search("initial", 10).len(), 1);
+                v.read_note("Note.md")
+            }));
+            assert_eq!(r2.join().unwrap().unwrap(), "initial");
+            let w = s.spawn(move || super::write_vault(state, |v| {
+                write_entered.store(true, Ordering::SeqCst);
+                v.write_note("Note.md", "updated")
+            }));
+            std::thread::sleep(Duration::from_millis(20));
+            assert!(!write_entered.load(Ordering::SeqCst));
+            rel_tx.send(()).unwrap();
+            assert_eq!(r1.join().unwrap().unwrap(), "initial");
+            w.join().unwrap().unwrap();
+            for i in 0..4 {
+                s.spawn(move || super::write_vault(state, |v| {
+                    assert_eq!(active_writers.fetch_add(1, Ordering::SeqCst), 0);
+                    let res = v.write_note("Note.md", &format!("v{i}"));
+                    assert_eq!(active_writers.fetch_sub(1, Ordering::SeqCst), 1);
+                    res
+                }).unwrap());
+            }
+        });
+    }
+
+    #[test]
+    fn queued_writes_and_renames_stay_in_submission_order() {
+        use std::time::Duration;
+        let dir = crate::fsutil::tmp_dir("write-order");
+        let state = &test_state(&dir.path);
+        super::write_vault(state, |v| v.create_note("Note.md", "zero")).unwrap();
+        let order = &std::sync::Mutex::new(Vec::new());
+        let (t1, t2, t3, t4) = (
+            state.write_queue.enqueue(), state.write_queue.enqueue(),
+            state.write_queue.enqueue(), state.write_queue.enqueue(),
+        );
+        std::thread::scope(|s| {
+            s.spawn(move || { std::thread::sleep(Duration::from_millis(30)); t1.run(state, |v| { order.lock().unwrap().push("write-1"); v.write_note("Note.md", "first") }).unwrap(); });
+            s.spawn(move || { std::thread::sleep(Duration::from_millis(10)); t2.run(state, |v| { order.lock().unwrap().push("write-2"); v.write_note("Note.md", "second") }).unwrap(); });
+            s.spawn(move || { t3.run(state, |v| { order.lock().unwrap().push("rename"); v.rename_path("Note.md", "Sub/Moved.md") }).unwrap(); });
+            s.spawn(move || { t4.run(state, |v| { order.lock().unwrap().push("write-moved"); v.write_note("Sub/Moved.md", "final") }).unwrap(); });
+        });
+        assert_eq!(*order.lock().unwrap(), vec!["write-1", "write-2", "rename", "write-moved"]);
+        assert!(!dir.path.join("Note.md").exists());
+        assert_eq!(super::read_vault(state, |v| v.read_note("Sub/Moved.md")).unwrap(), "final");
     }
 }
