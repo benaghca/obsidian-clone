@@ -341,15 +341,20 @@ impl Vault {
 
     /// Apply a watcher batch. Name maps rebuild once, after every path is updated.
     pub fn apply(&mut self, changes: &[VaultChanged]) {
-        // Sources the index still has. An app rename has already removed its
-        // source, so the watcher echo is absent here. Captured before `map_batch`.
-        let mut live_from = HashSet::new();
+        // One unconsumed move per indexed source that has already left that
+        // path. Captured before `map_batch`, which makes a real move and an
+        // echo look the same. A source that is still on disk is a later file
+        // reusing the pathname, not this rename.
+        let mut moves: HashMap<String, u32> = HashMap::new();
         for change in changes {
-            if change.kind == ChangeKind::Rename
-                && change.paths.len() == 2
-                && self.index.contains(&change.paths[0])
-            {
-                live_from.insert(change.paths[0].clone());
+            if change.kind == ChangeKind::Rename && change.paths.len() == 2 {
+                let from = &change.paths[0];
+                if !moves.contains_key(from)
+                    && self.index.contains(from)
+                    && !indexed_path_remains(&self.root, &self.index, from)
+                {
+                    moves.insert(from.clone(), 1);
+                }
             }
         }
         {
@@ -384,9 +389,6 @@ impl Vault {
         // Notes whose format this batch just moved. A create of their new parent
         // folder is also in `evict` and must not drop that relocated identity.
         let mut kept = HashSet::new();
-        // Destinations of a real move in this batch. The next hop of A -> B -> C
-        // is not itself in the pre-batch index, but it is still that same move.
-        let mut carried = HashSet::new();
         for change in changes {
             match change.kind {
                 ChangeKind::Remove | ChangeKind::Create => {
@@ -395,12 +397,13 @@ impl Vault {
                 ChangeKind::Rename if change.paths.len() == 2 => {
                     let from = &change.paths[0];
                     let to = &change.paths[1];
-                    if from != to && (live_from.contains(from) || carried.contains(from)) {
-                        // The index had not applied this move, so the destination's
-                        // cached format belongs to the old file. An echo is not
-                        // `live_from` and must not clear the format already moved.
+                    // Consume the identity. A second copy of this hop, and a
+                    // replay of a later hop, find nothing left and keep the
+                    // destination. The next hop of A -> B -> C receives it.
+                    if from != to && moves.get(from).copied().unwrap_or(0) > 0 {
+                        *moves.get_mut(from).unwrap() -= 1;
                         evict_format_tree(&mut formats, to);
-                        carried.insert(to.clone());
+                        *moves.entry(to.clone()).or_insert(0) += 1;
                     }
                     relocate_format_map(&mut formats, from, to, &mut evict, &mut kept);
                 }
@@ -483,6 +486,25 @@ fn has_prefix_in(path: &str, set: &HashSet<&str>) -> bool {
     !set.is_empty() && (set.contains(path) || path.match_indices('/').any(|(i, _)| set.contains(&path[..i])))
 }
 
+/// Whether `rel` still has the node the index recorded. False after a real
+/// rename (the path is gone or a different file is there). Directories are
+/// stored with their modified time only.
+fn indexed_path_remains(root: &Path, index: &Index, rel: &str) -> bool {
+    let Some(stamp) = index.stamp(rel) else {
+        return false;
+    };
+    let Ok(md) = fs::symlink_metadata(root.join(rel)) else {
+        return false;
+    };
+    if md.is_dir() != index.is_dir(rel) {
+        return false;
+    }
+    if md.is_dir() {
+        return fsutil::mtime_ms(&md) == stamp.mtime_ms;
+    }
+    Stamp::of(&md) == stamp
+}
+
 fn evict_format_tree(formats: &mut HashMap<String, NoteFormat>, rel: &str) {
     let prefix = format!("{rel}/");
     formats.retain(|k, _| k != rel && !k.starts_with(&prefix));
@@ -560,6 +582,15 @@ mod tests {
 
     fn listed(vault: &Vault, path: &str) -> FileEntry {
         vault.list_files().into_iter().find(|e| e.path == path).unwrap()
+    }
+
+    fn rename_both(root: &Path, from: &str, to: &str, tracker: usize) -> notify::Event {
+        notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Name(
+            notify::event::RenameMode::Both,
+        )))
+        .add_path(root.join(from))
+        .add_path(root.join(to))
+        .set_tracker(tracker)
     }
 
     #[test]
@@ -857,6 +888,152 @@ mod tests {
         let lf = case("eol-ext-rename-lf", "single", "a\r\nb\r\n", "single");
         let bom = case("eol-ext-rename-bom", "", "\u{feff}a\r\nb\r\n", "");
         assert_eq!((lf.as_str(), bom.as_str()), ("single\nnext", "single\nnext"));
+    }
+
+    /// Two coalesced `Rename(A, B)` records (distinct trackers). The second must
+    /// not wipe the format the first one just moved.
+    #[test]
+    fn replay_duplicate_coalesced_file_rename_keeps_crlf() {
+        let dir = tmp_dir("eol-replay-file");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[
+                rename_both(&dir.path, "A.md", "B.md", 1),
+                rename_both(&dir.path, "A.md", "B.md", 2),
+            ],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// Same replay for a folder: the note moved with the folder keeps CRLF.
+    #[test]
+    fn replay_duplicate_coalesced_folder_rename_keeps_crlf() {
+        let dir = tmp_dir("eol-replay-folder");
+        fs::create_dir(dir.path.join("dir1")).unwrap();
+        fs::write(dir.path.join("dir1/Note.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("dir1/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("dir1"), dir.path.join("dir2")).unwrap();
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[
+                rename_both(&dir.path, "dir1", "dir2", 1),
+                rename_both(&dir.path, "dir1", "dir2", 2),
+            ],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+                VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+            ]
+        );
+        vault.apply(&changes);
+        vault.write_note("dir2/Note.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("dir2/Note.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// A later hop repeated in the same batch must not drop the format the first
+    /// hop already carried forward.
+    #[test]
+    fn replay_repeated_chain_hop_keeps_crlf() {
+        let dir = tmp_dir("eol-replay-hop");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        fs::create_dir(dir.path.join("dir1")).unwrap();
+        fs::write(dir.path.join("dir1/Note.md"), "\u{feff}a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.write_note("dir1/Note.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("C.md")).unwrap();
+        fs::rename(dir.path.join("dir1"), dir.path.join("dir3")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "C.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir1".into(), "dir2".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir2".into(), "dir3".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["dir2".into(), "dir3".into()] },
+        ]);
+        vault.write_note("C.md", "single\nnext").unwrap();
+        vault.write_note("dir3/Note.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("C.md")).unwrap(), "single\r\nnext");
+        assert_eq!(fs::read_to_string(dir.path.join("dir3/Note.md")).unwrap(), "\u{feff}single\r\nnext");
+    }
+
+    /// App rename, then a new plain file at the old path, then the watcher echo.
+    /// The echo is the old move, not a move of the new file.
+    #[test]
+    fn replay_app_rename_reused_source_echo_keeps_crlf() {
+        let dir = tmp_dir("eol-echo-reused");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "plain\n").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// The new file at the old path really is renamed onto the destination.
+    /// That replacement still drops the format the app move left behind.
+    #[test]
+    fn replay_reused_source_external_rename_drops_stale_format() {
+        let dir = tmp_dir("eol-reused-real");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "plain\n").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[rename_both(&dir.path, "A.md", "B.md", 1)],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+        );
+        vault.apply(&changes);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\nnext");
+    }
+
+    /// A → B → A → B in one batch is a second real move, not a duplicate pair.
+    /// The format has to finish on B.
+    #[test]
+    fn replay_round_trip_keeps_crlf_on_the_final_hop() {
+        let dir = tmp_dir("eol-round-trip");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        vault.apply(&[
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["B.md".into(), "A.md".into()] },
+            VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] },
+        ]);
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(fs::read_to_string(dir.path.join("B.md")).unwrap(), "single\r\nnext");
     }
 
     #[test]
