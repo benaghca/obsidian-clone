@@ -403,6 +403,10 @@ impl Vault {
             }
         }
         self.track_ids(changes);
+        // The batch above relocates every rename, including an echo of a move
+        // the app already applied. Put a source that is still the indexed file
+        // back, or the final format prune drops it and the file list loses it.
+        self.restore_echo_sources(&stayed, changes);
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
         if formats.is_empty() {
             return;
@@ -560,6 +564,33 @@ impl Vault {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// `map_batch` already ran. A verified echo still relocated the source's
+    /// index node. When that file is on disk, index it again. The destination
+    /// stays as the batch refreshed it. Name maps rebuild once.
+    fn restore_echo_sources(&mut self, stayed: &HashSet<String>, changes: &[VaultChanged]) {
+        let mut missing: Vec<&str> = Vec::new();
+        for change in changes {
+            if change.kind != ChangeKind::Rename || change.paths.len() != 2 {
+                continue;
+            }
+            let from = change.paths[0].as_str();
+            if from == change.paths[1].as_str() || !stayed.contains(from) || self.index.contains(from) {
+                continue;
+            }
+            if !missing.contains(&from) {
+                missing.push(from);
+            }
+        }
+        if missing.is_empty() {
+            return;
+        }
+        let root = &self.root;
+        let mut batch = self.index.map_batch();
+        for path in missing {
+            batch.refresh_path(root, path);
         }
     }
 
@@ -1250,6 +1281,142 @@ mod tests {
         ]);
         vault.write_note("A.md", "single\nnext").unwrap();
         assert_eq!(fs::read_to_string(dir.path.join("A.md")).unwrap(), "single\r\nnext");
+    }
+
+    /// Single-line save before the echo. CRLF is only in the cache, so pruning
+    /// the recreated source cannot be repaired from the bytes on disk.
+    #[test]
+    fn replay_echo_single_line_keeps_reused_crlf_source() {
+        let dir = tmp_dir("eol-echo-single-crlf");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "a\r\nb\r\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("only\r\nnext".to_string(), "single\nnext".to_string())
+        );
+    }
+
+    /// Same echo, with the new source remembering a BOM and the destination
+    /// remembering CRLF. Both files stay indexed and keep their own bytes.
+    #[test]
+    fn replay_echo_single_line_keeps_reused_bom_source() {
+        let dir = tmp_dir("eol-echo-single-bom");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "\u{feff}only\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        vault.apply(&[VaultChanged {
+            kind: ChangeKind::Rename,
+            paths: vec!["A.md".into(), "B.md".into()],
+        }]);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("\u{feff}only\nnext".to_string(), "single\r\nnext".to_string())
+        );
+    }
+
+    /// Coalesce drops creates and modifies on a rename endpoint, so the echo
+    /// batch has no later refresh of the recreated source.
+    #[test]
+    fn replay_echo_single_line_coalesce_keeps_reused_crlf_source() {
+        let dir = tmp_dir("eol-echo-single-crlf-coalesce");
+        fs::write(dir.path.join("A.md"), "plain\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "a\r\nb\r\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        let create = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::File))
+            .add_path(dir.path.join("A.md"));
+        let modify = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Data(
+            notify::event::DataChange::Any,
+        )))
+        .add_path(dir.path.join("A.md"));
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[create, rename_both(&dir.path, "A.md", "B.md", 1), modify],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+        );
+        vault.apply(&changes);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("only\r\nnext".to_string(), "single\nnext".to_string())
+        );
+    }
+
+    /// The coalesced echo also keeps a BOM-only cache on the recreated source
+    /// and the CRLF cache on the destination.
+    #[test]
+    fn replay_echo_single_line_coalesce_keeps_reused_bom_source() {
+        let dir = tmp_dir("eol-echo-single-bom-coalesce");
+        fs::write(dir.path.join("A.md"), "a\r\nb\r\n").unwrap();
+        let mut vault = Vault::open(dir.path.clone()).unwrap();
+        vault.write_note("A.md", "single").unwrap();
+        vault.rename_path("A.md", "B.md").unwrap();
+        vault.create_note("A.md", "\u{feff}only\n").unwrap();
+        vault.write_note("A.md", "only").unwrap();
+        let create = notify::Event::new(notify::EventKind::Create(notify::event::CreateKind::File))
+            .add_path(dir.path.join("A.md"));
+        let modify = notify::Event::new(notify::EventKind::Modify(notify::event::ModifyKind::Data(
+            notify::event::DataChange::Any,
+        )))
+        .add_path(dir.path.join("A.md"));
+        let changes = vault.normalize(crate::watch::coalesce(
+            &dir.path,
+            &[create, rename_both(&dir.path, "A.md", "B.md", 1), modify],
+            |_| false,
+        ));
+        assert_eq!(
+            changes,
+            vec![VaultChanged { kind: ChangeKind::Rename, paths: vec!["A.md".into(), "B.md".into()] }]
+        );
+        vault.apply(&changes);
+        assert!(vault.index.contains("A.md"), "recreated source dropped out of the index");
+        assert!(vault.index.contains("B.md"), "destination dropped out of the index");
+        vault.write_note("A.md", "only\nnext").unwrap();
+        vault.write_note("B.md", "single\nnext").unwrap();
+        assert_eq!(
+            (
+                fs::read_to_string(dir.path.join("A.md")).unwrap(),
+                fs::read_to_string(dir.path.join("B.md")).unwrap(),
+            ),
+            ("\u{feff}only\nnext".to_string(), "single\r\nnext".to_string())
+        );
     }
 
     #[test]
