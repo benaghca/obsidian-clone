@@ -104,6 +104,10 @@
 .canvas-add-menu { min-width: 0; }
 .canvas-node-content .cm-line.cm-h1 { font-size: 25.888px; }
 .canvas-node-file .canvas-node-content > img { display: block; width: 100%; height: 100%; }
+/* A base card uses the same frame. The view fills the body and scrolls itself. */
+.canvas-node.is-base > .canvas-node-content { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
+.canvas-node:is(.is-selected, .is-editing).is-base > .canvas-node-content { overflow: hidden; }
+.canvas-node.is-base > .canvas-node-content > .bases-view { flex: 1; min-height: 0; }
 
 .canvas-controls { position: absolute; z-index: 4; top: 8px; right: 8px; display: flex; flex-direction: column; gap: 8px; --icon-size: 16px; --icon-stroke: 2px; }
 .canvas-controls .clickable-icon { width: 32px; height: 32px; padding: 8px; border-radius: 0; }

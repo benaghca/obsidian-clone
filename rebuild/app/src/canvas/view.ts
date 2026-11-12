@@ -382,6 +382,67 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         cleanups.push(drop);
         continue;
       }
+      // A Base is a normal file node. Its view is the tab's view, mounted only while this card is wanted.
+      if (node.type === "file" && node.file && /\.base$/i.test(node.file)) {
+        const file = node.file;
+        const viewName = node.subpath?.replace(/^#/, "") || undefined;
+        card.classList.add("is-base");
+        let mounted: { el: HTMLElement; reload(): void; dispose(): void } | undefined;
+        let request = 0, pending = false, hidden = false;
+        const parentWatch = new MutationObserver(() => { if (!content.isConnected) hidden = true; });
+        // Blur is the cell's commit. Removal itself does not blur a focused field.
+        const commitEdit = () => {
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement) || !content.contains(active)) return;
+          if (active.matches("input, textarea, select, [contenteditable]")) active.blur();
+        };
+        const drop = () => {
+          commitEdit();
+          request++;
+          pending = false;
+          hidden = false;
+          parentWatch.disconnect();
+          mounted?.dispose();
+          mounted = undefined;
+          content.replaceChildren();
+        };
+        function ensure() {
+          parentWatch.observe(card, { childList: true });
+          if (mounted) {
+            if (hidden) { hidden = false; mounted.reload(); }
+            return;
+          }
+          if (pending) return;
+          const token = ++request;
+          pending = true;
+          void import("../bases/view").then(({ createBase, baseFile }) => {
+            pending = false;
+            if (gone || mine !== generation || token !== request || !bodies.wanted(node)) return;
+            const base = createBase(ws, {
+              group,
+              file: baseFile(ws, file),
+              watch: file,
+              host: file,
+              viewIndex: 0,
+              viewName,
+              shown: () => bodies.wanted(node),
+            });
+            if (gone || mine !== generation || token !== request || !bodies.wanted(node)) { base.dispose(); return; }
+            mounted = base;
+            hidden = false;
+            content.replaceChildren(base.el);
+            bodies.ready(node);
+          }, () => {
+            pending = false;
+            if (gone || mine !== generation || token !== request) return;
+            content.textContent = `File not found: ${file}`;
+            bodies.ready(node);
+          });
+        }
+        bodies.add(node, card, { element: content, ensure, release: drop, ready: () => !!mounted || !!content.textContent, beforeHide: commitEdit });
+        cleanups.push(drop);
+        continue;
+      }
       if (node.type === "file" && !isNoteFile(node.file ?? "")) {
         bodies.add(node, card, { element: content, ensure() { content.textContent = node.file ? `Unsupported file: ${node.file}` : "File not found"; }, release() { content.replaceChildren(); }, ready: () => !!content.textContent });
         continue;

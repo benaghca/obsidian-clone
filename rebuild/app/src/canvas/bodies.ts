@@ -12,6 +12,8 @@ interface Body {
   /** A link card. Released when it loses its frame slot, so a detached page unloads. */
   frame?: boolean;
   wantsFrame?: () => boolean;
+  /** Run while the element is still connected, before cull or title mode removes it. */
+  beforeHide?: () => void;
 }
 interface Card { node: CanvasNode; el: HTMLElement; body?: Body; last?: string }
 export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: () => CanvasViewport | undefined) {
@@ -53,6 +55,12 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
   function slideView(id: string, view: CanvasViewport) {
     return pinned.has(id) && view.titles ? { ...view, titles: false } : view;
   }
+  // The stub used in unit tests has no isConnected. A real detached node is false and is left alone.
+  function detach(body: Body | undefined) {
+    if (!body) return;
+    if (body.element.isConnected !== false) body.beforeHide?.();
+    body.element.remove();
+  }
   function apply(card: Card, view: CanvasViewport, on: boolean) {
     view = slideView(card.node.id, view);
     if (pinned.has(card.node.id)) on = true;
@@ -61,13 +69,13 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     if (on || el.classList.contains("is-editing")) shown.add(node); else shown.delete(node);
     card.last = mark(on, view, node.id);
     el.classList.toggle("is-culled", !on && !el.classList.contains("is-editing"));
-    if (!on) { if (!el.classList.contains("is-editing")) body?.element.remove(); return; }
+    if (!on) { if (!el.classList.contains("is-editing")) detach(body); return; }
     el.classList.toggle("is-title-mode", view.titles);
     for (const child of el.children) if (child.matches(".canvas-node-ring,.canvas-node-title,.canvas-group-label,.canvas-node-connection-point")) band(child, view.band);
     const title = el.querySelector<HTMLElement>(".canvas-node-title"), min = titleBand(node.width, node.height);
     if (title) title.style.display = view.titles && min !== undefined && view.band < min ? "none" : "";
     const wanted = !view.titles || el.classList.contains("is-image") || el.classList.contains("is-editing");
-    if (body && !wanted) body.element.remove();
+    if (body && !wanted) detach(body);
     if (body && wanted) {
       if (body.element.parentElement !== el) el.append(body.element);
       body.ensure();
@@ -111,7 +119,7 @@ export function canvasBodies(nodes: CanvasNode[], work: CanvasWork, viewport: ()
     const {node,el,body} = card; const view = viewport(); if (view) { const on = node.x <= view.x + view.width * 1.25 && node.x + node.width >= view.x - view.width / 4 && node.y <= view.y + view.height * 1.25 && node.y + node.height >= view.y - view.height / 4; unload(card); el.classList.toggle("is-culled", !on && !el.classList.contains("is-editing")); el.classList.toggle("is-title-mode", view.titles); for (const child of el.children) if (child.matches(".canvas-node-ring,.canvas-node-title,.canvas-group-label")) band(child, view.band);
       const title = el.querySelector<HTMLElement>(".canvas-node-title"), min = titleBand(node.width, node.height);
       if (title && view.titles && min !== undefined && view.band < min) title.style.display = "none";
-      if ((!on || view.titles && !el.classList.contains("is-image")) && !el.classList.contains("is-editing")) body?.element.remove();
+      if ((!on || view.titles && !el.classList.contains("is-image")) && !el.classList.contains("is-editing")) detach(body);
       // No slot bit here. The first update of a slotted card mismatches and applies; other cards keep this key.
       card.last = `${on}/${view.band}/${view.titles}`; if (on) { shown.add(node); visible.add(node); } else shown.delete(node);
     } else shown.add(node);

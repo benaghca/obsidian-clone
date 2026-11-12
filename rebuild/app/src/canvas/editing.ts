@@ -121,7 +121,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     suppress = false; pressedLabel = undefined;
     if (e.defaultPrevented || e.button !== 0 || el.classList.contains("is-grabbable")) return;
     const target = e.target as Element;
-    if (target.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu, .is-editing, a, [data-href], input, button")) return;
+    // A Base cell owns the click that focuses its text, tag, or list field. The label, card background, and resize handles still drag.
+    if (target.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu, .is-editing, a, [data-href], input, button, .canvas-node.is-base td.property, .canvas-node.is-base [contenteditable]")) return;
     // Reconnect handles may overlap a short label; cards still cover labels.
     const beneath = target.closest(".canvas-edge-end") ? document.elementsFromPoint(e.clientX, e.clientY).find(el => el.matches(".canvas-edge-label, .canvas-node")) : target;
     const label = beneath?.closest<HTMLElement>(".canvas-edge-label");
@@ -329,7 +330,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   }, { signal: events.signal });
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only]")) return;
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .canvas-node.is-base .bases-view")) return;
     if (el.classList.contains("is-presenting")) return;
     if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); menu.zoom(); return; }
     const undo = (e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase());
