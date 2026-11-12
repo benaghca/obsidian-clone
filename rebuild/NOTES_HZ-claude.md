@@ -1,6 +1,6 @@
 # Piece HZ: smoother frames on the 240 Hz screen (Claude)
 
-Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's diagnosis (`HZ_FABLE_DIAGNOSIS.md`). Codex reviews next.
+Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's diagnosis (`HZ_FABLE_DIAGNOSIS.md`). First commit `8210f65`. Round 1 fixes for Codex's review (`NOTES_HZ-REVIEW1-codex.md`, PASS-WITH-FIXES) come in the next commit; see "Round 1 fixes".
 
 ## Summary
 
@@ -35,8 +35,10 @@ Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's 
 4. Otherwise, read the refresh period of the CRTC named in the request.
    - It uses libdrm's `drmModeGetResources` and `drmModeGetCrtc`, found with `dlsym`.
    - It computes `htotal × vtotal / pixel clock`, so 239.97 Hz stays 239.97 rather than 240.
-   - The period is cached per (fd, CRTC) for one second, so a mode change, such as switching to 60 Hz, is picked up within a second.
-5. Sleep with `clock_nanosleep` until the next multiple of that period on `CLOCK_MONOTONIC`, fill in the reply (sequence and timestamp) and return 0.
+   - The period is cached for one second per monitor, so a mode change, such as switching to 60 Hz, is picked up within a second.
+   - A monitor is the device behind the fd (its `/proc/self/fd` link) plus the CRTC index. A new fd on the same device inherits the last good period; an fd number reused for another device starts over.
+   - **Round 1:** a monitor whose mode was readable once keeps its last good period when a later read fails. It stays paced while the read is retried once a second.
+5. Sleep with `clock_nanosleep` until the next multiple of that period on `CLOCK_MONOTONIC`, fill in the reply (sequence and timestamp) and return 0. If the sleep fails (anything but `EINTR`, which resumes), the original error goes back rather than a claimed wait (round 1).
    - Relative and absolute requests follow the kernel's rules, including 32-bit wraparound and `NEXTONMISS`.
    - No wait goes more than one second ahead.
 
@@ -44,14 +46,17 @@ Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's 
 
 | Case | What happens |
 |---|---|
-| Mode can't be read or is outside 20–1000 Hz | The original error goes back to WebKit, which uses its own timer. One log line. |
+| Mode has never been readable for this monitor, or is outside 20–1000 Hz | The original error goes back to WebKit, which keeps its own timer. One log line. |
+| Mode was readable, then a read fails | The last good period is kept and the read retried once a second; waits stay paced (round 1). One log line. |
+| `clock_nanosleep` fails | The original error goes back (round 1). One log line. |
 | libdrm's real function not found | `-1` with `ENOSYS`. This can't happen in practice, because WebKit only calls the function when libdrm is loaded. |
 | A panic inside the emulation | Caught; the original error goes back. |
 | `GROVE_VBLANK_FALLBACK=off` | The real result is always returned. |
 
 **Log lines (once each).**
 - Started: `grove: DRM vblank is not supported by the display driver; timing WebKit's frames at 239.97 Hz from the display mode (GROVE_VBLANK_FALLBACK=off turns this off)`.
-- Mode unreadable: a line saying WebKit keeps its own timer.
+- Mode never readable: a line saying WebKit keeps its own timer.
+- Mode lost after working: `grove: the display mode of CRTC 0 could not be read; keeping the last good 239.97 Hz while retrying`.
 - Once A2 is active, WebKit's own `Failed to create DRM vblank monitor, falling back to timer` line should no longer appear.
 
 ### Fix B: GTK paints on the compositor's frame callback (`src/frame_pacing.rs`, one call in `lockdown.rs`)
@@ -69,6 +74,11 @@ Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's 
 - **Window teardown.** Teardown does the same, and skips the thaw when the GdkWindow is already destroyed, since thawing then would crash in GDK.
 - **Watchdog.** A 50 ms timer thaws if a callback never arrives, so a window can never stay frozen. That covers a hidden window, a paint that didn't commit, and a compositor that drops callbacks.
   - The first time it fires, it logs one line.
+- **Fallback to GTK (round 1).** After three watchdog expiries in a row with no callback between them, compositor pacing turns off for that window. Turning it off destroys the outstanding request, balances the freeze and cancels the watchdog. The window then paints on GTK's own clock, as today, and one line is logged:
+  `grove: 3 compositor frame callbacks in a row missed the 50 ms watchdog; this window goes back to GTK's frame clock`.
+  - A broken present path therefore costs three 50 ms stalls once, not one per frame.
+  - A callback resets the count, so a one-off miss only costs that frame. Unmap and unrealize also reset it, keeping hidden-window cleanup separate from failures.
+  - A window that had received callbacks before it was turned off tries again on its next focus-in. Its misses most likely came from animating on a hidden workspace, where Hyprland sends no callbacks. A window that never received one stays on GTK's clock until it is reopened.
 
 **When it switches itself off.** Each case logs one line and leaves GTK as it is today:
 - `GROVE_FRAME_PACING` set to anything other than `compositor`;
@@ -131,7 +141,7 @@ Use a release build from this branch: `npm run build`, then `cargo build --relea
   - A thaw with nothing queued paints nothing.
   - The watchdog is only armed while frozen.
 - **During motion:** up to four times as many frames as today, which is the real cost. Fable estimated 5–9 % of a core rising to 20–35 %. It is off by default for that reason; turning it on by default is Chris's call.
-- **Hidden windows:** a hidden window that keeps animating paints at about 20 Hz, because the 50 ms watchdog thaws it. GTK's own shared-memory path would stop such a window entirely instead.
+- **Hidden windows:** a hidden window that keeps animating paints at about 20 Hz for three frames, because the 50 ms watchdog thaws it. It then falls back to GTK's clock until it is focused again. GTK's own shared-memory path would stop such a window entirely instead.
 
 ## Checks
 
@@ -154,12 +164,26 @@ Use a release build from this branch: `npm run build`, then `cargo build --relea
 - Relative and absolute targets, wraparound and `NEXTONMISS`.
 - No drift over 600 frames.
 - The `Pace` state machine: freeze/thaw pairing, idle never freezing, a failed request, a callback arriving early, reset, and steady motion.
+- **Round 1, A2, with an injected clock, sleep, mode reader and device table (`Fake`):**
+  - **valid → unreadable → recovered.** Covers WebKit's probe, 240 waits read from the mode, then 600 waits (2.5 s) with the mode unreadable. Every one of those waits still sleeps, exactly one 239.97 Hz period after the last, and the read is retried 2–4 times, not per frame. Then the mode returns at 60 Hz and is picked up within 1.5 s, with even 60 Hz spacing.
+  - A monitor that never had a mode: `NoMode` every time, with no sleep.
+  - Identity: a new fd on the same device inherits the period. The same CRTC index on another device does not, nor does a reused fd number, nor an fd whose device can't be named.
+  - The table stays at 16 entries or fewer.
+  - A failed sleep is reported as `SleepFailed`, not a wait; a probe still succeeds.
+- **Round 1, B:**
+  - Three timeouts turn pacing off: each still thaws, and afterwards there are no requests or freezes for 100 frames.
+  - A reset doesn't turn it back on, and a window that was never paced doesn't resume on focus.
+  - A callback between misses resets the count (50 cycles, never off).
+  - Unmapping resets the count.
+  - A window that had received callbacks resumes on focus and paces again.
 
 **Suites.**
-- `cargo test --offline` in `rebuild/app/src-tauri`: **170 passed, 0 failed, 5 ignored**. One of the ignored tests is the new live test.
+- `cargo test --offline` in `rebuild/app/src-tauri`, first commit: **170 passed, 0 failed, 5 ignored**. One of the ignored tests is the new live test.
+- After the round 1 fixes: **179 passed, 0 failed, 5 ignored**. The live test was rerun after the refactor and still gives `240 waits: 239.97 Hz, gaps 4.121–4.219 ms, thread CPU 0.114 % of a core`.
 - `flock /tmp/grove-npm-test.lock npm test` in `rebuild/app`:
   - **First run: exit 1, a timing flake.** `test-friction.mjs` failed on `enter_list_item: 17 ms, 0 long tasks, slowest input 24 ms (budget 16)`. That check runs in a headless browser, and this piece changes no front-end code.
   - **Rerun once under the lock: exit 0.** Vitest passed 109 files and 1,648 tests, and the scripts printed 3,250 PASS lines.
+  - **After the round 1 fixes, first run: exit 0.** Same totals: 109 files, 1,648 Vitest tests, 3,250 PASS lines.
 
 ## What I could not verify without a window
 
@@ -168,9 +192,20 @@ Use a release build from this branch: `npm run build`, then `cargo build --relea
   - That the toplevel's `draw` signal fires for every GL paint of the window.
   - That a `wl_surface.frame` request made inside `draw` rides on NVIDIA EGL's commit.
   - That NVIDIA's `wp_fifo` barrier doesn't add its own throttle. Fable flagged this as a risk.
-  - If the first of these is wrong, B simply never freezes, and behaviour stays at A2. If the second is wrong, the watchdog limits each frame to 50 ms; that would look like a hitch, so check for the `no compositor frame callback within 50 ms` line, which should appear only when a window is hidden.
+  - If the first of these is wrong, B simply never freezes, and behaviour stays at A2. If the second is wrong, the window now falls back to GTK's clock after three 50 ms stalls (round 1). Check for the `goes back to GTK's frame clock` line: on a visible window it means B can't work on this path.
 - **Other compositors.** B on GNOME and KDE, and either fix on X11. A2 would still apply there if the driver refuses vblank. B turns itself off on X11.
 - **Frame-time limits in `npm test`** (the 20 ms popup check, the 16.8 ms pan checks). They run in a browser, not in Grove's GTK window, so B can't affect them.
+
+## Round 1 fixes (Codex review `NOTES_HZ-REVIEW1-codex.md`)
+
+| Finding | Fix |
+|---|---|
+| **P2:** an established emulated monitor lost its pacing when its mode became unreadable | `Monitors` in `vblank.rs` keeps the last good period per monitor (device plus CRTC, not the fd number) and retries the read once a second. Only a monitor that never had a readable mode returns the original error. The clock, sleep, mode reader and device lookup sit behind a `Platform` trait, so tests drive the whole `answer` path. |
+| **P2:** repeated watchdog expiries kept stalling a visible window | `Pace::timed_out` counts misses in a row. At three, pacing turns off for that window: the request is destroyed, the freeze balanced, the watchdog cancelled, and one line logged. GTK's own clock takes over. Resuming on focus is limited to windows that have had callbacks. |
+| **P3:** sleep errors | Taken, since it was small: `sleep_until` returns the error, and `answer` reports `SleepFailed`, so the original error goes back. |
+| **P3:** interlaced, doublescan and `vscan` modes | Not taken. The period maths is unchanged and still right for progressive modes, including 239.97 Hz. Codex marked this as later compatibility work. |
+
+Unchanged: B is still opt-in, A2 still has its env switch, and there is no visible change, no new crate or package, and no system or driver change.
 
 ## Files
 

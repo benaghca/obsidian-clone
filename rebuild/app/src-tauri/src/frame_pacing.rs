@@ -14,7 +14,10 @@
 //!
 //! Unmap, unrealize and teardown drop the callback and thaw. A watchdog thaws after 50 ms if a
 //! callback never comes (a hidden window, or a paint that did not commit), so the window can
-//! never stay frozen. Idle stays idle: the callback is only asked for when something drew, and
+//! never stay frozen. After three expiries in a row with no callback between them, the window
+//! goes back to GTK's own pacing (logged once), so a present path that never delivers callbacks
+//! costs three stalls once rather than one per frame. Only a window whose callbacks have arrived
+//! before, and so most likely missed them while hidden, tries again, on its next focus-in. Idle stays idle: the callback is only asked for when something drew, and
 //! a thaw with nothing queued paints nothing.
 //!
 //! On only with `GROVE_FRAME_PACING=compositor`, on Wayland. Anything else, or any symbol that
@@ -45,6 +48,10 @@ pub fn parse_pacing(value: Option<&str>) -> (Pacing, bool) {
     }
 }
 
+/// Watchdog expiries in a row, with no callback between them, after which a window goes back
+/// to GTK's own pacing.
+pub const MAX_MISSES: u8 = 3;
+
 /// The per-window bookkeeping, apart from the GTK and Wayland calls it leads to.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Pace {
@@ -54,6 +61,12 @@ pub struct Pace {
     painted: bool,
     /// The frame clock is frozen by us.
     frozen: bool,
+    /// Watchdog expiries since the last callback.
+    misses: u8,
+    /// Compositor pacing is off for this window: GTK paces it as it does today.
+    off: bool,
+    /// At least one callback has arrived for this window, so its present path delivers them.
+    proven: bool,
 }
 
 /// What a reset must undo.
@@ -63,9 +76,19 @@ pub struct Reset {
     pub thaw: bool,
 }
 
+/// What a watchdog expiry must undo, and whether it turned compositor pacing off.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Timeout {
+    pub thaw: bool,
+    pub turned_off: bool,
+}
+
 impl Pace {
     /// The toplevel is being drawn. True: ask for a frame callback now.
     pub fn draw(&mut self) -> bool {
+        if self.off {
+            return false;
+        }
         self.painted = true;
         !std::mem::replace(&mut self.pending, true)
     }
@@ -78,28 +101,67 @@ impl Pace {
     /// The frame clock finished a cycle. True: freeze it until the callback.
     pub fn after_paint(&mut self) -> bool {
         let painted = std::mem::take(&mut self.painted);
-        if painted && self.pending && !self.frozen {
+        if painted && self.pending && !self.frozen && !self.off {
             self.frozen = true;
             return true;
         }
         false
     }
 
-    /// The callback fired, or the watchdog gave up on it. True: thaw.
+    /// The compositor's callback fired. True: thaw.
     pub fn done(&mut self) -> bool {
         self.pending = false;
+        self.misses = 0;
+        self.proven = true;
         std::mem::take(&mut self.frozen)
     }
 
-    /// Unmap, unrealize or teardown: forget the callback and undo a freeze.
+    /// The watchdog gave up on the callback (which the caller destroys). After `MAX_MISSES` in a
+    /// row, compositor pacing turns off for this window, so a present path that never delivers
+    /// callbacks costs a few 50 ms stalls once instead of one on every frame.
+    pub fn timed_out(&mut self) -> Timeout {
+        self.pending = false;
+        let thaw = std::mem::take(&mut self.frozen);
+        self.misses = self.misses.saturating_add(1);
+        let turned_off = !self.off && self.misses >= MAX_MISSES;
+        if turned_off {
+            self.off = true;
+            self.misses = 0;
+            self.painted = false;
+        }
+        Timeout { thaw, turned_off }
+    }
+
+    /// Unmap, unrealize or teardown: forget the callback and undo a freeze. A hidden window's
+    /// missed callbacks are expected, so the miss count starts over; whether pacing is off stays.
     pub fn reset(&mut self) -> Reset {
         let reset = Reset { drop_callback: self.pending, thaw: self.frozen };
-        *self = Pace::default();
+        self.pending = false;
+        self.painted = false;
+        self.frozen = false;
+        self.misses = 0;
         reset
+    }
+
+    /// The window took focus. A window that was turned off after its callbacks had been arriving
+    /// was most likely missing them while hidden (on another workspace), so it may try again.
+    /// One that never got a callback stays on GTK's pacing. True: pacing is back on.
+    pub fn resume(&mut self) -> bool {
+        if self.off && self.proven {
+            self.off = false;
+            self.misses = 0;
+            return true;
+        }
+        false
     }
 
     pub fn frozen(&self) -> bool {
         self.frozen
+    }
+
+    #[cfg(test)]
+    pub fn off(&self) -> bool {
+        self.off
     }
 }
 
@@ -164,7 +226,7 @@ fn api() -> Result<&'static Api, String> {
 pub use runtime::install;
 
 mod runtime {
-    use super::{api, parse_pacing, Api, Pace, Pacing, ENV, WATCHDOG_MS, WL_SURFACE_FRAME};
+    use super::{api, parse_pacing, Api, Pace, Pacing, ENV, MAX_MISSES, WATCHDOG_MS, WL_SURFACE_FRAME};
     use gtk::gdk;
     use gtk::glib::{self, translate::ToGlibPtr, SignalHandlerId, SourceId};
     use gtk::prelude::*;
@@ -256,23 +318,48 @@ mod runtime {
         true
     }
 
-    /// Clear the callback (destroying it unless it already fired) and hand back what to thaw.
-    fn finish(api: &Api, paced: &mut Paced, fired: bool) -> (Option<gdk::Window>, Option<SourceId>) {
+    /// Why a callback's wait ended.
+    #[derive(Clone, Copy)]
+    enum End {
+        /// The compositor answered.
+        Fired,
+        /// The watchdog gave up.
+        TimedOut,
+        /// Unmap, unrealize or teardown.
+        Reset,
+    }
+
+    /// What to undo once the borrow is released.
+    struct After {
+        thaw: Option<gdk::Window>,
+        watchdog: Option<SourceId>,
+        turned_off: bool,
+    }
+
+    /// Destroy the callback if it is still ours, cancel the watchdog and hand back what to thaw.
+    fn finish(api: &Api, paced: &mut Paced, end: End) -> After {
         if !paced.callback.is_null() {
             // SAFETY: we own this proxy; destroying it inside its own `done` is the usual pattern.
             unsafe { (api.destroy)(paced.callback) };
             paced.callback = std::ptr::null_mut();
         }
-        let thaw = if fired { paced.pace.done() } else { paced.pace.reset().thaw };
-        (if thaw { paced.frozen_on.take() } else { None }, paced.watchdog.take())
+        let (thaw, turned_off) = match end {
+            End::Fired => (paced.pace.done(), false),
+            End::TimedOut => {
+                let timeout = paced.pace.timed_out();
+                (timeout.thaw, timeout.turned_off)
+            }
+            End::Reset => (paced.pace.reset().thaw, false),
+        };
+        After { thaw: if thaw { paced.frozen_on.take() } else { None }, watchdog: paced.watchdog.take(), turned_off }
     }
 
     /// Run outside any borrow: thawing can schedule GTK work.
-    fn thaw(api: &Api, after: (Option<gdk::Window>, Option<SourceId>)) {
-        if let Some(source) = after.1 {
+    fn thaw(api: &Api, after: After) {
+        if let Some(source) = after.watchdog {
             source.remove();
         }
-        if let Some(window) = after.0 {
+        if let Some(window) = after.thaw {
             if safe_window(&window) {
                 // SAFETY: balanced with the freeze in `after_paint`, on the same live toplevel.
                 unsafe { (api.thaw)(raw(&window)) };
@@ -288,7 +375,7 @@ mod runtime {
                 if paced.callback != callback {
                     return;
                 }
-                finish(api, &mut paced, true)
+                finish(api, &mut paced, End::Fired)
             };
             thaw(api, after);
         });
@@ -309,6 +396,7 @@ mod runtime {
         let id = shared.borrow().id;
         let source = glib::timeout_add_local_once(Duration::from_millis(WATCHDOG_MS), move || {
             static LATE: AtomicBool = AtomicBool::new(false);
+            static OFF: AtomicBool = AtomicBool::new(false);
             let Some(shared) = find(id) else { return };
             let after = {
                 let mut paced = shared.borrow_mut();
@@ -316,11 +404,17 @@ mod runtime {
                 if !paced.pace.frozen() {
                     return;
                 }
-                finish(api, &mut paced, true)
+                finish(api, &mut paced, End::TimedOut)
             };
-            note_once(&LATE, || {
-                format!("grove: no compositor frame callback within {WATCHDOG_MS} ms (normal while a window is hidden); painting anyway")
-            });
+            if after.turned_off {
+                note_once(&OFF, || {
+                    format!("grove: {MAX_MISSES} compositor frame callbacks in a row missed the {WATCHDOG_MS} ms watchdog; this window goes back to GTK's frame clock")
+                });
+            } else {
+                note_once(&LATE, || {
+                    format!("grove: no compositor frame callback within {WATCHDOG_MS} ms (normal while a window is hidden); painting anyway")
+                });
+            }
             thaw(api, after);
         });
         let mut paced = shared.borrow_mut();
@@ -338,7 +432,7 @@ mod runtime {
     }
 
     fn reset(api: &Api, shared: &Shared) {
-        let after = finish(api, &mut shared.borrow_mut(), false);
+        let after = finish(api, &mut shared.borrow_mut(), End::Reset);
         thaw(api, after);
     }
 
@@ -353,7 +447,7 @@ mod runtime {
         fn drop(&mut self) {
             let _ = WINDOWS.try_with(|w| w.borrow_mut().remove(&self.id));
             if let Ok(api) = api() {
-                let after = finish(api, self, false);
+                let after = finish(api, self, End::Reset);
                 thaw(api, after);
             }
             if let Some((clock, handler)) = self.clock.take() {
@@ -415,6 +509,14 @@ mod runtime {
         toplevel.connect_unrealize(move |_| detach_clock(api, &on_unrealize));
         let on_unmap = shared.clone();
         toplevel.connect_unmap(move |_| reset(api, &on_unmap));
+        let on_focus = shared.clone();
+        toplevel.connect_focus_in_event(move |_, _| {
+            static RESUMED: AtomicBool = AtomicBool::new(false);
+            if on_focus.borrow_mut().pace.resume() {
+                note_once(&RESUMED, || format!("grove: {ENV}=compositor: a window that had fallen back to GTK's clock is trying compositor pacing again"));
+            }
+            glib::Propagation::Proceed
+        });
         if toplevel.is_realized() {
             attach_clock(api, &shared, &toplevel);
         }
@@ -491,6 +593,83 @@ mod tests {
         assert!(!pace.after_paint());
     }
 
+    /// Draw, freeze, and let the watchdog expire: what a window whose callbacks never arrive does.
+    fn missed_frame(pace: &mut Pace) -> Timeout {
+        assert!(pace.draw(), "asks for a callback");
+        assert!(pace.after_paint(), "freezes");
+        pace.timed_out()
+    }
+
+    #[test]
+    fn repeated_timeouts_hand_the_window_back_to_gtk() {
+        let mut pace = Pace::default();
+        for _ in 1..MAX_MISSES {
+            assert_eq!(missed_frame(&mut pace), Timeout { thaw: true, turned_off: false });
+            assert!(!pace.off());
+        }
+        assert_eq!(missed_frame(&mut pace), Timeout { thaw: true, turned_off: true }, "the last miss still thaws");
+        assert!(pace.off() && !pace.frozen());
+        // From now on GTK paints on its own clock: no requests, no freezes, no watchdog.
+        for _ in 0..100 {
+            assert!(!pace.draw());
+            assert!(!pace.after_paint());
+            assert!(!pace.frozen());
+        }
+        // Hiding and showing does not turn it back on, and a window that never got a callback
+        // stays on GTK's clock when focused.
+        pace.reset();
+        assert!(!pace.resume());
+        assert!(!pace.draw());
+    }
+
+    #[test]
+    fn a_callback_between_misses_starts_the_count_over() {
+        let mut pace = Pace::default();
+        for _ in 0..50 {
+            for _ in 1..MAX_MISSES {
+                assert!(!missed_frame(&mut pace).turned_off);
+            }
+            assert!(pace.draw());
+            assert!(pace.after_paint());
+            assert!(pace.done());
+        }
+        assert!(!pace.off(), "a one-off missed callback only costs that frame");
+    }
+
+    #[test]
+    fn unmapping_starts_the_count_over() {
+        let mut pace = Pace::default();
+        for _ in 0..20 {
+            for _ in 1..MAX_MISSES {
+                assert!(!missed_frame(&mut pace).turned_off);
+            }
+            assert!(pace.draw());
+            assert!(pace.after_paint());
+            assert_eq!(pace.reset(), Reset { drop_callback: true, thaw: true });
+        }
+        assert!(!pace.off(), "hidden-window cleanup is not counted as a failure");
+    }
+
+    #[test]
+    fn a_proven_window_retries_on_focus() {
+        let mut pace = Pace::default();
+        assert!(pace.draw());
+        assert!(pace.after_paint());
+        assert!(pace.done(), "callbacks have arrived for this window");
+        // Left animating on a hidden workspace: callbacks stop, and it falls back to GTK.
+        for _ in 0..MAX_MISSES {
+            missed_frame(&mut pace);
+        }
+        assert!(pace.off());
+        assert!(!pace.draw());
+        // Back in view and focused: compositor pacing again.
+        assert!(pace.resume());
+        assert!(!pace.resume(), "already on");
+        assert!(pace.draw());
+        assert!(pace.after_paint());
+        assert!(pace.done());
+    }
+
     #[test]
     fn steady_motion_alternates_paint_and_wait() {
         let mut pace = Pace::default();
@@ -499,6 +678,6 @@ mod tests {
             assert!(pace.after_paint());
             assert!(pace.done());
         }
-        assert_eq!(pace, Pace::default());
+        assert_eq!(pace, Pace { proven: true, ..Pace::default() });
     }
 }

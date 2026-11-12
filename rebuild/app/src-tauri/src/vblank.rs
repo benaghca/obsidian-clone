@@ -15,8 +15,10 @@
 //! `EOPNOTSUPP`, for a plain blocking wait (no event, signal or flip), does Grove wait for the
 //! next multiple of the CRTC's real refresh period instead and report success. The period comes
 //! from the CRTC's current mode, read through libdrm, and is re-read once a second so a mode
-//! change is followed. When the mode cannot be read, the original error is returned, which is
-//! exactly today's behaviour (WebKit's timer). `GROVE_VBLANK_FALLBACK=off` turns this off.
+//! change is followed. A monitor whose mode has been readable keeps its last good period while
+//! a later read fails, so it stays paced while the read is retried. One whose mode was never
+//! readable gets the original error, which is exactly today's behaviour (WebKit's timer). A
+//! failed sleep also returns the original error. `GROVE_VBLANK_FALLBACK=off` turns this off.
 //!
 //! Idle cost: WebKit only waits for vblank while its display link has observers (something is
 //! animating or a page update is pending). With nothing on screen changing, no call arrives.
@@ -24,7 +26,7 @@
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CStr};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Set to `off` (or `0`, `no`, `false`) to leave WebKit's own fallback timer in place.
 pub const ENV: &str = "GROVE_VBLANK_FALLBACK";
@@ -54,7 +56,8 @@ const MIN_HZ: u64 = 20;
 const MAX_HZ: u64 = 1000;
 /// An emulated wait never goes further ahead than this, whatever the request asks.
 const MAX_WAIT: Duration = Duration::from_secs(1);
-/// How long a CRTC's period is trusted before the mode is read again.
+/// How long a CRTC's period is trusted before the mode is read again (and, for a monitor
+/// whose mode became unreadable, how often the read is retried).
 const PERIOD_TTL: Duration = Duration::from_secs(1);
 
 /// `drmVBlankReq` from xf86drm.h. `kind` is the `drmVBlankSeqType` enum (an `int`-sized value).
@@ -248,22 +251,6 @@ pub fn target(now_ns: u64, period_ns: u64, kind: c_uint, want: c_uint, max_ahead
     Target { sequence, at_ns: sequence * period }
 }
 
-fn now_ns() -> Option<u64> {
-    let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
-    // SAFETY: `ts` is a valid out-pointer for the call.
-    if unsafe { clock_gettime(CLOCK_MONOTONIC, &mut ts) } != 0 {
-        return None;
-    }
-    Some(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64)
-}
-
-fn sleep_until(at_ns: u64) {
-    let ts = Timespec { tv_sec: (at_ns / 1_000_000_000) as c_long, tv_nsec: (at_ns % 1_000_000_000) as c_long };
-    // An absolute deadline, so an interrupted sleep just resumes towards the same instant.
-    // SAFETY: `ts` is valid; a null remainder is allowed with TIMER_ABSTIME.
-    while unsafe { clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, std::ptr::null_mut()) } == EINTR {}
-}
-
 unsafe fn lookup(handle: *mut c_void, name: &CStr) -> *mut c_void {
     dlsym(handle, name.as_ptr())
 }
@@ -334,31 +321,185 @@ fn read_period(fd: c_int, index: usize) -> Option<u64> {
     }
 }
 
-struct Known {
-    fd: c_int,
-    index: usize,
-    period_ns: Option<u64>,
-    read_at: Instant,
+/// What `answer` needs from the system, so tests can stand in for the clock, the sleep, the
+/// display mode and the device behind an fd.
+pub trait Platform {
+    /// Now on the monotonic clock, in nanoseconds.
+    fn now_ns(&mut self) -> Option<u64>;
+    /// Sleep until `at_ns` on the monotonic clock. `Err(errno)` when the sleep failed.
+    fn sleep_until(&mut self, at_ns: u64) -> Result<(), c_int>;
+    /// The current mode's period on CRTC number `index` of the device open on `fd`.
+    fn read_period(&mut self, fd: c_int, index: usize) -> Option<u64>;
+    /// What `fd` is open on, to tell a reused fd number from the same device.
+    fn device(&mut self, fd: c_int) -> Option<String>;
 }
 
-/// The period for one CRTC, cached for a second per (fd, CRTC). WebKit has one monitor thread
-/// per display, so this is touched by a handful of threads at most.
-fn period_for(fd: c_int, index: usize) -> Option<u64> {
-    static KNOWN: Mutex<Vec<Known>> = Mutex::new(Vec::new());
-    let mut known = KNOWN.lock().unwrap_or_else(|e| e.into_inner());
-    let now = Instant::now();
-    if let Some(entry) = known.iter_mut().find(|k| k.fd == fd && k.index == index) {
-        if now.duration_since(entry.read_at) < PERIOD_TTL {
-            return entry.period_ns;
+/// The real clock, sleep, libdrm mode reads and `/proc/self/fd` links.
+struct System;
+
+impl Platform for System {
+    fn now_ns(&mut self) -> Option<u64> {
+        let mut ts = Timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: `ts` is a valid out-pointer for the call.
+        if unsafe { clock_gettime(CLOCK_MONOTONIC, &mut ts) } != 0 {
+            return None;
         }
-        entry.period_ns = read_period(fd, index);
-        entry.read_at = now;
-        return entry.period_ns;
+        Some(ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64)
     }
-    let period_ns = read_period(fd, index);
-    known.retain(|k| now.duration_since(k.read_at) < PERIOD_TTL * 10);
-    known.push(Known { fd, index, period_ns, read_at: now });
-    period_ns
+
+    fn sleep_until(&mut self, at_ns: u64) -> Result<(), c_int> {
+        let ts = Timespec { tv_sec: (at_ns / 1_000_000_000) as c_long, tv_nsec: (at_ns % 1_000_000_000) as c_long };
+        // An absolute deadline, so an interrupted sleep just resumes towards the same instant.
+        loop {
+            // SAFETY: `ts` is valid; a null remainder is allowed with TIMER_ABSTIME.
+            match unsafe { clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, std::ptr::null_mut()) } {
+                0 => return Ok(()),
+                EINTR => continue,
+                error => return Err(error),
+            }
+        }
+    }
+
+    fn read_period(&mut self, fd: c_int, index: usize) -> Option<u64> {
+        read_period(fd, index)
+    }
+
+    fn device(&mut self, fd: c_int) -> Option<String> {
+        std::fs::read_link(format!("/proc/self/fd/{fd}")).ok().map(|path| path.to_string_lossy().into_owned())
+    }
+}
+
+/// A CRTC's period, and whether this lookup could read the mode.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Period {
+    /// Read from the current mode.
+    Read(u64),
+    /// The mode could not be read just now; an established monitor keeps its last good period.
+    Kept(u64),
+}
+
+impl Period {
+    pub fn ns(self) -> u64 {
+        match self {
+            Period::Read(ns) | Period::Kept(ns) => ns,
+        }
+    }
+}
+
+struct Entry {
+    fd: c_int,
+    index: usize,
+    device: Option<String>,
+    /// The last period read from this CRTC's mode, if it ever had a readable one.
+    last_good: Option<u64>,
+    readable: bool,
+    read_at_ns: u64,
+}
+
+impl Entry {
+    fn period(&self) -> Option<Period> {
+        self.last_good.map(|ns| if self.readable { Period::Read(ns) } else { Period::Kept(ns) })
+    }
+}
+
+/// The CRTCs WebKit waits on. A monitor that ever had a readable mode keeps its last good period
+/// through failed reads, so it stays paced while the mode is retried once a period of
+/// `PERIOD_TTL`; one that never had a readable mode gets `None` (the original error, so WebKit
+/// keeps its own timer). Identity is the device behind the fd plus the CRTC index: a fd number
+/// reused for another device starts over, and a new fd on the same device inherits the period.
+pub struct Monitors {
+    entries: Vec<Entry>,
+}
+
+/// More than any machine has CRTCs times the times WebKit reopens a device.
+const MAX_MONITORS: usize = 16;
+
+impl Monitors {
+    pub const fn new() -> Self {
+        Monitors { entries: Vec::new() }
+    }
+
+    pub fn period(&mut self, platform: &mut impl Platform, fd: c_int, index: usize, now_ns: u64) -> Option<Period> {
+        let ttl = PERIOD_TTL.as_nanos() as u64;
+        let found = self.entries.iter().position(|e| e.fd == fd && e.index == index);
+        if let Some(i) = found {
+            if now_ns.saturating_sub(self.entries[i].read_at_ns) < ttl {
+                return self.entries[i].period();
+            }
+        }
+        let device = platform.device(fd);
+        let i = match found {
+            Some(i) => {
+                let entry = &mut self.entries[i];
+                if entry.device != device {
+                    // The fd number now names something else: nothing carries over.
+                    entry.device = device;
+                    entry.last_good = None;
+                }
+                i
+            }
+            None => {
+                let inherited = device.as_ref().and_then(|device| {
+                    self.entries
+                        .iter()
+                        .filter(|e| e.index == index && e.device.as_ref() == Some(device) && e.last_good.is_some())
+                        .max_by_key(|e| e.read_at_ns)
+                        .and_then(|e| e.last_good)
+                });
+                if self.entries.len() >= MAX_MONITORS {
+                    if let Some(oldest) = (0..self.entries.len()).min_by_key(|&i| self.entries[i].read_at_ns) {
+                        self.entries.swap_remove(oldest);
+                    }
+                }
+                self.entries.push(Entry { fd, index, device, last_good: inherited, readable: false, read_at_ns: now_ns });
+                self.entries.len() - 1
+            }
+        };
+        let read = platform.read_period(fd, index);
+        let entry = &mut self.entries[i];
+        entry.read_at_ns = now_ns;
+        entry.readable = read.is_some();
+        if read.is_some() {
+            entry.last_good = read;
+        }
+        entry.period()
+    }
+}
+
+impl Default for Monitors {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// The outcome of one refused wait.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Answer {
+    /// Waited until `target`; report success.
+    Waited { target: Target, period: Period },
+    /// No readable mode, ever: return the original error.
+    NoMode,
+    /// The clock could not be read: return the original error.
+    NoClock,
+    /// The sleep failed with this errno: return the original error rather than claim a wait.
+    SleepFailed(c_int),
+}
+
+/// Answer one refused wait from the CRTC's refresh period. The table is locked only for the
+/// lookup, never across the sleep.
+pub fn answer(monitors: &Mutex<Monitors>, platform: &mut impl Platform, fd: c_int, kind: c_uint, want: c_uint) -> Answer {
+    let index = crtc_index(kind);
+    let Some(now) = platform.now_ns() else { return Answer::NoClock };
+    let period = monitors.lock().unwrap_or_else(|e| e.into_inner()).period(platform, fd, index, now);
+    let Some(period) = period else { return Answer::NoMode };
+    let max_ahead = (MAX_WAIT.as_nanos() as u64 / period.ns()).max(1);
+    let goal = target(now, period.ns(), kind, want, max_ahead);
+    if goal.at_ns > now {
+        if let Err(error) = platform.sleep_until(goal.at_ns) {
+            return Answer::SleepFailed(error);
+        }
+    }
+    Answer::Waited { target: goal, period }
 }
 
 fn note_once(flag: &AtomicBool, message: impl FnOnce() -> String) {
@@ -367,28 +508,38 @@ fn note_once(flag: &AtomicBool, message: impl FnOnce() -> String) {
     }
 }
 
-/// Answer one refused wait from the CRTC's own refresh period. `None` leaves the error alone.
+/// Answer one refused wait for real. `None` leaves the driver's error alone.
 fn emulate(fd: c_int, vbl: *mut DrmVBlank, kind: c_uint, want: c_uint) -> Option<()> {
+    static MONITORS: Mutex<Monitors> = Mutex::new(Monitors::new());
     static STARTED: AtomicBool = AtomicBool::new(false);
     static NO_MODE: AtomicBool = AtomicBool::new(false);
+    static KEPT: AtomicBool = AtomicBool::new(false);
+    static NO_SLEEP: AtomicBool = AtomicBool::new(false);
     let index = crtc_index(kind);
-    let Some(period) = period_for(fd, index) else {
-        note_once(&NO_MODE, || {
-            format!("grove: DRM vblank is not supported and the display mode of CRTC {index} could not be read; WebKit keeps its own frame timer")
-        });
-        return None;
+    let (goal, period) = match answer(&MONITORS, &mut System, fd, kind, want) {
+        Answer::Waited { target, period } => (target, period),
+        Answer::NoMode => {
+            note_once(&NO_MODE, || {
+                format!("grove: DRM vblank is not supported and the display mode of CRTC {index} could not be read; WebKit keeps its own frame timer")
+            });
+            return None;
+        }
+        Answer::NoClock => return None,
+        Answer::SleepFailed(error) => {
+            note_once(&NO_SLEEP, || format!("grove: the emulated vblank wait failed (clock_nanosleep error {error}); passing the driver's error back"));
+            return None;
+        }
     };
-    let now = now_ns()?;
-    let max_ahead = (MAX_WAIT.as_nanos() as u64 / period).max(1);
-    let goal = target(now, period, kind, want, max_ahead);
     note_once(&STARTED, || {
         format!(
             "grove: DRM vblank is not supported by the display driver; timing WebKit's frames at {:.2} Hz from the display mode ({ENV}=off turns this off)",
-            1e9 / period as f64
+            1e9 / period.ns() as f64
         )
     });
-    if goal.at_ns > now {
-        sleep_until(goal.at_ns);
+    if let Period::Kept(ns) = period {
+        note_once(&KEPT, || {
+            format!("grove: the display mode of CRTC {index} could not be read; keeping the last good {:.2} Hz while retrying", 1e9 / ns as f64)
+        });
     }
     // SAFETY: the caller's `vbl` is valid for the whole call, as for the real function.
     unsafe {
@@ -540,6 +691,7 @@ mod tests {
     #[ignore]
     fn live_device_pacing() {
         use std::os::fd::AsRawFd;
+        use std::time::Instant;
         extern "C" {
             fn dlopen(name: *const c_char, flags: c_int) -> *mut c_void;
         }
@@ -590,6 +742,143 @@ mod tests {
             let want = 1e9 / period as f64;
             assert!((hz - want).abs() / want < 0.02, "{hz} Hz against a {want} Hz mode");
         }
+    }
+
+    /// A stand-in clock, sleep, mode and device table. Sleeping moves the clock to the deadline.
+    struct Fake {
+        now: u64,
+        mode: Option<u64>,
+        devices: std::collections::HashMap<c_int, String>,
+        reads: usize,
+        sleeps: Vec<u64>,
+        sleep_error: Option<c_int>,
+    }
+
+    impl Fake {
+        fn new(mode: Option<u64>) -> Self {
+            let devices = [(30, "/dev/dri/card1".to_string())].into();
+            Fake { now: 7_000_000_000, mode, devices, reads: 0, sleeps: Vec::new(), sleep_error: None }
+        }
+    }
+
+    impl Platform for Fake {
+        fn now_ns(&mut self) -> Option<u64> {
+            Some(self.now)
+        }
+        fn sleep_until(&mut self, at_ns: u64) -> Result<(), c_int> {
+            if let Some(error) = self.sleep_error {
+                return Err(error);
+            }
+            self.sleeps.push(at_ns);
+            self.now = self.now.max(at_ns);
+            Ok(())
+        }
+        fn read_period(&mut self, _fd: c_int, _index: usize) -> Option<u64> {
+            self.reads += 1;
+            self.mode
+        }
+        fn device(&mut self, fd: c_int) -> Option<String> {
+            self.devices.get(&fd).cloned()
+        }
+    }
+
+    const P240: u64 = 4_167_188; // 239.97 Hz
+    const P60: u64 = 16_666_666;
+
+    /// WebKit's monitor loop: wait for the next vblank, do a little work, repeat.
+    fn waits(monitors: &Mutex<Monitors>, fake: &mut Fake, fd: c_int, count: usize) -> Vec<Answer> {
+        (0..count)
+            .map(|_| {
+                let answer = answer(monitors, fake, fd, DRM_VBLANK_RELATIVE, 1);
+                fake.now += 300_000;
+                answer
+            })
+            .collect()
+    }
+
+    #[test]
+    fn an_established_monitor_stays_paced_while_its_mode_is_unreadable() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        // WebKit's probe, then a second of frames: all read from the mode.
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::Waited { period: Period::Read(P240), .. }));
+        assert!(waits(&monitors, &mut fake, 30, 240).iter().all(|a| matches!(a, Answer::Waited { period: Period::Read(P240), .. })));
+
+        // The mode goes away (hotplug, a mode switch in progress). For 2.5 s of waits, every one
+        // still sleeps to the next boundary of the last good period, and the read is retried.
+        fake.mode = None;
+        let reads = fake.reads;
+        let sleeps = fake.sleeps.len();
+        let during = waits(&monitors, &mut fake, 30, 600);
+        assert!(during.iter().skip(240).all(|a| matches!(a, Answer::Waited { period: Period::Kept(P240), .. })), "{:?}", &during[240..245]);
+        assert!(during.iter().all(|a| matches!(a, Answer::Waited { .. })), "no wait is refused once established");
+        assert_eq!(fake.sleeps.len() - sleeps, 600, "every wait slept; none returned at once");
+        for pair in fake.sleeps[sleeps..].windows(2) {
+            assert_eq!(pair[1] - pair[0], P240, "still evenly paced");
+        }
+        assert!((2..=4).contains(&(fake.reads - reads)), "retried about once a second, not per frame: {}", fake.reads - reads);
+
+        // The mode comes back, at a different rate: picked up within a second.
+        fake.mode = Some(P60);
+        let after = waits(&monitors, &mut fake, 30, 360); // 1.5 s at 240 Hz
+        assert!(matches!(after.last(), Some(Answer::Waited { period: Period::Read(P60), .. })), "{:?}", after.last());
+        let tail = &fake.sleeps[fake.sleeps.len() - 10..];
+        assert!(tail.windows(2).all(|pair| pair[1] - pair[0] == P60));
+    }
+
+    #[test]
+    fn a_monitor_that_never_had_a_mode_gets_the_original_error() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(None);
+        for _ in 0..5 {
+            assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::NoMode);
+            assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+            fake.now += 2_000_000_000;
+        }
+        assert!(fake.sleeps.is_empty(), "never sleeps without a period");
+    }
+
+    #[test]
+    fn the_last_good_period_follows_the_device_not_the_fd_number() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        waits(&monitors, &mut fake, 30, 10);
+        fake.mode = None;
+        fake.now += 2_000_000_000;
+        // WebKit reopens the same device on a new fd while the mode is unreadable: still paced.
+        fake.devices.insert(31, "/dev/dri/card1".into());
+        assert!(matches!(answer(&monitors, &mut fake, 31, DRM_VBLANK_RELATIVE, 1), Answer::Waited { period: Period::Kept(P240), .. }));
+        // The same CRTC index on another device is not the same monitor.
+        fake.devices.insert(32, "/dev/dri/card0".into());
+        assert_eq!(answer(&monitors, &mut fake, 32, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+        // Nor is fd 30 once its number is reused for another device.
+        fake.devices.insert(30, "/dev/dri/card0".into());
+        fake.now += 2_000_000_000;
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+        // An fd whose device cannot be named inherits nothing.
+        assert_eq!(answer(&monitors, &mut fake, 99, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+    }
+
+    #[test]
+    fn the_table_stays_small() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P60));
+        for fd in 0..100 {
+            fake.devices.insert(fd, format!("/dev/dri/card{fd}"));
+            answer(&monitors, &mut fake, fd, DRM_VBLANK_RELATIVE, 0);
+            fake.now += 1;
+        }
+        assert!(monitors.lock().unwrap().entries.len() <= MAX_MONITORS);
+    }
+
+    #[test]
+    fn a_failed_sleep_is_not_reported_as_a_wait() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        fake.sleep_error = Some(22);
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::SleepFailed(22));
+        // A probe needs no sleep, so it still succeeds.
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::Waited { .. }));
     }
 
     #[test]
