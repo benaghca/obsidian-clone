@@ -86,6 +86,29 @@ class Marks {
   }
 }
 
+/** In-place edits of a list the page already holds. A new array does not need this; assigning `files` or `notes` rebuilds. */
+const listFlags = new WeakMap<object, { stale: boolean }>();
+
+function watchList(list: { push: (...args: never[]) => unknown; pop: () => unknown; shift: () => unknown; unshift: (...args: never[]) => unknown; splice: (...args: never[]) => unknown }): { stale: boolean } {
+  const existing = listFlags.get(list);
+  if (existing) return existing;
+  const flag = { stale: false };
+  listFlags.set(list, flag);
+  for (const method of ["push", "pop", "shift", "unshift", "splice"] as const) {
+    const orig = list[method] as (this: unknown, ...args: unknown[]) => unknown;
+    Object.defineProperty(list, method, {
+      configurable: true,
+      writable: true,
+      value(this: unknown, ...args: unknown[]) {
+        const out = orig.apply(this, args);
+        flag.stale = true;
+        return out;
+      },
+    });
+  }
+  return flag;
+}
+
 function reduceBatch(batch: { kind: string; paths: string[] }[]) {
   batchVisits = 0;
   let refresh = false;
@@ -124,19 +147,33 @@ export class Vault {
 
   set files(files: FileEntry[]) {
     this.fileList = files;
-    const byPath = new Map<string, FileEntry>();
-    for (const file of files) if (!byPath.has(file.path)) byPath.set(file.path, file);
-    this.byPath = byPath;
+    this.reindexFiles();
   }
 
-  notes: NoteRef[] = [];
+  /** Notes derived from the file list, or assigned by a test. Replacing the array rebuilds the note lookup. */
+  get notes(): NoteRef[] {
+    return this.noteList;
+  }
+
+  set notes(notes: NoteRef[]) {
+    this.noteList = notes;
+    this.reindexNotes();
+  }
   links: LinkIndex = { outgoing: {} };
   /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
   isExcluded: (path: string) => boolean = () => false;
 
   private fileList: FileEntry[] = [];
+  private noteList: NoteRef[] = [];
   /** First entry wins when one path is listed twice, matching a list scan that stops at the first hit. */
   private byPath = new Map<string, FileEntry>();
+  /** First entry whose path matches ignoring case. Same order as a `files.find` on `toLowerCase`. */
+  private byLower = new Map<string, FileEntry>();
+  private indexedFiles: FileEntry[] | null = null;
+  private indexedFileLen = -1;
+  private notePaths = new Set<string>();
+  private indexedNotes: NoteRef[] | null = null;
+  private indexedNoteLen = -1;
   /** Disk events waiting for this frame's single refresh. */
   private pending: { kind: string; paths: string[] }[] | null = null;
   /** Bumped when a pending flush must not apply: a new open, or the page going away. */
@@ -328,6 +365,7 @@ export class Vault {
 
   /** Every file (not folders) as a link target: notes by their name without ".md", other files by their whole name. */
   fileRefs(): NoteRef[] {
+    this.syncFiles();
     if (this.refs?.files !== this.files) {
       const notes = new Map(this.notes.map((n) => [n.path, n]));
       this.refs = { files: this.files, out: this.files.filter((f) => !f.is_dir).map((f) => notes.get(f.path) ?? { name: noteName(f.path), path: f.path }) };
@@ -337,6 +375,7 @@ export class Vault {
 
   /** The notes that aren't excluded (Settings → Files and links → Excluded files). */
   includedNotes(): NoteRef[] {
+    this.syncNotes();
     const c = this.included;
     if (c && c.notes === this.notes && c.test === this.isExcluded) return c.out;
     const out = this.notes.filter((n) => !this.isExcluded(n.path));
@@ -346,24 +385,81 @@ export class Vault {
 
   /** Whether a link target points at a file (sets of names and paths, made once per file list). */
   linkExists(target: string, from: string | null): boolean {
+    this.syncFiles();
+    this.syncNotes();
     if (this.targets?.files !== this.files) this.targets = { files: this.files, exists: linkTargets(this.files, this.notes) };
     return this.targets.exists(target, from);
   }
 
-  /** The list entry for `path`, or none. */
+  /** The list entry for `path`, or none. The first entry wins when a path is listed twice. */
   entry(path: string): FileEntry | undefined {
+    this.syncFiles();
     return this.byPath.get(path);
   }
 
+  /** The first entry whose path equals `path` ignoring case, or none. */
+  matchPath(path: string): FileEntry | undefined {
+    this.syncFiles();
+    return this.byLower.get(path.toLowerCase());
+  }
+
+  /** Whether `path` is in the current note list. Comparison is case-sensitive, as a scan of `notes` is. */
+  hasNote(path: string): boolean {
+    this.syncNotes();
+    return this.notePaths.has(path);
+  }
+
   isFolder(path: string) {
-    return this.byPath.get(path)?.is_dir === true;
+    return this.entry(path)?.is_dir === true;
   }
 
   /** Mark a file as just modified (our own saves, or a change on disk), for views that cache by modified time. */
   private touch(path: string) {
-    const entry = this.byPath.get(path);
+    const entry = this.entry(path);
     if (entry) entry.mtime_ms = Date.now();
     this.modified.emit(path);
+  }
+
+  /** Rebuild when the array is replaced, or when a push, splice, or length change edits it in place. */
+  private syncFiles() {
+    const flag = listFlags.get(this.fileList);
+    if (!flag || flag.stale || this.indexedFiles !== this.fileList || this.indexedFileLen !== this.fileList.length) this.reindexFiles();
+  }
+
+  private reindexFiles() {
+    const same = this.indexedFiles === this.fileList;
+    const byPath = new Map<string, FileEntry>();
+    const byLower = new Map<string, FileEntry>();
+    for (const file of this.fileList) {
+      if (!byPath.has(file.path)) byPath.set(file.path, file);
+      const lower = file.path.toLowerCase();
+      if (!byLower.has(lower)) byLower.set(lower, file);
+    }
+    this.byPath = byPath;
+    this.byLower = byLower;
+    this.indexedFiles = this.fileList;
+    this.indexedFileLen = this.fileList.length;
+    watchList(this.fileList).stale = false;
+    // Identity-keyed caches keep the old contents when the same array is edited in place.
+    if (same) {
+      this.refs = null;
+      this.targets = null;
+    }
+  }
+
+  private syncNotes() {
+    const flag = listFlags.get(this.noteList);
+    if (!flag || flag.stale || this.indexedNotes !== this.noteList || this.indexedNoteLen !== this.noteList.length) this.reindexNotes();
+  }
+
+  private reindexNotes() {
+    const paths = new Set<string>();
+    for (const note of this.noteList) paths.add(note.path);
+    this.notePaths = paths;
+    this.indexedNotes = this.noteList;
+    this.indexedNoteLen = this.noteList.length;
+    watchList(this.noteList).stale = false;
+    this.included = null;
   }
 
   /** We wrote a note to disk: it is modified now, and the link index is read again a moment later. */

@@ -400,7 +400,7 @@ export class Workspace {
   }
 
   canUndoClose() {
-    return this.closed.some((c) => c.saved.type || (c.saved.path && this.vault.notes.some((n) => n.path === c.saved.path)));
+    return this.closed.some((c) => c.saved.type || (c.saved.path && this.vault.hasNote(c.saved.path)));
   }
 
   /** Obsidian's "Undo close tab": reopen the last closed tab where it was (or in the active pane). */
@@ -812,7 +812,7 @@ export class Workspace {
   }
 
   private loadTab(saved: SavedTab): Tab | null {
-    const isNote = (p: unknown): p is string => typeof p === "string" && this.vault.notes.some((n) => n.path === p);
+    const isNote = (p: unknown): p is string => typeof p === "string" && this.vault.hasNote(p);
     return loadTab(saved, () => this.blankTab(), isNote);
   }
 

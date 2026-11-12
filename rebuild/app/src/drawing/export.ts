@@ -32,7 +32,7 @@ export async function exportDrawing(ws: Workspace, path: string, kind: PictureKi
   const name = fileName(to);
   try {
     const scene = await savedScene(path);
-    const taken = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
+    const taken = ws.vault.matchPath(to);
     if (taken?.is_dir) throw new Error(`“${name}” is a folder`);
     if (taken) {
       const answer = await confirmDialog({ title: `Replace “${name}”?`, message: "A file with that name is already there.", confirm: "Replace", warning: true });

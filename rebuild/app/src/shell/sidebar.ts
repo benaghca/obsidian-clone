@@ -671,7 +671,7 @@ function createBookmarksView(ws: Workspace, bookmarks: Bookmarks, menus: () => M
     const paths = bookmarks.list();
     list.replaceChildren(
       ...paths.map((path) => {
-        const entry = ws.vault.files.find((f) => f.path === path)!;
+        const entry = ws.vault.entry(path)!;
         const row = h(
           "div",
           {

@@ -512,7 +512,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         const rows = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(row);
         // `this`, when the YAML reads it: its note's row (a copy, so its context has no `this` of its own), or any file's, such as the .base itself.
         const hostNow = hostPath();
-        const hostFile = hostNow === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === hostNow)?.file ?? ws.vault.files.find(f => f.path === hostNow);
+        const hostFile = hostNow === null || !/\bthis\b/.test(source) ? undefined : rows.find(r => r.file.path === hostNow)?.file ?? ws.vault.entry(hostNow);
         host = hostFile && row(hostFile);
         if (host) for (const r of rows) r.host = host;
         const matches = model!.select(rows,true);model!.total=matches.length;
