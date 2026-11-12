@@ -154,8 +154,10 @@ export class Vault {
   private linksRequest = 0;
   /** Local edits a file-list read that started earlier must not be folded onto. */
   private deltas: { vault: string; request: number; apply: (files: FileEntry[]) => FileEntry[] | null }[] = [];
-  /** One extra read when a snapshot cannot be ordered against a local edit. */
-  private refolding = false;
+  /** A confirmation read is already running. A newer edit asks for another after it settles. */
+  private confirming = false;
+  /** The running confirmation is no longer newer than every local edit. */
+  private confirmAgain = false;
   /** Advances when a disk read installs. Optimistic patches stay on the generation they started from. */
   private listEpoch = 0;
   /** Path pieces the last files change added or removed. Null means every open note may show a different link. */
@@ -182,6 +184,7 @@ export class Vault {
       this.filesRequest += 1;
       this.linksRequest += 1;
       this.deltas = [];
+      this.confirmAgain = false;
       this.listEpoch += 1;
     });
   }
@@ -229,17 +232,31 @@ export class Vault {
     if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     // A read that began before a local edit cannot be ordered against it. The
     // snapshot may omit the edit, or it may already contain a later outside
-    // change. Keep the patched list and read again after the edit.
+    // change. Keep the patched list and read again after the edit. A further
+    // edit during that confirmation schedules another read once it settles.
     if (this.deltas.some((delta) => delta.vault === vault && mine <= delta.request)) {
-      if (!this.refolding && mine === this.filesRequest) {
-        this.refolding = true;
-        void this.refreshFiles().catch(() => {}).finally(() => { this.refolding = false; });
-      }
+      this.confirmAgain = true;
+      this.scheduleConfirm();
       return;
     }
     this.deltas = [];
+    this.confirmAgain = false;
     this.listEpoch += 1;
     this.show(listed);
+  }
+
+  /** Keep reading until a snapshot that started after the latest edit can install. */
+  private scheduleConfirm() {
+    if (this.confirming) return;
+    this.confirming = true;
+    void this.confirmLoop().finally(() => { this.confirming = false; });
+  }
+
+  private async confirmLoop() {
+    while (this.confirmAgain && pageOwnsDisk()) {
+      this.confirmAgain = false;
+      await this.refreshFiles();
+    }
   }
 
   /** Generation of the last file list installed from disk. */
@@ -404,6 +421,7 @@ export class Vault {
     this.filesRequest += 1;
     this.linksRequest += 1;
     this.deltas = [];
+    this.confirmAgain = false;
     this.listEpoch += 1;
   }
 

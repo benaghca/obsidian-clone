@@ -5,7 +5,7 @@
 // file, and a full read still has to bring the folders it created.
 
 import type { FileEntry } from "./api";
-import { linkSpellings } from "./links/internal";
+import { linkSpellings, markdownURL } from "./links/internal";
 import { fileName, isNoteFile, noteName, parentDir } from "./paths";
 
 /**
@@ -120,6 +120,21 @@ export function listTokens(prev: readonly { path: string }[], next: readonly { p
 }
 
 /**
+ * Markdown destinations are unescaped, then percent-decoded, before a link
+ * resolves (`bareTarget`). A mixed encoding such as `%43af%C3%A9` is not one
+ * spelling of `Café`, so the decoded text is compared too.
+ */
+function decodedHay(text: string): string {
+  return markdownURL(text).replace(/(?:%[0-9a-f]{2})+/gi, (run) => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run;
+    }
+  }).toLowerCase();
+}
+
+/**
  * Whether an open note can draw a link differently after this file-list change.
  * An embed (`![`) draws another document, so the host source is not enough to
  * prove its links are unchanged. `filesChanged` then rebuilds decorations and
@@ -130,5 +145,8 @@ export function docNeedsFileRefresh(text: string, tokens: readonly string[] | nu
   if (!tokens.length) return false;
   if (text.includes("![")) return true;
   const hay = text.toLowerCase();
-  return tokens.some((token) => hay.includes(token));
+  if (tokens.some((token) => hay.includes(token))) return true;
+  if (!/%[0-9a-f]{2}/i.test(text)) return false;
+  const decoded = decodedHay(text);
+  return tokens.some((token) => decoded.includes(token));
 }

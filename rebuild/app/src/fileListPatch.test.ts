@@ -178,6 +178,34 @@ it("lets an outside change in an older snapshot win over a local create", async 
   expect(vault.notes.map((note) => note.path)).toEqual(["A.md", "C.md", "Outside.md"]);
 });
 
+it("reads a third time when another edit lands during the confirmation", async () => {
+  const vault = vaultWith([entry("Keep.md")]);
+  let calls = 0;
+  let releaseR1: (files: FileEntry[]) => void = () => {};
+  let releaseR2: (files: FileEntry[]) => void = () => {};
+  const disk = [entry("Keep.md"), entry("Later.md"), entry("Outside.md")];
+  vi.mocked(api.listFiles).mockImplementation(() => {
+    calls += 1;
+    if (calls === 1) return new Promise((resolve) => { releaseR1 = resolve; });
+    if (calls === 2) return new Promise((resolve) => { releaseR2 = resolve; });
+    return Promise.resolve(disk);
+  });
+  const pending = vault.refreshFiles();
+  expect(vault.adoptAdded(entry("LocalA.md"))).toBe(true);
+  releaseR1([entry("Keep.md"), entry("Outside.md")]);
+  await vi.waitFor(() => expect(calls).toBe(2));
+  expect(vault.adoptAdded(entry("LocalB.md"))).toBe(true);
+  expect(vault.entry("Outside.md")).toBeUndefined();
+  releaseR2([entry("Keep.md"), entry("Outside.md")]);
+  await pending;
+  await vi.waitFor(() => expect(vault.files).toBe(disk));
+  expect(calls).toBe(3);
+  expect(vault.entry("LocalA.md")).toBeUndefined();
+  expect(vault.entry("LocalB.md")).toBeUndefined();
+  expect(vault.entry("Outside.md")?.path).toBe("Outside.md");
+  expect(vault.notes.map((note) => note.path)).toEqual(["Keep.md", "Later.md", "Outside.md"]);
+});
+
 it("keeps a recreated file when a peer delete finishes after the watcher", async () => {
   const vault = vaultWith([entry("Gone.md"), entry("Keep.md")]);
   // Backend order. The watcher installs this array as it stands.
@@ -281,6 +309,81 @@ it("redraws a nested wikilink, an encoded link, and an embed on create, delete, 
   expect(docNeedsFileRefresh("[[Fresh name]]", renamed)).toBe(true);
   expect(docNeedsFileRefresh("[a](Projects/Other%20name.md)", renamed)).toBe(true);
   expect(docNeedsFileRefresh("plain prose", renamed)).toBe(false);
+});
+
+it("redraws a percent-encoded non-ASCII link, including a mixed encoding, on create, delete, and rename", () => {
+  const cafe = "Caf\u00e9.md";
+  const canonical = "[n](Caf%C3%A9.md)";
+  const mixed = "[n](%43af%C3%A9.md)";
+  const added = listTokens([{ path: "A.md" }], [{ path: "A.md" }, { path: cafe }]);
+  expect(docNeedsFileRefresh(canonical, added)).toBe(true);
+  expect(docNeedsFileRefresh(mixed, added)).toBe(true);
+  expect(docNeedsFileRefresh("[n](Other%20note.md)", added)).toBe(false);
+  const removed = listTokens([{ path: "A.md" }, { path: cafe }], [{ path: "A.md" }]);
+  expect(docNeedsFileRefresh(canonical, removed)).toBe(true);
+  expect(docNeedsFileRefresh(mixed, removed)).toBe(true);
+  const renamed = listTokens([{ path: cafe }], [{ path: "Tea.md" }]);
+  expect(docNeedsFileRefresh(canonical, renamed)).toBe(true);
+  expect(docNeedsFileRefresh(mixed, renamed)).toBe(true);
+  expect(docNeedsFileRefresh("plain prose", renamed)).toBe(false);
+
+  const vault = vaultWith([entry("A.md")]);
+  const doc = `${canonical}\n${mixed}`;
+  const view = {
+    state: EditorState.create({
+      doc,
+      extensions: [markdownSyntax, editingEmbed, readingMode.of(true), editorHost.of({
+        linkExists: (target: string) => vault.linkExists(target, null),
+      } as unknown as EditorHost)],
+    }),
+    hasFocus: true,
+    get visibleRanges() {
+      return [{ from: 0, to: this.state.doc.length }];
+    },
+    dispatch(spec: TransactionSpec) {
+      const tr = this.state.update(spec);
+      const startState = this.state;
+      this.state = tr.state;
+      lp.update({
+        view,
+        state: tr.state,
+        startState,
+        transactions: [tr],
+        changes: tr.changes,
+        docChanged: tr.docChanged,
+        selectionSet: !!tr.selection,
+        focusChanged: false,
+        viewportChanged: false,
+      } as unknown as ViewUpdate);
+    },
+  };
+  const lp = new LivePreview(view as unknown as EditorView);
+  const unresolved = () => {
+    let count = 0;
+    lp.decorations.between(0, doc.length, (_from, _to, deco) => {
+      if (typeof deco.spec.class === "string" && deco.spec.class.includes("is-unresolved")) count += 1;
+    });
+    return count;
+  };
+  const follow = () => {
+    const tokens = vault.fileTouch();
+    expect(docNeedsFileRefresh(canonical, tokens)).toBe(true);
+    expect(docNeedsFileRefresh(mixed, tokens)).toBe(true);
+    if (docNeedsFileRefresh(doc, tokens)) view.dispatch({ effects: filesChanged.of(null) });
+  };
+  expect(unresolved()).toBe(2);
+  expect(vault.adoptAdded(entry(cafe))).toBe(true);
+  follow();
+  expect(unresolved()).toBe(0);
+  expect(vault.dropPaths((path) => path === cafe)).toBe(true);
+  follow();
+  expect(unresolved()).toBe(2);
+  expect(vault.adoptAdded(entry(cafe))).toBe(true);
+  follow();
+  expect(unresolved()).toBe(0);
+  expect(vault.adoptMapped((path) => movedPath(path, cafe, "Tea.md"))).toBe(true);
+  follow();
+  expect(unresolved()).toBe(2);
 });
 
 it("drops the unresolved mark and the missing embed once the file list catches up", () => {
