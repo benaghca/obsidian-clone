@@ -1,6 +1,6 @@
 # Piece HZ: smoother frames on the 240 Hz screen (Claude)
 
-Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's diagnosis (`HZ_FABLE_DIAGNOSIS.md`). First commit `8210f65`. Round 1 fixes for Codex's review (`NOTES_HZ-REVIEW1-codex.md`, PASS-WITH-FIXES) come in the next commit; see "Round 1 fixes".
+Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's diagnosis (`HZ_FABLE_DIAGNOSIS.md`). First commit `8210f65`. Round 1 fixes for Codex's review (`NOTES_HZ-REVIEW1-codex.md`, PASS-WITH-FIXES) are in `e5bcc26`; see "Round 1 fixes". Round 2 fixes (`NOTES_HZ-REVIEW2-codex.md`, PASS-WITH-FIXES) are in the commit after it; see "Round 2 fixes".
 
 ## Summary
 
@@ -36,7 +36,8 @@ Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's 
    - It uses libdrm's `drmModeGetResources` and `drmModeGetCrtc`, found with `dlsym`.
    - It computes `htotal × vtotal / pixel clock`, so 239.97 Hz stays 239.97 rather than 240.
    - The period is cached for one second per monitor, so a mode change, such as switching to 60 Hz, is picked up within a second.
-   - A monitor is the device behind the fd (its `/proc/self/fd` link) plus the CRTC index. A new fd on the same device inherits the last good period; an fd number reused for another device starts over.
+   - A monitor is the device behind the fd plus the CRTC index. A new fd on the same device inherits the last good period; an fd number reused for another device starts over.
+   - **Round 2:** the device is checked on every lookup, including inside the one-second cache, with a `stat` of the open fd (filesystem, inode and device number). A cached or kept period is only ever used for the device it was read from. An fd whose device can't be checked gets only a mode read on that call.
    - **Round 1:** a monitor whose mode was readable once keeps its last good period when a later read fails. It stays paced while the read is retried once a second.
 5. Sleep with `clock_nanosleep` until the next multiple of that period on `CLOCK_MONOTONIC`, fill in the reply (sequence and timestamp) and return 0. If the sleep fails (anything but `EINTR`, which resumes), the original error goes back rather than a claimed wait (round 1).
    - Relative and absolute requests follow the kernel's rules, including 32-bit wraparound and `NEXTONMISS`.
@@ -79,6 +80,7 @@ Branch `rebuild/hz-claude`, from `8720db6`. Built from `HZ_TASK.md` and Fable's 
   - A broken present path therefore costs three 50 ms stalls once, not one per frame.
   - A callback resets the count, so a one-off miss only costs that frame. Unmap and unrealize also reset it, keeping hidden-window cleanup separate from failures.
   - A window that had received callbacks before it was turned off tries again on its next focus-in. Its misses most likely came from animating on a hidden workspace, where Hyprland sends no callbacks. A window that never received one stays on GTK's clock until it is reopened.
+  - **Round 2:** a retry uses up that earlier success. If the retry gets no callback before it is turned off again, later focus changes leave the window on GTK's clock. A broken path therefore costs at most one extra set of three stalls.
 
 **When it switches itself off.** Each case logs one line and leaves GTK as it is today:
 - `GROVE_FRAME_PACING` set to anything other than `compositor`;
@@ -170,20 +172,28 @@ Use a release build from this branch: `npm run build`, then `cargo build --relea
   - Identity: a new fd on the same device inherits the period. The same CRTC index on another device does not, nor does a reused fd number, nor an fd whose device can't be named.
   - The table stays at 16 entries or fewer.
   - A failed sleep is reported as `SleepFailed`, not a wait; a probe still succeeds.
+- **Round 2, A2 (cache identity):**
+  - A reused fd inside the cache second: fd 30 changes from card1 at 240 Hz to card0 with no mode, without the clock passing a second. WebKit's zero probe gets `NoMode`, 20 following waits get `NoMode`, and so does a wait past the cache second. None of them sleeps on card1's period. card0's own mode is used once readable.
+  - A reused fd on a device with a readable mode uses that device's rate on the first probe.
+  - The same device keeps its recovery: the cached read inside the second, the kept period past it with 20 waits all sleeping, and the same device reopened on the same fd number still kept.
+  - An fd whose device can't be checked: `NoMode` while the mode is unreadable, and a fresh read on every call once it is readable.
 - **Round 1, B:**
   - Three timeouts turn pacing off: each still thaws, and afterwards there are no requests or freezes for 100 frames.
   - A reset doesn't turn it back on, and a window that was never paced doesn't resume on focus.
   - A callback between misses resets the count (50 cycles, never off).
   - Unmapping resets the count.
   - A window that had received callbacks resumes on focus and paces again.
+  - Round 2: a focus retry that gets no callback is not repeated on later focus.
 
 **Suites.**
 - `cargo test --offline` in `rebuild/app/src-tauri`, first commit: **170 passed, 0 failed, 5 ignored**. One of the ignored tests is the new live test.
+- After the round 2 fixes: **184 passed, 0 failed, 5 ignored**. The live test reran at 239.97 Hz, gaps 4.118–4.218 ms, thread CPU 0.16–0.23 % of a core over three runs. The rise from about 0.11 % is the per-wait `stat`.
 - After the round 1 fixes: **179 passed, 0 failed, 5 ignored**. The live test was rerun after the refactor and still gives `240 waits: 239.97 Hz, gaps 4.121–4.219 ms, thread CPU 0.114 % of a core`.
 - `flock /tmp/grove-npm-test.lock npm test` in `rebuild/app`:
   - **First run: exit 1, a timing flake.** `test-friction.mjs` failed on `enter_list_item: 17 ms, 0 long tasks, slowest input 24 ms (budget 16)`. That check runs in a headless browser, and this piece changes no front-end code.
   - **Rerun once under the lock: exit 0.** Vitest passed 109 files and 1,648 tests, and the scripts printed 3,250 PASS lines.
   - **After the round 1 fixes, first run: exit 0.** Same totals: 109 files, 1,648 Vitest tests, 3,250 PASS lines.
+  - **After the round 2 fixes, first run: exit 0.** Same totals.
 
 ## What I could not verify without a window
 
@@ -206,6 +216,15 @@ Use a release build from this branch: `npm run build`, then `cargo build --relea
 | **P3:** interlaced, doublescan and `vscan` modes | Not taken. The period maths is unchanged and still right for progressive modes, including 239.97 Hz. Codex marked this as later compatibility work. |
 
 Unchanged: B is still opt-in, A2 still has its env switch, and there is no visible change, no new crate or package, and no system or driver change.
+
+## Round 2 fixes (Codex review `NOTES_HZ-REVIEW2-codex.md`)
+
+| Finding | Fix |
+|---|---|
+| **P2:** inside the one-second cache, `Monitors::period` returned a cached period for a reused (fd, CRTC) without checking the device, so another device on that fd could borrow the old monitor's period | The device behind the fd is checked before any cached period is used, on every lookup. A changed device, or one that can't be checked, clears the entry and reads the mode again on that call. `System::device` is now a `stat` of the open fd (filesystem, inode, device number) rather than the link path. The expensive mode read keeps its one-second cache. Regressions as listed under "Round 2, A2". |
+| **P3 (optional):** `proven` was a lifetime latch, so a broken path could stall three times on every focus | Taken, since it was a one-line change: a focus retry clears `proven`, so only a new callback re-arms it. Test: `a_failed_focus_retry_is_not_repeated`. |
+
+Unchanged: B is opt-in, A2 keeps `GROVE_VBLANK_FALLBACK`, and there is no visible change, no new crate or package, and no system or driver change. Interlaced and doublescan timing is still the "later" item.
 
 ## Files
 

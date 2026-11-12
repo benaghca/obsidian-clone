@@ -330,7 +330,8 @@ pub trait Platform {
     fn sleep_until(&mut self, at_ns: u64) -> Result<(), c_int>;
     /// The current mode's period on CRTC number `index` of the device open on `fd`.
     fn read_period(&mut self, fd: c_int, index: usize) -> Option<u64>;
-    /// What `fd` is open on, to tell a reused fd number from the same device.
+    /// What `fd` is open on, to tell a reused fd number from the same device. Asked on every
+    /// lookup; `None` (unknown) means no cached or kept period may be used for this fd.
     fn device(&mut self, fd: c_int) -> Option<String>;
 }
 
@@ -365,7 +366,11 @@ impl Platform for System {
     }
 
     fn device(&mut self, fd: c_int) -> Option<String> {
-        std::fs::read_link(format!("/proc/self/fd/{fd}")).ok().map(|path| path.to_string_lossy().into_owned())
+        use std::os::unix::fs::MetadataExt;
+        // `stat` of what the fd is open on (the link is followed): the device node's own
+        // filesystem, inode and device number. One cheap syscall, made on every wait.
+        let node = std::fs::metadata(format!("/proc/self/fd/{fd}")).ok()?;
+        Some(format!("{}:{}:{}", node.dev(), node.ino(), node.rdev()))
     }
 }
 
@@ -405,8 +410,10 @@ impl Entry {
 /// The CRTCs WebKit waits on. A monitor that ever had a readable mode keeps its last good period
 /// through failed reads, so it stays paced while the mode is retried once a period of
 /// `PERIOD_TTL`; one that never had a readable mode gets `None` (the original error, so WebKit
-/// keeps its own timer). Identity is the device behind the fd plus the CRTC index: a fd number
-/// reused for another device starts over, and a new fd on the same device inherits the period.
+/// keeps its own timer). Identity is the device behind the fd plus the CRTC index, checked on
+/// every lookup, including within the one-second cache: a fd number reused for another device
+/// starts over at once, a new fd on the same device inherits the period, and an fd whose device
+/// cannot be named only ever gets a period read just now.
 pub struct Monitors {
     entries: Vec<Entry>,
 }
@@ -421,20 +428,20 @@ impl Monitors {
 
     pub fn period(&mut self, platform: &mut impl Platform, fd: c_int, index: usize, now_ns: u64) -> Option<Period> {
         let ttl = PERIOD_TTL.as_nanos() as u64;
-        let found = self.entries.iter().position(|e| e.fd == fd && e.index == index);
-        if let Some(i) = found {
-            if now_ns.saturating_sub(self.entries[i].read_at_ns) < ttl {
-                return self.entries[i].period();
-            }
-        }
+        // Checked before any cached period is used: a cached period belongs to one device only.
         let device = platform.device(fd);
+        let found = self.entries.iter().position(|e| e.fd == fd && e.index == index);
         let i = match found {
             Some(i) => {
                 let entry = &mut self.entries[i];
-                if entry.device != device {
-                    // The fd number now names something else: nothing carries over.
+                if device.is_none() || entry.device != device {
+                    // The fd number now names something else, or can't be checked: nothing
+                    // carries over, and the mode is read again now.
                     entry.device = device;
                     entry.last_good = None;
+                    entry.readable = false;
+                } else if now_ns.saturating_sub(entry.read_at_ns) < ttl {
+                    return entry.period();
                 }
                 i
             }
@@ -857,6 +864,76 @@ mod tests {
         assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
         // An fd whose device cannot be named inherits nothing.
         assert_eq!(answer(&monitors, &mut fake, 99, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+    }
+
+    #[test]
+    fn a_reused_fd_never_borrows_the_old_devices_period_inside_the_cache_second() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::Waited { period: Period::Read(P240), .. }));
+        waits(&monitors, &mut fake, 30, 10);
+        // Well inside the one-second cache, fd 30 is closed and its number reused for another
+        // device that has no readable mode.
+        fake.devices.insert(30, "/dev/dri/card0".into());
+        fake.mode = None;
+        let sleeps = fake.sleeps.len();
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::NoMode, "WebKit's probe must fail");
+        for answer in waits(&monitors, &mut fake, 30, 20) {
+            assert_eq!(answer, Answer::NoMode);
+        }
+        // Past the cache second it stays refused.
+        fake.now += 2_000_000_000;
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::NoMode);
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+        assert_eq!(fake.sleeps.len(), sleeps, "never slept on the old device's period");
+        // The new device's own mode, once readable, is used at the next once-a-second retry.
+        fake.mode = Some(P60);
+        fake.now += 1_000_000_000;
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::Waited { period: Period::Read(P60), .. }));
+    }
+
+    #[test]
+    fn a_reused_fd_with_a_readable_mode_uses_its_own_rate_at_once() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        waits(&monitors, &mut fake, 30, 10);
+        fake.devices.insert(30, "/dev/dri/card0".into());
+        fake.mode = Some(P60);
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::Waited { period: Period::Read(P60), .. }));
+    }
+
+    #[test]
+    fn the_same_device_keeps_its_recovery_inside_and_past_the_cache_second() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        waits(&monitors, &mut fake, 30, 10);
+        fake.mode = None;
+        // Inside the cache second: the cached read; past it: the kept period, still sleeping.
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::Waited { period: Period::Read(P240), .. }));
+        fake.now += 2_000_000_000;
+        let sleeps = fake.sleeps.len();
+        assert!(waits(&monitors, &mut fake, 30, 20).iter().all(|a| matches!(a, Answer::Waited { period: Period::Kept(P240), .. })));
+        assert_eq!(fake.sleeps.len() - sleeps, 20);
+        // The same device closed and reopened on the same fd number keeps it too.
+        fake.devices.insert(30, "/dev/dri/card1".into());
+        assert!(matches!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::Waited { period: Period::Kept(P240), .. }));
+    }
+
+    #[test]
+    fn an_fd_whose_device_cannot_be_checked_gets_only_a_fresh_read() {
+        let monitors = Mutex::new(Monitors::new());
+        let mut fake = Fake::new(Some(P240));
+        waits(&monitors, &mut fake, 30, 10);
+        // The device behind fd 30 can no longer be named (inside the cache second).
+        fake.devices.remove(&30);
+        fake.mode = None;
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 0), Answer::NoMode);
+        assert_eq!(answer(&monitors, &mut fake, 30, DRM_VBLANK_RELATIVE, 1), Answer::NoMode);
+        // A mode read just now is still usable, and is re-read on every call.
+        fake.mode = Some(P60);
+        let reads = fake.reads;
+        assert!(waits(&monitors, &mut fake, 30, 5).iter().all(|a| matches!(a, Answer::Waited { period: Period::Read(P60), .. })));
+        assert_eq!(fake.reads - reads, 5);
     }
 
     #[test]

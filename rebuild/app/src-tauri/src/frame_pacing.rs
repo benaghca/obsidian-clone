@@ -145,11 +145,14 @@ impl Pace {
 
     /// The window took focus. A window that was turned off after its callbacks had been arriving
     /// was most likely missing them while hidden (on another workspace), so it may try again.
-    /// One that never got a callback stays on GTK's pacing. True: pacing is back on.
+    /// One that never got a callback stays on GTK's pacing. The retry uses up that earlier
+    /// success: if no callback arrives before it is turned off again, later focus changes leave
+    /// it on GTK's pacing. True: pacing is back on.
     pub fn resume(&mut self) -> bool {
         if self.off && self.proven {
             self.off = false;
             self.misses = 0;
+            self.proven = false;
             return true;
         }
         false
@@ -668,6 +671,26 @@ mod tests {
         assert!(pace.draw());
         assert!(pace.after_paint());
         assert!(pace.done());
+    }
+
+    #[test]
+    fn a_failed_focus_retry_is_not_repeated() {
+        let mut pace = Pace::default();
+        assert!(pace.draw());
+        assert!(pace.after_paint());
+        assert!(pace.done());
+        for _ in 0..MAX_MISSES {
+            missed_frame(&mut pace);
+        }
+        assert!(pace.resume(), "first focus retries");
+        // The retry gets no callback either: off again, and later focus does not retry.
+        for _ in 0..MAX_MISSES {
+            missed_frame(&mut pace);
+        }
+        assert!(pace.off());
+        assert!(!pace.resume());
+        assert!(!pace.resume());
+        assert!(!pace.draw());
     }
 
     #[test]
