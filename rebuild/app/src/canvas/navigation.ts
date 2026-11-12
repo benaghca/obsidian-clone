@@ -163,6 +163,10 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
   el.append(controls);
   el.addEventListener("wheel", e => {
     if (!e.ctrlKey && (e.target as Element).closest(".canvas-node.is-editing")) return;
+    if (!e.ctrlKey) {
+      const scrolling = (e.target as Element).closest<HTMLElement>(".canvas-node.is-base .bases-scroll, .canvas-node.is-base .bases-kanban, .canvas-node.is-base .bases-kanban-body");
+      if (scrolling && (scrolling.scrollHeight > scrolling.clientHeight + 1 || scrolling.scrollWidth > scrolling.clientWidth + 1)) return;
+    }
     if (held) {
       const content = (e.target as Element).closest<HTMLElement>(".canvas-node-content");
       if (!(content && content.scrollHeight > content.clientHeight + 1)) e.preventDefault();
@@ -185,7 +189,7 @@ export function canvasNavigation(el: HTMLElement, world: HTMLElement, tab: Tab, 
     }
   }, { passive: false });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .cm-editor, .canvas-node.is-base .bases-view, .canvas-controls, .canvas-card-menu, .canvas-selection-menu")) return;
     if (held) return;
     if (e.code === "Space" || e.key === " ") { e.preventDefault(); space = true; el.classList.add("is-grabbable"); }
     if (e.shiftKey && e.code === "Digit1") { e.preventDefault(); fit(); }

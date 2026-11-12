@@ -329,7 +329,7 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
   }, { signal: events.signal });
   el.addEventListener("click", e => { if (suppress) { e.preventDefault(); e.stopImmediatePropagation(); } }, { capture: true, signal: events.signal });
   el.addEventListener("keydown", e => {
-    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only]")) return;
+    if ((e.target as Element).closest("input, textarea, [contenteditable=true], [contenteditable=plaintext-only], .canvas-node.is-base .bases-view")) return;
     if (el.classList.contains("is-presenting")) return;
     if (e.shiftKey && e.code === "Digit2") { e.preventDefault(); menu.zoom(); return; }
     const undo = (e.ctrlKey || e.metaKey) && ["z", "y"].includes(e.key.toLowerCase());

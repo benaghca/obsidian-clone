@@ -64,7 +64,9 @@ export function canvasCards(el: HTMLElement, world: HTMLElement, ws: Workspace, 
   function pickNote(p = point(), edge?: CanvasEdge, place?: CanvasAddPlace) {
     const mine = revision;
     const at = place ?? p;
-    const notes = edge ? ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path)).map(f => ({ ...f, name: noteName(f.path) })) : ws.vault.includedNotes();
+    // A base is added as a normal file node. The note list stays notes, plus .base files.
+    const bases = ws.vault.files.filter(f => !f.is_dir && /\.base$/i.test(f.path) && !ws.vault.isExcluded(f.path)).map(f => ({ name: noteName(f.path), path: f.path }));
+    const notes = edge ? ws.vault.files.filter(f => !f.is_dir && !ws.vault.isExcluded(f.path)).map(f => ({ ...f, name: noteName(f.path) })) : [...ws.vault.includedNotes(), ...bases];
     openPrompt({
       placeholder: "Find a note...", emptyText: "No notes found.", instructions: hints("to add"),
       items: query => switcherItems(query, notes, [...ws.recent, ...notes.map(n => n.path)], null).filter(item => item.path !== null),
