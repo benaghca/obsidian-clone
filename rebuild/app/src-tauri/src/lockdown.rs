@@ -195,6 +195,9 @@ fn build_window(
         .build()?;
     install_main_frame_guard(&window, guard_dev);
     enable_spellchecker(&window);
+    // Off unless GROVE_FRAME_PACING=compositor (piece HZ, fix B).
+    #[cfg(target_os = "linux")]
+    crate::frame_pacing::install(&window);
     Ok(())
 }
 

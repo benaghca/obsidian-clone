@@ -24,11 +24,18 @@ mod edit_fuzz;
 #[cfg(test)]
 mod smoke;
 mod fsutil;
+/// Fix B (piece HZ, prototype): `GROVE_FRAME_PACING=compositor`.
+#[cfg(target_os = "linux")]
+mod frame_pacing;
 mod index;
 mod lockdown;
 mod model;
 mod queue;
 mod vault;
+/// Fix A2 (piece HZ): exported through `main.rs`. Public only for that.
+#[cfg(target_os = "linux")]
+#[doc(hidden)]
+pub mod vblank;
 mod watch;
 mod write_dispatch;
 

@@ -1,4 +1,10 @@
 fn main() {
+    // Piece HZ, fix A2: put the executable's `drmWaitVBlank` (main.rs) in the dynamic symbol
+    // table, so libwebkit2gtk's import of it binds to Grove's before libdrm's. Nothing else is
+    // exported. Linux only; `-bins` keeps it off the test and library links.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("linux") {
+        println!("cargo:rustc-link-arg-bins=-Wl,--export-dynamic-symbol=drmWaitVBlank");
+    }
     // Register each command in the app manifest, so each one needs an explicit
     // `allow-<command>` permission in a capability instead of being open to
     // every window by default.

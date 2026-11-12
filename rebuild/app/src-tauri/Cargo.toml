@@ -30,6 +30,10 @@ tauri-plugin-opener = "2"
 # navigate the main frame. `v2_40` is a cfg of this crate, not a new dependency.
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "2", features = ["v2_40"] }
+# Already in the build through tauri and tao (the type of `WebviewWindow::gtk_window`); named
+# directly so the opt-in frame pacing (src/frame_pacing.rs) can hook the window's draw and
+# frame clock. Same 0.18 line as Cargo.lock, so no new crate.
+gtk = "0.18"
 
 [dev-dependencies]
 # Empty feature of the tauri crate already in the build. It only exposes
