@@ -1356,6 +1356,7 @@ dependencies = [
 name = "grove"
 version = "0.1.0"
 dependencies = [
+ "gtk",
  "notify",
  "regex",
  "serde",
