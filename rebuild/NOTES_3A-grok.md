@@ -10,7 +10,9 @@ An event is now dropped only when the file on disk is still that write: the same
 
 A failed write leaves the previous record in place, including a crash or directory-sync error after the rename has already landed. The test hook that swaps the destination runs only on the success path, after publication and after the directory sync, and only in test builds. It fires once.
 
-`rename_path` moves the record with the file. `delete_path` drops it. After the unchanged index batch, a watcher rename moves the record only for an identity that actually left its path. The walk is the same one the format cache uses (`stayed` / departed id), on a copy of that map, so a chain still follows the file and a duplicate hop is spent once. An echo of an app rename has no departed id. A source that was written again after the rename keeps its new record, and the destination keeps the record `rename_path` already moved. The echo does not copy one onto the other, and it does not adopt whatever bytes are now on disk. A watcher remove drops the record. A create or modify does not refresh it.
+`rename_path` moves the record with the file. `delete_path` drops it. After the unchanged index batch, a watcher rename moves the record only for an identity that actually left its path. The walk is the same one the format cache uses (`stayed` / departed id), on a copy of that map, so a chain still follows the file and a duplicate hop is spent once. Whether a path stayed is the cached device and inode compared with the file now on disk. `record_own` stores the receipt's inode in that cache at the same time as the own-write stamp. `write_note`, `create_note`, `write_file_bytes`, `replace_file_bytes`, and `set_property` all go through it, so a property edit that replaces the inode is still the resident file. Those writers do not stat the destination for this identity. `rename_path`, `create_folder`, and a watcher batch still stat the path they are reconciling, because that path is not an atomic-write receipt.
+
+An echo of an app rename has no departed id when the cache matches. A source that was written again after the rename keeps its new record, and the destination keeps the record `rename_path` already moved. The echo does not copy one onto the other, and it does not adopt whatever bytes are now on disk. A watcher remove drops the record. A create or modify does not refresh it.
 
 The S5 write lock is still held across the save, and the flush that decides takes the same lock. That lock does not stop another process. `apply` and `rename_path` still rebuild name maps in their one existing `map_batch` block. Command signatures and the mutex were not changed. A path with no record is never suppressed, and the check stats only that path.
 
@@ -41,28 +43,27 @@ After the receipt and the identity walk, those five pass, and the five checks fr
 - `own_echo_does_not_hide_another_files_remove`
 - `external_rename_is_reported_and_keeps_the_stamp`
 
+On `fde70a7`, `app_rename_echo_keeps_property_writes_on_both_files` failed at `watch.rs:800` (`recreated source dropped`). Both property edits had returned Done, and both files were still own writes, before the echo. `set_property` had recorded the stamp from the receipt and left the inode cache on the earlier note write, so the echo treated the resident files as a move and dropped the recreated source.
+
 `create_note` records a stamp, so the property dry-run test expects that stamp to remain, and expects it to stop matching after an outside overwrite. Duplicate-hop, chain, and round-trip format tests still pass. `map_batch` was not edited.
 
 ## How it was run
 
 Commands started in `rebuild/app/src-tauri` for Rust and in `rebuild/app` for npm.
 
-- `cargo test --offline` passed: 166 tests, 0 failed, 4 ignored. `cargo fmt` was not run. `index/file_map.rs` still warns that `ValueWalk` is unused. That warning was already there.
-- `rebuild/app/node_modules` was already present from the earlier `npm ci --offline`. The lockfile did not change. `node_modules` is not in the commit.
-- The first `flock /tmp/grove-npm-test.lock npm test` stopped in `scripts/test-feel.mjs`: the graph phase had 1 long task, max 53 ms. That script drives the mock UI, not this Rust change. The rerun exited 0, including `posttest`. Typing, the switcher, and folder expand had 0 long tasks. The graph stayed the held gap (p95 33.4 ms, max 33.4 ms, 60/184 frames over 20 ms) with 0 long tasks. Friction budgets passed.
+- `cargo test --offline` passed: 167 tests, 0 failed, 4 ignored. `cargo fmt` was not run. `index/file_map.rs` still warns that `ValueWalk` is unused. That warning was already there.
+- `rebuild/app/node_modules` was already present. The lockfile did not change. `node_modules` is not in the commit.
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including `posttest`. Typing, the switcher, and folder expand had 0 long tasks. The graph stayed the held gap (p95 33.4 ms, max 33.5 ms, 62/181 frames over 20 ms) with 0 long tasks. Friction budgets passed.
 - The suite rewrote screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`. Those files were restored and are not in this commit.
 
 ## Size
 
-No new dependency. `vault.rs` stays one file (1955 lines; the test module starts at line 804).
+No new dependency. `vault.rs` stays one file (1959 lines; the test module starts at line 808).
 
 | Language | File | Lines | Change |
 | --- | --- | --- | --- |
-| Rust | `rebuild/app/src-tauri/src/vault.rs` | 1955 | +42 / −25 |
-| Rust | `rebuild/app/src-tauri/src/watch.rs` | 926 | +211 / −0 |
-| Rust | `rebuild/app/src-tauri/src/fsutil.rs` | 694 | +47 / −6 |
-| Rust | `rebuild/app/src-tauri/src/edit.rs` | 871 | +11 / −8 |
-| Rust | `rebuild/app/src-tauri/src/config.rs` | 44 | +3 / −1 |
-| Markdown | `rebuild/NOTES_3A-grok.md` | 68 | +31 / −20 |
+| Rust | `rebuild/app/src-tauri/src/vault.rs` | 1959 | +8 / −4 |
+| Rust | `rebuild/app/src-tauri/src/watch.rs` | 986 | +60 / −0 |
+| Markdown | `rebuild/NOTES_3A-grok.md` | 69 | +13 / −12 |
 
-Code only: +314 / −40. With this notes file: +345 / −60.
+Code only: +68 / −4. With this notes file: +81 / −16.

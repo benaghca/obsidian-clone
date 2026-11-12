@@ -138,7 +138,6 @@ impl Vault {
         let receipt = atomic_write(&full, written.as_bytes()).map_err(|e| e.to_string())?;
         let md = receipt.metadata();
         self.index.upsert_note(&self.root, &rel, &written, Stamp::of(md));
-        self.remember_id(&rel);
         self.record_own(&rel, md);
         Ok(())
     }
@@ -209,7 +208,6 @@ impl Vault {
         }
         let receipt = atomic_write(&full, bytes).map_err(|e| e.to_string())?;
         self.index.refresh_path(&self.root, &rel);
-        self.remember_id(&rel);
         self.record_own(&rel, receipt.metadata());
         Ok((self.entry_for(&rel), existed))
     }
@@ -224,7 +222,6 @@ impl Vault {
         self.observe_format(&rel, Some(content));
         let md = receipt.metadata();
         self.index.upsert_note(&self.root, &rel, content, Stamp::of(md));
-        self.remember_id(&rel);
         self.record_own(&rel, md);
         Ok(self.entry_for(&rel))
     }
@@ -524,13 +521,20 @@ impl Vault {
         out
     }
 
+    /// Remember a successful atomic write. `md` is the receipt from before
+    /// publication. The same identity goes into the rename preflight, so a
+    /// later echo does not treat this file as one that has already left.
     pub(crate) fn record_own(&mut self, rel: &str, md: &fs::Metadata) {
+        let id = file_id(md);
+        if let Some(id) = id {
+            self.ids.insert(rel.to_string(), id);
+        }
         self.own_writes.insert(
             rel.to_string(),
             OwnWrite {
                 mtime_ms: fsutil::mtime_ms(md),
                 size: md.len(),
-                id: file_id(md),
+                id,
             },
         );
     }

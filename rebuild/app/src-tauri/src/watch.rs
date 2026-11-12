@@ -758,6 +758,66 @@ mod tests {
         assert!(vault.index.search("alpha-source", 10).is_empty());
     }
 
+    /// A property edit replaces the inode. The delayed echo of the app rename
+    /// must still treat both files as resident, so each keeps the stamp of
+    /// the bytes now on it. An outside edit after that is reported.
+    #[test]
+    fn app_rename_echo_keeps_property_writes_on_both_files() {
+        let dir = tmp_dir("stamp-echo-property");
+        let inner = state(&dir.path);
+        let edit = property_status("todo", "doing");
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault
+                .write_note("A.md", "---\nstatus: todo\n---\nsource-body\n")
+                .unwrap();
+            vault.rename_path("A.md", "B.md").unwrap();
+            vault
+                .write_note("A.md", "---\nstatus: todo\n---\nrecreated-body\n")
+                .unwrap();
+            for path in ["A.md", "B.md"] {
+                let result = vault.set_property(path, &edit, false).unwrap();
+                assert!(
+                    matches!(result, crate::edit::EditResult::Done { .. }),
+                    "{path} {result:?}"
+                );
+                assert!(vault.is_own_write(path), "{path}");
+                assert!(vault.index.contains(path), "{path}");
+            }
+        }
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        assert_eq!(
+            flush_changes(&inner, &[rename], Index::scan),
+            one(ChangeKind::Rename, &["A.md", "B.md"])
+        );
+        {
+            let guard = lock(&inner);
+            let vault = guard.vault.as_ref().unwrap();
+            assert!(vault.index.contains("A.md"), "recreated source dropped");
+            assert!(vault.index.contains("B.md"));
+            assert!(vault.is_own_write("A.md"));
+            assert!(vault.is_own_write("B.md"));
+            assert_eq!(vault.index.search("recreated-body", 10).len(), 1);
+            assert_eq!(vault.index.search("source-body", 10).len(), 1);
+        }
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "A.md")], Index::scan).is_empty());
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan).is_empty());
+        fs::write(dir.path.join("B.md"), "outside-body").unwrap();
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["B.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(!vault.is_own_write("B.md"));
+        assert!(vault.is_own_write("A.md"));
+        assert!(vault.index.contains("A.md"));
+        assert_eq!(vault.index.search("outside-body", 10).len(), 1);
+        assert!(vault.index.search("source-body", 10).is_empty());
+    }
+
     /// After the rename publishes, swap in a different file before the caller
     /// records a stamp. The hook runs once. Drop clears it if the write never
     /// publishes.
