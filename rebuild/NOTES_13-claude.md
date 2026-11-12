@@ -63,3 +63,29 @@ To check "failed before", I put the `HEAD` version of `vault.ts` back with the n
 ## Size
 
 `vault.ts` 450 → 465 lines. `vault.events.test.ts` 481 → 600 lines. Only TypeScript changed. No new crates or packages.
+
+## Codex round 1 fixes
+
+Codex reviewed `42cf18a` and returned PASS-WITH-FIXES, with one blocker. A batch that left events waiting always skipped its link-index read. In a steady stream, where another change lands before each batch finishes, `vault.links` would never update until the stream went quiet. Changes to notes that are not loaded never call `written()`, so nothing else would read it either. S9 read the link index after every batch, so this was a regression.
+
+Changes in `src/vault.ts` (+15/−3):
+
+- `linksOwed` bounds the deferral. A batch with events waiting may skip its link read only if the batch before it did not already skip. During a stream the index is read every second batch, still coalesced. Any `refreshLinks` call clears the debt, including the 1s timer `written()` sets after one of Grove's own saves. `abandon` clears it, since `open` reads the index itself.
+- If a batch fails (a rejected `list_files`), nothing waits, and an earlier batch still owes its link read, the `finally` reads it. This still checks the wave and `pageOwnsDisk`. The request-id guards in `refreshLinks` are unchanged.
+- The flush's promise now has a `.catch` that logs to `console.error`, where before it was an unhandled rejection. The error is reported either way. The batch that failed is dropped as before, and what waited still runs.
+
+New tests in `src/vault.events.test.ts`. I checked each against `42cf18a`'s `vault.ts`:
+
+| Test | On `42cf18a` | After |
+| --- | --- | --- |
+| **reads the link index while a steady stream of changes keeps the queue full**: six batches, each with the next change queued before it finishes | **failed**: 0 link reads until the stream ended | passes: a read by the second batch, never more than one batch late, at most ⌈6/2⌉+1 reads in all. The final `vault.links` names the last change's note, and the files and reloads cover all six |
+| **runs the waiting batch after an awaited read rejects** | **failed**: unhandled rejection | passes: the error is logged once, the waiting batch runs (files, reload, one link read), and a later change starts its own batch |
+| **still reads the links a batch deferred when the batch that waited fails** | **failed** | passes. With only the `finally` fallback line removed, it fails on the link-read count, so that line is pinned too |
+| **does not let an old vault's batch release a newer batch when it finishes late**: an open during a batch, then the old read replies while the new batch is reading | passed (new coverage) | passes: the old reply does not install or reload, the new batch's marker holds, so a change during it waits, and the end state matches the new vault |
+
+Results for this round:
+
+- `npx vitest run`: 110 files, 1682 tests passed.
+- `npx tsc --noEmit`: clean.
+- `cargo test --offline`: 196 passed, 5 ignored.
+- `flock /tmp/grove-npm-test.lock npm test`, with posttest: passed (exit 0) on the first run. The screenshots and fixtures it rewrote under `rebuild/round*-shots/` were restored with `git checkout`.

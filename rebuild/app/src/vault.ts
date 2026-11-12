@@ -148,6 +148,8 @@ export class Vault {
   private frame: number | null = null;
   /** The batch being applied. Events that arrive meanwhile wait, then run as one batch after it. */
   private running: symbol | null = null;
+  /** A finished batch left its link-index read to the batch that waited. The next one may not defer again. */
+  private linksOwed = false;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private listenEpoch = 0;
   private stopChanges: (() => void) | undefined;
@@ -322,6 +324,7 @@ export class Vault {
   async refreshLinks() {
     const mine = ++this.linksRequest;
     const vault = backendRoot();
+    this.linksOwed = false;
     const links = await api.linkIndex();
     if (mine !== this.linksRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     this.links = links;
@@ -400,7 +403,8 @@ export class Vault {
       if (wave !== this.wave || ticket !== this.ticket) return;
       this.ticket += 1;
       this.disarm();
-      void this.flushChanges(wave);
+      // A failed read ends this batch only. The error is still reported, and what waited runs next.
+      this.flushChanges(wave).catch((error: unknown) => console.error("grove: applying outside changes failed", error));
     };
     if (typeof requestAnimationFrame === "function") this.frame = requestAnimationFrame(run);
     if (typeof setTimeout === "function") this.timer = setTimeout(run, FLUSH_LIMIT_MS);
@@ -421,6 +425,7 @@ export class Vault {
     this.suspended = true;
     this.pending = null;
     this.running = null;
+    this.linksOwed = false;
     this.disarm();
     this.filesRequest += 1;
     this.linksRequest += 1;
@@ -452,13 +457,17 @@ export class Vault {
         await this.reload(path);
       }
       if (wave !== this.wave || !pageOwnsDisk()) return;
-      // A batch that waited reads the link index for both.
-      if (!this.pending) void this.refreshLinks();
+      // A batch that waited reads the link index for both, but only one batch
+      // may defer, so a steady stream still reads it every second batch.
+      if (!this.pending || this.linksOwed) void this.refreshLinks();
+      else this.linksOwed = true;
     } finally {
       // An abandon already cleared `running` and dropped what was waiting.
       if (this.running === mine) {
         this.running = null;
         if (this.pending) this.armFlush();
+        // A batch that failed must not leave an earlier batch's links unread.
+        else if (this.linksOwed && wave === this.wave && pageOwnsDisk()) void this.refreshLinks();
       }
     }
   }
