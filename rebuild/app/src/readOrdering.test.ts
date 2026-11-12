@@ -97,7 +97,7 @@ it("search view sorts kept files in locale order, retaining backend tie order an
   expect(searchResults(files, notes, () => false, "byModifiedTime")[0].path).toBe("a.MD");
 });
 
-it("search view drops an old reply and sends only the newest queued query after flushing saves", async () => {
+it("search view drops an old reply and starts the newest query without waiting for that scan", async () => {
   const old = deferred<SearchNote[]>(), latest = deferred<SearchNote[]>();
   const flush = vi.fn().mockResolvedValue(undefined), receive = vi.fn(), failed = vi.fn();
   vi.mocked(api.searchNotes).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
@@ -107,14 +107,32 @@ it("search view drops an old reply and sends only the newest queued query after 
   reader.read({ query: "al", matchCase: false, seq: 2 });
   reader.read({ query: "Alpha", matchCase: true, seq: 3 });
   expect(api.searchNotes).toHaveBeenCalledTimes(1);
-  old.resolve([{ path: "old.md", count: 1 }]);
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
   expect(receive).not.toHaveBeenCalled();
   expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true);
+  old.resolve([{ path: "old.md", count: 1 }]);
+  await Promise.resolve();
+  expect(receive).not.toHaveBeenCalled();
+  expect(failed).not.toHaveBeenCalled();
   latest.resolve([{ path: "Upper.MD", count: 2 }]);
   await vi.waitFor(() => expect(receive).toHaveBeenCalledWith({ query: "Alpha", matchCase: true, seq: 3 }, [{ path: "Upper.MD", count: 2 }]));
   expect(flush).toHaveBeenCalledTimes(2);
   expect(flush.mock.invocationCallOrder[1]).toBeLessThan(vi.mocked(api.searchNotes).mock.invocationCallOrder[1]);
+  expect(failed).not.toHaveBeenCalled();
+});
+
+it("a superseded search failure is not shown", async () => {
+  const old = deferred<SearchNote[]>(), latest = deferred<SearchNote[]>();
+  const flush = vi.fn().mockResolvedValue(undefined), receive = vi.fn(), failed = vi.fn();
+  vi.mocked(api.searchNotes).mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise);
+  const reader = searchReader({ editors: { flush } } as never, receive, failed);
+  reader.read({ query: "a", matchCase: false, seq: 1 });
+  await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(1));
+  reader.read({ query: "Alpha", matchCase: true, seq: 2 });
+  await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
+  old.reject(new Error("cancelled"));
+  latest.resolve([{ path: "Upper.MD", count: 2 }]);
+  await vi.waitFor(() => expect(receive).toHaveBeenCalledWith({ query: "Alpha", matchCase: true, seq: 2 }, [{ path: "Upper.MD", count: 2 }]));
   expect(failed).not.toHaveBeenCalled();
 });
 

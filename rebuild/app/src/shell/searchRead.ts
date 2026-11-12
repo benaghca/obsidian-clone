@@ -1,4 +1,6 @@
-// Coalesce search-view requests so typing can never queue many vault scans.
+// Coalesce search-view requests. A newer query starts without waiting for the
+// scan already running, so that scan can stop. Keystrokes that land before the
+// next scan starts still become one query.
 import { api, type SearchNote, type FileEntry } from "../api";
 import { compareNames, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
@@ -68,11 +70,12 @@ export function searchResults(files: readonly FileEntry[], notes: readonly Searc
 
 export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: SearchRequest, notes: SearchNote[]) => void, failed: (request: SearchRequest, error: unknown) => void) {
   let latest: SearchRequest | null = null;
-  let running = false;
   let version = 0;
-  async function drain() {
-    if (running) return;
-    running = true;
+  let pumping = false;
+  let wake: (() => void) | null = null;
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
     try {
       while (latest) {
         const request: SearchRequest = latest;
@@ -81,16 +84,46 @@ export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: 
         try {
           await ws.editors.flush();
           if (mine !== version) continue; // Input changed during the flush: send only the newest.
-          const notes = await api.searchNotes(request.query, request.matchCase);
-          if (mine === version) receive(request, notes);
+          const pending = api.searchNotes(request.query, request.matchCase);
+          const finished = pending.then(
+            (notes) => { if (mine === version) receive(request, notes); },
+            (error: unknown) => { if (mine === version) failed(request, error); },
+          );
+          await new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              if (wake === finish) wake = null;
+              resolve();
+            };
+            wake = finish;
+            void finished.finally(finish);
+          });
         } catch (error) {
           if (mine === version) failed(request, error);
         }
       }
-    } finally { running = false; }
+    } finally {
+      pumping = false;
+      if (latest) void pump();
+    }
   }
   return {
-    read(request: SearchRequest) { version++; latest = request; void drain(); },
-    cancel() { version++; latest = null; },
+    read(request: SearchRequest) {
+      version++;
+      latest = request;
+      const poke = wake;
+      wake = null;
+      poke?.();
+      void pump();
+    },
+    cancel() {
+      version++;
+      latest = null;
+      const poke = wake;
+      wake = null;
+      poke?.();
+    },
   };
 }

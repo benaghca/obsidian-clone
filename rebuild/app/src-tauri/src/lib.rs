@@ -31,6 +31,7 @@ mod index;
 mod lockdown;
 mod model;
 mod queue;
+mod search_scan;
 mod vault;
 /// Fix A2 (piece HZ): exported through `main.rs`. Public only for that.
 #[cfg(target_os = "linux")]
@@ -52,6 +53,8 @@ pub struct AppState {
     pub(crate) inner: Arc<RwLock<Inner>>,
     pub(crate) write_queue: WriteQueue,
     pub(crate) watch_tx: mpsc::Sender<WatchMsg>,
+    /// One search generation per window, so a newer query stops the older scan.
+    pub(crate) search_gen: search_scan::SearchSlots,
 }
 
 pub struct Inner {
@@ -99,6 +102,7 @@ pub fn run() {
                 inner: Arc::new(RwLock::new(Inner { config_dir, vault: None })),
                 write_queue: WriteQueue::default(),
                 watch_tx: tx.clone(),
+                search_gen: search_scan::SearchSlots::default(),
             });
             app.manage(lockdown::FrameOrigins::new());
             let handle: AppHandle = app.handle().clone();
@@ -478,9 +482,10 @@ fn properties(state: State<'_, AppState>, paths: Option<Vec<String>>) -> Result<
 }
 
 /// Matching notes and exact occurrence counts, in vault path order.
+/// A newer call from the same window stops an older scan at the next note.
 #[tauri::command(async)]
-fn search_notes(state: State<'_, AppState>, query: String, match_case: bool) -> Result<Vec<SearchNote>, String> {
-    read_vault(&state, |v| Ok(v.index.search_notes(&query, match_case)))
+fn search_notes<R: tauri::Runtime>(window: tauri::Window<R>, state: State<'_, AppState>, query: String, match_case: bool) -> Result<Vec<SearchNote>, String> {
+    search_scan::run(&state, window.label(), &query, match_case)
 }
 
 /// A separately evaluated page of shown lines; paths no longer matching are omitted.
@@ -602,15 +607,15 @@ mod tests {
         eprintln!("write_10mb_ms={:.1}", elapsed.as_secs_f64() * 1000.0);
     }
 
-    fn test_state(root: &std::path::Path) -> super::AppState {
+    pub(crate) fn test_state(root: &std::path::Path) -> super::AppState {
         let (watch_tx, _rx) = std::sync::mpsc::channel();
         let inner = std::sync::Arc::new(std::sync::RwLock::new(super::Inner { config_dir: root.join(".cfg"), vault: None }));
-        let state = super::AppState { inner, write_queue: super::WriteQueue::default(), watch_tx };
+        let state = super::AppState { inner, write_queue: super::WriteQueue::default(), watch_tx, search_gen: super::search_scan::SearchSlots::default() };
         let r = root.to_path_buf();
         tauri::async_runtime::block_on(super::install_vault(&state, state.write_queue.take_ingress(0), move || Ok(r))).unwrap();
         state
     }
-    fn sync_write<T: Send + 'static>(state: &super::AppState, f: impl FnOnce(&mut crate::vault::Vault) -> Result<T, String> + Send + 'static) -> Result<T, String> {
+    pub(crate) fn sync_write<T: Send + 'static>(state: &super::AppState, f: impl FnOnce(&mut crate::vault::Vault) -> Result<T, String> + Send + 'static) -> Result<T, String> {
         tauri::async_runtime::block_on(super::write_vault(state, state.write_queue.take_ingress(0), f))
     }
 

@@ -44,6 +44,8 @@ thread_local! {
 
 #[cfg(test)]
 pub(crate) use file_map::take_file_visits;
+#[cfg(test)]
+pub(crate) use search::set_search_note_hook;
 
 #[cfg(test)]
 pub(crate) fn take_rebuild_maps_calls() -> usize {
@@ -93,7 +95,7 @@ impl Stamp {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct Node {
     is_dir: bool,
     stamp: Stamp,

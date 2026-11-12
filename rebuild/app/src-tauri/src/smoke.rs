@@ -59,6 +59,7 @@ fn save_rename_and_flush_round_trip_through_ipc() {
             })),
             write_queue: WriteQueue::default(),
             watch_tx,
+            search_gen: crate::search_scan::SearchSlots::default(),
         })
         .build(mock_context(noop_assets()))
         .expect("mock app");
@@ -173,6 +174,7 @@ fn smoke_app(config_dir: &std::path::Path) -> tauri::App<tauri::test::MockRuntim
             })),
             write_queue: WriteQueue::default(),
             watch_tx,
+            search_gen: crate::search_scan::SearchSlots::default(),
         })
         .build(mock_context(noop_assets()))
         .expect("mock app")
