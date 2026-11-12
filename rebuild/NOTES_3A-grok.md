@@ -6,13 +6,17 @@ An event is now dropped only when the file on disk is still that write: the same
 
 ## What records the stamp
 
-`write_note`, `create_note`, `write_file_bytes`, `replace_file_bytes`, and `set_property` record the stamp after the write succeeds, from the metadata of the file just written. A failed write leaves the previous record in place. `rename_path` moves the record with the file. `delete_path` drops it. After the unchanged index batch, a watcher rename moves the record the same way, and a watcher remove drops it. A create or modify does not refresh the record, so an external edit that was accepted no longer matches, and a later event for that path is not swallowed.
+`write_note`, `create_note`, `write_file_bytes`, `replace_file_bytes`, and `set_property` record the stamp only after the atomic write returns success. The stamp is the temp file's metadata, taken after the bytes are synced and before `rename` publishes that file. A stat of the destination after the rename can describe someone else's replace, so it is not the record. `atomic_write` and `atomic_write_durable` return that receipt. `write_config` and the app-config `remember` path discard it; they do not own a note stamp.
 
-The S5 write lock is still held across the save, and the flush that decides takes the same lock. `apply` and `rename_path` still rebuild name maps in their one existing `map_batch` block. Command signatures and the mutex were not changed. A path with no record is never suppressed, and the check stats only that path.
+A failed write leaves the previous record in place, including a crash or directory-sync error after the rename has already landed. The test hook that swaps the destination runs only on the success path, after publication and after the directory sync, and only in test builds. It fires once.
+
+`rename_path` moves the record with the file. `delete_path` drops it. After the unchanged index batch, a watcher rename moves the record only for an identity that actually left its path. The walk is the same one the format cache uses (`stayed` / departed id), on a copy of that map, so a chain still follows the file and a duplicate hop is spent once. An echo of an app rename has no departed id. A source that was written again after the rename keeps its new record, and the destination keeps the record `rename_path` already moved. The echo does not copy one onto the other, and it does not adopt whatever bytes are now on disk. A watcher remove drops the record. A create or modify does not refresh it.
+
+The S5 write lock is still held across the save, and the flush that decides takes the same lock. That lock does not stop another process. `apply` and `rename_path` still rebuild name maps in their one existing `map_batch` block. Command signatures and the mutex were not changed. A path with no record is never suppressed, and the check stats only that path.
 
 ## Coarse clocks, renames, and line endings
 
-`mtime_ms` truncates to milliseconds. A same-size replace in that same tick is a different file when the inode changes, and that is what gets reported. An in-place write that keeps the inode, the size, and the millisecond is still indistinguishable from our save. There is no 500 ms fallback for that case.
+`mtime_ms` truncates to milliseconds. A same-size replace in that same tick is a different file when the inode changes, and that is what gets reported. An in-place write that keeps the inode, the size, and the millisecond is still indistinguishable from our save. The receipt does not close that gap. There is no 500 ms fallback for that case.
 
 A two-sided rename is still reported. Names containing `.grove-tmp` are still ignored, so the rename our atomic save uses collapses to a create of the destination, and that create is dropped while the stamp matches. An external rename of a note we just saved is reported. The stamp moves with the file, so a later modify of those same bytes is quiet, and an edit of the destination is not.
 
@@ -22,36 +26,43 @@ A missing file is not our write, so an external delete is reported even inside t
 
 ## Tests
 
-`watch.rs` now checks five flushes, all under `/tmp`:
+`watch.rs` checks the flushes under `/tmp`.
 
-- `outside_edit_just_after_a_save_is_reported`: a different write immediately after `write_note` is one modify, and the index has the outside text.
-- `own_write_echo_produces_no_vault_changed`: a modify of our file, and the temp-file rename a save emits, are both empty. The bytes stay ours.
-- `same_size_new_inode_replace_is_reported`: same length, mtime restored with `File::set_modified`, new inode. The modify is reported.
-- `own_echo_does_not_hide_another_files_remove`: our modify is dropped and the other file's remove is kept.
-- `external_rename_is_reported_and_keeps_the_stamp`: the rename is reported, the record is on the destination, and a later modify of those bytes is empty.
+On `ce3f996`, before this fix:
 
-These tests were added with the new check, so they were not executed against `02a9e38`. On that commit `is_own_write` was true for 500 ms and did not look at the file.
+- `app_rename_echo_does_not_steal_a_recreated_sources_stamp` failed at `watch.rs:740`. The rename echo was reported, then Grove's own modify of the recreated `A.md` was emitted. `track_own` had moved A's new record onto B.
+- With writers still statting the path after `rename`, `outside_replace_during_publish_of_write_note_is_reported`, `..._create_note_...`, and `..._set_property_...` failed at `watch.rs:805` (`adopted the outside file`). `..._write_file_bytes_...` failed at `watch.rs:881` (`is_own_write("pic.png")`). The hook wrote a sibling and renamed it over the published path, so the outside file had a new inode and a different size. The first property attempt expected `todo` and conflicted without writing. The run that failed for real expected `status: todo`, returned `Done`, and still adopted the outside file.
 
-`create_note` now records a stamp, so the property dry-run test expects that stamp to remain, and expects it to stop matching after an outside overwrite.
+After the receipt and the identity walk, those five pass, and the five checks from `ce3f996` still pass:
+
+- `outside_edit_just_after_a_save_is_reported`
+- `own_write_echo_produces_no_vault_changed`
+- `same_size_new_inode_replace_is_reported`
+- `own_echo_does_not_hide_another_files_remove`
+- `external_rename_is_reported_and_keeps_the_stamp`
+
+`create_note` records a stamp, so the property dry-run test expects that stamp to remain, and expects it to stop matching after an outside overwrite. Duplicate-hop, chain, and round-trip format tests still pass. `map_batch` was not edited.
 
 ## How it was run
 
 Commands started in `rebuild/app/src-tauri` for Rust and in `rebuild/app` for npm.
 
-- `cargo test --offline` passed: 161 tests, 0 failed, 4 ignored. `cargo fmt` was not run. `index/file_map.rs` still warns that `ValueWalk` is unused. That warning was already there.
-- `rebuild/app/node_modules` was missing, so the property-edit fuzz could not import `@codemirror/state`. `npm ci --offline` installed 69 packages into this worktree. The lockfile did not change. `node_modules` is not in the commit. CI runs its own `npm ci`.
-- The first `flock /tmp/grove-npm-test.lock npm test` stopped in `scripts/test-feel.mjs`: the graph phase had 10 long tasks, max 81 ms. That script drives the mock UI, not this Rust change. The rerun exited 0, including `posttest`. Typing, the switcher, and folder expand had 0 long tasks. The graph stayed the held gap (p95 33.4 ms, max 33.5 ms, 59/184 frames over 20 ms) with 0 long tasks. Friction budgets passed.
+- `cargo test --offline` passed: 166 tests, 0 failed, 4 ignored. `cargo fmt` was not run. `index/file_map.rs` still warns that `ValueWalk` is unused. That warning was already there.
+- `rebuild/app/node_modules` was already present from the earlier `npm ci --offline`. The lockfile did not change. `node_modules` is not in the commit.
+- The first `flock /tmp/grove-npm-test.lock npm test` stopped in `scripts/test-feel.mjs`: the graph phase had 1 long task, max 53 ms. That script drives the mock UI, not this Rust change. The rerun exited 0, including `posttest`. Typing, the switcher, and folder expand had 0 long tasks. The graph stayed the held gap (p95 33.4 ms, max 33.4 ms, 60/184 frames over 20 ms) with 0 long tasks. Friction budgets passed.
 - The suite rewrote screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`. Those files were restored and are not in this commit.
 
 ## Size
 
-No new dependency. `vault.rs` stays one file (1938 lines; the test module starts at line 787).
+No new dependency. `vault.rs` stays one file (1955 lines; the test module starts at line 804).
 
 | Language | File | Lines | Change |
 | --- | --- | --- | --- |
-| Rust | `rebuild/app/src-tauri/src/vault.rs` | 1938 | +95 / −23 |
-| Rust | `rebuild/app/src-tauri/src/watch.rs` | 715 | +182 / −10 |
-| Rust | `rebuild/app/src-tauri/src/edit.rs` | 868 | +5 / −3 |
-| Markdown | `rebuild/NOTES_3A-grok.md` | 57 | +57 / −0, new |
+| Rust | `rebuild/app/src-tauri/src/vault.rs` | 1955 | +42 / −25 |
+| Rust | `rebuild/app/src-tauri/src/watch.rs` | 926 | +211 / −0 |
+| Rust | `rebuild/app/src-tauri/src/fsutil.rs` | 694 | +47 / −6 |
+| Rust | `rebuild/app/src-tauri/src/edit.rs` | 871 | +11 / −8 |
+| Rust | `rebuild/app/src-tauri/src/config.rs` | 44 | +3 / −1 |
+| Markdown | `rebuild/NOTES_3A-grok.md` | 68 | +31 / −20 |
 
-Code only: +282 / −36. With this notes file: +339 / −36.
+Code only: +314 / −40. With this notes file: +345 / −60.

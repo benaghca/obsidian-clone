@@ -495,17 +495,20 @@ impl crate::vault::Vault {
                 return Ok(prepared.result);
             }
             let updated = prepared.text.as_ref().expect("done edit has text");
-            if let Err(error) = fsutil::atomic_write_durable(&full, updated.as_bytes()) {
+            let receipt = match fsutil::atomic_write_durable(&full, updated.as_bytes()) {
+                Ok(receipt) => receipt,
                 // A directory-fsync error can occur after rename. Reconcile whichever
                 // bytes are now present; leave watcher echo unsuppressed on errors.
-                self.index.refresh_path(&self.root, &rel);
-                return Err(error.to_string());
-            }
-            let md = fs::metadata(&full).map_err(|e| e.to_string())?;
+                Err(error) => {
+                    self.index.refresh_path(&self.root, &rel);
+                    return Err(error.to_string());
+                }
+            };
+            let md = receipt.metadata();
             self.index
-                .upsert_note(&self.root, &rel, updated, Stamp::of(&md));
-            self.record_own(&rel, &md);
-            prepared.result.stamp(fsutil::mtime_ms(&md));
+                .upsert_note(&self.root, &rel, updated, Stamp::of(md));
+            self.record_own(&rel, md);
+            prepared.result.stamp(fsutil::mtime_ms(md));
             return Ok(prepared.result);
         }
         // A last fresh read reports the current property where it is readable.

@@ -136,9 +136,22 @@ pub fn foreign_config_file(root: &Path, source: &str, name: &str) -> Result<Path
     Ok(full)
 }
 
+/// Metadata of the temp file Grove finished, taken before that file is renamed
+/// onto `path`. A later stat of `path` can describe someone else's replace.
+pub struct WriteReceipt {
+    metadata: fs::Metadata,
+}
+
+impl WriteReceipt {
+    pub fn metadata(&self) -> &fs::Metadata {
+        &self.metadata
+    }
+}
+
 /// Write `bytes` via a temp file in the same directory, then rename over `path`, keeping the
-/// old file's permissions. The file is synced before the rename.
-pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
+/// old file's permissions. The file is synced before the rename. The receipt is that temp
+/// file, not a stat of `path` after the rename.
+pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<WriteReceipt> {
     replace(path, bytes, false)
 }
 
@@ -146,11 +159,11 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// loss (KANBAN_PLAN §4.3). That doubles a write's cost on a real disk (about 4 → 9 ms on
 /// btrfs), so only `set_property`, which runs off the GTK thread, uses it; note and settings
 /// saves run on the main thread and keep the plain write.
-pub fn atomic_write_durable(path: &Path, bytes: &[u8]) -> io::Result<()> {
+pub fn atomic_write_durable(path: &Path, bytes: &[u8]) -> io::Result<WriteReceipt> {
     replace(path, bytes, true)
 }
 
-fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
+fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<WriteReceipt> {
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
             fs::create_dir_all(parent)?;
@@ -173,7 +186,7 @@ fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).create_new(true).open(&tmp)?;
     #[cfg(test)]
     let mut leave_temp = false;
-    let write_res = (|| -> io::Result<()> {
+    let write_res = (|| -> io::Result<WriteReceipt> {
         let permissions = match fs::metadata(path) {
             Ok(old) => Some(old.permissions()),
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
@@ -184,6 +197,9 @@ fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
             file.set_permissions(permissions)?;
         }
         sync_file(&file)?;
+        // The inode, mtime, and size rename will publish. Taken before the
+        // rename so a replace of `path` cannot be adopted as this write.
+        let written = file.metadata()?;
         // A killed process stops here or after the rename. The hook exists only in test
         // builds: release `replace` does not read it and does not branch on it.
         #[cfg(test)]
@@ -207,7 +223,11 @@ fn replace(path: &Path, bytes: &[u8], sync_dir: bool) -> io::Result<()> {
         if let Some(directory) = &directory {
             sync_file(directory)?;
         }
-        Ok(())
+        // Test builds only. Fires after publication, before the caller records
+        // the receipt, so a replace here is not this write.
+        #[cfg(test)]
+        fire_after_publish(path);
+        Ok(WriteReceipt { metadata: written })
     })();
     drop(file);
     if write_res.is_err() {
@@ -250,6 +270,27 @@ pub fn crash_at(point: Option<CrashPoint>) {
 pub fn crash_process_at(point: CrashPoint) {
     crash_at(Some(point));
     EXIT_ON_CRASH.with(|slot| slot.set(true));
+}
+
+/// Runs once, after a successful publish, before [`atomic_write`] returns.
+/// Release builds have no hook. The hook must not call [`atomic_write`].
+#[cfg(test)]
+pub fn after_publish(hook: Option<Box<dyn FnMut(&Path)>>) {
+    AFTER_PUBLISH.with(|slot| *slot.borrow_mut() = hook);
+}
+
+#[cfg(test)]
+thread_local! {
+    static AFTER_PUBLISH: std::cell::RefCell<Option<Box<dyn FnMut(&Path)>>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn fire_after_publish(path: &Path) {
+    AFTER_PUBLISH.with(|slot| {
+        if let Some(mut hook) = slot.borrow_mut().take() {
+            hook(path);
+        }
+    });
 }
 
 #[cfg(test)]

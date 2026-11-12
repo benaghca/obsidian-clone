@@ -1,9 +1,9 @@
 //! One open vault: filesystem operations plus the in-memory index.
 //!
-//! `write_note` records the stamp of that save so the watcher can drop the echo of those
-//! bytes. A later edit with any other mtime, size, or file identity is a normal external
-//! change. The index is updated before the call returns, so the next `list_files`, `search`,
-//! or `link_index` already sees the change.
+//! `write_note` records the stamp of the file it finished, taken before that file is
+//! published, so the watcher can drop the echo of those bytes. A later edit with any other
+//! mtime, size, or file identity is a normal external change. The index is updated before
+//! the call returns, so the next `list_files`, `search`, or `link_index` already sees the change.
 
 use crate::fsutil::{self, atomic_write};
 use crate::index::{Index, Stamp};
@@ -135,13 +135,11 @@ impl Vault {
             Err(e) => return Err(e.to_string()),
         };
         let written = self.observe_format(&rel, existing.as_deref()).apply(content);
-        if let Err(e) = atomic_write(&full, written.as_bytes()) {
-            return Err(e.to_string());
-        }
-        let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
+        let receipt = atomic_write(&full, written.as_bytes()).map_err(|e| e.to_string())?;
+        let md = receipt.metadata();
+        self.index.upsert_note(&self.root, &rel, &written, Stamp::of(md));
         self.remember_id(&rel);
-        self.record_own(&rel, &md);
+        self.record_own(&rel, md);
         Ok(())
     }
 
@@ -209,13 +207,10 @@ impl Vault {
         if full.is_dir() {
             return Err(format!("not a file: {rel}"));
         }
-        if let Err(e) = atomic_write(&full, bytes) {
-            return Err(e.to_string());
-        }
+        let receipt = atomic_write(&full, bytes).map_err(|e| e.to_string())?;
         self.index.refresh_path(&self.root, &rel);
-        let md = fs::metadata(&full).map_err(|e| e.to_string())?;
         self.remember_id(&rel);
-        self.record_own(&rel, &md);
+        self.record_own(&rel, receipt.metadata());
         Ok((self.entry_for(&rel), existed))
     }
 
@@ -224,13 +219,13 @@ impl Vault {
         if full.exists() {
             return Err(format!("already exists: {rel}"));
         }
-        atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
+        let receipt = atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
         self.remove_formats(&rel);
         self.observe_format(&rel, Some(content));
-        let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
+        let md = receipt.metadata();
+        self.index.upsert_note(&self.root, &rel, content, Stamp::of(md));
         self.remember_id(&rel);
-        self.record_own(&rel, &md);
+        self.record_own(&rel, md);
         Ok(self.entry_for(&rel))
     }
 
@@ -331,7 +326,9 @@ impl Vault {
         }
         serde_json::from_str::<serde_json::Value>(content)
             .map_err(|e| format!("not JSON: {e}"))?;
-        atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())
+        atomic_write(&full, content.as_bytes())
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
     /// True when `rel` is still the file Grove wrote. A missing file, or any
@@ -426,7 +423,7 @@ impl Vault {
             }
         }
         self.track_ids(changes);
-        self.track_own(changes);
+        self.track_own(changes, at.clone(), &stayed);
         // The batch above relocates every rename, including an echo of a move
         // the app already applied. Put a source that is still the indexed file
         // back, or the final format prune drops it and the file list loses it.
@@ -562,9 +559,16 @@ impl Vault {
         }
     }
 
-    /// The index batch already ran. Keep each own-write stamp with the file
-    /// that moved, and drop it when the file is removed.
-    fn track_own(&mut self, changes: &[VaultChanged]) {
+    /// The index batch already ran. Move an own-write record only for an
+    /// identity that left its path. An app-rename echo has no departed id, so
+    /// a recreated source keeps the stamp of the bytes now on it. Do not
+    /// refresh a record from whatever bytes are at the destination.
+    fn track_own(
+        &mut self,
+        changes: &[VaultChanged],
+        mut moved: HashMap<String, u64>,
+        stayed: &HashSet<String>,
+    ) {
         for change in changes {
             match change.kind {
                 ChangeKind::Remove => {
@@ -573,7 +577,20 @@ impl Vault {
                     }
                 }
                 ChangeKind::Rename if change.paths.len() == 2 => {
-                    self.relocate_own(&change.paths[0], &change.paths[1]);
+                    let from = &change.paths[0];
+                    let to = &change.paths[1];
+                    if from == to {
+                        continue;
+                    }
+                    let Some(id) = moved.remove(from) else {
+                        continue;
+                    };
+                    if stayed.contains(to) {
+                        continue;
+                    }
+                    moved.remove(to);
+                    moved.insert(to.clone(), id);
+                    self.relocate_own(from, to);
                 }
                 _ => {}
             }
