@@ -264,3 +264,28 @@ Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
 - `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
 
 Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
+
+## Review 7
+
+Codex failed `1c86c53`. Both round-6 findings stay fixed. One blocker. Nothing on screen changes. No new package. Rust was not edited.
+
+A serial replay of queued property edits took every selected job out of the pending list before the first write. The switch only waited for the write that was already in flight, so it could open the next vault between edits. The last edit then ran against that new vault.
+
+The jobs stay queued until each one is sent, and one tracked promise covers the whole sequence. After every wait, the next send checks the source vault, the seal, and any path hold in that same turn. If the check fails, that edit and every later one stay queued in order, and `setProperty` is not called. A second flush waits for the sequence already in flight instead of reporting the vault quiet.
+
+Regression (`src/propertyReplay.test.ts`): four property edits with delayed replies, running beside `commitVaultSwitch`. On the previous replay both tests failed because the tail was no longer pending. With this replay, all four land on vault A before `open` of vault B. A path hold that arrives after the second reply leaves the third and fourth queued for A, the switch does not open, and lifting the hold writes those two in order. The idle two-edit restore test is unchanged.
+
+Left as they were: conflicting edits across windows, cross-page generation arbitration, crash-exactly-once recovery, the settings 8-pass retry, full-scene drawing serialization, detached-owner pruning, and large journal or binary tuning.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+`src/vaultWrite.ts` is 759 lines. `src/propertyReplay.test.ts` is 190. `src/saveEpoch.test.ts` is 735.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest (`TEST_EXIT:0` in `rebuild/.scratch-s1/npm-test7b.log`). Vitest: 109 files, 1648 tests passed. The known graph feel gap is still there (p95 33.4 ms, over_20ms 58/185) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 17.7 ms). An earlier locked run stopped in `scripts/test-r27e.mjs` because the settings search field was not focused after 80 ms. That script passed alone (`R27E_EXIT:0`). No assertion was weakened.
+- `npm run build` exited 0 (`BUILD_EXIT:0`, `tsc --noEmit` and `vite build`). The app index is `index-BA28BbAq.js` (183.77 kB). The largest chunk is `menu-CxZmNGBg.js` (261.14 kB). The log printed no chunk-size warning.
+- `npm run audit:offline` exited 0 (`AUDIT_EXIT:0`): 236 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.

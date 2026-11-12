@@ -69,6 +69,8 @@ interface PropHandoff {
   /** Submission order. Distinct edits of one file each keep their own number. */
   ord: number;
   key: string;
+  /** Owned by the in-flight replay. Stays queued so a switch still counts it. */
+  replaying?: boolean;
   resolve?: (result: unknown) => void;
 }
 
@@ -123,6 +125,8 @@ const structural: StructHandoff[] = [];
 const bytesJobs: BytesHandoff[] = [];
 const propJobs: PropHandoff[] = [];
 let propSeq = 0;
+/** Serial property replay still in flight. Quiet and a later flush both wait for it. */
+let propReplay: Promise<void> | null = null;
 const copies: CopyHandoff[] = [];
 const later: LaterJob[] = [];
 const sending = new Map<string, string>();
@@ -571,13 +575,14 @@ export function runOnVault(work: () => Promise<void>, source = sourceVault()): P
 }
 
 export async function flushHandoff(): Promise<boolean> {
+  if (propReplay) await propReplay;
   if (writesSealed()) return false;
   const vault = backendRoot();
   const noteEntries = [...notes.values()].filter((note) => note.vault === vault && !heldBack(note.path));
   const configEntries = [...configs.values()].filter((config) => config.vault === vault);
   const jobs = structural.filter((job) => job.vault === vault && !heldBack(job.path));
   const files = bytesJobs.filter((job) => job.vault === vault && !heldBack(job.path));
-  const props = propJobs.filter((job) => job.vault === vault && !heldBack(job.path));
+  const props = propJobs.filter((job) => job.vault === vault && !heldBack(job.path) && !job.replaying);
   const copyJobs = copies.filter((job) => job.vault === vault && !heldBack(job.from) && !heldBack(job.path));
   const deferred = later.filter((job) => job.vault === vault);
   for (const note of noteEntries) notes.delete(noteKey(note.vault, note.path));
@@ -588,11 +593,43 @@ export async function flushHandoff(): Promise<boolean> {
   };
   for (const job of jobs) pull(structural, job);
   for (const job of files) pull(bytesJobs, job);
-  for (const job of props) pull(propJobs, job);
   for (const job of copyJobs) pull(copies, job);
   for (const job of deferred) pull(later, job);
   const ack = (key: string, edit: (body: StoredHandoff) => StoredHandoff) => ackKey(key, edit);
   let failed = false;
+  // The tail stays in propJobs until each edit is sent, so handoffPending still
+  // counts it. One tracked promise covers the whole sequence, and each send
+  // rechecks the source vault, the seal, and a path hold in that same turn.
+  let propDone: Promise<void> | null = null;
+  if (props.length) {
+    const stopProps = (from: number) => {
+      failed = true;
+      for (const left of props.slice(from)) left.replaying = false;
+    };
+    for (const job of props) job.replaying = true;
+    const replay = (async () => {
+      for (let i = 0; i < props.length; i++) {
+        const job = props[i];
+        if (!canSubmit(job.vault, job.path)) {
+          stopProps(i);
+          return;
+        }
+        try {
+          const result = await api.setProperty(job.path, job.edit as never, false);
+          ack(job.key, (body) => ({ ...body, props: (body.props ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path)) }));
+          pull(propJobs, job);
+          job.resolve?.(result);
+        } catch {
+          stopProps(i);
+          return;
+        }
+      }
+    })();
+    propDone = replay.finally(() => {
+      if (propReplay === propDone) propReplay = null;
+    });
+    propReplay = propDone;
+  }
   await Promise.all([
     ...noteEntries.map(async (saved) => {
       const id = noteKey(saved.vault, saved.path);
@@ -645,20 +682,7 @@ export async function flushHandoff(): Promise<boolean> {
         if (!bytesJobs.includes(job)) bytesJobs.push(job);
       }
     }),
-    (async () => {
-      for (let i = 0; i < props.length; i++) {
-        const job = props[i];
-        try {
-          const result = await track(api.setProperty(job.path, job.edit as never, false));
-          ack(job.key, (body) => ({ ...body, props: (body.props ?? []).filter((row) => !(row.vault === job.vault && row.path === job.path)) }));
-          job.resolve?.(result);
-        } catch {
-          failed = true;
-          for (const left of props.slice(i)) if (!propJobs.includes(left)) propJobs.push(left);
-          return;
-        }
-      }
-    })(),
+    ...(propDone ? [track(propDone)] : []),
     ...copyJobs.map(async (job) => {
       try {
         if (backendRoot() !== job.vault || writesSealed()) {
@@ -719,6 +743,7 @@ export function resetHandoffForTests(): void {
   propJobs.splice(0);
   copies.splice(0);
   later.splice(0);
+  propReplay = null;
   sending.clear();
   sendingConfig.clear();
   captureDirty = () => [];
