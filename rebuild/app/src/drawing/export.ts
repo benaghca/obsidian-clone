@@ -4,6 +4,8 @@
 // edit waiting in its tab is written.
 
 import { api } from "../api";
+import { sourceVault } from "../vaultRoot";
+import { queuedBytes, submitBytes, writeVaultNote } from "../vaultWrite";
 import { confirmDialog } from "../shell/confirm";
 import { notice } from "../shell/notice";
 import { fileName } from "../paths";
@@ -37,8 +39,18 @@ export async function exportDrawing(ws: Workspace, path: string, kind: PictureKi
       if (!answer.ok) return null;
     }
     const target = taken?.path ?? to;
-    if (kind === "svg") await api.writeNote(target, drawingSvg(scene));
-    else await api.replaceFileBytes(target, await drawingPng(scene));
+    const source = sourceVault();
+    if (kind === "svg") {
+      if ((await writeVaultNote(target, drawingSvg(scene), () => ws.vault.written(target), undefined, source)) === "queued") return target;
+    } else {
+      const bytes = await drawingPng(scene);
+      const pending = submitBytes(source, target, bytes, "replace");
+      // Queued bytes belong to the vault that accepted them. Do not wait out a switch, and do not refresh the new root.
+      if (queuedBytes(source, target) !== undefined) return target;
+      await pending;
+      ws.vault.written(target);
+      if (sourceVault() !== source) return target;
+    }
     await ws.vault.refreshFiles();
     ws.vault.written(target);
     notice([`Saved “${fileName(target)}”`]);

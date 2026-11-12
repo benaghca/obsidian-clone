@@ -29,6 +29,13 @@ import { openDailyNote } from "./editorHost";
 import { filesChanged } from "./editor/livePreview";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
+import { bindCloseFlush, flushOpenSaves, requestClose } from "./quitFlush";
+import { discardCanvases, holdCanvases, releaseCanvases, retargetCanvases, saveCanvases, snapshotCanvases } from "./canvas/pending";
+import { discardDrawings, holdDrawings, releaseDrawings, retargetDrawings, saveDrawings, snapshotDrawings } from "./drawing/pending";
+import { installPathBarrier } from "./pathBarrier";
+import { installVaultSwitch, savesPending } from "./vaultSwitch";
+import { setBackendRoot, setPageVault, sourceVault } from "./vaultRoot";
+import { discardHandoff, replayHandoff, retargetHandoff, setConfigCapture, setDirtyCapture } from "./vaultWrite";
 import { updateLinks } from "./links/update";
 import { noteBacklinks } from "./links/backlinks";
 import { applyAppearance, applyPageSettings } from "./settings/appearance";
@@ -63,6 +70,8 @@ import { readStored, store } from "./storage";
 import { Workspace } from "./workspace";
 
 const ws = new Workspace();
+setDirtyCapture(() => [...ws.editors.snapshot(), ...snapshotCanvases(), ...snapshotDrawings()]);
+setConfigCapture(() => settings.pendingText());
 installHoverPreviews(ws);
 const bookmarks = new Bookmarks(ws);
 ws.propertyHost = propertyIndex(ws).host;
@@ -449,8 +458,8 @@ async function addWindowControls() {
       { class: "titlebar-buttons" },
       iconButton(icon("minus"), "Minimize", () => void win.minimize(), "titlebar-button"),
       iconButton(icon("square"), "Maximize", () => void win.toggleMaximize(), "titlebar-button mod-maximize"),
-      // Unsaved edits are written first, so closing a window loses nothing.
-      iconButton(icon("x"), "Close", () => void ws.editors.flush().finally(() => win.close()), "titlebar-button mod-close"),
+      // close() runs the close-requested handler, which flushes, retries, and enforces the deadline.
+      iconButton(icon("x"), "Close", () => requestClose(win), "titlebar-button mod-close"),
     ),
   );
   // The headers under the buttons leave exactly their width free (it varies
@@ -492,14 +501,74 @@ ws.on((change) => {
   clearTimeout(workspaceTimer);
   workspaceTimer = window.setTimeout(rememberWorkspace, 500);
 });
+// Compositor close, Alt+F4, and Grove's own close button all emit close-requested.
+// The handler prevents the immediate destroy, writes everything still waiting, then destroys.
+if (isTauri) {
+  void (async () => {
+    try {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      await bindCloseFlush(getCurrentWindow(), () => flushOpenSaves(() => ws.editors.flush()));
+    } catch (err) {
+      console.error("Could not keep saves on close", err);
+    }
+  })();
+  // Pop-outs share the backend vault. A switch in either window waits for both.
+  void installVaultSwitch({
+    flushNotes: () => ws.editors.flush(),
+    dirty: () => savesPending(ws.editors),
+    reload: () => location.reload(),
+  }).catch((err) => console.error("Could not coordinate vault switches", err));
+  void installPathBarrier({
+    hold(under) {
+      ws.editors.hold(under);
+      holdCanvases(under);
+      holdDrawings(under);
+    },
+    release(under) {
+      ws.editors.release(under);
+      releaseCanvases(under);
+      releaseDrawings(under);
+    },
+    async flush(under) {
+      const [notes, canvases, drawings] = await Promise.all([
+        ws.editors.flush(under),
+        saveCanvases(under),
+        saveDrawings(under),
+      ]);
+      return notes !== false && canvases !== false && drawings !== false;
+    },
+    retarget(under, swap) {
+      ws.editors.move(under, swap);
+      retargetCanvases(under, swap);
+      retargetDrawings(under, swap);
+      retargetHandoff(sourceVault(), under, swap);
+    },
+    discard(under) {
+      ws.editors.forget(under);
+      discardCanvases(under);
+      discardDrawings(under);
+      discardHandoff(sourceVault(), under);
+    },
+    async moved(_from, _to, swap) {
+      await ws.followMove(swap);
+    },
+    async removed(under) {
+      await ws.forget(under);
+    },
+  }).catch((err) => console.error("Could not coordinate renames", err));
+}
 window.addEventListener("beforeunload", () => {
   rememberWorkspace();
-  settings.flush();
-  void ws.editors.flush();
+  void flushOpenSaves(() => ws.editors.flush());
 });
 
 await ws.vault.open(!!popoutNote);
-if (ws.vault.path) rememberVault({ path: ws.vault.path, name: ws.vault.name });
+if (ws.vault.path) {
+  setBackendRoot(ws.vault.path);
+  setPageVault(ws.vault.path);
+  rememberVault({ path: ws.vault.path, name: ws.vault.name });
+}
+await replayHandoff();
 // The vault's own settings (its .grove folder) before the first note shows.
 await settings.load();
 // A vault Grove hasn't set up yet takes Cinder's or Obsidian's folders (once, in the main window).

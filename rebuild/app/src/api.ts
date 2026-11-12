@@ -66,7 +66,7 @@ interface VaultChange {
 export type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
 export type Listen = (event: string, handler: (payload: unknown) => void) => Promise<() => void>;
 
-export const isTauri = "__TAURI_INTERNALS__" in window;
+export const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 let backend: Promise<{ invoke: Invoke; listen: Listen }> | null = null;
 

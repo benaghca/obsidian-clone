@@ -7,6 +7,7 @@
 
 import { EditorView } from "@codemirror/view";
 import { api } from "./api";
+import { writeVaultNote } from "./vaultWrite";
 import type { ViewMode } from "./editor/editor";
 import { headingPos } from "./editor/headings";
 import type { EditorHost, EmbedHost, PropertyHost } from "./editor/host";
@@ -287,8 +288,10 @@ export class Workspace {
     // Write directly, not through the autosave (which only logs a failure): a failed save or open keeps the tab.
     const doc = this.editors.doc(path);
     if (doc) {
-      await api.writeNote(path, doc.toString());
-      this.vault.written(path);
+      // A sealed switch keeps the bytes for the old vault. Opening the window
+      // now would show the note against the root that is about to change.
+      const status = await writeVaultNote(path, doc.toString(), () => this.vault.written(path));
+      if (status === "queued") return;
     }
     await api.openNoteWindow(path);
     // Navigating or typing in the tab during the awaits keeps it here too.
@@ -888,8 +891,12 @@ export class Workspace {
     this.settle();
   }
 
-  /** Save a note now (Obsidian's "Save current file"), if it has changes waiting. */
-  async saveNow(path = this.active.path) {
-    if (path) await this.editors.flush((p) => p === path);
+  /**
+   * Save a note now (Obsidian's "Save current file"), if it has changes waiting.
+   * False when that write failed and the note is still dirty.
+   */
+  async saveNow(path = this.active.path): Promise<boolean> {
+    if (!path) return true;
+    return this.editors.flush((p) => p === path);
   }
 }

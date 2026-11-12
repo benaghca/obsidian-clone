@@ -7,6 +7,7 @@
 
 import { api, type FileEntry, isTauri, type LinkIndex } from "./api";
 import type { NoteRef } from "./editor/host";
+import { backendRoot, onBackendRootChange, pageOwnsDisk } from "./vaultRoot";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
 import { isNoteFile, noteName } from "./paths";
@@ -166,6 +167,12 @@ export class Vault {
       window.addEventListener("pagehide", () => this.abandon());
       window.addEventListener("pageshow", () => { this.suspended = false; });
     }
+    // A root change invalidates a list that was started on the previous vault.
+    // Rollback bumps the root again, so that reply still cannot install.
+    onBackendRootChange(() => {
+      this.filesRequest += 1;
+      this.linksRequest += 1;
+    });
   }
 
   /** Open the last vault; a note's own window (`reuse`) joins the one the backend already has open. */
@@ -204,8 +211,11 @@ export class Vault {
 
   async refreshFiles() {
     const mine = ++this.filesRequest;
+    const vault = backendRoot();
     const files = await api.listFiles();
-    if (mine !== this.filesRequest) return;
+    // The reply is the vault that was current when the read ran. Install it
+    // only if that vault is still this page's backend.
+    if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
@@ -215,8 +225,9 @@ export class Vault {
 
   async refreshLinks() {
     const mine = ++this.linksRequest;
+    const vault = backendRoot();
     const links = await api.linkIndex();
-    if (mine !== this.linksRequest) return;
+    if (mine !== this.linksRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     this.links = links;
     this.changed("links");
   }
@@ -276,7 +287,9 @@ export class Vault {
    * it; a later create, modify, or rename puts a path back.
    */
   private onChanged(kind: string, paths: string[]) {
-    if (this.suspended) return;
+    // A sealed page, or one whose vault is no longer the backend, must not
+    // queue a refresh that would replace its models with the other vault.
+    if (this.suspended || !pageOwnsDisk()) return;
     const start = this.pending === null;
     (this.pending ??= []).push({ kind, paths });
     if (start) this.armFlush();
@@ -317,18 +330,24 @@ export class Vault {
 
   private async flushChanges(wave: number) {
     if (wave !== this.wave) return;
+    // Ownership can change while the file list is in flight. Drop the batch
+    // instead of touching or reloading the page that no longer owns the disk.
+    if (!pageOwnsDisk()) {
+      this.pending = null;
+      return;
+    }
     const batch = this.pending;
     this.pending = null;
     if (!batch?.length) return;
     const { refresh, touch, reload } = reduceBatch(batch);
     if (refresh) await this.refreshFiles();
-    if (wave !== this.wave) return;
+    if (wave !== this.wave || !pageOwnsDisk()) return;
     for (const path of touch) this.touch(path);
     for (const path of reload) {
-      if (wave !== this.wave) return;
+      if (wave !== this.wave || !pageOwnsDisk()) return;
       await this.reload(path);
     }
-    if (wave !== this.wave) return;
+    if (wave !== this.wave || !pageOwnsDisk()) return;
     void this.refreshLinks();
   }
 }

@@ -2,7 +2,8 @@
 // card are the callers' job; both share this so the name, the folder and the
 // 20 MB cap stay one path.
 
-import { api } from "../api";
+import { sourceVault } from "../vaultRoot";
+import { queuedBytes, submitBytes } from "../vaultWrite";
 import { settings } from "../settings/store";
 import type { Workspace } from "../workspace";
 import { attachmentPaths } from "./attachments";
@@ -15,6 +16,7 @@ const ATTACHMENT_MAX = 20 * 1024 * 1024;
  * One refresh after the writes. A file over 20 MB is skipped.
  */
 export async function writeAttachments(ws: Workspace, from: string | null, files: File[], pasted = true): Promise<string[]> {
+  const source = sourceVault();
   if (!files.length) return [];
   const incoming: { name: string; type: string; bytes: Uint8Array }[] = [];
   for (const file of files) {
@@ -28,14 +30,21 @@ export async function writeAttachments(ws: Workspace, from: string | null, files
   if (!incoming.length) return [];
   const paths = attachmentPaths(from, settings.get("app.json").attachmentFolderPath, incoming, ws.vault.files.map((f) => f.path), new Date(), pasted);
   const saved: string[] = [];
+  let deferred = false;
   for (let i = 0; i < incoming.length; i++) {
     try {
-      await api.writeFileBytes(paths[i], incoming[i].bytes);
+      const pending = submitBytes(source, paths[i], incoming[i].bytes, "write");
+      if (queuedBytes(source, paths[i]) !== undefined) {
+        deferred = true;
+        saved.push(paths[i]);
+        continue;
+      }
+      await pending;
       saved.push(paths[i]);
     } catch (err) {
       console.warn("Grove could not save an attachment", paths[i], err);
     }
   }
-  if (saved.length) await ws.vault.refreshFiles();
+  if (saved.length && !deferred) await ws.vault.refreshFiles();
   return saved;
 }

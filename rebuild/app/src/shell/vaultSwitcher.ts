@@ -6,6 +6,7 @@
 // the new vault.
 
 import { api } from "../api";
+import { commitVaultSwitch, savesPending } from "../vaultSwitch";
 import type { Workspace } from "../workspace";
 import { h } from "./dom";
 import { icon } from "./icons";
@@ -47,21 +48,21 @@ function openMenu(ws: Workspace, anchor: HTMLElement, event: MouseEvent) {
       title: vault.name,
       checked: vault.path === here.path,
       action: () => {
-        if (vault.path !== here.path) void useVault(vault.path, false);
+        if (vault.path !== here.path) void useVault(ws, vault.path, false);
       },
     })),
     SEPARATOR,
-    { title: "Manage vaults...", icon: "vault", action: () => showManage(anchor) },
+    { title: "Manage vaults...", icon: "vault", action: () => showManage(ws, anchor) },
   ];
   showMenu(items, anchor, { point: { x: event.clientX, y: event.clientY } });
 }
 
 /** Open and create, the same path prompt the rest of the app uses. */
-function showManage(anchor: HTMLElement) {
+function showManage(ws: Workspace, anchor: HTMLElement) {
   showMenu(
     [
-      { title: "Open another vault...", action: () => askPath("Folder to open", "to open", (path) => void useVault(path, false)) },
-      { title: "Create new vault...", action: () => askPath("Folder for the new vault", "to create", (path) => void useVault(path, true)) },
+      { title: "Open another vault...", action: () => askPath("Folder to open", "to open", (path) => void useVault(ws, path, false)) },
+      { title: "Create new vault...", action: () => askPath("Folder for the new vault", "to create", (path) => void useVault(ws, path, true)) },
     ],
     anchor,
   );
@@ -82,12 +83,17 @@ function askPath(placeholder: string, enter: string, go: (path: string) => void)
   });
 }
 
-async function useVault(path: string, create: boolean) {
-  try {
-    const info = create ? await api.createVault(path) : await api.openVault(path);
-    rememberVault(info);
-    location.reload();
-  } catch (err) {
-    console.warn(create ? "Could not create vault" : "Could not open vault", err);
-  }
+async function useVault(ws: Workspace, path: string, create: boolean) {
+  await commitVaultSwitch(path, create, {
+    flushNotes: () => ws.editors.flush(),
+    dirty: () => savesPending(ws.editors),
+    vault: () => ws.vault.path ?? "",
+    reload: () => location.reload(),
+    warn: (message, err) => console.warn(message, err ?? ""),
+    open: async (folder, creating) => {
+      const info = creating ? await api.createVault(folder) : await api.openVault(folder);
+      rememberVault(info);
+      return info;
+    },
+  });
 }

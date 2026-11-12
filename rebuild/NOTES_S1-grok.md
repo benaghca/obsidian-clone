@@ -1,0 +1,291 @@
+# S1 notes (grok)
+
+Invisible data-loss fixes only. Nothing on screen changed: no "couldn't save" notice, status mark, toast, prompt, or dialog. A save that finishes still waits the same 300 ms after the last keystroke (500 ms for settings). A close can pause for the write itself, and gives up after 2 seconds if a write hangs.
+
+## In plain words
+
+Grove was dropping text you had just typed.
+
+- Closing with Alt+F4 or the compositor (not only Grove's own X) started the save and tore the page down without waiting. The same hole covered a pending canvas, drawing, or settings write.
+- A keystroke during a rename stayed on a timer for the old path. When that timer fired, the note had already moved, and the write was thrown away. A save already in flight had the same hole: the bytes went to the old path and the new path never got them.
+- A failed save was only logged. The app forgot the note was unsaved, so a reload or a quit could replace the text you still had. Merging two notes deleted the source even when the combined text never reached disk.
+
+Those paths are closed. A failed save stays dirty and is tried again (half a second, then 1, 2, 4, and at most 8 seconds). A later success clears it. Merge leaves the source on disk when the target save fails. The merged text stays in the target and is retried. No dialog.
+
+## What changed
+
+- `src/quitFlush.ts` listens for Tauri's close request, calls `preventDefault` before the first await, flushes notes, canvases, drawings, and settings, and then destroys the window. A flush that returns false is retried with the usual backoff until the saves are clean or 2 seconds from the start of the close (`QUIT_FLUSH_MS`). A second close request joins the same wait. Grove's X only calls `close()`, so that handler owns the deadline. A hung write cannot keep the button from starting it. `beforeunload` starts the same flush but cannot wait. `core:window:allow-destroy` was added next to `allow-close` in `src-tauri/capabilities/default.json`. `src-tauri/src/lib.rs` was not touched.
+- `src/noteEditors.ts` keeps a dirty set apart from the timers. `move()` re-keys the save timer, the retry timer, the dirty set, and the in-flight slot, and the timer reads the path when it fires. If the write already started at the old path, a follow-up write uses the new path. `flush` / `saveNow` resolve `false` when the write failed. A keystroke that lands during the write is included before `flush` resolves. `reload` will not replace text that is still dirty or in flight.
+- `src/fileOps.ts` `mergeNote` returns before `deleteFile` when `saveNow` is not successful. `src/workspace.ts` `saveNow` returns that boolean.
+- Canvas and drawing saves share `src/fileSave.ts` (debounce, dirty, backoff, flush). The two loops were the same shape; the note loop stays in `noteEditors.ts` because a rename has to retarget the path. This is not a new pending-saves service. Open canvases are tracked in `src/canvas/pending.ts`, the same way drawings already were. A write that has started is remembered with its path, so closing the tab does not drop it, and a rename of one file does not wait on an unrelated write.
+- `src/settings/store.ts` `flush` returns a promise that settles when the write settles. A failed settings write is retried on the same backoff and is included the next time `flush` runs.
+- `src/readOrdering.test.ts` gives the reload stub the new maps (`dirty`, `retryTimers`, `slots`). `reload` reads those fields directly so that stub, which is not a `NoteEditors` instance, still runs the real body. No assertion there was weakened.
+
+A canvas or drawing is owned by its path (`src/ownedSave.ts`). Rename retargets that writer. Delete discards it so a retry cannot recreate the file. Closing the tab keeps a failed save, and opening the file again uses the same writer. An external change still wins over a canvas or drawing edit that has not been saved.
+
+Out of scope, left as they were: a visible failure notice, conflict detection, CRLF/BOM, index batching, and moving Rust commands off the GTK thread. Direct process exit is S5's worker shutdown. This slice does not add a Rust `ExitRequested` hook, and destroying the page on the 2 second timeout does not cancel a write the worker has already accepted.
+
+## How the tests were proved
+
+`src/saveLoss.test.ts` is part of `vitest run`. No new npm script. No window.
+
+Checked out the pre-change copies of `noteEditors.ts`, `fileOps.ts`, `settings/store.ts`, `workspace.ts`, `main.ts`, `canvas/view.ts`, `drawing/view.ts`, `drawing/pending.ts`, `readOrdering.test.ts`, and `capabilities/default.json` from `46b072f`, left the new test file in place, and ran `npx vitest run src/saveLoss.test.ts`. 8 failed, 3 passed:
+
+- A keystroke waiting out a rename: `writeNote` was called 0 times. Expected `("New.md", "typed")`.
+- An in-flight save during rename: the only call was `("Old.md", "typed")`, not `New.md`.
+- A flush while a second keystroke arrives: the only call was `("A.md", "one")`, not `"two"`.
+- A failed write: `flush()` resolved `undefined`, not `false`.
+- Reload after that failure: the doc became `"from-disk"`. Expected `"kept"`.
+- `mergeNote` when the target save fails: `deletePath` was called once with `("From.md", false)`.
+- Settings flush: the return value was `undefined`, not a `Promise`.
+- The close test in that same run did not finish cleanly: the settings test above threw before putting `showLineNumber` back, so the later `set(true)` was a no-op and `writeConfig` was never called. That failure is not the close-path proof.
+
+The merge-success test passed on that tree too, because the old `mergeNote` always deleted. It still passes.
+
+The canvas/drawing retry and the close timeout passed in that run only because `fileSave.ts` and `quitFlush.ts` are new files and were still the fixed copies. They were proved by putting the old behaviour back inside those files:
+
+- `fileSave` cleared dirty on a failed write and did not arm a retry. `a canvas or drawing write stays dirty and retries until it succeeds` failed at `expect(disk.dirty).toBe(true)` (received `false`).
+- `bindCloseFlush` called `destroy()` without awaiting the flush. Both close tests failed at `expect(destroy).not.toHaveBeenCalled()`: destroy ran immediately.
+- With only `settings/store.ts` restored to `46b072f` (flush starts `writeConfig` and returns nothing) and vitest `--no-cache`, the close test failed after the drawing write was released: `expect(destroy).not.toHaveBeenCalled()` at the settings gate. The window was destroyed before the settings write finished. One `Promise.resolve()` was not enough to see that, so the test drains 20 microtasks after each release.
+
+Restored the fixed tree and ran `npx vitest run src/saveLoss.test.ts src/readOrdering.test.ts src/fileOps.test.ts --no-cache`: 3 files, 37 tests passed. `tsc --noEmit` passed.
+
+## Close path without a real webview
+
+No Grove window, no Tauri window, and no WebKitGTK or WebView2 process was opened. Browser verification was skipped because this brief forbids a GUI and requires that nothing visible change.
+
+The wait is reasoned from Tauri 2.12.4 as shipped in this app:
+
+- Rust `tauri::manager::window`: if the page has a JS listener for `tauri://close-requested`, the window `prevent_close()`s and then emits the event. That is Alt+F4 and the compositor, and also Grove's X, because `win.close()` emits the same event.
+- `@tauri-apps/api` `onCloseRequested` awaits the handler, then calls `destroy()` unless `preventDefault()` was called. `destroy()` does not emit `close-requested` again.
+- The handler calls `preventDefault()` synchronously, awaits the flush (or the 2 second timeout), then `destroy()`. `core:window:allow-destroy` is the permission that call needs. `allow-close` was already granted.
+
+`beforeunload` cannot wait for an IPC write. It only starts one. The unit test drives `bindCloseFlush` with a fake window object, so the wait and the timeout are asserted without a webview. A hung IPC is not cancelled when the timeout wins; the page is destroyed and that write may still be in flight.
+
+## Size
+
+No new dependency. No new crate. `package.json` was not changed.
+
+Net change is about +688 lines, almost all TypeScript, plus one JSON permission line. `git diff --numstat` on the tracked files is +291 / −101. New files add 498 lines.
+
+| File | Net |
+| --- | ---: |
+| `src/noteEditors.ts` | +145 (637 lines) |
+| `src/settings/store.ts` | +24 (214) |
+| `src/main.ts` | +12 (553) |
+| `src/drawing/pending.ts` | +13 (37) |
+| `src/workspace.ts` | +4 (705) |
+| `src/canvas/view.ts` | +3 (570) |
+| `src/fileOps.ts` | +1 (263) |
+| `src/drawing/view.ts` | −13 (397) |
+| `src/readOrdering.test.ts` | 0 (one line edited) |
+| `src-tauri/capabilities/default.json` | +1 |
+| `src/fileSave.ts` | new, 119 |
+| `src/quitFlush.ts` | new, 46 |
+| `src/canvas/pending.ts` | new, 34 |
+| `src/saveLoss.test.ts` | new, 299 |
+
+No file is over 800 lines. The longest touched file is `src/workspace.ts` at 705, four lines above where it started. Rust was not changed, so `cargo test` was not run.
+
+## Review fixes
+
+Codex failed `89bd364`. A pending or retrying save must not outlive the vault or the path it belongs to. Still nothing on screen: no notice, toast, status mark, or dialog.
+
+- **Vault switch.** `useVault` opened the new vault and then reloaded, so the old page's `beforeunload` could write vault A's text onto the same name in vault B. `commitVaultSwitch` flushes notes, canvases, drawings, and settings while the root is still the old vault. If anything is still dirty, the switch stops and the retries stay armed. There is no notice. Pop-out windows share the backend root, so each window flushes on its own page and answers before this page seals. This page seals only after they agree, and it seals before `openVault` / `createVault`, so a timer here cannot write after the root changes. The seal stays up across the reload. A write that never settles is awaited. The switch does not time out and then open. An edit that arrives after the seal, including one typed while the new vault is opening, puts the old root back and is written there. The page stays sealed only when that root cannot be restored. `core:window:allow-get-all-windows` lists the other windows. If that list fails, the switch stops and nothing is sealed.
+- **Rename and delete.** Notes, canvases, and drawings are held before `renamePath` or `deletePath`. The hold's flush writes the current text first. A delete then trashes those bytes. A flush that returns false does not delete, and the retry stays. A write already sent finishes on the old path. A keystroke or a retry during the IPC does not send another write until the rename has retargeted the path, or until a failed rename releases the old path. `save` does not wait on the rename, or the flush inside the rename would deadlock. After a successful delete, the owned canvas and drawing retry is dropped so it cannot recreate the file. A failed delete releases the hold and leaves the retry. Rename still continues when its flush returns false, because the dirty text moves with the file.
+- **Close.** All four save kinds report clean or dirty. A dirty result is retried until clean or the same 2 second deadline, counted from the start of the close. Grove's X calls `requestClose`, which is only `win.close()`.
+- **Canvas and drawing tabs.** The path owns the dirty text. Disposing the tab does not forget a failed save, and a second view of the file adopts it. Quit flushes that writer along with any tab that is still open.
+- **Settings.** Each real change bumps a generation. `flush` writes the newest snapshot. An older write finishing does not clear a newer one.
+- **Debounce.** A follow-up that a timer started waits out the rest of the 300 ms. `flush` still writes immediately. Settings stay at 500 ms.
+
+Red proof for this pass: the new tests were run with the old order put back inside the fixed files (open the vault before any flush, no hold across rename, close destroys when the flush returns false and does not retry, settings `flush` only joins the write already in flight, closing a canvas drops its writer, delete does not discard the retry, the X button flushes and then calls `close()`, and a follow-up save ignores a debounce that has not elapsed). `npx vitest run src/saveLoss.test.ts`: 16 failed, 10 passed. The new vault, rename-while-in-flight, canvas rename, delete, closed-tab, close-retry, settings-generation, X-button, and debounce tests failed. One older settings test also failed under that mutation, because `flush` no longer started a write. The failed-rename test still passed: the rename threw before the path moved, so the timer still wrote the old path. Restored the fix and ran `saveLoss.test.ts`, `fileOps.test.ts`, `links/updateRace.test.ts`, and `readOrdering.test.ts`: 4 files, 55 tests passed.
+
+Browser verification was skipped. Nothing visible changes, and the brief forbids opening Grove, Tauri, or a visible browser. No window was opened for this pass. The locked `npm test` still launches its own headless Chromium.
+
+## Commands
+
+The first commit (`89bd364`), from `rebuild/app` on `rebuild/s1-grok`:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest. Vitest: 100 files, 1556 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains.
+- `npm run audit:offline` exited 0: 223 source files, dist, CSP, capabilities, and dependencies checked.
+
+The suite rewrote screenshots under `rebuild/round*-shots`. Those were put back with `git restore` and are not in this commit.
+
+`scripts/test-canvas-notes.mjs` was not changed. On this worktree `node_modules` had been a symlink into another worktree, so Vite served `@codemirror/view` without rewriting its imports and that script failed here and on unmodified `46b072f`. A local copy of `node_modules` (gitignored, not part of this commit) made the script pass. No Grove window was opened. The suite's own headless Chromium is the browser run.
+
+This review pass, still from `rebuild/app` on `rebuild/s1-grok`, one `flock /tmp/grove-npm-test.lock` for all three:
+
+- `npm test` exited 0, including posttest. Vitest: 100 files, 1571 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1306 kB).
+- `npm run audit:offline` exited 0: 226 source files, dist, CSP, capabilities, and dependencies checked.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots` were rewritten and put back with `git restore`. They are not in this commit. Rust was not changed, so `cargo test` was not run. No file is over 800 lines. `src/saveLoss.test.ts` is 691. New files: `src/saveSeal.ts`, `src/ownedSave.ts`, `src/vaultSwitch.ts`.
+
+## Review 2
+
+Codex failed `e63e2c7`. Five blockers, plus every path where a pending save can outlive the note. Nothing on screen changes. No new package. Regressions live in `src/saveBarrier.test.ts`. The failed-delete case in `src/saveLoss.test.ts` now expects a failed flush to refuse the delete.
+
+- **Vault barrier.** Editors stay editable while `open` runs. A direct writer (an unloaded note, a property write, an attachment, a settings file, a base file, a drawing export) has no dirty set, so `writeVaultNote`, `writeVaultConfig`, and `runOnVault` queue while saves are sealed and do not call the backend. Note editors stay dirty and reschedule, because the document still holds the text. After the other windows agree, this page seals, opens, then asks again. If anything is dirty, or a peer says so, it opens the old root and only then unseals and flushes, including the queue. If the old root cannot be restored, the page stays sealed and reloads. A dry-run property read is not queued. The vault switch does not wait on `runOnVault` inside `open`.
+- **Peer cancel.** The thaw carries the transaction id. A peer whose flush finishes after the 2 second wait sees that id and does not seal, so its next edit still saves. Two windows that start a switch together: the smaller id is the one that opens. The other becomes a peer of that id. Its later unseal does not lift the winner's seal. The regression builds two coordinators, so they do not share one module's cancelled set. Both may end sealed. The test checks that exactly one `open` ran and that the opener stays sealed.
+- **Reload notice.** If the reload event fails after the new vault has opened, the commit still returns true, this page reloads, and the seal stays up. A later edit does not call `writeNote`.
+- **Delete.** The hold blocks timers. The explicit flush still writes. The trash receives the edit that was waiting out the 300 ms debounce. A flush that returns false does not call `deletePath`. A sealed page does not start a rename or a delete.
+- **Drawing prepare.** The view that last edited owns the snapshot a flush writes. A sibling opened later does not replace it, and it does not drop a newer generation while that write is telling the vault. An explicit flush bypasses a hold. A timer does not. `changed()` does not serialize the scene an extra time.
+- **Other windows.** `installPathBarrier` listens even when this is the only window, so a pop-out that opens later can hold this page before a rename or delete. Peers flush and stay held until it finishes. A failed peer flush aborts with no dialog. If the window list fails, the rename or delete does not start.
+
+`isTauri` is false when there is no `window`, so a node test that reaches the real `api` module can load. In the browser the check is the same.
+
+Red proof, then the production files were restored:
+
+- Old behavior put back together (no rollback, thaw without an id, unseal when the reload notice throws, a hold blocks the eager flush, prepare uses the later view, rename runs before the peer answers, a window that is alone does not listen): `src/saveBarrier.test.ts` had 9 failed and 1 passed. The slow-peer test still passed in that combined run, because it returned before the late flush decided.
+- Thaw with no id, on its own: the slow peer sealed after its flush (`expected false, received true`).
+- No smaller-id surrender, on its own: both windows opened (`['/vault-a', '/vault-b']`, length 2).
+- A window that started alone did not listen, on its own: the later rename never ran (`renamed` was -1).
+- Restored. `saveBarrier.test.ts`, `saveLoss.test.ts`, `fileOps.test.ts`, `links/updateRace.test.ts`, `readOrdering.test.ts`, and `bases/move.test.ts`: 6 files, 68 tests passed. `bases/results.test.ts` passed after the `isTauri` guard (4 tests).
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+No file is over 800 lines. The longest touched file is `src/workspace.ts` at 708. `src/saveLoss.test.ts` is 699. `src/noteEditors.ts` is 682. New files: `src/vaultWrite.ts` (113), `src/pathBarrier.ts` (164), `src/saveBarrier.test.ts` (351). `src/vaultSwitch.ts` is 374. Rust was not edited.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted. One `flock /tmp/grove-npm-test.lock` covered the three npm commands:
+
+- `npm test` exited 0, including posttest. Vitest: 101 files, 1581 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. An earlier locked run, while other worktrees were also testing, missed the drawing parse budget by 0.012 ms (20.012 ms). Three quiet reruns of that one test were 11.4, 11.6, and 11.9 ms. The passing locked run is the one recorded here.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1312 kB).
+- `npm run audit:offline` exited 0: 228 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, including `grove-note-editor.png` and `grove-note-readonly.png`, were rewritten and put back with `git restore`. They are not in this commit.
+
+## Review 3
+
+Codex failed `c263f9b`. Seven blockers. A sealed edit, a create, or a rename could still land in the wrong vault or under the old name. Nothing on screen changes. No new package. Rust was not edited. The backend still runs each write against the root that is current when the write arrives. This page checks that root in the same turn as the call, and keeps a copy of the bytes until that root is the one they belong to.
+
+- **Confirm is not the commit.** Before any page reloads, the dirty note, canvas, and drawing text is stored for the old vault (`grove.saveHandoff`). A keystroke after the peers agree, and a keystroke while the reload event is going out, is in that store. Once the reload has been sent, this page does not open the old vault again. If putting the old vault back fails, the page stays sealed, does not reload, and does not write the old text onto the new vault. The stored bytes are written when that vault is the backend root again.
+- **Create, copy, and new folder.** Those calls used to go straight to the backend. While saves are sealed they wait in the same store, tagged with the vault that was open when they started. They run only when that vault is the backend root. A rename or delete that was waiting on other windows checks the root again in the same turn as `renamePath` or `deletePath`. If the root has moved, the call does not happen.
+- **Eager flush during a hold.** Only the flush that runs before the rename or delete, and the peer flush that answers a hold, may write while a path is held. Ctrl+S, close, a second barrier, and closing the view do not write the old name after the rename has been sent. A queued note for the old path is moved to the new path after the rename, and dropped after a successful delete. A delete does not run when that queue, or the editor flush, fails.
+- **The queue is durable.** A rejected open drains it. A failed replay retries (half a second, then the usual backoff). Close flushes the open editors first, then the queue, so a newer edit is not overwritten by an older snapshot of the same path. An editor that is newer than a queued snapshot writes. An editor that is older stays dirty while the newer snapshot is still queued, so a delete cannot skip it.
+- **Two panes of one canvas or drawing.** The pane that saved tells a clean sibling to take that saved text. A sibling that has a newer unsaved edit is left alone. The writing pane still ignores its own echo, so the notification does not drop the view.
+- **Peer rename and delete.** The other window moves or forgets the workspace tab, the history, the recent list, and the views, and only then says the barrier is done. The hold stays until that answer arrives. If the done notice is lost, it is sent again. The old path stays held after a rename that already happened. A later edit is written to the new path.
+
+Regressions are in `src/saveBoundary.test.ts` (12 tests): a peer edit after confirm, an edit during reload, a failed rollback, a rejected open after a queued write, a failed replay then close, an older queued snapshot against a newer edit, a sealed copy, a rename and a delete that resume after the root changes, eager note, canvas, drawing, and peer flushes after rename ingress, two canvas panes and two drawing panes, a lost done notice with a real tab, and a peer delete that clears that tab.
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, and pruning detached clean owners.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+No file is over 800 lines. The longest touched file is `src/noteEditors.ts` at 710. `src/workspace.ts` is 708 and was not edited. `src/saveLoss.test.ts` is 703. `src/saveBoundary.test.ts` is 557. New files: `src/vaultRoot.ts` (32), `src/holdDrain.ts` (16), `src/saveBoundary.test.ts` (557).
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest. Vitest: 102 files, 1593 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1318 kB, `index-Y4L6APrl.js`).
+- `npm run audit:offline` exited 0: 230 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, including `grove-note-editor.png` and `grove-note-readonly.png`, were rewritten and put back with `git restore`. They are not in this commit.
+
+## Review 4
+
+Codex failed `4cdb34f`. Eight blockers. Sibling adoption and the peer workspace move and forget stay as they were. Nothing on screen changes. No new package. Rust was not edited. The backend still runs each write against the root that is current when the write arrives. This page names the vault the models belong to before any await, and sends the write only in the same turn that the backend root is still that vault.
+
+- **Page vault and backend root.** Opening the new vault sets the backend root when `open` returns. The page vault stays the old one until reload. A copy, a create, or a direct write that the still-old page accepts is tagged with the old vault, including while confirm is delayed and after a failed rollback. The queued create is stored under the old vault before the root flips.
+- **One journal key per window.** The store is `grove.saveHandoff.` plus this page's id. This page writes only its own key, then reads that key back. A write that does not read back does not reload and does not tell other windows to reload. An early failure puts the old root back, thaws, and flushes. Boot reads every key with that prefix. A newer note for the same vault and path drops the older copy from the other window's key. An empty old root still reloads, so a test that never set a vault is unchanged.
+- **Rename and delete.** Retarget and discard take the vault as well as the path. Notes, bytes, properties, and structural jobs for another vault stay byte for byte. Only the keys this page actually changed are written back.
+- **Holds.** A hold is a path predicate. Only the drain that owns it may write that path. Direct writes, queued writes, and retries all honor it. The rename moves the matching queue to the new path before the hold drops, then flushes. A delete still refuses when the flush fails. An eager flush after rename ingress still does not recreate the old path.
+- **Reload snapshot.** The preserve that runs as the reload goes out includes the latest settings text and any deferred attachment or property edit. A sealed settings write is queued and does not start a timer.
+- **Startup.** The stored bytes are replayed before settings load. A note or settings read still hits disk, then uses the recovered text when a replay write is in flight or still queued. The later flush writes the recovered content.
+- **Watchers.** While the page is sealed, or its vault is not the backend root, a foreign change does not drop a dirty note, canvas, or drawing. The vault change listener returns immediately. The old vault's accepted edits are stored before the backend root becomes the new vault.
+- **Peer completion.** The rename waits on the ack, raced with the retry delay, and drops a peer that has already left. The foreground wait is two seconds. The retries continue in the background. A timeout does not release a live peer's hold. A lost done notice is still sent again after half a second.
+
+Regressions are in `src/saveEpoch.test.ts` (13 tests): a copy and a direct write after `open` resolves, two windows plus a third page reading both records, a refused handoff write, a vault A mutation leaving vault B intact, overlapping drains, a retry during rename ingress, a peer retarget before release, settings and a deferred attachment on reload, a disk read during recovery, a late watcher while the page still belongs to the old vault, an ack that arrives without the backoff, and a peer that leaves before the ack. The source of the canvas and drawing views is checked for the foreign-change gate.
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, and pruning detached clean owners.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+No file is over 800 lines. The longest touched file is `src/noteEditors.ts` at 717. `src/saveLoss.test.ts` is 715. `src/workspace.ts` is 708 and was not edited. `src/vaultWrite.ts` is 594. New file: `src/saveEpoch.test.ts` (564).
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest. Vitest: 103 files, 1606 tests passed. The known graph feel gap is still there (p95 33.4 ms) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 17.7 ms).
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The existing chunk-size warning remains (index about 1324 kB, `index-Bex78D2N.js`).
+- `npm run audit:offline` exited 0: 230 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0. `grove_lib`: 110 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests. Rust was not edited.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
+
+## Review 5
+
+Codex failed `10e3eb0`. Five blockers. `rebuild/integration` at `af0fcc3` (newer than the review's `2a9ede5` anchor; it includes the S3 merge) was merged in. The only textual conflict was `src/vault.ts`. S9's batched scheduler stays. S1's ownership guard is applied when a batch is admitted and again before it touches files. Nothing on screen changes. No new package. This slice did not edit Rust; the Rust in the merge is integration's.
+
+- **Journal items.** Each accepted note, config, create, byte job, property edit, and copy is its own key: `grove.saveHandoff.` plus this page's id, a kind letter, and the id. A successful replay removes only that key. It does not rebuild another window's record from this page's cache. An older per-item note is dropped only after a fresh read still shows a generation this page already has. A legacy single-blob key is edited by reading it again at that moment, so a note another window added after this page loaded stays in the blob.
+- **Drains.** `beginHoldDrain` returns a disposer for that drain's own token. Finishing an earlier drain does not remove a later drain's authorization. Two overlapping renames can finish out of order, and the path the later drain still holds cannot be written.
+- **Peer delete.** The ack is true only when the path flush and this page's handoff flush both succeed. A failed queued text stays in that page's journal. The initiator does not delete.
+- **Copy.** A loaded note, canvas, or drawing copies the snapshot already in memory, including while the page is sealed. A closed file is read only in a turn where the backend is still the vault the copy was accepted on and the page is not sealed. If that read comes back after the root moved or the page sealed, those bytes are discarded and the copy waits until that vault is the backend again.
+- **Watcher batch.** S9 still coalesces on a frame, with a 50 ms fallback, one refresh, and the prefix/tombstone reducer. `onChanged` returns when the page is suspended or does not own the disk. A batch that loses ownership before it applies is dropped, including after `refreshFiles` and before each reload and the link refresh. It does not run later when the page owns the disk again.
+
+Regressions: replaying one window leaves the other window's later note in storage (`src/saveEpoch.test.ts`, 17 tests); an earlier rename drain finishing does not authorize the path a later drain still holds; a peer that fails its queued text refuses the delete and the text is still recoverable; a closed note and a canvas copied while confirm is delayed read the vault the page still belongs to. `src/vault.events.test.ts` checks that a batch already framed does not reload once the backend root is no longer the page vault. The sealed loaded-note copy still queues a structural create of the editor text.
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, pruning detached clean owners, and a product-wide conflict policy. S5 still runs each write against the root that is current when the write arrives.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+`src/vaultWrite.ts` is 724 lines. The storage helpers are `src/handoffStore.ts` (111). Each page's journal maps stay in `vaultWrite.ts`. `src/workspace.ts` is 902 because integration's copy is 895; this slice did not add a feature there.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest (`TEST_EXIT:0`). Vitest: 108 files, 1644 tests passed. The known graph feel gap is still there (p95 33.4 ms, over_20ms 59/185) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 16.9 ms).
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The app index is `index-BAKOCWYJ.js` (183.66 kB). The largest chunk is `menu-WcLcfhgn.js` (261.14 kB). The log printed no chunk-size warning.
+- `npm run audit:offline` exited 0: 236 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
+
+## Review 6
+
+Codex failed `0c14907`. The five earlier findings stay fixed. Two blockers. Nothing on screen changes. No new package. Rust was not edited.
+
+- **Property edits.** Each queued property edit gets its own journal key, with a submission number. A second edit of the same file no longer replaces the first in storage. A new page restores them in that order and writes them one after another. A failed edit keeps itself and every later edit queued.
+- **File list.** `refreshFiles` installs a list only when the request is still current, the backend root is the one captured when the read started, and this page owns the disk. A backend-root change drops in-flight file and link replies. A list that comes back from the other vault during a switch is not published, and rollback does not need to undo it because it was never installed.
+
+Regressions: two property edits of `Note.md` are still both written after a fresh journal realm (`src/saveEpoch.test.ts`, 18 tests). An in-flight file list of vault B, then a rollback to A, leaves A's files, notes, and path lookup in place and does not emit another files change (`src/vault.events.test.ts`).
+
+Left as they were: the settings 8-pass retry, drawing full-scene serialization, pruning detached clean owners, and a product-wide conflict policy.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+`src/vaultWrite.ts` is 734 lines. `src/saveEpoch.test.ts` is 735. `src/vault.ts` is 353.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest (`TEST_EXIT:0`). Vitest: 108 files, 1646 tests passed. The known graph feel gap is still there (p95 33.4 ms, over_20ms 64/180) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 17.0 ms). Two earlier locked runs stopped on existing frame-timing checks (canvas link frames, then kanban sideways scroll max 33.3 ms against a 25 ms cap). Those checks passed in this run. No assertion was weakened.
+- `npm run build` exited 0 (`tsc --noEmit` and `vite build`). The app index is `index-DPzdTJIA.js` (183.77 kB). The largest chunk is `menu-BVHRymps.js` (261.14 kB). The log printed no chunk-size warning.
+- `npm run audit:offline` exited 0: 236 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.
+
+## Review 7
+
+Codex failed `1c86c53`. Both round-6 findings stay fixed. One blocker. Nothing on screen changes. No new package. Rust was not edited.
+
+A serial replay of queued property edits took every selected job out of the pending list before the first write. The switch only waited for the write that was already in flight, so it could open the next vault between edits. The last edit then ran against that new vault.
+
+The jobs stay queued until each one is sent, and one tracked promise covers the whole sequence. After every wait, the next send checks the source vault, the seal, and any path hold in that same turn. If the check fails, that edit and every later one stay queued in order, and `setProperty` is not called. A second flush waits for the sequence already in flight instead of reporting the vault quiet.
+
+Regression (`src/propertyReplay.test.ts`): four property edits with delayed replies, running beside `commitVaultSwitch`. On the previous replay both tests failed because the tail was no longer pending. With this replay, all four land on vault A before `open` of vault B. A path hold that arrives after the second reply leaves the third and fourth queued for A, the switch does not open, and lifting the hold writes those two in order. The idle two-edit restore test is unchanged.
+
+Left as they were: conflicting edits across windows, cross-page generation arbitration, crash-exactly-once recovery, the settings 8-pass retry, full-scene drawing serialization, detached-owner pruning, and large journal or binary tuning.
+
+Browser verification was skipped. Nothing visible changes, and this pass does not open Grove, Tauri, or a visible browser. No window was opened. The locked `npm test` still launches its own headless Chromium.
+
+`src/vaultWrite.ts` is 759 lines. `src/propertyReplay.test.ts` is 190. `src/saveEpoch.test.ts` is 735.
+
+Commands for this pass, from `rebuild/app` on `rebuild/s1-grok` unless noted:
+
+- `flock /tmp/grove-npm-test.lock npm test` exited 0, including posttest (`TEST_EXIT:0` in `rebuild/.scratch-s1/npm-test7b.log`). Vitest: 109 files, 1648 tests passed. The known graph feel gap is still there (p95 33.4 ms, over_20ms 58/185) and the suite still passed with `GROVE_FEEL_STRICT_GRAPH` unset. Drawing parse of 5,000 elements stayed under the 20 ms budget (median 17.7 ms). An earlier locked run stopped in `scripts/test-r27e.mjs` because the settings search field was not focused after 80 ms. That script passed alone (`R27E_EXIT:0`). No assertion was weakened.
+- `npm run build` exited 0 (`BUILD_EXIT:0`, `tsc --noEmit` and `vite build`). The app index is `index-BA28BbAq.js` (183.77 kB). The largest chunk is `menu-CxZmNGBg.js` (261.14 kB). The log printed no chunk-size warning.
+- `npm run audit:offline` exited 0 (`AUDIT_EXIT:0`): 236 source files, dist, CSP, capabilities, and dependencies checked.
+- `cargo test --offline` from `rebuild/app/src-tauri` exited 0 (`CARGO_EXIT:0`). `grove_lib`: 156 passed, 0 failed, 4 ignored. The binary and doc-test targets ran 0 tests.
+
+Screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`, and the `round31b-shots` and `round32b-shots` directories the suite also rewrote, were put back with `git restore`. They are not in this commit.

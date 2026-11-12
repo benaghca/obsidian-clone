@@ -4,6 +4,7 @@ import { markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorState } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 import { api } from "../api";
+import { deliverForeignChange } from "../vaultRoot";
 import { commands } from "../commands";
 import { IMAGE_EXT, embedPart } from "../editor/embeds";
 import { editorHost } from "../editor/host";
@@ -34,6 +35,7 @@ import { canvasWork } from "./work";
 import { canvasBodies } from "./bodies";
 import { linkFrameBody } from "./linkFrame";
 import { canvasEdges } from "./edges";
+import { attachCanvas } from "./pending";
 
 const NS = "http://www.w3.org/2000/svg";
 function svg<K extends keyof SVGElementTagNameMap>(tag: K, attrs: Record<string, string>, ...children: SVGElement[]) {
@@ -65,27 +67,28 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   const host = ws.editors.viewOf(group).state.facet(editorHost)!;
   const world = h("div", { class: "canvas-world" });
   const el = h("div", { class: "view-content canvas-view", "aria-label": "Canvas", tabindex: "0" }, world);
-  let gone = false, generation = 0, loading = 0, source = "", timer = 0, notifying = false;
+  let gone = false, generation = 0, loading = 0, source = "";
   let undo: string[] = [], redo: string[] = [];
-  let writing = Promise.resolve();
   let stopText: ((paint?: boolean) => void) | undefined;
   let selectAfterDraw: string | undefined, editAfterDraw: string | undefined, building = false, cancelAutoEdit = 0;
-  function save() {
-    clearTimeout(timer); timer = 0;
-    const text = source;
-    writing = writing.then(async () => {
-      try {
-        await api.writeNote(path, text);
-        notifying = true;
-        try { ws.vault.written(path); } finally { notifying = false; }
-      } catch (err) { console.error(`Could not save ${path}`, err); }
-    });
-  }
+  const owned = attachCanvas(path, {
+    onWrote: () => { ws.vault.written(owned.path()); },
+    // A sibling pane adopts the saved board. It does not drop, and it does not become dirty.
+    adopt: (text) => {
+      if (text === source) return;
+      source = text;
+      undo = [];
+      redo = [];
+      void draw();
+    },
+  });
+  function save() { return owned.flush(); }
   function changed(next: string, redraw = false) {
     if (next === source) return;
     source = next;
     navigation.updateHistory(undo.some(text => text !== source), redo.some(text => text !== source));
-    clearTimeout(timer); timer = window.setTimeout(save, 300);
+    owned.setText(next);
+    owned.touch();
     if (redraw) draw();
   }
   function history(forward: boolean) {
@@ -145,12 +148,17 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
   const openCreateMenu = (box: { x: number; y: number; width: number; height: number }, at: { x: number; y: number }) =>
     cardActions.createMenu({ ...box, atStart: true }, at);
   async function load() {
+    if (owned.dirty) {
+      source = owned.text(); undo = []; redo = [];
+      draw();
+      return;
+    }
     const mine = ++loading;
     let text: string;
-    try { text = await api.readNote(path); } catch { text = ""; }
-    if (gone || mine !== loading) return;
+    try { text = await api.readNote(owned.path()); } catch { text = ""; }
+    if (gone || mine !== loading || owned.dirty) return;
     if (text === source && world.childElementCount) return;
-    clearTimeout(timer); timer = 0;
+    owned.drop();
     source = text; undo = []; redo = [];
     draw();
   }
@@ -559,9 +567,11 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
     if (event.key === "Escape") { cancelAutoEdit = generation; event.preventDefault(); event.stopPropagation(); }
     else if ((event.ctrlKey || event.metaKey) && ["z","y"].includes(event.key.toLowerCase())) { event.preventDefault(); event.stopPropagation(); history(event.shiftKey || event.key.toLowerCase() === "y"); }
   }, true);
-  const flush = () => { if (timer) save(); };
+  const flush = () => { void save(); };
   window.addEventListener("beforeunload", flush);
-  const unwatch = ws.vault.onModified(changed => { if (changed === path && !notifying) { clearTimeout(timer); timer = 0; void load(); } });
+  const unwatch = ws.vault.onModified(changedPath => {
+    deliverForeignChange(changedPath === owned.path(), owned.echoing, () => owned.drop(), () => { void load(); });
+  });
   void load();
-  return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
+  return { el, dispose() { gone = true; presentation.dispose(); unregisterPresentation(); flush(); owned.detach(); window.removeEventListener("beforeunload", flush); navigation.dispose(); cardActions.dispose(); unwatch(); stopEmbeds(); clear(); el.remove(); } };
 }

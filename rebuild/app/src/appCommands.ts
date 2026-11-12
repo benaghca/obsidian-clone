@@ -9,6 +9,7 @@ import { addCursorAbove, addCursorBelow, deleteLine, moveLineDown, moveLineUp } 
 import { openSearchPanel } from "@codemirror/search";
 import type { EditorView } from "@codemirror/view";
 import { api } from "./api";
+import { writeVaultNote } from "./vaultWrite";
 import type { Bookmarks } from "./bookmarks";
 import { type Command, commands } from "./commands";
 import { writeClipboard } from "./editor/clipboard";
@@ -234,8 +235,7 @@ export function registerAppCommands(parts: AppParts) {
         await ws.saveNow(path);
       }
     } else if (merged.text) {
-      await api.writeNote(path, merged.text);
-      ws.vault.written(path);
+      await writeVaultNote(path, merged.text, () => ws.vault.written(path));
     }
     if (ws.active.path === path) parts.panes.focusTitle(true);
   }

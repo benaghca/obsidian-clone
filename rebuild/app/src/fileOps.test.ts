@@ -12,7 +12,7 @@ const ws = {
     // The real one lists every file; these tests set the notes and read them back.
     fileRefs(this: { notes: unknown[] }) { return this.notes; },
   },
-  editors: { flush, move: moved }, followMove: vi.fn().mockResolvedValue(undefined),
+  editors: { flush, move: moved, hold() {}, release() {} }, followMove: vi.fn().mockResolvedValue(undefined),
 } as unknown as Workspace;
 beforeEach(() => vi.clearAllMocks());
 

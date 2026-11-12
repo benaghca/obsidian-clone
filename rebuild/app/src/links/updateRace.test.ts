@@ -59,6 +59,8 @@ const ws = {
   },
   editors: {
     flush: async () => {},
+    hold() {},
+    release() {},
     move(under: (path: string) => boolean, swap: (path: string) => string) {
       for (const [path, state] of [...states]) if (under(path)) { states.delete(path); states.set(swap(path), state); }
     },

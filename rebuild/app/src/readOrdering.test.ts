@@ -48,7 +48,7 @@ it("keeps newer file and link refreshes when older replies arrive last", async (
 function reloadHost() {
   let doc = Text.of(["original"]);
   const host = {
-    states: new Map([["a.md", true]]), saveTimers: new Map(), reloads: new Map(), loadEpoch: new Map(),
+    states: new Map([["a.md", true]]), saveTimers: new Map(), retryTimers: new Map(), dirty: new Set(), slots: new Map(), reloads: new Map(), loadEpoch: new Map(),
     doc: () => doc,
     change: vi.fn((_path: string, spec: { changes: { insert: string } }) => { doc = Text.of(spec.changes.insert.split("\n")); }),
     events: { saved: vi.fn() },
