@@ -1,6 +1,8 @@
-//! Search-view scans. A newer query in the same window supersedes a scan that is
-//! already walking notes. The walk keeps a shared snapshot, so it does not hold
-//! the vault lock and a save can proceed.
+//! Search-view scans. The page assigns each query a request id before the scan
+//! starts. A newer id in the same window supersedes a scan that is already
+//! walking notes. An older id that arrives late is ignored and does not move
+//! that window's id. The walk keeps a shared snapshot, so it does not hold the
+//! vault lock and a save can proceed.
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,15 +10,39 @@ use std::sync::{Arc, Mutex};
 
 use crate::model::SearchNote;
 
-/// One generation counter per window label.
+#[cfg(test)]
+use std::cell::RefCell;
+
+#[cfg(test)]
+thread_local! {
+    static BEFORE_CLAIM: RefCell<Option<Box<dyn FnMut()>>> = const { RefCell::new(None) };
+}
+
+/// Test hook that runs on the scan thread before this request claims its window id.
+#[cfg(test)]
+fn set_before_claim_hook(hook: Option<Box<dyn FnMut()>>) {
+    BEFORE_CLAIM.with(|cell| *cell.borrow_mut() = hook);
+}
+
+fn before_claim() {
+    #[cfg(test)]
+    BEFORE_CLAIM.with(|cell| {
+        if let Some(hook) = cell.borrow_mut().as_mut() {
+            hook();
+        }
+    });
+}
+
+/// One request id per window label. The page chooses the id. This only stores a newer one.
 #[derive(Default)]
 pub(crate) struct SearchSlots {
     windows: Mutex<HashMap<String, Arc<AtomicU64>>>,
 }
 
 impl SearchSlots {
-    /// The generation this call owns. An older scan of the same window sees a newer value and stops.
-    pub(crate) fn begin(&self, window: &str) -> (Arc<AtomicU64>, u64) {
+    /// `true` when `request` is strictly newer than this window's current id.
+    /// An older or repeated id is refused and leaves the atomic unchanged.
+    pub(crate) fn claim(&self, window: &str, request: u64) -> (Arc<AtomicU64>, bool) {
         let slot = {
             let mut windows = self.windows.lock().unwrap_or_else(|err| err.into_inner());
             windows
@@ -24,19 +50,33 @@ impl SearchSlots {
                 .or_insert_with(|| Arc::new(AtomicU64::new(0)))
                 .clone()
         };
-        let gen = slot.fetch_add(1, Ordering::AcqRel) + 1;
-        (slot, gen)
+        let mut seen = slot.load(Ordering::Acquire);
+        loop {
+            if request <= seen {
+                return (slot, false);
+            }
+            match slot.compare_exchange_weak(seen, request, Ordering::AcqRel, Ordering::Acquire) {
+                Ok(_) => return (slot, true),
+                Err(actual) => seen = actual,
+            }
+        }
     }
 }
 
 pub(crate) fn run(
     state: &crate::AppState,
     window: &str,
+    request: u64,
     query: &str,
     match_case: bool,
 ) -> Result<Vec<SearchNote>, String> {
-    // Bump before the snapshot so a scan that started earlier cannot keep the newer generation.
-    let (slot, gen) = state.search_gen.begin(window);
+    // The page id is already ordered. Claim it before the snapshot so a request
+    // that was dispatched late cannot take the generation from a newer one.
+    before_claim();
+    let (slot, owned) = state.search_gen.claim(window, request);
+    if !owned {
+        return Err("cancelled".to_string());
+    }
     let snap = {
         let guard = crate::read(&state.inner);
         let vault = guard
@@ -45,7 +85,7 @@ pub(crate) fn run(
             .ok_or_else(|| "no vault open".to_string())?;
         vault.index.search_snap()
     };
-    snap.search_notes(query, match_case, || slot.load(Ordering::Acquire) == gen)
+    snap.search_notes(query, match_case, || slot.load(Ordering::Acquire) == request)
         .map_err(|()| "cancelled".to_string())
 }
 
@@ -62,18 +102,23 @@ mod tests {
     #[test]
     fn one_window_does_not_supersede_another() {
         let slots = SearchSlots::default();
-        let (main_slot, main_gen) = slots.begin("main");
-        let (other_slot, other_gen) = slots.begin("note");
-        assert_eq!(main_slot.load(Ordering::Acquire), main_gen);
-        assert_eq!(other_slot.load(Ordering::Acquire), other_gen);
-        let _ = slots.begin("note");
+        let (main_slot, main_owned) = slots.claim("main", 1);
+        assert!(main_owned);
+        let (other_slot, other_owned) = slots.claim("note", 1);
+        assert!(other_owned);
+        assert_eq!(main_slot.load(Ordering::Acquire), 1);
+        assert_eq!(other_slot.load(Ordering::Acquire), 1);
+        assert!(slots.claim("note", 4).1);
         assert_eq!(
             main_slot.load(Ordering::Acquire),
-            main_gen,
+            1,
             "another window's search bumped this one"
         );
-        let _ = slots.begin("main");
-        assert_ne!(main_slot.load(Ordering::Acquire), main_gen);
+        assert!(!slots.claim("main", 1).1, "an older id advanced the generation");
+        assert_eq!(main_slot.load(Ordering::Acquire), 1);
+        assert!(slots.claim("main", 2).1);
+        assert_eq!(main_slot.load(Ordering::Acquire), 2);
+        assert_eq!(other_slot.load(Ordering::Acquire), 4);
     }
 
     #[test]
@@ -101,7 +146,7 @@ mod tests {
                         let _ = release_rx.lock().unwrap().recv();
                     }
                 })));
-                let result = run(&state_scan, "main", "alpha", false);
+                let result = run(&state_scan, "main", 1, "alpha", false);
                 set_search_note_hook(None);
                 result_tx.send(result).ok();
             });
@@ -114,7 +159,7 @@ mod tests {
             let state_other = Arc::clone(&state);
             scope.spawn(move || {
                 other_tx
-                    .send(run(&state_other, "note", "zebra-marker", false))
+                    .send(run(&state_other, "note", 1, "zebra-marker", false))
                     .ok();
             });
             let other = other_rx
@@ -160,7 +205,7 @@ mod tests {
                 "the save waited for the scan to keep walking"
             );
 
-            let newest = run(&state, "main", "saved-while-scanning", false).expect("newest search");
+            let newest = run(&state, "main", 2, "saved-while-scanning", false).expect("newest search");
             let direct = crate::read_vault(&state, |vault| {
                 Ok(vault.index.search_notes("saved-while-scanning", false))
             })
@@ -173,7 +218,7 @@ mod tests {
                     count: 1
                 }]
             );
-            let alpha = run(&state, "main", "alpha", false).expect("complete alpha search");
+            let alpha = run(&state, "main", 3, "alpha", false).expect("complete alpha search");
             let alpha_direct =
                 crate::read_vault(&state, |vault| Ok(vault.index.search_notes("alpha", false)))
                     .unwrap();
@@ -189,6 +234,69 @@ mod tests {
                 visits.load(Ordering::SeqCst),
                 1,
                 "old scan kept walking after a newer search started"
+            );
+        });
+    }
+
+    /// The older request pauses before it claims an id. The newer id must still
+    /// return every row. The page shows an error only when the current request
+    /// rejects, so this `Ok` is the result the search view draws.
+    #[test]
+    fn a_late_older_request_does_not_cancel_the_newer_one() {
+        let dir = crate::fsutil::tmp_dir("search-order");
+        for i in 0..4 {
+            std::fs::write(dir.path.join(format!("n{i}.md")), format!("alpha {i}\n")).unwrap();
+        }
+        let state = Arc::new(test_state(&dir.path));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let (old_tx, old_rx) = mpsc::channel();
+        let (new_tx, new_rx) = mpsc::channel();
+        thread::scope(|scope| {
+            let _unblock = Release(release_tx.clone());
+            let state_old = Arc::clone(&state);
+            scope.spawn(move || {
+                set_before_claim_hook(Some(Box::new(move || {
+                    entered_tx.send(()).ok();
+                    let _ = release_rx.lock().unwrap().recv();
+                })));
+                let result = run(&state_old, "main", 1, "alpha", false);
+                set_before_claim_hook(None);
+                old_tx.send(result).ok();
+            });
+            entered_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("older request did not pause before registration");
+
+            let state_new = Arc::clone(&state);
+            scope.spawn(move || {
+                new_tx.send(run(&state_new, "main", 2, "alpha", false)).ok();
+            });
+            let newest = new_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("newer search waited on the older request")
+                .expect("newer search was cancelled");
+            let direct = crate::read_vault(&state, |vault| {
+                Ok(vault.index.search_notes("alpha", false))
+            })
+            .unwrap();
+            assert_eq!(newest, direct);
+            assert_eq!(newest.len(), 4);
+
+            let (slot, again) = state.search_gen.claim("main", 2);
+            assert!(!again, "repeating the current id advanced the generation");
+            assert_eq!(slot.load(Ordering::Acquire), 2);
+
+            let _ = release_tx.send(());
+            let old = old_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("older request did not finish");
+            assert_eq!(old.expect_err("older request returned results"), "cancelled");
+            assert_eq!(
+                slot.load(Ordering::Acquire),
+                2,
+                "the late older request advanced the generation"
             );
         });
     }

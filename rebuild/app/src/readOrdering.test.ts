@@ -109,7 +109,10 @@ it("search view drops an old reply and starts the newest query without waiting f
   expect(api.searchNotes).toHaveBeenCalledTimes(1);
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
   expect(receive).not.toHaveBeenCalled();
-  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true);
+  expect(api.searchNotes).toHaveBeenNthCalledWith(1, "a", false, 1);
+  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true, 3);
+  const sent = vi.mocked(api.searchNotes).mock.calls.map((call) => call[2] as number);
+  expect(sent[0]).toBeLessThan(sent[1]);
   old.resolve([{ path: "old.md", count: 1 }]);
   await Promise.resolve();
   expect(receive).not.toHaveBeenCalled();
@@ -130,10 +133,22 @@ it("a superseded search failure is not shown", async () => {
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(1));
   reader.read({ query: "Alpha", matchCase: true, seq: 2 });
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
+  expect(api.searchNotes).toHaveBeenNthCalledWith(1, "a", false, 1);
+  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true, 2);
   old.reject(new Error("cancelled"));
   latest.resolve([{ path: "Upper.MD", count: 2 }]);
   await vi.waitFor(() => expect(receive).toHaveBeenCalledWith({ query: "Alpha", matchCase: true, seq: 2 }, [{ path: "Upper.MD", count: 2 }]));
   expect(failed).not.toHaveBeenCalled();
+});
+
+it("a current search failure is still reported", async () => {
+  const flush = vi.fn().mockResolvedValue(undefined), receive = vi.fn(), failed = vi.fn();
+  vi.mocked(api.searchNotes).mockRejectedValueOnce(new Error("no vault open"));
+  const reader = searchReader({ editors: { flush } } as never, receive, failed);
+  reader.read({ query: "Alpha", matchCase: false, seq: 1 });
+  await vi.waitFor(() => expect(failed).toHaveBeenCalledWith({ query: "Alpha", matchCase: false, seq: 1 }, expect.any(Error)));
+  expect(api.searchNotes).toHaveBeenCalledWith("Alpha", false, 1);
+  expect(receive).not.toHaveBeenCalled();
 });
 
 it("clearing search during the save flush cancels a pending query", async () => {

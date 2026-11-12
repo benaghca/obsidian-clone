@@ -1,6 +1,7 @@
 // Coalesce search-view requests. A newer query starts without waiting for the
 // scan already running, so that scan can stop. Keystrokes that land before the
-// next scan starts still become one query.
+// next scan starts still become one query. The id sent with a query is this
+// reader's version at send time, so a late older call cannot outrank it.
 import { api, type SearchNote, type FileEntry } from "../api";
 import { compareNames, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
@@ -84,7 +85,7 @@ export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: 
         try {
           await ws.editors.flush();
           if (mine !== version) continue; // Input changed during the flush: send only the newest.
-          const pending = api.searchNotes(request.query, request.matchCase);
+          const pending = api.searchNotes(request.query, request.matchCase, mine);
           const finished = pending.then(
             (notes) => { if (mine === version) receive(request, notes); },
             (error: unknown) => { if (mine === version) failed(request, error); },

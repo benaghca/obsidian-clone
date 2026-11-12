@@ -191,7 +191,7 @@ await withBrowser(async ({ run, send, click, press, fill, check }) => {
     window.edgeOrder = [];
     const write = api.writeNote, searchNotes = api.searchNotes, flush = ws.editors.flush.bind(ws.editors);
     api.writeNote = (path, text) => { edgeOrder.push(['write', path]); return write(path, text); };
-    api.searchNotes = (query, matchCase) => { edgeOrder.push(['search', query]); return searchNotes(query, matchCase); };
+    api.searchNotes = (query, matchCase, request) => { edgeOrder.push(['search', query]); return searchNotes(query, matchCase, request); };
     ws.editors.flush = (...args) => { edgeOrder.push(['flush']); return flush(...args); };
     const view = ws.view;
     view.dispatch({ changes: { from: view.state.doc.length, insert: '\nEDGEPENDINGTOKEN\n' }, userEvent: 'input' });

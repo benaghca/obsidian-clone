@@ -620,3 +620,42 @@ fn a_superseded_scan_of_20k_notes_stops_at_the_next_note() {
     assert!(stop_ms * 4.0 < full_ms, "cancelled scan {stop_ms:.1} ms was not much faster than the full scan {full_ms:.1} ms");
     assert!(snap.same_list(&again), "a second search rebuilt the note list");
 }
+
+#[test]
+fn a_rename_or_delete_keeps_the_snapshot_a_scan_already_holds() {
+    let mut idx = Index::from_notes(&[("a.md", "alpha one"), ("b.md", "alpha two")]);
+    let held = idx.search_snap();
+    idx.relocate("a.md", "moved.md");
+    let renamed = idx.search_snap();
+    assert!(!held.same_list(&renamed), "a rename reused the snapshot a scan was walking");
+    assert_eq!(
+        held.search_notes("alpha", false, || true).unwrap(),
+        vec![
+            crate::model::SearchNote { path: "a.md".into(), count: 1 },
+            crate::model::SearchNote { path: "b.md".into(), count: 1 },
+        ]
+    );
+    assert_eq!(
+        renamed.search_notes("alpha", false, || true).unwrap(),
+        vec![
+            crate::model::SearchNote { path: "b.md".into(), count: 1 },
+            crate::model::SearchNote { path: "moved.md".into(), count: 1 },
+        ]
+    );
+    assert_eq!(renamed.search_notes("alpha", false, || true).unwrap(), idx.search_notes("alpha", false));
+    idx.remove_tree("b.md");
+    let deleted = idx.search_snap();
+    assert!(!renamed.same_list(&deleted), "a delete reused the snapshot a scan was walking");
+    assert_eq!(
+        held.search_notes("alpha", false, || true).unwrap(),
+        vec![
+            crate::model::SearchNote { path: "a.md".into(), count: 1 },
+            crate::model::SearchNote { path: "b.md".into(), count: 1 },
+        ]
+    );
+    assert_eq!(
+        deleted.search_notes("alpha", false, || true).unwrap(),
+        vec![crate::model::SearchNote { path: "moved.md".into(), count: 1 }]
+    );
+    assert_eq!(deleted.search_notes("alpha", false, || true).unwrap(), idx.search_notes("alpha", false));
+}

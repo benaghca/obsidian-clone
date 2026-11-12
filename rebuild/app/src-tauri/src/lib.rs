@@ -482,10 +482,11 @@ fn properties(state: State<'_, AppState>, paths: Option<Vec<String>>) -> Result<
 }
 
 /// Matching notes and exact occurrence counts, in vault path order.
-/// A newer call from the same window stops an older scan at the next note.
+/// `request` is the page's order for this window. A newer id stops an older scan
+/// at the next note. An older id is `cancelled` and does not move that window's id.
 #[tauri::command(async)]
-fn search_notes<R: tauri::Runtime>(window: tauri::Window<R>, state: State<'_, AppState>, query: String, match_case: bool) -> Result<Vec<SearchNote>, String> {
-    search_scan::run(&state, window.label(), &query, match_case)
+fn search_notes<R: tauri::Runtime>(window: tauri::Window<R>, state: State<'_, AppState>, query: String, match_case: bool, request: u64) -> Result<Vec<SearchNote>, String> {
+    search_scan::run(&state, window.label(), request, &query, match_case)
 }
 
 /// A separately evaluated page of shown lines; paths no longer matching are omitted.
