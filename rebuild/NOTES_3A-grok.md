@@ -14,6 +14,8 @@ A failed write leaves the previous record in place, including a crash or directo
 
 An echo of an app rename has no departed id when the cache matches. A source that was written again after the rename keeps its new record, and the destination keeps the record `rename_path` already moved. The echo does not copy one onto the other, and it does not adopt whatever bytes are now on disk. A watcher remove drops the record. A create or modify does not refresh it.
 
+A changed inode at a source that still exists is not proof that file moved. The rename batch still relocates the old index node, then any source path that is still on disk is indexed again, including an outside replacement. The own-write receipt is left as it was, so that replacement stays external. Its cached line-ending is dropped, because those bytes are not the file that left. The identity cache is the file now on disk. A source that is gone stays moved.
+
 The S5 write lock is still held across the save, and the flush that decides takes the same lock. That lock does not stop another process. `apply` and `rename_path` still rebuild name maps in their one existing `map_batch` block. Command signatures and the mutex were not changed. A path with no record is never suppressed, and the check stats only that path.
 
 ## Coarse clocks, renames, and line endings
@@ -45,25 +47,27 @@ After the receipt and the identity walk, those five pass, and the five checks fr
 
 On `fde70a7`, `app_rename_echo_keeps_property_writes_on_both_files` failed at `watch.rs:800` (`recreated source dropped`). Both property edits had returned Done, and both files were still own writes, before the echo. `set_property` had recorded the stamp from the receipt and left the inode cache on the earlier note write, so the echo treated the resident files as a move and dropped the recreated source.
 
+On `704e29f`, `replaced_source_stays_indexed_when_the_rename_echo_arrives` failed at `watch.rs:855` (`replaced source dropped`). The recreate was replaced from outside the vault during publication, and the flush carried that move-in together with the delayed `Rename(A, B)`. The coalescer left the rename. The receipt inode made the preflight treat A as departed, the index loop moved A onto B, and only stayed sources were put back, so the outside file disappeared from the index. It was not adopted as Grove's write.
+
 `create_note` records a stamp, so the property dry-run test expects that stamp to remain, and expects it to stop matching after an outside overwrite. Duplicate-hop, chain, and round-trip format tests still pass. `map_batch` was not edited.
 
 ## How it was run
 
 Commands started in `rebuild/app/src-tauri` for Rust and in `rebuild/app` for npm.
 
-- `cargo test --offline` passed: 167 tests, 0 failed, 4 ignored. `cargo fmt` was not run. `index/file_map.rs` still warns that `ValueWalk` is unused. That warning was already there.
+- `cargo test --offline` passed: 168 tests, 0 failed, 4 ignored. `cargo fmt` was not run. `index/file_map.rs` still warns that `ValueWalk` is unused. That warning was already there.
 - `rebuild/app/node_modules` was already present. The lockfile did not change. `node_modules` is not in the commit.
-- `flock /tmp/grove-npm-test.lock npm test` exited 0, including `posttest`. Typing, the switcher, and folder expand had 0 long tasks. The graph stayed the held gap (p95 33.4 ms, max 33.5 ms, 62/181 frames over 20 ms) with 0 long tasks. Friction budgets passed.
+- The first `flock /tmp/grove-npm-test.lock npm test` reached `posttest` and stopped in `scripts/test-bases-embed.mjs`: the cold open took 1795.6 ms, budget 100 ms. That script drives the mock UI, not this Rust change. The rerun exited 0, including `posttest`. Typing, the switcher, and folder expand had 0 long tasks. The graph stayed the held gap (p95 33.4 ms, max 33.4 ms, 72/171 frames over 20 ms) with 0 long tasks. Friction budgets passed.
 - The suite rewrote screenshots under `rebuild/round23-shots` through `rebuild/round33-shots`. Those files were restored and are not in this commit.
 
 ## Size
 
-No new dependency. `vault.rs` stays one file (1959 lines; the test module starts at line 808).
+No new dependency. `vault.rs` stays one file (1975 lines; the test module starts at line 824).
 
 | Language | File | Lines | Change |
 | --- | --- | --- | --- |
-| Rust | `rebuild/app/src-tauri/src/vault.rs` | 1959 | +8 / −4 |
-| Rust | `rebuild/app/src-tauri/src/watch.rs` | 986 | +60 / −0 |
-| Markdown | `rebuild/NOTES_3A-grok.md` | 69 | +13 / −12 |
+| Rust | `rebuild/app/src-tauri/src/vault.rs` | 1975 | +30 / −14 |
+| Rust | `rebuild/app/src-tauri/src/watch.rs` | 1052 | +66 / −0 |
+| Markdown | `rebuild/NOTES_3A-grok.md` | 73 | +11 / −7 |
 
-Code only: +68 / −4. With this notes file: +81 / −16.
+Code only: +96 / −14. With this notes file: +107 / −21.

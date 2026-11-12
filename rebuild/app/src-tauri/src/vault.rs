@@ -422,9 +422,9 @@ impl Vault {
         self.track_ids(changes);
         self.track_own(changes, at.clone(), &stayed);
         // The batch above relocates every rename, including an echo of a move
-        // the app already applied. Put a source that is still the indexed file
-        // back, or the final format prune drops it and the file list loses it.
-        self.restore_echo_sources(&stayed, changes);
+        // the app already applied. Put a source that is still on disk back.
+        // A different file at that path is an outside replacement, not a move.
+        let replaced = self.restore_echo_sources(&stayed, changes);
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
         if formats.is_empty() {
             return;
@@ -467,6 +467,10 @@ impl Vault {
         formats.retain(|k, _| {
             self.index.contains(k) && !self.index.is_dir(k) && (kept.contains(k) || !has_prefix_in(k, &evict))
         });
+        // The file now at a replaced source is not the one whose format we cached.
+        for path in &replaced {
+            evict_format_tree(&mut formats, path);
+        }
     }
 
     /// Start recording index mutations before releasing the state lock to scan.
@@ -659,31 +663,43 @@ impl Vault {
         }
     }
 
-    /// `map_batch` already ran. A verified echo still relocated the source's
-    /// index node. When that file is on disk, index it again. The destination
-    /// stays as the batch refreshed it. Name maps rebuild once.
-    fn restore_echo_sources(&mut self, stayed: &HashSet<String>, changes: &[VaultChanged]) {
-        let mut missing: Vec<&str> = Vec::new();
+    /// `map_batch` already ran and relocated every rename source. Index a source
+    /// that is still on disk: the same file after an app echo, or a different
+    /// file an outside replace left behind. A path that is gone stayed moved.
+    /// The receipt stays the own-write record, so a replacement is not ours.
+    /// `track_ids` has already pointed the identity cache at the file on disk.
+    /// Returned paths are replacements whose cached format belonged to the
+    /// file that left.
+    fn restore_echo_sources(&mut self, stayed: &HashSet<String>, changes: &[VaultChanged]) -> Vec<String> {
+        let mut refresh: Vec<&str> = Vec::new();
+        let mut replaced: Vec<String> = Vec::new();
         for change in changes {
             if change.kind != ChangeKind::Rename || change.paths.len() != 2 {
                 continue;
             }
             let from = change.paths[0].as_str();
-            if from == change.paths[1].as_str() || !stayed.contains(from) || self.index.contains(from) {
+            if from == change.paths[1].as_str() || self.index.contains(from) {
                 continue;
             }
-            if !missing.contains(&from) {
-                missing.push(from);
+            if fs::symlink_metadata(self.root.join(from)).is_err() {
+                continue;
+            }
+            if !refresh.contains(&from) {
+                refresh.push(from);
+            }
+            if !stayed.contains(from) {
+                replaced.push(from.to_string());
             }
         }
-        if missing.is_empty() {
-            return;
+        if refresh.is_empty() {
+            return replaced;
         }
         let root = &self.root;
         let mut batch = self.index.map_batch();
-        for path in missing {
+        for path in refresh {
             batch.refresh_path(root, path);
         }
+        replaced
     }
 
     fn entry_for(&self, rel: &str) -> FileEntry {

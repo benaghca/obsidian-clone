@@ -818,12 +818,78 @@ mod tests {
         assert!(vault.index.search("source-body", 10).is_empty());
     }
 
+    /// Publish, then replace the new source from outside the vault. The delayed
+    /// rename echo is flushed with that move-in. The outside file stays indexed
+    /// and is not treated as Grove's write.
+    #[test]
+    fn replaced_source_stays_indexed_when_the_rename_echo_arrives() {
+        let dir = tmp_dir("stamp-echo-replaced");
+        let inner = state(&dir.path);
+        let outside = b"outside-marker-bytes";
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault.write_note("A.md", "original-body").unwrap();
+            vault.rename_path("A.md", "B.md").unwrap();
+        }
+        let _guard = arm_publish_replace_from_outside(&dir.path, outside);
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault.write_note("A.md", "recreated-body").unwrap();
+            assert!(!vault.is_own_write("A.md"));
+        }
+        drop(_guard);
+        assert_eq!(fs::read(dir.path.join("A.md")).unwrap(), outside);
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        let moved_in = kind(EventKind::Create(CreateKind::File), vec![dir.path.join("A.md")]);
+        assert_eq!(
+            flush_changes(&inner, &[rename, moved_in], Index::scan),
+            one(ChangeKind::Rename, &["A.md", "B.md"])
+        );
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.index.contains("A.md"), "replaced source dropped");
+        assert!(vault.index.contains("B.md"));
+        assert_eq!(vault.index.search("outside-marker-bytes", 10).len(), 1);
+        assert!(vault.index.search("recreated-body", 10).is_empty());
+        assert_eq!(vault.index.search("original-body", 10).len(), 1);
+        assert!(!vault.is_own_write("A.md"));
+        assert!(vault.is_own_write("B.md"));
+    }
+
     /// After the rename publishes, swap in a different file before the caller
     /// records a stamp. The hook runs once. Drop clears it if the write never
     /// publishes.
     fn arm_publish_replace(outside: &'static [u8]) -> PublishGuard {
         crate::fsutil::after_publish(Some(Box::new(move |path| {
             let incoming = path.with_extension("incoming");
+            fs::write(&incoming, outside).expect("incoming");
+            fs::rename(&incoming, path).expect("replace published file");
+        })));
+        PublishGuard
+    }
+
+    /// The replacement is created outside the vault and renamed in, so a watcher
+    /// would report a create of the destination rather than a second vault rename.
+    fn arm_publish_replace_from_outside(vault: &Path, outside: &'static [u8]) -> PublishGuard {
+        let vault = vault.to_path_buf();
+        crate::fsutil::after_publish(Some(Box::new(move |path| {
+            let incoming = std::env::temp_dir().join(format!(
+                "grove-incoming-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+            assert!(
+                !incoming.starts_with(&vault),
+                "replacement must be created outside the vault"
+            );
             fs::write(&incoming, outside).expect("incoming");
             fs::rename(&incoming, path).expect("replace published file");
         })));
