@@ -241,7 +241,8 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         const background = () => {
           backdrop.style.backgroundSize = node.backgroundStyle === "repeat" ? "auto" : "cover";
           backdrop.style.backgroundRepeat = node.backgroundStyle === "repeat" ? "repeat" : "no-repeat";
-          const file = ws.vault.files.find(f => f.path === node.background && !f.is_dir && IMAGE_EXT.test(f.path));
+          const found = typeof node.background === "string" ? ws.vault.entry(node.background) : undefined;
+          const file = found && !found.is_dir && IMAGE_EXT.test(found.path) ? found : undefined;
           if (heldPath === file?.path) return;
           unwatchBackground(); held?.release(); held = undefined; heldPath = file?.path; backdrop.style.backgroundImage = "";
           if (!file) return;

@@ -42,10 +42,8 @@ function parentsPresent(dirs: Set<string>, path: string): boolean {
   return true;
 }
 
-/** Insert `entry` in path order. The same array when that path is already listed. Null when a parent folder is not. */
+/** Insert `entry` in path order. The same array when that path is already listed. Null when a parent folder is not. The list is path-sorted, so the insert spot is also the existing entry. */
 export function addEntry(files: readonly FileEntry[], entry: FileEntry): FileEntry[] | null {
-  if (files.some((file) => file.path === entry.path)) return files as FileEntry[];
-  if (!parentsPresent(dirsOf(files), entry.path)) return null;
   let lo = 0;
   let hi = files.length;
   while (lo < hi) {
@@ -53,6 +51,8 @@ export function addEntry(files: readonly FileEntry[], entry: FileEntry): FileEnt
     if (pathCmp(files[mid].path, entry.path) < 0) lo = mid + 1;
     else hi = mid;
   }
+  if (files[lo]?.path === entry.path) return files as FileEntry[];
+  if (!parentsPresent(dirsOf(files), entry.path)) return null;
   const next = files.slice();
   next.splice(lo, 0, entry);
   return next;

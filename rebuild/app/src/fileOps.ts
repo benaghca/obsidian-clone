@@ -126,11 +126,21 @@ export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
 
 /** A path no file has: `stem` and `ext`, else with " 1", " 2", ... after the stem (only those, if `numbered`). */
 function freeName(ws: Workspace, stem: string, ext: string, numbered = false) {
-  const taken = new Set(ws.vault.files.map((f) => f.path.toLowerCase()));
   for (let i = Number(numbered); ; i++) {
     const path = `${stem}${i ? ` ${i}` : ""}${ext}`;
-    if (!taken.has(path.toLowerCase())) return path;
+    if (!pathTaken(ws.vault, path)) return path;
   }
+}
+
+/** The file at `path`, ignoring case. The real vault answers from its path map; a test double still scans. */
+function fileAt(vault: { files: readonly FileEntry[]; matchPath?: (path: string) => FileEntry | undefined }, path: string): FileEntry | undefined {
+  if (typeof vault.matchPath === "function") return vault.matchPath(path);
+  const lower = path.toLowerCase();
+  return vault.files.find((file) => file.path.toLowerCase() === lower);
+}
+
+function pathTaken(vault: { files: readonly FileEntry[]; matchPath?: (path: string) => FileEntry | undefined }, path: string): boolean {
+  return fileAt(vault, path) !== undefined;
 }
 
 /** Why a rename is refused, or "" when it can be committed. An empty draft is only an error on commit. */
@@ -143,7 +153,7 @@ export function renameError(ws: Workspace, path: string, newName: string, commit
   if (name === (isDir ? fileName(path) : fileName(path).slice(0, -ext.length))) return "";
   const dir = parentDir(path);
   const to = `${dir ? dir + "/" : ""}${name}${ext}`;
-  const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
+  const clash = fileAt(ws.vault, to);
   if (clash && clash.path !== path) return "There's already a file with the same name";
   return "";
 }
@@ -167,7 +177,7 @@ export async function moveFile(ws: Workspace, path: string, folder: string) {
   if (isDir && isUnder(folder.toLowerCase(), path.toLowerCase())) return;
   const name = fileName(path);
   const to = folder ? `${folder}/${name}` : name;
-  const clash = ws.vault.files.some((f) => f.path.toLowerCase() === to.toLowerCase());
+  const clash = pathTaken(ws.vault, to);
   const ext = isDir ? "" : /\.[^.]+$/.exec(name)?.[0] ?? "";
   await relocate(ws, path, clash ? freeName(ws, to.slice(0, to.length - ext.length), ext, true) : to);
 }
@@ -210,7 +220,7 @@ async function relocateNow(ws: Workspace, from: string, to: string) {
     return;
   }
   if (ws.vault.isFolder(from) && isUnder(parentDir(to).toLowerCase(), from.toLowerCase())) throw new Error("A folder cannot move into itself.");
-  const clash = ws.vault.files.find((f) => f.path.toLowerCase() === to.toLowerCase());
+  const clash = fileAt(ws.vault, to);
   if (clash && clash.path !== from) throw new Error(`"${to}" already exists`);
   // Other windows flush and hold this path before the rename. A failed peer
   // save aborts quietly: there is no dialog, and the file stays where it is.
