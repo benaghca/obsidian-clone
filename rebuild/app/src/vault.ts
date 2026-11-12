@@ -10,6 +10,7 @@ import type { NoteRef } from "./editor/host";
 import { backendRoot, onBackendRootChange, pageOwnsDisk } from "./vaultRoot";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
+import { addEntry, dropEntries, listTokens, mapEntries } from "./listPatch";
 import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
@@ -151,6 +152,12 @@ export class Vault {
   private linkTimer = 0;
   private filesRequest = 0;
   private linksRequest = 0;
+  /** Local creates, renames, and deletes a file-list read that started earlier must not wipe. */
+  private deltas: { vault: string; request: number; apply: (files: FileEntry[]) => FileEntry[] | null }[] = [];
+  /** One extra read when a stale snapshot cannot take those edits. Stops a retry from scheduling another. */
+  private refolding = false;
+  /** Path pieces the last files change added or removed. Null means every open note may show a different link. */
+  private pieces: readonly string[] | null = null;
   private modified = listeners<[string]>();
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
@@ -172,6 +179,7 @@ export class Vault {
     onBackendRootChange(() => {
       this.filesRequest += 1;
       this.linksRequest += 1;
+      this.deltas = [];
     });
   }
 
@@ -212,10 +220,67 @@ export class Vault {
   async refreshFiles() {
     const mine = ++this.filesRequest;
     const vault = backendRoot();
-    const files = await api.listFiles();
+    const listed = await api.listFiles();
     // The reply is the vault that was current when the read ran. Install it
     // only if that vault is still this page's backend.
     if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
+    let files = listed;
+    for (const delta of this.deltas) {
+      if (delta.vault !== vault || mine > delta.request) continue;
+      const applied = delta.apply(files);
+      // This read started before the edit and cannot show it (a parent folder
+      // is missing). Keep the patched list and read once more, after the edit.
+      if (!applied) {
+        if (!this.refolding && mine === this.filesRequest) {
+          this.refolding = true;
+          void this.refreshFiles().catch(() => {}).finally(() => { this.refolding = false; });
+        }
+        return;
+      }
+      files = applied;
+    }
+    this.deltas = [];
+    this.show(files);
+  }
+
+  /**
+   * Show one file the backend just created. False when this page does not own
+   * the disk, or a parent folder is not listed yet (the caller reads the list).
+   */
+  adoptAdded(entry: FileEntry): boolean {
+    return this.revise((files) => addEntry(files, entry));
+  }
+
+  /**
+   * Show a rename or move. False when this page does not own the disk, or the
+   * destination's parent folder is not listed yet.
+   */
+  adoptMapped(swap: (path: string) => string): boolean {
+    return this.revise((files) => mapEntries(files, swap));
+  }
+
+  /** Drop paths a delete removed. False when this page does not own the disk. `.trash` is not listed. */
+  dropPaths(under: (path: string) => boolean): boolean {
+    return this.revise((files) => dropEntries(files, under));
+  }
+
+  /** Lowercased pieces of the paths the last files change added or removed. */
+  fileTouch(): readonly string[] | null {
+    return this.pieces;
+  }
+
+  /** Remember `apply` and show it. A list read that started earlier folds it back in, so the edit is not lost. */
+  private revise(apply: (files: FileEntry[]) => FileEntry[] | null): boolean {
+    if (!pageOwnsDisk()) return false;
+    const next = apply(this.files);
+    if (!next) return false;
+    this.deltas.push({ vault: backendRoot(), request: this.filesRequest, apply });
+    if (next !== this.files) this.show(next);
+    return true;
+  }
+
+  private show(files: FileEntry[]) {
+    this.pieces = listTokens(this.fileList, files);
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
@@ -326,6 +391,7 @@ export class Vault {
     this.disarm();
     this.filesRequest += 1;
     this.linksRequest += 1;
+    this.deltas = [];
   }
 
   private async flushChanges(wave: number) {

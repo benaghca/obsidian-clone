@@ -15,7 +15,11 @@ export const vaultTags = perWorkspace((ws: Workspace) => {
   let tags: Promise<Map<string, string[]>> | null = null;
   const forget = () => (tags = null);
   ws.on((change) => {
-    if (change === "files" || change === "links") forget();
+    if (change === "links") forget();
+    if (change !== "files") return;
+    // A later list read that only changes modified times does not change tags.
+    const touch = ws.vault.fileTouch?.();
+    if (touch === undefined || touch === null || touch.length > 0) forget();
   });
   return {
     /** Every note's saved tags (notes without tags are left out), read again only after a change. */

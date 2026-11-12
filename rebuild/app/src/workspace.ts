@@ -863,7 +863,7 @@ export class Workspace {
     }
     this.recent = this.recent.map(swap);
     this.moves.emit(swap);
-    await this.vault.refreshFiles();
+    if (!this.vault.adoptMapped?.(swap)) await this.vault.refreshFiles();
     this.emit("tabs");
     this.shownKey = "";
     this.settle();
@@ -875,7 +875,7 @@ export class Workspace {
     this.recent = this.recent.filter((p) => !under(p));
     this.closed = this.closed.filter((c) => !c.saved.path || !under(c.saved.path));
     for (const tab of this.layout.tabs()) tabForgets(tab, under);
-    await this.vault.refreshFiles();
+    if (!this.vault.dropPaths?.(under)) await this.vault.refreshFiles();
     this.presentAll();
     this.settle();
     void this.vault.refreshLinks();

@@ -34,8 +34,14 @@ export const fileSettings = {
   renamed: (_from: string, _to: string, _before: NoteRef[], _sources: readonly string[]) => {},
 };
 
-async function publish(ws: Workspace, entry: FileEntry): Promise<FileEntry> {
+/** Show `entry` from the create reply. Read the whole list only when a parent folder is not listed yet. */
+async function showNewFile(ws: Workspace, entry: FileEntry): Promise<void> {
+  if (ws.vault.adoptAdded?.(entry)) return;
   await ws.vault.refreshFiles();
+}
+
+async function publish(ws: Workspace, entry: FileEntry): Promise<FileEntry> {
+  await showNewFile(ws, entry);
   // A copy or a daily note from a template can already contain links. Without
   // this, the link index waits for a later save and those backlinks never appear.
   ws.vault.written(entry.path);
@@ -112,7 +118,7 @@ export async function newDrawing(ws: Workspace, folder = fileSettings.newNoteFol
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
   const entry = await makeFolder(freeName(ws, `${parent ? `${parent}/` : ""}Untitled`, ""));
-  await ws.vault.refreshFiles();
+  await showNewFile(ws, entry);
   return entry.path;
 }
 
@@ -293,7 +299,7 @@ export async function copyNote(ws: Workspace, path: string): Promise<string> {
   if (backendRoot() === source && !writesSealed()) content = await api.readNote(path);
   if (content === null || backendRoot() !== source || writesSealed()) {
     const entry = await queueVaultCopy(source, path, dest);
-    await ws.vault.refreshFiles();
+    await showNewFile(ws, entry);
     ws.vault.written(entry.path);
     await ws.open(entry.path);
     return entry.path;
