@@ -34,8 +34,14 @@ export const fileSettings = {
   renamed: (_from: string, _to: string, _before: NoteRef[], _sources: readonly string[]) => {},
 };
 
-async function publish(ws: Workspace, entry: FileEntry): Promise<FileEntry> {
+/** Show `entry` from the create reply. Read the whole list when a parent is missing or a newer disk read already landed. */
+async function showNewFile(ws: Workspace, entry: FileEntry, epoch?: number): Promise<void> {
+  if (ws.vault.adoptAdded?.(entry, epoch)) return;
   await ws.vault.refreshFiles();
+}
+
+async function publish(ws: Workspace, entry: FileEntry, epoch?: number): Promise<FileEntry> {
+  await showNewFile(ws, entry, epoch);
   // A copy or a daily note from a template can already contain links. Without
   // this, the link index waits for a later save and those backlinks never appear.
   ws.vault.written(entry.path);
@@ -43,11 +49,12 @@ async function publish(ws: Workspace, entry: FileEntry): Promise<FileEntry> {
 }
 
 export async function createNote(ws: Workspace, path: string, content = "", source = sourceVault()): Promise<FileEntry> {
+  const epoch = ws.vault?.fileEpoch?.() ?? 0;
   // The vault captured by the caller is checked in the same turn as the create.
   if (writesSealed() || backendRoot() !== source) {
-    return publish(ws, await queueVaultCreate("note", path, content, source));
+    return publish(ws, await queueVaultCreate("note", path, content, source), epoch);
   }
-  return publish(ws, await api.createNote(path, content));
+  return publish(ws, await api.createNote(path, content), epoch);
 }
 
 async function makeFolder(path: string, source = sourceVault()): Promise<FileEntry> {
@@ -111,8 +118,9 @@ export async function newDrawing(ws: Workspace, folder = fileSettings.newNoteFol
 
 /** Create an empty "Untitled" folder; returns its path. */
 export async function newFolder(ws: Workspace, parent = ""): Promise<string> {
+  const epoch = ws.vault?.fileEpoch?.() ?? 0;
   const entry = await makeFolder(freeName(ws, `${parent ? `${parent}/` : ""}Untitled`, ""));
-  await ws.vault.refreshFiles();
+  await showNewFile(ws, entry, epoch);
   return entry.path;
 }
 
@@ -230,6 +238,7 @@ async function relocateHeld(ws: Workspace, from: string, to: string, vault: stri
       console.warn("Could not rename while a vault switch is saving");
       return false;
     }
+    const epoch = ws.vault?.fileEpoch?.() ?? 0;
     await api.renamePath(from, to);
     const swap = (p: string) => movedPath(p, from, to);
     ws.editors.move(under, swap);
@@ -241,7 +250,7 @@ async function relocateHeld(ws: Workspace, from: string, to: string, vault: stri
     // The hold blocked a retry of the old path. The queue now names the new one.
     await flushHandoff();
     await flushSaves(ws, (p) => isUnder(p, to));
-    await ws.followMove(swap);
+    await ws.followMove(swap, epoch);
     fileSettings.renamed(from, to, before, sources);
     return true;
   } catch (err) {
@@ -292,8 +301,9 @@ export async function copyNote(ws: Workspace, path: string): Promise<string> {
   let content: string | null = null;
   if (backendRoot() === source && !writesSealed()) content = await api.readNote(path);
   if (content === null || backendRoot() !== source || writesSealed()) {
+    const epoch = ws.vault?.fileEpoch?.() ?? 0;
     const entry = await queueVaultCopy(source, path, dest);
-    await ws.vault.refreshFiles();
+    await showNewFile(ws, entry, epoch);
     ws.vault.written(entry.path);
     await ws.open(entry.path);
     return entry.path;
@@ -341,6 +351,7 @@ export async function deleteFile(ws: Workspace, path: string, opts: { confirmed?
 
 async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boolean, vault: string): Promise<boolean> {
   holdSaves(ws, under);
+  let epoch = 0;
   try {
     const endDrain = beginHoldDrain(under);
     let flushed = false;
@@ -358,6 +369,7 @@ async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boo
       console.warn("Could not delete while a vault switch is saving");
       return false;
     }
+    epoch = ws.vault?.fileEpoch?.() ?? 0;
     await api.deletePath(path, fileSettings.permanentDelete());
   } catch (err) {
     releaseSaves(ws, under);
@@ -368,7 +380,7 @@ async function deleteHeld(ws: Workspace, path: string, under: (p: string) => boo
   discardDrawings(under);
   discardHandoff(vault, under);
   releaseSaves(ws, under);
-  await ws.forget(under);
+  await ws.forget(under, epoch);
   return true;
 }
 

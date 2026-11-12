@@ -27,6 +27,7 @@ import { countsField } from "./editor/counts";
 import { frontmatterField } from "./editor/frontmatter";
 import { openDailyNote } from "./editorHost";
 import { filesChanged } from "./editor/livePreview";
+import { docNeedsFileRefresh } from "./listPatch";
 import { refreshPropertyTypes } from "./editor/properties";
 import { fileSettings, newNote } from "./fileOps";
 import { bindCloseFlush, flushOpenSaves, requestClose } from "./quitFlush";
@@ -273,7 +274,15 @@ async function renderBacklinks() {
 }
 ws.on((change) => {
   // Links to notes that were just created (or deleted) are drawn again.
-  if (change === "files") for (const g of ws.groups()) ws.editors.viewOf(g).dispatch({ effects: filesChanged.of(null) });
+  // A pane whose text cannot name the path keeps the decorations it has.
+  if (change === "files") {
+    const tokens = ws.vault.fileTouch();
+    for (const g of ws.groups()) {
+      const text = g.active.path ? ws.editors.doc(g.active.path)?.toString() : undefined;
+      if (text !== undefined && !docNeedsFileRefresh(text, tokens)) continue;
+      ws.editors.viewOf(g).dispatch({ effects: filesChanged.of(null) });
+    }
+  }
   if (change === "doc" || change === "tabs" || change === "show") renderCounts();
   if (change === "links" || change === "tabs" || change === "show") renderBacklinks();
   if (change === "tabs" || change === "show" || change === "mode") renderEditorStatus();
@@ -549,11 +558,12 @@ if (isTauri) {
       discardDrawings(under);
       discardHandoff(sourceVault(), under);
     },
-    async moved(_from, _to, swap) {
-      await ws.followMove(swap);
+    epoch: () => ws.vault.fileEpoch(),
+    async moved(_from, _to, swap, epoch) {
+      await ws.followMove(swap, epoch);
     },
-    async removed(under) {
-      await ws.forget(under);
+    async removed(under, epoch) {
+      await ws.forget(under, epoch);
     },
   }).catch((err) => console.error("Could not coordinate renames", err));
 }

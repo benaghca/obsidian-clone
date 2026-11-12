@@ -10,6 +10,7 @@ import type { NoteRef } from "./editor/host";
 import { backendRoot, onBackendRootChange, pageOwnsDisk } from "./vaultRoot";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
+import { addEntry, dropEntries, listTokens, mapEntries } from "./listPatch";
 import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
@@ -151,6 +152,16 @@ export class Vault {
   private linkTimer = 0;
   private filesRequest = 0;
   private linksRequest = 0;
+  /** Local edits a file-list read that started earlier must not be folded onto. */
+  private deltas: { vault: string; request: number; apply: (files: FileEntry[]) => FileEntry[] | null }[] = [];
+  /** A confirmation read is already running. A newer edit asks for another after it settles. */
+  private confirming = false;
+  /** The running confirmation is no longer newer than every local edit. */
+  private confirmAgain = false;
+  /** Advances when a disk read installs. Optimistic patches stay on the generation they started from. */
+  private listEpoch = 0;
+  /** Path pieces the last files change added or removed. Null means every open note may show a different link. */
+  private pieces: readonly string[] | null = null;
   private modified = listeners<[string]>();
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
@@ -172,6 +183,9 @@ export class Vault {
     onBackendRootChange(() => {
       this.filesRequest += 1;
       this.linksRequest += 1;
+      this.deltas = [];
+      this.confirmAgain = false;
+      this.listEpoch += 1;
     });
   }
 
@@ -212,10 +226,90 @@ export class Vault {
   async refreshFiles() {
     const mine = ++this.filesRequest;
     const vault = backendRoot();
-    const files = await api.listFiles();
+    const listed = await api.listFiles();
     // The reply is the vault that was current when the read ran. Install it
     // only if that vault is still this page's backend.
     if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
+    // A read that began before a local edit cannot be ordered against it. The
+    // snapshot may omit the edit, or it may already contain a later outside
+    // change. Keep the patched list and read again after the edit. A further
+    // edit during that confirmation schedules another read once it settles.
+    if (this.deltas.some((delta) => delta.vault === vault && mine <= delta.request)) {
+      this.confirmAgain = true;
+      this.scheduleConfirm();
+      return;
+    }
+    this.deltas = [];
+    this.confirmAgain = false;
+    this.listEpoch += 1;
+    this.show(listed);
+  }
+
+  /** Keep reading until a snapshot that started after the latest edit can install. */
+  private scheduleConfirm() {
+    if (this.confirming) return;
+    this.confirming = true;
+    void this.confirmLoop().finally(() => { this.confirming = false; });
+  }
+
+  private async confirmLoop() {
+    while (this.confirmAgain && pageOwnsDisk()) {
+      this.confirmAgain = false;
+      await this.refreshFiles();
+    }
+  }
+
+  /** Generation of the last file list installed from disk. */
+  fileEpoch(): number {
+    return this.listEpoch;
+  }
+
+  /**
+   * Show one file the backend just created. False when this page does not own
+   * the disk, a parent folder is not listed yet, or a disk read newer than
+   * `epoch` has already installed (the caller reads the list).
+   */
+  adoptAdded(entry: FileEntry, epoch = this.listEpoch): boolean {
+    return this.revise(epoch, (files) => addEntry(files, entry));
+  }
+
+  /**
+   * Show a rename or move. False when this page does not own the disk, the
+   * destination's parent folder is not listed yet, or `epoch` is no longer current.
+   */
+  adoptMapped(swap: (path: string) => string, epoch = this.listEpoch): boolean {
+    return this.revise(epoch, (files) => mapEntries(files, swap));
+  }
+
+  /**
+   * Drop paths a delete removed. False when this page does not own the disk,
+   * or a disk read newer than `epoch` has already installed. `.trash` is not listed.
+   */
+  dropPaths(under: (path: string) => boolean, epoch = this.listEpoch): boolean {
+    return this.revise(epoch, (files) => dropEntries(files, under));
+  }
+
+  /** Lowercased pieces of the paths the last files change added or removed. */
+  fileTouch(): readonly string[] | null {
+    return this.pieces;
+  }
+
+  /**
+   * Show `apply` when `epoch` is still the installed disk generation.
+   * A newer disk read wins instead, and the caller reads again.
+   */
+  private revise(epoch: number, apply: (files: FileEntry[]) => FileEntry[] | null): boolean {
+    if (!pageOwnsDisk()) return false;
+    if (epoch !== this.listEpoch) return false;
+    const next = apply(this.files);
+    if (!next) return false;
+    this.deltas.push({ vault: backendRoot(), request: this.filesRequest, apply });
+    if (next !== this.files) this.show(next);
+    return true;
+  }
+
+  private show(files: FileEntry[]) {
+    this.pieces = listTokens(this.fileList, files);
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
@@ -326,6 +420,9 @@ export class Vault {
     this.disarm();
     this.filesRequest += 1;
     this.linksRequest += 1;
+    this.deltas = [];
+    this.confirmAgain = false;
+    this.listEpoch += 1;
   }
 
   private async flushChanges(wave: number) {
