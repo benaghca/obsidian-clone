@@ -338,7 +338,7 @@ it("drops a batch that is still reading when the vault opens again", async () =>
   expect(modified).toEqual([]);
 });
 
-it("keeps the later file list when two refreshes are in flight", async () => {
+it("keeps the later file list when an older read replies last", async () => {
   const pending: Array<(files: FileEntry[]) => void> = [];
   vi.mocked(api.listFiles).mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
   const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
@@ -352,16 +352,290 @@ it("keeps the later file list when two refreshes are in flight", async () => {
   emit({ kind: "create", paths: ["A.md"] });
   frames.shift()!(0);
   await microtasks();
+  // Another caller (a create's confirmation read) asks for the list while the batch reads.
+  const direct = vault.refreshFiles();
+  await microtasks();
+  expect(pending).toHaveLength(3);
+  pending[2]!([file("A.md"), file("B.md")]);
+  await direct;
+  pending[1]!([file("A.md")]);
+  await microtasks();
+
+  expect(vault.files.map((entry) => entry.path)).toEqual(["A.md", "B.md"]);
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["A.md"]);
+  expect(changed.mock.calls.filter((call) => call[0] === "files")).toEqual([["files"], ["files"]]);
+});
+
+it("refreshes once for a mixed burst and ends with the disk's files", async () => {
+  vi.mocked(api.listFiles).mockResolvedValueOnce(
+    ["Keep.md", "Edit.md", "Del.md", "Old.md", "Folder", "Folder/x.md"].map((path) => file(path, path === "Folder")),
+  );
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const { vault, changed } = await openVault(reload);
+  const modified: string[] = [];
+  vault.onModified((path) => modified.push(path));
+  const lists = vi.mocked(api.listFiles).mock.calls.length;
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+  const notices = changed.mock.calls.length;
+  vi.mocked(api.listFiles).mockResolvedValue(["Keep.md", "Edit.md", "Renamed.md", "New.md"].map((path) => file(path)));
+
+  emit({ kind: "create", paths: ["New.md"] });
+  emit({ kind: "modify", paths: ["Edit.md"] });
+  emit({ kind: "remove", paths: ["Del.md"] });
+  emit({ kind: "rename", paths: ["Old.md", "Renamed.md"] });
+  emit({ kind: "remove", paths: ["Folder"] });
+  emit({ kind: "modify", paths: ["Keep.md", "Folder/x.md"] });
+  await settle();
+
+  expect(vi.mocked(api.listFiles)).toHaveBeenCalledTimes(lists + 1);
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
+  expect(changed.mock.calls.slice(notices)).toEqual([["files"], ["links"]]);
+  expect(vault.files.map((entry) => entry.path)).toEqual(["Keep.md", "Edit.md", "Renamed.md", "New.md"]);
+  expect(vault.notes.map((note) => note.path)).toEqual(["Keep.md", "Edit.md", "Renamed.md", "New.md"]);
+  expect(vault.isFolder("Folder")).toBe(false);
+  expect(vault.entry("Del.md")).toBeUndefined();
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["New.md", "Edit.md", "Old.md", "Renamed.md", "Keep.md", "Folder/x.md"]);
+  expect(modified).toEqual(["Edit.md", "Keep.md", "Folder/x.md"]);
+});
+
+it("holds events that arrive while a refresh reads, then refreshes once more for all of them", async () => {
+  const pending: Array<(files: FileEntry[]) => void> = [];
+  let reading = 0;
+  let most = 0;
+  vi.mocked(api.listFiles).mockImplementation(() => {
+    reading += 1;
+    most = Math.max(most, reading);
+    return new Promise((resolve) => pending.push((files) => { reading -= 1; resolve(files); }));
+  });
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const changed = vi.fn();
+  const vault = new Vault(changed, reload);
+  const opening = vault.open();
+  await microtasks();
+  pending[0]!([file("Old.md"), file("Open.md")]);
+  await opening;
+  await microtasks();
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+
+  emit({ kind: "create", paths: ["A.md"] });
+  frames.shift()!(0);
+  await microtasks();
+  expect(pending).toHaveLength(2);
+
+  // Three more watcher batches land while that read is still out.
+  emit({ kind: "modify", paths: ["Open.md"] });
+  emit({ kind: "create", paths: ["B.md"] });
+  emit({ kind: "remove", paths: ["Old.md"] });
+  emit({ kind: "create", paths: ["C.md"] });
+  expect(frames).toHaveLength(0);
+  expect(pending).toHaveLength(2);
+
+  pending[1]!([file("Old.md"), file("Open.md"), file("A.md")]);
+  await microtasks();
+  expect(vault.files.map((entry) => entry.path)).toEqual(["Old.md", "Open.md", "A.md"]);
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["A.md"]);
+  // The follow-up reads the link index for both batches.
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links);
+  expect(frames).toHaveLength(1);
+
+  frames.shift()!(0);
+  await microtasks();
+  expect(pending).toHaveLength(3);
+  pending[2]!([file("Open.md"), file("A.md"), file("B.md"), file("C.md")]);
+  await settle();
+
+  expect(most).toBe(1);
+  expect(pending).toHaveLength(3);
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
+  expect(vault.files.map((entry) => entry.path)).toEqual(["Open.md", "A.md", "B.md", "C.md"]);
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["A.md", "Open.md", "B.md", "C.md"]);
+  expect(frames).toHaveLength(0);
+});
+
+it("keeps a change that arrives while the batch is reloading notes", async () => {
+  let release: (() => void) | null = null;
+  let held = false;
+  const reload = vi.fn<(path: string) => Promise<void>>((path) => {
+    if (path !== "Slow.md" || held) return Promise.resolve();
+    held = true;
+    return new Promise<void>((resolve) => { release = resolve; });
+  });
+  const { vault } = await openVault(reload);
+  const modified: string[] = [];
+  vault.onModified((path) => modified.push(path));
+  const lists = vi.mocked(api.listFiles).mock.calls.length;
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+
+  emit({ kind: "modify", paths: ["Slow.md"] });
+  await settle();
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["Slow.md"]);
+  emit({ kind: "modify", paths: ["Slow.md", "Late.md"] });
+  expect(frames).toHaveLength(0);
+
+  release!();
+  await microtasks();
+  expect(frames).toHaveLength(1);
+  await settle();
+
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["Slow.md", "Slow.md", "Late.md"]);
+  expect(modified).toEqual(["Slow.md", "Slow.md", "Late.md"]);
+  expect(vi.mocked(api.listFiles)).toHaveBeenCalledTimes(lists);
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
+});
+
+it("reads the link index while a steady stream of changes keeps the queue full", async () => {
+  const pending: Array<(files: FileEntry[]) => void> = [];
+  vi.mocked(api.listFiles).mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  // The disk's link index names the latest note the stream wrote.
+  let disk = 0;
+  vi.mocked(api.linkIndex).mockImplementation(async () => ({ outgoing: { [`N${disk}.md`]: [] } }));
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const vault = new Vault(vi.fn(), reload);
+  const opening = vault.open();
+  await microtasks();
+  pending[0]!([]);
+  await opening;
+  await microtasks();
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+
+  disk = 1;
+  emit({ kind: "create", paths: ["N1.md"] });
+  const batches = 6;
+  const during: number[] = [];
+  for (let i = 1; i <= batches; i++) {
+    expect(frames).toHaveLength(1);
+    frames.shift()!(0);
+    await microtasks();
+    expect(pending).toHaveLength(i + 1);
+    // The next change lands before this batch finishes, every time.
+    if (i < batches) {
+      disk = i + 1;
+      emit({ kind: "create", paths: [`N${i + 1}.md`] });
+    }
+    pending[i]!(Array.from({ length: i }, (_, k) => file(`N${k + 1}.md`)));
+    await microtasks();
+    during.push(vi.mocked(api.linkIndex).mock.calls.length - links);
+  }
+  await settle();
+
+  // A read before the stream went quiet, never more than one batch late, and still coalesced.
+  expect(during[1]).toBeGreaterThanOrEqual(1);
+  for (let i = 1; i < batches; i++) expect(during[i]! - (during[i - 2] ?? 0)).toBeGreaterThanOrEqual(1);
+  expect(vi.mocked(api.linkIndex).mock.calls.length - links).toBeLessThanOrEqual(Math.ceil(batches / 2) + 1);
+  expect(vault.links).toEqual({ outgoing: { [`N${batches}.md`]: [] } });
+  expect(vault.files.map((entry) => entry.path)).toEqual(Array.from({ length: batches }, (_, k) => `N${k + 1}.md`));
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(Array.from({ length: batches }, (_, k) => `N${k + 1}.md`));
+});
+
+it("runs the waiting batch after an awaited read rejects", async () => {
+  const pending: Array<{ resolve: (files: FileEntry[]) => void; reject: (error: Error) => void }> = [];
+  vi.mocked(api.listFiles).mockImplementation(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const vault = new Vault(vi.fn(), reload);
+  const opening = vault.open();
+  await microtasks();
+  pending[0]!.resolve([file("Old.md")]);
+  await opening;
+  await microtasks();
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+
+  emit({ kind: "create", paths: ["Lost.md"] });
+  frames.shift()!(0);
+  await microtasks();
+  emit({ kind: "create", paths: ["Next.md"] });
+  expect(frames).toHaveLength(0);
+  pending[1]!.reject(new Error("no vault"));
+  await microtasks();
+
+  expect(errors).toHaveBeenCalledTimes(1);
+  expect(frames).toHaveLength(1);
+  frames.shift()!(0);
+  await microtasks();
+  pending[2]!.resolve([file("Old.md"), file("Lost.md"), file("Next.md")]);
+  await settle();
+
+  expect(vault.files.map((entry) => entry.path)).toEqual(["Old.md", "Lost.md", "Next.md"]);
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["Next.md"]);
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
+  // Nothing is stuck: a later change starts its own batch.
+  emit({ kind: "modify", paths: ["Old.md"] });
+  expect(frames).toHaveLength(1);
+  await settle();
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["Next.md", "Old.md"]);
+  errors.mockRestore();
+});
+
+it("still reads the links a batch deferred when the batch that waited fails", async () => {
+  const pending: Array<{ resolve: (files: FileEntry[]) => void; reject: (error: Error) => void }> = [];
+  vi.mocked(api.listFiles).mockImplementation(() => new Promise((resolve, reject) => pending.push({ resolve, reject })));
+  const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+  const vault = new Vault(vi.fn(), async () => {});
+  const opening = vault.open();
+  await microtasks();
+  pending[0]!.resolve([]);
+  await opening;
+  await microtasks();
+  const links = vi.mocked(api.linkIndex).mock.calls.length;
+
+  emit({ kind: "create", paths: ["A.md"] });
+  frames.shift()!(0);
+  await microtasks();
+  emit({ kind: "create", paths: ["B.md"] });
+  pending[1]!.resolve([file("A.md")]);
+  await microtasks();
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links);
+  frames.shift()!(0);
+  await microtasks();
+  pending[2]!.reject(new Error("no vault"));
+  await settle();
+
+  expect(errors).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
+  errors.mockRestore();
+});
+
+it("does not let an old vault's batch release a newer batch when it finishes late", async () => {
+  const pending: Array<(files: FileEntry[]) => void> = [];
+  vi.mocked(api.listFiles).mockImplementation(() => new Promise((resolve) => pending.push(resolve)));
+  const reload = vi.fn<(path: string) => Promise<void>>(async () => {});
+  const vault = new Vault(vi.fn(), reload);
+  const modified: string[] = [];
+  vault.onModified((path) => modified.push(path));
+  const opening = vault.open();
+  await microtasks();
+  pending[0]!([file("Old.md")]);
+  await opening;
+
+  emit({ kind: "create", paths: ["A.md"] });
+  frames.shift()!(0);
+  await microtasks();
+  expect(pending).toHaveLength(2);
+
+  const again = vault.open();
+  await microtasks();
+  pending[2]!([file("Fresh.md")]);
+  await again;
   emit({ kind: "create", paths: ["B.md"] });
   frames.shift()!(0);
   await microtasks();
-  pending[1]!([file("A.md")]);
-  pending[2]!([file("B.md")]);
-  await microtasks();
+  expect(pending).toHaveLength(4);
 
-  expect(vault.files.map((entry) => entry.path)).toEqual(["B.md"]);
-  expect(reload.mock.calls.map((call) => call[0])).toEqual(["A.md", "B.md"]);
-  expect(changed.mock.calls.filter((call) => call[0] === "files")).toEqual([["files"], ["files"]]);
+  // The old batch's read comes back while the new batch is still reading.
+  pending[1]!([file("Stale.md")]);
+  await microtasks();
+  emit({ kind: "modify", paths: ["C.md"] });
+  expect(frames).toHaveLength(0);
+
+  pending[3]!([file("Fresh.md"), file("B.md")]);
+  await microtasks();
+  expect(frames).toHaveLength(1);
+  await settle();
+
+  expect(vault.files.map((entry) => entry.path)).toEqual(["Fresh.md", "B.md"]);
+  expect(reload.mock.calls.map((call) => call[0])).toEqual(["B.md", "C.md"]);
+  expect(modified).toEqual(["C.md"]);
+  expect(vi.mocked(api.listFiles)).toHaveBeenCalledTimes(4);
 });
 
 it("cancels a pending flush when the page is going away", async () => {
