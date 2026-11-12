@@ -5,7 +5,7 @@ import { NoteEditors } from "./noteEditors";
 import { Vault } from "./vault";
 import { Workspace } from "./workspace";
 import type { Tab } from "./tabs";
-import { searchReader, searchResults } from "./shell/searchRead";
+import { reloadSearchRequests, searchReader, searchResults } from "./shell/searchRead";
 import { createGraphSource } from "./graph/source";
 import { defaults, LOCAL_GRAPH } from "./settings/schema";
 import { vaultTags } from "./shell/vaultTags";
@@ -109,10 +109,10 @@ it("search view drops an old reply and starts the newest query without waiting f
   expect(api.searchNotes).toHaveBeenCalledTimes(1);
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
   expect(receive).not.toHaveBeenCalled();
-  expect(api.searchNotes).toHaveBeenNthCalledWith(1, "a", false, 1);
-  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true, 3);
   const sent = vi.mocked(api.searchNotes).mock.calls.map((call) => call[2] as number);
-  expect(sent[0]).toBeLessThan(sent[1]);
+  expect(api.searchNotes).toHaveBeenNthCalledWith(1, "a", false, sent[0]);
+  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true, sent[1]);
+  expect(sent[1]).toBe(sent[0] + 2);
   old.resolve([{ path: "old.md", count: 1 }]);
   await Promise.resolve();
   expect(receive).not.toHaveBeenCalled();
@@ -133,8 +133,10 @@ it("a superseded search failure is not shown", async () => {
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(1));
   reader.read({ query: "Alpha", matchCase: true, seq: 2 });
   await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
-  expect(api.searchNotes).toHaveBeenNthCalledWith(1, "a", false, 1);
-  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true, 2);
+  const sent = vi.mocked(api.searchNotes).mock.calls.map((call) => call[2] as number);
+  expect(api.searchNotes).toHaveBeenNthCalledWith(1, "a", false, sent[0]);
+  expect(api.searchNotes).toHaveBeenLastCalledWith("Alpha", true, sent[1]);
+  expect(sent[1]).toBe(sent[0] + 1);
   old.reject(new Error("cancelled"));
   latest.resolve([{ path: "Upper.MD", count: 2 }]);
   await vi.waitFor(() => expect(receive).toHaveBeenCalledWith({ query: "Alpha", matchCase: true, seq: 2 }, [{ path: "Upper.MD", count: 2 }]));
@@ -147,8 +149,47 @@ it("a current search failure is still reported", async () => {
   const reader = searchReader({ editors: { flush } } as never, receive, failed);
   reader.read({ query: "Alpha", matchCase: false, seq: 1 });
   await vi.waitFor(() => expect(failed).toHaveBeenCalledWith({ query: "Alpha", matchCase: false, seq: 1 }, expect.any(Error)));
-  expect(api.searchNotes).toHaveBeenCalledWith("Alpha", false, 1);
+  const sent = vi.mocked(api.searchNotes).mock.calls[0][2];
+  expect(api.searchNotes).toHaveBeenCalledWith("Alpha", false, sent);
   expect(receive).not.toHaveBeenCalled();
+});
+
+it("a reloaded search reader keeps a newer id and shows its first result", async () => {
+  const store = new Map<string, string>();
+  vi.stubGlobal("sessionStorage", {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, value); },
+    removeItem: (key: string) => { store.delete(key); },
+    clear: () => store.clear(),
+  });
+  try {
+    const oldScan = deferred<SearchNote[]>();
+    const flush = vi.fn().mockResolvedValue(undefined), oldReceive = vi.fn(), oldFailed = vi.fn();
+    vi.mocked(api.searchNotes).mockReturnValueOnce(oldScan.promise);
+    const oldReader = searchReader({ editors: { flush } } as never, oldReceive, oldFailed);
+    oldReader.read({ query: "old", matchCase: false, seq: 1 });
+    await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(1));
+    const oldId = vi.mocked(api.searchNotes).mock.calls[0][2] as number;
+
+    // Vault switch reloads the document. The previous scan can still be in flight.
+    reloadSearchRequests();
+    const rows = [{ path: "n0.md", count: 1 }, { path: "n1.md", count: 1 }, { path: "n2.md", count: 1 }, { path: "n3.md", count: 1 }];
+    const newest = deferred<SearchNote[]>();
+    const receive = vi.fn(), failed = vi.fn();
+    vi.mocked(api.searchNotes).mockReturnValueOnce(newest.promise);
+    const reader = searchReader({ editors: { flush } } as never, receive, failed);
+    reader.read({ query: "alpha", matchCase: false, seq: 1 });
+    await vi.waitFor(() => expect(api.searchNotes).toHaveBeenCalledTimes(2));
+    const newId = vi.mocked(api.searchNotes).mock.calls[1][2] as number;
+    expect(newId).toBeGreaterThan(oldId);
+    oldScan.reject(new Error("cancelled"));
+    newest.resolve(rows);
+    await vi.waitFor(() => expect(receive).toHaveBeenCalledWith({ query: "alpha", matchCase: false, seq: 1 }, rows));
+    expect(failed).not.toHaveBeenCalled();
+    expect(oldReceive).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 it("clearing search during the save flush cancels a pending query", async () => {

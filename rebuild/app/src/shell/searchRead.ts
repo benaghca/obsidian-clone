@@ -1,7 +1,8 @@
 // Coalesce search-view requests. A newer query starts without waiting for the
 // scan already running, so that scan can stop. Keystrokes that land before the
-// next scan starts still become one query. The id sent with a query is this
-// reader's version at send time, so a late older call cannot outrank it.
+// next scan starts still become one query. The id sent with a query comes from
+// a counter this window keeps across reader recreation and page reloads, so a
+// late call from the previous document cannot outrank the new one.
 import { api, type SearchNote, type FileEntry } from "../api";
 import { compareNames, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
@@ -69,6 +70,34 @@ export function searchResults(files: readonly FileEntry[], notes: readonly Searc
     });
 }
 
+const SEARCH_REQUEST_KEY = "grove.searchRequest";
+
+function storedSearchRequest(): number {
+  try {
+    const n = Number(sessionStorage.getItem(SEARCH_REQUEST_KEY));
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let issuedSearchRequest = storedSearchRequest();
+
+function issueSearchRequest(): number {
+  issuedSearchRequest += 1;
+  try {
+    sessionStorage.setItem(SEARCH_REQUEST_KEY, String(issuedSearchRequest));
+  } catch {
+    // This document still has the in-memory counter. A reload needs the stored one.
+  }
+  return issuedSearchRequest;
+}
+
+/** A reloaded document starts from the counter the previous document stored. */
+export function reloadSearchRequests(): void {
+  issuedSearchRequest = storedSearchRequest();
+}
+
 export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: SearchRequest, notes: SearchNote[]) => void, failed: (request: SearchRequest, error: unknown) => void) {
   let latest: SearchRequest | null = null;
   let version = 0;
@@ -112,7 +141,7 @@ export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: 
   }
   return {
     read(request: SearchRequest) {
-      version++;
+      version = issueSearchRequest();
       latest = request;
       const poke = wake;
       wake = null;
@@ -120,7 +149,7 @@ export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: 
       void pump();
     },
     cancel() {
-      version++;
+      version = issueSearchRequest();
       latest = null;
       const poke = wake;
       wake = null;

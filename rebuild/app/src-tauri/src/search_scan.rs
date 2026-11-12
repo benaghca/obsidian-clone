@@ -301,6 +301,66 @@ mod tests {
         });
     }
 
+    /// The window already has a request id from the previous document. That
+    /// document's last search is still paused before it claims. The reloaded
+    /// page's first id is the next one, not a counter that started over.
+    #[test]
+    fn a_reloaded_page_search_returns_every_row_while_an_old_request_is_delayed() {
+        let dir = crate::fsutil::tmp_dir("search-reload");
+        for i in 0..4 {
+            std::fs::write(dir.path.join(format!("n{i}.md")), format!("alpha {i}\n")).unwrap();
+        }
+        let state = Arc::new(test_state(&dir.path));
+        let warmed = run(&state, "main", 4, "alpha", false).expect("previous document's search");
+        assert_eq!(warmed.len(), 4);
+
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let (old_tx, old_rx) = mpsc::channel();
+        thread::scope(|scope| {
+            let _unblock = Release(release_tx.clone());
+            let state_old = Arc::clone(&state);
+            scope.spawn(move || {
+                set_before_claim_hook(Some(Box::new(move || {
+                    entered_tx.send(()).ok();
+                    let _ = release_rx.lock().unwrap().recv();
+                })));
+                let result = run(&state_old, "main", 5, "alpha", false);
+                set_before_claim_hook(None);
+                old_tx.send(result).ok();
+            });
+            entered_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("old document's request did not pause before registration");
+
+            let restarted = run(&state, "main", 1, "alpha", false);
+            assert_eq!(
+                restarted.expect_err("a restarted request id returned rows"),
+                "cancelled"
+            );
+            let newest = run(&state, "main", 6, "alpha", false).expect("reloaded search was cancelled");
+            let direct = crate::read_vault(&state, |vault| {
+                Ok(vault.index.search_notes("alpha", false))
+            })
+            .unwrap();
+            assert_eq!(newest, direct);
+            assert_eq!(newest.len(), 4);
+
+            let _ = release_tx.send(());
+            let old = old_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("old document's request did not finish");
+            assert_eq!(old.expect_err("old document's request returned rows"), "cancelled");
+            assert_eq!(state.search_gen.claim("main", 6).1, false);
+            assert_eq!(
+                state.search_gen.claim("main", 6).0.load(Ordering::Acquire),
+                6,
+                "the delayed request from the previous document advanced the id"
+            );
+        });
+    }
+
     /// Sends on drop so a failed assertion cannot leave the paused scan blocked.
     struct Release(mpsc::Sender<()>);
     impl Drop for Release {
