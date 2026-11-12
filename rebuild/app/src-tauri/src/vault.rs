@@ -1,8 +1,9 @@
 //! One open vault: filesystem operations plus the in-memory index.
 //!
-//! `write_note` records the path for [`OWN_WRITE`] so the watcher can drop the echo of that
-//! save. The index is updated before the call returns, so the next `list_files`, `search`, or
-//! `link_index` already sees the change.
+//! `write_note` records the stamp of the file it finished, taken before that file is
+//! published, so the watcher can drop the echo of those bytes. A later edit with any other
+//! mtime, size, or file identity is a normal external change. The index is updated before
+//! the call returns, so the next `list_files`, `search`, or `link_index` already sees the change.
 
 use crate::fsutil::{self, atomic_write};
 use crate::index::{Index, Stamp};
@@ -12,10 +13,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant, SystemTime};
-
-/// How long a `write_note` suppresses watcher events for that path.
-pub const OWN_WRITE: Duration = Duration::from_millis(500);
+use std::time::SystemTime;
 
 /// Largest image `read_file_bytes` hands to an embed.
 pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
@@ -39,10 +37,20 @@ impl NoteFormat {
     }
 }
 
+/// Stamp of a file Grove itself wrote. The watcher ignores an event for this
+/// path only while the file on disk is still that write.
+#[derive(Clone, Copy)]
+struct OwnWrite {
+    mtime_ms: u64,
+    size: u64,
+    /// Device and inode. A same-size replace in one mtime tick is a different file.
+    id: Option<(u64, u64)>,
+}
+
 pub struct Vault {
     pub root: PathBuf,
     pub index: Index,
-    own_writes: HashMap<String, Instant>,
+    own_writes: HashMap<String, OwnWrite>,
     formats: Mutex<HashMap<String, NoteFormat>>,
     /// Device and inode last seen for a path. A same-size replace in one
     /// clock tick can share a [`Stamp`]; the id tells that apart from the file
@@ -127,14 +135,10 @@ impl Vault {
             Err(e) => return Err(e.to_string()),
         };
         let written = self.observe_format(&rel, existing.as_deref()).apply(content);
-        self.mark_own(&rel);
-        if let Err(e) = atomic_write(&full, written.as_bytes()) {
-            self.own_writes.remove(&rel);
-            return Err(e.to_string());
-        }
-        let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index.upsert_note(&self.root, &rel, &written, Stamp::of(&md));
-        self.remember_id(&rel);
+        let receipt = atomic_write(&full, written.as_bytes()).map_err(|e| e.to_string())?;
+        let md = receipt.metadata();
+        self.index.upsert_note(&self.root, &rel, &written, Stamp::of(md));
+        self.record_own(&rel, md);
         Ok(())
     }
 
@@ -202,13 +206,9 @@ impl Vault {
         if full.is_dir() {
             return Err(format!("not a file: {rel}"));
         }
-        self.mark_own(&rel);
-        if let Err(e) = atomic_write(&full, bytes) {
-            self.own_writes.remove(&rel);
-            return Err(e.to_string());
-        }
+        let receipt = atomic_write(&full, bytes).map_err(|e| e.to_string())?;
         self.index.refresh_path(&self.root, &rel);
-        self.remember_id(&rel);
+        self.record_own(&rel, receipt.metadata());
         Ok((self.entry_for(&rel), existed))
     }
 
@@ -217,12 +217,12 @@ impl Vault {
         if full.exists() {
             return Err(format!("already exists: {rel}"));
         }
-        atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
+        let receipt = atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())?;
         self.remove_formats(&rel);
         self.observe_format(&rel, Some(content));
-        let md = fs::metadata(&full).map_err(|e| e.to_string())?;
-        self.index.upsert_note(&self.root, &rel, content, Stamp::of(&md));
-        self.remember_id(&rel);
+        let md = receipt.metadata();
+        self.index.upsert_note(&self.root, &rel, content, Stamp::of(md));
+        self.record_own(&rel, md);
         Ok(self.entry_for(&rel))
     }
 
@@ -267,6 +267,7 @@ impl Vault {
             batch.refresh_path(root, &to_rel);
         }
         self.relocate_ids(&from_rel, &to_rel);
+        self.relocate_own(&from_rel, &to_rel);
         self.remember_id(&to_rel);
         Ok(())
     }
@@ -295,6 +296,7 @@ impl Vault {
         }
         self.remove_formats(&rel);
         self.forget_id_tree(&rel);
+        self.forget_own_tree(&rel);
         self.index.remove_tree(&rel);
         Ok(())
     }
@@ -321,15 +323,30 @@ impl Vault {
         }
         serde_json::from_str::<serde_json::Value>(content)
             .map_err(|e| format!("not JSON: {e}"))?;
-        atomic_write(&full, content.as_bytes()).map_err(|e| e.to_string())
+        atomic_write(&full, content.as_bytes())
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
 
-    pub fn is_own_write(&self, rel: &str, now: Instant) -> bool {
-        self.own_writes.get(rel).is_some_and(|until| now < *until)
-    }
-
-    pub fn gc_own_writes(&mut self, now: Instant) {
-        self.own_writes.retain(|_, until| *until > now);
+    /// True when `rel` is still the file Grove wrote. A missing file, or any
+    /// other mtime, size, or identity, is someone else's change.
+    pub fn is_own_write(&self, rel: &str) -> bool {
+        let Some(own) = self.own_writes.get(rel) else {
+            return false;
+        };
+        let Ok(md) = fs::symlink_metadata(self.root.join(rel)) else {
+            return false;
+        };
+        if md.file_type().is_symlink() || !md.is_file() {
+            return false;
+        }
+        if fsutil::mtime_ms(&md) != own.mtime_ms || md.len() != own.size {
+            return false;
+        }
+        match (own.id, file_id(&md)) {
+            (Some(known), Some(now)) => known == now,
+            _ => true,
+        }
     }
 
     /// Turn a create of a path we already know about into a modify (an editor's atomic save).
@@ -403,10 +420,11 @@ impl Vault {
             }
         }
         self.track_ids(changes);
+        self.track_own(changes, at.clone(), &stayed);
         // The batch above relocates every rename, including an echo of a move
-        // the app already applied. Put a source that is still the indexed file
-        // back, or the final format prune drops it and the file list loses it.
-        self.restore_echo_sources(&stayed, changes);
+        // the app already applied. Put a source that is still on disk back.
+        // A different file at that path is an outside replacement, not a move.
+        let replaced = self.restore_echo_sources(&stayed, changes);
         let mut formats = self.formats.lock().unwrap_or_else(|e| e.into_inner());
         if formats.is_empty() {
             return;
@@ -449,6 +467,10 @@ impl Vault {
         formats.retain(|k, _| {
             self.index.contains(k) && !self.index.is_dir(k) && (kept.contains(k) || !has_prefix_in(k, &evict))
         });
+        // The file now at a replaced source is not the one whose format we cached.
+        for path in &replaced {
+            evict_format_tree(&mut formats, path);
+        }
     }
 
     /// Start recording index mutations before releasing the state lock to scan.
@@ -503,10 +525,84 @@ impl Vault {
         out
     }
 
-    pub(crate) fn mark_own(&mut self, rel: &str) {
-        let now = Instant::now();
-        self.gc_own_writes(now);
-        self.own_writes.insert(rel.to_string(), now + OWN_WRITE);
+    /// Remember a successful atomic write. `md` is the receipt from before
+    /// publication. The same identity goes into the rename preflight, so a
+    /// later echo does not treat this file as one that has already left.
+    pub(crate) fn record_own(&mut self, rel: &str, md: &fs::Metadata) {
+        let id = file_id(md);
+        if let Some(id) = id {
+            self.ids.insert(rel.to_string(), id);
+        }
+        self.own_writes.insert(
+            rel.to_string(),
+            OwnWrite {
+                mtime_ms: fsutil::mtime_ms(md),
+                size: md.len(),
+                id,
+            },
+        );
+    }
+
+    fn forget_own_tree(&mut self, rel: &str) {
+        let prefix = format!("{rel}/");
+        self.own_writes.retain(|k, _| k != rel && !k.starts_with(&prefix));
+    }
+
+    fn relocate_own(&mut self, from: &str, to: &str) {
+        if from == to || self.own_writes.is_empty() {
+            return;
+        }
+        let prefix = format!("{from}/");
+        let keys: Vec<String> = self
+            .own_writes
+            .keys()
+            .filter(|k| *k == from || k.starts_with(&prefix))
+            .cloned()
+            .collect();
+        for key in keys {
+            if let Some(own) = self.own_writes.remove(&key) {
+                let dest = if key == from { to.to_string() } else { format!("{to}{}", &key[from.len()..]) };
+                self.own_writes.insert(dest, own);
+            }
+        }
+    }
+
+    /// The index batch already ran. Move an own-write record only for an
+    /// identity that left its path. An app-rename echo has no departed id, so
+    /// a recreated source keeps the stamp of the bytes now on it. Do not
+    /// refresh a record from whatever bytes are at the destination.
+    fn track_own(
+        &mut self,
+        changes: &[VaultChanged],
+        mut moved: HashMap<String, u64>,
+        stayed: &HashSet<String>,
+    ) {
+        for change in changes {
+            match change.kind {
+                ChangeKind::Remove => {
+                    for path in &change.paths {
+                        self.forget_own_tree(path);
+                    }
+                }
+                ChangeKind::Rename if change.paths.len() == 2 => {
+                    let from = &change.paths[0];
+                    let to = &change.paths[1];
+                    if from == to {
+                        continue;
+                    }
+                    let Some(id) = moved.remove(from) else {
+                        continue;
+                    };
+                    if stayed.contains(to) {
+                        continue;
+                    }
+                    moved.remove(to);
+                    moved.insert(to.clone(), id);
+                    self.relocate_own(from, to);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn remember_id(&mut self, rel: &str) {
@@ -567,31 +663,43 @@ impl Vault {
         }
     }
 
-    /// `map_batch` already ran. A verified echo still relocated the source's
-    /// index node. When that file is on disk, index it again. The destination
-    /// stays as the batch refreshed it. Name maps rebuild once.
-    fn restore_echo_sources(&mut self, stayed: &HashSet<String>, changes: &[VaultChanged]) {
-        let mut missing: Vec<&str> = Vec::new();
+    /// `map_batch` already ran and relocated every rename source. Index a source
+    /// that is still on disk: the same file after an app echo, or a different
+    /// file an outside replace left behind. A path that is gone stayed moved.
+    /// The receipt stays the own-write record, so a replacement is not ours.
+    /// `track_ids` has already pointed the identity cache at the file on disk.
+    /// Returned paths are replacements whose cached format belonged to the
+    /// file that left.
+    fn restore_echo_sources(&mut self, stayed: &HashSet<String>, changes: &[VaultChanged]) -> Vec<String> {
+        let mut refresh: Vec<&str> = Vec::new();
+        let mut replaced: Vec<String> = Vec::new();
         for change in changes {
             if change.kind != ChangeKind::Rename || change.paths.len() != 2 {
                 continue;
             }
             let from = change.paths[0].as_str();
-            if from == change.paths[1].as_str() || !stayed.contains(from) || self.index.contains(from) {
+            if from == change.paths[1].as_str() || self.index.contains(from) {
                 continue;
             }
-            if !missing.contains(&from) {
-                missing.push(from);
+            if fs::symlink_metadata(self.root.join(from)).is_err() {
+                continue;
+            }
+            if !refresh.contains(&from) {
+                refresh.push(from);
+            }
+            if !stayed.contains(from) {
+                replaced.push(from.to_string());
             }
         }
-        if missing.is_empty() {
-            return;
+        if refresh.is_empty() {
+            return replaced;
         }
         let root = &self.root;
         let mut batch = self.index.map_batch();
-        for path in missing {
+        for path in refresh {
             batch.refresh_path(root, path);
         }
+        replaced
     }
 
     fn entry_for(&self, rel: &str) -> FileEntry {
@@ -718,6 +826,7 @@ mod tests {
     use super::*;
     use crate::fsutil::tmp_dir;
     use std::fs;
+    use std::time::{Duration, Instant};
 
     fn listed(vault: &Vault, path: &str) -> FileEntry {
         vault.list_files().into_iter().find(|e| e.path == path).unwrap()
@@ -1439,7 +1548,7 @@ mod tests {
             vault.read_note("Old.md").unwrap(),
             "see [[Target]]\nrevised\n"
         );
-        assert!(vault.is_own_write("Old.md", Instant::now()));
+        assert!(vault.is_own_write("Old.md"));
         let names: Vec<_> = fs::read_dir(&dir.path)
             .unwrap()
             .flatten()

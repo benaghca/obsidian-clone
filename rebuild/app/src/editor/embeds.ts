@@ -275,7 +275,8 @@ export class NoteEmbedWidget extends DrawnWidget {
     const open = () => host?.openLink(this.target, false, view);
     // Canvas cards paint this outside a CodeMirror view, so linkAt cannot see the
     // source. Clicks still follow data-href only; this attribute is for hover.
-    const tag = (el: HTMLElement) => { el.dataset.embedHref = this.target; return el; };
+    // A page preview's own root is not an embed: hovering its body must not preview itself.
+    const tag = (el: HTMLElement) => { if (!this.preview) el.dataset.embedHref = this.target; return el; };
     if ((!path || !embeds) && !this.preview) return tag(missingBox(`“${name}” is not created yet. Click to create.`, open));
     if (!this.preview && path && embeds && embedStopped(path, embeds.pathOf(view), chain)) {
       return tag(h("span", { class: "internal-embed file-embed is-clickable", onclick: open }, icon("file"), fileName(path)));

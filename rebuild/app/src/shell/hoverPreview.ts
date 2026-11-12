@@ -1,4 +1,7 @@
-// One delayed, local page preview, shared by editors, sidebar results and canvas cards.
+// Delayed, local page previews, shared by editors, sidebar results and canvas cards.
+// Ctrl+hovering a link inside a preview stacks another one on top, with no
+// depth limit. `layers` is that chain, root first; a pointer inside layer i
+// keeps layers 0..i and lets deeper ones close.
 // A detached read-only view supplies NoteEmbedWidget's rendering context;
 // no view, file read or syntax lookup is created until an eligible hover.
 // Canvas clicks call preventDefault on pointerdown, and WebKitGTK can keep
@@ -18,38 +21,50 @@ import type { Workspace } from "../workspace";
 import { h } from "./dom";
 
 export function installHoverPreviews(ws: Workspace) {
+  type Layer = { key: string; popup: HTMLElement; origin: string | null; source: EditorView; dispose: () => void };
+  const layers: Layer[] = [];
   let pending = 0;
+  let pendingKey = "";
   let leaving = 0;
-  let key = "";
-  let popup: HTMLElement | null = null;
-  let dispose: (() => void) | null = null;
+  // Set while anything is pending or open; it also removes the dismissal listeners.
   let unlisten: (() => void) | null = null;
-  const cancel = () => { clearTimeout(leaving); clearTimeout(pending); };
+  // Popovers sit side by side under body, so at most one contains a node.
+  const layerOf = (node: Node | null) => {
+    for (let i = layers.length; i--;) if (layers[i].popup.contains(node)) return i;
+    return -1;
+  };
+  const unpend = () => { clearTimeout(pending); pending = 0; pendingKey = ""; };
+  // Close the layers past `keep` now. A pending child of a closed layer goes with it.
+  const drop = (keep: number) => {
+    if (layers.length <= keep) return;
+    unpend();
+    while (layers.length > keep) layers.pop()!.dispose();
+  };
   const close = () => {
-    if (!key) return;
-    cancel();
-    key = "";
-    popup?.remove();
-    popup = null;
-    dispose?.();
-    dispose = null;
-    unlisten?.();
+    if (!unlisten) return;
+    clearTimeout(leaving);
+    unpend();
+    drop(0);
+    unlisten();
     unlisten = null;
   };
-  const leave = () => {
-    if (!key) return;
-    clearTimeout(pending);
-    pending = 0;
+  // The pointer is in layer keep - 1 (or outside every layer for 0) and not on a
+  // link that holds a deeper one: close what lies past it after the usual delay.
+  const leave = (keep = 0) => {
+    if (!unlisten) return;
+    unpend();
     clearTimeout(leaving);
-    leaving = window.setTimeout(close, 180);
+    if (keep < layers.length || !layers.length) leaving = window.setTimeout(() => keep ? drop(keep) : close(), 180);
   };
 
-  function show(target: string, from: string | null, source: EditorView, rect: DOMRect, side?: DOMRect) {
+  function show(key: string, target: string, from: string | null, source: EditorView, rect: DOMRect, side?: DOMRect) {
+    // A nested preview that cannot open leaves its parents alone.
+    const stop = () => { if (!layers.length) close(); };
     const host = source.state.facet(editorHost);
-    if (!host) return close();
+    if (!host) return stop();
     const [name, sub] = splitSubpath(target);
     const path = name ? ws.resolve(name, from) : from;
-    if (path && !isNoteFile(path)) return close();
+    if (path && !isNoteFile(path)) return stop();
     const origin = path ?? from;
     const resolve = (href: string) => resolveLink(href, origin, ws.vault.fileRefs());
     const context = new EditorView({ state: EditorState.create({ extensions: [
@@ -58,6 +73,7 @@ export function installHoverPreviews(ws: Workspace) {
         contextMenu: undefined,
         openLink: (href, where) => {
           const [note, anchor] = splitSubpath(href);
+          // `source` is the chain's root editor, so every depth opens where the first preview would.
           host.openLink(`${note ? resolve(note) ?? note : origin ?? ""}${anchor ? `#${anchor}` : ""}`, where, source);
           close();
         },
@@ -69,11 +85,13 @@ export function installHoverPreviews(ws: Workspace) {
     try { target = `${path ?? name}#${decodeURIComponent(sub)}`; } catch { target = `${path ?? name}#${sub}`; }
     const widget = new NoteEmbedWidget(target, path, [], true);
     const dom = widget.toDOM(context);
-    popup = h("div", { class: "hover-popover is-reading-mode", role: "dialog", "aria-label": "Page preview" }, dom);
-    popup.addEventListener("mouseenter", cancel);
-    popup.addEventListener("mouseleave", leave);
-    popup.addEventListener("pointerenter", cancel);
-    popup.addEventListener("pointerleave", leave);
+    const popup = h("div", { class: "hover-popover is-reading-mode", role: "dialog", "aria-label": "Page preview" }, dom);
+    const enter = () => leave(layers.indexOf(layer) + 1);
+    const exit = () => leave();
+    popup.addEventListener("mouseenter", enter);
+    popup.addEventListener("mouseleave", exit);
+    popup.addEventListener("pointerenter", enter);
+    popup.addEventListener("pointerleave", exit);
     popup.addEventListener("click", (event) => {
       const link = (event.target as Element).closest<HTMLElement>("[data-href]");
       if (!link || !event.isTrusted) return;
@@ -88,7 +106,6 @@ export function installHoverPreviews(ws: Workspace) {
     const toRight = side && innerWidth - side.right >= side.left;
     if (side) popup.style.width = `${Math.max(0, Math.min(popup.offsetWidth, (toRight ? innerWidth - side.right : side.left) - 14))}px`;
     const place = () => {
-      if (!popup) return;
       const width = popup.offsetWidth, height = popup.offsetHeight;
       const left = side ? (toRight ? side.right + 6 : side.left - width - 6) : rect.left;
       const top = side ? rect.top : rect.bottom + 6 + height <= innerHeight - 8 ? rect.bottom + 6 : rect.top - height - 6;
@@ -99,7 +116,10 @@ export function installHoverPreviews(ws: Workspace) {
     const size = new ResizeObserver(place);
     size.observe(popup);
     place();
-    dispose = () => { size.disconnect(); widget.destroy(dom); context.destroy(); };
+    const layer: Layer = { key, popup, origin, source, dispose: () => {
+      popup.remove(); size.disconnect(); widget.destroy(dom); context.destroy();
+    } };
+    layers.push(layer);
   }
 
   const hoverModifier = (event: { ctrlKey: boolean; metaKey: boolean }) =>
@@ -115,10 +135,13 @@ export function installHoverPreviews(ws: Workspace) {
 
   function inspect(x: number, y: number, modified: boolean, el: HTMLElement | null) {
     if (!el || typeof el.closest !== "function") return leave();
-    if (popup?.contains(el)) return cancel();
-    const view = EditorView.findFromDOM(el);
+    // Inside layer i, its links can open layer i + 1. A preview has no editor of its own.
+    const inside = layerOf(el);
+    const parent = layers[inside] as Layer | undefined;
+    const depth = inside + 1;
+    const view = parent ? null : EditorView.findFromDOM(el);
     const allowed = modified || !!view?.state.facet(readingMode);
-    if (!allowed && !popup) return leave();
+    if (!allowed && layers.length <= depth) return leave(depth);
     const sidebar = el.closest<HTMLElement>("[data-preview-path]");
     const link = el.closest<HTMLElement>("[data-href]");
     let target = sidebar?.dataset.previewPath ?? link?.dataset.href;
@@ -138,43 +161,54 @@ export function installHoverPreviews(ws: Workspace) {
       const href = embed?.dataset.embedHref;
       if (embed && href) { target = href; rect = embed.getBoundingClientRect(); }
     }
-    if (!target || !rect || !(isNotePath(target) || target.startsWith("#"))) return leave();
-    const source = view ?? ws.view;
+    if (!target || !rect || !(isNotePath(target) || target.startsWith("#"))) return leave(depth);
+    // A nested link resolves from the note its preview shows and opens through the root editor.
+    const source = parent?.source ?? view ?? ws.view;
     // The pane editor is not the card. File cards use the note; text cards use the canvas file.
     const editorFrom = ws.editors.pathOf(source);
     const cardFrom = el.closest<HTMLElement>(".canvas-node")?.dataset.path || null;
-    const from = sidebar ? null : editorFrom || cardFrom;
-    const next = `${from}\n${target}\n${rect.x},${rect.y}`;
-    if (key === next) {
-      clearTimeout(leaving);
-      if (popup || pending) return;
-    } else {
-      if (!allowed) return leave();
-      close();
-    }
-    key = next;
+    const from = parent ? parent.origin : sidebar ? null : editorFrom || cardFrom;
+    const next = `${depth}\n${from}\n${target}\n${rect.x},${rect.y}`;
+    // On the link that opened layer `depth`: keep it, and let anything deeper close.
+    if (layers[depth]?.key === next) return leave(depth + 1);
+    if (pendingKey === next) return;
+    if (!allowed) return leave(depth);
+    // Another link at this depth replaces that depth's preview, as a new link always has.
+    clearTimeout(leaving);
+    drop(depth);
+    unpend();
+    pendingKey = next;
     if (!unlisten) {
       const controller = new AbortController();
       const { signal } = controller;
       const off = ws.on((change) => { if (change === "show" || change === "mode" || change === "files") close(); });
       // Dismissal listeners exist only during a hover, never during ordinary typing.
       unlisten = () => { controller.abort(); off(); };
+      // Outside the chain this closes it all. Inside layer i it closes only the
+      // previews stacked above i, whose links it may have just moved or covered.
+      const dismiss = (event: Event) => {
+        const at = layerOf(event.target as Node);
+        if (at < 0) return close();
+        drop(at + 1);
+        unpend();
+      };
       document.addEventListener("keydown", (event) => {
         if (!["Control", "Meta", "Shift", "Alt"].includes(event.key)) close();
       }, { capture: true, signal });
       document.addEventListener("input", close, { capture: true, signal });
-      document.addEventListener("scroll", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
-      document.addEventListener("mousedown", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
+      document.addEventListener("scroll", dismiss, { capture: true, signal });
+      document.addEventListener("mousedown", dismiss, { capture: true, signal });
       // A canvas click preventDefault's pointerdown, which can swallow the mousedown that used to dismiss.
-      document.addEventListener("pointerdown", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
+      document.addEventListener("pointerdown", dismiss, { capture: true, signal });
       // Ctrl+wheel zooms the canvas without scrolling, so a wheel has to dismiss on its own.
-      document.addEventListener("wheel", (event) => { if (!popup?.contains(event.target as Node)) close(); }, { capture: true, signal });
+      document.addEventListener("wheel", dismiss, { capture: true, signal });
       window.addEventListener("blur", close, { signal });
       window.addEventListener("resize", close, { signal });
     }
     pending = window.setTimeout(() => {
       pending = 0;
-      show(target!, from, source, rect!, sidebar?.closest(".workspace-split.mod-sidedock")?.getBoundingClientRect());
+      pendingKey = "";
+      show(next, target!, from, source, rect!, sidebar?.closest(".workspace-split.mod-sidedock")?.getBoundingClientRect());
     }, 350);
   }
 
@@ -185,7 +219,7 @@ export function installHoverPreviews(ws: Workspace) {
     pointerSeen = true;
     buttons = event.buttons;
     // A drag or pan owns the pointer. Don't start a preview under it.
-    if (event.buttons && !popup && !pending) return;
+    if (event.buttons && !layers.length && !pending) return;
     const raw = event.target as HTMLElement | null;
     inspect(event.clientX, event.clientY, hoverModifier(event), raw && typeof raw.closest === "function" ? raw : null);
   }, { capture: true, passive: true });
@@ -204,7 +238,7 @@ export function installHoverPreviews(ws: Workspace) {
   // can be the node detaching; check again next frame before leaving.
   const stillPreviewing = (el: Element | null) => {
     if (!el || typeof (el as HTMLElement).closest !== "function") return false;
-    if (popup?.contains(el)) return true;
+    if (layerOf(el) >= 0) return true;
     const node = el as HTMLElement;
     if (node.closest("[data-href], [data-preview-path], [data-embed-href]")) return true;
     const view = EditorView.findFromDOM(node);
