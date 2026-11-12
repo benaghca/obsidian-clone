@@ -146,6 +146,8 @@ export class Vault {
   /** Bumped when one of a batch's callbacks wins, so the other one does not run it again. */
   private ticket = 0;
   private frame: number | null = null;
+  /** The batch being applied. Events that arrive meanwhile wait, then run as one batch after it. */
+  private running: symbol | null = null;
   private timer: ReturnType<typeof setTimeout> | undefined;
   private listenEpoch = 0;
   private stopChanges: (() => void) | undefined;
@@ -378,7 +380,8 @@ export class Vault {
    * the fallback timer, share one file-list read (when any event is not a
    * modify), one touch per path that is still here, one reload per such path,
    * and one link-index read. A remove drops that path and everything inside
-   * it; a later create, modify, or rename puts a path back.
+   * it; a later create, modify, or rename puts a path back. Events that arrive
+   * while a batch is still being applied wait for it, then share the next batch.
    */
   private onChanged(kind: string, paths: string[]) {
     // A sealed page, or one whose vault is no longer the backend, must not
@@ -386,7 +389,7 @@ export class Vault {
     if (this.suspended || !pageOwnsDisk()) return;
     const start = this.pending === null;
     (this.pending ??= []).push({ kind, paths });
-    if (start) this.armFlush();
+    if (start && !this.running) this.armFlush();
   }
 
   /** One shot for this batch: the frame if it paints, otherwise the timer. */
@@ -417,6 +420,7 @@ export class Vault {
     this.ticket += 1;
     this.suspended = true;
     this.pending = null;
+    this.running = null;
     this.disarm();
     this.filesRequest += 1;
     this.linksRequest += 1;
@@ -436,15 +440,26 @@ export class Vault {
     const batch = this.pending;
     this.pending = null;
     if (!batch?.length) return;
-    const { refresh, touch, reload } = reduceBatch(batch);
-    if (refresh) await this.refreshFiles();
-    if (wave !== this.wave || !pageOwnsDisk()) return;
-    for (const path of touch) this.touch(path);
-    for (const path of reload) {
+    const mine = Symbol();
+    this.running = mine;
+    try {
+      const { refresh, touch, reload } = reduceBatch(batch);
+      if (refresh) await this.refreshFiles();
       if (wave !== this.wave || !pageOwnsDisk()) return;
-      await this.reload(path);
+      for (const path of touch) this.touch(path);
+      for (const path of reload) {
+        if (wave !== this.wave || !pageOwnsDisk()) return;
+        await this.reload(path);
+      }
+      if (wave !== this.wave || !pageOwnsDisk()) return;
+      // A batch that waited reads the link index for both.
+      if (!this.pending) void this.refreshLinks();
+    } finally {
+      // An abandon already cleared `running` and dropped what was waiting.
+      if (this.running === mine) {
+        this.running = null;
+        if (this.pending) this.armFlush();
+      }
     }
-    if (wave !== this.wave || !pageOwnsDisk()) return;
-    void this.refreshLinks();
   }
 }
