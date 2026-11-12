@@ -4,37 +4,123 @@ use super::parse::Note;
 use super::props::PropertyValue;
 use super::query::{parse_query, Field, Query};
 use super::tags::is_js_space;
-use super::{basename, is_note_path, nameless_md, Index};
+use super::{basename, is_note_path, nameless_md, Index, Node};
 use crate::model::{SearchLine, SearchNote};
 use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::sync::Arc;
+
+#[cfg(test)]
+use std::cell::RefCell;
+
+#[cfg(test)]
+thread_local! {
+    static SEARCH_NOTE_HOOK: RefCell<Option<Box<dyn FnMut(usize)>>> = const { RefCell::new(None) };
+}
+
+/// Test hook called once per note a scan is about to read, after the cancel check.
+#[cfg(test)]
+pub(crate) fn set_search_note_hook(hook: Option<Box<dyn FnMut(usize)>>) {
+    SEARCH_NOTE_HOOK.with(|cell| *cell.borrow_mut() = hook);
+}
+
+fn on_search_note(index: usize) {
+    #[cfg(test)]
+    SEARCH_NOTE_HOOK.with(|cell| {
+        if let Some(hook) = cell.borrow_mut().as_mut() {
+            hook(index);
+        }
+    });
+    #[cfg(not(test))]
+    let _ = index;
+}
+
+/// Notes shared so a scan can run after the vault lock is dropped.
+pub(crate) struct NoteSnap {
+    notes: Arc<Vec<(Arc<str>, Arc<Node>)>>,
+}
 
 impl Index {
-    pub fn search_notes(&self, query: &str, match_case: bool) -> Vec<SearchNote> {
-        let Some(q) = parse_query(query, match_case) else {
-            return Vec::new();
+    pub(crate) fn search_snap(&self) -> NoteSnap {
+        NoteSnap {
+            notes: self.files.cached_search_notes(),
+        }
+    }
+}
+
+impl NoteSnap {
+    #[cfg(test)]
+    pub(crate) fn same_list(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.notes, &other.notes)
+    }
+
+    pub(crate) fn search_notes(
+        &self,
+        query: &str,
+        match_case: bool,
+        live: impl FnMut() -> bool,
+    ) -> Result<Vec<SearchNote>, ()> {
+        search_note_rows(
+            self.notes
+                .iter()
+                .map(|(path, node)| (path.as_ref(), node.as_ref())),
+            query,
+            match_case,
+            live,
+        )
+    }
+}
+
+fn search_note_rows<'a>(
+    notes: impl Iterator<Item = (&'a str, &'a Node)>,
+    query: &str,
+    match_case: bool,
+    mut live: impl FnMut() -> bool,
+) -> Result<Vec<SearchNote>, ()> {
+    let Some(q) = parse_query(query, match_case) else {
+        return Ok(Vec::new());
+    };
+    let plan = Plan::new(&q, match_case);
+    let mut out = Vec::new();
+    let mut seen = 0usize;
+    for (path, node) in notes {
+        if !live() {
+            return Err(());
+        }
+        on_search_note(seen);
+        seen += 1;
+        let mut eval = Evaluation::new(&plan, path, &node.note);
+        if !eval.passes(&q) {
+            continue;
+        }
+        let count = if plan.highlights.is_empty() {
+            0
+        } else {
+            let shown = eval.shown_lines();
+            eval.match_count(&shown)
         };
-        let plan = Plan::new(&q, match_case);
-        self.files
-            .iter()
-            .filter(|(path, node)| !node.is_dir && is_note_path(path))
-            .filter_map(|(path, node)| {
-                let mut eval = Evaluation::new(&plan, path, &node.note);
-                if !eval.passes(&q) {
-                    return None;
-                }
-                let count = if plan.highlights.is_empty() {
-                    0
-                } else {
-                    let shown = eval.shown_lines();
-                    eval.match_count(&shown)
-                };
-                Some(SearchNote {
-                    path: path.clone(),
-                    count,
-                })
-            })
-            .collect()
+        out.push(SearchNote {
+            path: path.to_string(),
+            count,
+        });
+    }
+    Ok(out)
+}
+
+impl Index {
+    /// Full walk. Tests compare a snapshot with this. The command uses [`NoteSnap`].
+    #[cfg(test)]
+    pub fn search_notes(&self, query: &str, match_case: bool) -> Vec<SearchNote> {
+        search_note_rows(
+            self.files
+                .iter()
+                .filter(|(path, node)| !node.is_dir && is_note_path(path))
+                .map(|(path, node)| (path.as_str(), node)),
+            query,
+            match_case,
+            || true,
+        )
+        .expect("an uncancellable search stopped")
     }
 
     pub fn search_lines(

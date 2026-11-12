@@ -50,7 +50,7 @@ await withBrowser(async ({ run, click, check }) => {
     const write = api.writeNote.bind(api);
     const find = api.searchNotes.bind(api);
     api.writeNote = (path, content) => { order.push(['write', path, content.includes('PENDTOKEN')]); return write(path, content); };
-    api.searchNotes = (query, matchCase) => { order.push(['search', query]); return find(query, matchCase); };
+    api.searchNotes = (query, matchCase, request) => { order.push(['search', query]); return find(query, matchCase, request); };
     window.__edgeOrder = order;
     await ws.open('Edge/Pending.md');
     ws.view.dispatch({ changes: { from: ws.view.state.doc.length, insert: '\nPENDTOKEN\n' }, userEvent: 'input' });

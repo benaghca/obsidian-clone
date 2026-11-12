@@ -587,3 +587,75 @@ fn partial_path_suffix_matches_today_and_does_not_scan() {
     );
     assert_eq!(take_file_visits(), 0, "partial path after a move walked the file list");
 }
+
+#[test]
+fn a_superseded_scan_of_20k_notes_stops_at_the_next_note() {
+    let owned: Vec<(String, String)> = (0..20_000).map(|i| {
+        let body = if i == 19_999 { "zebra-marker".to_string() } else { format!("alpha {i}") };
+        (format!("n{i}.md"), body)
+    }).collect();
+    let refs: Vec<(&str, &str)> = owned.iter().map(|(path, body)| (path.as_str(), body.as_str())).collect();
+    let idx = Index::from_notes(&refs);
+    let cold = Instant::now();
+    let snap = idx.search_snap();
+    let cold_ms = cold.elapsed().as_secs_f64() * 1000.0;
+    let warm = Instant::now();
+    let again = idx.search_snap();
+    let warm_ms = warm.elapsed().as_secs_f64() * 1000.0;
+    let full_at = Instant::now();
+    let full = snap.search_notes("alpha", false, || true).unwrap();
+    let full_ms = full_at.elapsed().as_secs_f64() * 1000.0;
+    assert_eq!(full, idx.search_notes("alpha", false));
+    assert_eq!(full.len(), 19_999);
+    let zebra = snap.search_notes("zebra-marker", false, || true).unwrap();
+    assert_eq!(zebra, idx.search_notes("zebra-marker", false));
+    assert_eq!(zebra, vec![crate::model::SearchNote { path: "n19999.md".into(), count: 1 }]);
+    let mut checks = 0u32;
+    let stop_at = Instant::now();
+    let stopped = snap.search_notes("alpha", false, || { checks += 1; checks == 1 });
+    let stop_ms = stop_at.elapsed().as_secs_f64() * 1000.0;
+    assert!(stopped.is_err(), "a superseded scan returned a result");
+    assert_eq!(checks, 2, "the scan did not stop at the next note");
+    eprintln!("search_cancel 20k cold_snap_ms={cold_ms:.2} warm_snap_ms={warm_ms:.2} full_ms={full_ms:.1} stop_ms={stop_ms:.2}");
+    assert!(stop_ms * 4.0 < full_ms, "cancelled scan {stop_ms:.1} ms was not much faster than the full scan {full_ms:.1} ms");
+    assert!(snap.same_list(&again), "a second search rebuilt the note list");
+}
+
+#[test]
+fn a_rename_or_delete_keeps_the_snapshot_a_scan_already_holds() {
+    let mut idx = Index::from_notes(&[("a.md", "alpha one"), ("b.md", "alpha two")]);
+    let held = idx.search_snap();
+    idx.relocate("a.md", "moved.md");
+    let renamed = idx.search_snap();
+    assert!(!held.same_list(&renamed), "a rename reused the snapshot a scan was walking");
+    assert_eq!(
+        held.search_notes("alpha", false, || true).unwrap(),
+        vec![
+            crate::model::SearchNote { path: "a.md".into(), count: 1 },
+            crate::model::SearchNote { path: "b.md".into(), count: 1 },
+        ]
+    );
+    assert_eq!(
+        renamed.search_notes("alpha", false, || true).unwrap(),
+        vec![
+            crate::model::SearchNote { path: "b.md".into(), count: 1 },
+            crate::model::SearchNote { path: "moved.md".into(), count: 1 },
+        ]
+    );
+    assert_eq!(renamed.search_notes("alpha", false, || true).unwrap(), idx.search_notes("alpha", false));
+    idx.remove_tree("b.md");
+    let deleted = idx.search_snap();
+    assert!(!renamed.same_list(&deleted), "a delete reused the snapshot a scan was walking");
+    assert_eq!(
+        held.search_notes("alpha", false, || true).unwrap(),
+        vec![
+            crate::model::SearchNote { path: "a.md".into(), count: 1 },
+            crate::model::SearchNote { path: "b.md".into(), count: 1 },
+        ]
+    );
+    assert_eq!(
+        deleted.search_notes("alpha", false, || true).unwrap(),
+        vec![crate::model::SearchNote { path: "moved.md".into(), count: 1 }]
+    );
+    assert_eq!(deleted.search_notes("alpha", false, || true).unwrap(), idx.search_notes("alpha", false));
+}

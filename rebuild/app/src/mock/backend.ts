@@ -495,7 +495,7 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       keepEmptyParents(path);
     },
     search: ({ query, limit }) => search(query, limit),
-    search_notes: ({ query, matchCase }) => searchNotes(query, matchCase),
+    search_notes: ({ query, matchCase }) => searchNotes(query, matchCase), // `request` orders overlapping scans; this mock runs one call at a time.
     search_lines: ({ query, matchCase, paths, limit }) => searchLines(query, matchCase, paths, limit),
     search_match: ({ queries }) => {
       const source = searchFiles();

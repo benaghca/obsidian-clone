@@ -1,4 +1,8 @@
-// Coalesce search-view requests so typing can never queue many vault scans.
+// Coalesce search-view requests. A newer query starts without waiting for the
+// scan already running, so that scan can stop. Keystrokes that land before the
+// next scan starts still become one query. The id sent with a query comes from
+// a counter this window keeps across reader recreation and page reloads, so a
+// late call from the previous document cannot outrank the new one.
 import { api, type SearchNote, type FileEntry } from "../api";
 import { compareNames, type SortOrder } from "../paths";
 import type { Workspace } from "../workspace";
@@ -66,13 +70,42 @@ export function searchResults(files: readonly FileEntry[], notes: readonly Searc
     });
 }
 
+const SEARCH_REQUEST_KEY = "grove.searchRequest";
+
+function storedSearchRequest(): number {
+  try {
+    const n = Number(sessionStorage.getItem(SEARCH_REQUEST_KEY));
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let issuedSearchRequest = storedSearchRequest();
+
+function issueSearchRequest(): number {
+  issuedSearchRequest += 1;
+  try {
+    sessionStorage.setItem(SEARCH_REQUEST_KEY, String(issuedSearchRequest));
+  } catch {
+    // This document still has the in-memory counter. A reload needs the stored one.
+  }
+  return issuedSearchRequest;
+}
+
+/** A reloaded document starts from the counter the previous document stored. */
+export function reloadSearchRequests(): void {
+  issuedSearchRequest = storedSearchRequest();
+}
+
 export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: SearchRequest, notes: SearchNote[]) => void, failed: (request: SearchRequest, error: unknown) => void) {
   let latest: SearchRequest | null = null;
-  let running = false;
   let version = 0;
-  async function drain() {
-    if (running) return;
-    running = true;
+  let pumping = false;
+  let wake: (() => void) | null = null;
+  async function pump() {
+    if (pumping) return;
+    pumping = true;
     try {
       while (latest) {
         const request: SearchRequest = latest;
@@ -81,16 +114,46 @@ export function searchReader(ws: Pick<Workspace, "editors">, receive: (request: 
         try {
           await ws.editors.flush();
           if (mine !== version) continue; // Input changed during the flush: send only the newest.
-          const notes = await api.searchNotes(request.query, request.matchCase);
-          if (mine === version) receive(request, notes);
+          const pending = api.searchNotes(request.query, request.matchCase, mine);
+          const finished = pending.then(
+            (notes) => { if (mine === version) receive(request, notes); },
+            (error: unknown) => { if (mine === version) failed(request, error); },
+          );
+          await new Promise<void>((resolve) => {
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              if (wake === finish) wake = null;
+              resolve();
+            };
+            wake = finish;
+            void finished.finally(finish);
+          });
         } catch (error) {
           if (mine === version) failed(request, error);
         }
       }
-    } finally { running = false; }
+    } finally {
+      pumping = false;
+      if (latest) void pump();
+    }
   }
   return {
-    read(request: SearchRequest) { version++; latest = request; void drain(); },
-    cancel() { version++; latest = null; },
+    read(request: SearchRequest) {
+      version = issueSearchRequest();
+      latest = request;
+      const poke = wake;
+      wake = null;
+      poke?.();
+      void pump();
+    },
+    cancel() {
+      version = issueSearchRequest();
+      latest = null;
+      const poke = wake;
+      wake = null;
+      poke?.();
+    },
   };
 }

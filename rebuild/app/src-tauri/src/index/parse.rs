@@ -2,11 +2,13 @@
 //! `![[embeds]]` and `[text](path)` markdown links, outside fenced and inline code) and its
 //! frontmatter aliases.
 
+#[derive(Clone)]
 pub(super) struct Line {
     pub(super) text: String,
     pub(super) lower: String,
 }
 
+#[derive(Clone)]
 pub(super) struct RawLink {
     pub(super) line: u32,
     pub(super) text: String,
@@ -16,7 +18,7 @@ pub(super) struct RawLink {
 }
 
 /// What the index keeps of a note (nothing, for other files and notes too large to index).
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub(super) struct Note {
     pub(super) links: Vec<RawLink>,
     /// Frontmatter aliases, lower case.
