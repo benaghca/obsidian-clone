@@ -390,7 +390,14 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
         let mounted: { el: HTMLElement; reload(): void; dispose(): void } | undefined;
         let request = 0, pending = false, hidden = false;
         const parentWatch = new MutationObserver(() => { if (!content.isConnected) hidden = true; });
+        // Blur is the cell's commit. Removal itself does not blur a focused field.
+        const commitEdit = () => {
+          const active = document.activeElement;
+          if (!(active instanceof HTMLElement) || !content.contains(active)) return;
+          if (active.matches("input, textarea, select, [contenteditable]")) active.blur();
+        };
         const drop = () => {
+          commitEdit();
           request++;
           pending = false;
           hidden = false;
@@ -432,7 +439,7 @@ export function createCanvasView(ws: Workspace, path: string, group: Group, tab:
             bodies.ready(node);
           });
         }
-        bodies.add(node, card, { element: content, ensure, release: drop, ready: () => !!mounted || !!content.textContent });
+        bodies.add(node, card, { element: content, ensure, release: drop, ready: () => !!mounted || !!content.textContent, beforeHide: commitEdit });
         cleanups.push(drop);
         continue;
       }

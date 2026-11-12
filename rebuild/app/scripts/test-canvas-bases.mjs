@@ -10,6 +10,9 @@ views:
   - type: table
     name: All
     order:
+      - note
+      - tags
+      - labels
       - file.name
       - status
     sort:
@@ -43,17 +46,18 @@ await withBrowser(async ({ run, send, click, point, move, press, chord, check, r
   const settle = () => wait(() => run(() => window.__canvasProbe?.().pending === 0), 'canvas work drains');
   const data = async () => JSON.parse(await read());
   const rows = (id) => run((id) => [...document.querySelectorAll(`[data-node-id="${id}"] .bases-table tbody tr[data-path]`)].map((tr) => tr.dataset.path), id);
-  const jump = async (cx, cy) => {
-    await run((cx, cy) => {
+  const jump = async (cx, cy, scale = 1) => {
+    await wait(() => run(() => !!window.__groveViewports.canvasViewports.get(ws.active)), 'canvas viewport is ready');
+    await run((cx, cy, scale) => {
       const { canvasViewports } = window.__groveViewports;
       const state = canvasViewports.get(ws.active);
       state.cx = cx;
       state.cy = cy;
-      state.scale = 1;
+      state.scale = scale;
       const el = document.querySelector('.canvas-view');
       const r = el.getBoundingClientRect();
       el.dispatchEvent(new WheelEvent('wheel', { ctrlKey: true, cancelable: true, deltaY: 0, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2 }));
-    }, cx, cy);
+    }, cx, cy, scale);
     await sleep(240);
     await settle();
   };
@@ -80,8 +84,8 @@ await withBrowser(async ({ run, send, click, point, move, press, chord, check, r
     const { api } = await import('/src/api.ts');
     const { canvasViewports } = await import('/src/canvas/navigation.ts');
     window.__groveViewports = { canvasViewports };
-    await api.createNote('BC/One.md', '---\nstatus: open\n---\n# One\n');
-    await api.createNote('BC/Two.md', '---\nstatus: done\n---\n# Two\n');
+    await api.createNote('BC/One.md', '---\nstatus: open\nnote: hello\ntags:\n  - alpha\nlabels:\n  - one\n---\n# One\n');
+    await api.createNote('BC/Two.md', '---\nstatus: done\nnote: there\ntags:\n  - beta\nlabels:\n  - two\n---\n# Two\n');
     await api.createNote('Board.base', yaml);
     await api.createNote('Other.txt', 'plain\n');
     await ws.vault.refreshFiles();
@@ -126,6 +130,83 @@ await withBrowser(async ({ run, send, click, point, move, press, chord, check, r
   await jump(480, 340);
   await wait(() => run(() => !!document.querySelector('[data-node-id="near"] .bases-view') && !document.querySelector('[data-node-id="far"] .bases-view')), 'panning back detaches the far view and restores the near one');
   check(await read() === original, 'rendering and panning leave the canvas bytes unchanged');
+
+  const source = (path) => run(async (path) => {
+    const { api } = await import('/src/api.ts');
+    return api.readNote(path);
+  }, path);
+  // A base scroller is contain:strict inside the transformed canvas, so
+  // getBoundingClientRect of a cell does not match what the pointer hits.
+  await send('DOM.enable');
+  const fieldAt = async (selector) => {
+    await run((selector) => document.querySelector(selector)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }), selector);
+    await sleep(30);
+    const found = await send('Runtime.evaluate', { expression: `document.querySelector(${JSON.stringify(selector)})` });
+    const model = await send('DOM.getBoxModel', { objectId: found.result.objectId });
+    const q = model.model.content;
+    const left = Math.min(q[0], q[2], q[4], q[6]);
+    const right = Math.max(q[0], q[2], q[4], q[6]);
+    const top = Math.min(q[1], q[3], q[5], q[7]);
+    const bottom = Math.max(q[1], q[3], q[5], q[7]);
+    return { x: left + Math.min(8, (right - left) / 2), y: (top + bottom) / 2 };
+  };
+  const cell = (path, key, part) => `[data-node-id="near"] tr[data-path="${path}"] td[data-property="${key}"] [data-part="${part}"]`;
+  const baseBytes = await source('Board.base');
+  const canvasBytes = await read();
+  const otherBefore = await source('Other.txt');
+  await click(await fieldAt(cell('BC/One.md', 'note', 'value')));
+  await send('Input.insertText', { text: 'bctext' });
+  check(!(await source('BC/One.md')).includes('bctext'), 'typing a text cell does not write before commit');
+  await press('Enter');
+  await wait(async () => (await source('BC/One.md')).includes('bctext'), 'the text cell commits into the row note');
+  check(!(await source('BC/Two.md')).includes('bctext'), 'the other row note is unchanged');
+  check(await source('Board.base') === baseBytes, 'a text cell edit does not rewrite the base');
+  check(await read() === canvasBytes, 'a text cell edit does not rewrite the canvas');
+
+  await click(await fieldAt(cell('BC/One.md', 'tags', 'add')));
+  await send('Input.insertText', { text: 'newtag' });
+  await press('Enter');
+  await wait(async () => (await source('BC/One.md')).includes('  - newtag'), 'tag entry commits into the row note');
+  check(!(await source('BC/Two.md')).includes('newtag'), 'the tag stays on the edited row');
+  await click(await fieldAt(cell('BC/One.md', 'labels', 'add')));
+  await send('Input.insertText', { text: 'bclist' });
+  await press('Enter');
+  await wait(async () => (await source('BC/One.md')).includes('  - bclist'), 'list entry commits into the row note');
+  check(!(await source('BC/Two.md')).includes('bclist'), 'the list item stays on the edited row');
+  check(await source('Board.base') === baseBytes && await read() === canvasBytes, 'tag and list entry do not rewrite the base or the canvas');
+
+  await click(await fieldAt(cell('BC/Two.md', 'note', 'value')));
+  await send('Input.insertText', { text: 'bczoom' });
+  check(!(await source('BC/Two.md')).includes('bczoom'), 'the zoom edit is still uncommitted');
+  await jump(480, 340, 0.2);
+  await wait(() => run(() => !document.querySelector('[data-node-id="near"] .bases-view')), 'title mode detaches the base view');
+  await wait(async () => (await source('BC/Two.md')).includes('bczoom'), 'title mode commits the focused cell into the row note');
+  check(!(await source('BC/One.md')).includes('bczoom') && await source('Board.base') === baseBytes && await read() === canvasBytes && await source('Other.txt') === otherBefore, 'title mode writes no other file');
+  await jump(480, 340);
+  await wait(() => run(() => !!document.querySelector('[data-node-id="near"] .bases-view')), 'leaving title mode restores the base view');
+
+  await click(await fieldAt(cell('BC/Two.md', 'tags', 'add')));
+  await send('Input.insertText', { text: 'bccull' });
+  check(!(await source('BC/Two.md')).includes('bccull'), 'the cull edit is still uncommitted');
+  await jump(8230, 160);
+  await wait(() => run(() => !document.querySelector('[data-node-id="near"] .bases-view') && !!document.querySelector('[data-node-id="far"] .bases-view')), 'panning away culls the edited card');
+  await wait(async () => (await source('BC/Two.md')).includes('bccull'), 'culling commits the focused cell into the row note');
+  check((await source('BC/Two.md')).includes('bczoom') && !(await source('BC/One.md')).includes('bccull') && await source('Board.base') === baseBytes && await read() === canvasBytes && await source('Other.txt') === otherBefore, 'culling writes no other file');
+  await jump(480, 340);
+  await wait(() => run(() => !!document.querySelector('[data-node-id="near"] .bases-view')), 'panning back restores the edited card');
+
+  await click(await fieldAt(cell('BC/One.md', 'note', 'value')));
+  await send('Input.insertText', { text: 'bcbye' });
+  check(!(await source('BC/One.md')).includes('bcbye'), 'the disposal edit is still uncommitted');
+  const welcomeBefore = await source('Welcome.md');
+  await run(async () => { await ws.open('Welcome.md'); });
+  await wait(async () => (await source('BC/One.md')).includes('bcbye'), 'closing the canvas commits the focused cell');
+  check((await source('BC/Two.md')).includes('bczoom') && (await source('BC/Two.md')).includes('bccull'), 'disposal keeps the other row');
+  check(await source('Board.base') === baseBytes && await source('Board.canvas') === canvasBytes && await source('Other.txt') === otherBefore && await source('Welcome.md') === welcomeBefore, 'disposal writes no other file');
+  await run(async () => { await ws.open('Board.canvas'); });
+  await wait(() => run(() => window.__canvasProbe?.().built), 'canvas restored after disposal');
+  await jump(480, 340);
+  await wait(() => run(() => !!document.querySelector('[data-node-id="near"] .bases-view')), 'the base view returns after disposal');
 
   await click('[data-node-id="near"] .bases-toolbar [aria-label="Sort"]');
   await wait(() => run(() => !!document.querySelector('.bases-sort-menu')), 'sort menu opens from the card');

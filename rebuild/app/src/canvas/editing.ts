@@ -121,7 +121,8 @@ export function canvasEditing(el: HTMLElement, world: HTMLElement, nodes: Canvas
     suppress = false; pressedLabel = undefined;
     if (e.defaultPrevented || e.button !== 0 || el.classList.contains("is-grabbable")) return;
     const target = e.target as Element;
-    if (target.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu, .is-editing, a, [data-href], input, button")) return;
+    // A Base cell owns the click that focuses its text, tag, or list field. The label, card background, and resize handles still drag.
+    if (target.closest(".canvas-controls, .canvas-card-menu, .canvas-selection-menu, .is-editing, a, [data-href], input, button, .canvas-node.is-base td.property, .canvas-node.is-base [contenteditable]")) return;
     // Reconnect handles may overlap a short label; cards still cover labels.
     const beneath = target.closest(".canvas-edge-end") ? document.elementsFromPoint(e.clientX, e.clientY).find(el => el.matches(".canvas-edge-label, .canvas-node")) : target;
     const label = beneath?.closest<HTMLElement>(".canvas-edge-label");
