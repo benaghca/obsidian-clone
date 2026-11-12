@@ -13,7 +13,9 @@ pub fn remember(dir: &Path, vault: &Path) -> Result<(), String> {
     }))
     .map_err(|e| e.to_string())?;
     body.push(b'\n');
-    fsutil::atomic_write(&dir.join(FILE), &body).map_err(|e| e.to_string())
+    fsutil::atomic_write(&dir.join(FILE), &body)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// The remembered folder, when it is still a directory.

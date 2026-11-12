@@ -2,8 +2,9 @@
 //!
 //! Notify events sit for ~100ms of quiet (and at most ~400ms) so a burst becomes a few
 //! `vault-changed` events. Temp files and `.obsidian` / `.git` / `.trash` / `.grove` / `.cinder` are dropped.
-//! A path written by `write_note` in the last 500ms is dropped too. Rename events carry
-//! `[from, to]`; a move into `.trash` is reported as `remove`.
+//! An event is dropped only when the file is still Grove's own last write (same mtime,
+//! size, and file identity). Any other change is reported. Rename events carry `[from, to]`;
+//! a move into `.trash` is reported as `remove`.
 
 use crate::model::{push_change, ChangeKind, VaultChanged};
 use crate::{lock, AppState, Inner};
@@ -120,12 +121,10 @@ pub(crate) fn flush_changes(
         let Some(vault) = inner.vault.as_mut() else {
             return Vec::new();
         };
-        let now = Instant::now();
         if !events.iter().any(|event| event.need_rescan()) {
-            let raw = coalesce(&vault.root, events, |path| vault.is_own_write(path, now));
+            let raw = coalesce(&vault.root, events, |path| vault.is_own_write(path));
             let changes = vault.normalize(raw);
             vault.apply(&changes);
-            vault.gc_own_writes(now);
             return changes;
         }
         (vault.root.clone(), vault.begin_rescan())
@@ -137,7 +136,6 @@ pub(crate) fn flush_changes(
         return Vec::new();
     };
     let changes = vault.finish_rescan(&token, fresh);
-    vault.gc_own_writes(Instant::now());
     changes
 }
 
@@ -151,7 +149,7 @@ struct RenamePart {
 
 /// Group a burst of notify events into contract events.
 ///
-/// `suppress` drops creates, modifies, and removes of a path (our own `write_note`).
+/// `suppress` drops creates, modifies, and removes of a path that is still our own write.
 /// A two-sided rename is kept: that is a real move, not the temp-file rename a save uses.
 pub fn coalesce(
     root: &Path,
@@ -353,9 +351,9 @@ mod tests {
             vault.write_file_bytes("image.png", b"png").unwrap();
             vault.rename_path("moved.md", "folder/moved.md").unwrap();
             vault.delete_path("removed.md", true).unwrap();
-            // A long scan plus later saves may garbage-collect all echo suppression.
-            vault.gc_own_writes(Instant::now() + crate::vault::OWN_WRITE);
-            assert!(!vault.is_own_write("saved.md", Instant::now()));
+            // Suppression follows the bytes we wrote, not a timer, so it is still
+            // ours after a long scan. The journal does not depend on it.
+            assert!(vault.is_own_write("saved.md"));
             // An unrelated external change still generates an event after the swap.
             fs::write(root.join("external.md"), "external").unwrap();
             let mut fresh = fresh;
@@ -538,6 +536,517 @@ mod tests {
             out.iter()
                 .any(|change| change.paths.iter().any(|p| p == "n.md")),
             "expected n.md in {out:?} from {events:?}"
+        );
+    }
+
+    fn modify_of(root: &Path, rel: &str) -> Event {
+        kind(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            vec![root.join(rel)],
+        )
+    }
+
+    /// An editor, git, or sync tool that lands inside the old 500 ms window is
+    /// a normal external change. The timer used to drop it.
+    #[test]
+    fn outside_edit_just_after_a_save_is_reported() {
+        let dir = tmp_dir("stamp-outside");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-marker")
+                .unwrap();
+        }
+        fs::write(dir.path.join("Note.md"), "external-marker").unwrap();
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "Note.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["Note.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(!vault.is_own_write("Note.md"));
+        assert_eq!(vault.index.search("external-marker", 10).len(), 1);
+        assert!(vault.index.search("grove-marker", 10).is_empty());
+    }
+
+    /// The modify from our own save, and the temp-file rename that save uses,
+    /// must not become `vault-changed`.
+    #[test]
+    fn own_write_echo_produces_no_vault_changed() {
+        let dir = tmp_dir("stamp-echo");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-marker")
+                .unwrap();
+        }
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "Note.md")], Index::scan).is_empty());
+        let save = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![
+                dir.path.join(format!(".Note.md.9{TEMP_MARK}")),
+                dir.path.join("Note.md"),
+            ],
+        )
+        .set_tracker(3);
+        assert!(flush_changes(&inner, &[save], Index::scan).is_empty());
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.is_own_write("Note.md"));
+        assert_eq!(vault.index.search("grove-marker", 10).len(), 1);
+        assert_eq!(fs::read_to_string(dir.path.join("Note.md")).unwrap(), "grove-marker");
+    }
+
+    /// Same length and the original mtime, but a new inode: a replace in one
+    /// clock tick. That is not our file, so the modify is reported.
+    #[test]
+    fn same_size_new_inode_replace_is_reported() {
+        let dir = tmp_dir("stamp-inode");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard.vault.as_mut().unwrap().write_note("Note.md", "aaaa").unwrap();
+        }
+        let note = dir.path.join("Note.md");
+        let before = fs::metadata(&note).unwrap();
+        let mtime = before.modified().unwrap();
+        let before_ms = crate::fsutil::mtime_ms(&before);
+        #[cfg(unix)]
+        let before_ino = {
+            use std::os::unix::fs::MetadataExt;
+            before.ino()
+        };
+        let tmp = dir.path.join("swap.md");
+        fs::write(&tmp, "bbbb").unwrap();
+        fs::rename(&tmp, &note).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&note)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+        let after = fs::metadata(&note).unwrap();
+        assert_eq!(crate::fsutil::mtime_ms(&after), before_ms);
+        assert_eq!(after.len(), 4);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            assert_ne!(after.ino(), before_ino);
+        }
+        {
+            let guard = lock(&inner);
+            assert!(!guard.vault.as_ref().unwrap().is_own_write("Note.md"));
+        }
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "Note.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["Note.md"]));
+        let guard = lock(&inner);
+        assert_eq!(guard.vault.as_ref().unwrap().index.search("bbbb", 10).len(), 1);
+    }
+
+    /// Dropping our echo must not drop a different file's remove in the same batch.
+    #[test]
+    fn own_echo_does_not_hide_another_files_remove() {
+        let dir = tmp_dir("stamp-batch");
+        fs::write(dir.path.join("Note.md"), "old").unwrap();
+        fs::write(dir.path.join("Other.md"), "other").unwrap();
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-marker")
+                .unwrap();
+        }
+        fs::remove_file(dir.path.join("Other.md")).unwrap();
+        let remove = kind(EventKind::Remove(RemoveKind::File), vec![dir.path.join("Other.md")]);
+        let changes = flush_changes(
+            &inner,
+            &[modify_of(&dir.path, "Note.md"), remove],
+            Index::scan,
+        );
+        assert_eq!(changes, one(ChangeKind::Remove, &["Other.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.is_own_write("Note.md"));
+        assert!(vault.index.contains("Note.md"));
+        assert!(!vault.index.contains("Other.md"));
+        assert_eq!(vault.index.search("grove-marker", 10).len(), 1);
+    }
+
+    /// A real rename is still reported. The stamp moves with the file, so a
+    /// later modify of those same bytes is quiet.
+    #[test]
+    fn external_rename_is_reported_and_keeps_the_stamp() {
+        let dir = tmp_dir("stamp-rename");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard.vault.as_mut().unwrap().write_note("A.md", "grove-marker").unwrap();
+        }
+        fs::rename(dir.path.join("A.md"), dir.path.join("B.md")).unwrap();
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        let changes = flush_changes(&inner, &[rename], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Rename, &["A.md", "B.md"]));
+        {
+            let guard = lock(&inner);
+            let vault = guard.vault.as_ref().unwrap();
+            assert!(!vault.is_own_write("A.md"));
+            assert!(vault.is_own_write("B.md"));
+            assert!(!vault.index.contains("A.md"));
+            assert!(vault.index.contains("B.md"));
+        }
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan).is_empty());
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.is_own_write("B.md"));
+        assert_eq!(vault.index.search("grove-marker", 10).len(), 1);
+    }
+
+    /// App rename, then the source is written again, then the delayed rename
+    /// echo arrives. Both files keep the stamp of the bytes now on them, so
+    /// their own modifies stay quiet. An outside edit after that is reported.
+    #[test]
+    fn app_rename_echo_does_not_steal_a_recreated_sources_stamp() {
+        let dir = tmp_dir("stamp-echo-rename");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault.write_note("A.md", "alpha-source").unwrap();
+            vault.rename_path("A.md", "B.md").unwrap();
+            vault.write_note("A.md", "alpha-recreated").unwrap();
+            assert!(vault.is_own_write("A.md"));
+            assert!(vault.is_own_write("B.md"));
+        }
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        assert_eq!(
+            flush_changes(&inner, &[rename], Index::scan),
+            one(ChangeKind::Rename, &["A.md", "B.md"])
+        );
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "A.md")], Index::scan).is_empty());
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan).is_empty());
+        {
+            let guard = lock(&inner);
+            let vault = guard.vault.as_ref().unwrap();
+            assert!(vault.is_own_write("A.md"));
+            assert!(vault.is_own_write("B.md"));
+            assert_eq!(vault.index.search("alpha-recreated", 10).len(), 1);
+            assert_eq!(vault.index.search("alpha-source", 10).len(), 1);
+        }
+        fs::write(dir.path.join("B.md"), "alpha-outside").unwrap();
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["B.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(!vault.is_own_write("B.md"));
+        assert!(vault.is_own_write("A.md"));
+        assert_eq!(vault.index.search("alpha-outside", 10).len(), 1);
+        assert!(vault.index.search("alpha-source", 10).is_empty());
+    }
+
+    /// A property edit replaces the inode. The delayed echo of the app rename
+    /// must still treat both files as resident, so each keeps the stamp of
+    /// the bytes now on it. An outside edit after that is reported.
+    #[test]
+    fn app_rename_echo_keeps_property_writes_on_both_files() {
+        let dir = tmp_dir("stamp-echo-property");
+        let inner = state(&dir.path);
+        let edit = property_status("todo", "doing");
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault
+                .write_note("A.md", "---\nstatus: todo\n---\nsource-body\n")
+                .unwrap();
+            vault.rename_path("A.md", "B.md").unwrap();
+            vault
+                .write_note("A.md", "---\nstatus: todo\n---\nrecreated-body\n")
+                .unwrap();
+            for path in ["A.md", "B.md"] {
+                let result = vault.set_property(path, &edit, false).unwrap();
+                assert!(
+                    matches!(result, crate::edit::EditResult::Done { .. }),
+                    "{path} {result:?}"
+                );
+                assert!(vault.is_own_write(path), "{path}");
+                assert!(vault.index.contains(path), "{path}");
+            }
+        }
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        assert_eq!(
+            flush_changes(&inner, &[rename], Index::scan),
+            one(ChangeKind::Rename, &["A.md", "B.md"])
+        );
+        {
+            let guard = lock(&inner);
+            let vault = guard.vault.as_ref().unwrap();
+            assert!(vault.index.contains("A.md"), "recreated source dropped");
+            assert!(vault.index.contains("B.md"));
+            assert!(vault.is_own_write("A.md"));
+            assert!(vault.is_own_write("B.md"));
+            assert_eq!(vault.index.search("recreated-body", 10).len(), 1);
+            assert_eq!(vault.index.search("source-body", 10).len(), 1);
+        }
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "A.md")], Index::scan).is_empty());
+        assert!(flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan).is_empty());
+        fs::write(dir.path.join("B.md"), "outside-body").unwrap();
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "B.md")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["B.md"]));
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(!vault.is_own_write("B.md"));
+        assert!(vault.is_own_write("A.md"));
+        assert!(vault.index.contains("A.md"));
+        assert_eq!(vault.index.search("outside-body", 10).len(), 1);
+        assert!(vault.index.search("source-body", 10).is_empty());
+    }
+
+    /// Publish, then replace the new source from outside the vault. The delayed
+    /// rename echo is flushed with that move-in. The outside file stays indexed
+    /// and is not treated as Grove's write.
+    #[test]
+    fn replaced_source_stays_indexed_when_the_rename_echo_arrives() {
+        let dir = tmp_dir("stamp-echo-replaced");
+        let inner = state(&dir.path);
+        let outside = b"outside-marker-bytes";
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault.write_note("A.md", "original-body").unwrap();
+            vault.rename_path("A.md", "B.md").unwrap();
+        }
+        let _guard = arm_publish_replace_from_outside(&dir.path, outside);
+        {
+            let mut guard = lock(&inner);
+            let vault = guard.vault.as_mut().unwrap();
+            vault.write_note("A.md", "recreated-body").unwrap();
+            assert!(!vault.is_own_write("A.md"));
+        }
+        drop(_guard);
+        assert_eq!(fs::read(dir.path.join("A.md")).unwrap(), outside);
+        let rename = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::Both)),
+            vec![dir.path.join("A.md"), dir.path.join("B.md")],
+        );
+        let moved_in = kind(EventKind::Create(CreateKind::File), vec![dir.path.join("A.md")]);
+        assert_eq!(
+            flush_changes(&inner, &[rename, moved_in], Index::scan),
+            one(ChangeKind::Rename, &["A.md", "B.md"])
+        );
+        let guard = lock(&inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(vault.index.contains("A.md"), "replaced source dropped");
+        assert!(vault.index.contains("B.md"));
+        assert_eq!(vault.index.search("outside-marker-bytes", 10).len(), 1);
+        assert!(vault.index.search("recreated-body", 10).is_empty());
+        assert_eq!(vault.index.search("original-body", 10).len(), 1);
+        assert!(!vault.is_own_write("A.md"));
+        assert!(vault.is_own_write("B.md"));
+    }
+
+    /// After the rename publishes, swap in a different file before the caller
+    /// records a stamp. The hook runs once. Drop clears it if the write never
+    /// publishes.
+    fn arm_publish_replace(outside: &'static [u8]) -> PublishGuard {
+        crate::fsutil::after_publish(Some(Box::new(move |path| {
+            let incoming = path.with_extension("incoming");
+            fs::write(&incoming, outside).expect("incoming");
+            fs::rename(&incoming, path).expect("replace published file");
+        })));
+        PublishGuard
+    }
+
+    /// The replacement is created outside the vault and renamed in, so a watcher
+    /// would report a create of the destination rather than a second vault rename.
+    fn arm_publish_replace_from_outside(vault: &Path, outside: &'static [u8]) -> PublishGuard {
+        let vault = vault.to_path_buf();
+        crate::fsutil::after_publish(Some(Box::new(move |path| {
+            let incoming = std::env::temp_dir().join(format!(
+                "grove-incoming-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("clock")
+                    .as_nanos()
+            ));
+            assert!(
+                !incoming.starts_with(&vault),
+                "replacement must be created outside the vault"
+            );
+            fs::write(&incoming, outside).expect("incoming");
+            fs::rename(&incoming, path).expect("replace published file");
+        })));
+        PublishGuard
+    }
+
+    struct PublishGuard;
+    impl Drop for PublishGuard {
+        fn drop(&mut self) {
+            crate::fsutil::after_publish(None);
+        }
+    }
+
+    fn property_status(expect: &str, value: &str) -> crate::edit::PropertyEdit {
+        use crate::edit::{PropertyEdit, Target, Typed};
+        use crate::index::props::{PropertyType, PropertyValue};
+        PropertyEdit {
+            key: "status".into(),
+            expect: Some(format!("status: {expect}")),
+            to: Some(Target::Typed(Typed {
+                kind: PropertyType::Text,
+                value: PropertyValue::Text(value.into()),
+            })),
+        }
+    }
+
+    /// The bytes Grove submitted stay in the index until the flush reloads the
+    /// file the hook put at the path. That reload must be reported.
+    fn assert_published_note_reloads(
+        inner: &std::sync::RwLock<Inner>,
+        dir: &Path,
+        rel: &str,
+        grove: &str,
+        outside: &str,
+    ) {
+        {
+            let guard = lock(inner);
+            let vault = guard.vault.as_ref().unwrap();
+            assert!(!vault.is_own_write(rel), "{rel} adopted the outside file");
+            assert_eq!(vault.index.search(grove, 10).len(), 1, "{rel} indexed text");
+            assert!(vault.index.search(outside, 10).is_empty(), "{rel} outside text");
+        }
+        assert_eq!(fs::read(dir.join(rel)).unwrap(), outside.as_bytes());
+        let changes = flush_changes(inner, &[modify_of(dir, rel)], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &[rel]));
+        let guard = lock(inner);
+        let vault = guard.vault.as_ref().unwrap();
+        assert!(!vault.is_own_write(rel));
+        assert_eq!(vault.index.search(outside, 10).len(), 1);
+        assert!(vault.index.search(grove, 10).is_empty());
+    }
+
+    #[test]
+    fn outside_replace_during_publish_of_write_note_is_reported() {
+        let dir = tmp_dir("stamp-publish-note");
+        let inner = state(&dir.path);
+        let _guard = arm_publish_replace(b"outside-note-bytes");
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_note("Note.md", "grove-note-word")
+                .unwrap();
+        }
+        drop(_guard);
+        assert_published_note_reloads(
+            &inner,
+            &dir.path,
+            "Note.md",
+            "grove-note-word",
+            "outside-note-bytes",
+        );
+    }
+
+    #[test]
+    fn outside_replace_during_publish_of_create_note_is_reported() {
+        let dir = tmp_dir("stamp-publish-create");
+        let inner = state(&dir.path);
+        let _guard = arm_publish_replace(b"outside-create-bytes");
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .create_note("New.md", "grove-create-word")
+                .unwrap();
+        }
+        drop(_guard);
+        assert_published_note_reloads(
+            &inner,
+            &dir.path,
+            "New.md",
+            "grove-create-word",
+            "outside-create-bytes",
+        );
+    }
+
+    #[test]
+    fn outside_replace_during_publish_of_write_file_bytes_is_reported() {
+        let dir = tmp_dir("stamp-publish-bytes");
+        let inner = state(&dir.path);
+        let outside = b"outside-png-bytes-xx";
+        let _guard = arm_publish_replace(outside);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .write_file_bytes("pic.png", b"grove-png")
+                .unwrap();
+            assert!(!guard.vault.as_ref().unwrap().is_own_write("pic.png"));
+        }
+        drop(_guard);
+        assert_eq!(fs::read(dir.path.join("pic.png")).unwrap(), outside);
+        let changes = flush_changes(&inner, &[modify_of(&dir.path, "pic.png")], Index::scan);
+        assert_eq!(changes, one(ChangeKind::Modify, &["pic.png"]));
+        assert!(!lock(&inner).vault.as_ref().unwrap().is_own_write("pic.png"));
+    }
+
+    #[test]
+    fn outside_replace_during_publish_of_set_property_is_reported() {
+        let dir = tmp_dir("stamp-publish-prop");
+        let inner = state(&dir.path);
+        {
+            let mut guard = lock(&inner);
+            guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .create_note("Prop.md", "---\nstatus: todo\n---\nbody-grove-word\n")
+                .unwrap();
+        }
+        let _guard = arm_publish_replace(b"outside-property-marker");
+        {
+            let mut guard = lock(&inner);
+            let result = guard
+                .vault
+                .as_mut()
+                .unwrap()
+                .set_property("Prop.md", &property_status("todo", "doing"), false)
+                .unwrap();
+            assert!(
+                matches!(result, crate::edit::EditResult::Done { .. }),
+                "{result:?}"
+            );
+        }
+        drop(_guard);
+        assert_published_note_reloads(
+            &inner,
+            &dir.path,
+            "Prop.md",
+            "body-grove-word",
+            "outside-property-marker",
         );
     }
 }
