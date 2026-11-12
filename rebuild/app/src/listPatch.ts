@@ -5,7 +5,27 @@
 // file, and a full read still has to bring the folders it created.
 
 import type { FileEntry } from "./api";
+import { linkSpellings } from "./links/internal";
 import { fileName, isNoteFile, noteName, parentDir } from "./paths";
+
+/**
+ * Path order of the backend's file map: Unicode scalar values, which is the
+ * byte order of well-formed UTF-8. JavaScript `<` compares UTF-16 code units
+ * and sorts emoji before fullwidth letters.
+ */
+export function pathCmp(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const ca = a.codePointAt(i)!;
+    const cb = b.codePointAt(j)!;
+    if (ca !== cb) return ca < cb ? -1 : 1;
+    i += ca > 0xffff ? 2 : 1;
+    j += cb > 0xffff ? 2 : 1;
+  }
+  if (i === a.length && j === b.length) return 0;
+  return i === a.length ? -1 : 1;
+}
 
 function dirsOf(files: readonly FileEntry[]): Set<string> {
   const dirs = new Set<string>();
@@ -30,7 +50,7 @@ export function addEntry(files: readonly FileEntry[], entry: FileEntry): FileEnt
   let hi = files.length;
   while (lo < hi) {
     const mid = (lo + hi) >> 1;
-    if (files[mid].path < entry.path) lo = mid + 1;
+    if (pathCmp(files[mid].path, entry.path) < 0) lo = mid + 1;
     else hi = mid;
   }
   const next = files.slice();
@@ -48,7 +68,7 @@ export function mapEntries(files: readonly FileEntry[], swap: (path: string) => 
     return { ...file, path, name: file.is_dir ? fileName(path) : noteName(path) };
   });
   if (!changed) return files as FileEntry[];
-  const sorted = mapped.slice().sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const sorted = mapped.slice().sort((a, b) => pathCmp(a.path, b.path));
   for (let i = 1; i < sorted.length; i++) if (sorted[i].path === sorted[i - 1].path) return null;
   const dirs = dirsOf(sorted);
   for (const file of sorted) if (!parentsPresent(dirs, file.path)) return null;
@@ -74,11 +94,23 @@ export function listTokens(prev: readonly { path: string }[], next: readonly { p
   const after = new Set(next.map((file) => file.path));
   const tokens = new Set<string>();
   const add = (path: string) => {
-    tokens.add(path.toLowerCase());
-    tokens.add(fileName(path).toLowerCase());
-    if (isNoteFile(path)) tokens.add(path.slice(0, -3).toLowerCase());
+    const pieces = [path, fileName(path)];
+    if (isNoteFile(path)) {
+      pieces.push(path.slice(0, -3), noteName(path));
+    }
     const slash = path.lastIndexOf("/");
-    if (slash > 0) tokens.add(path.slice(0, slash).toLowerCase());
+    if (slash > 0) pieces.push(path.slice(0, slash));
+    for (const piece of pieces) {
+      for (const spelling of linkSpellings(piece)) tokens.add(spelling.toLowerCase());
+      if (/%[0-9a-f]{2}/i.test(piece)) {
+        try {
+          const decoded = decodeURIComponent(piece);
+          if (decoded !== piece) for (const spelling of linkSpellings(decoded)) tokens.add(spelling.toLowerCase());
+        } catch {
+          // The piece is not percent-encoded. The literal spelling stays.
+        }
+      }
+    }
   };
   for (const path of before) if (!after.has(path)) add(path);
   for (const path of after) if (!before.has(path)) add(path);
@@ -87,10 +119,16 @@ export function listTokens(prev: readonly { path: string }[], next: readonly { p
   return [...tokens];
 }
 
-/** Whether an open note can draw a link differently after this file-list change. */
+/**
+ * Whether an open note can draw a link differently after this file-list change.
+ * An embed (`![`) draws another document, so the host source is not enough to
+ * prove its links are unchanged. `filesChanged` then rebuilds decorations and
+ * rescans missing embeds.
+ */
 export function docNeedsFileRefresh(text: string, tokens: readonly string[] | null): boolean {
   if (!tokens || tokens.some((token) => token.length < 3)) return true;
   if (!tokens.length) return false;
+  if (text.includes("![")) return true;
   const hay = text.toLowerCase();
   return tokens.some((token) => hay.includes(token));
 }

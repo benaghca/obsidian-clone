@@ -152,10 +152,12 @@ export class Vault {
   private linkTimer = 0;
   private filesRequest = 0;
   private linksRequest = 0;
-  /** Local creates, renames, and deletes a file-list read that started earlier must not wipe. */
+  /** Local edits a file-list read that started earlier must not be folded onto. */
   private deltas: { vault: string; request: number; apply: (files: FileEntry[]) => FileEntry[] | null }[] = [];
-  /** One extra read when a stale snapshot cannot take those edits. Stops a retry from scheduling another. */
+  /** One extra read when a snapshot cannot be ordered against a local edit. */
   private refolding = false;
+  /** Advances when a disk read installs. Optimistic patches stay on the generation they started from. */
+  private listEpoch = 0;
   /** Path pieces the last files change added or removed. Null means every open note may show a different link. */
   private pieces: readonly string[] | null = null;
   private modified = listeners<[string]>();
@@ -180,6 +182,7 @@ export class Vault {
       this.filesRequest += 1;
       this.linksRequest += 1;
       this.deltas = [];
+      this.listEpoch += 1;
     });
   }
 
@@ -224,44 +227,49 @@ export class Vault {
     // The reply is the vault that was current when the read ran. Install it
     // only if that vault is still this page's backend.
     if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
-    let files = listed;
-    for (const delta of this.deltas) {
-      if (delta.vault !== vault || mine > delta.request) continue;
-      const applied = delta.apply(files);
-      // This read started before the edit and cannot show it (a parent folder
-      // is missing). Keep the patched list and read once more, after the edit.
-      if (!applied) {
-        if (!this.refolding && mine === this.filesRequest) {
-          this.refolding = true;
-          void this.refreshFiles().catch(() => {}).finally(() => { this.refolding = false; });
-        }
-        return;
+    // A read that began before a local edit cannot be ordered against it. The
+    // snapshot may omit the edit, or it may already contain a later outside
+    // change. Keep the patched list and read again after the edit.
+    if (this.deltas.some((delta) => delta.vault === vault && mine <= delta.request)) {
+      if (!this.refolding && mine === this.filesRequest) {
+        this.refolding = true;
+        void this.refreshFiles().catch(() => {}).finally(() => { this.refolding = false; });
       }
-      files = applied;
+      return;
     }
     this.deltas = [];
-    this.show(files);
+    this.listEpoch += 1;
+    this.show(listed);
+  }
+
+  /** Generation of the last file list installed from disk. */
+  fileEpoch(): number {
+    return this.listEpoch;
   }
 
   /**
    * Show one file the backend just created. False when this page does not own
-   * the disk, or a parent folder is not listed yet (the caller reads the list).
+   * the disk, a parent folder is not listed yet, or a disk read newer than
+   * `epoch` has already installed (the caller reads the list).
    */
-  adoptAdded(entry: FileEntry): boolean {
-    return this.revise((files) => addEntry(files, entry));
+  adoptAdded(entry: FileEntry, epoch = this.listEpoch): boolean {
+    return this.revise(epoch, (files) => addEntry(files, entry));
   }
 
   /**
-   * Show a rename or move. False when this page does not own the disk, or the
-   * destination's parent folder is not listed yet.
+   * Show a rename or move. False when this page does not own the disk, the
+   * destination's parent folder is not listed yet, or `epoch` is no longer current.
    */
-  adoptMapped(swap: (path: string) => string): boolean {
-    return this.revise((files) => mapEntries(files, swap));
+  adoptMapped(swap: (path: string) => string, epoch = this.listEpoch): boolean {
+    return this.revise(epoch, (files) => mapEntries(files, swap));
   }
 
-  /** Drop paths a delete removed. False when this page does not own the disk. `.trash` is not listed. */
-  dropPaths(under: (path: string) => boolean): boolean {
-    return this.revise((files) => dropEntries(files, under));
+  /**
+   * Drop paths a delete removed. False when this page does not own the disk,
+   * or a disk read newer than `epoch` has already installed. `.trash` is not listed.
+   */
+  dropPaths(under: (path: string) => boolean, epoch = this.listEpoch): boolean {
+    return this.revise(epoch, (files) => dropEntries(files, under));
   }
 
   /** Lowercased pieces of the paths the last files change added or removed. */
@@ -269,9 +277,13 @@ export class Vault {
     return this.pieces;
   }
 
-  /** Remember `apply` and show it. A list read that started earlier folds it back in, so the edit is not lost. */
-  private revise(apply: (files: FileEntry[]) => FileEntry[] | null): boolean {
+  /**
+   * Show `apply` when `epoch` is still the installed disk generation.
+   * A newer disk read wins instead, and the caller reads again.
+   */
+  private revise(epoch: number, apply: (files: FileEntry[]) => FileEntry[] | null): boolean {
     if (!pageOwnsDisk()) return false;
+    if (epoch !== this.listEpoch) return false;
     const next = apply(this.files);
     if (!next) return false;
     this.deltas.push({ vault: backendRoot(), request: this.filesRequest, apply });
@@ -392,6 +404,7 @@ export class Vault {
     this.filesRequest += 1;
     this.linksRequest += 1;
     this.deltas = [];
+    this.listEpoch += 1;
   }
 
   private async flushChanges(wave: number) {

@@ -22,10 +22,12 @@ export interface PathOps {
   handoff?(): Promise<boolean>;
   retarget(under: (path: string) => boolean, swap: (path: string) => string): void;
   discard(under: (path: string) => boolean): void;
+  /** File-list generation when a hold begins. A later disk read makes the completion reread. */
+  epoch?(): number;
   /** Workspace tabs, history, and move listeners. Ack waits until this settles. */
-  moved?(from: string, to: string, swap: (path: string) => string): Promise<void> | void;
+  moved?(from: string, to: string, swap: (path: string) => string, epoch?: number): Promise<void> | void;
   /** Workspace tabs and history after a delete. Ack waits until this settles. */
-  removed?(under: (path: string) => boolean): Promise<void> | void;
+  removed?(under: (path: string) => boolean, epoch?: number): Promise<void> | void;
 }
 
 interface PathBody {
@@ -195,13 +197,13 @@ export async function installPathBarrier(ops: PathOps, io?: Pick<SwitchIo, "bus"
   if (!resolved) return;
   const bus = resolved.bus;
   const self = resolved.self;
-  const held = new Map<string, { under: (path: string) => boolean; from: string }>();
+  const held = new Map<string, { under: (path: string) => boolean; from: string; epoch?: number }>();
   await bus.listen(HOLD, (payload) => {
     const body = bodyOf(payload);
     if (!body.id || !body.path || body.from === self) return;
     const from = body.path;
     const under = (path: string) => isUnder(path, from);
-    held.set(body.id, { under, from });
+    held.set(body.id, { under, from, epoch: ops.epoch?.() });
     ops.hold(under);
     void (async () => {
       let ok = false;
@@ -241,7 +243,7 @@ export async function installPathBarrier(ops: PathOps, io?: Pick<SwitchIo, "bus"
       const next = body.to;
       const swap = (path: string) => movedPath(path, mine.from, next);
       ops.retarget(mine.under, swap);
-      settle(ops.moved?.(mine.from, next, swap), () => {
+      settle(ops.moved?.(mine.from, next, swap, mine.epoch), () => {
         ops.release(mine.under);
         void ops.flush((path) => isUnder(path, next));
       });
@@ -249,7 +251,7 @@ export async function installPathBarrier(ops: PathOps, io?: Pick<SwitchIo, "bus"
     }
     if (body.ok) {
       ops.discard(mine.under);
-      settle(ops.removed?.(mine.under), () => { ops.release(mine.under); });
+      settle(ops.removed?.(mine.under, mine.epoch), () => { ops.release(mine.under); });
       return;
     }
     held.delete(body.id);

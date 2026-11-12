@@ -558,11 +558,12 @@ if (isTauri) {
       discardDrawings(under);
       discardHandoff(sourceVault(), under);
     },
-    async moved(_from, _to, swap) {
-      await ws.followMove(swap);
+    epoch: () => ws.vault.fileEpoch(),
+    async moved(_from, _to, swap, epoch) {
+      await ws.followMove(swap, epoch);
     },
-    async removed(under) {
-      await ws.forget(under);
+    async removed(under, epoch) {
+      await ws.forget(under, epoch);
     },
   }).catch((err) => console.error("Could not coordinate renames", err));
 }

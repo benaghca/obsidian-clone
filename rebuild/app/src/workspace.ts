@@ -856,14 +856,14 @@ export class Workspace {
   }
 
   /** A file or folder moved (see fileOps.ts): tabs, their history, closed tabs and recents follow. */
-  async followMove(swap: (path: string) => string) {
+  async followMove(swap: (path: string) => string, epoch?: number) {
     for (const tab of this.layout.tabs()) tabFollowsMove(tab, swap);
     for (const c of this.closed) {
       if (c.saved.path) c.saved.path = swap(c.saved.path);
     }
     this.recent = this.recent.map(swap);
     this.moves.emit(swap);
-    if (!this.vault.adoptMapped?.(swap)) await this.vault.refreshFiles();
+    if (!this.vault.adoptMapped?.(swap, epoch)) await this.vault.refreshFiles();
     this.emit("tabs");
     this.shownKey = "";
     this.settle();
@@ -871,11 +871,11 @@ export class Workspace {
   }
 
   /** Files were deleted: tabs showing them go empty, and they leave every history. */
-  async forget(under: (path: string) => boolean) {
+  async forget(under: (path: string) => boolean, epoch?: number) {
     this.recent = this.recent.filter((p) => !under(p));
     this.closed = this.closed.filter((c) => !c.saved.path || !under(c.saved.path));
     for (const tab of this.layout.tabs()) tabForgets(tab, under);
-    if (!this.vault.dropPaths?.(under)) await this.vault.refreshFiles();
+    if (!this.vault.dropPaths?.(under, epoch)) await this.vault.refreshFiles();
     this.presentAll();
     this.settle();
     void this.vault.refreshLinks();

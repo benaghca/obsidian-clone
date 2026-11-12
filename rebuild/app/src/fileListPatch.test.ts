@@ -1,11 +1,21 @@
+import { EditorState, type TransactionSpec } from "@codemirror/state";
+import type { EditorView, ViewUpdate } from "@codemirror/view";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { api, type FileEntry } from "./api";
+import { editingEmbed } from "./editor/embeds";
+import { type EditorHost, editorHost } from "./editor/host";
+import { filesChanged, LivePreview } from "./editor/livePreview";
+import { readingMode } from "./editor/render";
+import { markdownSyntax } from "./editor/syntax";
 import { createNote } from "./fileOps";
-import { docNeedsFileRefresh, listTokens } from "./listPatch";
+import { resolveLink } from "./links/internal";
+import { addEntry, docNeedsFileRefresh, listTokens, pathCmp } from "./listPatch";
 import { isUnder, movedPath } from "./paths";
+import { installPathBarrier } from "./pathBarrier";
 import { sealWrites, unsealWrites } from "./saveSeal";
 import { Vault } from "./vault";
 import { resetBackendRootForTests, setBackendRoot, setPageVault } from "./vaultRoot";
+import { localSaveBus } from "./vaultSwitch";
 import type { Workspace } from "./workspace";
 
 vi.mock("./api", () => ({
@@ -129,17 +139,77 @@ it("drops a deleted folder and everything inside it", () => {
   expect(api.listFiles).not.toHaveBeenCalled();
 });
 
-it("keeps a local create when an older file list returns without it", async () => {
+it("confirms a local create with a fresh read when an older list omits it", async () => {
   const vault = vaultWith([entry("A.md"), entry("C.md")]);
   let release: (files: FileEntry[]) => void = () => {};
-  vi.mocked(api.listFiles).mockReturnValue(new Promise((resolve) => { release = resolve; }));
+  let calls = 0;
+  vi.mocked(api.listFiles).mockImplementation(() => {
+    calls += 1;
+    if (calls === 1) return new Promise((resolve) => { release = resolve; });
+    return Promise.resolve([entry("A.md"), entry("B.md"), entry("C.md")]);
+  });
   const pending = vault.refreshFiles();
   expect(vault.adoptAdded(entry("B.md"))).toBe(true);
   release([entry("A.md"), entry("C.md")]);
   await pending;
+  await vi.waitFor(() => expect(vault.entry("B.md")).toBeTruthy());
   expect(vault.files.map((file) => file.path)).toEqual(["A.md", "B.md", "C.md"]);
-  expect(vault.files.filter((file) => file.path === "B.md")).toHaveLength(1);
-  expect(api.listFiles).toHaveBeenCalledOnce();
+  expect(calls).toBe(2);
+});
+
+it("lets an outside change in an older snapshot win over a local create", async () => {
+  const vault = vaultWith([entry("A.md"), entry("C.md")]);
+  let release: (files: FileEntry[]) => void = () => {};
+  let calls = 0;
+  const disk = [entry("A.md"), entry("C.md"), entry("Outside.md")];
+  vi.mocked(api.listFiles).mockImplementation(() => {
+    calls += 1;
+    if (calls === 1) return new Promise((resolve) => { release = resolve; });
+    return Promise.resolve(disk);
+  });
+  const pending = vault.refreshFiles();
+  expect(vault.adoptAdded(entry("B.md"))).toBe(true);
+  expect(vault.entry("B.md")).toBeTruthy();
+  release([entry("A.md"), entry("C.md"), entry("Outside.md")]);
+  await pending;
+  await vi.waitFor(() => expect(vault.entry("Outside.md")).toBeTruthy());
+  expect(vault.entry("B.md")).toBeUndefined();
+  expect(vault.files).toBe(disk);
+  expect(vault.notes.map((note) => note.path)).toEqual(["A.md", "C.md", "Outside.md"]);
+});
+
+it("keeps a recreated file when a peer delete finishes after the watcher", async () => {
+  const vault = vaultWith([entry("Gone.md"), entry("Keep.md")]);
+  // Backend order. The watcher installs this array as it stands.
+  const disk = [{ ...entry("Gone.md"), mtime_ms: 77, size: 9 }, entry("Keep.md")];
+  vi.mocked(api.listFiles).mockResolvedValue(disk);
+  const bus = localSaveBus();
+  let settled = Promise.resolve();
+  await installPathBarrier({
+    hold() {},
+    release() {},
+    flush: async () => true,
+    handoff: async () => true,
+    retarget() {},
+    discard() {},
+    epoch: () => vault.fileEpoch(),
+    removed(under, epoch) {
+      settled = (async () => {
+        if (!vault.dropPaths(under, epoch)) await vault.refreshFiles();
+      })();
+      return settled;
+    },
+  }, { bus, self: "peer" });
+  await bus.emit("grove-path-hold", { id: "d1", path: "Gone.md", from: "main" });
+  await vault.refreshFiles();
+  expect(vault.fileEpoch()).toBe(1);
+  expect(vault.entry("Gone.md")?.mtime_ms).toBe(77);
+  await bus.emit("grove-path-done", { id: "d1", from: "main", ok: true });
+  await settled;
+  expect(vault.entry("Gone.md")).toMatchObject({ mtime_ms: 77, size: 9 });
+  expect(vault.notes.map((note) => note.path)).toContain("Gone.md");
+  expect(vault.includedNotes().map((note) => note.path)).toContain("Gone.md");
+  expect(vault.files.map((file) => file.path)).toEqual(["Gone.md", "Keep.md"]);
 });
 
 it("lets a list read that starts after the create replace the patched entry", async () => {
@@ -165,6 +235,120 @@ it("does not install a stale list after the page stops owning the disk", async (
   await pending;
   expect(vault.files).toBe(patched);
   expect(vault.entry("B.md")?.path).toBe("B.md");
+});
+
+it("orders paths the way the backend file map does, and keeps a partial-path winner", () => {
+  const y = "\uFF39.md";
+  const z = "\uFF3A.md";
+  const emoji = "\u{1F600}.md";
+  expect(pathCmp(y, z)).toBeLessThan(0);
+  expect(pathCmp(z, emoji)).toBeLessThan(0);
+  expect(addEntry([entry(z), entry(emoji)], entry(y))!.map((file) => file.path)).toEqual([y, z, emoji]);
+  const zNote = "\uFF3A/Shared/Note.md";
+  const eNote = "\u{1F600}/Shared/Note.md";
+  const vault = vaultWith([
+    entry("Other.md"),
+    entry("\uFF3A", true),
+    entry("\uFF3A/Shared", true),
+    entry(zNote),
+    entry("\u{1F600}", true),
+    entry("\u{1F600}/Shared", true),
+    entry(eNote),
+  ]);
+  // The files setter stores the list. Notes follow that order, as a disk read would.
+  vault.notes = vault.files.filter((file) => !file.is_dir).map((file) => ({ name: file.name, path: file.path }));
+  expect(resolveLink("Shared/Note", null, vault.notes)).toBe(zNote);
+  expect(vault.adoptMapped((path) => movedPath(path, "Other.md", "Later.md"))).toBe(true);
+  expect(api.listFiles).not.toHaveBeenCalled();
+  expect(resolveLink("Shared/Note", null, vault.notes)).toBe(zNote);
+  expect(vault.entry("Later.md")?.name).toBe("Later");
+});
+
+it("redraws a nested wikilink, an encoded link, and an embed on create, delete, and rename", () => {
+  const nested = listTokens([{ path: "A.md" }], [{ path: "A.md" }, { path: "Projects/Fresh name.md" }]);
+  expect(nested).toEqual(expect.arrayContaining(["fresh name", "fresh%20name", "projects/fresh name"]));
+  expect(docNeedsFileRefresh("see [[Fresh name]]", nested)).toBe(true);
+  expect(docNeedsFileRefresh("see [n](Projects/Fresh%20name.md)", nested)).toBe(true);
+  expect(docNeedsFileRefresh("![[Daily]]\n\nno name here", nested)).toBe(true);
+  expect(docNeedsFileRefresh("no mention", nested)).toBe(false);
+  const encoded = listTokens([{ path: "A.md" }], [{ path: "A.md" }, { path: "Fresh%20name.md" }]);
+  expect(docNeedsFileRefresh("[[Fresh name]]", encoded)).toBe(true);
+  expect(docNeedsFileRefresh("[n](Fresh%20name.md)", encoded)).toBe(true);
+  const removed = listTokens([{ path: "A.md" }, { path: "Projects/Fresh name.md" }], [{ path: "A.md" }]);
+  expect(docNeedsFileRefresh("[[Fresh name]]", removed)).toBe(true);
+  expect(docNeedsFileRefresh("![[pic.png]]", removed)).toBe(true);
+  const renamed = listTokens([{ path: "Projects/Fresh name.md" }], [{ path: "Projects/Other name.md" }]);
+  expect(docNeedsFileRefresh("[[Fresh name]]", renamed)).toBe(true);
+  expect(docNeedsFileRefresh("[a](Projects/Other%20name.md)", renamed)).toBe(true);
+  expect(docNeedsFileRefresh("plain prose", renamed)).toBe(false);
+});
+
+it("drops the unresolved mark and the missing embed once the file list catches up", () => {
+  let present = false;
+  const host = {
+    linkExists: (target: string) => present && /fresh|daily|pic\.png/i.test(target),
+    embeds: {
+      resolve: (target: string) => {
+        if (!present) return null;
+        if (target === "Daily") return "Daily.md";
+        if (target === "pic.png") return "pic.png";
+        return null;
+      },
+    },
+  };
+  const doc = "see [[Fresh name]]\n\n[n](Projects/Fresh%20name.md)\n\n![[Daily]]\n\n![[pic.png]]";
+  const view = {
+    state: EditorState.create({
+      doc,
+      extensions: [markdownSyntax, editingEmbed, readingMode.of(true), editorHost.of(host as unknown as EditorHost)],
+    }),
+    hasFocus: true,
+    get visibleRanges() {
+      return [{ from: 0, to: this.state.doc.length }];
+    },
+    dispatch(spec: TransactionSpec) {
+      const tr = this.state.update(spec);
+      const startState = this.state;
+      this.state = tr.state;
+      lp.update({
+        view,
+        state: tr.state,
+        startState,
+        transactions: [tr],
+        changes: tr.changes,
+        docChanged: tr.docChanged,
+        selectionSet: !!tr.selection,
+        focusChanged: false,
+        viewportChanged: false,
+      } as unknown as ViewUpdate);
+    },
+  };
+  const lp = new LivePreview(view as unknown as EditorView);
+  const snap = () => {
+    const classes: string[] = [];
+    const widgets: { kind: string; path: string | null }[] = [];
+    lp.decorations.between(0, doc.length, (_from, _to, deco) => {
+      if (typeof deco.spec.class === "string") classes.push(deco.spec.class);
+      const widget = deco.spec.widget as { path?: string | null; constructor: { name: string } } | undefined;
+      if (widget && "path" in widget) widgets.push({ kind: widget.constructor.name, path: widget.path ?? null });
+    });
+    return { classes, widgets };
+  };
+  const before = snap();
+  expect(before.classes.some((cls) => cls.includes("cm-wikilink") && cls.includes("is-unresolved"))).toBe(true);
+  expect(before.classes.some((cls) => cls.includes("cm-rendered-link") && cls.includes("is-unresolved"))).toBe(true);
+  expect(before.widgets).toEqual(expect.arrayContaining([
+    { kind: "NoteEmbedWidget", path: null },
+    { kind: "ImageWidget", path: null },
+  ]));
+  present = true;
+  view.dispatch({ effects: filesChanged.of(null) });
+  const after = snap();
+  expect(after.classes.some((cls) => cls.includes("is-unresolved"))).toBe(false);
+  expect(after.widgets).toEqual(expect.arrayContaining([
+    { kind: "NoteEmbedWidget", path: "Daily.md" },
+    { kind: "ImageWidget", path: "pic.png" },
+  ]));
 });
 
 it("names only the paths a file-list change added or removed", () => {
