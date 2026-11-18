@@ -14,8 +14,11 @@ mod search;
 mod tags;
 mod backlinks;
 mod link_sources;
+mod name_maps;
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod name_maps_tests;
 #[cfg(test)]
 mod parity;
 #[cfg(test)]
@@ -25,10 +28,11 @@ mod search_props_edge;
 
 use crate::fsutil::{self, is_ignored_rel};
 use crate::model::{FileEntry, LinkIndex, SearchHit};
+use name_maps::NameMaps;
 use parse::{clean_target, parse_note, Note};
 #[cfg(test)]
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -108,16 +112,16 @@ pub struct Index {
     // Present only while the watcher scans without the state lock. Unlike echo
     // suppression, this journal cannot expire before the replacement is installed.
     rescan_changes: Option<BTreeSet<String>>,
-    by_name: HashMap<String, Vec<String>>,
-    by_alias: HashMap<String, String>,
-    by_path_lower: HashMap<String, String>,
-    // Partial path (`folder/note`) to the shortest file, then the smaller original path.
-    // A key is a slash-aligned tail (`/note.md`), not the whole path. Rebuilt with the other maps.
-    by_suffix: HashMap<String, String>,
+    // Note names, aliases, lower-case paths, and partial paths, for `resolve`.
+    // `put_node` / `take_node` update them for the one path they touch.
+    maps: NameMaps,
     // While > 0, `rebuild_maps` only marks the maps stale. The outermost
     // `MapBatch` rebuilds once. `apply` and `rename_path` hold that guard
     // until every path in the batch is in its final place.
     defer_depth: u32,
+    // The maps do not match `files`. `put_node` / `take_node` leave them alone
+    // until the full rebuild that is pending (on the outermost `MapBatch` drop,
+    // or at the end of the `scan` / `refresh_path` that marked them).
     maps_dirty: bool,
 }
 
@@ -154,8 +158,9 @@ impl MapBatch<'_> {
 
 impl Index {
     pub fn scan(root: &Path) -> Result<Self, String> {
-        let mut idx = Index::default();
         let rd = fs::read_dir(root).map_err(|e| format!("can't read {}: {e}", root.display()))?;
+        // One full build at the end beats one sorted insert per file.
+        let mut idx = Index::stale();
         idx.add_children(root, "", rd);
         idx.rebuild_maps();
         Ok(idx)
@@ -207,12 +212,12 @@ impl Index {
         if let Some(stripped) = key.strip_suffix(".md") {
             key = stripped.to_string();
         }
-        if let Some(cands) = self.by_name.get(&key) {
+        if let Some(cands) = self.maps.names(&key) {
             if let Some(found) = pick(cands, from) {
                 return Some(found.to_string());
             }
         }
-        self.by_alias.get(&raw.to_lowercase()).cloned()
+        self.maps.alias(&raw.to_lowercase()).cloned()
     }
 
     pub fn link_index(&self) -> LinkIndex {
@@ -383,30 +388,23 @@ impl Index {
         MapBatch { index: self }
     }
 
+    /// Drop `rel` and everything under it. Only those paths are visited.
     pub fn remove_tree(&mut self, rel: &str) {
         self.changed_during_rescan(rel);
-        let prefix = format!("{rel}/");
-        self.files
-            .retain(|k, _| k != rel && !k.starts_with(&prefix));
-        self.rebuild_maps();
+        for key in self.files.tree_keys(rel) {
+            self.take_node(&key);
+        }
     }
 
     /// Move `from` and everything under it to `to`. No-op when `from` is not indexed.
     pub fn relocate(&mut self, from: &str, to: &str) {
-        if from == to || (!self.files.contains_key(from) && !self.has_child(from)) {
+        if from == to || (!self.files.contains_key(from) && !self.files.has_below(from)) {
             return;
         }
         self.changed_during_rescan(from);
         self.changed_during_rescan(to);
-        let prefix = format!("{from}/");
-        let keys: Vec<String> = self
-            .files
-            .keys()
-            .filter(|k| *k == from || k.starts_with(&prefix))
-            .cloned()
-            .collect();
-        for key in keys {
-            if let Some(mut node) = self.files.remove(&key) {
+        for key in self.files.tree_keys(from) {
+            if let Some(mut node) = self.take_node(&key) {
                 let new_key = if key == from {
                     to.to_string()
                 } else {
@@ -415,12 +413,11 @@ impl Index {
                 if !node.is_dir && !is_note_path(&new_key) {
                     node.note = Note::default();
                 }
-                self.files.insert(new_key, node);
+                self.put_node(new_key, node);
             }
         }
         // A move into a new folder should keep that folder in the file list.
         self.ensure_parent_nodes(to);
-        self.rebuild_maps();
     }
 
     /// Reload one path from disk. A new directory also picks up children the index doesn't have.
@@ -433,6 +430,8 @@ impl Index {
         match fs::symlink_metadata(&full) {
             Ok(md) if md.file_type().is_symlink() => self.remove_tree(rel),
             Ok(md) if md.is_dir() => {
+                // A new folder can bring many files: rebuild once instead (see `MapBatch`).
+                self.maps_dirty = true;
                 self.ensure_dirs(root, rel);
                 self.insert_dir(rel, fsutil::mtime_ms(&md));
                 if let Ok(rd) = fs::read_dir(&full) {
@@ -440,10 +439,10 @@ impl Index {
                 }
                 self.rebuild_maps();
             }
+            // One file updates the maps for its own path, like `upsert_note`.
             Ok(md) if md.is_file() => {
                 self.ensure_dirs(root, rel);
                 self.read_file_node(root, rel, &md);
-                self.rebuild_maps();
             }
             _ => self.remove_tree(rel),
         }
@@ -453,7 +452,6 @@ impl Index {
         self.changed_during_rescan(rel);
         self.ensure_dirs(root, rel);
         self.insert_file(rel, stamp, || content.to_string());
-        self.rebuild_maps();
     }
 
     fn resolve_path(&self, from: &str, raw: &str) -> Option<String> {
@@ -467,7 +465,7 @@ impl Index {
             let Some(norm) = norm_logical(&cand) else {
                 continue;
             };
-            if let Some(found) = self.by_path_lower.get(&norm.to_lowercase()) {
+            if let Some(found) = self.maps.path_lower(&norm.to_lowercase()) {
                 if nameless_md(found) {
                     continue;
                 }
@@ -478,12 +476,35 @@ impl Index {
         let low = raw.trim_start_matches('/').to_lowercase();
         let suf = format!("/{low}");
         let suf_md = format!("/{low}.md");
-        better_suffix(self.by_suffix.get(&suf), self.by_suffix.get(&suf_md)).cloned()
+        better_suffix(self.maps.suffix(&suf), self.maps.suffix(&suf_md)).cloned()
     }
 
-    fn has_child(&self, rel: &str) -> bool {
-        let prefix = format!("{rel}/");
-        self.files.keys().any(|k| k.starts_with(&prefix))
+    /// Store `node` at `key`, replacing what was there, and update the maps for that path.
+    fn put_node(&mut self, key: String, node: Node) {
+        if self.maps_dirty {
+            self.files.insert(key, node);
+            return;
+        }
+        let keep = self.files.get(&key).is_some_and(|old| name_maps::same_keys(old, &node));
+        let old = self.files.insert(key.clone(), node);
+        if keep {
+            return;
+        }
+        if let Some(old) = &old {
+            self.maps.remove(&key, old);
+        }
+        if let Some(new) = self.files.get(&key) {
+            self.maps.add(&key, new);
+        }
+    }
+
+    /// Remove `key` and forget what it contributed to the maps.
+    fn take_node(&mut self, key: &str) -> Option<Node> {
+        let old = self.files.remove(key)?;
+        if !self.maps_dirty {
+            self.maps.remove(key, &old);
+        }
+        Some(old)
     }
 
     /// Index the entries of the folder `rel` ("" for the vault) and everything below them,
@@ -547,7 +568,7 @@ impl Index {
             },
             ..Node::default()
         };
-        self.files.insert(rel.to_string(), node);
+        self.put_node(rel.to_string(), node);
     }
 
     /// A file's node. A note's text (from `read`) is parsed, unless it is too large to index.
@@ -562,7 +583,7 @@ impl Index {
             stamp,
             note,
         };
-        self.files.insert(rel.to_string(), node);
+        self.put_node(rel.to_string(), node);
     }
 
     fn read_file_node(&mut self, root: &Path, rel: &str, md: &fs::Metadata) {
@@ -571,6 +592,17 @@ impl Index {
         });
     }
 
+    /// An empty index whose maps wait for one full rebuild once its files are in.
+    fn stale() -> Self {
+        Index {
+            maps_dirty: true,
+            ..Index::default()
+        }
+    }
+
+    /// Every map from the whole file list, for scans and folder refreshes (once per
+    /// outermost `MapBatch`). Saves, renames, deletes, and file refreshes update only their
+    /// own paths instead; tests compare those updates with this full rebuild.
     fn rebuild_maps(&mut self) {
         if self.defer_depth > 0 {
             self.maps_dirty = true;
@@ -579,44 +611,12 @@ impl Index {
         self.maps_dirty = false;
         #[cfg(test)]
         count_rebuild_maps();
-        self.by_name.clear();
-        self.by_alias.clear();
-        self.by_path_lower.clear();
-        let mut suffixes: HashMap<String, String> = HashMap::new();
-        let mut names: HashMap<String, Vec<String>> = HashMap::new();
-        for (path, node) in &self.files {
-            if node.is_dir {
-                continue;
-            }
-            let lower = path.to_lowercase();
-            if !nameless_md(path) {
-                for (i, _) in lower.match_indices('/') {
-                    remember_suffix(&mut suffixes, &lower[i..], path);
-                }
-            }
-            self.by_path_lower.insert(lower, path.clone());
-            let key = display_name(path, false).to_lowercase();
-            if !key.is_empty() {
-                names.entry(key).or_default().push(path.clone());
-            }
-            if is_note_path(path) {
-                for alias in &node.note.aliases {
-                    self.by_alias
-                        .entry(alias.clone())
-                        .or_insert_with(|| path.clone());
-                }
-            }
-        }
-        for list in names.values_mut() {
-            list.sort();
-        }
-        self.by_name = names;
-        self.by_suffix = suffixes;
+        self.maps.refill(&self.files);
     }
 
     #[cfg(test)]
     fn from_notes(notes: &[(&str, &str)]) -> Self {
-        let mut idx = Index::default();
+        let mut idx = Index::stale();
         for (path, content) in notes {
             // Parent folders exist in a real scan, so a directory rename has a node to move.
             idx.ensure_parent_nodes(path);
@@ -678,16 +678,6 @@ fn better_suffix<'a>(a: Option<&'a String>, b: Option<&'a String>) -> Option<&'a
         (Some(_), Some(b)) => Some(b),
         (Some(a), None) => Some(a),
         (None, b) => b,
-    }
-}
-
-fn remember_suffix(map: &mut HashMap<String, String>, key: &str, path: &str) {
-    let keep = match map.get(key) {
-        Some(old) => old.len() < path.len() || (old.len() == path.len() && old.as_str() <= path),
-        None => false,
-    };
-    if !keep {
-        map.insert(key.to_string(), path.to_string());
     }
 }
 
