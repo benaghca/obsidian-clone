@@ -35,6 +35,7 @@ use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 // Real name-map rebuilds, and file nodes visited by `Index::list`.
 // `take_*` resets the counter. A deferred rebuild counts when the maps are
@@ -44,6 +45,7 @@ use std::path::Path;
 thread_local! {
     static REBUILD_MAPS_CALLS: Cell<usize> = const { Cell::new(0) };
     static LIST_WALKS: Cell<usize> = const { Cell::new(0) };
+    static MAP_UPDATES: Cell<usize> = const { Cell::new(0) };
 }
 
 #[cfg(test)]
@@ -61,6 +63,17 @@ pub(crate) fn take_list_walks() -> usize {
     LIST_WALKS.with(|cell| cell.replace(0))
 }
 
+/// Per-path name-map updates (one per node added to or removed from the maps).
+#[cfg(test)]
+pub(crate) fn take_map_updates() -> usize {
+    MAP_UPDATES.with(|cell| cell.replace(0))
+}
+
+#[cfg(test)]
+fn count_map_update() {
+    MAP_UPDATES.with(|cell| cell.set(cell.get() + 1));
+}
+
 #[cfg(test)]
 fn count_rebuild_maps() {
     REBUILD_MAPS_CALLS.with(|cell| cell.set(cell.get() + 1));
@@ -72,6 +85,12 @@ fn count_list_walk(nodes: usize) {
 }
 
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Above this many paths, a tree delete rebuilds the maps once instead of updating them
+/// path by path. Per path costs microseconds, but each update shifts its sorted lists, so
+/// many same-named files (`README.md` in every folder) would make a large delete quadratic.
+/// Below it, even a list as long as the vault costs about one full rebuild.
+const BULK_PATHS: usize = 256;
 
 /// A file's modified and created times (ms since the epoch, 0 when unknown) and size.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -388,11 +407,20 @@ impl Index {
         MapBatch { index: self }
     }
 
-    /// Drop `rel` and everything under it. Only those paths are visited.
+    /// Drop `rel` and everything under it. Only those paths are visited. A tree of more
+    /// than `BULK_PATHS` paths rebuilds the maps once instead (deferred in a `MapBatch`).
     pub fn remove_tree(&mut self, rel: &str) {
         self.changed_during_rescan(rel);
-        for key in self.files.tree_keys(rel) {
+        let keys = self.files.tree_keys(rel);
+        let bulk = keys.len() > BULK_PATHS;
+        if bulk {
+            self.maps_dirty = true;
+        }
+        for key in keys {
             self.take_node(&key);
+        }
+        if bulk {
+            self.rebuild_maps();
         }
     }
 
@@ -403,21 +431,39 @@ impl Index {
         }
         self.changed_during_rescan(from);
         self.changed_during_rescan(to);
-        for key in self.files.tree_keys(from) {
-            if let Some(mut node) = self.take_node(&key) {
+        let keys = self.files.tree_keys(from);
+        // Both callers (`rename_path` and the watcher's `apply`) refresh the destination
+        // next, and a folder refresh rebuilds the maps anyway. Moving a folder entry by
+        // entry first would be wasted work, and quadratic for many same-named files.
+        let folder = keys.len() > 1 || self.is_dir(from);
+        if folder {
+            self.maps_dirty = true;
+        }
+        for key in keys {
+            if let Some(node) = self.take_node(&key) {
                 let new_key = if key == from {
                     to.to_string()
                 } else {
                     format!("{to}{}", &key[from.len()..])
                 };
-                if !node.is_dir && !is_note_path(&new_key) {
-                    node.note = Note::default();
-                }
+                let node = if !node.is_dir && !is_note_path(&new_key) {
+                    // Not a note any more: keep only its kind and times.
+                    Arc::new(Node {
+                        is_dir: false,
+                        stamp: node.stamp,
+                        note: Note::default(),
+                    })
+                } else {
+                    node
+                };
                 self.put_node(new_key, node);
             }
         }
         // A move into a new folder should keep that folder in the file list.
         self.ensure_parent_nodes(to);
+        if folder {
+            self.rebuild_maps();
+        }
     }
 
     /// Reload one path from disk. A new directory also picks up children the index doesn't have.
@@ -480,28 +526,32 @@ impl Index {
     }
 
     /// Store `node` at `key`, replacing what was there, and update the maps for that path.
-    fn put_node(&mut self, key: String, node: Node) {
+    /// The old node is only read (never cloned), even while a search shares it.
+    fn put_node(&mut self, key: String, node: Arc<Node>) {
         if self.maps_dirty {
             self.files.insert(key, node);
             return;
         }
-        let keep = self.files.get(&key).is_some_and(|old| name_maps::same_keys(old, &node));
-        let old = self.files.insert(key.clone(), node);
-        if keep {
-            return;
-        }
-        if let Some(old) = &old {
-            self.maps.remove(&key, old);
-        }
-        if let Some(new) = self.files.get(&key) {
-            self.maps.add(&key, new);
+        let old = self.files.insert(key.clone(), Arc::clone(&node));
+        #[cfg(test)]
+        count_map_update();
+        match old {
+            Some(old) if name_maps::same_keys(&old, &node) => {}
+            Some(old) => {
+                self.maps.remove(&key, &old);
+                self.maps.add(&key, &node);
+            }
+            None => self.maps.add(&key, &node),
         }
     }
 
-    /// Remove `key` and forget what it contributed to the maps.
-    fn take_node(&mut self, key: &str) -> Option<Node> {
+    /// Remove `key` and forget what it contributed to the maps. The node is shared, not
+    /// copied, with any search still holding it.
+    fn take_node(&mut self, key: &str) -> Option<Arc<Node>> {
         let old = self.files.remove(key)?;
         if !self.maps_dirty {
+            #[cfg(test)]
+            count_map_update();
             self.maps.remove(key, &old);
         }
         Some(old)
@@ -568,7 +618,7 @@ impl Index {
             },
             ..Node::default()
         };
-        self.put_node(rel.to_string(), node);
+        self.put_node(rel.to_string(), Arc::new(node));
     }
 
     /// A file's node. A note's text (from `read`) is parsed, unless it is too large to index.
@@ -583,7 +633,7 @@ impl Index {
             stamp,
             note,
         };
-        self.put_node(rel.to_string(), node);
+        self.put_node(rel.to_string(), Arc::new(node));
     }
 
     fn read_file_node(&mut self, root: &Path, rel: &str, md: &fs::Metadata) {

@@ -89,14 +89,15 @@ impl Files {
         self.map.contains_key(key)
     }
 
-    pub(super) fn insert(&mut self, key: String, node: Node) -> Option<Node> {
+    /// The replaced node comes back shared: a search snapshot may still hold it.
+    pub(super) fn insert(&mut self, key: String, node: Arc<Node>) -> Option<Arc<Node>> {
         self.clear_snap();
-        self.map.insert(key, Arc::new(node)).map(unique_node)
+        self.map.insert(key, node)
     }
 
-    pub(super) fn remove(&mut self, key: &str) -> Option<Node> {
+    pub(super) fn remove(&mut self, key: &str) -> Option<Arc<Node>> {
         self.clear_snap();
-        self.map.remove(key).map(unique_node)
+        self.map.remove(key)
     }
 
     /// Notes, in path order, shared with any scan already holding the previous list.
@@ -165,10 +166,6 @@ impl Files {
             .range::<str, _>((Included(start.as_str()), Excluded(end.as_str())))
             .map(|(key, _)| key)
     }
-}
-
-fn unique_node(arc: Arc<Node>) -> Node {
-    Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone())
 }
 
 fn search_note_arcs(map: &BTreeMap<String, Arc<Node>>) -> Vec<(Arc<str>, Arc<Node>)> {

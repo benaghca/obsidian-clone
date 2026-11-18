@@ -73,7 +73,7 @@ impl Index {
     fn rebuilt_copy(&self) -> Index {
         let mut copy = Index::stale();
         for (path, node) in &self.files {
-            copy.files.insert(path.clone(), node.clone());
+            copy.files.insert(path.clone(), std::sync::Arc::new(node.clone()));
         }
         copy.rebuild_maps();
         copy
@@ -183,6 +183,9 @@ fn run_sequence(seed: u64, steps: usize) {
     for step in 0..steps {
         let ctx = format!("seed {seed} step {step}");
         let op = rng.below(20);
+        // Full rebuilds this op may run: none for a file-level change, at most one for a
+        // folder move or a batch (both rebuild once by design).
+        let mut allowed = 0;
         match op {
             0..=7 => {
                 let path = random_path(&mut rng);
@@ -211,6 +214,10 @@ fn run_sequence(seed: u64, steps: usize) {
                 } else {
                     random_path(&mut rng)
                 };
+                let file = idx.contains(&from) && !idx.is_dir(&from) && !idx.files.has_below(&from);
+                if !file {
+                    allowed = 1;
+                }
                 idx.relocate(&from, &to);
             }
             13..=15 => {
@@ -230,6 +237,7 @@ fn run_sequence(seed: u64, steps: usize) {
                     }
                 }
                 drop(batch);
+                allowed = 1;
             }
             _ => {
                 // A batch whose refresh reads a real file: the maps go stale until the drop.
@@ -251,7 +259,7 @@ fn run_sequence(seed: u64, steps: usize) {
             }
         }
         let rebuilds = take_rebuild_maps_calls();
-        assert_eq!(rebuilds, 0, "{ctx}: op {op} ran {rebuilds} full rebuilds");
+        assert!(rebuilds <= allowed, "{ctx}: op {op} ran {rebuilds} full rebuilds (allowed {allowed})");
         same_answers(&idx, &ctx);
         // The oracle copy's own rebuild is not the op's.
         let _ = take_rebuild_maps_calls();
@@ -366,7 +374,9 @@ fn big_index(n: usize) -> Index {
     idx
 }
 
-/// A save, a rename, and a delete visit only their own paths, never the whole list.
+/// A save, a file rename, and a small delete visit only their own paths and never rebuild.
+/// A folder move rebuilds once: its callers refresh the destination folder next, which
+/// rebuilds anyway.
 #[test]
 fn per_path_updates_visit_only_the_changed_paths() {
     let tmp = tmp_dir("name-maps-visits");
@@ -380,27 +390,111 @@ fn per_path_updates_visit_only_the_changed_paths() {
     let upserts = take_file_visits();
     idx.relocate("f3/g3/n3.md", "elsewhere/n3.md");
     let file_move = take_file_visits();
-    idx.relocate("f5", "f5-moved");
-    let folder_move = take_file_visits();
     idx.remove_tree("new/one.md");
     let file_delete = take_file_visits();
     idx.remove_tree("f6");
     let folder_delete = take_file_visits();
     idx.relocate("missing", "also-missing");
     let missing = take_file_visits();
-    let rebuilds = take_rebuild_maps_calls();
+    let per_path_rebuilds = take_rebuild_maps_calls();
 
-    // f5 and f6 each hold 20 notes in 7 subfolders, plus the folder itself.
+    // f6 holds 20 notes in 7 subfolders, plus the folder itself.
     assert_eq!(
-        (upserts, file_move, folder_move, file_delete, folder_delete, missing, rebuilds),
-        (0, 1, 28, 1, 28, 0, 0),
-        "visits: upserts, file move, folder move, file delete, folder delete, missing; rebuilds"
+        (upserts, file_move, file_delete, folder_delete, missing, per_path_rebuilds),
+        (0, 1, 1, 28, 0, 0),
+        "visits: upserts, file move, file delete, folder delete, missing; rebuilds"
     );
+    idx.assert_maps_match_rebuild();
+
+    idx.relocate("f5", "f5-moved");
+    assert_eq!(take_rebuild_maps_calls(), 1, "a folder move rebuilds once");
     idx.assert_maps_match_rebuild();
     assert_eq!(idx.resolve("x.md", "fresh").as_deref(), Some("elsewhere/n3.md"));
     assert_eq!(idx.resolve("x.md", "a5").as_deref(), Some("f5-moved/g5/n5.md"));
     assert!(idx.resolve("x.md", "a6").is_none());
     assert!(idx.resolve("x.md", "one").is_none());
+}
+
+/// Many folders holding the same names (`README.md`, `index.md`) share one name list and
+/// one partial-path list. Deleting or moving such a tree path by path would shift those
+/// lists once per path: quadratic under the vault lock. A large delete and any folder
+/// move rebuild once instead; a delete at the threshold stays per-path.
+#[test]
+fn bulk_deletes_and_folder_moves_of_repeated_names_rebuild_once() {
+    let mut idx = Index::stale();
+    let add = |idx: &mut Index, path: String| {
+        idx.ensure_parent_nodes(&path);
+        let body = "---\naliases: [readme]\n---\n[[README]] [[docs/README]]\n".to_string();
+        idx.insert_file(&path, Stamp::sized(body.len()), || body.clone());
+    };
+    let n = 3_000;
+    for i in 0..n {
+        add(&mut idx, format!("big/p{i:05}/docs/README.md"));
+        add(&mut idx, format!("big/p{i:05}/index.md"));
+    }
+    // Trees of exactly `BULK_PATHS` paths and one more: the folder plus its files.
+    for i in 0..BULK_PATHS - 1 {
+        add(&mut idx, format!("exact/r{i:03}-README.md"));
+    }
+    for i in 0..BULK_PATHS {
+        add(&mut idx, format!("over/r{i:03}-README.md"));
+    }
+    add(&mut idx, "keep/docs/README.md".to_string());
+    add(&mut idx, "keep/index.md".to_string());
+    idx.rebuild_maps();
+    let _ = take_rebuild_maps_calls();
+    let _ = take_map_updates();
+
+    assert_eq!(idx.files.tree_keys("exact").len(), BULK_PATHS);
+    assert_eq!(idx.files.tree_keys("over").len(), BULK_PATHS + 1);
+    idx.remove_tree("exact");
+    assert_eq!(take_rebuild_maps_calls(), 0, "a delete of BULK_PATHS paths stays per-path");
+    assert_eq!(take_map_updates(), BULK_PATHS, "one map update per deleted path");
+    idx.assert_maps_match_rebuild();
+    idx.remove_tree("over");
+    assert_eq!(take_rebuild_maps_calls(), 1, "one path more rebuilds once");
+    assert_eq!(take_map_updates(), 0, "and skips the per-path updates");
+    idx.assert_maps_match_rebuild();
+
+    let started = Instant::now();
+    idx.rebuild_maps();
+    let rebuild = started.elapsed();
+    let _ = take_rebuild_maps_calls();
+
+    // Inside one batch, a folder move and a large delete still rebuild only once.
+    let started = Instant::now();
+    {
+        let mut batch = idx.map_batch();
+        batch.relocate("big", "moved");
+        for i in 0..n / 2 {
+            batch.remove_tree(&format!("moved/p{i:05}"));
+        }
+        batch.remove_tree("moved");
+    }
+    let bulk = started.elapsed();
+    assert_eq!(take_rebuild_maps_calls(), 1, "one rebuild for the whole batch");
+    assert_eq!(take_map_updates(), 0, "no per-path updates for a folder move or a bulk delete");
+    idx.assert_maps_match_rebuild();
+    assert_eq!(idx.resolve("x.md", "README").as_deref(), Some("keep/docs/README.md"));
+    assert_eq!(idx.resolve("x.md", "docs/README").as_deref(), Some("keep/docs/README.md"));
+    assert_eq!(idx.resolve("x.md", "readme").as_deref(), Some("keep/docs/README.md"));
+    // The batch moved and deleted 15,000 paths with one rebuild. Path by path, the
+    // shared lists made this many times slower than a rebuild.
+    eprintln!("bulk batch {bulk:?}, one rebuild of the full index {rebuild:?}");
+    assert!(
+        bulk < rebuild * 20 + std::time::Duration::from_millis(200),
+        "bulk batch {bulk:?} vs one rebuild {rebuild:?}"
+    );
+
+    // Outside a batch, a large delete of repeated names rebuilds once too.
+    for i in 0..n {
+        add(&mut idx, format!("again/p{i:05}/docs/README.md"));
+    }
+    idx.rebuild_maps();
+    let _ = take_rebuild_maps_calls();
+    idx.remove_tree("again");
+    assert_eq!(take_rebuild_maps_calls(), 1);
+    idx.assert_maps_match_rebuild();
 }
 
 /// Cheap timing at 20k notes: a save costs far less than one full rebuild.
@@ -477,4 +571,38 @@ fn bench_name_maps() {
         );
         idx.assert_maps_match_rebuild();
     }
+}
+
+/// A search that dropped the vault lock still holds the note list. Saves, renames, and
+/// deletes must not deep-copy the notes it holds: a rename moves the same shared node,
+/// and a replaced or deleted node is only read to forget its keys.
+#[test]
+fn renames_and_deletes_share_nodes_a_search_still_holds() {
+    use std::sync::Arc;
+    let tmp = tmp_dir("name-maps-arc");
+    let root = tmp.path.as_path();
+    let mut idx = Index::from_notes(&[
+        ("a.md", "---\naliases: [first]\n---\nbody\n"),
+        ("b.md", "[[a]]\n"),
+        ("c.md", "gone\n"),
+    ]);
+    let held = idx.files.cached_search_notes();
+    let node_of = |list: &[(Arc<str>, Arc<Node>)], path: &str| {
+        Arc::clone(&list.iter().find(|(p, _)| &**p == path).expect("listed").1)
+    };
+    let a = node_of(&held, "a.md");
+    let c = node_of(&held, "c.md");
+
+    idx.relocate("a.md", "moved/a.md");
+    idx.upsert_note(root, "b.md", "[[first]]\n", Stamp::sized(10));
+    idx.remove_tree("c.md");
+    idx.assert_maps_match_rebuild();
+
+    let now = idx.files.cached_search_notes();
+    assert!(Arc::ptr_eq(&a, &node_of(&now, "moved/a.md")), "the rename moved the same node");
+    // `held`, `a`, and the index's entry share it; nothing was copied.
+    assert_eq!(Arc::strong_count(&a), 4);
+    // The deleted node lives on only in the search's list and this test.
+    assert_eq!(Arc::strong_count(&c), 2);
+    assert_eq!(idx.resolve("b.md", "first").as_deref(), Some("moved/a.md"));
 }
