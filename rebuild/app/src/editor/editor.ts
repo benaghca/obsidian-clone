@@ -64,6 +64,8 @@ const drawnSelection = [
 export type ViewMode = "live" | "source" | "reading";
 
 export const viewModeCompartment = new Compartment();
+/** Holds a main state's undo history, so it can be dropped and started fresh. */
+export const historyCompartment = new Compartment();
 
 export const VIEW_MODES: Record<ViewMode, Extension> = {
   live: [livePreview, blocks, propertiesBlock, tableKeys],
@@ -232,7 +234,7 @@ export function createNoteState({ doc, host, extensions = [], history: withHisto
     selection,
     extensions: [
       editorHost.of(host),
-      withHistory ? history() : [],
+      historyCompartment.of(withHistory ? history() : []),
       drawnSelection,
       EditorView.lineWrapping,
       EditorState.allowMultipleSelections.of(true),

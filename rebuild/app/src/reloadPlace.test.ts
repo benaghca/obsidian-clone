@@ -2,11 +2,12 @@
 // as the smallest edit, so the cursor and selection stay on the text they were
 // on, and it stays out of undo, so Ctrl+Z cannot bring the old text back and
 // save it over the synced file. No window: these run on the note's state.
-import { redo, undo, undoDepth } from "@codemirror/commands";
-import { EditorSelection, type EditorState, type Transaction } from "@codemirror/state";
+import { history, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
+import { EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "./api";
-import { MAX_LINE_EDITS, minimalChanges, normalizeLineBreaks, type TextEdit } from "./editor/minimalChange";
+import { MAX_LINE_EDITS, minimalChanges, normalizeLineBreaks, REFINE_CHARS, type TextEdit } from "./editor/minimalChange";
+import { historySurvives } from "./editor/reloadHistory";
 import { NoteEditors } from "./noteEditors";
 import { resetBackendRootForTests } from "./vaultRoot";
 import { resetHoldsForTests } from "./holdDrain";
@@ -260,6 +261,108 @@ test("typing after a reload starts a new undo step, so undo stops at the synced 
   undo({ state: state(), dispatch: (tr) => { undone = tr; } });
   expect(undone.state.doc.toString()).toBe("a" + text + "\nsynced");
   await notes.flush();
+});
+
+// ----- undo steps the sync touched (Codex review 1, P1) -----
+
+/** Run one history command on the note's state; the text it would produce, or null when there is nothing to do. */
+function step(state: EditorState, command: typeof undo): string | null {
+  let out: Transaction | null = null;
+  command({ state, dispatch: (tr) => { out = tr; } });
+  return out ? (out as Transaction).state.doc.toString() : null;
+}
+
+test("a sync that deletes your saved edit leaves nothing to undo, so the old word cannot come back", async () => {
+  vi.useFakeTimers();
+  const { notes, state, sync } = await opened("status: draft", 0);
+  notes.change("A.md", { changes: { from: 8, to: 13, insert: "ready" }, userEvent: "input.type" });
+  await notes.flush();
+  expect(api.writeNote).toHaveBeenLastCalledWith("A.md", "status: ready");
+  await sync("status: ");
+  expect(state().doc.toString()).toBe("status: ");
+  expect(undoDepth(state())).toBe(0);
+  expect(step(state(), undo)).toBeNull();
+  expect(notes.hasUnsaved()).toBe(false);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(api.writeNote).toHaveBeenCalledTimes(1);
+});
+
+test("a sync that replaces your saved edit leaves nothing to undo either", async () => {
+  const { notes, state, sync } = await opened("status: draft", 0);
+  notes.change("A.md", { changes: { from: 8, to: 13, insert: "ready" }, userEvent: "input.type" });
+  await notes.flush();
+  await sync("status: published");
+  expect(undoDepth(state())).toBe(0);
+  expect(step(state(), undo)).toBeNull();
+  expect(state().doc.toString()).toBe("status: published");
+});
+
+test("a redo step the sync touched is dropped too", () => {
+  // "draft" -> "ready", then undone: "ready" waits on the redo stack.
+  const typed = EditorState.create({ doc: "status: draft", extensions: history() })
+    .update({ changes: { from: 8, to: 13, insert: "ready" } }).state;
+  let back!: Transaction;
+  undo({ state: typed, dispatch: (tr) => { back = tr; } });
+  expect(undoDepth(back.state)).toBe(0);
+  expect(redoDepth(back.state)).toBe(1);
+  expect(historySurvives(back.state, minimalChanges("status: draft", "status: final"))).toBe(false);
+  expect(historySurvives(back.state, minimalChanges("status: draft", "intro\nstatus: draft"))).toBe(true);
+});
+
+test("an outside insert right next to your edit counts as touching it", async () => {
+  const { notes, state, sync } = await opened("todo", 0);
+  notes.change("A.md", { changes: { from: 4, insert: " soon" }, userEvent: "input.type" });
+  await notes.flush();
+  await sync("todo soon!");
+  expect(undoDepth(state())).toBe(0);
+  expect(state().doc.toString()).toBe("todo soon!");
+});
+
+test("a clean history starts again after it was dropped", async () => {
+  const { notes, state, sync } = await opened("status: draft", 0);
+  notes.change("A.md", { changes: { from: 8, to: 13, insert: "ready" }, userEvent: "input.type" });
+  await notes.flush();
+  await sync("status: published");
+  notes.change("A.md", { changes: { from: 0, insert: "new " }, userEvent: "input.type" });
+  expect(undoDepth(state())).toBe(1);
+  expect(step(state(), undo)).toBe("status: published");
+  await notes.flush();
+});
+
+test("history checks replay every step, older ones included", () => {
+  let s = EditorState.create({ doc: "one two three", extensions: history() });
+  s = s.update({ changes: { from: 4, to: 7, insert: "TWO" } }).state; // older step, touched below
+  s = s.update({ changes: { from: 0, insert: "zero " }, annotations: [] }).state;
+  // A newer step that is far away does not hide the older one under the sync.
+  expect(undoDepth(s)).toBe(2);
+  expect(historySurvives(s, minimalChanges(s.doc.toString(), s.doc.toString().replace("TWO", "2")))).toBe(false);
+  expect(historySurvives(s, minimalChanges(s.doc.toString(), s.doc.toString() + "\nend"))).toBe(true);
+});
+
+// ----- long lines (Codex review 1, P2) -----
+
+test("separate edits around a caret on a 5,000-character line leave the caret on its text", async () => {
+  const middle = Array.from({ length: 1700 }, (_, i) => `w${i % 10}`).join(" ");
+  const text = `# Head\nstart ${middle} end\nlast`;
+  const caret = text.indexOf("w5", 2500);
+  const { state, sync } = await opened(text, caret);
+  await sync(text.replace("start ", "START here ").replace(" end", " the end"));
+  const s = state();
+  expect(s.selection.main.head).toBe(caret + "START here ".length - "start ".length);
+  expect(s.doc.sliceString(s.selection.main.head, s.selection.main.head + 2)).toBe("w5");
+  const edits = minimalChanges(text, s.doc.toString());
+  expect(edits.every((e) => e.to - e.from < 10 && e.insert.length < 10)).toBe(true);
+});
+
+test("a 60,000-character line with edits at both ends is still refined, quickly", () => {
+  const middle = "lorem ipsum ".repeat(5000);
+  const old = `a ${middle}z`, next = `A ${middle}Z!`;
+  expect(old.length).toBeLessThan(REFINE_CHARS);
+  const started = performance.now();
+  const edits = minimalChanges(old, next);
+  expect(performance.now() - started).toBeLessThan(250);
+  expect(apply(old, edits)).toBe(next);
+  expect(edits.every((e) => e.to - e.from <= 2 && e.insert.length <= 2)).toBe(true);
 });
 
 // ----- guards and quiet cases -----

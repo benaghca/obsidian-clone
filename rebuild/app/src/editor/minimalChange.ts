@@ -22,8 +22,12 @@ export interface TextEdit {
  * only as minimal as a common prefix and suffix.
  */
 export const MAX_LINE_EDITS = 1000;
-/** A changed block up to this many characters (each side) is compared word by word. */
-const REFINE_CHARS = 4000;
+/**
+ * A changed block up to this many characters (each side) is compared word by
+ * word. Equal words at its ends are skipped first and the diff stops after
+ * MAX_WORD_EDITS, so the cost stays near (words in the block) x MAX_WORD_EDITS.
+ */
+export const REFINE_CHARS = 200_000;
 /** Word edits past this inside one block: keep the block as one edit. */
 const MAX_WORD_EDITS = 200;
 

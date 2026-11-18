@@ -12,7 +12,7 @@
 // mirror runs on the main state. Saving and the "changed" event follow the
 // original change only, so a note is still saved once.
 
-import { isolateHistory, redo, undo } from "@codemirror/commands";
+import { history, isolateHistory, redo, undo } from "@codemirror/commands";
 import { Annotation, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
@@ -24,7 +24,8 @@ import { bumpPathGen, pageOwnsDisk, pageVault, pathGen, sourceVault } from "./va
 import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
 import { minimalChanges, normalizeLineBreaks } from "./editor/minimalChange";
-import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
+import { createNoteState, historyCompartment, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
+import { historySurvives } from "./editor/reloadHistory";
 import type { EditorHost } from "./editor/host";
 import { kept } from "./memo";
 import { type Group, memoryOf, type Tab } from "./tabs";
@@ -473,6 +474,8 @@ export class NoteEditors {
     // The editor holds "\n" line breaks; a CRLF file with the same text is not a change.
     const changes = minimalChanges(current.toString(), normalizeLineBreaks(read));
     if (!changes.length) return;
+    // Undo and redo steps that overlap or touch the outside edit cannot be mapped across it safely.
+    const keepHistory = historySurvives(this.owners.get(path)?.state ?? this.states.get(path)!, changes);
     // Only what changed is replaced, so every pane's cursor, selection and scroll map across it.
     // It stays out of undo (history maps across it), so Ctrl+Z cannot put the old text back and save it.
     this.change(path, {
@@ -480,7 +483,21 @@ export class NoteEditors {
       userEvent: "external",
       annotations: [Transaction.addToHistory.of(false), isolateHistory.of("full")],
     });
+    if (!keepHistory) this.clearHistory(path);
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
+  }
+
+  /** Start a note's undo history fresh (its main state; mirrors have none). */
+  private clearHistory(path: string) {
+    const off = { effects: historyCompartment.reconfigure([]) }, on = { effects: historyCompartment.reconfigure(history()) };
+    const owner = this.owners.get(path);
+    if (owner) {
+      owner.dispatch(off);
+      owner.dispatch(on);
+      return;
+    }
+    const state = this.states.get(path);
+    if (state) this.states.set(path, state.update(off).state.update(on).state);
   }
 
   /** Paths under a moved folder (or a moved note) follow it. */

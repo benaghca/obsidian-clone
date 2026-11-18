@@ -94,4 +94,68 @@ await withBrowser(async ({ run, open, check, chord, send }) => {
   check(now.doc === withoutQ, 'a second Ctrl+Z does not undo the sync');
   check(await run(() => window.s1Writes.length === 0), 'and nothing is written over the synced file');
   check(await run((path) => !ws.editors.hasUnsaved((p) => p === path), PATH), 'the note is still clean');
+
+  // Codex review 1, P1: an undo or redo step that the sync touched must not run.
+  const onDisk = (path) => run(async (path) => (await import('/src/api.ts')).api.readNote(path), path);
+  const shown = () => run(() => ws.editors.viewOf(ws.activeGroup).state.doc.toString());
+  const outside = (path, text) => run(async (path, text) => {
+    const { api } = await import('/src/api.ts');
+    await api.writeNote(path, text); ws.vault.written(path); await ws.editors.reload(path);
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  }, path, text);
+  /** Open `path` with `text`, then replace `word` with `typed` by real input and let it save. */
+  const typeOver = async (path, text, word, typed) => {
+    await open(path, text, 300);
+    await run((word) => {
+      const view = ws.editors.viewOf(ws.activeGroup), at = view.state.doc.toString().indexOf(word);
+      view.focus(); view.dispatch({ selection: { anchor: at, head: at + word.length } });
+    }, word);
+    await send('Input.insertText', { text: typed });
+    await sleep(600);
+  };
+  const writes = () => run(() => window.s1Writes.length);
+  const rest = '\n' + Array.from({ length: 20 }, (_, i) => `filler ${i}`).join('\n');
+
+  for (const [name, synced] of [['deleted', 'status: '], ['replaced', 'status: published']]) {
+    const path = `Status ${name}.md`;
+    await typeOver(path, 'status: draft' + rest, 'draft', 'ready');
+    check(await onDisk(path) === 'status: ready' + rest, `${name}: your edit is saved`);
+    await outside(path, synced + rest);
+    const before = await writes();
+    await run(() => ws.editors.viewOf(ws.activeGroup).focus());
+    await chord('z');
+    await sleep(600);
+    check(await shown() === synced + rest, `${name}: Ctrl+Z after the sync leaves the synced text (no "draft")`);
+    check(await onDisk(path) === synced + rest && await writes() === before, `${name}: nothing is written over the synced file`);
+  }
+
+  {
+    const path = 'Status redo.md';
+    await typeOver(path, 'status: draft' + rest, 'draft', 'ready');
+    await run(() => ws.editors.viewOf(ws.activeGroup).focus());
+    await chord('z');
+    await sleep(600);
+    check(await onDisk(path) === 'status: draft' + rest, 'redo: your undo is saved, "ready" waits for redo');
+    await outside(path, 'status: final' + rest);
+    const before = await writes();
+    await run(() => ws.editors.viewOf(ws.activeGroup).focus());
+    await chord('y');
+    await sleep(600);
+    check(await shown() === 'status: final' + rest, 'redo: Ctrl+Y after the sync leaves the synced text');
+    check(await onDisk(path) === 'status: final' + rest && await writes() === before, 'redo: nothing is written over the synced file');
+  }
+
+  // Codex review 1, P2: separate edits on a long line keep a caret in its unchanged middle.
+  {
+    const path = 'Long line.md';
+    const middle = Array.from({ length: 1700 }, (_, i) => `w${i % 10}`).join(' ');
+    const text = `start ${middle} end\nnext line`;
+    await open(path, text, 300);
+    const caret = text.indexOf('w7', 3000);
+    await run((caret) => { const view = ws.editors.viewOf(ws.activeGroup); view.focus(); view.dispatch({ selection: { anchor: caret } }); }, caret);
+    const next = text.replace('start ', 'START here ').replace(' end', ' the end');
+    await outside(path, next);
+    const head = await run(() => ws.editors.viewOf(ws.activeGroup).state.selection.main.head);
+    check(await shown() === next && head === caret + 5 && next.slice(head, head + 2) === 'w7', 'a caret inside a long unchanged span stays on its word');
+  }
 });
