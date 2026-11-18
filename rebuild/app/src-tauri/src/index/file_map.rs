@@ -89,14 +89,15 @@ impl Files {
         self.map.contains_key(key)
     }
 
-    pub(super) fn insert(&mut self, key: String, node: Node) -> Option<Node> {
+    /// The replaced node comes back shared: a search snapshot may still hold it.
+    pub(super) fn insert(&mut self, key: String, node: Arc<Node>) -> Option<Arc<Node>> {
         self.clear_snap();
-        self.map.insert(key, Arc::new(node)).map(unique_node)
+        self.map.insert(key, node)
     }
 
-    pub(super) fn remove(&mut self, key: &str) -> Option<Node> {
+    pub(super) fn remove(&mut self, key: &str) -> Option<Arc<Node>> {
         self.clear_snap();
-        self.map.remove(key).map(unique_node)
+        self.map.remove(key)
     }
 
     /// Notes, in path order, shared with any scan already holding the previous list.
@@ -129,19 +130,42 @@ impl Files {
         ValueWalk { inner: self.map.values() }
     }
 
-    /// Visit every node. Each visit counts, then `keep` decides whether it stays.
-    pub(super) fn retain(&mut self, mut keep: impl FnMut(&String, &Node) -> bool) {
-        self.clear_snap();
-        self.map.retain(|key, node| {
+    /// `rel` (when indexed) and every path below it, in path order. Only those paths are
+    /// visited, and each counts.
+    pub(super) fn tree_keys(&self, rel: &str) -> Vec<String> {
+        let mut keys = Vec::new();
+        if self.map.contains_key(rel) {
             #[cfg(test)]
             count_visit();
-            keep(key, node.as_ref())
-        });
+            keys.push(rel.to_string());
+        }
+        for key in self.below(rel) {
+            #[cfg(test)]
+            count_visit();
+            keys.push(key.clone());
+        }
+        keys
     }
-}
 
-fn unique_node(arc: Arc<Node>) -> Node {
-    Arc::try_unwrap(arc).unwrap_or_else(|arc| (*arc).clone())
+    /// Whether any path lies below `rel`. Visits at most one path.
+    pub(super) fn has_below(&self, rel: &str) -> bool {
+        let found = self.below(rel).next().is_some();
+        #[cfg(test)]
+        if found {
+            count_visit();
+        }
+        found
+    }
+
+    /// Paths starting with `rel/`: from `rel/` up to, not including, `rel0` ('0' follows '/').
+    fn below(&self, rel: &str) -> impl Iterator<Item = &String> {
+        use std::ops::Bound::{Excluded, Included};
+        let start = format!("{rel}/");
+        let end = format!("{rel}0");
+        self.map
+            .range::<str, _>((Included(start.as_str()), Excluded(end.as_str())))
+            .map(|(key, _)| key)
+    }
 }
 
 fn search_note_arcs(map: &BTreeMap<String, Arc<Node>>) -> Vec<(Arc<str>, Arc<Node>)> {
