@@ -606,3 +606,70 @@ fn renames_and_deletes_share_nodes_a_search_still_holds() {
     assert_eq!(Arc::strong_count(&c), 2);
     assert_eq!(idx.resolve("b.md", "first").as_deref(), Some("moved/a.md"));
 }
+
+/// A watcher batch of many separate file events (a sync removing `README.md` from
+/// thousands of folders that stay) has no single large tree. The per-path updates share
+/// one `BULK_PATHS` budget per batch; past it the batch rebuilds once instead of shifting
+/// the shared name and suffix lists once per file.
+#[test]
+fn many_single_removals_in_one_batch_share_the_bulk_budget() {
+    let readmes = |n: usize| {
+        let mut idx = Index::stale();
+        for i in 0..n {
+            for path in [format!("p{i:05}/README.md"), format!("p{i:05}/keep.md")] {
+                idx.ensure_parent_nodes(&path);
+                let body = "---\naliases: [readme]\n---\n[[README]]\n".to_string();
+                idx.insert_file(&path, Stamp::sized(body.len()), || body.clone());
+            }
+        }
+        idx.insert_file("last/README.md", Stamp::sized(0), String::new);
+        idx.ensure_parent_nodes("last/README.md");
+        idx.rebuild_maps();
+        let _ = take_rebuild_maps_calls();
+        let _ = take_map_updates();
+        idx
+    };
+    let remove_singly = |idx: &mut Index, count: usize| {
+        let mut batch = idx.map_batch();
+        for i in 0..count {
+            batch.remove_tree(&format!("p{i:05}/README.md"));
+        }
+    };
+
+    // Exactly the budget: path by path, no rebuild.
+    let mut idx = readmes(BULK_PATHS);
+    remove_singly(&mut idx, BULK_PATHS);
+    assert_eq!(
+        (take_rebuild_maps_calls(), take_map_updates()),
+        (0, BULK_PATHS),
+        "a batch within budget stays per-path"
+    );
+    idx.assert_maps_match_rebuild();
+
+    // One more: the batch goes stale once and rebuilds on drop.
+    let mut idx = readmes(BULK_PATHS + 1);
+    remove_singly(&mut idx, BULK_PATHS + 1);
+    assert_eq!(
+        (take_rebuild_maps_calls(), take_map_updates()),
+        (1, BULK_PATHS),
+        "one update past the budget rebuilds once"
+    );
+    idx.assert_maps_match_rebuild();
+
+    // Thousands of single removals: still one rebuild, and the per-path work stops at
+    // the budget.
+    let mut idx = readmes(5_000);
+    remove_singly(&mut idx, 5_000);
+    assert_eq!((take_rebuild_maps_calls(), take_map_updates()), (1, BULK_PATHS));
+    idx.assert_maps_match_rebuild();
+    assert!(idx.is_dir("p04999"));
+    assert!(idx.contains("p04999/keep.md"));
+    assert_eq!(idx.resolve("p00000/keep.md", "README").as_deref(), Some("last/README.md"));
+
+    // The budget belongs to one batch: the next batch starts fresh.
+    let mut batch = idx.map_batch();
+    batch.remove_tree("p00000/keep.md");
+    drop(batch);
+    assert_eq!((take_rebuild_maps_calls(), take_map_updates()), (0, 1));
+    idx.assert_maps_match_rebuild();
+}

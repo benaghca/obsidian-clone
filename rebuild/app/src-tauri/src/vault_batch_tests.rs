@@ -359,3 +359,71 @@ fn p2a_lookups_survive_a_rescan_swap_and_later_patches() {
     assert_eq!(vault.index.resolve("b.md", "c").as_deref(), Some("sub/c.md"));
     assert_eq!(vault.index.resolve("b.md", "sub/c").as_deref(), Some("sub/c.md"));
 }
+
+/// P2a review 2: a sync that deletes `README.md` from thousands of folders arrives as
+/// one watcher batch of single-file Remove records. The folders stay, so no tree is
+/// large. The batch shares one per-path budget and rebuilds the maps once; creating
+/// as many files back does the same.
+#[test]
+fn p2a_many_single_file_events_in_one_batch_rebuild_once() {
+    let dir = tmp_dir("p2a-many-singles");
+    let n = 1_200;
+    for i in 0..n {
+        let folder = dir.path.join(format!("p{i:04}"));
+        fs::create_dir(&folder).unwrap();
+        fs::write(folder.join("README.md"), "---\naliases: [readme]\n---\n[[README]]\n").unwrap();
+        fs::write(folder.join("keep.md"), "[[README]] [[readme]]\n").unwrap();
+    }
+    let mut vault = Vault::open(dir.path.clone()).unwrap();
+    for i in 0..n {
+        fs::remove_file(dir.path.join(format!("p{i:04}/README.md"))).unwrap();
+    }
+    let removes: Vec<VaultChanged> = (0..n)
+        .map(|i| VaultChanged {
+            kind: ChangeKind::Remove,
+            paths: vec![format!("p{i:04}/README.md")],
+        })
+        .collect();
+    let _ = index::take_rebuild_maps_calls();
+    let _ = index::take_map_updates();
+    vault.apply(&removes);
+    let removed = (index::take_rebuild_maps_calls(), index::take_map_updates());
+    links_match_disk(&vault);
+    assert!(vault.index.resolve("p0000/keep.md", "README").is_none());
+    assert!(vault.index.contains("p1199/keep.md"));
+
+    for i in 0..n {
+        fs::write(dir.path.join(format!("p{i:04}/README.md")), "back\n").unwrap();
+    }
+    let creates: Vec<VaultChanged> = (0..n)
+        .map(|i| VaultChanged {
+            kind: ChangeKind::Create,
+            paths: vec![format!("p{i:04}/README.md")],
+        })
+        .collect();
+    let _ = index::take_rebuild_maps_calls();
+    let _ = index::take_map_updates();
+    vault.apply(&creates);
+    let created = (index::take_rebuild_maps_calls(), index::take_map_updates());
+    links_match_disk(&vault);
+    assert_eq!(
+        vault.index.resolve("p0005/keep.md", "README").as_deref(),
+        Some("p0005/README.md")
+    );
+    assert_eq!(
+        (removed, created),
+        ((1, index::BULK_PATHS), (1, index::BULK_PATHS)),
+        "(rebuilds, per-path updates) for {n} single removes, then {n} single creates"
+    );
+}
+
+/// Maps, paths, and resolved links against a rescan. Folder rows are left out of the
+/// comparison: a file Remove event does not re-read its parent folder's mtime (before
+/// P2a too), and deleting a file on disk changes that mtime.
+fn links_match_disk(vault: &Vault) {
+    vault.index.assert_maps_match_rebuild();
+    let scanned = Index::scan(&vault.root).expect("rescan");
+    let paths = |index: &Index| index.paths().cloned().collect::<Vec<_>>();
+    assert_eq!(paths(&vault.index), paths(&scanned), "indexed paths");
+    assert_eq!(vault.index.link_index(), scanned.link_index(), "resolved links");
+}

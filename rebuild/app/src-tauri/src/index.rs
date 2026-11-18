@@ -87,10 +87,12 @@ fn count_list_walk(nodes: usize) {
 const MAX_INDEX_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Above this many paths, a tree delete rebuilds the maps once instead of updating them
-/// path by path. Per path costs microseconds, but each update shifts its sorted lists, so
-/// many same-named files (`README.md` in every folder) would make a large delete quadratic.
-/// Below it, even a list as long as the vault costs about one full rebuild.
-const BULK_PATHS: usize = 256;
+/// path by path, and so does a `MapBatch` after this many per-path updates in total (a
+/// watcher batch of many separate file events). Per path costs microseconds, but each
+/// update shifts its sorted lists, so many same-named files (`README.md` in every folder)
+/// would make a large delete quadratic. Below it, even a list as long as the vault costs
+/// about one full rebuild.
+pub(crate) const BULK_PATHS: usize = 256;
 
 /// A file's modified and created times (ms since the epoch, 0 when unknown) and size.
 #[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
@@ -142,6 +144,9 @@ pub struct Index {
     // until the full rebuild that is pending (on the outermost `MapBatch` drop,
     // or at the end of the `scan` / `refresh_path` that marked them).
     maps_dirty: bool,
+    // Per-path map updates since the outermost `MapBatch` opened. Past `BULK_PATHS`
+    // the maps go stale and that batch rebuilds once on drop.
+    batch_updates: usize,
 }
 
 /// Holds name-map rebuilds, then rebuilds once on drop if anything asked.
@@ -154,9 +159,12 @@ pub(crate) struct MapBatch<'a> {
 impl Drop for MapBatch<'_> {
     fn drop(&mut self) {
         self.index.defer_depth -= 1;
-        if self.index.defer_depth == 0 && self.index.maps_dirty {
-            self.index.maps_dirty = false;
-            self.index.rebuild_maps();
+        if self.index.defer_depth == 0 {
+            self.index.batch_updates = 0;
+            if self.index.maps_dirty {
+                self.index.maps_dirty = false;
+                self.index.rebuild_maps();
+            }
         }
     }
 }
@@ -403,6 +411,9 @@ impl Index {
 
     /// Rebuild name maps once when the guard drops, not once per file in the batch.
     pub(crate) fn map_batch(&mut self) -> MapBatch<'_> {
+        if self.defer_depth == 0 {
+            self.batch_updates = 0;
+        }
         self.defer_depth += 1;
         MapBatch { index: self }
     }
@@ -533,28 +544,39 @@ impl Index {
             return;
         }
         let old = self.files.insert(key.clone(), Arc::clone(&node));
-        #[cfg(test)]
-        count_map_update();
-        match old {
-            Some(old) if name_maps::same_keys(&old, &node) => {}
-            Some(old) => {
-                self.maps.remove(&key, &old);
-                self.maps.add(&key, &node);
-            }
-            None => self.maps.add(&key, &node),
+        if old.as_ref().is_some_and(|old| name_maps::same_keys(old, &node)) || !self.spend_update() {
+            return;
         }
+        if let Some(old) = &old {
+            self.maps.remove(&key, old);
+        }
+        self.maps.add(&key, &node);
     }
 
     /// Remove `key` and forget what it contributed to the maps. The node is shared, not
     /// copied, with any search still holding it.
     fn take_node(&mut self, key: &str) -> Option<Arc<Node>> {
         let old = self.files.remove(key)?;
-        if !self.maps_dirty {
-            #[cfg(test)]
-            count_map_update();
+        if !self.maps_dirty && self.spend_update() {
             self.maps.remove(key, &old);
         }
         Some(old)
+    }
+
+    /// Whether one more per-path map update may run. Inside a `MapBatch`, the batch's
+    /// `BULK_PATHS` budget is shared by all its steps; once it is spent the maps go stale
+    /// and the batch rebuilds once on drop. The node change itself always lands.
+    fn spend_update(&mut self) -> bool {
+        if self.defer_depth > 0 {
+            self.batch_updates += 1;
+            if self.batch_updates > BULK_PATHS {
+                self.maps_dirty = true;
+                return false;
+            }
+        }
+        #[cfg(test)]
+        count_map_update();
+        true
     }
 
     /// Index the entries of the folder `rel` ("" for the vault) and everything below them,

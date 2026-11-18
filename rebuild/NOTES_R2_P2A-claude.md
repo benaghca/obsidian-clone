@@ -89,9 +89,32 @@ Built on `rebuild/r2-p2a-claude` from `rebuild/integration` `d285b70` (brief: `R
   2. `legacy_winners`: the pre-P2a `rebuild_maps` loop, copied verbatim, returning its four maps. The live maps' winners, read through the **same accessors `resolve` uses**, must equal it. This catches a wrong winner rule (for example, first instead of last for lower-case paths), not just drift between the two new code paths.
 - **Batches.** A batch with only per-path work (file renames, small deletes, and file refreshes: the watcher's usual shape) never goes stale and never rebuilds. A batch with a folder refresh, a folder move, or a large delete goes stale at that point; any later per-path work in that batch skips the maps; the outermost drop rebuilds once.
 
-## Tests
+## Review 2 fix (Codex PASS-WITH-FIXES, one P2)
 
-All in Rust; no TypeScript changes.
+**P2: a watcher batch of many single-file events could still go quadratic.** The review 1 cutoff counted the paths of one tree. A sync that deletes `README.md` from thousands of folders that stay arrives as one watcher batch of single-file Remove records (`watch.rs` groups them, and `Vault::apply` runs them in one `MapBatch` under the vault lock). No single tree is large, so each removal shifted the shared name and partial-path lists. Before P2a, that batch rebuilt once.
+
+**The fix: one `BULK_PATHS` budget per batch.**
+- `Index.batch_updates` counts per-path map updates since the outermost `MapBatch` opened. It is reset when that batch opens and when it drops.
+- Every per-path update in `put_node` / `take_node` goes through `spend_update`.
+  - Inside a batch, the 257th update marks the maps stale instead.
+  - From then on, every step in that batch skips the maps, and the batch rebuilds once on drop.
+  - The node change itself always lands in the file list.
+- Outside a batch nothing changes: each call is its own lock hold, and the per-tree cutoff from review 1 still covers one large delete.
+- A save whose keys don't change (same kind of node, same aliases) spends no budget, so a batch of plain content modifies stays per-path.
+- Within budget, a batch costs at most 256 per-path updates: a few µs each, or about one rebuild even in the worst case where every file shares one name. Past the budget it costs those plus one rebuild.
+
+**Tests:**
+- `many_single_removals_in_one_batch_share_the_bulk_budget` (`index/name_maps_tests.rs`). Folders `pNNNNN/` each hold `README.md` (alias `readme`) and `keep.md`; `README.md` files are removed one `remove_tree` call at a time inside one batch, and the folders stay.
+  - 256 removals: **0** rebuilds, **256** per-path updates.
+  - 257 removals: **1** rebuild, 256 updates.
+  - 5,000 removals: **1** rebuild, 256 updates.
+  - The next batch gets a fresh budget.
+  - After each case the maps equal both oracles, and `README` resolves to the surviving `last/README.md`.
+- `p2a_many_single_file_events_in_one_batch_rebuild_once` (`vault_batch_tests.rs`) goes through the real watcher path, `Vault::apply`, on disk under `/tmp`. 1,200 folders each lose `README.md` (folders stay), as 1,200 separate Remove records in one apply. Then 1,200 files come back as 1,200 separate Create records.
+  - Each apply does exactly **1** rebuild and stops per-path work at 256 updates.
+  - After each apply, the maps equal both oracles, and the indexed paths and `link_index` equal a rescan.
+  - It doesn't compare folder rows: a single-file Remove has never re-read its parent folder's mtime, and that is outside this piece.
+- Mutation: with the budget check disabled, both new tests fail.
 
 **New, `src-tauri/src/index/name_maps_tests.rs`:**
 
@@ -132,7 +155,11 @@ The lower-case path mutation was missed at first: the rebuilt copy shares the lo
 
 **Suites:**
 
-- `cargo test --offline` in `rebuild/app/src-tauri`: **210 passed**, 0 failed, 6 ignored (after review 1; 208 at `d5e3a78`).
+- `cargo test --offline` in `rebuild/app/src-tauri`: **212 passed**, 0 failed, 6 ignored after review 2 (210 at `9f87d3d`, 208 at `d5e3a78`).
+- `flock /tmp/grove-npm-test.lock npm test` in `rebuild/app`, after review 2: **passed** on the third run (exit 0; vitest 1691/1691, every browser script and posttest PASS).
+  - Run 1 failed only on the known `test-bases-edge.mjs` 10k-scroll frame flake (`p95 16.7 max 33.4`).
+  - Run 2 failed only on a `test-bases-embed.mjs` budget: `the cold open renders both embeds within 100 ms (177.4 ms)`.
+  - Both are browser-mock timing checks with no Rust index involved, and each passed in every other full run of this piece. Another session's locked run started right after run 2, so the machine was shared around then.
 - `flock /tmp/grove-npm-test.lock npm test` in `rebuild/app`, after review 1: **passed** (exit 0; vitest 1691/1691, every browser script and posttest PASS) on its second run.
   - The first run failed only in `test-drawing-editor.mjs`: one 52 ms task against a 50 ms budget (`DRAWING_EDIT_LONG [52]`). That is a browser-mock timing flake with no Rust index involved. On the rerun it read `[]`.
 - At `d5e3a78` the same suite **passed** (exit 0; vitest 1691/1691, every browser script and posttest PASS) on its second run.
@@ -160,7 +187,7 @@ Each figure is the median of three bench runs. Each bench run averages 5 rebuild
 
 ## Leftover gaps
 
-- **A folder refresh, a folder move, and a delete of more than 256 paths still do one full rebuild.** These are a watcher folder create, a folder rename (with its destination reload), a big folder delete, and rescan replay of a folder. That is deliberate (see "Review 1 fixes") and still batched once per `MapBatch`. To make them per-path later, removals and inserts would have to be grouped per key, with one `retain` or merge per list instead of one shift per path. Do that only if a folder rename on a huge vault shows up in a profile.
+- **A folder refresh, a folder move, a delete of more than 256 paths, and a batch with more than 256 per-path updates still do one full rebuild.** These are a watcher folder create, a folder rename (with its destination reload), a big folder delete, and rescan replay of a folder. That is deliberate (see "Review 1 fixes") and still batched once per `MapBatch`. To make them per-path later, removals and inserts would have to be grouped per key, with one `retain` or merge per list instead of one shift per path. Do that only if a folder rename on a huge vault shows up in a profile.
 - **`link_index` is still sent in full** about a second after each save (`LINK_INDEX_DELAY` in `vault.ts`), and the page still rebuilds its link consumers. That is P2b, which is the larger half of the felt gain on big vaults. P2a only takes the map rebuild out of the save path.
 - `upsert_note` still calls `ensure_dirs`, which runs one `stat` per parent folder per save. That was already there and is cheap, so it was left alone.
 - The 20k timing check is a ratio inside one debug run, not an absolute budget, so a slow CI box can't flake it. The absolute numbers live in the ignored bench.
