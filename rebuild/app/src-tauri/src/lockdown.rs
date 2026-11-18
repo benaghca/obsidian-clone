@@ -6,7 +6,11 @@
 //! - every navigation (a link, a dropped URL, script setting `location`, a frame load) is checked.
 //!   The app's own origin is always allowed: `tauri://localhost`, or `http(s)://tauri.localhost` on
 //!   Windows and Android, in release builds, plus the dev server origin in dev builds. A *child* frame may also
-//!   load an `http(s)` origin the page registered with `allow_frame_origin`. The main frame may not;
+//!   load an `http(s)` origin the page registered with `allow_frame_origin`, a `blob:` URL (a vault
+//!   PDF the page read), or WebKit's built-in PDF viewer
+//!   (`webkit-pdfjs-viewer://pdfjs/web/viewer.html`) when its `file` parameter is a `blob:` URL.
+//!   The main frame may not. On Linux the response-policy hook still ignores those URLs as a
+//!   main-frame document, and vault bytes are not page script.
 //! - every new-window request (`window.open`, `target=_blank`) is denied, registered origin or not.
 //!
 //! External links never load inside the app: the front end hands them to the system opener
@@ -293,10 +297,37 @@ pub fn main_frame_document_allowed(url: &Url, dev_url: Option<&Url>) -> bool {
     is_app_url(url, dev_url)
 }
 
+/// WebKit's built-in PDF viewer, and only when the file it opens is a blob we created.
+fn is_pdf_viewer_url(url: &Url) -> bool {
+    if url.scheme() != "webkit-pdfjs-viewer"
+        || url.host_str() != Some("pdfjs")
+        || url.path() != "/web/viewer.html"
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return false;
+    }
+    let mut saw_file = false;
+    for (key, value) in url.query_pairs() {
+        if key != "file" {
+            continue;
+        }
+        saw_file = true;
+        let Ok(file) = Url::parse(&value) else {
+            return false;
+        };
+        if file.scheme() != "blob" {
+            return false;
+        }
+    }
+    saw_file
+}
+
 /// Whether a navigation may proceed.
 ///
 /// The main frame stays on the app. A child frame, and a navigation whose frame wry cannot name,
-/// may also go to a registered http(s) origin. `file:`, `javascript:`, and anything unregistered
+/// may also go to a registered http(s) origin, a `blob:` URL, or WebKit's PDF viewer when
+/// [`is_pdf_viewer_url`] allows it. `file:`, `javascript:`, `data:`, and anything unregistered
 /// are refused in every frame. New windows are not decided here; the builder denies all of them.
 pub fn navigation_allowed(
     url: &Url,
@@ -310,7 +341,9 @@ pub fn navigation_allowed(
     match place {
         NavFrame::Main => false,
         NavFrame::Child | NavFrame::Unknown => {
-            http_origin(url).is_some_and(|origin| frames.contains(&origin))
+            url.scheme() == "blob"
+                || is_pdf_viewer_url(url)
+                || http_origin(url).is_some_and(|origin| frames.contains(&origin))
         }
     }
 }
@@ -483,6 +516,26 @@ mod tests {
                 Some("'self' blob:"),
                 "{name} media-src"
             );
+            assert_eq!(
+                policy["frame-src"].as_str(),
+                Some("https: http: blob: webkit-pdfjs-viewer:"),
+                "{name} frame-src"
+            );
+            assert_eq!(
+                policy["object-src"].as_str(),
+                Some("'none'"),
+                "{name} object-src"
+            );
+            assert_eq!(
+                policy["child-src"].as_str(),
+                Some("'none'"),
+                "{name} child-src"
+            );
+            assert_eq!(
+                policy["script-src"].as_str(),
+                Some("'self'"),
+                "{name} script-src"
+            );
             let flat = policy.to_string();
             assert!(
                 !flat.contains("asset:") && !flat.contains("asset.localhost"),
@@ -632,6 +685,41 @@ mod tests {
             &bare,
             NavFrame::Child
         ));
+
+        // A vault PDF is a blob the page created. A child frame may load it, and WebKit may
+        // then open its built-in viewer only for that blob. The main frame may not.
+        let blob = url("blob:https://example.com/550e8400-e29b-41d4-a716-446655440000");
+        let viewer = url(
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=blob%3Ahttps%3A%2F%2Fexample.com%2F550e8400-e29b-41d4-a716-446655440000",
+        );
+        for place in [NavFrame::Child, NavFrame::Unknown] {
+            assert!(navigation_allowed(&blob, None, &bare, place), "{place:?}");
+            assert!(navigation_allowed(&viewer, None, &bare, place), "{place:?}");
+        }
+        assert!(!navigation_allowed(&blob, None, &bare, NavFrame::Main));
+        assert!(!navigation_allowed(&viewer, None, &bare, NavFrame::Main));
+        assert!(!main_frame_document_allowed(&blob, None));
+        assert!(!main_frame_document_allowed(&viewer, None));
+        for refused in [
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html",
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=https://evil.test/a.pdf",
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=javascript:alert(1)",
+            "webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=file:///etc/passwd",
+            "webkit-pdfjs-viewer://pdfjs/extras/content-script.js?file=blob:https://example.com/x",
+            "webkit-pdfjs-viewer://evil/web/viewer.html?file=blob:https://example.com/x",
+            "webkit-pdfjs-viewer://user@pdfjs/web/viewer.html?file=blob:https://example.com/x",
+            "data:application/pdf,JVBERi0=",
+            "javascript:alert(1)",
+        ] {
+            assert!(
+                !navigation_allowed(&url(refused), None, &bare, NavFrame::Child),
+                "{refused} was allowed"
+            );
+            assert!(
+                !navigation_allowed(&url(refused), None, &bare, NavFrame::Unknown),
+                "{refused} was allowed"
+            );
+        }
     }
 
     #[test]

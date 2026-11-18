@@ -70,9 +70,12 @@ const ALLOW = [
     files: /^src-tauri\/capabilities\/[\w-]+\.json$/,
     why: "opener scope: which links a click may hand to the system browser",
   },
-  // Embedded web pages (W1). Not an ALLOW row: frame-src is the scheme sources
-  // "https:" and "http:" with no host, so the URL rule does not match them.
-  // Section 3 allows exactly those two sources on frame-src and nowhere else.
+  // Embedded web pages (W1) plus a vault PDF (R2 M). Not an ALLOW row: frame-src
+  // is the scheme sources "https:", "http:", "blob:", and "webkit-pdfjs-viewer:" with no
+  // host, so the URL rule does not match them. Section 3 allows exactly those
+  // sources on frame-src and nowhere else. blob: is the PDF iframe. webkit-pdfjs-viewer:
+  // is WebKit's built-in viewer; the navigation guard still requires its file
+  // parameter to be a blob URL.
   // The frame's network is the navigation guard's registered origins, not
   // fetch, XHR, or WebSocket. Do not add an ALLOW row for those rules, or for
   // a host URL inside the embed code.
@@ -160,8 +163,8 @@ const REQUIRED = {
   "base-uri": ["'self'"],
   "form-action": ["'none'"],
 };
-// W1: the only remote CSP exception. Schemes, not hosts. child-src stays 'none'.
-const FRAME_SRC = ["https:", "http:"];
+// W1 plus a vault PDF. Schemes, not hosts. child-src stays 'none'.
+const FRAME_SRC = ["https:", "http:", "blob:", "webkit-pdfjs-viewer:"];
 // These rules stay closed. An ALLOW row for one of them fails the audit.
 const CLOSED_RULES = ["fetch", "xhr", "websocket", "eventsource", "beacon", "webrtc", "service-worker", "import-scripts", "window-open", "css-import", "css-url", "source-map"];
 

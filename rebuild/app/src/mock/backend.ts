@@ -6,6 +6,7 @@ import { readProperties, splitFrontmatter } from "../editor/frontmatter";
 import { editProperty, type PropertyEdit } from "../editor/propertyEdit";
 import { linkResolver, linkSpellings, markdownURL } from "../links/internal";
 import { tagsInText } from "../shell/linksTags";
+import { mediaBytesMatch, mediaKind } from "../media";
 import { fileName, isNoteFile, noteName } from "../paths";
 import { createSearchVault } from "../shell/searchVault";
 import { sampleVault, syntheticVault } from "./sampleVault";
@@ -439,10 +440,21 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
       return new Uint8Array(mockClipboardPacked).buffer;
     },
     read_file_bytes: ({ path }) => {
-      if (!/\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(path) || path.split("/").includes("..")) throw new Error(`not an image: ${path}`);
-      const content = need(path).content;
-      const binary = isBinary(content) ? base64ToBytes(content.slice(BYTE_MARK.length)) : null;
-      return binary ?? imageBytes(content);
+      const p = String(path ?? "");
+      if (p.split("/").includes("..")) throw new Error(`not an image: ${p}`);
+      const image = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(p);
+      const kind = mediaKind(p);
+      if (!image && !kind) throw new Error(`not an image: ${p}`);
+      const content = need(p).content;
+      const binary = isBinary(content) ? new Uint8Array(base64ToBytes(content.slice(BYTE_MARK.length))) : null;
+      if (kind) {
+        const bytes = binary ?? new TextEncoder().encode(content);
+        if (bytes.byteLength > BYTE_MAX) throw new Error(`too large to show: ${p}`);
+        if (!mediaBytesMatch(p, bytes)) throw new Error(`not a media file: ${p}`);
+        return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      }
+      if (binary && binary.byteLength > BYTE_MAX) throw new Error(`too large to show: ${p}`);
+      return binary ? binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength) : imageBytes(content);
     },
     write_file_bytes: ({ path, bytes, replace }) => {
       const why = badPath(String(path ?? ""));

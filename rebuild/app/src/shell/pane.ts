@@ -17,7 +17,8 @@ import { baseViews, canvasViews, drawingViews, graphViews, preloadKinds } from "
 import { renameError, renameFile } from "../fileOps";
 import { EditorView } from "@codemirror/view";
 import { editAt, readingMode } from "../editor/render";
-import { noteName, parentDir } from "../paths";
+import { MEDIA_PLAY_FAIL, mediaFailText } from "../media";
+import { fileName, noteName, parentDir } from "../paths";
 import { type Group, type Tab, tabTitle, type ViewType } from "../tabs";
 import type { Workspace } from "../workspace";
 import { dragPointer, fieldError, h, iconButton } from "./dom";
@@ -419,7 +420,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       shownCrumb = crumb;
       breadcrumb.replaceChildren();
       if (tab.type && !fileView) {
-        const title = tab.type === "image" || tab.type === "backlinks" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph";
+        const title = tab.type === "image" || tab.type === "audio" || tab.type === "video" || tab.type === "pdf" || tab.type === "backlinks" ? tabTitle(tab) : tab.type === "graph" ? "Graph view" : "Local graph";
         breadcrumb.append(h("span", { class: "view-header-title" }, title));
         return;
       }
@@ -509,6 +510,73 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       void held.url.then((url) => shownImage?.held === held && (picture.src = url), () => {});
     }
 
+    // A recording: one player, from the same blob: URLs as an embed. Over the size cap, a short message.
+    const mediaView = h("div", { class: "view-content media-view" });
+    mediaView.hidden = true;
+    let shownMedia: { path: string; kind: "audio" | "video"; held: ReturnType<typeof ws.embeds.media>; el: HTMLMediaElement } | null = null;
+    function renderMedia(path: string | null, kind: "audio" | "video" | null) {
+      if (shownMedia && shownMedia.path === path && shownMedia.kind === kind) return;
+      shownMedia?.held.release();
+      if (shownMedia) {
+        shownMedia.el.pause();
+        shownMedia.el.removeAttribute("src");
+        shownMedia.el.load();
+      }
+      shownMedia = null;
+      mediaView.replaceChildren();
+      if (!path || !kind) return;
+      const el = document.createElement(kind);
+      el.controls = true;
+      el.preload = "metadata";
+      if (el instanceof HTMLVideoElement) el.playsInline = true;
+      let armed = false;
+      el.addEventListener("error", () => {
+        if (shownMedia?.el === el && armed) mediaView.replaceChildren(h("p", { class: "media-fail" }, MEDIA_PLAY_FAIL));
+      });
+      mediaView.append(el);
+      const held = ws.embeds.media(path);
+      shownMedia = { path, kind, held, el };
+      void held.url.then(
+        (url) => {
+          if (shownMedia?.held !== held) return;
+          armed = true;
+          el.src = url;
+        },
+        (err) => {
+          if (shownMedia?.held !== held) return;
+          mediaView.replaceChildren(h("p", { class: "media-fail" }, mediaFailText(err, kind)));
+        },
+      );
+    }
+
+    // A PDF: the iframe is created only after the bytes succeed, so a failed read never navigates.
+    const pdfView = h("div", { class: "view-content pdf-view" });
+    pdfView.hidden = true;
+    const pdfFrame = document.createElement("iframe");
+    let shownPdf: { path: string; held: ReturnType<typeof ws.embeds.media> } | null = null;
+    function renderPdf(path: string | null) {
+      if (shownPdf?.path === path) return;
+      shownPdf?.held.release();
+      shownPdf = null;
+      pdfFrame.removeAttribute("src");
+      pdfView.replaceChildren();
+      if (!path) return;
+      const held = ws.embeds.media(path);
+      shownPdf = { path, held };
+      void held.url.then(
+        (url) => {
+          if (shownPdf?.held !== held) return;
+          pdfFrame.title = fileName(path);
+          pdfView.replaceChildren(pdfFrame);
+          pdfFrame.src = url;
+        },
+        (err) => {
+          if (shownPdf?.held !== held) return;
+          pdfView.replaceChildren(h("p", { class: "media-fail" }, mediaFailText(err, "pdf")));
+        },
+      );
+    }
+
     let canvas: { el: HTMLElement; dispose(): void } | null = null;
     let canvasPath: string | null = null;
     let canvasTab: Tab | null = null;
@@ -519,6 +587,9 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       const tab = group.active;
       const path = tab.path;
       const image = tab.type === "image" ? (tab.viewFile ?? null) : null;
+      const mediaKindNow = tab.type === "audio" || tab.type === "video" ? tab.type : null;
+      const mediaPath = mediaKindNow ? tab.viewFile || null : null;
+      const pdfPath = tab.type === "pdf" ? tab.viewFile || null : null;
       const board = tab.type === "canvas" || tab.type === "base" ? tab.viewFile ?? null : null;
       const drawingFile = tab.type === "drawing" ? tab.viewFile ?? null : null;
       // The chunk is not in memory yet. Leave whatever is on screen; the
@@ -557,9 +628,13 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       const links = tab.type === "backlinks" ? (tab.viewFile ?? null) : undefined;
       showBacklinksTab(links);
       scroller.hidden = !path || !!graph || links !== undefined;
-      empty.hidden = !!path || !!graph || !!image || !!board || !!drawingFile || links !== undefined;
+      empty.hidden = !!path || !!graph || !!image || !!board || !!drawingFile || links !== undefined || !!mediaPath || !!pdfPath;
       imageView.hidden = !image;
+      mediaView.hidden = !mediaPath;
+      pdfView.hidden = !pdfPath;
       renderImage(image);
+      renderMedia(mediaPath, mediaKindNow);
+      renderPdf(pdfPath);
       for (const child of [...leaf.children]) if (child.classList.contains("graph-view") && child !== graph?.el) child.remove();
       if (graph && graph.el.parentElement !== leaf) leaf.append(graph.el);
       const pathChanged = path !== titlePath;
@@ -752,7 +827,7 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       }
     });
 
-    const leaf = h("div", { class: "workspace-leaf" }, header, scroller, empty, imageView);
+    const leaf = h("div", { class: "workspace-leaf" }, header, scroller, empty, imageView, mediaView, pdfView);
     const el = h("div", { class: "workspace-tabs" }, strip.el, leaf);
     // A press or focus anywhere in a pane makes it the active one.
     const activate = () => ws.focusGroup(group);

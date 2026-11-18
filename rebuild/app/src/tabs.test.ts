@@ -81,6 +81,15 @@ describe("tabs", () => {
     expect(loadTab(saveTab({ ...blank(), type: "localgraph", viewFile: "Gone.md" }), blank, isNote)).toMatchObject({ type: "localgraph", viewFile: null });
     expect(loadTab(saveTab({ ...blank(), type: "canvas", viewFile: "Board.canvas" }), blank, isNote)).toMatchObject({ type: "canvas", path: null, viewFile: "Board.canvas" });
     expect(loadTab(saveTab({ ...blank(), type: "drawing", viewFile: "Sketch.excalidraw" }), blank, isNote)).toMatchObject({ type: "drawing", path: null, viewFile: "Sketch.excalidraw" });
+    expect(loadTab(saveTab({ ...blank(), type: "audio", viewFile: "clip.mp3" }), blank, isNote)).toMatchObject({ type: "audio", path: null, viewFile: "clip.mp3" });
+    expect(loadTab(saveTab({ ...blank(), type: "video", viewFile: "movie.mp4" }), blank, isNote)).toMatchObject({ type: "video", path: null, viewFile: "movie.mp4" });
+    expect(loadTab(saveTab({ ...blank(), type: "pdf", viewFile: "Docs/Lease.pdf" }), blank, isNote)).toMatchObject({ type: "pdf", path: null, viewFile: "Docs/Lease.pdf" });
+    expect(tabTitle({ ...blank(), type: "pdf", viewFile: "Docs/Lease.pdf" })).toBe("Lease");
+    expect(tabTitle({ ...blank(), type: "audio", viewFile: "clip.mp3" })).toBe("clip");
+    // A layout saved before these views stored the file as the tab path.
+    expect(loadTab({ path: "clip.mp3", mode: "live", pinned: false, back: [], forward: [] }, blank, isNote)).toMatchObject({ type: "audio", path: null, viewFile: "clip.mp3" });
+    expect(loadTab({ path: "Docs/Lease.PDF", mode: "live", pinned: false, back: [], forward: [] }, blank, isNote)).toMatchObject({ type: "pdf", path: null, viewFile: "Docs/Lease.PDF" });
+    expect(loadTab({ path: "A.md", mode: "live", pinned: false, back: ["clip.mp3", "\0audio\0clip.mp3"], forward: [] }, blank, isNote)!.back).toEqual(["\0audio\0clip.mp3"]);
   });
 
   it("links tabs (Link with tab...): linked tabs follow the note one opens, views stay, a lone link goes", () => {

@@ -19,6 +19,7 @@ import { resolveLink } from "./links/internal";
 import { listeners } from "./listeners";
 import { kept } from "./memo";
 import { createNote } from "./fileOps";
+import { mediaMime } from "./media";
 import { fileName, isNoteFile, noteName } from "./paths";
 import { dailyNotePath, existingDailyNote, fillTemplate } from "./settings/dateFormat";
 import { settings } from "./settings/store";
@@ -184,6 +185,22 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   };
   ws.vault.onModified(modified);
 
+  const holdBlob = (path: string, type: string) => {
+    const held = kept(images, path, () => ({ url: api.readFileBytes(path).then((bytes) => URL.createObjectURL(new Blob([bytes], { type }))), holders: 0 }));
+    held.holders++;
+    let released = false;
+    return {
+      url: held.url,
+      release() {
+        if (released) return;
+        released = true;
+        if (--held.holders > 0) return;
+        if (images.get(path) === held) images.delete(path);
+        held.url.then(URL.revokeObjectURL, () => {});
+      },
+    };
+  };
+
   return {
     resolve: (target, view) => resolveLink(target, ws.editors.pathOf(view), ws.vault.fileRefs()),
     pathOf: (view) => ws.editors.pathOf(view),
@@ -197,19 +214,10 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       });
     },
     image(path) {
-      const held = kept(images, path, () => ({ url: api.readFileBytes(path).then((bytes) => URL.createObjectURL(new Blob([bytes], { type: mime(path) }))), holders: 0 }));
-      held.holders++;
-      let released = false;
-      return {
-        url: held.url,
-        release() {
-          if (released) return;
-          released = true;
-          if (--held.holders > 0) return;
-          if (images.get(path) === held) images.delete(path);
-          held.url.then(URL.revokeObjectURL, () => {});
-        },
-      };
+      return holdBlob(path, mime(path));
+    },
+    media(path) {
+      return holdBlob(path, mediaMime(path));
     },
     async toggleTask(path, line) {
       // Through the note's editor state (loaded from disk if it isn't open), so it is saved like any edit.

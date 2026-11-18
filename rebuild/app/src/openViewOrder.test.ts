@@ -326,3 +326,77 @@ test("closing onto a cold canvas waits, and closing the cold tab itself does not
   expect(again.group.tabs).toEqual([again.canvas]);
   expect(again.group.active).toBe(again.canvas);
 });
+
+test("pdf, audio, and video open as views and do not load a note", async () => {
+  const tab = {
+    id: 1,
+    path: "Welcome.md",
+    back: [] as string[],
+    forward: [] as string[],
+    mode: "live" as const,
+    pinned: false,
+    backlinks: false,
+    memory: null,
+  } as Tab;
+  const group = { active: tab, tabs: [tab] };
+  const load = vi.fn(async () => ({ doc: { toString: () => "" } }));
+  const host = Object.assign(Object.create(Workspace.prototype), {
+    opens: new WeakMap(),
+    recent: [] as string[],
+    layout: { groups: () => [group], activeGroup: group },
+    editors: {
+      load,
+      shows: () => false,
+      present: () => {},
+      viewOf: () => ({
+        state: { doc: { toString: () => "", length: 0, lines: 1, line: () => ({ from: 0, to: 0 }) }, selection: { main: { anchor: 0, head: 0 } } },
+        focus() {},
+        dispatch() {},
+      }),
+    },
+    settle: () => {},
+  });
+  await Workspace.prototype.open.call(host, "clip.mp3");
+  expect(tab).toMatchObject({ type: "audio", path: null, viewFile: "clip.mp3" });
+  await Workspace.prototype.open.call(host, "movie.mp4");
+  expect(tab).toMatchObject({ type: "video", path: null, viewFile: "movie.mp4" });
+  await Workspace.prototype.open.call(host, "Doc.PDF");
+  expect(tab).toMatchObject({ type: "pdf", path: null, viewFile: "Doc.PDF" });
+  await Workspace.prototype.open.call(host, "pic.png");
+  expect(tab).toMatchObject({ type: "image", path: null, viewFile: "pic.png" });
+  expect(load).not.toHaveBeenCalled();
+  await Workspace.prototype.open.call(host, "Note.md");
+  expect(load).toHaveBeenCalledTimes(1);
+  expect(load).toHaveBeenCalledWith("Note.md");
+  expect(tab.path).toBe("Note.md");
+  expect(tab.type).toBeUndefined();
+
+  load.mockClear();
+  tab.back = ["clip.mp3"];
+  tab.forward = [];
+  tab.path = "Note.md";
+  tab.type = undefined;
+  tab.viewFile = undefined;
+  await Workspace.prototype.travel.call(host, -1);
+  expect(load).not.toHaveBeenCalled();
+  expect(tab).toMatchObject({ type: "audio", path: null, viewFile: "clip.mp3" });
+
+  tab.back = ["\0image\0clip.mp3"];
+  tab.forward = [];
+  tab.path = "Note.md";
+  tab.type = undefined;
+  tab.viewFile = undefined;
+  await Workspace.prototype.travel.call(host, -1);
+  expect(load).not.toHaveBeenCalled();
+  expect(tab).toMatchObject({ type: "image", path: null, viewFile: "clip.mp3" });
+
+  tab.back = ["Note.md"];
+  tab.forward = [];
+  tab.path = null;
+  tab.type = "audio";
+  tab.viewFile = "clip.mp3";
+  await Workspace.prototype.travel.call(host, -1);
+  expect(load).toHaveBeenCalledWith("Note.md");
+  expect(tab.path).toBe("Note.md");
+  expect(tab.type).toBeUndefined();
+});

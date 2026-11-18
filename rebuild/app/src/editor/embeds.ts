@@ -15,6 +15,7 @@
 
 import { EditorSelection, StateEffect, StateField, type Text } from "@codemirror/state";
 import type { EditorView, WidgetType } from "@codemirror/view";
+import { MEDIA_PLAY_FAIL, mediaFailText } from "../media";
 import { dragPointer, h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { fileName, noteName } from "../paths";
@@ -248,6 +249,74 @@ export class ImageWidget extends DrawnWidget {
         () => held === mine && dom.replaceChildren(`“${this.src}” could not be loaded.`),
       );
     };
+    load();
+    const unwatch = host.watch(path, load);
+    onDestroy(dom, () => {
+      unwatch();
+      held?.release();
+    });
+    return dom;
+  }
+}
+
+/** An audio or video embed: a player, not a note. Clicks stay on the controls. */
+export class MediaWidget extends DrawnWidget {
+  constructor(
+    readonly kind: "audio" | "video",
+    readonly path: string | null,
+    readonly src: string,
+    readonly srcAt: number,
+    readonly size: EmbedSize,
+    readonly length: number,
+  ) {
+    super();
+  }
+  ignoreEvent() {
+    return true;
+  }
+  toDOM(view: EditorView) {
+    const editor = view.state.facet(editorHost);
+    const host = editor?.embeds;
+    const { path, size, kind } = this;
+    if (!path || !host) return missingBox(`“${this.src}” could not be found.`);
+    const el = document.createElement(kind);
+    el.controls = true;
+    el.preload = "metadata";
+    if (el instanceof HTMLVideoElement) el.playsInline = true;
+    if (size.width) el.style.width = `${size.width}px`;
+    if (kind === "video" && size.height && el instanceof HTMLVideoElement) el.height = size.height;
+    const actions = editButton();
+    const dom = h("span", { class: `internal-embed media-embed is-${kind}` }, el, actions);
+    actions.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const at = view.posAtDOM(dom);
+      const from = at + this.srcAt;
+      view.dispatch({ selection: EditorSelection.range(from, from + this.src.length), effects: editEmbed.of(at) });
+      view.focus();
+    });
+    let held: ReturnType<typeof host.media> | null = null;
+    let started = false;
+    const fail = (text: string) => {
+      if (held) dom.replaceChildren(text);
+    };
+    const load = () => {
+      held?.release();
+      started = false;
+      el.removeAttribute("src");
+      const mine = (held = host.media(path));
+      mine.url.then(
+        (url) => {
+          if (held !== mine) return;
+          started = true;
+          el.src = url;
+          dom.classList.add("is-loaded");
+        },
+        (err) => held === mine && fail(mediaFailText(err, kind)),
+      );
+    };
+    el.addEventListener("error", () => {
+      if (held && started) fail(MEDIA_PLAY_FAIL);
+    });
     load();
     const unwatch = host.watch(path, load);
     onDestroy(dom, () => {

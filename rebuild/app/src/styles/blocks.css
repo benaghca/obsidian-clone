@@ -47,6 +47,7 @@
   transition: opacity var(--anim-duration-fast) var(--anim-ease-out);
 }
 :is(.cm-callout, .cm-table-widget, .image-embed):hover > .embed-actions,
+:is(.media-embed.is-audio, .media-embed.is-video):hover > .embed-actions,
 .cm-codeblock-begin:hover .copy-code-button {
   opacity: 1;
 }
@@ -210,6 +211,46 @@
   display: flex;
   justify-content: center;
   padding: 16px;
+}
+
+/* audio and video. Images also use .media-embed, so these rules name the kind. */
+.media-embed.is-audio,
+.media-embed.is-video {
+  position: relative;
+  display: block;
+  max-width: 100%;
+  margin: 0.5em 0;
+}
+.media-embed.is-audio audio {
+  width: min(520px, 100%);
+}
+.media-embed.is-video video,
+.view-content.media-view video {
+  max-width: 100%;
+  background: #000;
+}
+.media-embed.is-video video {
+  max-height: 70vh;
+}
+.view-content.media-view {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.view-content.pdf-view {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+.view-content.pdf-view iframe {
+  flex: 1;
+  width: 100%;
+  border: 0;
+  background: var(--background-primary);
+}
+.media-fail {
+  margin: 0;
+  color: var(--text-muted);
 }
 
 /* note embeds, and the box for a missing file: blocks inside their line,

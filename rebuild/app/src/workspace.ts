@@ -13,6 +13,7 @@ import { headingPos } from "./editor/headings";
 import type { EditorHost, EmbedHost, PropertyHost } from "./editor/host";
 import { isDrawingPath } from "./drawing/render";
 import { IMAGE_EXT } from "./editor/embeds";
+import { mediaKind } from "./media";
 import { kindReady, notesReady, preloadKinds } from "./viewLoad";
 import { createEditorHost } from "./editorHost";
 import { type Edge, Layout } from "./layout";
@@ -605,7 +606,7 @@ export class Workspace {
     const replaces = !opts.where;
     const mine = Symbol();
     if (replaces) this.opens.set(from, mine);
-    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path) || isDrawingPath(path)) {
+    if (IMAGE_EXT.test(path) || /\.(canvas|base)$/i.test(path) || isDrawingPath(path) || mediaKind(path)) {
       const kind = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : isDrawingPath(path) ? "drawing" : undefined;
       // Already-loaded chunks stay on this turn. A missing one is fetched
       // before the tab changes, so the pane never shows an empty board.
@@ -654,13 +655,13 @@ export class Workspace {
     }
   }
 
-  /** An image from the file list: shown in the tab (or where `where` says), as Obsidian's image view. */
+  /** An image, recording, or PDF from the file list, shown in the tab (or where `where` says). */
   private openAttachment(path: string, where: OpenWhere, from = this.activeGroup) {
     if (!where && from.active.pinned && from.active.viewFile !== path) where = "tab";
     const { group, tab, layoutChanged } = this.target(from, where, where === "tab");
     pushBack(tab, this.caretIn(from));
     tab.path = null;
-    tab.type = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : isDrawingPath(path) ? "drawing" : "image";
+    tab.type = /\.canvas$/i.test(path) ? "canvas" : /\.base$/i.test(path) ? "base" : isDrawingPath(path) ? "drawing" : mediaKind(path) ?? "image";
     this.recent = [path, ...this.recent.filter(p => p !== path)].slice(0, 50);
     tab.viewFile = path;
     this.show(group, tab, layoutChanged);
@@ -718,7 +719,12 @@ export class Workspace {
     const mine = Symbol();
     this.opens.set(group, mine);
     const stale = () => this.opens.get(group) !== mine || group.active !== tab || !this.layout.groups().includes(group);
-    const parsed = parseViewEntry(entry);
+    // A raw history path for a recording or PDF is that view. A view entry is parsed first,
+    // so one that merely ends in ".mp3" is not reclassified.
+    const parsed = parseViewEntry(entry) ?? (() => {
+      const kind = mediaKind(entry);
+      return kind ? { type: kind, file: entry } : null;
+    })();
     if (parsed) {
       if (!kindReady(parsed.type)) {
         await preloadKinds([parsed.type]);

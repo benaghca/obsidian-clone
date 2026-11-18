@@ -3,7 +3,7 @@ import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
 import type { MarkdownParser } from "@lezer/markdown";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { editingEmbed } from "./embeds";
+import { editingEmbed, MediaWidget, NoteEmbedWidget } from "./embeds";
 import { checkedTaskText, LivePreview, wordClick } from "./livePreview";
 import { readingMode } from "./render";
 import { markdownSyntax, Tag, WikiLink } from "./syntax";
@@ -77,6 +77,20 @@ test("Reading view gives plain paragraph text an inline cursor target without co
     });
     expect(spans).toEqual(reading ? [[0, text.length]] : []);
   }
+});
+
+test("an audio or video embed is a player, and a script or a PDF stays a link", () => {
+  const text = "![[clip.mp3]]\n\n![[movie.mp4]]\n\n![alt](clip.mp3)\n\n![[Note]]\n\n![[run.sh]]\n\n![[a.pdf]]\n\n![x](a.pdf)\n";
+  const { lp, view } = editor(text, 0);
+  const widgets: { name: string; kind?: string; src?: string }[] = [];
+  lp.decorations.between(0, view.state.doc.length, (_from, _to, d) => {
+    const widget = d.spec.widget as { constructor: { name: string }; kind?: string; src?: string } | undefined;
+    if (widget) widgets.push({ name: widget.constructor.name, kind: widget.kind, src: widget.src });
+  });
+  const media = widgets.filter((widget) => widget.name === MediaWidget.name);
+  expect(media.map((widget) => widget.kind)).toEqual(["audio", "video", "audio"]);
+  expect(widgets.some((widget) => widget.name === NoteEmbedWidget.name)).toBe(true);
+  expect(widgets.some((widget) => widget.src === "run.sh" || widget.src === "a.pdf")).toBe(false);
 });
 
 test("markup stays as it was while the mouse button is down, and catches up when it comes up", () => {

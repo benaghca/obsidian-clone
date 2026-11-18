@@ -15,10 +15,82 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
 
-/// Largest image `read_file_bytes` hands to an embed.
+/// Largest file `read_file_bytes` returns: an image, or audio, video, or PDF.
 pub const IMAGE_MAX_BYTES: u64 = 20 * 1024 * 1024;
-/// The files `read_file_bytes` reads: images an embed can show.
+/// Images an embed can show. These are not sniffed.
 const IMAGE_EXTENSIONS: [&str; 8] = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "avif"];
+/// Audio, video, and PDF. The list and the header check match `src/media.ts`.
+const MEDIA_EXTENSIONS: [&str; 14] = [
+    "mp3", "m4a", "aac", "wav", "ogg", "oga", "opus", "flac", "mp4", "m4v", "mov", "webm", "ogv",
+    "pdf",
+];
+
+fn starts_at(bytes: &[u8], text: &[u8], at: usize) -> bool {
+    bytes.get(at..at + text.len()) == Some(text)
+}
+
+/// Markup or a script, even with a media extension. A UTF-8 BOM and leading
+/// ASCII space are skipped; the magic itself is not.
+fn looks_like_active(bytes: &[u8]) -> bool {
+    let mut i = 0;
+    if bytes.len() >= 3 && bytes[..3] == [0xef, 0xbb, 0xbf] {
+        i = 3;
+    }
+    while i < bytes.len() && matches!(bytes[i], b' ' | b'\t' | b'\n' | b'\r') {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return false;
+    }
+    bytes[i] == b'<' || (bytes[i] == b'#' && bytes.get(i + 1) == Some(&b'!'))
+}
+
+fn is_ftyp(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"ftyp", 4)
+}
+
+fn is_quicktime(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"moov", 4)
+        || starts_at(bytes, b"mdat", 4)
+        || starts_at(bytes, b"wide", 4)
+        || starts_at(bytes, b"free", 4)
+        || starts_at(bytes, b"skip", 4)
+        || starts_at(bytes, b"pnot", 4)
+}
+
+fn is_mp3(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"ID3", 0) || (bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xe0 == 0xe0)
+}
+
+fn is_adts(bytes: &[u8]) -> bool {
+    bytes.len() >= 2 && bytes[0] == 0xff && bytes[1] & 0xf6 == 0xf0
+}
+
+fn is_wav(bytes: &[u8]) -> bool {
+    starts_at(bytes, b"RIFF", 0) && starts_at(bytes, b"WAVE", 8)
+}
+
+fn is_ebml(bytes: &[u8]) -> bool {
+    bytes.len() >= 4 && bytes[..4] == [0x1a, 0x45, 0xdf, 0xa3]
+}
+
+/// True when `bytes` are the audio, video, or PDF that `ext` names.
+fn media_bytes_match(ext: &str, bytes: &[u8]) -> bool {
+    if looks_like_active(bytes) {
+        return false;
+    }
+    match ext {
+        "pdf" => starts_at(bytes, b"%PDF", 0),
+        "mp3" => is_mp3(bytes),
+        "wav" => is_wav(bytes),
+        "flac" => starts_at(bytes, b"fLaC", 0),
+        "ogg" | "oga" | "opus" | "ogv" => starts_at(bytes, b"OggS", 0),
+        "aac" => is_adts(bytes) || is_ftyp(bytes),
+        "m4a" | "mp4" | "m4v" | "mov" => is_ftyp(bytes) || is_quicktime(bytes),
+        "webm" => is_ebml(bytes),
+        _ => false,
+    }
+}
 
 #[derive(Clone, Copy, Default)]
 struct NoteFormat {
@@ -96,12 +168,17 @@ impl Vault {
         Ok(text.strip_prefix('\u{feff}').unwrap_or(&text).to_string())
     }
 
-    /// An image's bytes, for an `![[embed]]`: the same path checks as `read_note` (inside the
-    /// vault, no `..`, no symlink out, nothing in hidden folders), image extensions only, and at
-    /// most [`IMAGE_MAX_BYTES`].
+    /// Bytes for an image embed, or for an audio, video, or PDF view. The same path checks as
+    /// `read_note` (inside the vault, no `..`, no symlink out, nothing in hidden folders), and at
+    /// most [`IMAGE_MAX_BYTES`] (the length is checked before the body is read). Images are the
+    /// image extensions only and are not sniffed. Audio, video, and PDF must also match their
+    /// header (`media_bytes_match`, the same rules as `src/media.ts`); a script or the wrong
+    /// container is `not a media file`.
     pub fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
         let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
-        if !ext.is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str())) {
+        let image = ext.as_ref().is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str()));
+        let media = ext.as_ref().is_some_and(|e| MEDIA_EXTENSIONS.contains(&e.as_str()));
+        if !image && !media {
             return Err(format!("not an image: {path}"));
         }
         let (_rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
@@ -120,6 +197,9 @@ impl Vault {
             .map_err(|e| e.to_string())?;
         if bytes.len() as u64 > IMAGE_MAX_BYTES {
             return Err(format!("too large to show: {path}"));
+        }
+        if media && !media_bytes_match(ext.as_deref().unwrap_or(""), &bytes) {
+            return Err(format!("not a media file: {path}"));
         }
         Ok(bytes)
     }
@@ -1840,6 +1920,70 @@ mod tests {
     }
 
     #[test]
+    fn read_file_bytes_reads_media_that_matches_its_header() {
+        let dir = tmp_dir("media-bytes");
+        let ok: &[(&str, &[u8])] = &[
+            ("notes/a.pdf", b"%PDF-1.4"),
+            ("clip.mp3", b"ID3\x03"),
+            ("frame.mp3", b"\xff\xfb\x90\x00"),
+            ("sound.wav", b"RIFF\x00\x00\x00\x00WAVE"),
+            ("song.ogg", b"OggS"),
+            ("song.oga", b"OggS"),
+            ("song.opus", b"OggS"),
+            ("song.flac", b"fLaC"),
+            ("voice.aac", b"\xff\xf1\x50\x80"),
+            ("voice.m4a", b"\x00\x00\x00\x18ftyp"),
+            ("movie.mp4", b"\x00\x00\x00\x18ftypisom"),
+            ("movie.MP4", b"\x00\x00\x00\x18ftypisom"),
+            ("movie.m4v", b"\x00\x00\x00\x08moov"),
+            ("movie.mov", b"\x00\x00\x00\x08mdat"),
+            ("movie.webm", &[0x1a, 0x45, 0xdf, 0xa3]),
+            ("movie.ogv", b"OggS"),
+        ];
+        for (path, bytes) in ok {
+            if let Some(parent) = Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    fs::create_dir_all(dir.path.join(parent)).unwrap();
+                }
+            }
+            fs::write(dir.path.join(path), bytes).unwrap();
+        }
+        fs::write(dir.path.join("script.mp3"), b"<script>alert(1)</script>").unwrap();
+        fs::write(dir.path.join("bang.mp4"), b"#!/bin/sh\n").unwrap();
+        fs::write(dir.path.join("bom.html.pdf"), b"\xef\xbb\xbf\n  <html>").unwrap();
+        fs::write(dir.path.join("empty.pdf"), b"").unwrap();
+        fs::write(dir.path.join("wrong.mp4"), &[0x1a, 0x45, 0xdf, 0xa3]).unwrap();
+        fs::write(dir.path.join("avi.wav"), b"RIFF\x00\x00\x00\x00AVI ").unwrap();
+        fs::write(dir.path.join("Note.md"), b"%PDF").unwrap();
+        fs::create_dir(dir.path.join(".grove")).unwrap();
+        fs::write(dir.path.join(".grove").join("x.mp3"), b"ID3").unwrap();
+        fs::File::create(dir.path.join("huge.mp4"))
+            .unwrap()
+            .set_len(IMAGE_MAX_BYTES + 1)
+            .unwrap();
+        let outside = tmp_dir("media-bytes-out");
+        fs::write(outside.path.join("secret.mp3"), b"ID3").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path.join("secret.mp3"), dir.path.join("link.mp3")).unwrap();
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        for (path, bytes) in ok {
+            assert_eq!(vault.read_file_bytes(path).unwrap(), *bytes, "{path}");
+        }
+        for path in ["script.mp3", "bang.mp4", "bom.html.pdf", "empty.pdf", "wrong.mp4", "avi.wav"] {
+            assert_eq!(
+                vault.read_file_bytes(path).unwrap_err(),
+                format!("not a media file: {path}")
+            );
+        }
+        assert!(vault.read_file_bytes("Note.md").unwrap_err().contains("not an image"));
+        assert!(vault.read_file_bytes("huge.mp4").unwrap_err().contains("too large"));
+        assert!(vault.read_file_bytes(".grove/x.mp3").is_err());
+        assert!(vault.read_file_bytes("pics/../../x.mp3").is_err());
+        #[cfg(unix)]
+        assert!(vault.read_file_bytes("link.mp3").is_err(), "a symlink out of the vault");
+    }
+
+    #[test]
     fn write_file_bytes_stays_inside_the_vault() {
         let dir = tmp_dir("attach");
         let outside = tmp_dir("attach-out");
@@ -1877,7 +2021,12 @@ mod tests {
         assert_eq!(vault.read_file_bytes("pics/shot.png").unwrap(), Vec::<u8>::new());
         vault.write_file_bytes("notes/file.pdf", b"%PDF").unwrap();
         assert!(dir.path.join("notes").join("file.pdf").is_file());
-        assert!(vault.read_file_bytes("notes/file.pdf").is_err(), "not an image");
+        assert_eq!(vault.read_file_bytes("notes/file.pdf").unwrap(), b"%PDF");
+        vault.write_file_bytes("notes/run.sh", b"#!/bin/sh\n").unwrap();
+        assert!(
+            vault.read_file_bytes("notes/run.sh").unwrap_err().contains("not an image"),
+            "a script is not a media file"
+        );
         assert!(vault.write_file_bytes("../x.png", &[1]).is_err());
         assert!(vault.write_file_bytes("/etc/x.png", &[1]).is_err());
         assert!(vault.write_file_bytes(".grove/x.png", &[1]).is_err());
