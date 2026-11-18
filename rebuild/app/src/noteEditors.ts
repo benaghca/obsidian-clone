@@ -12,7 +12,7 @@
 // mirror runs on the main state. Saving and the "changed" event follow the
 // original change only, so a note is still saved once.
 
-import { redo, undo } from "@codemirror/commands";
+import { isolateHistory, redo, undo } from "@codemirror/commands";
 import { Annotation, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
@@ -23,6 +23,7 @@ import { writesSealed } from "./saveSeal";
 import { bumpPathGen, pageOwnsDisk, pageVault, pathGen, sourceVault } from "./vaultRoot";
 import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
+import { minimalChanges, normalizeLineBreaks } from "./editor/minimalChange";
 import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
 import type { EditorHost } from "./editor/host";
 import { kept } from "./memo";
@@ -463,13 +464,22 @@ export class NoteEditors {
     const before = this.doc(path);
     const mine = Symbol();
     this.reloads.set(path, mine);
-    const text = await api.readNote(path).catch(() => null);
+    const read = await api.readNote(path).catch(() => null);
     if (this.reloads.get(path) !== mine) return;
     this.reloads.delete(path);
     const current = this.doc(path);
     // A newer reload or local typing while the read ran takes precedence.
-    if (text === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job || text === current.toString()) return;
-    this.change(path, { changes: { from: 0, to: current.length, insert: text }, userEvent: "external" });
+    if (read === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job) return;
+    // The editor holds "\n" line breaks; a CRLF file with the same text is not a change.
+    const changes = minimalChanges(current.toString(), normalizeLineBreaks(read));
+    if (!changes.length) return;
+    // Only what changed is replaced, so every pane's cursor, selection and scroll map across it.
+    // It stays out of undo (history maps across it), so Ctrl+Z cannot put the old text back and save it.
+    this.change(path, {
+      changes,
+      userEvent: "external",
+      annotations: [Transaction.addToHistory.of(false), isolateHistory.of("full")],
+    });
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }
 
