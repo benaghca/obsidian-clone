@@ -300,9 +300,12 @@ export class MediaWidget extends DrawnWidget {
       if (held) dom.replaceChildren(text);
     };
     const load = () => {
-      held?.release();
       started = false;
+      el.pause();
       el.removeAttribute("src");
+      el.load();
+      held?.release();
+      if (el.parentElement !== dom) dom.replaceChildren(el, actions);
       const mine = (held = host.media(path));
       mine.url.then(
         (url) => {
@@ -321,6 +324,70 @@ export class MediaWidget extends DrawnWidget {
     const unwatch = host.watch(path, load);
     onDestroy(dom, () => {
       unwatch();
+      el.pause();
+      el.removeAttribute("src");
+      held?.release();
+    });
+    return dom;
+  }
+}
+
+/** A PDF embed: the same unsandboxed blob iframe as the PDF view. No iframe until the bytes succeed. */
+export class PdfWidget extends DrawnWidget {
+  constructor(
+    readonly path: string | null,
+    readonly src: string,
+    readonly srcAt: number,
+    readonly size: EmbedSize,
+    readonly length: number,
+  ) {
+    super();
+  }
+  ignoreEvent() {
+    return true;
+  }
+  toDOM(view: EditorView) {
+    const editor = view.state.facet(editorHost);
+    const host = editor?.embeds;
+    const { path, size } = this;
+    if (!path || !host) return missingBox(`“${this.src}” could not be found.`);
+    const frame = document.createElement("iframe");
+    frame.title = fileName(path);
+    if (size.width) frame.style.width = `${size.width}px`;
+    if (size.height) frame.style.height = `${size.height}px`;
+    const actions = editButton();
+    const dom = h("span", { class: "internal-embed pdf-embed" }, actions);
+    actions.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      const at = view.posAtDOM(dom);
+      const from = at + this.srcAt;
+      view.dispatch({ selection: EditorSelection.range(from, from + this.src.length), effects: editEmbed.of(at) });
+      view.focus();
+    });
+    let held: ReturnType<typeof host.media> | null = null;
+    const fail = (text: string) => {
+      if (held) dom.replaceChildren(text);
+    };
+    const load = () => {
+      frame.removeAttribute("src");
+      frame.remove();
+      held?.release();
+      const mine = (held = host.media(path));
+      mine.url.then(
+        (url) => {
+          if (held !== mine) return;
+          dom.replaceChildren(frame, actions);
+          frame.src = url;
+          dom.classList.add("is-loaded");
+        },
+        (err) => held === mine && fail(mediaFailText(err, "pdf")),
+      );
+    };
+    load();
+    const unwatch = host.watch(path, load);
+    onDestroy(dom, () => {
+      unwatch();
+      frame.removeAttribute("src");
       held?.release();
     });
     return dom;

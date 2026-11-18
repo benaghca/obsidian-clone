@@ -173,8 +173,25 @@ impl Vault {
     /// most [`IMAGE_MAX_BYTES`] (the length is checked before the body is read). Images are the
     /// image extensions only and are not sniffed. Audio, video, and PDF must also match their
     /// header (`media_bytes_match`, the same rules as `src/media.ts`); a script or the wrong
-    /// container is `not a media file`.
+    /// container is `not a media file`. On Linux the open uses `O_NONBLOCK`, then this checks
+    /// the opened descriptor: a FIFO or other non-regular file returns without blocking.
     pub fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        /// Linux `O_NONBLOCK` is 04000. A FIFO open returns at once; a regular file ignores it.
+        fn open_for_bytes(path: &Path) -> std::io::Result<fs::File> {
+            #[cfg(target_os = "linux")]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                const O_NONBLOCK: i32 = 0x800;
+                fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(O_NONBLOCK)
+                    .open(path)
+            }
+            #[cfg(not(target_os = "linux"))]
+            {
+                fs::File::open(path)
+            }
+        }
         let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
         let image = ext.as_ref().is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str()));
         let media = ext.as_ref().is_some_and(|e| MEDIA_EXTENSIONS.contains(&e.as_str()));
@@ -182,7 +199,9 @@ impl Vault {
             return Err(format!("not an image: {path}"));
         }
         let (_rel, full) = fsutil::resolve_in_vault(&self.root, path)?;
-        let file = fs::File::open(&full).map_err(|_| format!("no such file: {path}"))?;
+        // O_NONBLOCK so a FIFO replaced onto this path cannot hold the vault read lock.
+        // The descriptor is still fstat'd below, so a swap during the open is caught.
+        let file = open_for_bytes(&full).map_err(|_| format!("no such file: {path}"))?;
         let md = file.metadata().map_err(|e| e.to_string())?;
         if !md.is_file() {
             return Err(format!("no such file: {path}"));
@@ -1981,6 +2000,49 @@ mod tests {
         assert!(vault.read_file_bytes("pics/../../x.mp3").is_err());
         #[cfg(unix)]
         assert!(vault.read_file_bytes("link.mp3").is_err(), "a symlink out of the vault");
+    }
+
+    /// A media or image path replaced with a FIFO must return. The old note read
+    /// checked `is_file` before opening; this command holds the vault read lock.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn read_file_bytes_does_not_block_on_a_fifo() {
+        let dir = tmp_dir("fifo-bytes");
+        let vault = Vault::open(dir.path.clone()).unwrap();
+        let clip = dir.path.join("clip.mp3");
+        let shot = dir.path.join("shot.png");
+        for node in [&clip, &shot] {
+            let status = std::process::Command::new("mkfifo").arg(node).status().unwrap();
+            assert!(status.success(), "mkfifo {}", node.display());
+        }
+        std::os::unix::fs::symlink(&clip, dir.path.join("link.mp3")).unwrap();
+        let expect_refused = |rel: &str, node: &Path| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let rel = rel.to_string();
+            std::thread::scope(|scope| {
+                scope.spawn(|| {
+                    let result = vault.read_file_bytes(&rel);
+                    let _ = tx.send(result.map(|bytes| bytes.len()));
+                });
+                match rx.recv_timeout(Duration::from_secs(2)) {
+                    Ok(Err(msg)) => assert!(
+                        msg.contains("no such file"),
+                        "{rel}: {msg}"
+                    ),
+                    Ok(Ok(n)) => panic!("{rel} was read as a file ({n} bytes)"),
+                    Err(_) => {
+                        // Unblock a stuck open so this test can finish, then fail.
+                        let _ = fs::OpenOptions::new().write(true).open(node);
+                        panic!("{rel} blocked in read_file_bytes");
+                    }
+                }
+            });
+        };
+        expect_refused("clip.mp3", &clip);
+        expect_refused("shot.png", &shot);
+        expect_refused("link.mp3", &clip);
+        fs::write(dir.path.join("ok.mp3"), b"ID3\x03").unwrap();
+        assert_eq!(vault.read_file_bytes("ok.mp3").unwrap(), b"ID3\x03");
     }
 
     #[test]

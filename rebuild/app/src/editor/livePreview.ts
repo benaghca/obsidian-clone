@@ -27,7 +27,7 @@ import { h } from "../shell/dom";
 import { icon } from "../shell/icons";
 import { DrawingEmbedWidget } from "../drawing/embed";
 import { mediaKind } from "../media";
-import { BaseWidget, editingEmbed, embedSize, IMAGE_EXT, ImageWidget, MediaWidget, NoteEmbedWidget } from "./embeds";
+import { BaseWidget, editingEmbed, embedSize, IMAGE_EXT, ImageWidget, MediaWidget, NoteEmbedWidget, PdfWidget } from "./embeds";
 import { type HighlightColor, highlightColor } from "./format";
 import { frontmatterField } from "./frontmatter";
 import { editorHost } from "./host";
@@ -384,6 +384,9 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
       if (kind === "audio" || kind === "video") {
         const widget = new MediaWidget(kind, resolve(file), raw, url.from - node.from, embedSize(alt), node.to - node.from);
         decos.push(Decoration.replace({ widget }).range(node.from, node.to));
+      } else if (kind === "pdf") {
+        const widget = new PdfWidget(resolve(file), raw, url.from - node.from, embedSize(alt), node.to - node.from);
+        decos.push(Decoration.replace({ widget }).range(node.from, node.to));
       }
     }
   }
@@ -405,10 +408,13 @@ function decorate(state: EditorState, ranges: readonly { from: number; to: numbe
     }
     const file = src.split("#")[0];
     const kind = mediaKind(file);
-    if (kind === "audio" || kind === "video") {
+    if (kind === "audio" || kind === "video" || kind === "pdf") {
       if (editing === from) return false;
       const aliasText = alias ? doc.sliceString(alias.from, alias.to) : null;
-      const widget = new MediaWidget(kind, resolve(file), src, target.from - from, embedSize(aliasText ?? ""), node.to - from);
+      const size = embedSize(aliasText ?? "");
+      const widget = kind === "pdf"
+        ? new PdfWidget(resolve(file), src, target.from - from, size, node.to - from)
+        : new MediaWidget(kind, resolve(file), src, target.from - from, size, node.to - from);
       decos.push(Decoration.replace({ widget }).range(from, node.to));
       return true;
     }

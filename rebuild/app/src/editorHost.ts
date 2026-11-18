@@ -5,7 +5,8 @@
 // note's text (its editor's, when it is open), and an image's bytes as a
 // blob: URL. Nothing is read until an embed is drawn. Notes' text is kept by
 // path until the file changes; an image's URL is revoked as soon as no embed
-// shows it, or when the file changes.
+// shows it, or when the file changes. A PDF blob is registered with the
+// navigation guard before that URL is handed out, and released with the last holder.
 
 import { api, type FileEntry } from "./api";
 import { isolateHistory } from "@codemirror/commands";
@@ -175,7 +176,7 @@ async function saveAttachments(ws: Workspace, view: EditorView, files: File[], a
 
 function createEmbedHost(ws: Workspace): EmbedHost {
   const notes = new Map<string, Promise<string>>();
-  const images = new Map<string, { url: Promise<string>; holders: number }>();
+  const images = new Map<string, { url: Promise<string>; holders: number; pdf: boolean }>();
   const watchers = new Map<string, ReturnType<typeof listeners>>();
 
   const modified = (path: string) => {
@@ -186,7 +187,23 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   ws.vault.onModified(modified);
 
   const holdBlob = (path: string, type: string) => {
-    const held = kept(images, path, () => ({ url: api.readFileBytes(path).then((bytes) => URL.createObjectURL(new Blob([bytes], { type }))), holders: 0 }));
+    const pdf = type === "application/pdf";
+    const held = kept(images, path, () => ({
+      pdf,
+      holders: 0,
+      url: api.readFileBytes(path).then(async (bytes) => {
+        const url = URL.createObjectURL(new Blob([bytes], { type }));
+        if (!pdf) return url;
+        // The iframe navigates only after this returns, so the guard already lists the blob.
+        try {
+          await api.allowPdfBlob(url);
+        } catch (err) {
+          URL.revokeObjectURL(url);
+          throw err;
+        }
+        return url;
+      }),
+    }));
     held.holders++;
     let released = false;
     return {
@@ -196,7 +213,16 @@ function createEmbedHost(ws: Workspace): EmbedHost {
         released = true;
         if (--held.holders > 0) return;
         if (images.get(path) === held) images.delete(path);
-        held.url.then(URL.revokeObjectURL, () => {});
+        held.url.then(async (url) => {
+          if (held.pdf) {
+            try {
+              await api.releasePdfBlob(url);
+            } catch {
+              // The blob is still revoked below.
+            }
+          }
+          URL.revokeObjectURL(url);
+        }, () => {});
       },
     };
   };

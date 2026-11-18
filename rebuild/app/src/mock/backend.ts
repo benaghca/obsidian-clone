@@ -48,6 +48,9 @@ export function mockClipboardImageReads(): number {
 /** Origins registered with `allow_frame_origin`, in the form the Rust command stores (lowercase host, default port dropped). */
 const mockFrameOrigins = new Set<string>();
 
+/** PDF blob URLs registered with `allow_pdf_blob`, and how many holders each has. */
+const mockPdfBlobs = new Map<string, number>();
+
 /** The origins web embeds registered so far, in order, for browser tests. */
 export function mockAllowedFrameOrigins(): string[] {
   return [...mockFrameOrigins];
@@ -432,6 +435,31 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     },
     allow_frame_origin: ({ origin }) => {
       mockFrameOrigins.add(mockFrameOrigin(String(origin ?? "")));
+      return null;
+    },
+    allow_pdf_blob: ({ url }) => {
+      const raw = String(url ?? "");
+      let parsed: URL;
+      try {
+        parsed = new URL(raw);
+      } catch {
+        throw new Error("pdf resource must be a blob: URL");
+      }
+      if (parsed.protocol !== "blob:") throw new Error("pdf resource must be a blob: URL");
+      mockPdfBlobs.set(parsed.href, (mockPdfBlobs.get(parsed.href) ?? 0) + 1);
+      return null;
+    },
+    release_pdf_blob: ({ url }) => {
+      let href = String(url ?? "");
+      try {
+        href = new URL(href).href;
+      } catch {
+        // An unknown URL is ignored, as in the Rust command.
+      }
+      const count = mockPdfBlobs.get(href);
+      if (count === undefined) return null;
+      if (count <= 1) mockPdfBlobs.delete(href);
+      else mockPdfBlobs.set(href, count - 1);
       return null;
     },
     read_clipboard_image: () => {

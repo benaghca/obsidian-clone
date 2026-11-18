@@ -3,7 +3,7 @@ import { EditorState, type TransactionSpec } from "@codemirror/state";
 import type { EditorView, ViewUpdate } from "@codemirror/view";
 import type { MarkdownParser } from "@lezer/markdown";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { editingEmbed, MediaWidget, NoteEmbedWidget } from "./embeds";
+import { editingEmbed, MediaWidget, NoteEmbedWidget, PdfWidget } from "./embeds";
 import { checkedTaskText, LivePreview, wordClick } from "./livePreview";
 import { readingMode } from "./render";
 import { markdownSyntax, Tag, WikiLink } from "./syntax";
@@ -79,7 +79,7 @@ test("Reading view gives plain paragraph text an inline cursor target without co
   }
 });
 
-test("an audio or video embed is a player, and a script or a PDF stays a link", () => {
+test("an audio or video embed is a player, a PDF is the document, and a script stays a link", () => {
   const text = "![[clip.mp3]]\n\n![[movie.mp4]]\n\n![alt](clip.mp3)\n\n![[Note]]\n\n![[run.sh]]\n\n![[a.pdf]]\n\n![x](a.pdf)\n";
   const { lp, view } = editor(text, 0);
   const widgets: { name: string; kind?: string; src?: string }[] = [];
@@ -89,8 +89,10 @@ test("an audio or video embed is a player, and a script or a PDF stays a link", 
   });
   const media = widgets.filter((widget) => widget.name === MediaWidget.name);
   expect(media.map((widget) => widget.kind)).toEqual(["audio", "video", "audio"]);
+  const pdfs = widgets.filter((widget) => widget.name === PdfWidget.name);
+  expect(pdfs.map((widget) => widget.src)).toEqual(["a.pdf", "a.pdf"]);
   expect(widgets.some((widget) => widget.name === NoteEmbedWidget.name)).toBe(true);
-  expect(widgets.some((widget) => widget.src === "run.sh" || widget.src === "a.pdf")).toBe(false);
+  expect(widgets.some((widget) => widget.src === "run.sh")).toBe(false);
 });
 
 test("markup stays as it was while the mouse button is down, and catches up when it comes up", () => {

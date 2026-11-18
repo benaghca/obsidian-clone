@@ -511,19 +511,26 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
     }
 
     // A recording: one player, from the same blob: URLs as an embed. Over the size cap, a short message.
+    // A vault change drops the holder and reads again, including after a failed read.
     const mediaView = h("div", { class: "view-content media-view" });
     mediaView.hidden = true;
     let shownMedia: { path: string; kind: "audio" | "video"; held: ReturnType<typeof ws.embeds.media>; el: HTMLMediaElement } | null = null;
-    function renderMedia(path: string | null, kind: "audio" | "video" | null) {
-      if (shownMedia && shownMedia.path === path && shownMedia.kind === kind) return;
-      shownMedia?.held.release();
+    let mediaWatch: (() => void) | null = null;
+    function stopMedia() {
+      mediaWatch?.();
+      mediaWatch = null;
       if (shownMedia) {
         shownMedia.el.pause();
         shownMedia.el.removeAttribute("src");
         shownMedia.el.load();
+        shownMedia.held.release();
+        shownMedia = null;
       }
-      shownMedia = null;
       mediaView.replaceChildren();
+    }
+    function renderMedia(path: string | null, kind: "audio" | "video" | null) {
+      if (shownMedia && shownMedia.path === path && shownMedia.kind === kind) return;
+      stopMedia();
       if (!path || !kind) return;
       const el = document.createElement(kind);
       el.controls = true;
@@ -533,48 +540,78 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
       el.addEventListener("error", () => {
         if (shownMedia?.el === el && armed) mediaView.replaceChildren(h("p", { class: "media-fail" }, MEDIA_PLAY_FAIL));
       });
+      const show = (held: ReturnType<typeof ws.embeds.media>) => {
+        shownMedia = { path, kind, held, el };
+        void held.url.then(
+          (url) => {
+            if (shownMedia?.held !== held) return;
+            mediaView.replaceChildren(el);
+            armed = true;
+            el.src = url;
+          },
+          (err) => {
+            if (shownMedia?.held !== held) return;
+            mediaView.replaceChildren(h("p", { class: "media-fail" }, mediaFailText(err, kind)));
+          },
+        );
+      };
       mediaView.append(el);
-      const held = ws.embeds.media(path);
-      shownMedia = { path, kind, held, el };
-      void held.url.then(
-        (url) => {
-          if (shownMedia?.held !== held) return;
-          armed = true;
-          el.src = url;
-        },
-        (err) => {
-          if (shownMedia?.held !== held) return;
-          mediaView.replaceChildren(h("p", { class: "media-fail" }, mediaFailText(err, kind)));
-        },
-      );
+      show(ws.embeds.media(path));
+      mediaWatch = ws.embeds.watch(path, () => {
+        if (!shownMedia || shownMedia.path !== path || shownMedia.el !== el) return;
+        armed = false;
+        el.pause();
+        el.removeAttribute("src");
+        el.load();
+        shownMedia.held.release();
+        mediaView.replaceChildren(el);
+        show(ws.embeds.media(path));
+      });
     }
 
-    // A PDF: the iframe is created only after the bytes succeed, so a failed read never navigates.
+    // A PDF: the iframe is attached only after the bytes succeed, so a failed read never navigates.
+    // Closing the pane, and a vault change, clear it and release the blob.
     const pdfView = h("div", { class: "view-content pdf-view" });
     pdfView.hidden = true;
     const pdfFrame = document.createElement("iframe");
     let shownPdf: { path: string; held: ReturnType<typeof ws.embeds.media> } | null = null;
-    function renderPdf(path: string | null) {
-      if (shownPdf?.path === path) return;
+    let pdfWatch: (() => void) | null = null;
+    function stopPdf() {
+      pdfWatch?.();
+      pdfWatch = null;
+      pdfFrame.removeAttribute("src");
       shownPdf?.held.release();
       shownPdf = null;
-      pdfFrame.removeAttribute("src");
       pdfView.replaceChildren();
+    }
+    function renderPdf(path: string | null) {
+      if (shownPdf?.path === path) return;
+      stopPdf();
       if (!path) return;
-      const held = ws.embeds.media(path);
-      shownPdf = { path, held };
-      void held.url.then(
-        (url) => {
-          if (shownPdf?.held !== held) return;
-          pdfFrame.title = fileName(path);
-          pdfView.replaceChildren(pdfFrame);
-          pdfFrame.src = url;
-        },
-        (err) => {
-          if (shownPdf?.held !== held) return;
-          pdfView.replaceChildren(h("p", { class: "media-fail" }, mediaFailText(err, "pdf")));
-        },
-      );
+      const show = (held: ReturnType<typeof ws.embeds.media>) => {
+        shownPdf = { path, held };
+        void held.url.then(
+          (url) => {
+            if (shownPdf?.held !== held) return;
+            pdfFrame.title = fileName(path);
+            pdfView.replaceChildren(pdfFrame);
+            pdfFrame.src = url;
+          },
+          (err) => {
+            if (shownPdf?.held !== held) return;
+            pdfFrame.removeAttribute("src");
+            pdfView.replaceChildren(h("p", { class: "media-fail" }, mediaFailText(err, "pdf")));
+          },
+        );
+      };
+      show(ws.embeds.media(path));
+      pdfWatch = ws.embeds.watch(path, () => {
+        if (!shownPdf || shownPdf.path !== path) return;
+        pdfFrame.removeAttribute("src");
+        shownPdf.held.release();
+        pdfView.replaceChildren();
+        show(ws.embeds.media(path));
+      });
     }
 
     let canvas: { el: HTMLElement; dispose(): void } | null = null;
@@ -851,6 +888,8 @@ export function createPanes(ws: Workspace, menus: () => Menus, extras: PaneExtra
         backlinks?.setActive(false);
         linksTab?.setActive(false);
         renderImage(null);
+        renderMedia(null, null);
+        renderPdf(null);
         canvas?.dispose();
         drawing?.dispose();
         el.remove();

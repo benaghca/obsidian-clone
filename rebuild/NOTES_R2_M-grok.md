@@ -12,15 +12,21 @@ Audio, video, and PDF open as views (`audio`, `video`, `pdf`) with `path` null a
 
 `read_file_bytes` still does the vault path checks. Images stay extension-only and are not sniffed. Audio, video, and PDF (`mp3`, `m4a`, `aac`, `wav`, `ogg`, `oga`, `opus`, `flac`, `mp4`, `m4v`, `mov`, `webm`, `ogv`, `pdf`) must also match the header in `src/media.ts`. A script, HTML (including a UTF-8 BOM and leading spaces), an empty file, or the wrong container (`webm` bytes in `.mp4`, AVI in `.wav`) is `not a media file`. The mock backend uses the same check.
 
-A note embed `![[clip.mp3]]` or `![alt](clip.mp3)` (hash stripped, alias size kept) is a player with controls, `preload="metadata"`, and no autoplay. A PDF wikilink stays a link; choosing it opens the document view. A canvas card of one of these files still says "Unsupported file".
+A note embed `![[clip.mp3]]` or `![alt](clip.mp3)` (hash stripped, alias size kept) is a player with controls, `preload="metadata"`, and no autoplay. `![[a.pdf]]` and `![x](a.pdf)` are the same unsandboxed PDF iframe as the pane: the frame is attached only after the sniffed bytes succeed, and it is not focused. A script such as `![[run.sh]]` stays a link. A canvas card of one of these files still says "Unsupported file".
+
+Closing a pane pauses the player, clears the iframe, and releases both blob holders, including when the read finishes after the pane is gone. The pane also watches the path, as the embed does. An outside replacement drops the old bytes and reads again, so a failure is replaced when a valid file arrives. The same reload puts a player or PDF frame back after a failed read.
 
 ## How PDFs are shown
 
-This machine's WebKitGTK is 2.54.1 (`libwebkit2gtk-4.1`). Its binary contains `webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=`, so the built-in PDF.js viewer needs no new package. The pane reads the file, then sets an unsandboxed iframe `src` to a `blob:` URL of type `application/pdf`. The iframe is created only after that read succeeds, and it is not focused. A sandbox would block the viewer. WebKit then navigates the frame to its viewer with that blob as `file`. The page does not load `pdf.js` itself. `script-src` stays `'self'`.
+This machine's WebKitGTK is 2.54.1 (`libwebkit2gtk-4.1`). Its binary contains `webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=`, so the built-in PDF.js viewer needs no new package. The pane and a note embed read the file, register that `blob:` URL, then set an unsandboxed iframe `src` to it (`application/pdf`). The iframe is attached only after that read succeeds, and it is not focused. A sandbox would block the viewer. WebKit then navigates the frame to its viewer with that blob as `file`. The page does not load `pdf.js` itself. `script-src` stays `'self'`. There is no "open in default app" control.
+
+Inline PDF in a note uses that same iframe. It stays inside the limits: no new package, the existing CSP and viewer scheme, and no extra chrome beyond the embed and the edit button the audio and video embeds already have.
 
 ## Size cap
 
 The cap is the existing `IMAGE_MAX_BYTES`, 20 MB. The length is checked on metadata before the body is read, and again if the file grew during the read. Over the cap, the command returns `too large to show` and the view says "Too large to show." There is no player and no iframe. A longer video is not streamed in this piece.
+
+On Linux the open uses `O_NONBLOCK` (`04000`), then `fstat` on that descriptor. A FIFO, or any other non-regular file, returns `no such file` instead of blocking the vault read lock. A regular file ignores the flag. The type check is on the opened descriptor, so a replacement during the open is still refused. `read_note` is unchanged.
 
 A read that fails for any other reason says "This file can't be shown." A PDF says "This PDF can't be shown." A player that cannot decode the bytes says "This file can't be played here."
 
@@ -30,22 +36,25 @@ A read that fails for any other reason says "This file can't be shown." A PDF sa
 
 `frame-src` in both `csp` and `devCsp` is `https: http: blob: webkit-pdfjs-viewer:`. `object-src` stays `'none'`, `child-src` stays `'none'`, and `script-src` stays `'self'`. The asset protocol stays off.
 
-The navigation guard allows a child frame, and a navigation whose frame wry cannot name, to load a `blob:` URL or `webkit-pdfjs-viewer://pdfjs/web/viewer.html` when every `file` parameter parses as a `blob:` URL. The main frame refuses both. On Linux the response-policy hook still ignores those URLs as a main-frame document. `file:`, `javascript:`, and `data:` stay refused. A viewer URL with no `file`, a non-blob `file`, another path (the viewer's `content-script.js`), another host, or userinfo is refused.
+`on_navigation` still passes `Unknown`. It does not allow every blob URL. A blob navigation, and `webkit-pdfjs-viewer://pdfjs/web/viewer.html`, are allowed only when every blob is one the page registered with `allow_pdf_blob` and this window has connected its Linux response-policy hook. That hook sets the window's flag only after `connect_decide_policy` is installed. If `with_webview` does not run the closure, the flag stays false and the PDF frame is refused. Non-Linux builds do not install the hook, so they refuse the blob and the viewer too. The main frame still refuses both, including through `main_frame_document_allowed`. `file:`, `javascript:`, and `data:` stay refused. A viewer URL with no `file`, a non-blob `file`, another path (the viewer's `content-script.js`), another host, or userinfo is refused.
 
-A note cannot mint a blob URL. The page creates the blob after a sniffed read, and the vault bytes are not page script. The residual is that any blob URL is allowed as a child or unnamed-frame navigation, because that is how the PDF iframe loads. On platforms where wry cannot tell a child frame from the main frame, the same limit as the web-embed frames applies; the Linux main-frame document check still refuses blob and the viewer.
+The page registers the blob only after a sniffed PDF read, and awaits that before the iframe `src` is set. The last holder clears `src`, then `release_pdf_blob`, then revokes the URL. Audio and video blobs are not registered. A note cannot mint a blob URL, and the vault bytes are not page script. The residual is that the trusted page can register a blob URL it created. Each window has its own main-frame flag, so one window's hook does not enable PDF frames in a window whose hook failed.
 
 ## Tests
 
-`cargo test --offline` in `rebuild/app/src-tauri`: 203 passed, 0 failed, 5 ignored. That includes the media header and size-cap reads, the image reads, and the navigation-guard table for the viewer scheme above. The scheme in the guard matches the URL strings in this machine's `libwebkit2gtk-4.1.so.0`.
+`cargo test --offline` in `rebuild/app/src-tauri` after these review fixes: 205 passed, 0 failed, 5 ignored (lib), plus main 0 and doc 0. That includes the media header and size-cap reads, the FIFO open returning `no such file`, the image reads, and the navigation-guard table (a registered PDF blob only while this window's top-level deny is on). The scheme in the guard matches the URL strings in this machine's `libwebkit2gtk-4.1.so.0`. Two pre-existing `dead_code` warnings in `index/file_map.rs` remain.
 
-`flock /tmp/grove-npm-test.lock npm test` in `rebuild/app` passed (exit 0) on the frontend. Earlier runs on a busy machine failed in unrelated timing checks (a 52 ms drawing long task, a base-embed cold open, a 10 s scratch-vault startup, a 17 ms list-item friction sample) and passed on the next quieter run. Screenshot fixtures the suite rewrote were restored and are not in the commit. The viewer-scheme correction is in the Rust guard, `tauri.conf.json`, and the offline audit list; the frontend sources the npm suite executes did not change after that pass, and `cargo test --offline` was run again after the scheme correction.
+`flock /tmp/grove-npm-test.lock npm test` in `rebuild/app` passed (exit 0), including vitest (112 files). One earlier run on this machine missed the known base-embed cold-open budget (118.9 ms against 100 ms); the quieter rerun passed. Screenshot fixtures the suite rewrote were restored and are not in the commit.
 
-Headless checks cover the sniff, the cap, opening without `read_note`, layout restore, the embed widget type, and the guard table. Vitest runs in node and does not build the player DOM.
+Headless checks cover the sniff, the cap, opening without `read_note`, layout restore, the audio, video, and PDF embed widget types, the FIFO open returning, and the guard table (a registered PDF blob only while the top-level deny is on; `Unknown` refuses it before that). Vitest runs in node and does not build the player or the iframe. Closing a pane and the outside-replacement reload are in the pane code; node tests do not construct that DOM.
+
+Codex review 1 (PASS-WITH-FIXES on `e146989`): the pane now releases media and PDF holders on dispose; Linux opens the byte read without blocking on a FIFO; PDF navigations are limited to registered blobs after the main-frame hook; a note embed shows the PDF with the same iframe; the open pane reloads when the file changes.
 
 ## What a window would still have to show
 
 Grove was not launched. The headless Chromium harness is not WebKitGTK, so these are unverified:
 
-- An `application/pdf` blob iframe actually navigating to `webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=` and painting pages under this CSP.
+- An `application/pdf` blob iframe, in the pane and in a note, actually navigating to `webkit-pdfjs-viewer://pdfjs/web/viewer.html?file=` and painting pages under this CSP.
 - `<audio>` and `<video>` decoding the MIME types used here, including `.mov` as `video/mp4`.
-- The Linux response policy ignoring a blob or viewer response that arrives as a main-frame document.
+- The Linux response policy ignoring a blob or viewer response that arrives as a main-frame document, and `with_webview` actually running the hook that arms the PDF exception.
+- Closing a split leaving no blob URL, and an outside replace of an open recording or PDF showing the new bytes.
