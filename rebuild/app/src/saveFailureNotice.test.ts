@@ -235,6 +235,71 @@ test("a rejection whose message cannot be read still retries", async () => {
   spy.mockRestore();
 });
 
+test("a confirmed retry does not make the next edit's first failure a streak", async () => {
+  vi.useFakeTimers();
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  let release!: () => void;
+  let calls = 0;
+  vi.mocked(api.writeNote).mockImplementation(() => {
+    calls += 1;
+    if (calls === 2) return new Promise<void>((resolve) => { release = resolve; });
+    return Promise.reject(denied);
+  });
+  const notes = editors();
+  await notes.load("Daily.md");
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "one" } });
+  await expect(notes.flush()).resolves.toBe(false);
+  await vi.advanceTimersByTimeAsync(500);
+  await vi.waitFor(() => expect(api.writeNote).toHaveBeenCalledTimes(2));
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "two" } });
+  release();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(events.saved).not.toHaveBeenCalled();
+  expect(notes.hasUnsaved()).toBe(true);
+  await vi.advanceTimersByTimeAsync(300);
+  await vi.waitFor(() => expect(api.writeNote).toHaveBeenLastCalledWith("Daily.md", "two"));
+  await vi.advanceTimersByTimeAsync(SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(400);
+  expect(noticeTexts()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told]);
+  spy.mockRestore();
+});
+
+test("the saved notice waits until the latest text reaches disk", async () => {
+  vi.useFakeTimers();
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  let release!: () => void;
+  let calls = 0;
+  vi.mocked(api.writeNote).mockImplementation(() => {
+    calls += 1;
+    if (calls < 3) return Promise.reject(denied);
+    if (calls === 3) return new Promise<void>((resolve) => { release = resolve; });
+    return Promise.resolve();
+  });
+  const notes = editors();
+  await notes.load("Daily.md");
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "one" } });
+  await notes.flush();
+  await vi.advanceTimersByTimeAsync(500 + SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told]);
+  await vi.advanceTimersByTimeAsync(1000);
+  await vi.waitFor(() => expect(api.writeNote).toHaveBeenCalledTimes(3));
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "two" } });
+  release();
+  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told]);
+  expect(events.saved).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(300);
+  await vi.waitFor(() => expect(api.writeNote).toHaveBeenLastCalledWith("Daily.md", "two"));
+  expect(events.saved).toHaveBeenCalledWith("Daily.md");
+  await vi.advanceTimersByTimeAsync(SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told, "Saved \u201CDaily\u201D."]);
+  spy.mockRestore();
+});
+
 test("a superseded retry retires the streak without saying the note saved", async () => {
   vi.useFakeTimers();
   const spy = vi.spyOn(console, "error").mockImplementation(() => {});

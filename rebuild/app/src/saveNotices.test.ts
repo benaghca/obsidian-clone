@@ -66,6 +66,25 @@ test("one failure stays quiet, and the second failure of a streak speaks once", 
   expect(waiting()).toBe(0);
 });
 
+test("a confirmed write resets the count, and the saved notice waits", () => {
+  const { board, shown, drain, waiting } = harness();
+  board.reject("Daily.md", "disk full");
+  board.confirmed("Daily.md");
+  board.reject("Daily.md", "disk full");
+  expect(waiting()).toBe(0);
+  board.reject("Daily.md", "disk full");
+  drain();
+  expect(shown).toEqual([[failure(q("Daily"), "disk full")]]);
+  board.confirmed("Daily.md");
+  expect(waiting()).toBe(0);
+  board.landed("Daily.md");
+  drain();
+  expect(shown.map((lines) => lines[0])).toEqual([
+    failure(q("Daily"), "disk full"),
+    saved(q("Daily")),
+  ]);
+});
+
 test("a save clears the streak, and the next streak can speak again", () => {
   const { board, shown, drain } = harness();
   board.reject("Daily.md", "disk full");

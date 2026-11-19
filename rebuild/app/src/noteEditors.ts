@@ -695,6 +695,8 @@ export class NoteEditors {
     if (moved) {
       this.dirty.add(landed);
       if (!this.saveTimers.has(landed) && !this.retryTimers.has(landed)) this.scheduleSave(landed);
+      // These bytes are on disk. Newer typing is still dirty, so do not say "saved" yet.
+      this.tellSaveNotice(() => this.saveNotices.confirmed(landed));
       return false;
     }
     this.dirty.delete(landed);

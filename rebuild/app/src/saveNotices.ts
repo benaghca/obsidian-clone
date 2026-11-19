@@ -33,6 +33,8 @@ export interface SaveNoticeBoard {
   reject(path: string, reason: string): void;
   /** The latest text of `path` reached disk. */
   landed(path: string): void;
+  /** This generation reached disk. Newer editor text may still be pending, so do not say it saved yet. */
+  confirmed(path: string): void;
   /** The note is gone. No "saved" notice. */
   drop(under: (path: string) => boolean): void;
   /** A rename retargets an open streak. */
@@ -163,6 +165,18 @@ export function createSaveNotices(
         kick();
       }
       endWave();
+    },
+
+    confirmed(path) {
+      const streak = streaks.get(path);
+      if (!streak) return;
+      streak.failures = 0;
+      // A streak the user has not heard about is over. One they have heard about
+      // stays open so the saved notice can wait for the latest text.
+      if (!streak.announced && !streak.suppressed) {
+        streaks.delete(path);
+        endWave();
+      }
     },
 
     drop(under) {
