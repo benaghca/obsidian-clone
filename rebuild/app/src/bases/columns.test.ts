@@ -60,3 +60,26 @@ it("keeps date, checkbox and pill widths, and skips cells that cannot be the wid
   expect(width).toBeGreaterThan(60);
   expect(seen).not.toContain("tiny");
 });
+
+it("measures each rendered kind once, and a list drawn in a text column widens the fit", () => {
+  const long = "this cell is much longer than the header";
+  const seen: string[] = [];
+  const samples = [
+    { kind: "text", text: "tiny" },
+    ...Array.from({ length: 40 }, () => ({ kind: "text", text: long })),
+    { kind: "list", pills: ["abcd"] },
+    { kind: "list", pills: ["abcd"] },
+    { kind: "checkbox" },
+    { kind: "date" },
+  ];
+  const width = columnWidth((text) => { seen.push(text); return text.length * 10; }, {
+    key: "t", label: "t", sorted: false, type: "text", samples,
+  });
+  expect(width).toBe(long.length * 10 + 16);
+  expect(seen.filter(text => text === long)).toEqual([long]);
+  expect(seen).not.toContain("tiny");
+  expect(seen.filter(text => text === "abcd")).toEqual(["abcd"]);
+  const date = { key: "due", label: "Due date", sorted: true, type: "date" as const };
+  expect(columnWidth(px, { ...date, samples: [{ kind: "date" }] })).toBe(128);
+  expect(columnWidth(px, { ...date, samples: [{ kind: "list", pills: ["abcdefghij"] }] })).toBe(160);
+});

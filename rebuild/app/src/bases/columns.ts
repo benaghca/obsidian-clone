@@ -6,36 +6,89 @@ const CELL_PAD = 16;
 /** Upper bound on one glyph, in px. The table font is 13.125px; this stays above it so a wide glyph is never skipped. */
 const CELL_ADVANCE = 32;
 
+/** One rendered cell. A fit passes these; opening a base does not. */
+export interface ColumnSample {
+  kind: string;
+  text?: string;
+  pills?: readonly string[];
+}
+
 export interface ColumnWidthInput {
   key: string;
   label: string;
   sorted: boolean;
   type: string;
-  /** Tag, list and alias pills. Measured for the automatic width and for a fit. */
+  /** Tag, list and alias pills. Measured for the automatic width. */
   pills?: readonly (readonly string[])[];
-  /** Plain cell strings. Set only when fitting; the automatic width stays header-sized. */
+  /** Plain cell strings. The automatic width stays header-sized when this is omitted. */
   text?: readonly string[];
+  /** Per-cell kind and displayed value. Widens a fit past the column-type rule. */
+  samples?: readonly ColumnSample[];
+}
+
+const listKind = (kind: string) => kind === "tags" || kind === "list" || kind === "aliases";
+
+/** Identical rows share one measurement. The longest string is measured first so shorter ones can be skipped. */
+function measureTexts(width: number, texts: readonly string[], textWidth: (text: string) => number): number {
+  let longest = "";
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const text of texts) {
+    if (!text || seen.has(text)) continue;
+    seen.add(text);
+    unique.push(text);
+    if (text.length > longest.length) longest = text;
+  }
+  const apply = (text: string) => {
+    if (text.length * CELL_ADVANCE + CELL_PAD <= width) return;
+    width = Math.max(width, Math.ceil(textWidth(text) + CELL_PAD));
+  };
+  if (longest) apply(longest);
+  for (const text of unique) if (text !== longest) apply(text);
+  return width;
+}
+
+function measurePills(width: number, rows: readonly (readonly string[])[], textWidth: (text: string) => number): number {
+  const seen = new Set<string>();
+  for (const pills of rows) {
+    const id = JSON.stringify(pills);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    let bound = 16;
+    for (const item of pills) bound += item.length * CELL_ADVANCE + 44;
+    if (bound <= width) continue;
+    width = Math.max(width, Math.ceil(pills.reduce((sum, item) => sum + textWidth(item) + 44, 16)));
+  }
+  return width;
 }
 
 /**
  * Column width in px. Header, fixed date and pill rules are the table's
- * automatic width. `text` widens a fit to the longest plain cell. The drag
+ * automatic width. `samples` widens a fit to what each cell draws. The drag
  * floor is 40; file name stays at least 78 and every other column at least 60.
  */
 export function columnWidth(textWidth: (text: string) => number, column: ColumnWidthInput): number {
   let width = Math.max(column.key === "file.name" ? 78 : 60, Math.ceil(textWidth(column.label) + 34 + (column.sorted ? 16 : 0)));
-  if (column.type === "date" || column.type === "datetime") return column.type === "date" ? 128 : 210;
-  if (column.type === "tags" || column.type === "list" || column.type === "aliases") {
-    for (const pills of column.pills ?? []) width = Math.max(width, Math.ceil(pills.reduce((sum, item) => sum + textWidth(item) + 44, 16)));
+  if (!column.samples) {
+    if (column.type === "date" || column.type === "datetime") return column.type === "date" ? 128 : 210;
+    if (listKind(column.type)) return Math.max(40, measurePills(width, column.pills ?? [], textWidth));
+    if (column.type !== "checkbox" && column.text) width = measureTexts(width, column.text, textWidth);
     return Math.max(40, width);
   }
-  if (column.type !== "checkbox" && column.text) {
-    const ranked = column.text.length > 1 ? [...column.text].sort((a, b) => b.length - a.length) : column.text;
-    for (const text of ranked) {
-      if (!text || text.length * CELL_ADVANCE + CELL_PAD <= width) continue;
-      width = Math.max(width, Math.ceil(textWidth(text) + CELL_PAD));
-    }
+  if (column.type === "date") width = 128;
+  else if (column.type === "datetime") width = 210;
+  else if (listKind(column.type)) width = measurePills(width, column.pills ?? [], textWidth);
+  const texts: string[] = [];
+  const pills: string[][] = [];
+  for (const sample of column.samples) {
+    if (sample.kind === "date") { width = Math.max(width, 128); continue; }
+    if (sample.kind === "datetime") { width = Math.max(width, 210); continue; }
+    if (sample.kind === "checkbox") continue;
+    if (sample.pills) pills.push(sample.pills as string[]);
+    else if (sample.text) texts.push(sample.text);
   }
+  width = measurePills(width, pills, textWidth);
+  width = measureTexts(width, texts, textWidth);
   return Math.max(40, width);
 }
 

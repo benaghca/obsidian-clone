@@ -19,8 +19,8 @@ const notes = {
 const host = `# Host\n\n\`\`\`base\n${yaml}\`\`\`\n`;
 
 await withBrowser(async ({ run, double, check }) => {
-  const wait = async (test, label) => {
-    for (let i = 0; i < 150; i++) { if (await test()) return; await sleep(20); }
+  const wait = async (test, label, attempts = 150) => {
+    for (let i = 0; i < attempts; i++) { if (await test()) return; await sleep(20); }
     assert.fail(label);
   };
   const ready = (root) => run((root) => {
@@ -79,4 +79,142 @@ await withBrowser(async ({ run, double, check }) => {
   const fitted = await cell('.bases-view');
   check(fitted && fitted.overflow <= 2, `standalone long cell fits (${JSON.stringify(fitted)})`);
   console.log('PASS column fit uses row text in an embed and a standalone base');
+
+  const hideYaml = `filters: 'file.inFolder("R2B1Hide")'
+views:
+  - type: table
+    name: Hide
+    order:
+      - t
+      - file.name
+    groupBy:
+      property: g
+      direction: ASC
+      order:
+        - show
+        - hide
+      hidden:
+        - hide
+`;
+  await run(async (long, yaml) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('R2B1Hide/A.md', '---\ng: show\nt: no\n---\n# A\n');
+    await api.createNote('R2B1Hide/B.md', `---\ng: hide\nt: ${long}\n---\n# B\n`);
+    await api.createNote('Hide.base', yaml);
+    await ws.vault.refreshFiles();
+    await ws.open('Hide.base');
+  }, LONG, hideYaml);
+  await wait(() => run(() => {
+    const scope = document.querySelector('.bases-view');
+    const count = scope?.querySelector('.bases-count span')?.textContent;
+    const hidden = [...(scope?.querySelectorAll('td[data-property="t"]') ?? [])].some(td => td.textContent.includes('Wider than the header'));
+    return count === '1 results' && !hidden;
+  }), 'hidden group is not drawn');
+  const hideBefore = await width('.bases-table th[data-property="t"]');
+  check(hideBefore < 120, `hidden-group column starts at the header (${hideBefore}px)`);
+  await double('.bases-table th[data-property="t"] .bases-resizer');
+  let hideGrew = false;
+  for (let i = 0; i < 25; i++) {
+    const now = await width('.bases-table th[data-property="t"]');
+    const src = await run(async () => { const { api } = await import('/src/api.ts'); return api.readNote('Hide.base'); });
+    if (now >= 120 || /note\.t:\s*\d{3,}/.test(src)) hideGrew = true;
+    await sleep(40);
+  }
+  check(!hideGrew, 'a hidden group does not widen the column');
+  console.log('PASS hidden group rows are left out of the fit');
+
+  const pill = 'Wider than the header ' + 'pill-fit '.repeat(8);
+  const formulaYaml = `filters: 'file.inFolder("R2B1Pills")'
+formulas:
+  pills: items
+views:
+  - type: table
+    name: Pills
+    order:
+      - formula.pills
+      - file.name
+`;
+  await run(async (pill, yaml) => {
+    const { api } = await import('/src/api.ts');
+    const { settings } = await import('/src/settings/store.ts');
+    settings.setPropertyType('mix', 'text');
+    await api.createNote('R2B1Pills/A.md', `---\nitems:\n  - ${pill}\nmix:\n  - ${pill}\n---\n# A\n`);
+    await api.createNote('R2B1Pills/B.md', '---\nitems:\n  - no\nmix: no\n---\n# B\n');
+    await api.createNote('Pills.base', yaml);
+    await api.createNote('Mix.base', `filters: 'file.inFolder("R2B1Pills")'\nviews:\n  - type: table\n    name: Mix\n    order:\n      - mix\n      - file.name\n`);
+    await ws.vault.refreshFiles();
+    await ws.open('Pills.base');
+  }, pill, formulaYaml);
+  await wait(() => run(() => {
+    const scope = document.querySelector('.bases-view');
+    return scope?.querySelector('.bases-count span')?.textContent === '2 results' && !!scope.querySelector('td[data-property="formula.pills"] .property-pill');
+  }), 'formula pills render');
+  const pillBefore = await width('.bases-table th[data-property="formula.pills"]');
+  check(pillBefore < 160, `formula column starts at the header (${pillBefore}px)`);
+  await double('.bases-table th[data-property="formula.pills"] .bases-resizer');
+  await wait(() => run(async (before) => {
+    const { api } = await import('/src/api.ts');
+    const th = document.querySelector('.bases-table th[data-property="formula.pills"]');
+    return /formula\.pills:\s*\d/.test(await api.readNote('Pills.base')) && th.getBoundingClientRect().width > before + 40;
+  }, pillBefore), 'formula fit writes columnSize');
+  const pillFit = await run(() => {
+    const td = [...document.querySelectorAll('td[data-property="formula.pills"]')].find(el => el.textContent.includes('Wider than the header'));
+    const item = td?.querySelector('.property-pill');
+    if (!td || !item) return null;
+    return { col: td.getBoundingClientRect().width, pill: item.getBoundingClientRect().width };
+  });
+  check(pillFit && pillFit.pill <= pillFit.col + 2, `formula pills fit (${JSON.stringify(pillFit)})`);
+  console.log('PASS formula list fit uses the drawn pills');
+
+  await run(async () => { await ws.open('Mix.base'); });
+  await wait(() => run(() => {
+    const scope = document.querySelector('.bases-view');
+    return scope?.querySelector('.bases-count span')?.textContent === '2 results' && !!scope.querySelector('td[data-property="mix"] .property-pill');
+  }), 'mixed list cell renders as pills');
+  const mixBefore = await width('.bases-table th[data-property="mix"]');
+  check(mixBefore < 120, `mixed column starts at the header (${mixBefore}px)`);
+  await double('.bases-table th[data-property="mix"] .bases-resizer');
+  await wait(() => run(async (before) => {
+    const { api } = await import('/src/api.ts');
+    const th = document.querySelector('.bases-table th[data-property="mix"]');
+    return /note\.mix:\s*\d/.test(await api.readNote('Mix.base')) && th.getBoundingClientRect().width > before + 40;
+  }, mixBefore), 'mixed fit writes columnSize');
+  const mixFit = await run(() => {
+    const td = [...document.querySelectorAll('td[data-property="mix"]')].find(el => el.textContent.includes('Wider than the header'));
+    const item = td?.querySelector('.property-pill');
+    if (!td || !item) return null;
+    return { col: td.getBoundingClientRect().width, pill: item.getBoundingClientRect().width };
+  });
+  check(mixFit && mixFit.pill <= mixFit.col + 2, `mixed list cell fits (${JSON.stringify(mixFit)})`);
+  console.log('PASS a list drawn in a text column is part of the fit');
+
+  const rows = 300;
+  await run(async (n, long) => {
+    const { api } = await import('/src/api.ts');
+    for (let i = 0; i < n; i++) {
+      const text = i === n - 1 ? long : 'no';
+      await api.createNote(`R2B1Large/${String(i).padStart(3, '0')}.md`, `---\nt: ${text}\n---\n`);
+    }
+    await api.createNote('Large.base', `filters: 'file.inFolder("R2B1Large")'\nviews:\n  - type: table\n    name: Large\n    order:\n      - t\n      - file.name\n`);
+    await ws.vault.refreshFiles();
+    await ws.open('Large.base');
+  }, rows, LONG);
+  await wait(() => run((n) => document.querySelector('.bases-view .bases-count span')?.textContent === `${n} results`, rows), 'large result', 400);
+  const painted = await run(() => [...document.querySelectorAll('.bases-view td[data-property="t"]')].some(td => td.textContent.includes('Wider than the header')));
+  check(!painted, 'the widest cell is outside the painted window');
+  const largeBefore = await width('.bases-table th[data-property="t"]');
+  check(largeBefore < 120, `large column starts at the header (${largeBefore}px)`);
+  const elapsed = await run(() => {
+    const handle = document.querySelector('.bases-table th[data-property="t"] .bases-resizer');
+    const start = performance.now();
+    handle.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+    return performance.now() - start;
+  });
+  check(elapsed < 400, `fit of ${rows} virtualized rows took ${elapsed.toFixed(1)}ms`);
+  await wait(() => run((before) => document.querySelector('.bases-table th[data-property="t"]').getBoundingClientRect().width > before + 40, largeBefore), 'off-screen cell widens the column');
+  const largeAfter = await width('.bases-table th[data-property="t"]');
+  const largeFile = await run(async () => { const { api } = await import('/src/api.ts'); return api.readNote('Large.base'); });
+  const largeSaved = saved(largeFile);
+  check(largeAfter > largeBefore + 40 && largeSaved > largeBefore, `off-screen fit ${largeBefore} -> ${largeAfter}, saved ${largeSaved}, ${elapsed.toFixed(1)}ms`);
+  console.log('PASS virtualized fit includes the off-screen cell');
 });

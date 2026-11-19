@@ -19,7 +19,7 @@ import { baseMenus, type BaseFile } from "./menus";
 import { createCardGrid } from "./cards";
 import { createKanban } from "./kanban";
 import { createList } from "./list";
-import { columnControls, columnWidth, type ColumnWidthInput } from "./columns";
+import { columnControls, columnWidth, type ColumnSample, type ColumnWidthInput } from "./columns";
 import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, viewGlyph, type Row } from "./model";
 import type { Value } from "./expression";
@@ -347,49 +347,69 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     if (key === "file.size" || typeof value === "number") return "number";
     return types.get(noteKey(key)) ?? (Array.isArray(value) ? "list" : typeof value === "boolean" ? "checkbox" : "text");
   }
-  /** The string a plain cell draws. Dates, checks and pills are sized by their own rules. */
-  function shownCell(key: string, entry: Entry): string {
+  function columnSpec(key: string): ColumnWidthInput {
+    const kind = type(key);
+    const list = kind === "tags" || kind === "list" || kind === "aliases";
+    const pills: string[][] = [];
+    // Opening still lets a bad list value fail the base. A fit skips that cell.
+    if (list) for (const entry of selected) {
+      const value = entry.context.get(key);
+      if (Array.isArray(value)) pills.push(value.map(item => String(item)));
+    }
+    return { key, label: model!.label(key), sorted: model!.sorts.some(s => noteKey(s.property) === noteKey(key)), type: kind, pills };
+  }
+  /** The kind and value this cell draws. Mirrors `cell` and the property editor's per-row fallback. */
+  function renderedSample(key: string, entry: Entry): ColumnSample | undefined {
     let value: Value;
     try { value = entry.context.get(key); }
-    catch (error) { return error instanceof Error ? error.message : String(error); }
+    catch (error) { return { kind: "text", text: error instanceof Error ? error.message : String(error) }; }
     const prop = entry.row.props.find(p => p.key === noteKey(key));
     const want = index.host.typeOf(noteKey(key));
     if (prop && want && fits(prop, want)) value = asType(prop, want);
-    if (value instanceof Error) return String(value);
-    if (value == null || value === "" || typeof value === "boolean" || Array.isArray(value)) return "";
-    return String(value);
-  }
-  function columnSpec(key: string, cells: boolean): ColumnWidthInput {
-    const kind = type(key);
-    const list = kind === "tags" || kind === "list" || kind === "aliases";
-    const plain = cells && !list && kind !== "date" && kind !== "datetime" && kind !== "checkbox";
-    const pills: string[][] = [];
-    const text: string[] = [];
-    if (list || plain) {
-      for (const entry of cells ? drawn : selected) {
-        if (!list) {
-          const sample = shownCell(key, entry);
-          if (sample) text.push(sample);
-          continue;
-        }
-        // Opening still lets a bad list value fail the base. A fit skips that cell.
-        let value: Value | undefined;
-        if (cells) { try { value = entry.context.get(key); } catch { continue; } }
-        else value = entry.context.get(key);
-        if (Array.isArray(value)) pills.push(value.map(item => String(item)));
-      }
+    if (value instanceof Error) return { kind: "text", text: String(value) };
+    const kind = type(key, value);
+    if (!/^(file|formula)\./.test(key) && kind !== "unknown") {
+      const p: Property = prop ?? { key: noteKey(key), type: kind, value: ["tags", "list", "aliases"].includes(kind) ? [] : kind === "checkbox" ? false : "", line: 0, count: 0 };
+      const shown = fits(p, kind) ? kind : p.type;
+      const displayed = fits(p, kind) ? asType(p, kind) : p.value;
+      return sampleFrom(shown, displayed);
     }
-    return { key, label: model!.label(key), sorted: model!.sorts.some(s => noteKey(s.property) === noteKey(key)), type: kind, pills, text: cells ? text : undefined };
+    if (value == null || value === "") return;
+    if (key === "file.name") return { kind: "text", text: String(value) };
+    if (kind === "date" || kind === "datetime") return { kind };
+    if (typeof value === "boolean") return { kind: "checkbox" };
+    if (Array.isArray(value)) return value.length ? { kind: "list", pills: value.map(item => String(item)) } : undefined;
+    return { kind: "text", text: String(value) };
   }
-  /** Header width and the fit width, from one canvas, for the current result rows. */
+  function sampleFrom(kind: string, value: Property["value"]): ColumnSample | undefined {
+    if (kind === "date" || kind === "datetime" || kind === "checkbox") return { kind };
+    if (kind === "tags" || kind === "list" || kind === "aliases") {
+      const pills = Array.isArray(value) ? value.map(item => String(item)) : [];
+      return pills.length ? { kind, pills } : undefined;
+    }
+    if (value == null || value === "") return;
+    return { kind: "text", text: String(value) };
+  }
+  /** Rows the grouped table draws, including ones outside the virtual window. Hidden groups stay out. */
+  function fitRows(): readonly Entry[] {
+    return groupedView.rows() ?? drawn;
+  }
+  /** Header width already on screen, and the fit width, from one canvas. */
   function fitWidth(key: string): { header: number; fitted: number } | undefined {
     if (!model) return;
+    const header = automatic[model.columns.indexOf(key)];
+    if (header === undefined) return;
     const ctx = document.createElement("canvas").getContext("2d");
     if (!ctx) return;
     ctx.font = `13.125px ${getComputedStyle(table).fontFamily}`;
     const textWidth = (sample: string) => ctx.measureText(sample).width;
-    const spec = columnSpec(key, false);
-    return { header: columnWidth(textWidth, spec), fitted: columnWidth(textWidth, columnSpec(key, true)) };
+    const samples: ColumnSample[] = [];
+    for (const entry of fitRows()) {
+      const sample = renderedSample(key, entry);
+      if (sample) samples.push(sample);
+    }
+    const fitted = columnWidth(textWidth, { key, label: model.label(key), sorted: model.sorts.some(s => noteKey(s.property) === noteKey(key)), type: type(key), samples });
+    return { header, fitted };
   }
   function cell(key: string, entry: typeof selected[number]) {
     let value = entry.context.get(key);
@@ -608,7 +628,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
         const measure = document.createElement("canvas").getContext("2d")!;
         measure.font = `13.125px ${getComputedStyle(table).fontFamily}`;
         const textWidth = (sample: string) => measure.measureText(sample).width;
-        automatic = model!.columns.map(key => columnWidth(textWidth, columnSpec(key, false)));
+        automatic = model!.columns.map(key => columnWidth(textWidth, columnSpec(key)));
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
         if (!await groupedView.update(model!, drawn, types, () => gone || dirty)) continue;
         counted(); paint(true);

@@ -14,6 +14,20 @@ When that fit is wider than the header (or the fixed date or pill width), the wi
 
 The cell string is the one the cell draws. Dates, checkboxes, and pills keep their own rules and are not widened by the word in the cell. Strings are measured longest-first, and a string that cannot beat the current width is skipped (32px per character is above the 13.125px table font). One column, and only on the double-click.
 
+## Review 1
+
+Codex reviewed `319c86f` as pass-with-fixes.
+
+A fit was using every result row, so a long value in a manually hidden group could set the saved width. It now uses the grouped table's drawn rows (`groupedView.rows()`). Those rows exclude hidden groups and still include rows the table has not painted. With no grouping, the fit still uses the search result.
+
+A formula that returns a list was typed as text for the header, and the fit dropped arrays, so the pills stayed clipped. A note property whose column type is text can also draw one row as pills when that row's own type does not fit. The fit now follows the cell renderer: the property editor's per-row type, or the file/formula branch (pills, a checkbox, a fixed date, or the text). Opening a base still sizes from the header, the date constants, and tag/list/alias pills only.
+
+The double-click no longer sorts a copy of every string, and it does not measure the header pills a second time. The header width is the one already computed for the open layout. Identical strings and identical pill rows are measured once. The longest string is measured first, so a shorter string whose glyphs cannot beat that width is skipped.
+
+`columns.test.ts` checks that forty copies of one string and two copies of one pill are measured once, that a list sample widens a text column, and that a date sample stays 128 unless a cell draws something wider. The browser script checks a hidden group (the column stays at 60px and `columnSize` is not written), a formula list and a text-typed property that draws a list (both fit the pill), and 300 virtualized rows whose widest cell is not in the DOM (60 → 872, saved 872, the double-click handler took 0.5ms).
+
+`tsc --noEmit` passed. `scripts/test-bases-columns.mjs` still resets the due column. `flock /tmp/grove-npm-test.lock npm test` then passed, including posttest (vitest 111 files, and the fit lines above). Three earlier runs of that suite stopped on other timing checks: embed cold open 219.6ms against a 100ms budget, the settings search field not focused after 80ms, and a drawing edit at 51ms against a 50ms budget. Those scripts were not part of this change. The suite rewrote tracked files under `rebuild/round*-shots`; those were restored.
+
 ## Tests
 
 `rebuild/app/scripts/test-bases-fit.mjs` is headless Chromium. Before the fix, an embedded base with header `t` and a long cell opened at 60px, and the double-click did not write `columnSize`. After the fix the same embed goes 60 → 872, saves `note.t: 872`, and the long cell's overflow is 0. The standalone `Fit.base` does the same. The vault is the harness scratch vault.
