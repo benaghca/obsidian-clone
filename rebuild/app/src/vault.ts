@@ -11,6 +11,7 @@ import { backendRoot, onBackendRootChange, pageOwnsDisk } from "./vaultRoot";
 import { linkTargets } from "./links/internal";
 import { listeners } from "./listeners";
 import { addEntry, dropEntries, listTokens, mapEntries } from "./listPatch";
+import { mediaKind } from "./media";
 import { isNoteFile, noteName } from "./paths";
 
 const LINK_INDEX_DELAY = 1000;
@@ -116,25 +117,46 @@ function reduceBatch(batch: { kind: string; paths: string[] }[]) {
   const tombs = tomb();
   const touch = new Marks();
   const reload = new Marks();
+  // Audio, video, and PDF paths in this batch, including one that ends removed.
+  // Note reloads stay on `reload`. A modify is a touch, not a second signal.
+  const media: string[] = [];
+  const seenMedia = new Set<string>();
+  const markMedia = (path: string) => {
+    if (seenMedia.has(path) || !mediaKind(path)) return;
+    seenMedia.add(path);
+    media.push(path);
+  };
   const bury = (path: string) => {
     const node = walk(tombs, path, true);
     if (node) node.removedAt = ++seq;
   };
   for (const change of batch) {
     if (change.kind !== "modify") refresh = true;
-    if (change.kind === "remove") for (const path of change.paths) bury(path);
-    else if (change.kind === "rename") {
+    if (change.kind === "remove") {
+      for (const path of change.paths) {
+        bury(path);
+        markMedia(path);
+      }
+    } else if (change.kind === "rename") {
       if (change.paths[0]) bury(change.paths[0]);
-      for (const path of change.paths) reload.add(path, ++seq, tombs);
+      for (const path of change.paths) {
+        reload.add(path, ++seq, tombs);
+        markMedia(path);
+      }
     } else if (change.kind === "modify") {
       for (const path of change.paths) {
         const at = ++seq;
         touch.add(path, at, tombs);
         reload.add(path, at, tombs);
       }
-    } else for (const path of change.paths) reload.add(path, ++seq, tombs);
+    } else {
+      for (const path of change.paths) {
+        reload.add(path, ++seq, tombs);
+        markMedia(path);
+      }
+    }
   }
-  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs) };
+  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs), media };
 }
 
 export class Vault {
@@ -206,6 +228,12 @@ export class Vault {
   private modified = listeners<[string]>();
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
+  private mediaPaths = listeners<[string]>();
+  /**
+   * An audio, video, or PDF path was created, removed, or renamed in one disk batch.
+   * Fired once per path after that batch's file list is installed. A modify uses `onModified`.
+   */
+  readonly onMediaPath = this.mediaPaths.on;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
   private refs: { files: FileEntry[]; out: NoteRef[] } | null = null;
   private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
@@ -478,6 +506,7 @@ export class Vault {
    * A change on disk, not ours. Events that arrive before the frame, or before
    * the fallback timer, share one file-list read (when any event is not a
    * modify), one touch per path that is still here, one reload per such path,
+   * one signal per audio, video, or PDF path the batch created, removed, or renamed,
    * and one link-index read. A remove drops that path and everything inside
    * it; a later create, modify, or rename puts a path back. Events that arrive
    * while a batch is still being applied wait for it, then share the next batch.
@@ -544,10 +573,12 @@ export class Vault {
     const mine = Symbol();
     this.running = mine;
     try {
-      const { refresh, touch, reload } = reduceBatch(batch);
+      const { refresh, touch, reload, media } = reduceBatch(batch);
       if (refresh) await this.refreshFiles();
       if (wave !== this.wave || !pageOwnsDisk()) return;
+      const touched = new Set(touch);
       for (const path of touch) this.touch(path);
+      for (const path of media) if (!touched.has(path)) this.mediaPaths.emit(path);
       for (const path of reload) {
         if (wave !== this.wave || !pageOwnsDisk()) return;
         await this.reload(path);

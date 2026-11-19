@@ -106,6 +106,7 @@ pub fn run() {
             });
             app.manage(lockdown::FrameOrigins::new());
             app.manage(lockdown::PdfBlobs::new());
+            app.manage(lockdown::PdfFrameFlags::new());
             let handle: AppHandle = app.handle().clone();
             std::thread::Builder::new()
                 .name("vault-watch".into())
@@ -403,11 +404,16 @@ fn allow_frame_origin(origins: State<'_, lockdown::FrameOrigins>, origin: String
 }
 
 /// Hold one reference to a PDF `blob:` URL so an embedded frame may navigate to it.
-/// The main frame may not, and the exception stays off until this window's Linux
-/// response-policy hook is connected (`lockdown`).
+/// Refuses when this window's Linux response-policy hook is not connected, without
+/// recording the blob. The main frame may not navigate there either (`lockdown`).
 #[tauri::command(async)]
-fn allow_pdf_blob(pdf: State<'_, lockdown::PdfBlobs>, url: String) -> Result<(), String> {
-    pdf.allow(&url)
+fn allow_pdf_blob<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    frames: State<'_, lockdown::PdfFrameFlags>,
+    pdf: State<'_, lockdown::PdfBlobs>,
+    url: String,
+) -> Result<(), String> {
+    frames.allow_blob(window.label(), &pdf, &url)
 }
 
 /// Drop one reference from [`allow_pdf_blob`]. The last one removes the URL.

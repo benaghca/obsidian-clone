@@ -146,6 +146,53 @@ fn blob_key(raw: &str) -> Result<String, String> {
     Ok(url.as_str().to_string())
 }
 
+/// Shown when this window cannot navigate a PDF frame. The page uses it instead of a blank iframe.
+pub const PDF_VIEWER_UNAVAILABLE: &str = "PDF viewer is not available in this window";
+
+/// One flag per window. It starts false and becomes true only after that window's Linux
+/// response-policy hook is connected. A missing window is not ready.
+#[derive(Clone, Default)]
+pub struct PdfFrameFlags {
+    flags: Arc<Mutex<HashMap<String, Arc<AtomicBool>>>>,
+}
+
+impl PdfFrameFlags {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&self, label: &str, flag: Arc<AtomicBool>) {
+        self.flags
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .insert(label.to_string(), flag);
+    }
+
+    pub fn remove(&self, label: &str) {
+        self.flags
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .remove(label);
+    }
+
+    pub fn enabled(&self, label: &str) -> bool {
+        self.flags
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+            .get(label)
+            .is_some_and(|flag| flag.load(Ordering::Acquire))
+    }
+
+    /// Register `url` only when this window's viewer hook is connected. Otherwise the blob
+    /// is not recorded, and the caller shows a fallback instead of navigating.
+    pub fn allow_blob(&self, label: &str, pdf: &PdfBlobs, url: &str) -> Result<(), String> {
+        if !self.enabled(label) {
+            return Err(PDF_VIEWER_UNAVAILABLE.into());
+        }
+        pdf.allow(url)
+    }
+}
+
 /// `http://host[:port]` or `https://host[:port]`. No user, path, query, or fragment.
 pub fn parse_frame_origin(raw: &str) -> Result<String, String> {
     const ERR: &str = "origin must be http://host[:port] or https://host[:port]";
@@ -247,6 +294,8 @@ fn build_window(
     // This window may allow a PDF frame only after its own main-frame hook is connected.
     let pdf_frames = Arc::new(AtomicBool::new(false));
     let pdf_frames_nav = Arc::clone(&pdf_frames);
+    let frame_flags = app.state::<PdfFrameFlags>().inner().clone();
+    frame_flags.insert(label, Arc::clone(&pdf_frames));
     let window = WebviewWindowBuilder::from_config(app, &config)?
         .on_navigation(move |url| {
             // Unknown: this callback cannot tell the main frame from a subframe. The response
@@ -270,6 +319,13 @@ fn build_window(
             NewWindowResponse::Deny
         })
         .build()?;
+    let closed = frame_flags.clone();
+    let closed_label = label.to_string();
+    window.on_window_event(move |event| {
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            closed.remove(&closed_label);
+        }
+    });
     install_main_frame_guard(&window, guard_dev, pdf_frames);
     enable_spellchecker(&window);
     // Off unless GROVE_FRAME_PACING=compositor (piece HZ, fix B).
@@ -507,6 +563,8 @@ pub fn capabilities_grant_local_ipc_only() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
 
     /// The calls below pass no PDF blobs and leave the main-frame hook off.
     fn nav(url: &Url, dev: Option<&Url>, frames: &FrameOrigins, place: NavFrame) -> bool {
@@ -952,6 +1010,34 @@ mod tests {
             false,
             NavFrame::Main
         ));
+    }
+
+    #[test]
+    fn a_window_without_the_viewer_hook_does_not_register_a_pdf_blob() {
+        let raw = "blob:https://example.com/550e8400-e29b-41d4-a716-446655440000";
+        let flags = PdfFrameFlags::new();
+        let main = Arc::new(AtomicBool::new(false));
+        let note = Arc::new(AtomicBool::new(false));
+        flags.insert("main", Arc::clone(&main));
+        flags.insert("note-1", Arc::clone(&note));
+        assert!(!flags.enabled("main"));
+        assert!(!flags.enabled("missing"));
+        let pdf = PdfBlobs::new();
+        let err = flags.allow_blob("main", &pdf, raw).unwrap_err();
+        assert_eq!(err, PDF_VIEWER_UNAVAILABLE);
+        assert!(!pdf.contains(&url(raw)));
+        // Another window's hook does not make this one ready.
+        note.store(true, Ordering::Release);
+        assert!(flags.allow_blob("main", &pdf, raw).is_err());
+        assert!(!pdf.contains(&url(raw)));
+        main.store(true, Ordering::Release);
+        flags.allow_blob("main", &pdf, raw).unwrap();
+        assert!(pdf.contains(&url(raw)));
+        assert!(flags.enabled("note-1"));
+        flags.remove("main");
+        assert!(!flags.enabled("main"));
+        assert!(flags.enabled("note-1"));
+        assert!(flags.allow_blob("main", &pdf, raw).is_err());
     }
 
     #[test]

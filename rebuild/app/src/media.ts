@@ -46,6 +46,7 @@ export const MEDIA_PLAY_FAIL = "This file can't be played here.";
 export function mediaFailText(err: unknown, kind: MediaKind): string {
   const msg = typeof err === "string" ? err : err instanceof Error ? err.message : "";
   if (msg.includes("too large")) return "Too large to show.";
+  if (kind === "pdf" && msg.includes("not available")) return "This PDF can't be shown in this window.";
   return kind === "pdf" ? "This PDF can't be shown." : "This file can't be shown.";
 }
 

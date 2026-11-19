@@ -55,6 +55,7 @@ describe("media files", () => {
     expect(mediaFailText("too large to show: movie.mp4", "video")).toBe("Too large to show.");
     expect(mediaFailText(new Error("too large to show: a.pdf"), "pdf")).toBe("Too large to show.");
     expect(mediaFailText("not a media file: a.pdf", "pdf")).toBe("This PDF can't be shown.");
+    expect(mediaFailText("PDF viewer is not available in this window", "pdf")).toBe("This PDF can't be shown in this window.");
     expect(mediaFailText("not a media file: clip.mp3", "audio")).toBe("This file can't be shown.");
     expect(MEDIA_PLAY_FAIL).toBe("This file can't be played here.");
   });

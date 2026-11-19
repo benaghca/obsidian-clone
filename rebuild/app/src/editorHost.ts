@@ -5,10 +5,13 @@
 // note's text (its editor's, when it is open), and an image's bytes as a
 // blob: URL. Nothing is read until an embed is drawn. Notes' text is kept by
 // path until the file changes; an image's URL is revoked as soon as no embed
-// shows it, or when the file changes. A PDF blob is registered with the
-// navigation guard before that URL is handed out, and released with the last holder.
+// shows it, or when the file changes. A create, remove, or rename of an audio,
+// video, or PDF path drops that holder too. A PDF blob is registered with the
+// navigation guard before that URL is handed out, and only when this window can
+// show the viewer; otherwise the read fails and no iframe is attached.
 
 import { api, type FileEntry } from "./api";
+import { mediaKind } from "./media";
 import { isolateHistory } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
 import { embedFor } from "./editor/attachments";
@@ -185,6 +188,24 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     watchers.get(path)?.emit();
   };
   ws.vault.onModified(modified);
+  ws.vault.onMediaPath(modified);
+  // A folder remove or rename changes the list without naming the file. Compare the
+  // paths a player or PDF is actually watching, once per file-list install.
+  const seenMedia = new Map<string, string>();
+  const mediaSig = (path: string) => {
+    const entry = ws.vault.entry(path);
+    return entry && !entry.is_dir ? `${entry.mtime_ms}:${entry.size}` : "";
+  };
+  ws.on((change) => {
+    if (change !== "files") return;
+    for (const path of watchers.keys()) {
+      if (!mediaKind(path)) continue;
+      const next = mediaSig(path);
+      const prev = seenMedia.get(path);
+      seenMedia.set(path, next);
+      if (prev !== undefined && prev !== next) modified(path);
+    }
+  });
 
   const holdBlob = (path: string, type: string) => {
     const pdf = type === "application/pdf";
@@ -255,6 +276,7 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       modified(path); // its embeds show it now, not when it is saved
     },
     watch(path, fn) {
+      if (mediaKind(path) && !seenMedia.has(path)) seenMedia.set(path, mediaSig(path));
       return kept(watchers, path, () => listeners()).on(fn);
     },
     base: (parent, embed, view) => {

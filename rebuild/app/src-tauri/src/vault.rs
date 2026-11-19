@@ -131,6 +131,99 @@ pub struct Vault {
     rescan: Option<Arc<()>>,
 }
 
+/// `O_NONBLOCK` for this process, from libc 0.2.191. `None` on Windows, which has no POSIX FIFO.
+/// An unknown Unix target fails the build rather than opening in a way that can block.
+fn o_nonblock() -> Option<i32> {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "tvos",
+        target_os = "watchos",
+        target_os = "visionos",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd",
+        target_os = "dragonfly",
+    ))]
+    {
+        return Some(0x4);
+    }
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        #[cfg(any(
+            target_arch = "mips",
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6",
+        ))]
+        {
+            return Some(128);
+        }
+        #[cfg(any(target_arch = "sparc", target_arch = "sparc64"))]
+        {
+            return Some(0x4000);
+        }
+        #[cfg(not(any(
+            target_arch = "mips",
+            target_arch = "mips32r6",
+            target_arch = "mips64",
+            target_arch = "mips64r6",
+            target_arch = "sparc",
+            target_arch = "sparc64",
+        )))]
+        {
+            return Some(0x800);
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        return None;
+    }
+    #[cfg(all(
+        unix,
+        not(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly",
+        )),
+    ))]
+    {
+        compile_error!(
+            "O_NONBLOCK is unknown for this Unix target; a blocking open can stall the vault read lock"
+        );
+    }
+}
+
+/// Open for a byte read. Unix uses this target's `O_NONBLOCK` so a FIFO returns at once.
+fn open_for_bytes(path: &Path) -> std::io::Result<fs::File> {
+    match o_nonblock() {
+        Some(flag) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                fs::OpenOptions::new()
+                    .read(true)
+                    .custom_flags(flag)
+                    .open(path)
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = flag;
+                fs::File::open(path)
+            }
+        }
+        None => fs::File::open(path),
+    }
+}
+
 impl Vault {
     pub fn open(root: PathBuf) -> Result<Self, String> {
         if !root.is_dir() {
@@ -173,25 +266,9 @@ impl Vault {
     /// most [`IMAGE_MAX_BYTES`] (the length is checked before the body is read). Images are the
     /// image extensions only and are not sniffed. Audio, video, and PDF must also match their
     /// header (`media_bytes_match`, the same rules as `src/media.ts`); a script or the wrong
-    /// container is `not a media file`. On Linux the open uses `O_NONBLOCK`, then this checks
-    /// the opened descriptor: a FIFO or other non-regular file returns without blocking.
+    /// container is `not a media file`. Unix opens with this target's `O_NONBLOCK`, then this
+    /// checks the opened descriptor: a FIFO or other non-regular file returns without blocking.
     pub fn read_file_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
-        /// Linux `O_NONBLOCK` is 04000. A FIFO open returns at once; a regular file ignores it.
-        fn open_for_bytes(path: &Path) -> std::io::Result<fs::File> {
-            #[cfg(target_os = "linux")]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                const O_NONBLOCK: i32 = 0x800;
-                fs::OpenOptions::new()
-                    .read(true)
-                    .custom_flags(O_NONBLOCK)
-                    .open(path)
-            }
-            #[cfg(not(target_os = "linux"))]
-            {
-                fs::File::open(path)
-            }
-        }
         let ext = path.rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase());
         let image = ext.as_ref().is_some_and(|e| IMAGE_EXTENSIONS.contains(&e.as_str()));
         let media = ext.as_ref().is_some_and(|e| MEDIA_EXTENSIONS.contains(&e.as_str()));
@@ -2002,9 +2079,44 @@ mod tests {
         assert!(vault.read_file_bytes("link.mp3").is_err(), "a symlink out of the vault");
     }
 
+    #[test]
+    fn byte_open_uses_this_targets_nonblocking_flag() {
+        let flag = o_nonblock();
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let expected = if cfg!(any(
+                target_arch = "mips",
+                target_arch = "mips32r6",
+                target_arch = "mips64",
+                target_arch = "mips64r6",
+            )) {
+                128
+            } else if cfg!(any(target_arch = "sparc", target_arch = "sparc64")) {
+                0x4000
+            } else {
+                0x800
+            };
+            assert_eq!(flag, Some(expected));
+        }
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "tvos",
+            target_os = "watchos",
+            target_os = "visionos",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly",
+        ))]
+        assert_eq!(flag, Some(0x4));
+        #[cfg(not(unix))]
+        assert_eq!(flag, None);
+    }
+
     /// A media or image path replaced with a FIFO must return. The old note read
     /// checked `is_file` before opening; this command holds the vault read lock.
-    #[cfg(target_os = "linux")]
+    #[cfg(unix)]
     #[test]
     fn read_file_bytes_does_not_block_on_a_fifo() {
         let dir = tmp_dir("fifo-bytes");

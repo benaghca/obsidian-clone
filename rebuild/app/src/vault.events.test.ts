@@ -278,6 +278,42 @@ it("does not touch or reload a path that ends the frame removed", async () => {
   expect(vi.mocked(api.linkIndex)).toHaveBeenCalledTimes(links + 1);
 });
 
+it("signals an audio, video, or PDF path on create, remove, and rename, once per batch", async () => {
+  const { vault } = await openVault();
+  const modified: string[] = [];
+  const media: string[] = [];
+  vault.onModified((path) => modified.push(path));
+  vault.onMediaPath((path) => media.push(path));
+
+  emit({ kind: "remove", paths: ["clip.mp3"] });
+  emit({ kind: "create", paths: ["clip.mp3", "Note.md"] });
+  await settle();
+  expect(media).toEqual(["clip.mp3"]);
+  expect(modified).toEqual([]);
+
+  media.length = 0;
+  emit({ kind: "rename", paths: ["old.mp4", "clip.mp4"] });
+  emit({ kind: "rename", paths: ["Old.md", "New.md"] });
+  await settle();
+  expect(media).toEqual(["old.mp4", "clip.mp4"]);
+  expect(modified).toEqual([]);
+
+  media.length = 0;
+  emit({ kind: "modify", paths: ["clip.mp3"] });
+  await settle();
+  expect(modified).toEqual(["clip.mp3"]);
+  expect(media).toEqual([]);
+
+  media.length = 0;
+  modified.length = 0;
+  emit({ kind: "create", paths: ["a.pdf"] });
+  await settle();
+  emit({ kind: "remove", paths: ["a.pdf"] });
+  await settle();
+  expect(media).toEqual(["a.pdf", "a.pdf"]);
+  expect(modified).toEqual([]);
+});
+
 it("drops a pending frame and the previous listener when the vault opens again", async () => {
   const stops: Array<() => void> = [];
   vi.mocked(api.onVaultChanged).mockImplementation((handler) => {
