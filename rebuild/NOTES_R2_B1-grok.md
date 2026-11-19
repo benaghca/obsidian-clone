@@ -28,6 +28,20 @@ The double-click no longer sorts a copy of every string, and it does not measure
 
 `tsc --noEmit` passed. `scripts/test-bases-columns.mjs` still resets the due column. `flock /tmp/grove-npm-test.lock npm test` then passed, including posttest (vitest 111 files, and the fit lines above). Three earlier runs of that suite stopped on other timing checks: embed cold open 219.6ms against a 100ms budget, the settings search field not focused after 80ms, and a drawing edit at 51ms against a 50ms budget. Those scripts were not part of this change. The suite rewrote tracked files under `rebuild/round*-shots`; those were restored.
 
+## Review 2
+
+Codex reviewed `d026dbb` as pass-with-fixes.
+
+Opening a tag or list column still measures every selected row, including a pill in a hidden group or a row the search box has filtered out. The fit measured only the rows on screen, but it saved the width only when that fit was larger than the automatic one. A smaller fit cleared `columnSize`, and the column went back to the wide automatic width. A fit is now saved whenever it differs from that automatic width. A fit that matches it still clears `columnSize`, which is what the due column and a short text column already did. The open-path measurement is unchanged.
+
+The fit was also using `groupedView.rows()`, which is the copy and CSV order and still includes rows inside a collapsed group. The table does not paint those rows. `fitRows()` is a separate iterator: it skips collapsed groups and keeps every row of an expanded group, including rows outside the painted window. Copy and CSV still use `rows()`. With no grouping, the fit still uses the search result.
+
+The browser script now checks a hidden group whose list column opens at 464px because of a hidden pill, then double-click shrinks it to 75px and writes `note.labels`. It also collapses a group that holds a longer string, with the expanded group's long cell outside the painted window: the fit is 60 → 872, the same width as that expanded cell, and the collapsed string does not widen it.
+
+`tsc --noEmit` passed. `columns.test.ts` is still 5 tests. `scripts/test-bases-columns.mjs` still resets the due column. The fit script passed, including the two new cases (hidden pill 464 → 75; collapsed group 60 → 872, saved 872; the 300-row handler took 0.4ms).
+
+`flock /tmp/grove-npm-test.lock npm test` then passed, including posttest (vitest 111 files, the fit lines above, and the 10,000-row scroll at p95 16.8ms, max 16.8ms). Two earlier runs of that suite stopped on the 10,000-row scroll frame budget in `scripts/test-bases-edge.mjs` (p95 16.8ms, max 33.3ms against 25ms). Run alone, that script's scroll max was 16.8ms. The suite rewrote tracked files under `rebuild/round*-shots`; those were restored.
+
 ## Tests
 
 `rebuild/app/scripts/test-bases-fit.mjs` is headless Chromium. Before the fix, an embedded base with header `t` and a long cell opened at 60px, and the double-click did not write `columnSize`. After the fix the same embed goes 60 → 872, saves `note.t: 872`, and the long cell's overflow is 0. The standalone `Fit.base` does the same. The vault is the harness scratch vault.

@@ -322,12 +322,13 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     table.style.width=`${widths.reduce((sum,n)=>sum+n,0)}px`;
   }
   // A double-click passes no width. Fit the column to its rows and store that
-  // width the way a drag stores one. A fit that is only the header, or the
-  // fixed date or pill width, still clears the saved size.
+  // width the way a drag stores one. A fit that matches the automatic width
+  // still clears the saved size. A smaller fit is kept: opening a tag or list
+  // column can count a pill from a hidden or search-filtered row.
   const controls=columnControls(head,applySizes,(key,width)=>{
     if(width===undefined){
       const fit=fitWidth(key);
-      if(fit&&fit.fitted>fit.header){applySizes(key,fit.fitted);return menus.size(key,fit.fitted);}
+      if(fit&&fit.fitted!==fit.header){applySizes(key,fit.fitted);return menus.size(key,fit.fitted);}
     }
     return menus.size(key,width);
   },change=>menus.order(change),schedule);
@@ -390,9 +391,9 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     if (value == null || value === "") return;
     return { kind: "text", text: String(value) };
   }
-  /** Rows the grouped table draws, including ones outside the virtual window. Hidden groups stay out. */
+  /** Rows a fit measures. Collapsed groups are skipped. Unpainted rows of expanded groups stay. A table that is not grouped uses the search result. */
   function fitRows(): readonly Entry[] {
-    return groupedView.rows() ?? drawn;
+    return groupedView.fitRows() ?? drawn;
   }
   /** Header width already on screen, and the fit width, from one canvas. */
   function fitWidth(key: string): { header: number; fitted: number } | undefined {

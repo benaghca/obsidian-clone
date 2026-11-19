@@ -18,7 +18,7 @@ const notes = {
 };
 const host = `# Host\n\n\`\`\`base\n${yaml}\`\`\`\n`;
 
-await withBrowser(async ({ run, double, check }) => {
+await withBrowser(async ({ run, double, click, check }) => {
   const wait = async (test, label, attempts = 150) => {
     for (let i = 0; i < attempts; i++) { if (await test()) return; await sleep(20); }
     assert.fail(label);
@@ -217,4 +217,93 @@ views:
   const largeSaved = saved(largeFile);
   check(largeAfter > largeBefore + 40 && largeSaved > largeBefore, `off-screen fit ${largeBefore} -> ${largeAfter}, saved ${largeSaved}, ${elapsed.toFixed(1)}ms`);
   console.log('PASS virtualized fit includes the off-screen cell');
+
+  // A hidden group's long pill sets the automatic width. The fit is the short
+  // visible pill, which is narrower, and that smaller width has to be saved.
+  const hidePill = 'Wider than the header ' + 'pill-fit '.repeat(8);
+  const pillHideYaml = `filters: 'file.inFolder("R2B1PillHide")'
+views:
+  - type: table
+    name: PillHide
+    order:
+      - labels
+      - file.name
+    groupBy:
+      property: g
+      direction: ASC
+      order:
+        - show
+        - hide
+      hidden:
+        - hide
+`;
+  await run(async (pill, yaml) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('R2B1PillHide/A.md', '---\ng: show\nlabels:\n  - no\n---\n# A\n');
+    await api.createNote('R2B1PillHide/B.md', `---\ng: hide\nlabels:\n  - ${pill}\n---\n# B\n`);
+    await api.createNote('PillHide.base', yaml);
+    await ws.vault.refreshFiles();
+    await ws.open('PillHide.base');
+  }, hidePill, pillHideYaml);
+  await wait(() => run(() => {
+    const scope = document.querySelector('.bases-view');
+    const count = scope?.querySelector('.bases-count span')?.textContent;
+    const hidden = [...(scope?.querySelectorAll('td[data-property="labels"]') ?? [])].some(td => td.textContent.includes('pill-fit'));
+    return count === '1 results' && !hidden && !!scope.querySelector('td[data-property="labels"] .property-pill');
+  }), 'hidden pill group is not drawn');
+  const pillHideBefore = await width('.bases-table th[data-property="labels"]');
+  check(pillHideBefore > 280, `hidden pill sets the automatic width (${pillHideBefore}px)`);
+  await double('.bases-table th[data-property="labels"] .bases-resizer');
+  await wait(() => run(async (before) => {
+    const { api } = await import('/src/api.ts');
+    const th = document.querySelector('.bases-table th[data-property="labels"]');
+    const saved = Number((await api.readNote('PillHide.base')).match(/note\.labels:\s*(\d+(?:\.\d+)?)/)?.[1]);
+    const now = th.getBoundingClientRect().width;
+    return now < before - 80 && saved < before - 80 && Math.abs(saved - now) < 1.5;
+  }, pillHideBefore), 'hidden pill fit persists the smaller width');
+  const pillHideAfter = await width('.bases-table th[data-property="labels"]');
+  const pillHideFit = await run(() => {
+    const td = document.querySelector('td[data-property="labels"]');
+    const item = td?.querySelector('.property-pill');
+    if (!td || !item) return null;
+    return { col: td.getBoundingClientRect().width, pill: item.getBoundingClientRect().width };
+  });
+  check(pillHideFit && pillHideFit.pill <= pillHideFit.col + 2, `visible pill fits after the shrink (${pillHideBefore} -> ${pillHideAfter}, ${JSON.stringify(pillHideFit)})`);
+  console.log('PASS a hidden pill does not keep the fitted width');
+
+  // A collapsed group's longer text must not widen the fit. An unpainted row
+  // of the expanded group still does.
+  const longer = LONG + ' ' + 'W'.repeat(40);
+  const shutRows = 80;
+  await run(async (n, long, extra) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('R2B1Shut/shut.md', `---\ng: shut\nt: ${extra}\n---\n`);
+    for (let i = 0; i < n; i++) {
+      const text = i === n - 1 ? long : 'no';
+      await api.createNote(`R2B1Shut/${String(i).padStart(3, '0')}.md`, `---\ng: open\nt: ${text}\n---\n`);
+    }
+    await api.createNote('Shut.base', `filters: 'file.inFolder("R2B1Shut")'\nviews:\n  - type: table\n    name: Shut\n    order:\n      - t\n      - file.name\n    groupBy:\n      property: g\n      direction: ASC\n      order:\n        - shut\n        - open\n`);
+    await ws.vault.refreshFiles();
+    await ws.open('Shut.base');
+  }, shutRows, LONG, longer);
+  await wait(() => run((n) => {
+    const scope = document.querySelector('.bases-view');
+    const labels = [...(scope?.querySelectorAll('.bases-b5-toggle') ?? [])].map(b => b.getAttribute('aria-label'));
+    return scope?.querySelector('.bases-count span')?.textContent === `${n + 1} results` && labels[0] === 'shut (1)' && labels[1] === `open (${n})`;
+  }, shutRows), 'collapsed-group fixture', 400);
+  await click(`.bases-b5-toggle[data-group-id='s:"shut"']`);
+  await wait(() => run(() => {
+    const shut = document.querySelector(`.bases-b5-toggle[data-group-id='s:"shut"']`);
+    const drawn = [...document.querySelectorAll('td[data-property="t"]')].some(td => td.textContent.includes('column-fit'));
+    return shut?.getAttribute('aria-expanded') === 'false' && !drawn;
+  }), 'collapsed group and the off-screen cell are not drawn');
+  const shutBefore = await width('.bases-table th[data-property="t"]');
+  check(shutBefore < 120, `grouped column starts at the header (${shutBefore}px)`);
+  await double('.bases-table th[data-property="t"] .bases-resizer');
+  await wait(() => run((before) => document.querySelector('.bases-table th[data-property="t"]').getBoundingClientRect().width > before + 40, shutBefore), 'expanded off-screen cell widens the column');
+  const shutAfter = await width('.bases-table th[data-property="t"]');
+  const shutFile = await run(async () => { const { api } = await import('/src/api.ts'); return api.readNote('Shut.base'); });
+  const shutSaved = saved(shutFile);
+  check(shutAfter > 700 && shutAfter < 980 && shutSaved > 700 && shutSaved < 980 && Math.abs(shutSaved - shutAfter) < 1.5, `collapsed group is left out of the fit (${shutBefore} -> ${shutAfter}, saved ${shutSaved})`);
+  console.log('PASS collapsed groups are left out of the fit');
 });
