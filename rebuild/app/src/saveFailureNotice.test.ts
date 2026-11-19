@@ -7,7 +7,7 @@ import { SAVE_NOTICE_COALESCE_MS } from "./saveNotices";
 import { resetHoldsForTests } from "./holdDrain";
 import { sealWrites, unsealWrites } from "./saveSeal";
 import { resetBackendRootForTests } from "./vaultRoot";
-import { resetHandoffForTests } from "./vaultWrite";
+import { resetHandoffForTests, writeVaultNote } from "./vaultWrite";
 
 vi.mock("./api", () => ({
   isTauri: false,
@@ -210,6 +210,83 @@ test("notes that fail together share one notice", async () => {
     "Couldn\u2019t save \u201CA\u201D, \u201CB\u201D, and 2 more: Permission denied. Grove will keep trying.",
   ]);
   expect(api.writeNote).toHaveBeenCalledTimes(8);
+  spy.mockRestore();
+});
+
+test("a rejection whose message cannot be read still retries", async () => {
+  vi.useFakeTimers();
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  const broken = {};
+  Object.defineProperty(broken, "message", { get() { throw new Error("no message"); } });
+  vi.mocked(api.writeNote).mockRejectedValue(broken);
+  const notes = editors();
+  await notes.load("Daily.md");
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "kept" } });
+  await expect(notes.flush()).resolves.toBe(false);
+  expect(api.writeNote).toHaveBeenCalledTimes(1);
+  expect(notes.hasUnsaved()).toBe(true);
+  await vi.advanceTimersByTimeAsync(499);
+  expect(api.writeNote).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(api.writeNote).toHaveBeenCalledTimes(2);
+  expect(api.writeNote).toHaveBeenLastCalledWith("Daily.md", "kept");
+  expect(noticeTexts()).toEqual([]);
+  expect(spy).toHaveBeenCalledWith("Could not show a save notice", expect.anything());
+  spy.mockRestore();
+});
+
+test("a superseded retry retires the streak without saying the note saved", async () => {
+  vi.useFakeTimers();
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.mocked(api.writeNote).mockRejectedValueOnce(denied);
+  const notes = editors();
+  await notes.load("Daily.md");
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "kept" } });
+  await notes.flush();
+  expect(notes.hasUnsaved()).toBe(true);
+  vi.mocked(api.writeNote).mockResolvedValueOnce(undefined);
+  await writeVaultNote("Daily.md", "newer");
+  await vi.advanceTimersByTimeAsync(500 + SAVE_NOTICE_COALESCE_MS);
+  expect(api.writeNote).toHaveBeenCalledTimes(2);
+  expect(api.writeNote).toHaveBeenNthCalledWith(1, "Daily.md", "kept");
+  expect(api.writeNote).toHaveBeenNthCalledWith(2, "Daily.md", "newer");
+  expect(notes.hasUnsaved()).toBe(false);
+  expect(noticeTexts()).toEqual([]);
+  vi.mocked(api.writeNote).mockRejectedValue(denied);
+  notes.change("Daily.md", { changes: { from: 0, to: 4, insert: "again" } });
+  await notes.flush();
+  await vi.advanceTimersByTimeAsync(SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(400);
+  expect(noticeTexts()).toEqual([]);
+  await vi.advanceTimersByTimeAsync(SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told]);
+  spy.mockRestore();
+});
+
+test("an announced streak retired by a newer write can speak again", async () => {
+  vi.useFakeTimers();
+  const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+  vi.mocked(api.writeNote).mockRejectedValue(denied);
+  const notes = editors();
+  await notes.load("Daily.md");
+  notes.change("Daily.md", { changes: { from: 0, to: 3, insert: "kept" } });
+  await notes.flush();
+  await vi.advanceTimersByTimeAsync(500 + SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told]);
+  vi.mocked(api.writeNote).mockResolvedValueOnce(undefined);
+  await writeVaultNote("Daily.md", "newer");
+  await vi.advanceTimersByTimeAsync(1000 + SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([told]);
+  expect(notes.hasUnsaved()).toBe(false);
+  vi.mocked(api.writeNote).mockRejectedValue(denied);
+  notes.change("Daily.md", { changes: { from: 0, to: 4, insert: "again" } });
+  await notes.flush();
+  await vi.advanceTimersByTimeAsync(500 + SAVE_NOTICE_COALESCE_MS);
+  expect(noticeTexts()).toEqual([
+    told,
+    "Couldn\u2019t save \u201CDaily\u201D: Permission denied. Grove will keep trying.",
+  ]);
   spy.mockRestore();
 });
 

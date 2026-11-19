@@ -643,14 +643,17 @@ export class NoteEditors {
     }
     // A direct write accepted after this edit owns the path. Do not put the older text back.
     // Leave it dirty when that write is still queued, so a delete will not skip it.
+    // This generation will not be retried. Drop its streak, and do not say it saved:
+    // this write did not land the editor text.
     if (slot.gen !== undefined && pathGen(path) > slot.gen) {
       const queued = queuedNote(pageVault() || sourceVault(), path);
       if (!queued) this.dirty.delete(path);
+      this.tellSaveNotice(() => this.saveNotices.drop((candidate) => candidate === path));
       return !queued;
     }
     const text = state.doc.toString();
     let failed = false;
-    let reason = "";
+    let rejection: unknown;
     try {
       const status = await writeVaultNote(path, text, undefined, slot.gen, sourceVault());
       if (status !== "sent") {
@@ -661,7 +664,7 @@ export class NoteEditors {
     } catch (err) {
       console.error(`Could not save ${path}`, err);
       failed = true;
-      reason = saveFailureReason(err);
+      rejection = err;
     }
     const landed = slot.path;
     if (!this.states.has(landed)) {
@@ -677,14 +680,16 @@ export class NoteEditors {
     const moved = !!latest && latest.doc.toString() !== text;
     if (failed) {
       this.dirty.add(landed);
+      // Arm the next write before reading the rejection. A notice problem must not cancel the retry.
+      const report = () => this.tellSaveNotice(() => this.saveNotices.reject(landed, saveFailureReason(rejection)));
       // A newer keystroke is written on the next pass. Backoff waits only when this text itself failed.
       if (moved) {
         if (!this.saveTimers.has(landed)) this.scheduleSave(landed);
-        this.tellSaveNotice(() => this.saveNotices.reject(landed, reason));
+        report();
         return false;
       }
       this.scheduleRetry(slot);
-      this.tellSaveNotice(() => this.saveNotices.reject(landed, reason));
+      report();
       return false;
     }
     if (moved) {
