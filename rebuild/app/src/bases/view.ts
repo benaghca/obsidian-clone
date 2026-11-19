@@ -19,7 +19,7 @@ import { baseMenus, type BaseFile } from "./menus";
 import { createCardGrid } from "./cards";
 import { createKanban } from "./kanban";
 import { createList } from "./list";
-import { columnControls } from "./columns";
+import { columnControls, columnWidth, type ColumnWidthInput } from "./columns";
 import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, viewGlyph, type Row } from "./model";
 import type { Value } from "./expression";
@@ -321,7 +321,16 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     [...columns.children].forEach((col,i)=>(col as HTMLElement).style.width=`${widths[i]}px`);
     table.style.width=`${widths.reduce((sum,n)=>sum+n,0)}px`;
   }
-  const controls=columnControls(head,applySizes,(key,width)=>menus.size(key,width),change=>menus.order(change),schedule);
+  // A double-click passes no width. Fit the column to its rows and store that
+  // width the way a drag stores one. A fit that is only the header, or the
+  // fixed date or pill width, still clears the saved size.
+  const controls=columnControls(head,applySizes,(key,width)=>{
+    if(width===undefined){
+      const fit=fitWidth(key);
+      if(fit&&fit.fitted>fit.header){applySizes(key,fit.fitted);return menus.size(key,fit.fitted);}
+    }
+    return menus.size(key,width);
+  },change=>menus.order(change),schedule);
   const field = (node: EventTarget | null) => node instanceof Element && body.contains(node) && node.matches('input:not([type="checkbox"]),[contenteditable="plaintext-only"]');
   const editing = () => controls.active || field(document.activeElement);
   // Work out the rows' text while the Search box is focused, before the first key.
@@ -337,6 +346,50 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     if (key === "file.tags") return "tags";
     if (key === "file.size" || typeof value === "number") return "number";
     return types.get(noteKey(key)) ?? (Array.isArray(value) ? "list" : typeof value === "boolean" ? "checkbox" : "text");
+  }
+  /** The string a plain cell draws. Dates, checks and pills are sized by their own rules. */
+  function shownCell(key: string, entry: Entry): string {
+    let value: Value;
+    try { value = entry.context.get(key); }
+    catch (error) { return error instanceof Error ? error.message : String(error); }
+    const prop = entry.row.props.find(p => p.key === noteKey(key));
+    const want = index.host.typeOf(noteKey(key));
+    if (prop && want && fits(prop, want)) value = asType(prop, want);
+    if (value instanceof Error) return String(value);
+    if (value == null || value === "" || typeof value === "boolean" || Array.isArray(value)) return "";
+    return String(value);
+  }
+  function columnSpec(key: string, cells: boolean): ColumnWidthInput {
+    const kind = type(key);
+    const list = kind === "tags" || kind === "list" || kind === "aliases";
+    const plain = cells && !list && kind !== "date" && kind !== "datetime" && kind !== "checkbox";
+    const pills: string[][] = [];
+    const text: string[] = [];
+    if (list || plain) {
+      for (const entry of cells ? drawn : selected) {
+        if (!list) {
+          const sample = shownCell(key, entry);
+          if (sample) text.push(sample);
+          continue;
+        }
+        // Opening still lets a bad list value fail the base. A fit skips that cell.
+        let value: Value | undefined;
+        if (cells) { try { value = entry.context.get(key); } catch { continue; } }
+        else value = entry.context.get(key);
+        if (Array.isArray(value)) pills.push(value.map(item => String(item)));
+      }
+    }
+    return { key, label: model!.label(key), sorted: model!.sorts.some(s => noteKey(s.property) === noteKey(key)), type: kind, pills, text: cells ? text : undefined };
+  }
+  /** Header width and the fit width, from one canvas, for the current result rows. */
+  function fitWidth(key: string): { header: number; fitted: number } | undefined {
+    if (!model) return;
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return;
+    ctx.font = `13.125px ${getComputedStyle(table).fontFamily}`;
+    const textWidth = (sample: string) => ctx.measureText(sample).width;
+    const spec = columnSpec(key, false);
+    return { header: columnWidth(textWidth, spec), fitted: columnWidth(textWidth, columnSpec(key, true)) };
   }
   function cell(key: string, entry: typeof selected[number]) {
     let value = entry.context.get(key);
@@ -551,19 +604,11 @@ export function createBase(ws: Workspace, o: BaseOptions) {
           const th = h("th", { "data-property": key, oncontextmenu: (e: MouseEvent) => menus.header(e, key) }, h("div", { class: "bases-header" }, icon(key === "file.name" ? "info" : key.startsWith("formula.") ? "square-function" : TYPE_ICONS[type(key)], 14), h("span", null, model!.label(key)), sort ? icon(sort.direction === 1 ? "chevron-up" : "chevron-down", 14) : null));
           controls.attach(th,key);return th;
         })));
-        // Measure the interface font; reserve a sort glyph and native date width.
+        // Header, date and pill widths. Cell text is measured on fit, not here, so opening a base stays header-sized.
         const measure = document.createElement("canvas").getContext("2d")!;
         measure.font = `13.125px ${getComputedStyle(table).fontFamily}`;
-        automatic = model!.columns.map(key => {
-            const sort = model!.sorts.some(s => noteKey(s.property) === noteKey(key));
-            let width = Math.max(key === "file.name" ? 78 : 60, Math.ceil(measure.measureText(model!.label(key)).width + 34 + (sort ? 16 : 0)));
-            if (["date", "datetime"].includes(type(key))) width = type(key) === "date" ? 128 : 210;
-            if (["tags", "list", "aliases"].includes(type(key))) for (const entry of selected) {
-              const v = entry.context.get(key);
-              if (Array.isArray(v)) width = Math.max(width, Math.ceil(v.reduce<number>((sum, item) => sum + measure.measureText(String(item)).width + 44, 16)));
-            }
-            return width;
-        });
+        const textWidth = (sample: string) => measure.measureText(sample).width;
+        automatic = model!.columns.map(key => columnWidth(textWidth, columnSpec(key, false)));
         columns.replaceChildren(...model!.columns.map(()=>h("col")));applySizes();
         if (!await groupedView.update(model!, drawn, types, () => gone || dirty)) continue;
         counted(); paint(true);

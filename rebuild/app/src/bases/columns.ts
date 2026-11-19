@@ -1,5 +1,44 @@
 import { h } from "../shell/dom";
 import { drag, dropSlot, reordered } from "./drag";
+
+/** Body cell padding, 8px on each side. Header chrome (icon and gap) is the +34 below. */
+const CELL_PAD = 16;
+/** Upper bound on one glyph, in px. The table font is 13.125px; this stays above it so a wide glyph is never skipped. */
+const CELL_ADVANCE = 32;
+
+export interface ColumnWidthInput {
+  key: string;
+  label: string;
+  sorted: boolean;
+  type: string;
+  /** Tag, list and alias pills. Measured for the automatic width and for a fit. */
+  pills?: readonly (readonly string[])[];
+  /** Plain cell strings. Set only when fitting; the automatic width stays header-sized. */
+  text?: readonly string[];
+}
+
+/**
+ * Column width in px. Header, fixed date and pill rules are the table's
+ * automatic width. `text` widens a fit to the longest plain cell. The drag
+ * floor is 40; file name stays at least 78 and every other column at least 60.
+ */
+export function columnWidth(textWidth: (text: string) => number, column: ColumnWidthInput): number {
+  let width = Math.max(column.key === "file.name" ? 78 : 60, Math.ceil(textWidth(column.label) + 34 + (column.sorted ? 16 : 0)));
+  if (column.type === "date" || column.type === "datetime") return column.type === "date" ? 128 : 210;
+  if (column.type === "tags" || column.type === "list" || column.type === "aliases") {
+    for (const pills of column.pills ?? []) width = Math.max(width, Math.ceil(pills.reduce((sum, item) => sum + textWidth(item) + 44, 16)));
+    return Math.max(40, width);
+  }
+  if (column.type !== "checkbox" && column.text) {
+    const ranked = column.text.length > 1 ? [...column.text].sort((a, b) => b.length - a.length) : column.text;
+    for (const text of ranked) {
+      if (!text || text.length * CELL_ADVANCE + CELL_PAD <= width) continue;
+      width = Math.max(width, Math.ceil(textWidth(text) + CELL_PAD));
+    }
+  }
+  return Math.max(40, width);
+}
+
 export function columnControls(head: HTMLElement, applySize: (key?: string, width?: number) => void, size: (key: string, width?: number) => void, order: (change: (keys: string[]) => string[]) => void, finished: () => void) {
   let active=false, cancel: (()=>void) | undefined;
   const line=h("div",{class:"bases-column-drop"});
