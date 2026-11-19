@@ -192,8 +192,12 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   // each start a read. Remember the signature here. The signal reloads the
   // path; a folder event that never names the file is reloaded one microtask
   // after the signal, and only when the signal did not cover it.
+  // A modify-only batch reloads without installing a new list, so the saved
+  // signature stays old. The next list install is that version catching up,
+  // and must not reload the holder a second time.
   const changedByList = new Set<string>();
   const signaled = new Set<string>();
+  const loadedAhead = new Set<string>();
   let scheduled = false;
   const reconcile = () => {
     scheduled = false;
@@ -210,7 +214,10 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     queueMicrotask(() => queueMicrotask(reconcile));
   };
   const invalidate = (path: string) => {
-    if (scheduled && mediaKind(path)) signaled.add(path);
+    if (mediaKind(path)) {
+      if (scheduled) signaled.add(path);
+      else loadedAhead.add(path);
+    }
     modified(path);
   };
   ws.vault.onModified(invalidate);
@@ -229,10 +236,15 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       const next = mediaSig(path);
       const prev = seenMedia.get(path);
       seenMedia.set(path, next);
-      if (prev !== undefined && prev !== next) {
-        changedByList.add(path);
-        scheduleReconcile();
+      if (prev === undefined || prev === next) {
+        loadedAhead.delete(path);
+        continue;
       }
+      // The holder already read this version. The list is only now showing it.
+      // A path that disappeared still reloads, so playback does not keep a deleted file.
+      if (loadedAhead.delete(path) && next !== "") continue;
+      changedByList.add(path);
+      scheduleReconcile();
     }
   });
 
@@ -316,6 +328,7 @@ function createEmbedHost(ws: Workspace): EmbedHost {
         if (bucket.size > 0) return;
         watchers.delete(path);
         seenMedia.delete(path);
+        loadedAhead.delete(path);
       };
     },
     base: (parent, embed, view) => {

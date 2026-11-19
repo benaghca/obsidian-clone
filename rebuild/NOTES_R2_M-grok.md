@@ -14,7 +14,7 @@ Audio, video, and PDF open as views (`audio`, `video`, `pdf`) with `path` null a
 
 A note embed `![[clip.mp3]]` or `![alt](clip.mp3)` (hash stripped, alias size kept) is a player with controls, `preload="metadata"`, and no autoplay. `![[a.pdf]]` and `![x](a.pdf)` are the same unsandboxed PDF iframe as the pane: the frame is attached only after the sniffed bytes succeed, and it is not focused. A script such as `![[run.sh]]` stays a link. A canvas card of one of these files still says "Unsupported file".
 
-Closing a pane pauses the player, clears the iframe, and releases both blob holders, including when the read finishes after the pane is gone. The pane also watches the path, as the embed does. An outside replacement drops the old bytes and reads again, so a failure is replaced when a valid file arrives. The same reload puts a player or PDF frame back after a failed read. A create, remove, or rename of that audio, video, or PDF path does this once per disk batch, including a remove and a later create in two batches. The file-list install and that path signal are one reload, not two reads. A folder event that does not name the file still drops the holder when the installed file list no longer matches the path being watched. A modify stays on the existing modified signal. Note reloads are unchanged. Closing the last watcher for a path drops it, so later file-list installs do not scan it.
+Closing a pane pauses the player, clears the iframe, and releases both blob holders, including when the read finishes after the pane is gone. The pane also watches the path, as the embed does. An outside replacement drops the old bytes and reads again, so a failure is replaced when a valid file arrives. The same reload puts a player or PDF frame back after a failed read. A create, remove, or rename of that audio, video, or PDF path does this once per disk batch, including a remove and a later create in two batches. The file-list install and that path signal are one reload, not two reads. A folder event that does not name the file still drops the holder when the installed file list no longer matches the path being watched. A modify stays on the existing modified signal and reloads the holder then. A later file-list install that only catches that version up does not reload it again. A later modify still does, and so does a list install that drops the file. Note reloads are unchanged. Closing the last watcher for a path drops it, so later file-list installs do not scan it.
 
 ## How PDFs are shown
 
@@ -44,7 +44,7 @@ The page registers the blob only after a sniffed PDF read, and awaits that befor
 
 `cargo test --offline` in `rebuild/app/src-tauri` after the second review: 207 passed, 0 failed, 5 ignored (lib), plus main 0 and doc 0. That includes the media header and size-cap reads, the FIFO open returning `no such file`, the non-blocking flag for this target, a window without the viewer hook not registering a PDF blob, the image reads, and the navigation-guard table (a registered PDF blob only while this window's top-level deny is on). The scheme in the guard matches the URL strings in this machine's `libwebkit2gtk-4.1.so.0`. Two pre-existing `dead_code` warnings in `index/file_map.rs` remain.
 
-`flock /tmp/grove-npm-test.lock npm test` in `rebuild/app` exited 0 in 1065s. Vitest: 113 files, 1701 tests. An earlier run missed the drawing-editor 50 ms budget by 1 ms (`DRAWING_EDIT_LONG [51]`). The next run passed that check and missed the 10,000-row bases scroll by one frame (max 33.3 ms, budget 25 ms, no long task). This run passed both (`DRAWING_EDIT_LONG [50]`, scroll max 16.8 ms).
+`flock /tmp/grove-npm-test.lock npm test` in `rebuild/app` exited 0 in 1058s. Vitest: 113 files, 1702 tests. Earlier runs missed the bases-embed cold open (112.8 ms, budget 100 ms), the six canvas link-card frames, and the drawing-editor 50 ms budget (`DRAWING_EDIT_LONG [54]`). This run passed those checks (cold open 26.7 ms, `DRAWING_EDIT_LONG []`, 10,000-row scroll max 16.8 ms).
 
 Headless checks cover the sniff, the cap, opening without `read_note`, layout restore, the audio, video, and PDF embed widget types, the FIFO open returning, and the guard table (a registered PDF blob only while the top-level deny is on; `Unknown` refuses it before that). Vitest runs in node and does not build the player or the iframe. Closing a pane and the outside-replacement reload are in the pane code; node tests do not construct that DOM.
 
@@ -53,6 +53,8 @@ Codex review 1 (PASS-WITH-FIXES on `e146989`): the pane now releases media and P
 Codex review 2 (PASS-WITH-FIXES on `bf891eb`): a window whose viewer hook is off refuses `allow_pdf_blob` and the page shows a fallback instead of a blank iframe; create, remove, and rename of a media path refresh holders inside the existing disk batch; Unix opens use that target's `O_NONBLOCK`.
 
 Codex review 3 (PASS-WITH-FIXES on `fe48146`): one disk batch reloads a watched audio, video, or PDF path once when both the file list and the path signal notice it, and a path leaves the file-list scan when its last watcher unsubscribes.
+
+Codex review 4 (PASS-WITH-FIXES on `792ae80`): a modify reloads the holder before the file list updates, and a later unrelated list install adopts that version instead of reloading again.
 
 ## What a window would still have to show
 

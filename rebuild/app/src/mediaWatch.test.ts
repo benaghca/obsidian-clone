@@ -96,6 +96,33 @@ it("reloads a watched recording once when one batch recreates it", async () => {
   expect(hits).toBe(1);
 });
 
+it("does not reload a recording again when a later batch only refreshes the file list", async () => {
+  files = [file("clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("clip.mp3", () => { hits += 1; });
+
+  files = [file("clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  files = [file("clip.mp3", 2, 8), file("Note.md", 1, 1)];
+  emit({ kind: "create", paths: ["Note.md"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  files = [file("clip.mp3", 3, 12), file("Note.md", 1, 1)];
+  emit({ kind: "modify", paths: ["clip.mp3"] });
+  await settle();
+  expect(hits).toBe(2);
+
+  files = [file("Away/clip.mp3", 3, 12), file("Note.md", 1, 1)];
+  emit({ kind: "rename", paths: ["Dir", "Away"] });
+  await settle();
+  expect(hits).toBe(3);
+});
+
 it("reloads a watched file once when a folder rename drops it from the list", async () => {
   files = [file("Dir/clip.mp3", 1, 4)];
   const { host } = await openHost();
