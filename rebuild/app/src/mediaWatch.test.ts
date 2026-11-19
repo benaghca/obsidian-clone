@@ -22,6 +22,10 @@ function file(path: string, mtime = 1, size = 4): FileEntry {
   return { path, name: path.slice(path.lastIndexOf("/") + 1), is_dir: false, mtime_ms: mtime, ctime_ms: 1, size };
 }
 
+function dir(path: string, mtime: number): FileEntry {
+  return { path, name: path.slice(path.lastIndexOf("/") + 1), is_dir: true, mtime_ms: mtime, ctime_ms: 0, size: 0 };
+}
+
 let files: FileEntry[] = [];
 let emit: (change: DiskChange) => void = () => {};
 let frames: FrameRequestCallback[] = [];
@@ -121,6 +125,44 @@ it("does not reload a recording again when a later batch only refreshes the file
   emit({ kind: "rename", paths: ["Dir", "Away"] });
   await settle();
   expect(hits).toBe(3);
+});
+
+it("reloads when a later batch replaces the folder after a modify", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8), file("Note.md", 1, 1)];
+  emit({ kind: "create", paths: ["Note.md"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  files = [dir("Dir", 50), file("Dir/clip.mp3", 9, 20)];
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  await settle();
+  expect(hits).toBe(2);
+});
+
+it("does not remember a modify for a recording nobody is watching", async () => {
+  files = [file("clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  files = [file("clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["clip.mp3"] });
+  await settle();
+
+  let hits = 0;
+  host.embeds.watch("clip.mp3", () => { hits += 1; });
+  files = [file("clip.mp3", 2, 8), file("Note.md", 1, 1)];
+  emit({ kind: "create", paths: ["Note.md"] });
+  await settle();
+  expect(hits).toBe(1);
 });
 
 it("reloads a watched file once when a folder rename drops it from the list", async () => {
