@@ -6,7 +6,7 @@
 // blob: URL. Nothing is read until an embed is drawn. Notes' text is kept by
 // path until the file changes; an image's URL is revoked as soon as no embed
 // shows it, or when the file changes. A create, remove, or rename of an audio,
-// video, or PDF path drops that holder too. A PDF blob is registered with the
+// video, or PDF path drops that holder once per disk batch. A PDF blob is registered with the
 // navigation guard before that URL is handed out, and only when this window can
 // show the viewer; otherwise the read fails and no iframe is attached.
 
@@ -187,8 +187,34 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     images.delete(path); // its holders load it again, and let go of the old URL
     watchers.get(path)?.emit();
   };
-  ws.vault.onModified(modified);
-  ws.vault.onMediaPath(modified);
+  // The list install emits "files" and then, one microtask later, the batch's
+  // modify and media-path signals. A signature change and that signal would
+  // each start a read. Remember the signature here. The signal reloads the
+  // path; a folder event that never names the file is reloaded one microtask
+  // after the signal, and only when the signal did not cover it.
+  const changedByList = new Set<string>();
+  const signaled = new Set<string>();
+  let scheduled = false;
+  const reconcile = () => {
+    scheduled = false;
+    for (const path of changedByList) {
+      if (signaled.has(path) || !watchers.has(path)) continue;
+      modified(path);
+    }
+    changedByList.clear();
+    signaled.clear();
+  };
+  const scheduleReconcile = () => {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => queueMicrotask(reconcile));
+  };
+  const invalidate = (path: string) => {
+    if (scheduled && mediaKind(path)) signaled.add(path);
+    modified(path);
+  };
+  ws.vault.onModified(invalidate);
+  ws.vault.onMediaPath(invalidate);
   // A folder remove or rename changes the list without naming the file. Compare the
   // paths a player or PDF is actually watching, once per file-list install.
   const seenMedia = new Map<string, string>();
@@ -198,12 +224,15 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   };
   ws.on((change) => {
     if (change !== "files") return;
-    for (const path of watchers.keys()) {
+    for (const path of [...watchers.keys()]) {
       if (!mediaKind(path)) continue;
       const next = mediaSig(path);
       const prev = seenMedia.get(path);
       seenMedia.set(path, next);
-      if (prev !== undefined && prev !== next) modified(path);
+      if (prev !== undefined && prev !== next) {
+        changedByList.add(path);
+        scheduleReconcile();
+      }
     }
   });
 
@@ -277,7 +306,17 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     },
     watch(path, fn) {
       if (mediaKind(path) && !seenMedia.has(path)) seenMedia.set(path, mediaSig(path));
-      return kept(watchers, path, () => listeners()).on(fn);
+      const bucket = kept(watchers, path, () => listeners());
+      const stop = bucket.on(fn);
+      let live = true;
+      return () => {
+        if (!live) return;
+        live = false;
+        stop();
+        if (bucket.size > 0) return;
+        watchers.delete(path);
+        seenMedia.delete(path);
+      };
     },
     base: (parent, embed, view) => {
       const live = baseEmbeds.get();
