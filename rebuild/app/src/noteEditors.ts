@@ -19,7 +19,9 @@ import { api } from "./api";
 import { configEffects } from "./editor/config";
 import { retryDelay } from "./fileSave";
 import { drainAllows, pathHeld, popPathHold, pushPathHold } from "./holdDrain";
+import { createSaveNotices, saveFailureReason } from "./saveNotices";
 import { writesSealed } from "./saveSeal";
+import { notice } from "./shell/notice";
 import { bumpPathGen, pageOwnsDisk, pageVault, pathGen, sourceVault } from "./vaultRoot";
 import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
@@ -83,6 +85,11 @@ export class NoteEditors {
   private saveTimers = new Map<string, number>();
   private retryTimers = new Map<string, number>();
   private retryAttempt = new Map<string, number>();
+  /** Speaks once when saves keep failing. It does not choose the retry. */
+  private saveNotices = createSaveNotices((lines) => {
+    if (typeof document === "undefined" || !document.body) return;
+    notice(lines);
+  });
   /** Latest text is not on disk. Kept apart from the timers: a failed save has no timer until its retry is armed. */
   private dirty = new Set<string>();
   /** Path identity for an in-flight save, so a rename can retarget it. */
@@ -481,6 +488,7 @@ export class NoteEditors {
     this.rekey(this.saveTimers, under, swap);
     this.rekey(this.retryTimers, under, swap);
     this.rekey(this.retryAttempt, under, swap);
+    this.tellSaveNotice(() => this.saveNotices.rekey(under, swap));
     const dirty = new Set<string>();
     for (const path of this.dirty) dirty.add(under(path) ? swap(path) : path);
     this.dirty = dirty;
@@ -514,6 +522,7 @@ export class NoteEditors {
     for (const path of [...this.retryTimers.keys()]) if (under(path)) this.clearTimer(this.retryTimers, path);
     for (const path of [...this.retryAttempt.keys()]) if (under(path)) this.retryAttempt.delete(path);
     for (const path of [...this.dirty]) if (under(path)) this.dirty.delete(path);
+    this.tellSaveNotice(() => this.saveNotices.drop(under));
     for (const path of [...this.slots.keys()]) if (under(path)) this.slots.delete(path);
   }
 
@@ -556,6 +565,12 @@ export class NoteEditors {
     if (writesSealed()) return true;
     if (drainAllows(path)) return false;
     return this.holds.some((under) => under(path)) || pathHeld(path);
+  }
+
+  /** A notice problem must not change the save's result or its retry. */
+  private tellSaveNotice(run: () => void) {
+    try { run(); }
+    catch (err) { console.error("Could not show a save notice", err); }
   }
 
   private scheduleSave(path: string) {
@@ -618,6 +633,7 @@ export class NoteEditors {
     const state = this.states.get(path);
     if (!state) {
       this.dirty.delete(path);
+      this.tellSaveNotice(() => this.saveNotices.drop((candidate) => candidate === path));
       return true;
     }
     if (this.blocked(path)) {
@@ -634,6 +650,7 @@ export class NoteEditors {
     }
     const text = state.doc.toString();
     let failed = false;
+    let reason = "";
     try {
       const status = await writeVaultNote(path, text, undefined, slot.gen, sourceVault());
       if (status !== "sent") {
@@ -644,10 +661,12 @@ export class NoteEditors {
     } catch (err) {
       console.error(`Could not save ${path}`, err);
       failed = true;
+      reason = saveFailureReason(err);
     }
     const landed = slot.path;
     if (!this.states.has(landed)) {
       this.dirty.delete(landed);
+      this.tellSaveNotice(() => this.saveNotices.drop((candidate) => candidate === path || candidate === landed));
       return true;
     }
     if (landed !== path) {
@@ -661,9 +680,11 @@ export class NoteEditors {
       // A newer keystroke is written on the next pass. Backoff waits only when this text itself failed.
       if (moved) {
         if (!this.saveTimers.has(landed)) this.scheduleSave(landed);
+        this.tellSaveNotice(() => this.saveNotices.reject(landed, reason));
         return false;
       }
       this.scheduleRetry(slot);
+      this.tellSaveNotice(() => this.saveNotices.reject(landed, reason));
       return false;
     }
     if (moved) {
@@ -674,6 +695,7 @@ export class NoteEditors {
     this.dirty.delete(landed);
     this.retryAttempt.delete(landed);
     this.events.saved(landed);
+    this.tellSaveNotice(() => this.saveNotices.landed(landed));
     return true;
   }
 
