@@ -194,12 +194,14 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   // after the signal, and only when the signal did not cover it.
   // A modify-only batch reloads without installing a new list, so the saved
   // signature stays old. The next list install may only be that version
-  // catching up. Remember the ancestor versions at the read, and skip only
-  // when those are unchanged, so a folder swapped into the same name still
-  // reloads. Record that only while a watcher is active.
+  // catching up. Skip that second reload unless this batch removes, renames,
+  // or creates a watched ancestor: a sibling note changes the folder stamp
+  // without replacing the file, and a swapped folder can keep the old stamp.
+  // Record the skip only while a watcher is active.
   const changedByList = new Set<string>();
   const signaled = new Set<string>();
-  const loadedAhead = new Map<string, string>();
+  const loadedAhead = new Set<string>();
+  const structural = new Set<string>();
   let scheduled = false;
   const reconcile = () => {
     scheduled = false;
@@ -215,25 +217,27 @@ function createEmbedHost(ws: Workspace): EmbedHost {
     scheduled = true;
     queueMicrotask(() => queueMicrotask(reconcile));
   };
-  const ancestorSig = (path: string) => {
-    const parts = path.split("/");
-    let sig = "";
-    for (let i = 1; i < parts.length; i++) {
-      const entry = ws.vault.entry(parts.slice(0, i).join("/"));
-      sig += entry ? `${entry.mtime_ms}:${entry.size}` : "";
-      sig += "/";
-    }
-    return sig;
-  };
   const invalidate = (path: string) => {
     if (mediaKind(path) && watchers.has(path)) {
       if (scheduled) signaled.add(path);
-      else loadedAhead.set(path, ancestorSig(path));
+      else loadedAhead.add(path);
     }
     modified(path);
   };
   ws.vault.onModified(invalidate);
   ws.vault.onMediaPath(invalidate);
+  ws.vault.onStructure((paths) => {
+    structural.clear();
+    for (const watched of watchers.keys()) {
+      if (!mediaKind(watched)) continue;
+      for (const eventPath of paths) {
+        if (eventPath && (watched === eventPath || watched.startsWith(`${eventPath}/`))) {
+          structural.add(watched);
+          break;
+        }
+      }
+    }
+  });
   // A folder remove or rename changes the list without naming the file. Compare the
   // paths a player or PDF is actually watching, once per file-list install.
   const seenMedia = new Map<string, string>();
@@ -252,14 +256,14 @@ function createEmbedHost(ws: Workspace): EmbedHost {
         loadedAhead.delete(path);
         continue;
       }
-      // The holder already read this version. Skip only when every ancestor
-      // still has the version from that read, so a replaced folder is not a catch-up.
-      const ancestors = loadedAhead.get(path);
-      loadedAhead.delete(path);
-      if (ancestors !== undefined && ancestors === ancestorSig(path) && next !== "") continue;
+      // The holder already read this version. A remove, rename, or create of
+      // the file or an ancestor is a different file, not that catch-up.
+      const ahead = loadedAhead.delete(path);
+      if (ahead && next !== "" && !structural.has(path)) continue;
       changedByList.add(path);
       scheduleReconcile();
     }
+    structural.clear();
   });
 
   const holdBlob = (path: string, type: string) => {

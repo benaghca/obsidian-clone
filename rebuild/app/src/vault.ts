@@ -126,6 +126,12 @@ function reduceBatch(batch: { kind: string; paths: string[] }[]) {
     seenMedia.add(path);
     media.push(path);
   };
+  // Remove, rename, and create paths. A modify is not one of these: the file
+  // list may only be catching up to a read the holder already did.
+  const structure: string[] = [];
+  const markStructure = (path: string) => {
+    if (path) structure.push(path);
+  };
   const bury = (path: string) => {
     const node = walk(tombs, path, true);
     if (node) node.removedAt = ++seq;
@@ -136,12 +142,14 @@ function reduceBatch(batch: { kind: string; paths: string[] }[]) {
       for (const path of change.paths) {
         bury(path);
         markMedia(path);
+        markStructure(path);
       }
     } else if (change.kind === "rename") {
       if (change.paths[0]) bury(change.paths[0]);
       for (const path of change.paths) {
         reload.add(path, ++seq, tombs);
         markMedia(path);
+        markStructure(path);
       }
     } else if (change.kind === "modify") {
       for (const path of change.paths) {
@@ -153,10 +161,11 @@ function reduceBatch(batch: { kind: string; paths: string[] }[]) {
       for (const path of change.paths) {
         reload.add(path, ++seq, tombs);
         markMedia(path);
+        markStructure(path);
       }
     }
   }
-  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs), media };
+  return { refresh, touch: touch.live(tombs), reload: reload.live(tombs), media, structure };
 }
 
 export class Vault {
@@ -234,6 +243,12 @@ export class Vault {
    * Fired once per path after that batch's file list is installed. A modify uses `onModified`.
    */
   readonly onMediaPath = this.mediaPaths.on;
+  private structural = listeners<[readonly string[]]>();
+  /**
+   * Remove, rename, and create paths for the file list about to be installed.
+   * Fired just before that list's `files` signal. A modify is not included.
+   */
+  readonly onStructure = this.structural.on;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
   private refs: { files: FileEntry[]; out: NoteRef[] } | null = null;
   private targets: { files: FileEntry[]; exists: ReturnType<typeof linkTargets> } | null = null;
@@ -292,7 +307,7 @@ export class Vault {
     this.stopChanges = stop;
   }
 
-  async refreshFiles() {
+  async refreshFiles(structure?: readonly string[]) {
     const mine = ++this.filesRequest;
     const vault = backendRoot();
     const listed = await api.listFiles();
@@ -311,7 +326,7 @@ export class Vault {
     this.deltas = [];
     this.confirmAgain = false;
     this.listEpoch += 1;
-    this.show(listed);
+    this.show(listed, structure);
   }
 
   /** Keep reading until a snapshot that started after the latest edit can install. */
@@ -377,12 +392,13 @@ export class Vault {
     return true;
   }
 
-  private show(files: FileEntry[]) {
+  private show(files: FileEntry[], structure?: readonly string[]) {
     this.pieces = listTokens(this.fileList, files);
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
       .map((f) => ({ name: noteName(f.path), path: f.path }));
+    if (structure?.length) this.structural.emit(structure);
     this.changed("files");
   }
 
@@ -573,8 +589,8 @@ export class Vault {
     const mine = Symbol();
     this.running = mine;
     try {
-      const { refresh, touch, reload, media } = reduceBatch(batch);
-      if (refresh) await this.refreshFiles();
+      const { refresh, touch, reload, media, structure } = reduceBatch(batch);
+      if (refresh) await this.refreshFiles(structure);
       if (wave !== this.wave || !pageOwnsDisk()) return;
       const touched = new Set(touch);
       for (const path of touch) this.touch(path);

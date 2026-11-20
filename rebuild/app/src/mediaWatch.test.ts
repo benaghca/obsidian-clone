@@ -150,6 +150,41 @@ it("reloads when a later batch replaces the folder after a modify", async () => 
   expect(hits).toBe(2);
 });
 
+it("does not reload when a note is created in the same folder after a modify", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  files = [dir("Dir", 99), file("Dir/clip.mp3", 2, 8), file("Dir/Note.md", 1, 1)];
+  emit({ kind: "create", paths: ["Dir/Note.md"] });
+  await settle();
+  expect(hits).toBe(1);
+});
+
+it("reloads when a replaced folder keeps the same mtime and size", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 9, 20)];
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  await settle();
+  expect(hits).toBe(2);
+});
+
 it("does not remember a modify for a recording nobody is watching", async () => {
   files = [file("clip.mp3", 1, 4)];
   const { host } = await openHost();
