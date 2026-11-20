@@ -30,6 +30,7 @@ fn main() {
             "search_lines",
             "search_match",
             "link_index",
+            "link_changes",
             "backlinks",
             "link_sources",
             "frontmatter",

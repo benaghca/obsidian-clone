@@ -5,6 +5,7 @@
 import type { Property } from "./editor/frontmatter";
 import type { EditResult, PropertyEdit } from "./editor/propertyEdit";
 import { isExternalUrl } from "./links/external";
+import { type LinkChanges, linkReader } from "./links/linkDelta";
 
 export interface VaultInfo {
   path: string;
@@ -189,7 +190,11 @@ export const api = {
     call<SearchNote[]>("search_notes", request === undefined ? { query, matchCase } : { query, matchCase, request }),
   searchLines: (query: string, matchCase: boolean, paths: string[], limit: number) => call<Record<string, SearchLine[]>>("search_lines", { query, matchCase, paths, limit }),
   searchMatch: (queries: string[]) => call<string[][]>("search_match", { queries }),
-  linkIndex: () => call<LinkIndex>("link_index"),
+  /**
+   * The whole link index. Read as the changes since this page's last reply
+   * (`link_changes`), patched onto it; see links/linkDelta.ts.
+   */
+  linkIndex: linkReader((id, version) => call<LinkChanges>("link_changes", { id, version })),
   /** Linked mentions for the requested targets only; targets with none are omitted. */
   backlinks: (paths: string[]) => call<Record<string, Backlink[]>>("backlinks", { paths }),
   /**

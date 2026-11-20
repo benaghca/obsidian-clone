@@ -20,7 +20,7 @@
 //! reads the vault. `vault_tags` is the five searches the Tags view made
 //! before step 1; `tags` is the one command it makes now.
 
-use super::{is_note_path, Index};
+use super::{display_name, is_note_path, parents, Index, Stamp};
 use std::path::Path;
 use std::time::Instant;
 
@@ -375,4 +375,171 @@ fn bench_vault() {
         ms_list(&hash_ser_ms),
         median(&hash_ser_ms)
     );
+}
+
+/// Resident and peak memory of this process, in MB (Linux `/proc/self/status`).
+fn rss_mb() -> (f64, f64) {
+    let status = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+    let field = |name: &str| {
+        status
+            .lines()
+            .find(|l| l.starts_with(name))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|kb| kb.parse::<f64>().ok())
+            .map_or(0.0, |kb| kb / 1024.0)
+    };
+    (field("VmRSS:"), field("VmHWM:"))
+}
+
+/// R2 P2b: what a save and the link refresh after it cost, with the link table, against
+/// the pre-P2b full walk. Same vault as `bench_vault`:
+///
+/// ```text
+/// GROVE_BENCH_VAULT=/tmp/grove-bench-20000 cargo test --release --offline --lib -- --ignored --nocapture bench_link_deltas
+/// ```
+///
+/// `GROVE_BENCH_JSON_DIR` (a temp subdirectory) also writes the full and delta replies for
+/// a page-side comparison (`JSON.parse` of the full reply against `patchLinks`).
+#[test]
+#[ignore]
+fn bench_link_deltas() {
+    use super::link_table_tests::{walked_backlinks, walked_link_index};
+    let root =
+        std::env::var("GROVE_BENCH_VAULT").unwrap_or_else(|_| "/tmp/grove-bench-5000".to_string());
+    let root = Path::new(&root);
+    assert!(root.is_dir(), "bench vault missing at {}", root.display());
+    let mut idx = Index::scan(root).expect("scan");
+    let (rss, peak) = rss_mb();
+    let mut scans = Vec::new();
+    for _ in 0..3 {
+        let started = Instant::now();
+        drop(Index::scan(root).expect("scan"));
+        scans.push(elapsed_ms(started));
+    }
+    println!("GROVE_BENCH vault={} scan_ms={} median={:.1} rss_after_first_scan_mb={rss:.0} peak_mb={peak:.0}", root.display(), ms_list(&scans), median(&scans));
+    let mut maps_ms = Vec::new();
+    let mut links_ms = Vec::new();
+    for _ in 0..3 {
+        let started = Instant::now();
+        idx.maps.refill(&idx.files);
+        maps_ms.push(elapsed_ms(started));
+        let started = Instant::now();
+        idx.rebuild_links();
+        links_ms.push(elapsed_ms(started));
+    }
+    println!("GROVE_BENCH full rebuild: maps_ms={:.1} links_ms={:.1} (links is new in P2b; it replaces the walk each refresh did)", median(&maps_ms), median(&links_ms));
+
+    let runs = 5;
+    let timed = |f: &mut dyn FnMut() -> usize| {
+        let mut samples = Vec::new();
+        let mut bytes = 0;
+        for _ in 0..runs {
+            let started = Instant::now();
+            bytes = f();
+            samples.push(elapsed_ms(started));
+        }
+        (median(&samples), bytes)
+    };
+    let (walk_ms, walk_bytes) = timed(&mut || json_len(&walked_link_index(&idx)));
+    let (full_ms, full_bytes) = timed(&mut || json_len(&idx.link_changes(None)));
+    println!("GROVE_BENCH link_index_walk_ms={walk_ms:.1} json_bytes={walk_bytes} (pre-P2b, every refresh)");
+    println!("GROVE_BENCH link_changes_full_ms={full_ms:.1} json_bytes={full_bytes} (first read)");
+
+    // The most linked note, and one note that links to it.
+    let mut counts: std::collections::HashMap<&String, usize> = std::collections::HashMap::new();
+    let links = idx.link_index();
+    for list in links.outgoing.values() {
+        for t in list {
+            *counts.entry(t).or_default() += 1;
+        }
+    }
+    let (hub, hub_links) = counts.into_iter().max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(a.0))).map(|(p, n)| (p.clone(), n)).unwrap();
+    let source = links.outgoing.iter().find(|(_, t)| t.contains(&hub)).map(|(p, _)| p.clone()).unwrap();
+    let text: String = idx.files.get(&source).unwrap().note.lines.iter().map(|l| format!("{}\n", l.text)).collect();
+    let target_name = display_name(&hub, false);
+    let hub_text: String = idx.files.get(&hub).unwrap().note.lines.iter().map(|l| format!("{}\n", l.text)).collect();
+
+    let one = vec![hub.clone()];
+    let (bl_walk, _) = timed(&mut || json_len(&walked_backlinks(&idx, &one)));
+    let (bl_table, bl_bytes) = timed(&mut || json_len(&idx.backlinks(&one)));
+    println!("GROVE_BENCH backlinks_one walk_ms={bl_walk:.2} table_ms={bl_table:.3} json_bytes={bl_bytes} linkers={hub_links}");
+
+    let json_dir = std::env::var("GROVE_BENCH_JSON_DIR").ok().map(std::path::PathBuf::from);
+    if let Some(dir) = &json_dir {
+        let temp = std::env::temp_dir();
+        assert!(dir.starts_with(&temp) && dir != &temp, "bench JSON must be under a temp subdirectory");
+        std::fs::create_dir_all(dir).unwrap();
+        std::fs::write(dir.join("links-full.json"), serde_json::to_vec(&idx.link_changes(None)).unwrap()).unwrap();
+    }
+    fn idx_since(idx: &Index) -> (u64, u64) {
+        idx.links.version()
+    }
+
+    // Each case: the save (Rust, under the write lock) and the reply the page reads next.
+    let cases: Vec<(&str, String, String)> = vec![
+        ("typing save, same links", source.clone(), format!("{text}more words\n")),
+        ("save adds a link", source.clone(), format!("{text}[[{target_name}]] [[Nowhere new]]\n")),
+        ("save adds an alias", source.clone(), format!("---\naliases: [bench alias]\n---\n{text}")),
+        ("hub save, same links", hub.clone(), format!("{hub_text}edit\n")),
+    ];
+    for (label, path, body) in cases {
+        let original: String = idx.files.get(&path).unwrap().note.lines.iter().map(|l| format!("{}\n", l.text)).collect();
+        let mut save_ms = Vec::new();
+        let mut reply_ms = Vec::new();
+        let mut reply_bytes = 0;
+        let mut changed = 0;
+        for _ in 0..runs {
+            let base = idx_since(&idx);
+            let started = Instant::now();
+            idx.upsert_note(root, &path, &body, Stamp::sized(body.len()));
+            save_ms.push(elapsed_ms(started));
+            let started = Instant::now();
+            let reply = idx.link_changes(Some(base));
+            reply_bytes = json_len(&reply);
+            reply_ms.push(elapsed_ms(started));
+            changed = reply.changed.len();
+            if let Some(dir) = &json_dir {
+                let name = label.replace([' ', ','], "-");
+                std::fs::write(dir.join(format!("links-delta-{name}.json")), serde_json::to_vec(&reply).unwrap()).unwrap();
+            }
+            idx.upsert_note(root, &path, &original, Stamp::sized(original.len()));
+        }
+        println!(
+            "GROVE_BENCH {label}: save_ms={:.3} link_changes_ms={:.3} json_bytes={reply_bytes} changed_notes={changed}",
+            median(&save_ms),
+            median(&reply_ms)
+        );
+    }
+
+    // Renaming the most linked note: every linker resolves again.
+    let renamed = format!("{hub}-renamed.md");
+    let mut ms = Vec::new();
+    let mut bytes = 0;
+    let mut changed = 0;
+    for _ in 0..runs {
+        let base = idx_since(&idx);
+        let started = Instant::now();
+        idx.relocate(&hub, &renamed);
+        let reply = idx.link_changes(Some(base));
+        bytes = json_len(&reply);
+        ms.push(elapsed_ms(started));
+        changed = reply.changed.len();
+        idx.relocate(&renamed, &hub);
+    }
+    println!("GROVE_BENCH rename hub: relocate_plus_changes_ms={:.3} json_bytes={bytes} changed_notes={changed}", median(&ms));
+
+    // A folder rename: one full map and link rebuild, then a delta of the notes that differ.
+    let folder = parents(&hub).next().unwrap().to_string();
+    let mut ms = Vec::new();
+    for _ in 0..runs {
+        let base = idx_since(&idx);
+        let started = Instant::now();
+        idx.relocate(&folder, "Bench moved");
+        let reply = idx.link_changes(Some(base));
+        bytes = json_len(&reply);
+        ms.push(elapsed_ms(started));
+        changed = reply.changed.len();
+        idx.relocate("Bench moved", &folder);
+    }
+    println!("GROVE_BENCH folder rename ({folder}): relocate_plus_changes_ms={:.1} json_bytes={bytes} changed_notes={changed}", median(&ms));
 }

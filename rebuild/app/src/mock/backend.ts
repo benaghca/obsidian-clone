@@ -503,6 +503,9 @@ export function createMockBackend(): { invoke: Invoke; listen: Listen } {
     },
     // Copies, as IPC hands the page a fresh reply: the walk is kept for the next call.
     link_index: () => structuredClone(linkData().links),
+    // Always the whole index: the mock keeps no history. Its maps are in file
+    // order, not path order, so patching them would not match its full reply.
+    link_changes: () => ({ id: 0, version: revision, since: null, full: structuredClone(linkData().links), changed: {} }),
     backlinks: ({ paths }) => {
       const all = paths.length ? linkData().backlinks : {};
       return structuredClone(Object.fromEntries([...new Set(paths as string[])].filter((path) => all[path]).map((path) => [path, all[path]])));

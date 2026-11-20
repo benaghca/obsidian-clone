@@ -92,8 +92,9 @@ impl Owners {
 
 const KINDS: [Kind; 4] = [Kind::Name, Kind::Alias, Kind::Path, Kind::Suffix];
 
-#[derive(Clone, Copy)]
-enum Kind {
+/// Which map a key lives in.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(super) enum Kind {
     Name,
     Alias,
     Path,
@@ -229,13 +230,74 @@ pub(super) struct Winners {
     pub(super) by_suffix: HashMap<String, String>,
 }
 
+/// One key of one map, as the link table remembers a read of it: a 64-bit FNV-1a hash of the
+/// map and the key. Two keys with the same hash only make a change to one wake the readers of
+/// both, which resolve again to the same answer. A read is never missed.
+pub(super) type KeyHash = u64;
+
+pub(super) fn key_hash(kind: Kind, key: &str) -> KeyHash {
+    const PRIME: u64 = 0x0000_0100_0000_01B3;
+    let mut hash: u64 = 0xCBF2_9CE4_8422_2325;
+    for byte in std::iter::once(kind as u8).chain(key.bytes()) {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(PRIME);
+    }
+    hash
+}
+
+/// The lookups `resolve` makes. `watching` also notes every key read, hit or miss: a
+/// resolution can change only when one of those keys changes owners.
+pub(super) struct Lookups<'m, 'r> {
+    maps: &'m NameMaps,
+    reads: Option<&'r mut Vec<KeyHash>>,
+}
+
+impl<'m, 'r> Lookups<'m, 'r> {
+    pub(super) fn new(maps: &'m NameMaps) -> Self {
+        Lookups { maps, reads: None }
+    }
+
+    pub(super) fn watching(maps: &'m NameMaps, reads: &'r mut Vec<KeyHash>) -> Self {
+        Lookups {
+            maps,
+            reads: Some(reads),
+        }
+    }
+
+    fn note(&mut self, kind: Kind, key: &str) {
+        if let Some(reads) = &mut self.reads {
+            reads.push(key_hash(kind, key));
+        }
+    }
+
+    pub(super) fn names(&mut self, key: &str) -> Option<&'m [String]> {
+        self.note(Kind::Name, key);
+        self.maps.names(key)
+    }
+
+    pub(super) fn alias(&mut self, key: &str) -> Option<&'m String> {
+        self.note(Kind::Alias, key);
+        self.maps.alias(key)
+    }
+
+    pub(super) fn path_lower(&mut self, key: &str) -> Option<&'m String> {
+        self.note(Kind::Path, key);
+        self.maps.path_lower(key)
+    }
+
+    pub(super) fn suffix(&mut self, key: &str) -> Option<&'m String> {
+        self.note(Kind::Suffix, key);
+        self.maps.suffix(key)
+    }
+}
+
 /// Whether two nodes at the same path contribute the same keys.
 pub(super) fn same_keys(a: &Node, b: &Node) -> bool {
     a.is_dir == b.is_dir && a.note.aliases == b.note.aliases
 }
 
 /// The keys a node at `path` contributes. Folders contribute none.
-fn keys_of(path: &str, node: &Node, mut each: impl FnMut(Kind, String)) {
+pub(super) fn keys_of(path: &str, node: &Node, mut each: impl FnMut(Kind, String)) {
     if node.is_dir {
         return;
     }

@@ -29,6 +29,7 @@
     "allow-search-lines",
     "allow-search-match",
     "allow-link-index",
+    "allow-link-changes",
     "allow-backlinks",
     "allow-link-sources",
     "allow-frontmatter",

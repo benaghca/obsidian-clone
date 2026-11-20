@@ -41,7 +41,7 @@ mod watch;
 mod write_dispatch;
 
 use crate::index::NoteProperties;
-use crate::model::{Backlink, FileEntry, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
+use crate::model::{Backlink, FileEntry, LinkChanges, LinkIndex, SearchHit, SearchNote, SearchLine, VaultInfo};
 use crate::queue::{invoke_key, Reply, WriteQueue, WriteTicket};
 use crate::watch::WatchMsg;
 use std::collections::BTreeMap;
@@ -118,7 +118,7 @@ pub fn run() {
             open_vault, create_vault, last_vault, list_files, read_note, read_file_bytes,
             read_clipboard_image, write_clipboard_image, set_property, write_note, write_file_bytes,
             create_note, create_folder, rename_path, delete_path, search, search_notes,
-            search_lines, search_match, link_index, backlinks, link_sources, frontmatter,
+            search_lines, search_match, link_index, link_changes, backlinks, link_sources, frontmatter,
             properties, tags, read_config, write_config, read_foreign_config,
             open_note_window, allow_frame_origin,
         ]))
@@ -448,6 +448,14 @@ fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<S
 #[tauri::command(async)]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
     read_vault(&state, |v| Ok(v.index.link_index()))
+}
+
+/// The link index since an earlier reply (`id` and `version` from it), or all of it when
+/// both are absent or that reply can't be continued (another vault, a reopen, or too far
+/// behind). See `index::link_table`.
+#[tauri::command(async)]
+fn link_changes(state: State<'_, AppState>, id: Option<u64>, version: Option<u64>) -> Result<LinkChanges, String> {
+    read_vault(&state, |v| Ok(v.index.link_changes(id.zip(version))))
 }
 
 /// Linked mentions for the requested target paths only; empty targets are omitted.

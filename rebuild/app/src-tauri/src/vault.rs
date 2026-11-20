@@ -512,6 +512,8 @@ impl Vault {
                 created.push(path.clone());
             }
         }
+        // The page keeps patching its link index across the swap.
+        fresh.continue_link_history(&self.index);
         self.index = fresh;
         let created_set: HashSet<&str> = created.iter().map(String::as_str).collect();
         self.formats

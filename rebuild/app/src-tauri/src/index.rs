@@ -14,9 +14,12 @@ mod search;
 mod tags;
 mod backlinks;
 mod link_sources;
+mod link_table;
 mod name_maps;
 #[cfg(test)]
 mod bench;
+#[cfg(test)]
+mod link_table_tests;
 #[cfg(test)]
 mod name_maps_tests;
 #[cfg(test)]
@@ -27,9 +30,10 @@ mod tests;
 mod search_props_edge;
 
 use crate::fsutil::{self, is_ignored_rel};
-use crate::model::{FileEntry, LinkIndex, SearchHit};
-use name_maps::NameMaps;
-use parse::{clean_target, parse_note, Note};
+use crate::model::{FileEntry, LinkChanges, LinkEntry, LinkIndex, SearchHit};
+use link_table::{LinkTable, Resolved};
+use name_maps::{Lookups, NameMaps};
+use parse::{clean_target, parse_note, Note, RawLink};
 #[cfg(test)]
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -147,6 +151,10 @@ pub struct Index {
     // Per-path map updates since the outermost `MapBatch` opened. Past `BULK_PATHS`
     // the maps go stale and that batch rebuilds once on drop.
     batch_updates: usize,
+    // Every note's resolved links, kept in step with `files` and `maps` (see `link_table`).
+    // `put_node` / `take_node` queue the notes to resolve again; `settle_links` resolves
+    // them when the change is done. A full map rebuild resolves every note.
+    links: LinkTable,
 }
 
 /// Holds name-map rebuilds, then rebuilds once on drop if anything asked.
@@ -165,6 +173,7 @@ impl Drop for MapBatch<'_> {
                 self.index.maps_dirty = false;
                 self.index.rebuild_maps();
             }
+            self.index.settle_links();
         }
     }
 }
@@ -225,74 +234,26 @@ impl Index {
     }
 
     pub fn resolve(&self, from: &str, target: &str) -> Option<String> {
-        // Heading, block, and alias suffixes are not part of the note name.
-        let target = clean_target(target)?;
-        let raw = target.replace('\\', "/");
-        let raw = raw.trim().trim_start_matches('/');
-        if raw.is_empty() {
-            return None;
-        }
-        if raw.contains('/') {
-            return self.resolve_path(from, raw);
-        }
-        let mut key = raw.to_lowercase();
-        if let Some(stripped) = key.strip_suffix(".md") {
-            key = stripped.to_string();
-        }
-        if let Some(cands) = self.maps.names(&key) {
-            if let Some(found) = pick(cands, from) {
-                return Some(found.to_string());
-            }
-        }
-        self.maps.alias(&raw.to_lowercase()).cloned()
+        resolve_in(&mut Lookups::new(&self.maps), from, target)
     }
 
+    /// Every note's resolved links, read from the link table (no resolving here).
     pub fn link_index(&self) -> LinkIndex {
-        let mut outgoing = BTreeMap::new();
-        let mut markdown = BTreeMap::new();
-        let mut unresolved = BTreeMap::new();
-        for (path, node) in &self.files {
-            if node.is_dir || !is_note_path(path) {
-                continue;
-            }
-            let mut outs = Vec::new();
-            let mut md_outs = Vec::new();
-            let mut missing: Vec<String> = Vec::new();
-            for link in &node.note.links {
-                let Some(dest) = self.resolve(path, &link.target) else {
-                    let name = if link.markdown {
-                        strip_md(&link.target)
-                    } else {
-                        link.target.as_str()
-                    };
-                    if !missing.iter().any(|m| m.eq_ignore_ascii_case(name)) {
-                        missing.push(name.to_string());
-                    }
-                    continue;
-                };
-                if link.markdown {
-                    if !md_outs.contains(&dest) {
-                        md_outs.push(dest.clone());
-                    }
-                } else if !outs.contains(&dest) {
-                    outs.push(dest.clone());
-                }
-            }
-            if !outs.is_empty() {
-                outgoing.insert(path.clone(), outs);
-            }
-            if !md_outs.is_empty() {
-                markdown.insert(path.clone(), md_outs);
-            }
-            if !missing.is_empty() {
-                unresolved.insert(path.clone(), missing);
-            }
-        }
-        LinkIndex {
-            outgoing,
-            markdown,
-            unresolved,
-        }
+        debug_assert!(!self.links.has_pending(), "link table read before it settled");
+        self.links.link_index()
+    }
+
+    /// What changed in `link_index` since `since` (an id and version an earlier reply gave),
+    /// or the whole index when the page holds none, another id, or is too far behind.
+    pub fn link_changes(&self, since: Option<(u64, u64)>) -> LinkChanges {
+        debug_assert!(!self.links.has_pending(), "link table read before it settled");
+        self.links.changes(since)
+    }
+
+    /// Keep the page's link history across a rescan: this (fresh) index continues `older`'s
+    /// versions, logging only the notes whose links differ.
+    pub(crate) fn continue_link_history(&mut self, older: &Index) {
+        self.links.continue_from(&older.links);
     }
 
     /// Case-insensitive substring search. Whitespace-separated terms must all occur on the same
@@ -433,6 +394,7 @@ impl Index {
         if bulk {
             self.rebuild_maps();
         }
+        self.settle_links();
     }
 
     /// Move `from` and everything under it to `to`. No-op when `from` is not indexed.
@@ -475,6 +437,7 @@ impl Index {
         if folder {
             self.rebuild_maps();
         }
+        self.settle_links();
     }
 
     /// Reload one path from disk. A new directory also picks up children the index doesn't have.
@@ -503,53 +466,36 @@ impl Index {
             }
             _ => self.remove_tree(rel),
         }
+        self.settle_links();
     }
 
     pub fn upsert_note(&mut self, root: &Path, rel: &str, content: &str, stamp: Stamp) {
         self.changed_during_rescan(rel);
         self.ensure_dirs(root, rel);
         self.insert_file(rel, stamp, || content.to_string());
-    }
-
-    fn resolve_path(&self, from: &str, raw: &str) -> Option<String> {
-        let dir = parent_path(from);
-        let mut cands = vec![raw.to_string(), format!("{raw}.md")];
-        if !dir.is_empty() {
-            cands.push(format!("{dir}/{raw}"));
-            cands.push(format!("{dir}/{raw}.md"));
-        }
-        for cand in cands {
-            let Some(norm) = norm_logical(&cand) else {
-                continue;
-            };
-            if let Some(found) = self.maps.path_lower(&norm.to_lowercase()) {
-                if nameless_md(found) {
-                    continue;
-                }
-                return Some(found.clone());
-            }
-        }
-        // A partial path: the shortest file path that ends with it, then the smaller original path.
-        let low = raw.trim_start_matches('/').to_lowercase();
-        let suf = format!("/{low}");
-        let suf_md = format!("/{low}.md");
-        better_suffix(self.maps.suffix(&suf), self.maps.suffix(&suf_md)).cloned()
+        self.settle_links();
     }
 
     /// Store `node` at `key`, replacing what was there, and update the maps for that path.
     /// The old node is only read (never cloned), even while a search shares it.
     fn put_node(&mut self, key: String, node: Arc<Node>) {
         if self.maps_dirty {
+            // A full rebuild is pending; it resolves every note's links too.
             self.files.insert(key, node);
             return;
         }
         let old = self.files.insert(key.clone(), Arc::clone(&node));
+        if has_links(&key, &node) || self.links.contains(&key) {
+            self.links.touch(&key);
+        }
         if old.as_ref().is_some_and(|old| name_maps::same_keys(old, &node)) || !self.spend_update() {
             return;
         }
         if let Some(old) = &old {
+            self.wake_readers(&key, old);
             self.maps.remove(&key, old);
         }
+        self.wake_readers(&key, &node);
         self.maps.add(&key, &node);
     }
 
@@ -557,10 +503,55 @@ impl Index {
     /// copied, with any search still holding it.
     fn take_node(&mut self, key: &str) -> Option<Arc<Node>> {
         let old = self.files.remove(key)?;
-        if !self.maps_dirty && self.spend_update() {
+        if self.maps_dirty {
+            return Some(old);
+        }
+        if self.links.contains(key) {
+            self.links.touch(key);
+        }
+        if self.spend_update() {
+            self.wake_readers(key, &old);
             self.maps.remove(key, &old);
         }
         Some(old)
+    }
+
+    /// `node` at `path` is joining or leaving the maps: every note whose links read one of
+    /// its keys resolves again.
+    fn wake_readers(&mut self, path: &str, node: &Node) {
+        let links = &mut self.links;
+        name_maps::keys_of(path, node, |kind, key| links.wake(kind, key));
+    }
+
+    /// Resolve again the notes queued since the last settle, and log the entries that changed.
+    /// Waits while a batch is open or a full rebuild is pending (that resolves every note).
+    fn settle_links(&mut self) {
+        if self.defer_depth > 0 || self.maps_dirty || !self.links.has_pending() {
+            return;
+        }
+        let mut changed = Vec::new();
+        for path in self.links.take_pending() {
+            let resolved = self
+                .files
+                .get(&path)
+                .filter(|node| has_links(&path, node))
+                .map(|node| resolve_note(&self.maps, &path, &node.note.links));
+            if self.links.replace(Arc::clone(&path), resolved) {
+                changed.push(path);
+            }
+        }
+        self.links.record(changed);
+    }
+
+    /// Every note's links from scratch, after a full map rebuild.
+    fn rebuild_links(&mut self) {
+        let maps = &self.maps;
+        let fresh = self
+            .files
+            .iter()
+            .filter(|(path, node)| has_links(path, node))
+            .map(|(path, node)| (Arc::<str>::from(path.as_str()), resolve_note(maps, path, &node.note.links)));
+        self.links.refill(fresh);
     }
 
     /// Whether one more per-path map update may run. Inside a `MapBatch`, the batch's
@@ -684,6 +675,7 @@ impl Index {
         #[cfg(test)]
         count_rebuild_maps();
         self.maps.refill(&self.files);
+        self.rebuild_links();
     }
 
     #[cfg(test)]
@@ -697,6 +689,103 @@ impl Index {
         idx.rebuild_maps();
         idx
     }
+}
+
+/// A note whose links the link table keeps: a note file with at least one link.
+fn has_links(path: &str, node: &Node) -> bool {
+    !node.is_dir && !node.note.links.is_empty() && is_note_path(path)
+}
+
+/// Resolve `target` as a link from `from`. Every map read goes through `look`.
+fn resolve_in(look: &mut Lookups, from: &str, target: &str) -> Option<String> {
+    // Heading, block, and alias suffixes are not part of the note name.
+    let target = clean_target(target)?;
+    let raw = target.replace('\\', "/");
+    let raw = raw.trim().trim_start_matches('/');
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.contains('/') {
+        return resolve_path_in(look, from, raw);
+    }
+    let mut key = raw.to_lowercase();
+    if let Some(stripped) = key.strip_suffix(".md") {
+        key = stripped.to_string();
+    }
+    if let Some(cands) = look.names(&key) {
+        if let Some(found) = pick(cands, from) {
+            return Some(found.to_string());
+        }
+    }
+    look.alias(&raw.to_lowercase()).cloned()
+}
+
+fn resolve_path_in(look: &mut Lookups, from: &str, raw: &str) -> Option<String> {
+    let dir = parent_path(from);
+    let mut cands = vec![raw.to_string(), format!("{raw}.md")];
+    if !dir.is_empty() {
+        cands.push(format!("{dir}/{raw}"));
+        cands.push(format!("{dir}/{raw}.md"));
+    }
+    for cand in cands {
+        let Some(norm) = norm_logical(&cand) else {
+            continue;
+        };
+        if let Some(found) = look.path_lower(&norm.to_lowercase()) {
+            if nameless_md(found) {
+                continue;
+            }
+            return Some(found.clone());
+        }
+    }
+    // A partial path: the shortest file path that ends with it, then the smaller original path.
+    let low = raw.trim_start_matches('/').to_lowercase();
+    let suf = format!("/{low}");
+    let suf_md = format!("/{low}.md");
+    let a = look.suffix(&suf);
+    let b = look.suffix(&suf_md);
+    better_suffix(a, b).cloned()
+}
+
+/// One note's links resolved against `maps`, with every key that took. The entry follows the
+/// `link_index` rules: targets in first-seen order without repeats, wikilinks in `outgoing`,
+/// markdown links in `markdown`, and the targets that match no file in `unresolved` (as
+/// written, a markdown link without its `.md`, repeats dropped ignoring ASCII case).
+fn resolve_note(maps: &NameMaps, path: &str, links: &[RawLink]) -> Resolved {
+    let mut reads = Vec::new();
+    let mut look = Lookups::watching(maps, &mut reads);
+    let mut entry = LinkEntry::default();
+    let mut slots = Vec::with_capacity(links.len());
+    for link in links {
+        let Some(dest) = resolve_in(&mut look, path, &link.target) else {
+            let name = if link.markdown {
+                strip_md(&link.target)
+            } else {
+                link.target.as_str()
+            };
+            if !entry.unresolved.iter().any(|m| m.eq_ignore_ascii_case(name)) {
+                entry.unresolved.push(name.to_string());
+            }
+            slots.push(None);
+            continue;
+        };
+        let list = if link.markdown {
+            &mut entry.markdown
+        } else {
+            &mut entry.outgoing
+        };
+        let at = match list.iter().position(|d| *d == dest) {
+            Some(at) => at,
+            None => {
+                list.push(dest);
+                list.len() - 1
+            }
+        };
+        slots.push(Some(at as u32));
+    }
+    reads.sort();
+    reads.dedup();
+    Resolved { slots, reads, entry }
 }
 
 /// The folders above a path ("a" and "a/b" for "a/b/c.md").
