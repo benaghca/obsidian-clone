@@ -183,4 +183,24 @@ await withBrowser(async ({ run, open, check, chord, send }) => {
     check(now.caretLine === start.caretLine && now.column === start.column, 'fallback: the caret stays on its own text');
     check(now.topText === start.topText && Math.abs(now.scrollTop - start.scrollTop) <= 2, `fallback: the same line stays at the top of the pane (${now.topText}, ${now.scrollTop - start.scrollTop}px)`);
   }
+  // Codex review 3, P2: a sync that touches an older undo step keeps the newer, unrelated one.
+  {
+    const path = 'Two steps.md';
+    await typeOver(path, 'one two three' + rest, 'two', 'TWO');
+    await sleep(700); // the next edit is its own undo step
+    await run(() => { const view = ws.editors.viewOf(ws.activeGroup); view.focus(); view.dispatch({ selection: { anchor: 0 } }); });
+    await send('Input.insertText', { text: 'zero ' });
+    await sleep(600);
+    check(await onDisk(path) === 'zero one TWO three' + rest, 'two steps: both of your edits are saved');
+    await outside(path, 'zero one 2 three' + rest);
+    const before = await writes();
+    await run(() => ws.editors.viewOf(ws.activeGroup).focus());
+    await chord('z');
+    await sleep(600);
+    check(await shown() === 'one 2 three' + rest, 'two steps: Ctrl+Z takes back your newer edit, away from the sync');
+    check(await onDisk(path) === 'one 2 three' + rest && await writes() === before + 1, 'two steps: that undo is the one write, and it keeps the synced word');
+    await chord('z');
+    await sleep(600);
+    check(await shown() === 'one 2 three' + rest && await writes() === before + 1, 'two steps: a second Ctrl+Z cannot bring "TWO" or "two" back');
+  }
 });

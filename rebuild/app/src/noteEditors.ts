@@ -12,7 +12,7 @@
 // mirror runs on the main state. Saving and the "changed" event follow the
 // original change only, so a note is still saved once.
 
-import { history, isolateHistory, redo, undo } from "@codemirror/commands";
+import { history, historyField, isolateHistory, redo, undo } from "@codemirror/commands";
 import { Annotation, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
@@ -25,7 +25,7 @@ import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
 import { minimalChanges, normalizeLineBreaks } from "./editor/minimalChange";
 import { createNoteState, historyCompartment, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
-import { historySurvives } from "./editor/reloadHistory";
+import { type HistoryKeep, historyKeep, keptHistory } from "./editor/reloadHistory";
 import type { EditorHost } from "./editor/host";
 import { kept } from "./memo";
 import { type Group, memoryOf, type Tab } from "./tabs";
@@ -472,10 +472,14 @@ export class NoteEditors {
     // A newer reload or local typing while the read ran takes precedence.
     if (read === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job) return;
     // The editor holds "\n" line breaks; a CRLF file with the same text is not a change.
-    const changes = minimalChanges(current.toString(), normalizeLineBreaks(read), this.places(path));
+    // Checked before anything else, so a watcher event for an unchanged note reads no layout.
+    const text = normalizeLineBreaks(read), was = current.toString();
+    if (text === was) return;
+    // The cursor and scroll positions are read only when an edit replaces text around one.
+    const changes = minimalChanges(was, text, () => this.places(path));
     if (!changes.length) return;
     // Undo and redo steps that overlap or touch the outside edit cannot be mapped across it safely.
-    const keepHistory = historySurvives(this.owners.get(path)?.state ?? this.states.get(path)!, changes);
+    const keep = historyKeep(this.owners.get(path)?.state ?? this.states.get(path)!, changes);
     // Only what changed is replaced, so every pane's cursor, selection and scroll map across it.
     // It stays out of undo (history maps across it), so Ctrl+Z cannot put the old text back and save it.
     this.change(path, {
@@ -483,7 +487,7 @@ export class NoteEditors {
       userEvent: "external",
       annotations: [Transaction.addToHistory.of(false), isolateHistory.of("full")],
     });
-    if (!keepHistory) this.clearHistory(path);
+    if (keep) this.keepHistory(path, keep);
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }
 
@@ -512,17 +516,24 @@ export class NoteEditors {
     return out.slice(0, 64);
   }
 
-  /** Start a note's undo history fresh (its main state; mirrors have none). */
-  private clearHistory(path: string) {
-    const off = { effects: historyCompartment.reconfigure([]) }, on = { effects: historyCompartment.reconfigure(history()) };
+  /**
+   * Keep only the newest undo and redo steps the outside change left alone
+   * (its main state; mirrors have none). The history is swapped by taking it
+   * out of its compartment and putting it back seeded with the kept steps.
+   */
+  private keepHistory(path: string, keep: HistoryKeep) {
     const owner = this.owners.get(path);
+    const state = owner?.state ?? this.states.get(path);
+    if (!state) return;
+    const value = keptHistory(state, keep);
+    const off = { effects: historyCompartment.reconfigure([]) };
+    const on = { effects: historyCompartment.reconfigure([historyField.init(() => value), history()]) };
     if (owner) {
       owner.dispatch(off);
       owner.dispatch(on);
       return;
     }
-    const state = this.states.get(path);
-    if (state) this.states.set(path, state.update(off).state.update(on).state);
+    this.states.set(path, state.update(off).state.update(on).state);
   }
 
   /** Paths under a moved folder (or a moved note) follow it. */

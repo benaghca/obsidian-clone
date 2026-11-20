@@ -165,10 +165,64 @@ Every guard is unchanged and still runs in the same order: `pageOwnsDisk`, the `
 - I then ran `test-r27e` and every script after it, plus `npm run posttest`, under the same lock: all passed (EXIT 0). That includes `test-r27e` itself, `test-bases-embed`, and the new reload script with its fallback checks.
 - Between them, the two full runs and that final run cover every step of the suite. Each step passed in at least one of them, and the only failures were the two timing checks above.
 
+## Review round 3 (Codex PASS-WITH-FIXES, `/tmp/r2-s1-codex-review3.md`)
+
+### P2: the caret could still jump to the start of an unchanged span
+
+- **The problem.** Two cases the round-2 split missed:
+  - A word replaced whole whose middle survived: `A` + 100 × `x` + `A` → `B` + 100 × `x` + `B` is one word on each side, so the word diff replaced it as one (not a fallback), and the caret went from 50 to 0.
+  - A short surviving span inside a fallback: ` KEY ` between 105 × `alpha` that all become `bravo`. The unchanged text around the caret was under the 8-character minimum, so the caret went from 632 to 0.
+- **The fix** (`src/editor/minimalChange.ts`).
+  - The split now runs on **every** edit that replaces text around a kept position, not only fallbacks. The internal `coarse` flag is gone.
+  - `locate` tries seeds of 32, 8, 2 and then 1 character.
+  - A match of 8 or more characters is kept as before. A shorter one (at least 2 characters) is kept only when that exact text occurs once in the edit's old side and once in its new side, so the changes around it fix where it belongs.
+  - If the short span occurs twice in the new text, nothing is guessed: the caret goes to the block start as before. There is a test for that.
+
+### P2: a sync touching one undo step dropped all the other history
+
+- **The problem.** Round 1 cleared the whole history when any step touched the sync. A newer edit far from the sync could then no longer be undone. That is a visible change outside the approved behavior.
+- **The fix** (`src/editor/reloadHistory.ts`, `NoteEditors.keepHistory`).
+  - The replay guard stays. `historyKeep(state, edits)` replays each stack newest first, as Ctrl+Z (or Ctrl+Y) would, and counts the steps before the first one the sync touches. It returns null when nothing is touched.
+  - After the reload, `keptHistory` keeps only those newest steps of each stack. The touched step goes, together with everything older on that stack, since those could only be reached by undoing it first.
+  - This is exact, because each step sits on top of the older ones. CodeMirror maps only the top event across a change and stores that mapping for the events below it, so dropping the older events leaves the kept ones as they were. Mapping can drop the top event only when the sync touched it, and then that stack keeps nothing anyway.
+  - It uses the history field's public JSON form (`historyField` `toJSON`/`fromJSON` through `EditorState`). The trimmed value is installed by taking `history()` out of `historyCompartment` and putting it back as `[historyField.init(() => value), history()]`.
+  - The JSON form drops history effects. Grove uses no `invertedEffects`, so nothing is lost.
+  - A history rebuilt from JSON has no "previous time", so the next typing starts its own step and doesn't join the last kept one. There is a test for that.
+
+### P3: a no-op reload read layout
+
+- `minimalChanges` used to get the cursor and scroll positions as an argument, so `places()` measured bounding rectangles in every pane even for an unchanged note.
+- Now `reload` compares the normalized text first and returns when it is equal.
+- `minimalChanges` takes the positions as a function and calls it only when some edit replaces text. An insert or delete alone reads nothing.
+
+### Tests
+
+- **Vitest** (`src/reloadPlace.test.ts`, now 44 tests; 63 with `readOrdering.test.ts`):
+  - the `A`/`x`/`A` word case and the ` KEY ` case, through the real `reload`;
+  - a short surviving line (`--`) holding the scroll inside a 3,000-line fallback;
+  - a short span that appears twice in the new text, where the caret is not guessed;
+  - an older step touched and a newer one kept: undo takes back only the newer edit, that is the one write, nothing further can be undone, and redo puts back only the kept step;
+  - redo keeps the step it reaches before the one the sync touched;
+  - a kept history doesn't join the next typing into its last step;
+  - the round-1 "older step" test, which now also checks the keep counts;
+  - no positions are read for an unchanged note, a CRLF-only difference or a pure insert, and they are read once for a replacement.
+- **Browser** (`scripts/test-r2-s1-reload.mjs`), with real input: type over `two`, then separately type `zero ` at the start, then a sync rewrites `TWO`. Ctrl+Z takes back only `zero `, and that is the one write. A second Ctrl+Z changes nothing and writes nothing.
+- **Each test fails without its fix.**
+  - With the round-2 diff (adapted only to accept the new function form of the positions), the three caret tests fail.
+  - With short anchors turned off, the ` KEY ` and `--` tests fail.
+  - With the history cleared as before, the three history vitest tests fail, and so does the browser check.
+  - With the positions read eagerly and no early text check, the layout test fails.
+
+**Checks run** (focused only, as asked, each through `heavy` and one at a time):
+- `heavy npx tsc --noEmit -p .`: passes.
+- `heavy npx vitest run src/reloadPlace.test.ts src/readOrdering.test.ts`: 63 passed.
+- `heavy node scripts/test-r2-s1-reload.mjs`: every check passes, the new "two steps" ones included. With the history cleared the old way, it fails at "Ctrl+Z takes back your newer edit".
+- The full `npm test` and `cargo test` were not run this round.
+
 ## Leftover gaps
 
 - **Mirrors aren't tested directly.** A second pane showing the same note relies on `forward()` and CodeMirror's own selection mapping. Vitest has no DOM, and the browser script uses one pane.
-- **Where the caret lands when its text is gone.** If the sync rewrites the caret's own words, the caret goes to the start of the replaced block. The start is the natural place, but it isn't "the same text", because that text no longer exists. Past the fallbacks (more than 200 word edits in one block, more than 1,000 line edits, a block over 200,000 characters), the caret and the scroll line now keep their text when at least 8 characters around them survived (review round 2). Other unchanged text inside a fallback block is still replaced with itself, which is exact but makes CodeMirror re-measure those lines.
+- **Where the caret lands when its text is gone.** If the sync rewrites the caret's own words, the caret goes to the start of the replaced block. The start is the natural place, but it isn't "the same text", because that text no longer exists. In any other replacement, including the fallbacks past the work limits, the caret and the scroll line keep their text when at least 8 characters around them survived, or a shorter span that is unique on both sides (review rounds 2 and 3). Other unchanged text inside a fallback block is still replaced with itself, which is exact but makes CodeMirror re-measure those lines.
 - **Kept positions are a lookup, not a diff.** In text that repeats exactly, the match nearest the expected place wins. That keeps the caret on the same words, but in an extreme case it could be a copy a few lines away.
-- **History is cleared as a whole.** When any undo or redo step touches the sync, all of the note's history is cleared, including steps elsewhere in the note. Keeping the untouched older steps would mean rebuilding CodeMirror's history, and that isn't public API.
+- **Older steps below a touched one still go.** Since review round 3, the newer steps of each stack are kept and only the touched step and everything older on that stack are dropped. Keeping an older, untouched step below a touched one would mean rebasing it past the dropped step, which CodeMirror's history can't do.
 - **Not in this piece:** S2 (merge view for an unsaved conflict) and S3 (save-failure notice). An outside change to a dirty note is still skipped, as before.

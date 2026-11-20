@@ -7,7 +7,10 @@
 // Lines are compared first (Myers' O(ND) diff, the same approach as Cinder's
 // ui/diff.js). A small changed block is then compared word by word, and each
 // edit is trimmed to the characters that differ, so a caret on a line the
-// sync also edited stays where it was.
+// sync also edited stays where it was. Last, any edit that replaces text
+// around a caret or the line holding the scroll is split around that text if
+// it survived, which also covers the fallbacks past the work limits and a
+// replaced word that kept its middle.
 
 export interface TextEdit {
   /** Range in the old text. */
@@ -63,9 +66,6 @@ function intern(text: string, starts: number[], ids: Map<string, number>): Int32
   }
   return out;
 }
-
-/** An edit, and whether it is a fallback that may cover text that did not change. */
-type Edit = TextEdit & { coarse?: true };
 
 /** A changed block of pieces: old pieces [a0, a1) become new pieces [b0, b1). */
 type Hunk = [a0: number, a1: number, b0: number, b1: number];
@@ -137,9 +137,9 @@ function trimmed(old: string, from: number, to: number, insert: string): TextEdi
 /**
  * Edits between `old` and `next`, both cut into pieces at the given starts.
  * Offsets are in `old`, shifted by `base`. Past `limit` piece edits, the
- * changed middle is one edit, marked coarse; `exact` false then returns null instead.
+ * changed middle is one edit; `exact` false then returns null instead.
  */
-function editsBetween(old: string, oldStarts: number[], next: string, nextStarts: number[], limit: number, base: number, exact: boolean): Edit[] | null {
+function editsBetween(old: string, oldStarts: number[], next: string, nextStarts: number[], limit: number, base: number, exact: boolean): TextEdit[] | null {
   const oldCount = oldStarts.length - 1, nextCount = nextStarts.length - 1;
   const piece = (text: string, starts: number[], i: number) => text.slice(starts[i], starts[i + 1]);
   // Equal pieces at the start and end need no diff; most syncs change one spot.
@@ -151,44 +151,56 @@ function editsBetween(old: string, oldStarts: number[], next: string, nextStarts
   const a = intern(old, oldStarts.slice(pre, oldStarts.length - suf), ids);
   const b = intern(next, nextStarts.slice(pre, nextStarts.length - suf), ids);
   let hunks = hunksOf(a, b, limit);
-  const coarse = !hunks;
   if (!hunks) {
     if (!exact) return null;
     hunks = [[0, a.length, 0, b.length]];
   }
-  const edits: Edit[] = [];
+  const edits: TextEdit[] = [];
   for (const [a0, a1, b0, b1] of hunks) {
     const from = oldStarts[pre + a0], to = oldStarts[pre + a1];
     const edit = trimmed(old, from, to, next.slice(nextStarts[pre + b0], nextStarts[pre + b1]));
-    if (edit) edits.push(coarse ? { from: edit.from + base, to: edit.to + base, insert: edit.insert, coarse } : { from: edit.from + base, to: edit.to + base, insert: edit.insert });
+    if (edit) edits.push({ from: edit.from + base, to: edit.to + base, insert: edit.insert });
   }
   return edits;
 }
 
 /** A replaced block compared word by word, so text inside it that did not change keeps its place. */
-function refined(old: string, edit: Edit): Edit[] {
+function refined(old: string, edit: TextEdit): TextEdit[] {
   const gone = old.slice(edit.from, edit.to);
   if (!gone.length || !edit.insert.length) return [edit];
   const words =
     gone.length > REFINE_CHARS || edit.insert.length > REFINE_CHARS
       ? null
       : editsBetween(gone, wordStarts(gone), edit.insert, wordStarts(edit.insert), MAX_WORD_EDITS, edit.from, false);
-  return words ?? [{ ...edit, coarse: true }];
+  return words ?? [edit];
 }
 
 /** Matching text is followed this far each way from a kept position (bounds the work per position). */
 const KEEP_REACH = 4096;
 /** Occurrences of a seed looked at each way from where the position is expected. */
 const KEEP_HITS = 32;
-/** Less unchanged text than this around a position is not worth splitting an edit for. */
+/** This much unchanged text around a position is enough to keep it, wherever it is found. */
 const KEEP_MIN = 8;
+/** Shorter unchanged text is kept only when it occurs once in the old text of the edit and once in the new. */
+const KEEP_UNIQUE = 2;
+
+/** True when `text` occurs exactly once in `within` between `from` and `to`. */
+function once(within: string, text: string, from: number, to: number): boolean {
+  const first = within.indexOf(text, from);
+  if (first < 0 || first + text.length > to) return false;
+  const second = within.indexOf(text, first + 1);
+  return second < 0 || second + text.length > to;
+}
 
 /**
- * Where a position inside a fallback edit sits in its new text, if the text around
- * it survived: `p` in `insert`, with `left` and `right` matching characters on
- * either side. Seeds of the text just after and just before the position are
- * looked up near where it would be if the edit were spread evenly; the longest
- * match wins, then the nearest.
+ * Where a position inside a replacement sits in its new text, if the text
+ * around it survived: `p` in `insert`, with `left` and `right` matching
+ * characters on either side. Seeds of the text just after and just before the
+ * position (32 characters, then 8, 2 and 1) are looked up near where it would
+ * be if the edit were spread evenly; the longest match wins, then the nearest.
+ * A match of at least KEEP_MIN characters is kept. A shorter one is kept only
+ * when that text is unique in both the old and the new side of the edit, so
+ * the changes around it fix where it belongs.
  */
 function locate(old: string, edit: TextEdit, at: number): { p: number; left: number; right: number } | null {
   const { from, to, insert } = edit;
@@ -204,18 +216,18 @@ function locate(old: string, edit: TextEdit, at: number): { p: number; left: num
     if (right && isHigh(old.charCodeAt(at + right - 1))) right--;
     return { p, left, right };
   };
-  for (const size of [32, KEEP_MIN]) {
+  for (const size of [32, KEEP_MIN, 2, 1]) {
     let best: { p: number; left: number; right: number } | null = null;
     const consider = (p: number) => {
       const hit = extent(p);
       const score = hit.left + hit.right;
-      if (score < KEEP_MIN) return;
+      if (!score) return;
       const bestScore = best ? best.left + best.right : -1;
       if (score > bestScore || (score === bestScore && Math.abs(p - expected) < Math.abs(best!.p - expected))) best = hit;
     };
     for (const after of [true, false]) {
       const seed = after ? old.slice(at, Math.min(at + size, to)) : old.slice(Math.max(at - size, from), at);
-      if (seed.length < Math.min(size, KEEP_MIN)) continue;
+      if (seed.length < size) continue;
       const shift = after ? 0 : seed.length;
       // Nearest occurrences first, forward and backward from the expected place.
       for (let i = 0, hit = insert.indexOf(seed, Math.max(0, expected - shift)); i < KEEP_HITS && hit >= 0; i++, hit = insert.indexOf(seed, hit + 1)) consider(hit + shift);
@@ -223,13 +235,17 @@ function locate(old: string, edit: TextEdit, at: number): { p: number; left: num
         if (hit + shift < expected) consider(hit + shift);
       }
     }
-    if (best) return best;
+    if (!best) continue;
+    const { p, left, right } = best as { p: number; left: number; right: number };
+    if (left + right >= KEEP_MIN) return best;
+    const span = old.slice(at - left, at + right);
+    if (span.length >= KEEP_UNIQUE && once(old, span, from, to) && once(insert, span, 0, insert.length)) return { p, left, right };
   }
   return null;
 }
 
 /**
- * A fallback edit split around each kept position whose surrounding text it would
+ * A replacement split around each kept position whose surrounding text it would
  * replace with the same text, so the position (a caret, the line holding the
  * scroll) maps onto that text instead of the edit's start.
  */
@@ -251,14 +267,18 @@ function keptAround(old: string, edit: TextEdit, keep: readonly number[]): TextE
 /**
  * Edits (in old-text offsets, sorted, not overlapping) that turn `old` into
  * `next`. Both texts must use "\n" line breaks. Empty when they are equal.
- * Where the work limits fall back to one large edit, the text around each
- * `keep` position (in `old`) is still kept when it survived.
+ * Any edit that replaces text around a `keep` position (in `old`: a caret,
+ * the line holding the scroll) is split again so that position stays on its
+ * own text when that text survived, also where the work limits fell back to
+ * one large edit or a whole word was replaced. `keep` may be a function; it is
+ * called only when some edit replaces text, so an insertion or a deletion
+ * reads no positions.
  */
-export function minimalChanges(old: string, next: string, keep: readonly number[] = [], limit = MAX_LINE_EDITS): TextEdit[] {
+export function minimalChanges(old: string, next: string, keep: readonly number[] | (() => readonly number[]) = [], limit = MAX_LINE_EDITS): TextEdit[] {
   if (old === next) return [];
-  const edits = editsBetween(old, lineStarts(old), next, lineStarts(next), limit, 0, true)!;
-  const sorted = [...new Set(keep)].sort((a, b) => a - b);
-  return edits
-    .flatMap((edit) => refined(old, edit))
-    .flatMap(({ coarse, ...edit }) => (coarse && sorted.length ? keptAround(old, edit, sorted) : [edit]));
+  const edits = editsBetween(old, lineStarts(old), next, lineStarts(next), limit, 0, true)!
+    .flatMap((edit) => refined(old, edit));
+  if (!edits.some((e) => e.to > e.from && e.insert.length)) return edits;
+  const sorted = [...new Set(typeof keep === "function" ? keep() : keep)].sort((a, b) => a - b);
+  return sorted.length ? edits.flatMap((edit) => keptAround(old, edit, sorted)) : edits;
 }
