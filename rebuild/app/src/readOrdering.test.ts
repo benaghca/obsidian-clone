@@ -51,6 +51,7 @@ function reloadHost() {
     states: new Map([["a.md", EditorState.create({ doc: "original" })]]), owners: new Map(), saveTimers: new Map(), retryTimers: new Map(), dirty: new Set(), slots: new Map(), reloads: new Map(), loadEpoch: new Map(),
     doc: () => doc,
     change: vi.fn((_path: string, spec: { changes: ChangeSpec }) => { doc = ChangeSet.of(spec.changes, doc.length).apply(doc); }),
+    places: () => [],
     events: { saved: vi.fn() },
   };
   return { host, type: () => { doc = Text.of(["unsaved typing"]); }, reload: () => NoteEditors.prototype.reload.call(host as never, "a.md") };

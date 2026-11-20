@@ -24,6 +24,7 @@ When a sync (git, Syncthing, another app) changes a note you have open but are n
 The diff has two limits, and past either one it falls back to a less fine-grained result that is still exact:
 - More than 1,000 line edits (a rewrite): the changed middle becomes one block, the same as a common prefix/suffix diff.
 - More than 200 word edits inside one block: that block stays one edit.
+- Since review round 2, a fallback block is split again around each kept position (the cursor, the line that holds the scroll) when the text around it survived. See review round 2 below.
 
 `normalizeLineBreaks` turns CRLF and lone CR into `\n`, which is what CodeMirror stores.
 
@@ -123,9 +124,51 @@ Every guard is unchanged and still runs in the same order: `pageOwnsDisk`, the `
 
 **Process slip.** One scratch probe ran `npx tsx`, which wasn't installed, so npx fetched it into its own cache, probably over the network. Nothing was added to the project, and no probe files are left in the worktree. Later probes used only installed packages.
 
+## Review round 2 (Codex PASS-WITH-FIXES, `/tmp/r2-s1-codex-review2.md`)
+
+### P2: a fallback edit still sent the caret to its start
+
+- **The problem.** When the diff hits a work limit, it replaces the whole changed block as one edit. A caret inside that block maps to its start, even when the text under the caret didn't change. Codex showed it two ways:
+  - a 1,277-character line, `alpha ` ×105, `unchanged section`, ` alpha` ×105, with every `alpha` changed to `bravo`. That is more than 200 word edits, so the caret went from 639 to 0;
+  - two small edits around 200,001 unchanged characters, which is over the word-diff size cap. The caret went from 100,000 to 0.
+
+  The same block can also swallow the line CodeMirror holds the scroll by, so the view jumps.
+- **The fix.** It keeps the work limits.
+  - `minimalChanges(old, next, keep)` takes positions to keep. Fallback blocks are marked internally (`coarse`).
+  - For each kept position strictly inside a fallback block, `locate` takes the 32 characters just after and just before the position (then 8, if needed) and looks them up in the block's new text. It looks outward from where the position would land if the edit were spread evenly, at most 32 hits each way.
+  - Each hit is extended in both directions (at most 4,096 characters each way). The longest match wins; on a tie, the nearest one, which keeps a caret in repeating text on its own copy and not one 30 characters away.
+  - The block is then split into two trimmed edits around that unchanged span, and any other kept positions are handled the same way inside the two parts. Less than 8 matching characters is not worth a split.
+  - The split never cuts a surrogate pair, and the result is always exact, because it splits only on text that is the same on both sides.
+- **The positions** come from `NoteEditors.places(path)`:
+  - the main state's selection (anchor and head of every range);
+  - in every pane showing the note, its selection, plus the start of the line block at the top of its scroller and the one after it. That is the block CodeMirror's `scrollAnchorAt` uses to hold the scroll across a change.
+
+  The list is capped at 64 positions.
+- **Tests.**
+  - Vitest:
+    - Codex's 1,277-character case and the 200,001-character case, through the real `reload`;
+    - repeating `w0 … w9` text over 200k characters, where the caret must land exactly on its own copy;
+    - a 3,000-line note past the line-edit limit, where the caret line and a scroll line both map onto their own text;
+    - six kept places in one fallback block;
+    - a 300-round fuzz with emoji, limit 1 and random kept positions: the result is always exact and no edit boundary splits a surrogate pair;
+    - a 20,000-line rewrite with 64 kept positions in under 500 ms.
+  - Browser script, a fallback case: a 1,500-line note where every line changes except 700–760 and 1,390–1,410. The pane is scrolled to line 730 and the caret, out of view, is on line 1400. After the sync, the caret stays on its text and column, and the same line stays at the top with 0 px of scroll change.
+- **The tests fail without the fix.**
+  - With the kept positions turned off, the five vitest fallback cases fail.
+  - In the browser, with no positions, the caret check fails. With the selection kept but not the scroll lines, the top-of-pane check fails (the top went to the note's start, −17,071 px).
+- **Concurrent writers.** Codex noted again that a pending whole-note save on a dirty note, or a pop-out with its own dirty state, can still replace an outside edit. That predates this branch and is outside the clean-reload piece (it belongs with S2/S3), so it is unchanged.
+
+**Suites after the round-2 fix.**
+- `cargo test --offline`: 202 passed, 0 failed, 5 ignored.
+- Locked `npm test`, run 1: the first script, `test-feel`, missed the quick switcher's input budget (24 ms against 16 ms) at a load average around 23. That script runs before any reload code.
+- Run 2: the steps before vitest and all of vitest passed (112 files, 1,727 tests). Then `test-r27e` failed "settings opens with the search field focused" at a load average of 76. That is a focus-timing check with no reload in it.
+- I then ran `test-r27e` and every script after it, plus `npm run posttest`, under the same lock: all passed (EXIT 0). That includes `test-r27e` itself, `test-bases-embed`, and the new reload script with its fallback checks.
+- Between them, the two full runs and that final run cover every step of the suite. Each step passed in at least one of them, and the only failures were the two timing checks above.
+
 ## Leftover gaps
 
 - **Mirrors aren't tested directly.** A second pane showing the same note relies on `forward()` and CodeMirror's own selection mapping. Vitest has no DOM, and the browser script uses one pane.
-- **Where the caret lands when its text is gone.** If the sync rewrites the caret's exact words, the caret goes to the start of the replaced block. The same happens past the fallbacks: more than 200 word edits in one block, more than 1,000 line edits, or a changed block over 200,000 characters (for example a single line that long, edited at both ends). The start is the natural place, but it isn't "the same text", because that text no longer exists.
+- **Where the caret lands when its text is gone.** If the sync rewrites the caret's own words, the caret goes to the start of the replaced block. The start is the natural place, but it isn't "the same text", because that text no longer exists. Past the fallbacks (more than 200 word edits in one block, more than 1,000 line edits, a block over 200,000 characters), the caret and the scroll line now keep their text when at least 8 characters around them survived (review round 2). Other unchanged text inside a fallback block is still replaced with itself, which is exact but makes CodeMirror re-measure those lines.
+- **Kept positions are a lookup, not a diff.** In text that repeats exactly, the match nearest the expected place wins. That keeps the caret on the same words, but in an extreme case it could be a copy a few lines away.
 - **History is cleared as a whole.** When any undo or redo step touches the sync, all of the note's history is cleared, including steps elsewhere in the note. Keeping the untouched older steps would mean rebuilding CodeMirror's history, and that isn't public API.
 - **Not in this piece:** S2 (merge view for an unsaved conflict) and S3 (save-failure notice). An outside change to a dirty note is still skipped, as before.

@@ -472,7 +472,7 @@ export class NoteEditors {
     // A newer reload or local typing while the read ran takes precedence.
     if (read === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job) return;
     // The editor holds "\n" line breaks; a CRLF file with the same text is not a change.
-    const changes = minimalChanges(current.toString(), normalizeLineBreaks(read));
+    const changes = minimalChanges(current.toString(), normalizeLineBreaks(read), this.places(path));
     if (!changes.length) return;
     // Undo and redo steps that overlap or touch the outside edit cannot be mapped across it safely.
     const keepHistory = historySurvives(this.owners.get(path)?.state ?? this.states.get(path)!, changes);
@@ -485,6 +485,31 @@ export class NoteEditors {
     });
     if (!keepHistory) this.clearHistory(path);
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
+  }
+
+  /**
+   * Positions in a note an outside change should keep on their own text: the
+   * main state's selection, and in every pane showing the note its selection
+   * and the lines CodeMirror holds the scroll by (the line at the top of the
+   * view). The diff keeps the text around them even where it falls back to one
+   * large edit.
+   */
+  private places(path: string): number[] {
+    const out: number[] = [];
+    const state = this.owners.get(path)?.state ?? this.states.get(path);
+    if (state) for (const r of state.selection.ranges) out.push(r.anchor, r.head);
+    for (const pane of this.panes.values()) {
+      if (pane.path !== path) continue;
+      const { view, scroller } = pane;
+      for (const r of view.state.selection.ranges) out.push(r.anchor, r.head);
+      if (!scroller) continue;
+      const height = scroller.getBoundingClientRect().top - view.contentDOM.getBoundingClientRect().top;
+      if (height <= 0) continue;
+      const top = view.lineBlockAtHeight(height);
+      out.push(top.from, view.lineBlockAtHeight(top.bottom + 1).from);
+    }
+    // Many cursors: the first ones are enough to bound the work.
+    return out.slice(0, 64);
   }
 
   /** Start a note's undo history fresh (its main state; mirrors have none). */

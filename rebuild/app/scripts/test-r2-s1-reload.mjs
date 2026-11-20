@@ -158,4 +158,29 @@ await withBrowser(async ({ run, open, check, chord, send }) => {
     const head = await run(() => ws.editors.viewOf(ws.activeGroup).state.selection.main.head);
     check(await shown() === next && head === caret + 5 && next.slice(head, head + 2) === 'w7', 'a caret inside a long unchanged span stays on its word');
   }
+  // Codex review 2, P2: past the diff's limits the change falls back to one large
+  // edit; the caret and the line holding the scroll still keep their own text.
+  {
+    const path = 'Fallback.md';
+    const text = Array.from({ length: 1500 }, (_, i) => `Line ${i} with some words in it`).join('\n');
+    await open(path, text, 300);
+    await run(async () => {
+      // The caret on line 1400, out of view; the pane scrolled to line 730.
+      const group = ws.activeGroup, view = ws.editors.viewOf(group);
+      view.focus();
+      view.dispatch({ selection: { anchor: view.state.doc.line(1401).from + 5 } });
+      ws.editors.glide(group, view.state.doc.line(731).from);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
+    const start = await where();
+    check(start.caretLine === 'Line 1400 with some words in it' && start.topText !== null, `fallback: caret on line 1400, ${start.topText} at the top`);
+    // Every line but 700 to 760 and 1390 to 1410 changes: far past the line-edit limit.
+    const kept = (i) => (i >= 700 && i <= 760) || (i >= 1390 && i <= 1410);
+    const next = text.split('\n').map((line, i) => (kept(i) ? line : line.replace('words', 'WORDS'))).join('\n');
+    await outside(path, next);
+    const now = await where();
+    check(now.doc === next, 'fallback: the editor shows the synced text');
+    check(now.caretLine === start.caretLine && now.column === start.column, 'fallback: the caret stays on its own text');
+    check(now.topText === start.topText && Math.abs(now.scrollTop - start.scrollTop) <= 2, `fallback: the same line stays at the top of the pane (${now.topText}, ${now.scrollTop - start.scrollTop}px)`);
+  }
 });

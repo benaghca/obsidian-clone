@@ -3,7 +3,7 @@
 // on, and it stays out of undo, so Ctrl+Z cannot bring the old text back and
 // save it over the synced file. No window: these run on the note's state.
 import { history, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
-import { EditorSelection, EditorState, type Transaction } from "@codemirror/state";
+import { ChangeSet, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "./api";
 import { MAX_LINE_EDITS, minimalChanges, normalizeLineBreaks, REFINE_CHARS, type TextEdit } from "./editor/minimalChange";
@@ -115,7 +115,7 @@ test("random edits always rebuild the new text exactly", () => {
     const old = base.join("\n") + tail(), now = changed.join("\n") + tail();
     expect(apply(old, minimalChanges(old, now))).toBe(now);
     // Past the edit limit it falls back to one block, which is still exact.
-    expect(apply(old, minimalChanges(old, now, 1))).toBe(now);
+    expect(apply(old, minimalChanges(old, now, [], 1))).toBe(now);
   }
 });
 
@@ -363,6 +363,92 @@ test("a 60,000-character line with edits at both ends is still refined, quickly"
   expect(performance.now() - started).toBeLessThan(250);
   expect(apply(old, edits)).toBe(next);
   expect(edits.every((e) => e.to - e.from <= 2 && e.insert.length <= 2)).toBe(true);
+});
+
+// ----- fallbacks keep the caret and the scroll line (Codex review 2, P2) -----
+
+test("past the word-edit budget, a caret in surviving text stays on it (1,277 characters)", async () => {
+  const text = "alpha ".repeat(105) + "unchanged section" + " alpha".repeat(105);
+  const next = text.replaceAll("alpha", "bravo");
+  const caret = text.indexOf("unchanged") + 7;
+  // Every word around it changed: more word edits than the budget, so the block is a fallback.
+  expect(minimalChanges(text, next)).toHaveLength(1);
+  const { state, sync } = await opened(text, caret);
+  await sync(next);
+  const s = state();
+  expect(s.doc.toString()).toBe(next);
+  expect(s.selection.main.head).toBe(next.indexOf("unchanged") + 7);
+});
+
+test("a block too long to compare by word keeps a caret in its unchanged middle (200,001 characters)", async () => {
+  const middle = "x".repeat(200_001);
+  const text = `ab ${middle} cd`, next = `AB ${middle} CD`;
+  expect(middle.length).toBeGreaterThan(REFINE_CHARS);
+  const { state, sync } = await opened(text, 100_000);
+  await sync(next);
+  expect(state().doc.toString()).toBe(next);
+  expect(state().selection.main.head).toBe(100_000);
+});
+
+test("in repeating text, the caret keeps its own place, not a copy of it nearby", async () => {
+  const middle = Array.from({ length: 70_000 }, (_, i) => `w${i % 10}`).join(" ");
+  const text = `start ${middle} end`, next = `START here ${middle} the end`;
+  const caret = text.indexOf("w7", 100_000);
+  const { state, sync } = await opened(text, caret);
+  await sync(next);
+  expect(state().selection.main.head).toBe(caret + 5);
+});
+
+test("past the line-edit limit, the caret line and a scroll line both keep their text", () => {
+  const old = lines(3000);
+  // Every line changes except 1,490 to 1,510: thousands of line edits, one fallback block.
+  const next = old.split("\n").map((line, i) => (i >= 1490 && i <= 1510 ? line : line.replace("lorem", "LOREM"))).join("\n");
+  const caret = old.indexOf("line 1500 ") + 7, top = old.indexOf("line 1495 ");
+  expect(minimalChanges(old, next)).toHaveLength(1);
+  const edits = minimalChanges(old, next, [top, caret]);
+  expect(apply(old, edits)).toBe(next);
+  const changes = ChangeSet.of(edits, old.length);
+  expect(changes.mapPos(caret, -1)).toBe(next.indexOf("line 1500 ") + 7);
+  expect(changes.mapPos(top, -1)).toBe(next.indexOf("line 1495 "));
+});
+
+test("several kept places in one fallback block each keep their text", () => {
+  const word = (i: number) => `k${i}x`;
+  const old = Array.from({ length: 600 }, (_, i) => (i % 100 === 50 ? `${word(i)} stays here` : "alpha")).join(" ");
+  const next = old.replaceAll("alpha", "bravo");
+  const keep = [...old.matchAll(/k\d+x/g)].map((m) => m.index! + 2);
+  const edits = minimalChanges(old, next, keep);
+  expect(apply(old, edits)).toBe(next);
+  const changes = ChangeSet.of(edits, old.length);
+  for (const at of keep) {
+    const label = old.slice(at - 2, old.indexOf(" ", at));
+    expect(next.slice(changes.mapPos(at, -1) - 2).startsWith(label + " stays here")).toBe(true);
+  }
+});
+
+test("kept places never break the result or split an emoji (fuzz)", () => {
+  const next = random(7);
+  const pieces = ["alpha ", "bravo ", "😀", "x", "\n", "same text here "];
+  const text = (n: number) => Array.from({ length: n }, () => pieces[Math.floor(next() * pieces.length)]).join("");
+  for (let round = 0; round < 300; round++) {
+    const old = text(80 + Math.floor(next() * 200));
+    const now = old.split("").map((c) => (c === "a" && next() < 0.5 ? "o" : c)).join("") + (next() < 0.5 ? text(5) : "");
+    const keep = Array.from({ length: 4 }, () => Math.floor(next() * old.length));
+    const edits = minimalChanges(old, now, keep, 1);
+    expect(apply(old, edits)).toBe(now);
+    for (const e of edits) {
+      for (const at of [e.from, e.to]) expect(/[\uDC00-\uDFFF]/.test(old[at] ?? "") && /[\uD800-\uDBFF]/.test(old[at - 1] ?? "")).toBe(false);
+    }
+  }
+});
+
+test("keeping places inside a huge fallback stays fast", () => {
+  const old = lines(20_000), next = lines(20_000, "other");
+  const keep = Array.from({ length: 64 }, (_, i) => Math.floor((old.length * i) / 64));
+  const started = performance.now();
+  const edits = minimalChanges(old, next, keep);
+  expect(performance.now() - started).toBeLessThan(500);
+  expect(apply(old, edits)).toBe(next);
 });
 
 // ----- guards and quiet cases -----
