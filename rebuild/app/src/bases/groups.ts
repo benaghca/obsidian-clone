@@ -456,6 +456,31 @@ export function createGroupedView(host: GroupedHost) {
     dispose() { gone = true; clear(); host.scroller.removeEventListener("contextmenu", contextMenu); host.el.removeEventListener("keydown", keys); root.remove(); },
     /** The rows in the order they are drawn, for Copy and Export CSV: by group when grouped. */
     rows: (): readonly Entry[] | null => model?.groupBy ? groups.flatMap(g => g.rows) : null,
+    /** Rows a column fit measures. Collapsed groups are skipped. Unpainted rows of expanded groups stay. Null when this table is not grouped. */
+    fitRows: (): readonly Entry[] | null => model?.groupBy ? groups.flatMap(g => collapsed.has(idOf(g)) ? [] : g.rows) : null,
+    /**
+     * Summary label and result strings drawn in this column. The all-results
+     * footer is included. Collapsed groups' footers are not. Empty when this
+     * table draws no summary in the column.
+     */
+    fitSummaryText: (key: string): { labels: readonly string[]; values: readonly string[] } => {
+      const labels: string[] = [], values: string[] = [];
+      if (!model || model.type !== "table" || !model.summaryPlan.selected.size) return { labels, values };
+      const id = /^(file|formula)\./.test(key) ? key : `note.${key.replace(/^note\./, "")}`;
+      const add = (rows: ReadonlyMap<string, Value> | undefined) => {
+        const name = model!.summaryPlan.selected.get(id);
+        if (!name) return;
+        const label = name.replace(/^custom\./, "");
+        const value = rows?.get(id) ?? null;
+        let text: string;
+        try { text = isFormulaError(value) ? "#ERROR!" : displayValue(value); } catch { text = "#ERROR!"; }
+        if (label) labels.push(label);
+        if (text) values.push(text);
+      };
+      add(summaries.all);
+      if (model.groupBy) for (const g of groups) if (!collapsed.has(idOf(g))) add(summaries.groups.get(g.id));
+      return { labels, values };
+    },
     /** Every group of the last rebuild, in automatic order (the Group menu arranges them). */
     groups: (): readonly RowGroup[] => automatic,
     /** Rows in hidden groups: left out of the result count (D7). */
