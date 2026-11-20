@@ -10,69 +10,104 @@
 // history only, none of the editor's other extensions) and checked first.
 //
 // Each stack is replayed newest first, the order Ctrl+Z (or Ctrl+Y) would
-// run it. The steps before the first one the change touches stay: each sits
-// on top of the older ones, so dropping the older ones leaves it exact. The
-// step the change touches goes, with everything older on that stack, since
-// those could only be reached by undoing it first.
+// run it. A step that touches the outside change is dropped: its current
+// text stays in the document. A step below it is still kept when it can be
+// moved past every dropped step: its change is mapped across them, and it
+// must not touch them or the outside change. Anything that touches either
+// is dropped too, so no kept step can bring back text the sync replaced.
+// When something was dropped, the history is rebuilt from the kept steps as
+// ordinary transactions on a fresh history.
 
-import { historyField, redo, undo } from "@codemirror/commands";
-import { EditorState, type StateCommand, type Transaction } from "@codemirror/state";
+import { history, historyField, isolateHistory, redo, undo } from "@codemirror/commands";
+import { type ChangeDesc, ChangeSet, EditorSelection, EditorState, type StateCommand, type Text, Transaction } from "@codemirror/state";
 import type { TextEdit } from "./minimalChange";
 
-/** How many of the newest steps of each stack to keep (Infinity: all of them). */
-export interface HistoryKeep {
-  done: number;
-  undone: number;
+type Range = readonly [from: number, to: number];
+
+/** A step that stays: its change, and the document it applies to (only kept steps applied). */
+interface Kept {
+  changes: ChangeSet;
+  doc: Text;
 }
 
 /**
- * Null when no undo or redo step of `state` overlaps or touches the ranges
- * `edits` change (offsets in `state.doc`): the whole history can stay.
- * Otherwise how many of the newest steps of each stack can.
+ * Replay one stack of `state` with `command` until it is empty. `ranges` is
+ * the outside change's text in `state.doc`. Returns the kept steps in replay
+ * order, and whether any step was dropped.
  */
-export function historyKeep(state: EditorState, edits: readonly TextEdit[]): HistoryKeep | null {
+function replay(state: EditorState, ranges: readonly Range[], command: StateCommand): { kept: Kept[]; dropped: boolean } {
   const value = state.field(historyField, false);
-  if (value === undefined || !edits.length) return null;
-  const light = EditorState.create({ doc: state.doc, selection: state.selection, extensions: historyField.init(() => value) });
-  const keep = { done: clear(light, edits, undo), undone: clear(light, edits, redo) };
-  return keep.done === Infinity && keep.undone === Infinity ? null : keep;
-}
-
-/** True when the history can stay as it is. */
-export function historySurvives(state: EditorState, edits: readonly TextEdit[]): boolean {
-  return historyKeep(state, edits) === null;
-}
-
-/** Run `command` until its stack is empty (Infinity) or a step reaches an edited range (the steps before it). */
-function clear(start: EditorState, edits: readonly TextEdit[], command: StateCommand): number {
-  let state = start;
-  // The edited ranges, in the coordinates of the document each step applies to.
-  let ranges = edits.map((e) => [e.from, e.to] as const);
-  for (let steps = 0; ; steps++) {
+  if (value === undefined) return { kept: [], dropped: false };
+  // `all` is the copy CodeMirror replays on, with every step applied, dropped ones included.
+  let all = EditorState.create({ doc: state.doc, selection: state.selection, extensions: historyField.init(() => value) });
+  // `doc` has only the kept steps applied. `skip` takes `all`'s coordinates to `doc`'s: the dropped steps put back.
+  let doc = state.doc;
+  let skip: ChangeDesc = ChangeSet.empty(doc.length).desc;
+  let sync = ranges;
+  const kept: Kept[] = [];
+  let dropped = false;
+  for (;;) {
     let step: Transaction | null = null;
-    if (!command({ state, dispatch: (tr) => { step = tr; } }) || !step) return Infinity;
+    if (!command({ state: all, dispatch: (tr) => { step = tr; } }) || !step) break;
     const changes = (step as Transaction).changes;
-    if (ranges.some(([from, to]) => changes.touchesRange(from, to))) return steps;
-    ranges = ranges.map(([from, to]) => [changes.mapPos(from, -1), changes.mapPos(to, 1)] as const);
-    state = (step as Transaction).state;
+    let clear = true;
+    changes.iterChangedRanges((from, to) => { if (clear && skip.touchesRange(from, to)) clear = false; });
+    const moved = clear ? changes.map(skip) : null;
+    if (moved && !sync.some(([from, to]) => moved.touchesRange(from, to))) {
+      kept.push({ changes: moved, doc });
+      doc = moved.apply(doc);
+      sync = sync.map(([from, to]) => [moved.mapPos(from, -1), moved.mapPos(to, 1)] as const);
+      skip = skip.mapDesc(changes);
+    } else {
+      dropped = true;
+      // Back from after this step to before it, then the earlier dropped steps.
+      skip = changes.invertedDesc.composeDesc(skip);
+    }
+    all = (step as Transaction).state;
   }
+  return { kept, dropped };
 }
 
-interface HistoryJSON {
-  done: unknown[];
-  undone: unknown[];
+/** The ranges an edit list changes, in the coordinates of the document it applies to. */
+const rangesOf = (edits: readonly TextEdit[]): Range[] => edits.map((e) => [e.from, e.to] as const);
+
+/** True when no undo or redo step of `state` overlaps or touches the ranges `edits` change (offsets in `state.doc`). */
+export function historySurvives(state: EditorState, edits: readonly TextEdit[]): boolean {
+  if (!edits.length) return true;
+  const ranges = rangesOf(edits);
+  return !replay(state, ranges, undo).dropped && !replay(state, ranges, redo).dropped;
+}
+
+/** Fresh-history transaction options: never joined with a neighbour. */
+const alone = [isolateHistory.of("full")];
+const quiet = [Transaction.addToHistory.of(false)];
+
+/** Put the cursor where `changes` starts, so its undo returns there; then apply it as its own step. */
+function stepped(state: EditorState, changes: ChangeSet): EditorState {
+  let at = -1;
+  changes.iterChangedRanges((from) => { if (at < 0) at = from; });
+  const placed = state.update({ selection: EditorSelection.cursor(Math.max(0, at)), annotations: quiet }).state;
+  return placed.update({ changes, annotations: alone }).state;
 }
 
 /**
- * The history value of `state` (taken after the outside change, so the kept
- * steps are already mapped across it) with only the newest `keep` steps of
- * each stack. Uses the field's own JSON form, the public way to read and
- * build a history.
+ * The history `state` (taken right after the outside change `sync`) should
+ * have, or null when every step can stay as CodeMirror mapped it.
  */
-export function keptHistory(state: EditorState, keep: HistoryKeep) {
-  const value = state.field(historyField);
-  const json = EditorState.create({ extensions: historyField.init(() => value) }).toJSON({ history: historyField }).history as HistoryJSON;
-  const newest = (branch: unknown[], n: number) => (n >= branch.length ? branch : branch.slice(branch.length - n));
-  const history: HistoryJSON = { done: newest(json.done, keep.done), undone: newest(json.undone, keep.undone) };
-  return EditorState.fromJSON({ doc: "", selection: { ranges: [{ anchor: 0, head: 0 }], main: 0 }, history }, {}, { history: historyField }).field(historyField);
+export function historyAfter(state: EditorState, sync: ChangeSet) {
+  if (state.field(historyField, false) === undefined || sync.empty) return null;
+  const ranges: Range[] = [];
+  sync.iterChangedRanges((_fromA, _toA, fromB, toB) => ranges.push([fromB, toB]));
+  const done = replay(state, ranges, undo), undone = replay(state, ranges, redo);
+  if (!done.dropped && !undone.dropped) return null;
+  // Start where every kept undo has run, then make each step again, oldest first.
+  const last = done.kept[done.kept.length - 1];
+  let rebuilt = EditorState.create({ doc: last ? last.changes.apply(last.doc) : state.doc, extensions: history() });
+  for (let i = done.kept.length - 1; i >= 0; i--) rebuilt = stepped(rebuilt, done.kept[i].changes.invert(done.kept[i].doc));
+  // The redo stack: make each kept redo, then undo them all, so they wait in the same order.
+  for (const { changes } of undone.kept) rebuilt = stepped(rebuilt, changes);
+  for (let i = 0; i < undone.kept.length; i++) undo({ state: rebuilt, dispatch: (tr) => { rebuilt = tr.state; } });
+  // Never expected; if it happened, a fresh history is the safe answer.
+  if (!rebuilt.doc.eq(state.doc)) return EditorState.create({ extensions: history() }).field(historyField);
+  return rebuilt.field(historyField);
 }

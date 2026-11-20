@@ -2,12 +2,12 @@
 // as the smallest edit, so the cursor and selection stay on the text they were
 // on, and it stays out of undo, so Ctrl+Z cannot bring the old text back and
 // save it over the synced file. No window: these run on the note's state.
-import { history, isolateHistory, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
-import { ChangeSet, EditorSelection, EditorState, type Transaction } from "@codemirror/state";
+import { history, historyField, isolateHistory, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
+import { ChangeSet, Compartment, EditorSelection, EditorState, Transaction } from "@codemirror/state";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "./api";
 import { MAX_LINE_EDITS, minimalChanges, normalizeLineBreaks, REFINE_CHARS, type TextEdit } from "./editor/minimalChange";
-import { historyKeep, historySurvives } from "./editor/reloadHistory";
+import { historyAfter, historySurvives } from "./editor/reloadHistory";
 import { NoteEditors } from "./noteEditors";
 import { resetBackendRootForTests } from "./vaultRoot";
 import { resetHoldsForTests } from "./holdDrain";
@@ -336,8 +336,6 @@ test("history checks replay every step, older ones included", () => {
   // A newer step that is far away does not hide the older one under the sync.
   expect(undoDepth(s)).toBe(2);
   expect(historySurvives(s, minimalChanges(s.doc.toString(), s.doc.toString().replace("TWO", "2")))).toBe(false);
-  // The newer step is kept; the touched one and anything older go.
-  expect(historyKeep(s, minimalChanges(s.doc.toString(), s.doc.toString().replace("TWO", "2")))).toEqual({ done: 1, undone: Infinity });
   expect(historySurvives(s, minimalChanges(s.doc.toString(), s.doc.toString() + "\nend"))).toBe(true);
 });
 
@@ -406,6 +404,132 @@ test("a kept history does not join the next typing into its last step", async ()
   expect(undoDepth(state())).toBe(2);
   expect(step(state(), undo)).toBe("one 2 three!");
   await notes.flush();
+});
+
+// ----- older steps below a touched one (Codex review 4, P2) -----
+
+/** Three saved edits, each its own undo step: "one two three" -> "ONE TWO THREE". */
+async function threeSteps() {
+  vi.useFakeTimers();
+  const opened3 = await opened("one two three", 0);
+  const { notes } = opened3;
+  for (const [from, to, insert] of [[0, 3, "ONE"], [4, 7, "TWO"], [8, 13, "THREE"]] as const) {
+    notes.change("A.md", { changes: { from, to, insert }, userEvent: "input.type", annotations: [isolateHistory.of("full")] });
+  }
+  await notes.flush();
+  expect(api.writeNote).toHaveBeenLastCalledWith("A.md", "ONE TWO THREE");
+  return opened3;
+}
+
+test("a disjoint step below the one the sync touched can still be undone", async () => {
+  const { notes, state, sync } = await threeSteps();
+  await sync("ONE published THREE");
+  expect(undoDepth(state())).toBe(2);
+  const before = vi.mocked(api.writeNote).mock.calls.length;
+  expect(undoInto(notes, state)).toBe("ONE published three");
+  await notes.flush();
+  expect(undoInto(notes, state)).toBe("one published three");
+  await notes.flush();
+  // The touched step is gone: nothing brings "TWO" or "two" back.
+  expect(step(state(), undo)).toBeNull();
+  const saved = vi.mocked(api.writeNote).mock.calls.slice(before).map((c) => c[1]);
+  expect(saved).toEqual(["ONE published three", "one published three"]);
+  expect(saved.every((t) => !/two/i.test(t as string))).toBe(true);
+  // Redo walks them back in order.
+  let s = state();
+  for (const want of ["ONE published three", "ONE published THREE"]) {
+    let tr!: Transaction;
+    expect(redo({ state: s, dispatch: (t) => { tr = t; } })).toBe(true);
+    expect(tr.state.doc.toString()).toBe(want);
+    s = tr.state;
+  }
+});
+
+test("redo keeps disjoint steps on both sides of the one the sync touched", async () => {
+  const { notes, state, sync } = await threeSteps();
+  for (let i = 0; i < 3; i++) undoInto(notes, state);
+  await notes.flush();
+  expect(state().doc.toString()).toBe("one two three");
+  expect(redoDepth(state())).toBe(3);
+  // Redo would run ONE, then TWO (touched: "two" is now "published"), then THREE.
+  await sync("one published three");
+  expect(redoDepth(state())).toBe(2);
+  expect(step(state(), redo)).toBe("ONE published three");
+  let tr!: Transaction;
+  redo({ state: state(), dispatch: (t) => { tr = t; } });
+  expect(step(tr.state, redo)).toBe("ONE published THREE");
+  await notes.flush();
+});
+
+test("kept steps never touch the synced text and each still makes its own edit (fuzz, both stacks)", () => {
+  const next = random(11);
+  const letters = "abcdefgh \n";
+  const word = (n: number) => Array.from({ length: n }, () => letters[Math.floor(next() * letters.length)]).join("");
+  const c = new Compartment();
+  let checked = 0, below = 0;
+  for (let round = 0; round < 400; round++) {
+    let s = EditorState.create({ doc: word(40 + Math.floor(next() * 40)), extensions: c.of(history()) });
+    // Local edits, each its own step; remember what each replaced.
+    const made: Array<{ gone: string; put: string }> = [];
+    for (let i = 0, n = 2 + Math.floor(next() * 5); i < n; i++) {
+      const len = s.doc.length, from = Math.floor(next() * len), to = Math.min(len, from + Math.floor(next() * 4));
+      const insert = word(Math.floor(next() * 4));
+      if (to === from && !insert) continue;
+      made.push({ gone: s.doc.sliceString(from, to), put: insert });
+      s = s.update({ changes: { from, to, insert }, annotations: [isolateHistory.of("full")] }).state;
+    }
+    // Some of them undone first, so the redo stack has steps too.
+    const undoneFirst = Math.floor(next() * (made.length + 1));
+    for (let i = 0; i < undoneFirst; i++) undo({ state: s, dispatch: (t) => { s = t.state; } });
+    // The sync: one or two replacements.
+    const text = s.doc.toString();
+    let synced = text;
+    for (let i = 0, n = 1 + Math.floor(next() * 2); i < n; i++) {
+      const from = Math.floor(next() * synced.length), to = Math.min(synced.length, from + Math.floor(next() * 5));
+      synced = synced.slice(0, from) + word(1 + Math.floor(next() * 3)) + synced.slice(to);
+    }
+    const edits = minimalChanges(text, synced);
+    if (!edits.length) continue;
+    const syncSet = ChangeSet.of(edits, text.length);
+    s = s.update({ changes: syncSet, annotations: [Transaction.addToHistory.of(false), isolateHistory.of("full")] }).state;
+    const value = historyAfter(s, syncSet);
+    if (value) s = s.update({ effects: c.reconfigure([]) }).state.update({ effects: c.reconfigure([historyField.init(() => value), history()]) }).state;
+    // The synced text, tracked through every step taken from here.
+    const put: Array<{ from: number; to: number; text: string }> = [];
+    syncSet.iterChanges((_fa, _ta, from, to, ins) => put.push({ from, to, text: ins.toString() }));
+    const walk = (command: typeof undo, expected: Array<{ gone: string; put: string }>) => {
+      let t = s, at = 0;
+      let ranges = put.map((r) => ({ ...r }));
+      for (;;) {
+        let tr: Transaction | null = null;
+        if (!command({ state: t, dispatch: (x) => { tr = x; } }) || !tr) break;
+        const changes = (tr as Transaction).changes;
+        for (const r of ranges) expect(changes.touchesRange(r.from, r.to)).toBe(false);
+        const pieces: Array<{ gone: string; put: string }> = [];
+        changes.iterChanges((fa, ta, _fb, _tb, ins) => pieces.push({ gone: t.doc.sliceString(fa, ta), put: ins.toString() }));
+        expect(pieces).toHaveLength(1);
+        // Each step taken is one of the steps made, in order (some may have been dropped).
+        const was = at;
+        while (at < expected.length && !(expected[at].gone === pieces[0].gone && expected[at].put === pieces[0].put)) at++;
+        expect(at).toBeLessThan(expected.length);
+        if (at > was) below++; // kept below a dropped step
+        at++;
+        ranges = ranges.map((r) => ({ ...r, from: changes.mapPos(r.from, -1), to: changes.mapPos(r.to, 1) }));
+        t = (tr as Transaction).state;
+        for (const r of ranges) expect(t.doc.sliceString(r.from, r.to)).toBe(r.text);
+        checked++;
+      }
+    };
+    // Undo runs the still-done steps newest first, each putting back what it replaced.
+    const done = made.slice(0, made.length - undoneFirst).reverse().map((m) => ({ gone: m.put, put: m.gone }));
+    // Redo runs the undone steps oldest first.
+    const redone = made.slice(made.length - undoneFirst);
+    walk(undo, done);
+    walk(redo, redone);
+  }
+  expect(checked).toBeGreaterThan(200);
+  // Steps kept below a dropped one were reached, so the rebase is exercised.
+  expect(below).toBeGreaterThan(10);
 });
 
 // ----- long lines (Codex review 1, P2) -----
@@ -554,6 +678,33 @@ test("a short surviving line holding the scroll inside a large fallback keeps it
   expect(at).toBe(next.indexOf("\n--\n") + 1);
 });
 
+test("a single unique character left in a replaced word keeps the caret by it", async () => {
+  const { state, sync } = await opened("AxA", 1);
+  await sync("BxB");
+  expect(state().doc.toString()).toBe("BxB");
+  expect(state().selection.main.head).toBe(1);
+});
+
+test("whole lines inserted right at a kept line start go in after its line break", () => {
+  const old = "a\nb\nc\n", next = "a\nX\nY\nb\nc\n";
+  const top = old.indexOf("b");
+  // Without the position, the plain diff inserts right at the line start.
+  expect(minimalChanges(old, next)).toEqual([{ from: top, to: top, insert: "X\nY\n" }]);
+  const edits = minimalChanges(old, next, [top]);
+  expect(edits).toEqual([{ from: top - 1, to: top - 1, insert: "\nX\nY" }]);
+  expect(apply(old, edits)).toBe(next);
+  expect(ChangeSet.of(edits, old.length).mapPos(top, -1)).toBe(next.indexOf("b"));
+});
+
+test("a caret at the start of its line stays on it when lines are inserted there", async () => {
+  const text = lines(20), at = text.indexOf("line 10 ");
+  const { state, sync } = await opened(text, at);
+  const next = text.replace("line 10 ", "new a\nnew b\nline 10 ");
+  await sync(next);
+  expect(state().doc.toString()).toBe(next);
+  expect(state().selection.main.head).toBe(next.indexOf("line 10 "));
+});
+
 test("a short span that appears twice in the new text is not guessed at", () => {
   const text = "alpha ".repeat(105) + " KEY " + "alpha ".repeat(105);
   // " KEY " now appears twice: nothing fixes which copy is the caret's.
@@ -566,15 +717,16 @@ test("a short span that appears twice in the new text is not guessed at", () => 
 
 // ----- no layout read for a no-op (Codex review 3, P3) -----
 
-test("an unchanged note, or a pure insert, reads no cursor or scroll positions", async () => {
+test("an unchanged note, or a pure deletion, reads no cursor or scroll positions", async () => {
   const places = vi.spyOn(NoteEditors.prototype as unknown as { places(path: string): number[] }, "places");
-  const { sync } = await opened("one\ntwo\n", 2);
-  await sync("one\r\ntwo\r\n");
-  await sync("one\ntwo\n");
-  expect(places).not.toHaveBeenCalled();
+  const { sync } = await opened("zero\none\ntwo\n", 2);
+  await sync("zero\r\none\r\ntwo\r\n");
   await sync("zero\none\ntwo\n");
   expect(places).not.toHaveBeenCalled();
-  await sync("zero\none\nTWO\n");
+  await sync("one\ntwo\n");
+  expect(places).not.toHaveBeenCalled();
+  // Inserted text can land on a kept position, so an insert reads them, once.
+  await sync("one\nnew\ntwo\n");
   expect(places).toHaveBeenCalledTimes(1);
   places.mockRestore();
 });

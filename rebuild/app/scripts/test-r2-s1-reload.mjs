@@ -203,4 +203,24 @@ await withBrowser(async ({ run, open, check, chord, send }) => {
     await sleep(600);
     check(await shown() === 'one 2 three' + rest && await writes() === before + 1, 'two steps: a second Ctrl+Z cannot bring "TWO" or "two" back');
   }
+  // Codex review 4, P2: whole lines inserted exactly at the start of the top line in view.
+  {
+    const path = 'Top insert.md';
+    const text = Array.from({ length: 400 }, (_, i) => `Row ${i} with some words in it`).join('\n');
+    await open(path, text, 300);
+    await run(async () => {
+      const group = ws.activeGroup, view = ws.editors.viewOf(group);
+      ws.editors.glide(group, view.state.doc.line(201).from);
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    });
+    const start = await where();
+    const top = await run(() => ws.editors.topLine(ws.activeGroup));
+    check(start.topText !== null && top !== null, `top insert: ${start.topText} is at the top`);
+    const next = text.slice(0, top) + 'synced one\nsynced two\n' + text.slice(top);
+    await outside(path, next);
+    const now = await where();
+    check(now.doc === next, 'top insert: the editor shows the synced text');
+    check(now.topText === start.topText, `top insert: the same line stays at the top of the pane (${now.topText})`);
+    check(now.scrollTop > start.scrollTop, 'top insert: the pane scrolled by the inserted lines');
+  }
 });

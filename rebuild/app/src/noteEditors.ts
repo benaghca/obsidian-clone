@@ -13,7 +13,7 @@
 // original change only, so a note is still saved once.
 
 import { history, historyField, isolateHistory, redo, undo } from "@codemirror/commands";
-import { Annotation, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
+import { Annotation, ChangeSet, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
 import { configEffects } from "./editor/config";
@@ -25,7 +25,7 @@ import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
 import { minimalChanges, normalizeLineBreaks } from "./editor/minimalChange";
 import { createNoteState, historyCompartment, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
-import { type HistoryKeep, historyKeep, keptHistory } from "./editor/reloadHistory";
+import { historyAfter } from "./editor/reloadHistory";
 import type { EditorHost } from "./editor/host";
 import { kept } from "./memo";
 import { type Group, memoryOf, type Tab } from "./tabs";
@@ -475,11 +475,9 @@ export class NoteEditors {
     // Checked before anything else, so a watcher event for an unchanged note reads no layout.
     const text = normalizeLineBreaks(read), was = current.toString();
     if (text === was) return;
-    // The cursor and scroll positions are read only when an edit replaces text around one.
+    // The cursor and scroll positions are read only when an edit inserts text, which could land on one.
     const changes = minimalChanges(was, text, () => this.places(path));
     if (!changes.length) return;
-    // Undo and redo steps that overlap or touch the outside edit cannot be mapped across it safely.
-    const keep = historyKeep(this.owners.get(path)?.state ?? this.states.get(path)!, changes);
     // Only what changed is replaced, so every pane's cursor, selection and scroll map across it.
     // It stays out of undo (history maps across it), so Ctrl+Z cannot put the old text back and save it.
     this.change(path, {
@@ -487,7 +485,8 @@ export class NoteEditors {
       userEvent: "external",
       annotations: [Transaction.addToHistory.of(false), isolateHistory.of("full")],
     });
-    if (keep) this.keepHistory(path, keep);
+    // Undo and redo steps that overlap or touch the outside edit cannot be mapped across it safely.
+    this.keepHistory(path, ChangeSet.of(changes, was.length));
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
   }
 
@@ -517,15 +516,17 @@ export class NoteEditors {
   }
 
   /**
-   * Keep only the newest undo and redo steps the outside change left alone
-   * (its main state; mirrors have none). The history is swapped by taking it
-   * out of its compartment and putting it back seeded with the kept steps.
+   * Keep the undo and redo steps the outside change can be moved past (its
+   * main state; mirrors have none); see reloadHistory.ts. When any had to go,
+   * the history is swapped by taking it out of its compartment and putting it
+   * back seeded with the rebuilt steps.
    */
-  private keepHistory(path: string, keep: HistoryKeep) {
+  private keepHistory(path: string, sync: ChangeSet) {
     const owner = this.owners.get(path);
     const state = owner?.state ?? this.states.get(path);
     if (!state) return;
-    const value = keptHistory(state, keep);
+    const value = historyAfter(state, sync);
+    if (!value) return;
     const off = { effects: historyCompartment.reconfigure([]) };
     const on = { effects: historyCompartment.reconfigure([historyField.init(() => value), history()]) };
     if (owner) {

@@ -52,6 +52,7 @@ function reloadHost() {
     doc: () => doc,
     change: vi.fn((_path: string, spec: { changes: ChangeSpec }) => { doc = ChangeSet.of(spec.changes, doc.length).apply(doc); }),
     places: () => [],
+    keepHistory: () => {},
     events: { saved: vi.fn() },
   };
   return { host, type: () => { doc = Text.of(["unsaved typing"]); }, reload: () => NoteEditors.prototype.reload.call(host as never, "a.md") };

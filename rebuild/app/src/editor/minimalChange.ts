@@ -10,7 +10,8 @@
 // sync also edited stays where it was. Last, any edit that replaces text
 // around a caret or the line holding the scroll is split around that text if
 // it survived, which also covers the fallbacks past the work limits and a
-// replaced word that kept its middle.
+// replaced word that kept its middle, and whole lines inserted right at a
+// kept line start go in after the line break before it.
 
 export interface TextEdit {
   /** Range in the old text. */
@@ -181,7 +182,11 @@ const KEEP_REACH = 4096;
 const KEEP_HITS = 32;
 /** This much unchanged text around a position is enough to keep it, wherever it is found. */
 const KEEP_MIN = 8;
-/** Shorter unchanged text is kept only when it occurs once in the old text of the edit and once in the new. */
+/**
+ * Shorter unchanged text is kept only when it occurs once in the old text of
+ * the edit and once in the new. A single character must also sit where the
+ * changes around it put it (within one character of the evenly spread place).
+ */
 const KEEP_UNIQUE = 2;
 
 /** True when `text` occurs exactly once in `within` between `from` and `to`. */
@@ -200,7 +205,8 @@ function once(within: string, text: string, from: number, to: number): boolean {
  * be if the edit were spread evenly; the longest match wins, then the nearest.
  * A match of at least KEEP_MIN characters is kept. A shorter one is kept only
  * when that text is unique in both the old and the new side of the edit, so
- * the changes around it fix where it belongs.
+ * the changes around it fix where it belongs (a single character also has to
+ * sit about where the evenly spread edit would put it).
  */
 function locate(old: string, edit: TextEdit, at: number): { p: number; left: number; right: number } | null {
   const { from, to, insert } = edit;
@@ -239,7 +245,8 @@ function locate(old: string, edit: TextEdit, at: number): { p: number; left: num
     const { p, left, right } = best as { p: number; left: number; right: number };
     if (left + right >= KEEP_MIN) return best;
     const span = old.slice(at - left, at + right);
-    if (span.length >= KEEP_UNIQUE && once(old, span, from, to) && once(insert, span, 0, insert.length)) return { p, left, right };
+    const placed = span.length >= KEEP_UNIQUE || Math.abs(p - expected) <= 1;
+    if (placed && once(old, span, from, to) && once(insert, span, 0, insert.length)) return { p, left, right };
   }
   return null;
 }
@@ -265,20 +272,39 @@ function keptAround(old: string, edit: TextEdit, keep: readonly number[]): TextE
 }
 
 /**
+ * Whole lines inserted exactly at a kept line start move one character back:
+ * "X\n" before line L becomes "\nX" after the line break ending the line
+ * above. The text is the same, but the kept position (the line holding the
+ * scroll, a caret at the start of its line) is no longer the insertion point,
+ * where CodeMirror would leave it before the new lines; it stays on its line.
+ */
+function offLineStarts(old: string, edits: TextEdit[], keep: readonly number[]): TextEdit[] {
+  const kept = new Set(keep);
+  return edits.map((edit, i) => {
+    const { from, to, insert } = edit;
+    const pure = from === to && insert.endsWith("\n") && from > 0 && old.charCodeAt(from - 1) === 10;
+    if (!pure || !kept.has(from) || (i > 0 && edits[i - 1].to > from - 1)) return edit;
+    return { from: from - 1, to: from - 1, insert: "\n" + insert.slice(0, -1) };
+  });
+}
+
+/**
  * Edits (in old-text offsets, sorted, not overlapping) that turn `old` into
  * `next`. Both texts must use "\n" line breaks. Empty when they are equal.
  * Any edit that replaces text around a `keep` position (in `old`: a caret,
  * the line holding the scroll) is split again so that position stays on its
  * own text when that text survived, also where the work limits fell back to
- * one large edit or a whole word was replaced. `keep` may be a function; it is
- * called only when some edit replaces text, so an insertion or a deletion
- * reads no positions.
+ * one large edit or a whole word was replaced. Whole lines inserted right at a
+ * kept line start go in after its line break instead. `keep` may be a
+ * function; it is called only when some edit inserts text, so a deletion
+ * alone reads no positions.
  */
 export function minimalChanges(old: string, next: string, keep: readonly number[] | (() => readonly number[]) = [], limit = MAX_LINE_EDITS): TextEdit[] {
   if (old === next) return [];
   const edits = editsBetween(old, lineStarts(old), next, lineStarts(next), limit, 0, true)!
     .flatMap((edit) => refined(old, edit));
-  if (!edits.some((e) => e.to > e.from && e.insert.length)) return edits;
+  if (!edits.some((e) => e.insert.length)) return edits;
   const sorted = [...new Set(typeof keep === "function" ? keep() : keep)].sort((a, b) => a - b);
-  return sorted.length ? edits.flatMap((edit) => keptAround(old, edit, sorted)) : edits;
+  if (!sorted.length) return edits;
+  return offLineStarts(old, edits.flatMap((edit) => keptAround(old, edit, sorted)), sorted);
 }

@@ -219,10 +219,75 @@ Every guard is unchanged and still runs in the same order: `pageOwnsDisk`, the `
 - `heavy node scripts/test-r2-s1-reload.mjs`: every check passes, the new "two steps" ones included. With the history cleared the old way, it fails at "Ctrl+Z takes back your newer edit".
 - The full `npm test` and `cargo test` were not run this round.
 
+## Review round 4 (Codex PASS-WITH-FIXES, `/tmp/r2-s1-codex-review4.md`)
+
+### P2: older, disjoint undo and redo steps below a touched one were dropped
+
+- **The problem.** Round 3 kept only the steps above the first one the sync touched. Codex's case: three separate saved edits turn `one two three` into `ONE TWO THREE`, then a sync makes it `ONE published THREE`. Undo took back `THREE` and stopped, although undoing `ONE` is just as safe. The redo stack had the same cutoff.
+- **The fix** (`src/editor/reloadHistory.ts`, rewritten).
+  - `replay(state, ranges, command)` runs one stack newest first on a light copy, right after the reload, so the steps are already mapped across it. It keeps two documents:
+    - `all`, which CodeMirror replays on, with every step applied, dropped ones included;
+    - `doc`, with only the kept steps applied.
+
+    `skip` is the change from `all`'s coordinates to `doc`'s, that is, the dropped steps put back.
+  - For each step, CodeMirror's own undo (or redo) gives its change in `all`. The step is kept only when:
+    - that change touches no range of `skip` (the dropped steps' current text);
+    - once mapped across `skip`, it touches none of the sync's ranges, tracked in `doc` through every kept step.
+
+    A kept step's change is that mapped change, and `skip` is mapped past it. Any other step is dropped: its text stays, and `skip` grows by its inverse. "Touches" includes being right next to the range, as in round 1.
+  - Anything uncertain is therefore dropped. A kept step can't reach the synced text or a dropped step's text, so it can't restore pre-sync text.
+  - When anything was dropped, `historyAfter(state, sync)` builds a fresh `history()` on a light state, using only ordinary transactions:
+    - the done stack: start from the document with every kept undo run, then make each kept step again, oldest first, each as its own step (`isolateHistory`), with the cursor at the step so Ctrl+Z returns there;
+    - the redo stack: make each kept redo, then undo them all, so they wait in the same order.
+
+    If the rebuilt document didn't match (never expected), it falls back to an empty history. The value is installed through `historyCompartment` as in round 3, now from `NoteEditors.keepHistory(path, sync)`.
+  - This replaces round 3's JSON trimming, so the history's JSON form is no longer used.
+  - `historySurvives` stays as a check built on the same replay.
+- **Tests (vitest).**
+  - Codex's case: undo gives `ONE published three`, then `one published three`, and then there is nothing left. The two saves are exactly those texts, and neither contains `two` in any case. Redo walks them back.
+  - Redo across a touched step, with kept steps on both sides: `ONE` and `THREE` are redone, `TWO` is dropped.
+  - A 400-round fuzz on both stacks: random single-range edits, some undone first, and a random one- or two-part sync. Every undo and redo taken after the rebuild must:
+    - touch none of the synced text;
+    - leave that text intact;
+    - be exactly one of the user's own edits (what it removes and puts back), in stack order.
+
+    It checks over 200 steps, and it asserts that more than 10 of them sit below a dropped step, so the rebase is really exercised.
+
+### P2: a surviving character, or a line inserted at the top line, could still move your place
+
+- **One character.** `AxA` → `BxB` with the caret at 1 went to 0, because the unique `x` was under the 2-character minimum.
+  - A single character is now accepted when it is unique on both sides of the edit and also sits within one character of where the evenly spread edit would put it. The surrounding changes then fix its alignment.
+  - Two characters or more still need only uniqueness, and 8 or more need neither.
+- **Lines inserted at the top line.** A pure insertion of whole lines exactly at the start of the top line in view skipped position collection. CodeMirror then mapped its scroll anchor (left association) to before the new lines, so the view jumped by their height.
+  - The positions are now read whenever any edit inserts text. Unchanged notes and pure deletions still read nothing (P3 from round 3 holds).
+  - `offLineStarts` then moves whole-line insertions that land exactly on a kept line start one character back, after the line break above. `X\n` before the line becomes `\nX` after the previous line's break. The text is identical, but the line start is no longer the insertion point, so the scroll anchor and a caret at the start of that line stay on their line.
+- **Tests.**
+  - Vitest:
+    - `AxA` → `BxB` through the real reload;
+    - the shifted insertion and its mapping, compared with the plain diff;
+    - a caret at the start of a line where two lines are inserted;
+    - the P3 test, updated: no positions for an unchanged note, a CRLF-only change or a deletion, and one read for an insertion.
+  - Browser: a 400-line note scrolled to the middle, with two lines inserted exactly at the start of the top line in view. The same line stays at the top, and the pane scrolls by the inserted lines.
+
+### Checks
+
+- **Each test fails without its fix.**
+  - With the replay cut off at the first dropped step (the round-3 behavior), the two new history tests fail.
+  - With one-character anchors and the line-start shift turned off, the three new caret and scroll tests fail.
+  - Without the shift, the browser check fails: the top line became `synced one`.
+- **Runs** (focused only, each through `heavy` and one at a time):
+  - `heavy npx tsc --noEmit -p .`: passes;
+  - `heavy npx vitest run src/reloadPlace.test.ts src/readOrdering.test.ts`: 69 passed;
+  - `heavy node scripts/test-r2-s1-reload.mjs`: exit 0, with 39 checks passing.
+
+  The full `npm test` and `cargo test` were not run (no Rust changes).
+
 ## Leftover gaps
 
 - **Mirrors aren't tested directly.** A second pane showing the same note relies on `forward()` and CodeMirror's own selection mapping. Vitest has no DOM, and the browser script uses one pane.
 - **Where the caret lands when its text is gone.** If the sync rewrites the caret's own words, the caret goes to the start of the replaced block. The start is the natural place, but it isn't "the same text", because that text no longer exists. In any other replacement, including the fallbacks past the work limits, the caret and the scroll line keep their text when at least 8 characters around them survived, or a shorter span that is unique on both sides (review rounds 2 and 3). Other unchanged text inside a fallback block is still replaced with itself, which is exact but makes CodeMirror re-measure those lines.
 - **Kept positions are a lookup, not a diff.** In text that repeats exactly, the match nearest the expected place wins. That keeps the caret on the same words, but in an extreme case it could be a copy a few lines away.
-- **Older steps below a touched one still go.** Since review round 3, the newer steps of each stack are kept and only the touched step and everything older on that stack are dropped. Keeping an older, untouched step below a touched one would mean rebasing it past the dropped step, which CodeMirror's history can't do.
+- **Dropped steps are the ones that touch.** Since review round 4, a step is dropped only when it touches the synced text or a step already dropped. One drop can still cascade: an older step that edited right next to a dropped one goes too, because nothing proves it is safe.
+- **A rebuilt history loses step details CodeMirror kept.** The rebuilt steps carry the cursor at each change, not the exact selection you had, and they never join with typing that follows. This only happens when a step was dropped.
+- **Lines inserted at the very start of the note.** The line-start shift needs a line break before the kept position. If the note is scrolled partway into its first line and lines are inserted at offset 0, the view can still move by their height.
 - **Not in this piece:** S2 (merge view for an unsaved conflict) and S3 (save-failure notice). An outside change to a dirty note is still skipped, as before.
