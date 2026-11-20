@@ -2,7 +2,7 @@
 // as the smallest edit, so the cursor and selection stay on the text they were
 // on, and it stays out of undo, so Ctrl+Z cannot bring the old text back and
 // save it over the synced file. No window: these run on the note's state.
-import { history, historyField, isolateHistory, redo, redoDepth, undo, undoDepth } from "@codemirror/commands";
+import { history, historyField, isolateHistory, redo, redoDepth, undo, undoDepth, undoSelection } from "@codemirror/commands";
 import { ChangeSet, Compartment, EditorSelection, EditorState, Transaction } from "@codemirror/state";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { api } from "./api";
@@ -461,7 +461,157 @@ test("redo keeps disjoint steps on both sides of the one the sync touched", asyn
   await notes.flush();
 });
 
-test("kept steps never touch the synced text and each still makes its own edit (fuzz, both stacks)", () => {
+// ----- kept steps keep their selections (Codex review 5, P2) -----
+
+type Sel = Array<[anchor: number, head: number]>;
+const sel = (s: EditorSelection): Sel => s.ranges.map((r) => [r.anchor, r.head]);
+const shifted = (s: Sel, by: number, from = 0): Sel => s.map(([a, h]) => [a >= from ? a + by : a, h >= from ? h + by : h]);
+
+/** Run history commands in order from `s`; the text and the selection after each. */
+function walkSel(s: EditorState, commands: Array<typeof undo>) {
+  return commands.map((command) => {
+    let tr!: Transaction;
+    expect(command({ state: s, dispatch: (t) => { tr = t; } })).toBe(true);
+    s = tr.state;
+    return { text: s.doc.toString(), sel: sel(s.selection) };
+  });
+}
+
+/** Select, then type over the selection, as separate undo steps (the selecting is stored with the step before). */
+function typeOver(notes: NoteEditors, selection: EditorSelection, insert: string) {
+  notes.change("A.md", { selection });
+  const s = (notes as unknown as { states: Map<string, EditorState> }).states.get("A.md")!;
+  notes.change("A.md", { ...s.replaceSelection(insert), userEvent: "input.type", annotations: [isolateHistory.of("full")] });
+}
+
+/** Codex's case, each word selected and typed over: "one two three" -> "ONE TWO THREE". */
+async function threeSelected() {
+  vi.useFakeTimers();
+  const opened3 = await opened("one two three", 0);
+  for (const [from, to, insert] of [[0, 3, "ONE"], [4, 7, "TWO"], [8, 13, "THREE"]] as const) typeOver(opened3.notes, EditorSelection.single(from, to), insert);
+  opened3.notes.change("A.md", { selection: EditorSelection.single(1) });
+  await opened3.notes.flush();
+  expect(api.writeNote).toHaveBeenLastCalledWith("A.md", "ONE TWO THREE");
+  return opened3;
+}
+
+test("after a sync drops a separate step, undo still selects the words it puts back, and redo restores its selection", async () => {
+  const { notes, state, sync } = await threeSelected();
+  // Before the sync: what undo and redo select, as CodeMirror stored it.
+  const ref = walkSel(state(), [undo, undo, undo, redo, redo, redo]);
+  expect(ref[0].sel).toEqual([[8, 13]]);
+  expect(ref[2].sel).toEqual([[0, 3]]);
+  const before = vi.mocked(api.writeNote).mock.calls.length;
+  await sync("ONE published THREE");
+  // The TWO step is dropped; the other two keep their selections, past "published" (6 longer than "TWO").
+  const now = walkSel(state(), [undo, undo, redo, redo]);
+  expect(now.map((n) => n.text)).toEqual(["ONE published three", "one published three", "ONE published three", "ONE published THREE"]);
+  expect(now[0].sel).toEqual([[14, 19]]);
+  expect(now[1].sel).toEqual([[0, 3]]);
+  expect(now[2].sel).toEqual(ref[3].sel);
+  expect(now[3].sel).toEqual(shifted(ref[5].sel, 6, 8));
+  // Typing right after the undo replaces the restored word, as it would have before the sync.
+  undoInto(notes, state);
+  notes.change("A.md", { ...state().replaceSelection("3"), userEvent: "input.type" });
+  expect(state().doc.toString()).toBe("ONE published 3");
+  await notes.flush();
+  const saved = vi.mocked(api.writeNote).mock.calls.slice(before).map((c) => c[1]);
+  expect(saved).toEqual(["ONE published 3"]);
+});
+
+test("after a sync drops a separate step, redo restores each kept step's selection", async () => {
+  const { notes, state, sync } = await threeSelected();
+  for (let i = 0; i < 3; i++) undoInto(notes, state);
+  await notes.flush();
+  expect(state().doc.toString()).toBe("one two three");
+  const ref = walkSel(state(), [redo, redo, redo, undo, undo, undo]);
+  // Redo would run ONE, then TWO (now "published", so dropped), then THREE.
+  await sync("one published three");
+  expect(redoDepth(state())).toBe(2);
+  const now = walkSel(state(), [redo, redo, undo, undo]);
+  expect(now.map((n) => n.text)).toEqual(["ONE published three", "ONE published THREE", "ONE published three", "one published three"]);
+  expect(now[0].sel).toEqual(ref[0].sel);
+  expect(now[1].sel).toEqual(shifted(ref[2].sel, 6, 8));
+  // Undo after those redos selects what it did before the sync.
+  expect(now[2].sel).toEqual(shifted(ref[3].sel, 6, 8));
+  expect(now[3].sel).toEqual(ref[5].sel);
+  await notes.flush();
+});
+
+/**
+ * "one two three four": one step upper-cases "one" and "three" at once and
+ * keeps both selected (two ranges), the next types over "two", selected
+ * backwards.
+ */
+async function twoRanges() {
+  vi.useFakeTimers();
+  const opened2 = await opened("one two three four", 0);
+  const both = EditorSelection.create([EditorSelection.range(0, 3), EditorSelection.range(8, 13)]);
+  opened2.notes.change("A.md", { selection: both });
+  opened2.notes.change("A.md", { changes: [{ from: 0, to: 3, insert: "ONE" }, { from: 8, to: 13, insert: "THREE" }], selection: both, userEvent: "input", annotations: [isolateHistory.of("full")] });
+  typeOver(opened2.notes, EditorSelection.single(7, 4), "TWO");
+  opened2.notes.change("A.md", { selection: EditorSelection.single(0) });
+  await opened2.notes.flush();
+  expect(api.writeNote).toHaveBeenLastCalledWith("A.md", "ONE TWO THREE four");
+  return opened2;
+}
+
+test("undo and redo after a sync drops a separate step restore a selection of several ranges", async () => {
+  const { notes, state, sync } = await twoRanges();
+  const ref = walkSel(state(), [undo, undo, redo, redo]);
+  expect(ref[1].sel).toEqual([[0, 3], [8, 13]]);
+  expect(ref[2].sel).toEqual([[0, 3], [8, 13]]);
+  await sync("ONE published THREE four");
+  expect(undoDepth(state())).toBe(1);
+  const now = walkSel(state(), [undo, redo]);
+  expect(now.map((n) => n.text)).toEqual(["one published three four", "ONE published THREE four"]);
+  // Both words selected, past "published" (6 longer than "TWO").
+  expect(now[0].sel).toEqual([[0, 3], [14, 19]]);
+  expect(now[1].sel).toEqual(shifted(ref[2].sel, 6, 4));
+  expect(now[1].sel).toEqual([[0, 3], [14, 19]]);
+  await notes.flush();
+});
+
+test("redo after a sync drops a separate step restores a selection of several ranges", async () => {
+  const { notes, state, sync } = await twoRanges();
+  undoInto(notes, state);
+  undoInto(notes, state);
+  await notes.flush();
+  expect(state().doc.toString()).toBe("one two three four");
+  const ref = walkSel(state(), [redo, undo]);
+  expect(ref[0].sel).toEqual([[0, 3], [8, 13]]);
+  // Redo runs the two-range step first; the sync rewrites "two", so the TWO step after it is dropped.
+  await sync("one 2 three four");
+  expect(redoDepth(state())).toBe(1);
+  const now = walkSel(state(), [redo, undo]);
+  expect(now.map((n) => n.text)).toEqual(["ONE 2 THREE four", "one 2 three four"]);
+  expect(now[0].sel).toEqual([[0, 3], [6, 11]]);
+  // Undo after that redo selects what it did before the sync.
+  expect(now[1].sel).toEqual(shifted(ref[1].sel, -2, 4));
+  await notes.flush();
+});
+
+test("selection undo still walks back the selections stored with a kept step", async () => {
+  const { state, sync } = await threeSelected();
+  // CodeMirror's own record, before the sync: the last step (THREE) has the caret move to 1 stored after it.
+  const ref = walkSel(state(), [undoSelection, undoSelection]);
+  expect(ref[0]).toEqual({ text: "ONE TWO THREE", sel: [[13, 13]] });
+  await sync("ONE published THREE");
+  // All the way down: each kept step's stored selection, the step, and the one from before the first edit.
+  const now = walkSel(state(), Array(5).fill(undoSelection));
+  expect(now).toEqual([
+    { text: "ONE published THREE", sel: [[19, 19]] },
+    { text: "ONE published three", sel: [[14, 19]] },
+    { text: "ONE published three", sel: [[3, 3]] },
+    { text: "one published three", sel: [[0, 3]] },
+    { text: "one published three", sel: [[0, 0]] },
+  ]);
+  let s = state();
+  for (let i = 0; i < 5; i++) undoSelection({ state: s, dispatch: (t) => { s = t.state; } });
+  expect(undoSelection({ state: s, dispatch: () => {} })).toBe(false);
+});
+
+test("kept steps never touch the synced text, and each still makes its own edit with its own selections (fuzz, both stacks)", () => {
   const next = random(11);
   const letters = "abcdefgh \n";
   const word = (n: number) => Array.from({ length: n }, () => letters[Math.floor(next() * letters.length)]).join("");
@@ -469,15 +619,22 @@ test("kept steps never touch the synced text and each still makes its own edit (
   let checked = 0, below = 0;
   for (let round = 0; round < 400; round++) {
     let s = EditorState.create({ doc: word(40 + Math.floor(next() * 40)), extensions: c.of(history()) });
-    // Local edits, each its own step; remember what each replaced.
-    const made: Array<{ gone: string; put: string }> = [];
+    // Local edits, each its own step, typed over a selection (either way round) of what it replaces.
+    // Remember what each replaced, and its selection before and right after, from its start.
+    type Made = { gone: string; put: string; before: Sel; after: Sel };
+    const made: Made[] = [];
     for (let i = 0, n = 2 + Math.floor(next() * 5); i < n; i++) {
       const len = s.doc.length, from = Math.floor(next() * len), to = Math.min(len, from + Math.floor(next() * 4));
       const insert = word(Math.floor(next() * 4));
       if (to === from && !insert) continue;
-      made.push({ gone: s.doc.sliceString(from, to), put: insert });
+      const back = next() < 0.5;
+      // The selecting is stored with the step before, for selection undo and for redo.
+      s = s.update({ selection: EditorSelection.single(back ? to : from, back ? from : to) }).state;
+      const gone = s.doc.sliceString(from, to), before = shifted(sel(s.selection), -from);
       s = s.update({ changes: { from, to, insert }, annotations: [isolateHistory.of("full")] }).state;
+      made.push({ gone, put: insert, before, after: shifted(sel(s.selection), -from) });
     }
+    s = s.update({ selection: EditorSelection.single(0) }).state;
     // Some of them undone first, so the redo stack has steps too.
     const undoneFirst = Math.floor(next() * (made.length + 1));
     for (let i = 0; i < undoneFirst; i++) undo({ state: s, dispatch: (t) => { s = t.state; } });
@@ -497,7 +654,9 @@ test("kept steps never touch the synced text and each still makes its own edit (
     // The synced text, tracked through every step taken from here.
     const put: Array<{ from: number; to: number; text: string }> = [];
     syncSet.iterChanges((_fa, _ta, from, to, ins) => put.push({ from, to, text: ins.toString() }));
-    const walk = (command: typeof undo, expected: Array<{ gone: string; put: string }>) => {
+    // `expected`: each step's text, the selection it sets and the one the opposite command then sets, from its start.
+    type Want = { gone: string; put: string; sets: Sel; back: Sel };
+    const walk = (command: typeof undo, opposite: typeof undo, expected: Want[]) => {
       let t = s, at = 0;
       let ranges = put.map((r) => ({ ...r }));
       for (;;) {
@@ -505,12 +664,18 @@ test("kept steps never touch the synced text and each still makes its own edit (
         if (!command({ state: t, dispatch: (x) => { tr = x; } }) || !tr) break;
         const changes = (tr as Transaction).changes;
         for (const r of ranges) expect(changes.touchesRange(r.from, r.to)).toBe(false);
-        const pieces: Array<{ gone: string; put: string }> = [];
-        changes.iterChanges((fa, ta, _fb, _tb, ins) => pieces.push({ gone: t.doc.sliceString(fa, ta), put: ins.toString() }));
+        const pieces: Array<{ gone: string; put: string; at: number }> = [];
+        changes.iterChanges((fa, ta, fb, _tb, ins) => pieces.push({ gone: t.doc.sliceString(fa, ta), put: ins.toString(), at: fb }));
         expect(pieces).toHaveLength(1);
-        // Each step taken is one of the steps made, in order (some may have been dropped).
+        const [piece] = pieces;
+        // The selection this step sets, and the one taking it back sets.
+        const sets = shifted(sel((tr as Transaction).newSelection), -piece.at);
+        let back!: Sel;
+        opposite({ state: (tr as Transaction).state, dispatch: (x) => { back = shifted(sel(x.newSelection), -piece.at); } });
+        // Each step taken is one of the steps made, in order (some may have been dropped), with its own selections.
+        const same = (w: Want) => w.gone === piece.gone && w.put === piece.put && JSON.stringify([w.sets, w.back]) === JSON.stringify([sets, back]);
         const was = at;
-        while (at < expected.length && !(expected[at].gone === pieces[0].gone && expected[at].put === pieces[0].put)) at++;
+        while (at < expected.length && !same(expected[at])) at++;
         expect(at).toBeLessThan(expected.length);
         if (at > was) below++; // kept below a dropped step
         at++;
@@ -521,11 +686,14 @@ test("kept steps never touch the synced text and each still makes its own edit (
       }
     };
     // Undo runs the still-done steps newest first, each putting back what it replaced.
-    const done = made.slice(0, made.length - undoneFirst).reverse().map((m) => ({ gone: m.put, put: m.gone }));
-    // Redo runs the undone steps oldest first.
-    const redone = made.slice(made.length - undoneFirst);
-    walk(undo, done);
-    walk(redo, redone);
+    // Undo selects what the step was typed over; redo then restores the selection right after it.
+    const done = made.slice(0, made.length - undoneFirst).reverse().map((m) => ({ gone: m.put, put: m.gone, sets: m.before, back: m.after }));
+    // Redo runs the undone steps oldest first and restores the selection right after each. Undo after
+    // that has no stored selection, so CodeMirror maps redo's across the step taken back (right side).
+    const backOver = (m: Made): Sel => sel(EditorSelection.create(m.after.map(([a, h]) => EditorSelection.range(a, h))).map(ChangeSet.of({ from: 0, to: m.put.length, insert: m.gone }, m.put.length), 1));
+    const redone = made.slice(made.length - undoneFirst).map((m) => ({ gone: m.gone, put: m.put, sets: m.after, back: backOver(m) }));
+    walk(undo, redo, done);
+    walk(redo, undo, redone);
   }
   expect(checked).toBeGreaterThan(200);
   // Steps kept below a dropped one were reached, so the rebase is exercised.

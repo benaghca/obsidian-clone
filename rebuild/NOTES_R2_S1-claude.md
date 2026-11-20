@@ -282,12 +282,51 @@ Every guard is unchanged and still runs in the same order: `pageOwnsDisk`, the `
 
   The full `npm test` and `cargo test` were not run (no Rust changes).
 
+## Review round 5 (Codex PASS-WITH-FIXES, `/tmp/r2-s1-codex-review5.md`)
+
+### P2: a rebuilt history changed the selection that undo and redo restore
+
+- **The problem.** Round 4 rebuilt the kept steps with a single caret at each change. Codex's case: select each of `one two three` and type over it (`ONE TWO THREE`), then sync `ONE published THREE`. Undoing `THREE` left a caret at 14 instead of selecting the restored `three` (14–19), so typing next went beside the word instead of replacing it. Several ranges collapsed the same way.
+- **What CodeMirror stores per step** (checked in `@codemirror/commands` 6.11.1):
+  - `startSelection`, which undo (or redo) of the step restores;
+  - `selectionsAfter`, the selections you moved through after making it. Selection undo walks these back, and the first one is what the opposite command restores. With none, CodeMirror maps `startSelection` across the step itself.
+  - A stack can also have a selection-only entry at the bottom, for example from moving the caret before the first edit.
+- **The fix** (`src/editor/reloadHistory.ts`).
+  - The replay now runs `undoSelection` and `redoSelection` instead of `undo` and `redo`. They run exactly the same change steps, but first walk back each step's stored selections one at a time, so every selection is read through CodeMirror's own commands, already mapped across the sync.
+  - Each kept step carries its selections, mapped into the kept steps' document with the same `skip` change as its text:
+    - the selection the step sets, in the document after it, through `skip` once it has been moved past the step;
+    - its stored selections, in the document before it, through `skip` before the step.
+
+    A dropped step's selections go with it. Selections left after the last step are the stack's bottom entry and are kept too.
+  - The rebuilt history is built directly in the history field's JSON form (`historyField` `fromJSON`, through a throwaway `EditorState.fromJSON`):
+    - each kept step's change exactly as its undo (or redo) applies it;
+    - its `startSelection` and `selectionsAfter`;
+    - no pending mapping, since every step is already in its own coordinates.
+
+    This replaces round 4's transaction rebuild, which could not set the redo stack's stored selections. The JSON form drops history effects, and Grove has none (as in round 3). It has no previous time, so the next typing still starts its own step.
+  - If any selection did not fit its document, or a change did not fit its document (neither is expected), the history falls back to empty.
+  - **Data safety is unchanged.** Which steps are kept, and each kept change, are exactly as in round 4. Only selections are added, and a selection can't change text.
+- **Tests (vitest).**
+  - Codex's case, undo: `THREE` comes back with `three` selected (14–19), then `ONE` with `one` selected (0–3). Redo restores what it restored before the sync, past `published`. Typing right after the undo replaces the word (`ONE published 3`), and that is the only save after the sync.
+  - Codex's case, redo: all three undone, the sync drops `TWO` from the redo stack. Redo, and undo after it, restore what they did before the sync.
+  - Several ranges, undo: one step upper-cases `one` and `three` together, keeping both selected, and a separate step types over `two`. The sync drops the `TWO` step. Undo selects both words (0–3 and 14–19), and redo selects both again.
+  - Several ranges, redo: the same steps undone, the sync drops `TWO` from the redo stack. Redo selects both words (0–3 and 6–11), and undo after it matches its selection before the sync.
+  - Selection undo: walking all the way down gives each kept step's stored selection, the step, and the caret from before the first edit, then stops. The dropped step's stored caret is gone.
+  - The 400-round fuzz now types each edit over a selection (either direction). Every step taken after a sync must match one of your steps on its text and on both selections: the one it sets, and the one the opposite command sets right after.
+- **Checks.**
+  - With round 4's `reloadHistory.ts`, all five new selection tests and the extended fuzz fail.
+  - `heavy npx tsc --noEmit -p .`: passes.
+  - `heavy npx vitest run src/reloadPlace.test.ts src/readOrdering.test.ts`: 74 passed.
+  - `heavy node scripts/test-r2-s1-reload.mjs`: exit 0, with 39 checks passing.
+
+  All runs were through `heavy`, one at a time. The full `npm test` and `cargo test` were not run (no Rust changes).
+
 ## Leftover gaps
 
 - **Mirrors aren't tested directly.** A second pane showing the same note relies on `forward()` and CodeMirror's own selection mapping. Vitest has no DOM, and the browser script uses one pane.
 - **Where the caret lands when its text is gone.** If the sync rewrites the caret's own words, the caret goes to the start of the replaced block. The start is the natural place, but it isn't "the same text", because that text no longer exists. In any other replacement, including the fallbacks past the work limits, the caret and the scroll line keep their text when at least 8 characters around them survived, or a shorter span that is unique on both sides (review rounds 2 and 3). Other unchanged text inside a fallback block is still replaced with itself, which is exact but makes CodeMirror re-measure those lines.
 - **Kept positions are a lookup, not a diff.** In text that repeats exactly, the match nearest the expected place wins. That keeps the caret on the same words, but in an extreme case it could be a copy a few lines away.
 - **Dropped steps are the ones that touch.** Since review round 4, a step is dropped only when it touches the synced text or a step already dropped. One drop can still cascade: an older step that edited right next to a dropped one goes too, because nothing proves it is safe.
-- **A rebuilt history loses step details CodeMirror kept.** The rebuilt steps carry the cursor at each change, not the exact selection you had, and they never join with typing that follows. This only happens when a step was dropped.
+- **A rebuilt history differs in small ways.** Since review round 5 it keeps every kept step's selections. It still never joins the last kept step with typing that follows, and a dropped step's stored selections are dropped with it (CodeMirror would hand them to the step below). This only happens when a step was dropped.
 - **Lines inserted at the very start of the note.** The line-start shift needs a line break before the kept position. If the note is scrolled partway into its first line and lines are inserted at offset 0, the view can still move by their height.
 - **Not in this piece:** S2 (merge view for an unsaved conflict) and S3 (save-failure notice). An outside change to a dirty note is still skipped, as before.
