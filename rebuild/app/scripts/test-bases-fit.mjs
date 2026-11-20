@@ -306,4 +306,84 @@ views:
   const shutSaved = saved(shutFile);
   check(shutAfter > 700 && shutAfter < 980 && shutSaved > 700 && shutSaved < 980 && Math.abs(shutSaved - shutAfter) < 1.5, `collapsed group is left out of the fit (${shutBefore} -> ${shutAfter}, saved ${shutSaved})`);
   console.log('PASS collapsed groups are left out of the fit');
+
+  // A short cell stays at the header. The summary label and the expanded
+  // group's result are wider. The collapsed group's longer result is not drawn.
+  const sumLong = LONG;
+  const sumLonger = LONG + ' ' + 'W'.repeat(40);
+  const sumLabel = 'summarylabel'.repeat(8);
+  const sumYaml = `filters: 'file.inFolder("R2B1Sum")'
+summaries:
+  wide: 'if(count == 1, if(values.join("").contains("shut"), "${sumLonger}", "${sumLong}"), "all")'
+  ${sumLabel}: count
+views:
+  - type: table
+    name: Sum
+    order:
+      - t
+      - n
+      - file.name
+    groupBy:
+      property: g
+      direction: ASC
+      order:
+        - shut
+        - open
+    summaries:
+      t: wide
+      n: ${sumLabel}
+`;
+  await run(async (yaml) => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('R2B1Sum/shut.md', '---\ng: shut\nt: shut\nn: 1\n---\n');
+    await api.createNote('R2B1Sum/open.md', '---\ng: open\nt: open\nn: 1\n---\n');
+    await api.createNote('Sum.base', yaml);
+    await ws.vault.refreshFiles();
+    await ws.open('Sum.base');
+  }, sumYaml);
+  await wait(() => run((long) => {
+    const scope = document.querySelector('.bases-view');
+    const labels = [...(scope?.querySelectorAll('.bases-b5-toggle') ?? [])].map(b => b.getAttribute('aria-label'));
+    const foot = scope?.querySelector('tfoot [data-property="t"]')?.dataset.value;
+    return scope?.querySelector('.bases-count span')?.textContent === '2 results' && labels[0] === 'shut (1)' && labels[1] === 'open (1)' && foot === 'all' && !!scope.querySelector(`tbody [data-property="t"][data-value="${long}"]`);
+  }, sumLong), 'summary footers render', 400);
+  await click(`.bases-b5-toggle[data-group-id='s:"shut"']`);
+  await wait(() => run((longer) => {
+    const shut = document.querySelector(`.bases-b5-toggle[data-group-id='s:"shut"']`);
+    const collapsedFoot = [...document.querySelectorAll('[data-property="t"]')].some(td => td.dataset.value === longer);
+    return shut?.getAttribute('aria-expanded') === 'false' && !collapsedFoot;
+  }, sumLonger), 'collapsed summary footer is not drawn');
+  const sumBeforeT = await width('.bases-table th[data-property="t"]');
+  const sumBeforeN = await width('.bases-table th[data-property="n"]');
+  check(sumBeforeT < 120 && sumBeforeN < 120, `summary columns start at the header (${sumBeforeT}px, ${sumBeforeN}px)`);
+  await double('.bases-table th[data-property="t"] .bases-resizer');
+  await wait(() => run(async () => {
+    const { api } = await import('/src/api.ts');
+    const now = document.querySelector('.bases-table th[data-property="t"]').getBoundingClientRect().width;
+    const saved = Number((await api.readNote('Sum.base')).match(/note\.t:\s*(\d+(?:\.\d+)?)/)?.[1]);
+    return now > 700 && now < 980 && saved > 700 && saved < 980 && Math.abs(saved - now) < 1.5;
+  }), 'summary result fit stays inside the expanded footer');
+  const sumFit = await run((long) => {
+    const td = [...document.querySelectorAll('tbody [data-property="t"]')].find(el => el.dataset.value === long);
+    const item = td?.querySelector('.bases-b5-summary-value');
+    if (!td || !item) return null;
+    return { col: td.getBoundingClientRect().width, overflow: item.scrollWidth - item.clientWidth };
+  }, sumLong);
+  const sumAfterT = await width('.bases-table th[data-property="t"]');
+  check(sumFit && sumFit.overflow <= 2, `expanded summary result fits (${sumBeforeT} -> ${sumAfterT}, ${JSON.stringify(sumFit)})`);
+  await double('.bases-table th[data-property="n"] .bases-resizer');
+  await wait(() => run(async (before) => {
+    const { api } = await import('/src/api.ts');
+    const now = document.querySelector('.bases-table th[data-property="n"]').getBoundingClientRect().width;
+    const saved = Number((await api.readNote('Sum.base')).match(/note\.n:\s*(\d+(?:\.\d+)?)/)?.[1]);
+    return now > before + 40 && saved > before + 40 && Math.abs(saved - now) < 1.5;
+  }, sumBeforeN), 'summary label fit writes columnSize');
+  const sumLabelFit = await run((label) => {
+    const item = [...document.querySelectorAll('[data-property="n"] .bases-b5-summary-label')].find(el => el.textContent === label);
+    if (!item) return null;
+    return { overflow: item.scrollWidth - item.clientWidth, width: item.getBoundingClientRect().width };
+  }, sumLabel);
+  const sumAfterN = await width('.bases-table th[data-property="n"]');
+  check(sumLabelFit && sumLabelFit.overflow <= 2, `summary label fits (${sumBeforeN} -> ${sumAfterN}, ${JSON.stringify(sumLabelFit)})`);
+  console.log('PASS summary label and result are part of the fit');
 });

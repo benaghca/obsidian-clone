@@ -409,7 +409,20 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       const sample = renderedSample(key, entry);
       if (sample) samples.push(sample);
     }
-    const fitted = columnWidth(textWidth, { key, label: model.label(key), sorted: model.sorts.some(s => noteKey(s.property) === noteKey(key)), type: type(key), samples });
+    let fitted = columnWidth(textWidth, { key, label: model.label(key), sorted: model.sorts.some(s => noteKey(s.property) === noteKey(key)), type: type(key), samples });
+    // Summary rows stack a 10px label on a 13px result, each with 8px of side padding.
+    const family = getComputedStyle(table).fontFamily;
+    const seen = new Set<string>();
+    const summary = groupedView.fitSummaryText(key);
+    const widen = (px: number, text: string) => {
+      const id = `${px}\0${text}`;
+      if (seen.has(id)) return;
+      seen.add(id);
+      ctx.font = `${px}px ${family}`;
+      fitted = Math.max(fitted, Math.ceil(ctx.measureText(text).width + 16));
+    };
+    for (const text of summary.labels) widen(10, text);
+    for (const text of summary.values) widen(13, text);
     return { header, fitted };
   }
   function cell(key: string, entry: typeof selected[number]) {

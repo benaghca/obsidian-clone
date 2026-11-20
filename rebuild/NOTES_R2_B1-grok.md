@@ -42,6 +42,16 @@ The browser script now checks a hidden group whose list column opens at 464px be
 
 `flock /tmp/grove-npm-test.lock npm test` then passed, including posttest (vitest 111 files, the fit lines above, and the 10,000-row scroll at p95 16.8ms, max 16.8ms). Two earlier runs of that suite stopped on the 10,000-row scroll frame budget in `scripts/test-bases-edge.mjs` (p95 16.8ms, max 33.3ms against 25ms). Run alone, that script's scroll max was 16.8ms. The suite rewrote tracked files under `rebuild/round*-shots`; those were restored.
 
+## Review 3
+
+Codex reviewed `0f699b4` as pass-with-fixes.
+
+A fit measured data rows only. The table also draws a summary label and result in that column: the all-results footer, and a footer on each expanded group. A long custom summary name or result stayed clipped. The double-click now measures those strings too. The label is the 10px summary name and the result is the 13px value the footer draws, including `#ERROR!`. Opening a base still ignores them. A collapsed group's footer is left out. Copy and CSV are unchanged.
+
+The browser script collapses a group whose summary result is longer than the expanded group's. The cells themselves are short, so the column opens at 60px. The fit goes to 868 and saves `note.t`, and the longer collapsed result is not part of it. A second column's summary name is the wide text: 60 → 514, and that label fits.
+
+`tsc --noEmit` passed. The fit script passed, including the summary case above. `flock /tmp/grove-npm-test.lock npm test` then passed, including posttest (vitest 111 files, the summary fit 60 → 868 and 60 → 514, and the 10,000-row scroll at p95 16.8ms, max 16.8ms). One earlier run of that suite stopped on the same scroll frame budget (max 33.2ms against 25ms). The suite rewrote tracked files under `rebuild/round*-shots`; those were restored.
+
 ## Tests
 
 `rebuild/app/scripts/test-bases-fit.mjs` is headless Chromium. Before the fix, an embedded base with header `t` and a long cell opened at 60px, and the double-click did not write `columnSize`. After the fix the same embed goes 60 → 872, saves `note.t: 872`, and the long cell's overflow is 0. The standalone `Fit.base` does the same. The vault is the harness scratch vault.
