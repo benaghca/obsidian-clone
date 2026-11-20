@@ -243,6 +243,8 @@ export class Vault {
    * Fired once per path after that batch's file list is installed. A modify uses `onModified`.
    */
   readonly onMediaPath = this.mediaPaths.on;
+  /** Ancestor replacements waiting for the list read that actually installs. */
+  private pendingStructure: string[] = [];
   private structural = listeners<[readonly string[]]>();
   /**
    * Remove, rename, and create paths for the file list about to be installed.
@@ -308,12 +310,18 @@ export class Vault {
   }
 
   async refreshFiles(structure?: readonly string[]) {
+    if (structure) for (const path of structure) this.pendingStructure.push(path);
     const mine = ++this.filesRequest;
     const vault = backendRoot();
     const listed = await api.listFiles();
     // The reply is the vault that was current when the read ran. Install it
-    // only if that vault is still this page's backend.
-    if (mine !== this.filesRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
+    // only if that vault is still this page's backend. A discarded reply keeps
+    // the ancestor paths for the read that does install.
+    if (backendRoot() !== vault || !pageOwnsDisk()) {
+      this.pendingStructure = [];
+      return;
+    }
+    if (mine !== this.filesRequest) return;
     // A read that began before a local edit cannot be ordered against it. The
     // snapshot may omit the edit, or it may already contain a later outside
     // change. Keep the patched list and read again after the edit. A further
@@ -326,7 +334,9 @@ export class Vault {
     this.deltas = [];
     this.confirmAgain = false;
     this.listEpoch += 1;
-    this.show(listed, structure);
+    const pending = this.pendingStructure;
+    this.pendingStructure = [];
+    this.show(listed, pending);
   }
 
   /** Keep reading until a snapshot that started after the latest edit can install. */
@@ -572,6 +582,7 @@ export class Vault {
     this.linksRequest += 1;
     this.deltas = [];
     this.confirmAgain = false;
+    this.pendingStructure = [];
     this.listEpoch += 1;
   }
 

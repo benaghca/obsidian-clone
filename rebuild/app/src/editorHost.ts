@@ -252,14 +252,19 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       const next = mediaSig(path);
       const prev = seenMedia.get(path);
       seenMedia.set(path, next);
-      if (prev === undefined || prev === next) {
+      // A replaced ancestor can keep the file's mtime and size. That is still
+      // a new file. A batch that also names the file reloads once: this queues
+      // the reconcile, and the direct signal is the one reload.
+      if (structural.has(path)) {
         loadedAhead.delete(path);
+        changedByList.add(path);
+        scheduleReconcile();
         continue;
       }
-      // The holder already read this version. A remove, rename, or create of
-      // the file or an ancestor is a different file, not that catch-up.
+      if (prev === undefined || prev === next) continue;
+      // The holder already read this version. A sibling note is not a new file.
       const ahead = loadedAhead.delete(path);
-      if (ahead && next !== "" && !structural.has(path)) continue;
+      if (ahead && next !== "") continue;
       changedByList.add(path);
       scheduleReconcile();
     }

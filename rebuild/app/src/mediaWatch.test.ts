@@ -185,6 +185,55 @@ it("reloads when a replaced folder keeps the same mtime and size", async () => {
   expect(hits).toBe(2);
 });
 
+it("reloads when a replaced folder keeps the media stamp as well", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  // Naming the file in that same kind of batch still reloads once.
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "create", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(2);
+});
+
+it("reloads once when a local edit discards the list read for a replaced folder", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { vault, host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  const hung: Array<(listed: FileEntry[]) => void> = [];
+  vi.mocked(api.listFiles).mockImplementation(
+    () => new Promise((resolve) => hung.push((listed) => resolve(listed))),
+  );
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 9, 20)];
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  await settle();
+  expect(hung).toHaveLength(1);
+  expect(vault.adoptAdded(file("Local.md", 3, 3))).toBe(true);
+
+  const listed = () => files.map((entry) => ({ ...entry }));
+  hung.shift()!(listed());
+  await new Promise((resolve) => realTimeout(resolve, 0));
+  expect(hung).toHaveLength(1);
+  hung.shift()!(listed());
+  await settle();
+  expect(hits).toBe(2);
+});
+
 it("does not remember a modify for a recording nobody is watching", async () => {
   files = [file("clip.mp3", 1, 4)];
   const { host } = await openHost();
