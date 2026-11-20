@@ -85,6 +85,19 @@ test("a confirmed write resets the count, and the saved notice waits", () => {
   ]);
 });
 
+test("a confirmed write cancels a failure notice that has not been shown", () => {
+  const { board, shown, drain, waiting } = harness();
+  board.reject("Daily.md", "disk full");
+  board.reject("Daily.md", "disk full");
+  expect(waiting()).toBe(1);
+  board.confirmed("Daily.md");
+  drain();
+  expect(shown).toEqual([]);
+  failTwice(board, "Daily.md");
+  drain();
+  expect(shown).toEqual([[failure(q("Daily"), "disk full")]]);
+});
+
 test("a save clears the streak, and the next streak can speak again", () => {
   const { board, shown, drain } = harness();
   board.reject("Daily.md", "disk full");

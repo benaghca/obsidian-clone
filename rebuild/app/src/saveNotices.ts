@@ -17,7 +17,7 @@ const RQ = "\u201D";
 
 interface Streak {
   failures: number;
-  /** The user was told, or a notice for this note is waiting to be shown. */
+  /** Set when a failure notice is queued. Cleared if that notice is cancelled before it is shown. */
   announced: boolean;
   /** The outage already used its notices. Stay quiet, including when it later saves. */
   suppressed: boolean;
@@ -171,8 +171,13 @@ export function createSaveNotices(
       const streak = streaks.get(path);
       if (!streak) return;
       streak.failures = 0;
-      // A streak the user has not heard about is over. One they have heard about
-      // stays open so the saved notice can wait for the latest text.
+      const queued = failQueue.some((item) => item.path === path);
+      if (queued) {
+        // Queued is not the same as shown. Drop it, and do not owe a saved notice.
+        failQueue = failQueue.filter((item) => item.path !== path);
+        streak.announced = false;
+      }
+      // A notice the user already saw stays open. The saved line waits for the latest text.
       if (!streak.announced && !streak.suppressed) {
         streaks.delete(path);
         endWave();
