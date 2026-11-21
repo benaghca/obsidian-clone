@@ -1,4 +1,4 @@
-import { Text } from "@codemirror/state";
+import { ChangeSet, type ChangeSpec, EditorState, Text } from "@codemirror/state";
 import { beforeEach, expect, it, vi } from "vitest";
 import { api, type FileEntry, type LinkIndex, type SearchNote } from "./api";
 import { NoteEditors } from "./noteEditors";
@@ -48,9 +48,11 @@ it("keeps newer file and link refreshes when older replies arrive last", async (
 function reloadHost() {
   let doc = Text.of(["original"]);
   const host = {
-    states: new Map([["a.md", true]]), saveTimers: new Map(), retryTimers: new Map(), dirty: new Set(), slots: new Map(), reloads: new Map(), loadEpoch: new Map(),
+    states: new Map([["a.md", EditorState.create({ doc: "original" })]]), owners: new Map(), saveTimers: new Map(), retryTimers: new Map(), dirty: new Set(), slots: new Map(), reloads: new Map(), loadEpoch: new Map(),
     doc: () => doc,
-    change: vi.fn((_path: string, spec: { changes: { insert: string } }) => { doc = Text.of(spec.changes.insert.split("\n")); }),
+    change: vi.fn((_path: string, spec: { changes: ChangeSpec }) => { doc = ChangeSet.of(spec.changes, doc.length).apply(doc); }),
+    places: () => [],
+    keepHistory: () => {},
     events: { saved: vi.fn() },
   };
   return { host, type: () => { doc = Text.of(["unsaved typing"]); }, reload: () => NoteEditors.prototype.reload.call(host as never, "a.md") };

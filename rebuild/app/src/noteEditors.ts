@@ -12,8 +12,8 @@
 // mirror runs on the main state. Saving and the "changed" event follow the
 // original change only, so a note is still saved once.
 
-import { redo, undo } from "@codemirror/commands";
-import { Annotation, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
+import { history, historyField, isolateHistory, redo, undo } from "@codemirror/commands";
+import { Annotation, ChangeSet, EditorSelection, type EditorState, Prec, type Text, Transaction, type TransactionSpec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { api } from "./api";
 import { configEffects } from "./editor/config";
@@ -25,7 +25,9 @@ import { notice } from "./shell/notice";
 import { bumpPathGen, pageOwnsDisk, pageVault, pathGen, sourceVault } from "./vaultRoot";
 import { authoritativeNote, queuedNote, writeVaultNote } from "./vaultWrite";
 import { countsField } from "./editor/counts";
-import { createNoteState, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
+import { minimalChanges, normalizeLineBreaks } from "./editor/minimalChange";
+import { createNoteState, historyCompartment, VIEW_MODES, type ViewMode, viewModeCompartment, viewModeOf } from "./editor/editor";
+import { historyAfter } from "./editor/reloadHistory";
 import type { EditorHost } from "./editor/host";
 import { kept } from "./memo";
 import { type Group, memoryOf, type Tab } from "./tabs";
@@ -470,14 +472,76 @@ export class NoteEditors {
     const before = this.doc(path);
     const mine = Symbol();
     this.reloads.set(path, mine);
-    const text = await api.readNote(path).catch(() => null);
+    const read = await api.readNote(path).catch(() => null);
     if (this.reloads.get(path) !== mine) return;
     this.reloads.delete(path);
     const current = this.doc(path);
     // A newer reload or local typing while the read ran takes precedence.
-    if (text === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job || text === current.toString()) return;
-    this.change(path, { changes: { from: 0, to: current.length, insert: text }, userEvent: "external" });
+    if (read === null || !current || current !== before || this.dirty.has(path) || this.saveTimers.has(path) || this.retryTimers.has(path) || this.slots.get(path)?.job) return;
+    // The editor holds "\n" line breaks; a CRLF file with the same text is not a change.
+    // Checked before anything else, so a watcher event for an unchanged note reads no layout.
+    const text = normalizeLineBreaks(read), was = current.toString();
+    if (text === was) return;
+    // The cursor and scroll positions are read only when an edit inserts text, which could land on one.
+    const changes = minimalChanges(was, text, () => this.places(path));
+    if (!changes.length) return;
+    // Only what changed is replaced, so every pane's cursor, selection and scroll map across it.
+    // It stays out of undo (history maps across it), so Ctrl+Z cannot put the old text back and save it.
+    this.change(path, {
+      changes,
+      userEvent: "external",
+      annotations: [Transaction.addToHistory.of(false), isolateHistory.of("full")],
+    });
+    // Undo and redo steps that overlap or touch the outside edit cannot be mapped across it safely.
+    this.keepHistory(path, ChangeSet.of(changes, was.length));
     this.events.saved(path); // Refresh cached previews after canonical text has reloaded.
+  }
+
+  /**
+   * Positions in a note an outside change should keep on their own text: the
+   * main state's selection, and in every pane showing the note its selection
+   * and the lines CodeMirror holds the scroll by (the line at the top of the
+   * view). The diff keeps the text around them even where it falls back to one
+   * large edit.
+   */
+  private places(path: string): number[] {
+    const out: number[] = [];
+    const state = this.owners.get(path)?.state ?? this.states.get(path);
+    if (state) for (const r of state.selection.ranges) out.push(r.anchor, r.head);
+    for (const pane of this.panes.values()) {
+      if (pane.path !== path) continue;
+      const { view, scroller } = pane;
+      for (const r of view.state.selection.ranges) out.push(r.anchor, r.head);
+      if (!scroller) continue;
+      const height = scroller.getBoundingClientRect().top - view.contentDOM.getBoundingClientRect().top;
+      if (height <= 0) continue;
+      const top = view.lineBlockAtHeight(height);
+      out.push(top.from, view.lineBlockAtHeight(top.bottom + 1).from);
+    }
+    // Many cursors: the first ones are enough to bound the work.
+    return out.slice(0, 64);
+  }
+
+  /**
+   * Keep the undo and redo steps the outside change can be moved past (its
+   * main state; mirrors have none); see reloadHistory.ts. When any had to go,
+   * the history is swapped by taking it out of its compartment and putting it
+   * back seeded with the rebuilt steps.
+   */
+  private keepHistory(path: string, sync: ChangeSet) {
+    const owner = this.owners.get(path);
+    const state = owner?.state ?? this.states.get(path);
+    if (!state) return;
+    const value = historyAfter(state, sync);
+    if (!value) return;
+    const off = { effects: historyCompartment.reconfigure([]) };
+    const on = { effects: historyCompartment.reconfigure([historyField.init(() => value), history()]) };
+    if (owner) {
+      owner.dispatch(off);
+      owner.dispatch(on);
+      return;
+    }
+    this.states.set(path, state.update(off).state.update(on).state);
   }
 
   /** Paths under a moved folder (or a moved note) follow it. */
