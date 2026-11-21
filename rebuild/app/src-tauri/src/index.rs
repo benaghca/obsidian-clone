@@ -37,7 +37,7 @@ use crate::model::{FileEntry, LinkEntry, SearchHit};
 use crate::model::{LinkChanges, LinkIndex};
 pub(crate) use link_jobs::LinkSlice;
 pub(crate) use link_replies::{BacklinkReply, LinkReply, ReplyStep};
-use link_table::{LinkTable, Resolved};
+use link_table::{LinkTable, Replaced, Resolved};
 use name_maps::{Lookups, NameMaps, Src};
 use parse::{clean_target, parse_note, Note, RawLink};
 #[cfg(test)]
@@ -179,6 +179,9 @@ pub(crate) enum Edit {
     Key(name_maps::KeyHash),
     /// A path's node was replaced, added, or removed.
     Node(Arc<str>),
+    /// A note's resolved links changed (review 4: a link can move between targets with the
+    /// note's entry unchanged, so `backlinks` replies patch from these too).
+    Entry(Arc<str>),
 }
 
 /// The last `EDIT_LOG` edits. A full map rebuild starts a new `epoch` (from one counter for
@@ -199,7 +202,7 @@ pub(crate) struct EditMark {
     seq: u64,
 }
 
-const EDIT_LOG: usize = 16_384;
+const EDIT_LOG: usize = 65_536;
 
 impl Edits {
     fn note(&mut self, edit: Edit) {
@@ -358,6 +361,31 @@ impl Index {
         Some(e.log.range(from..).map(|(_, edit)| edit))
     }
 
+    /// The paths of node and entry edits after `since` up to `until`, skipping the first `skip`
+    /// edits there and reading at most `n`: (paths, edits read, whether that was the last).
+    /// `None` when they are not known any more.
+    pub(crate) fn edited_paths(&self, since: EditMark, until: EditMark, skip: usize, n: usize) -> Option<(Vec<Arc<str>>, usize, bool)> {
+        let e = &self.edits;
+        if e.epoch != since.epoch || since.seq < e.floor {
+            return None;
+        }
+        let from = (e.log.partition_point(|(seq, _)| *seq <= since.seq) + skip).min(e.log.len());
+        let (mut paths, mut read) = (Vec::new(), 0);
+        for (seq, edit) in e.log.range(from..) {
+            if *seq > until.seq {
+                return Some((paths, read, true));
+            }
+            if read == n {
+                return Some((paths, read, false));
+            }
+            read += 1;
+            if let Edit::Node(path) | Edit::Entry(path) = edit {
+                paths.push(Arc::clone(path));
+            }
+        }
+        Some((paths, read, true))
+    }
+
     /// Defer every link update past `n` queued notes (tests: 0 defers them all).
     #[cfg(test)]
     pub(crate) fn defer_links_over(&mut self, n: usize) {
@@ -385,7 +413,11 @@ impl Index {
                     .get(&path)
                     .filter(|node| has_links(&path, node))
                     .map(|node| resolve_note(&self.maps, &path, &node.note.links));
-                if self.links.replace(Arc::clone(&path), resolved) {
+                let replaced = self.links.replace(Arc::clone(&path), resolved);
+                if replaced != Replaced::Same {
+                    self.edits.note(Edit::Entry(Arc::clone(&path)));
+                }
+                if replaced == Replaced::Entry {
                     changed.push(path);
                 }
             }
@@ -975,7 +1007,7 @@ fn resolve_through<'m>(src: Src<'m>, path: &str, links: &[RawLink]) -> (Resolved
     let src = look.into_src();
     reads.sort();
     reads.dedup();
-    (Resolved { slots, reads, entry }, src)
+    (Resolved::new(slots, reads, entry), src)
 }
 
 /// Where each item of a first-seen, repeat-free list sits: a scan while the list is short, a

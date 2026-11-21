@@ -259,9 +259,13 @@ fn queued_saves_stay_quick(what: &str, inner: &RwLock<Inner>, write: impl FnOnce
     write(crate::write_lock(inner).vault.as_mut().unwrap());
     let edit = started.elapsed();
     assert!(lock(inner).vault.as_ref().unwrap().index.links_pending(), "{what}: the work is queued");
-    let (settle, saves, reply) = saves_during(inner, || crate::link_reads::link_changes(inner, None).unwrap());
+    let (settle, saves, (reply, hold)) = saves_during(inner, || {
+        crate::link_reads::take_longest_hold();
+        (crate::link_reads::link_changes(inner, None).unwrap(), crate::link_reads::take_longest_hold())
+    });
     let worst = *saves.iter().max().unwrap();
-    println!("{what} (debug): the write {edit:?}, read incl. settling {settle:?}, {} saves meanwhile, worst {worst:?}", saves.len());
+    println!("{what} (debug): the write {edit:?}, read incl. settling {settle:?} (longest hold {hold:?}), {} saves meanwhile, worst {worst:?}", saves.len());
+    assert!(hold * 4 < settle, "{what}: one step held the lock {hold:?} of {settle:?}");
     assert!(edit * 4 < settle, "{what}: the write ({edit:?}) left the work ({settle:?}) to the read");
     assert!(saves.len() >= 3, "{what}: saves ran while the read settled");
     assert!(worst * 4 < settle, "{what}: a save waited {worst:?} while the queue took {settle:?}");
@@ -318,27 +322,83 @@ fn a_save_behind_link_heavy_notes_stays_quick() {
 /// Review 3: a large reply. 20,000 notes with links, nothing queued: the whole `link_index` and
 /// a large `backlinks` reply are copied a chunk at a time under the read lock and built off it,
 /// so saves queued behind them wait for one chunk, not the whole copy.
+///
+/// Review 4: the `backlinks` reply also has sources of its target edited between its steps
+/// (eight of them: a reply used to start over on each such edit, and take what was left in one
+/// hold after four). It patches them instead, every step stays bounded, and it ends equal to
+/// a fresh scan.
 #[test]
 fn a_save_behind_a_large_reply_stays_quick() {
     let files = (0..20_000).map(|i| (format!("n/{i:05}.md"), format!("[[n/{:05}]] [[hub]] [[gone {i}]] [md](hub.md)\nline {i}\n", (i + 1) % 20_000)));
     let files = files.chain([("hub.md".to_string(), "hub\n".to_string())]);
     let (_dir, inner) = open_deferred("link-reply-latency", files);
     for read in ["link_index", "backlinks"] {
-        let (took, saves, size) = saves_during(&inner, || match read {
-            "link_index" => crate::link_reads::link_index(&inner).unwrap().outgoing.len(),
-            _ => crate::link_reads::backlinks(&inner, &["hub.md".into()]).unwrap()["hub.md"].len(),
+        let edits = std::sync::atomic::AtomicUsize::new(0);
+        let count = || edits.load(std::sync::atomic::Ordering::SeqCst);
+        let (took, saves, (size, hold)) = saves_during(&inner, || {
+            crate::link_reads::take_longest_hold();
+            let size = match read {
+                "link_index" => crate::link_reads::link_index(&inner).unwrap().outgoing.len(),
+                _ => {
+                    let mut between = || {
+                        let i = count();
+                        if i < 8 {
+                            // Text and lines move; one source drops its link to the hub.
+                            let body = if i == 5 { "[[n/00000]] unlinked\n".to_string() } else { format!("moved\n[[n/00000]] [[hub]] [[gone]] [md](hub.md)\nedited {i}\n") };
+                            crate::write_lock(&inner).vault.as_mut().unwrap().write_note(&format!("n/{:05}.md", 2_500 * i + 7), &body).unwrap();
+                            edits.store(i + 1, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    };
+                    crate::link_reads::backlinks_stepping(&inner, &["hub.md".into()], &mut between).unwrap()["hub.md"].len()
+                }
+            };
+            (size, crate::link_reads::take_longest_hold())
         });
         let worst = *saves.iter().max().unwrap();
-        println!("{read} of 20,000 notes (debug): {took:?} for {size}, {} saves meanwhile, worst {worst:?}", saves.len());
-        assert!(size >= 20_000, "{read}: a large reply");
+        println!("{read} of 20,000 notes (debug): {took:?} for {size}, longest hold {hold:?}, {} edits to sources, {} saves meanwhile, worst {worst:?}", count(), saves.len());
+        assert!(size >= 19_000, "{read}: a large reply");
         assert!(saves.len() >= 3, "{read}: saves ran while the reply was built");
         assert!(worst * 4 < took, "{read}: a save waited {worst:?} while the reply took {took:?}");
+        assert!(hold * 8 < took, "{read}: one step held the lock {hold:?} of {took:?}");
+        if read == "backlinks" {
+            assert_eq!(count(), 8, "sources edited between steps");
+            let root = lock(&inner).vault.as_ref().unwrap().root.clone();
+            let fresh = Index::scan(&root).unwrap();
+            assert_eq!(size, fresh.backlinks(&["hub.md".into()])["hub.md"].len(), "the reply patched to the edits");
+        }
     }
     let root = lock(&inner).vault.as_ref().unwrap().root.clone();
     let fresh = Index::scan(&root).unwrap();
     assert_eq!(crate::link_reads::link_index(&inner).unwrap(), fresh.link_index());
     let paths: Vec<String> = fresh.paths().cloned().collect();
     assert_eq!(crate::link_reads::backlinks(&inner, &paths).unwrap(), fresh.backlinks(&paths));
+}
+
+/// Review 4: one note with 16,000 links of both kinds (4,000 targets written both ways, 4,000
+/// missing notes, 4,000 Markdown links to no file). Its job resolves it off the lock, and its
+/// publish puts its reverse-map memberships in a bounded number per hold, so a save queued
+/// behind it waits for one hold. Deleting it leaves its memberships to clear in steps too.
+#[test]
+fn a_save_behind_a_long_mixed_note_stays_quick() {
+    use std::time::Instant;
+    let files = (0..4_000).map(|j| (format!("t/{j:04}.md"), "x\n".to_string()));
+    let (_dir, inner) = open_deferred("link-long-note-latency", files);
+    let body: String = (0..4_000).map(|j| format!("[[t/{j:04}]] [m](t/{:04}.md) [x](u/{j}.md) [[gone {j}]]\n", (j * 7) % 4_000)).collect();
+    queued_saves_stay_quick("one note of 16,000 mixed links", &inner, |v| v.write_note("long.md", &body).unwrap());
+    let started = Instant::now();
+    crate::write_lock(&inner).vault.as_mut().unwrap().delete_path("long.md", true).unwrap();
+    let delete = started.elapsed();
+    let (settle, saves, hold) = saves_during(&inner, || {
+        crate::link_reads::take_longest_hold();
+        crate::link_reads::link_changes(&inner, None).unwrap();
+        crate::link_reads::settle(&inner).unwrap();
+        crate::link_reads::take_longest_hold()
+    });
+    let worst = *saves.iter().max().unwrap();
+    println!("deleting it (debug): {delete:?}, clearing {settle:?} (longest hold {hold:?}), worst save {worst:?}");
+    let guard = lock(&inner);
+    let vault = guard.vault.as_ref().unwrap();
+    vault.index.assert_maps_match_rebuild();
 }
 
 /// Review 3: a save queued behind a rescan's finish, with a high-fanout alias edited during the

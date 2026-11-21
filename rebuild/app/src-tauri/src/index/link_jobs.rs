@@ -4,15 +4,20 @@
 //! with thousands of links) is left queued by the write that caused it (`Index::settle_links`).
 //! `link_reads` resolves it in jobs, each in five steps, and only two of them hold the lock:
 //!
-//! 1. `Index::link_job` (write lock, bounded): queue a step of woken keys' readers and take up
-//!    to `JOB_NOTES` queued notes or `JOB_LINKS` links, as shared nodes, with an `EditMark`;
+//! 1. `Index::link_job` (write lock, bounded): clear a step of stale reverse-map memberships,
+//!    queue a step of woken keys' readers, and take up to `JOB_NOTES` queued notes or
+//!    `JOB_LINKS` links, as shared nodes with their current entries, and an `EditMark`;
 //! 2. `LinkJob::ask` (no lock): resolve each note against nothing, which lists every map key
 //!    its resolution could read;
 //! 3. `Index::answer` (read lock, `ANSWER_STEP` keys a time): look those keys up;
-//! 4. `LinkJob::finish` (no lock): resolve each note from the answers;
-//! 5. `Index::publish` (write lock): store each note's result unless, since the mark, its node
-//!    changed or a key it asked about gained or lost an owner (`Index::edits_since`). Such a
-//!    note stays queued for the next job. After a full map rebuild the whole job is dropped.
+//! 4. `LinkJob::finish` (no lock): resolve each note from the answers, and work out how its
+//!    reverse-map memberships move from the entry taken in step 1 (`Moves`, review 4);
+//! 5. `Index::publish` (write lock, `MEMBER_STEP` membership changes a hold): store each note's
+//!    result unless, since the mark, its node changed, a key it asked about gained or lost an
+//!    owner (`Index::edits_since`), or its entry is not the one taken. Such a note stays
+//!    queued for the next job. A note with more changes than one hold allows is put in over
+//!    several holds: its new memberships first, then its entry, then the old memberships are
+//!    cleared (`LinkTable::install`, `clean`). After a full map rebuild the job is dropped.
 //!
 //! A key's answer depends only on that key's owners (and the asking note's folder), so a note
 //! stored at publish equals the note resolved against the maps then: what an inline settle
@@ -20,9 +25,10 @@
 //! jobs finish while saves keep coming.
 //!
 //! Replies are built the same way: `link_reads` copies shared entries out in chunks under the
-//! read lock and patches them from the change log (`LinkTable::logged`).
+//! read lock and patches them from the change log (`LinkTable::logged`) or the edits
+//! (`Index::edited_paths`).
 
-use super::link_table::Resolved;
+use super::link_table::{Moves, Replaced, Resolved, MEMBER_STEP};
 use super::name_maps::{key_hash, Answers, KeyHash, Query, Src};
 use super::{has_links, resolve_note, resolve_through, Edit, EditMark, Index, Node};
 use crate::model::Backlink;
@@ -37,6 +43,8 @@ const JOB_LINKS: usize = 1_024;
 const EXPAND_STEP: usize = 4_096;
 /// Map keys looked up per read-lock hold.
 const ANSWER_STEP: usize = 2_048;
+/// Stale memberships checked per job.
+const CLEAN_STEP: usize = 4_096;
 
 #[cfg(test)]
 thread_local! {
@@ -70,17 +78,33 @@ pub(crate) struct LinkJob {
     notes: Vec<NoteJob>,
     /// Where `answer` goes on: (note, question).
     at: (usize, usize),
+    /// `publish`: the edits read so far (up to `seen`), and the next note to store.
+    seen: EditMark,
+    nodes: HashSet<Arc<str>>,
+    keys: HashSet<KeyHash>,
+    next: usize,
 }
 
 struct NoteJob {
     path: Arc<str>,
     /// `None`: no note with links there any more (its entry goes away).
     node: Option<Arc<Node>>,
+    /// Its entry when the job was taken: what `moves` start from.
+    before: Option<Arc<Resolved>>,
     asked: Vec<Query>,
     /// The asked keys, as edits name them.
     keys: Vec<KeyHash>,
     answers: Vec<Option<String>>,
-    resolved: Option<Resolved>,
+    /// Set by `finish` (unless an answer was missing: then `publish` resolves it).
+    done: Option<Finished>,
+    /// New memberships put in so far by a staged publish.
+    added: usize,
+}
+
+struct Finished {
+    new: Option<Arc<Resolved>>,
+    change: Replaced,
+    moves: Moves,
 }
 
 /// What one step of a job found.
@@ -95,12 +119,13 @@ pub(crate) enum LinkSlice {
 }
 
 impl Index {
-    /// Start a job (step 1), or `None` when nothing is queued.
+    /// Start a job (step 1), or `None` when nothing is queued or left to clear.
     pub(crate) fn link_job(&mut self) -> Option<LinkJob> {
-        if !self.links.has_pending() {
+        if !self.links.has_pending() && !self.links.has_cleanup() {
             return None;
         }
         debug_assert!(self.defer_depth == 0 && !self.maps_dirty, "a link job inside a change");
+        self.links.clean(budget(CLEAN_STEP));
         self.links.expand(budget(EXPAND_STEP));
         let mut notes = Vec::new();
         let mut links = 0;
@@ -113,13 +138,16 @@ impl Index {
             notes.push(NoteJob {
                 path: Arc::clone(path),
                 node,
+                before: self.links.shared(path).cloned(),
                 asked: Vec::new(),
                 keys: Vec::new(),
                 answers: Vec::new(),
-                resolved: None,
+                done: None,
+                added: 0,
             });
         }
-        Some(LinkJob { mark: self.edit_mark(), notes, at: (0, 0) })
+        let mark = self.edit_mark();
+        Some(LinkJob { mark, notes, at: (0, 0), seen: mark, nodes: HashSet::new(), keys: HashSet::new(), next: 0 })
     }
 
     /// Answer up to `ANSWER_STEP` of a job's questions (step 3, under the read lock).
@@ -144,40 +172,103 @@ impl Index {
         LinkSlice::Done
     }
 
-    /// Store a finished job (step 5): each note that nothing it read has changed under.
-    pub(crate) fn publish(&mut self, job: LinkJob) -> LinkSlice {
-        let Some(edits) = self.edits_since(job.mark) else {
+    /// Store a finished job (step 5): each note that nothing it read has changed under, at
+    /// most `MEMBER_STEP` membership changes per call. `More`: call again (after letting
+    /// writers in).
+    pub(crate) fn publish(&mut self, job: &mut LinkJob) -> LinkSlice {
+        let Some(edits) = self.edits_since(job.seen) else {
+            // A rebuild (the reverse maps start over) or more edits than the log keeps.
+            if let Some(note) = job.notes.get(job.next) {
+                if let (true, Some(Finished { new: Some(new), .. })) = (note.added > 0, &note.done) {
+                    if self.edit_mark().epoch == job.mark.epoch {
+                        self.links.forget(&note.path, Arc::clone(new));
+                    }
+                }
+            }
             return LinkSlice::Stale;
         };
-        let mut nodes: HashSet<Arc<str>> = HashSet::new();
-        let mut keys: HashSet<KeyHash> = HashSet::new();
         for edit in edits {
             match edit {
-                Edit::Node(path) => nodes.insert(Arc::clone(path)),
-                Edit::Key(key) => keys.insert(*key),
-            };
+                Edit::Node(path) => {
+                    job.nodes.insert(Arc::clone(path));
+                }
+                Edit::Key(key) => {
+                    job.keys.insert(*key);
+                }
+                Edit::Entry(_) => {}
+            }
         }
+        job.seen = self.edit_mark();
+        let mut left = budget(MEMBER_STEP);
         let mut changed = Vec::new();
-        for note in job.notes {
-            if nodes.contains(&note.path) || note.keys.iter().any(|k| keys.contains(k)) {
+        let mut out = LinkSlice::Done;
+        while let Some(note) = job.notes.get_mut(job.next) {
+            let read_changed = job.nodes.contains(&note.path) || note.keys.iter().any(|k| job.keys.contains(k));
+            let moved = !same(self.links.shared(&note.path), note.before.as_ref());
+            if read_changed || moved {
                 // Read something that changed: it stays queued for another job.
+                if let (true, Some(Finished { new: Some(new), .. })) = (note.added > 0, &note.done) {
+                    self.links.forget(&note.path, Arc::clone(new));
+                }
                 #[cfg(test)]
                 SKIPPED.with(|n| n.set(n.get() + 1));
+                job.next += 1;
                 continue;
             }
-            // A question nobody listed (never expected): resolve this one against the maps.
-            let resolved = match (&note.node, note.resolved) {
-                (None, _) => None,
-                (Some(_), Some(resolved)) => Some(resolved),
-                (Some(node), None) => Some(resolve_note(&self.maps, &note.path, &node.note.links)),
+            let Some(done) = &note.done else {
+                // An answer nobody listed (never expected): resolve this one against the maps.
+                let resolved = note.node.as_ref().map(|node| resolve_note(&self.maps, &note.path, &node.note.links));
+                self.links.unqueue(&note.path);
+                let replaced = self.links.replace(Arc::clone(&note.path), resolved);
+                self.entry_changed(&note.path, replaced, &mut changed);
+                job.next += 1;
+                continue;
             };
+            if done.change != Replaced::Same {
+                let adds = done.moves.adds();
+                let take = (adds - note.added).min(left);
+                if let Some(new) = &done.new {
+                    self.links.add_moves(&note.path, new, &done.moves, note.added, take);
+                }
+                note.added += take;
+                left -= take;
+                if note.added < adds {
+                    out = LinkSlice::More;
+                    break;
+                }
+                let used = self.links.install(Arc::clone(&note.path), done.new.clone(), note.before.clone(), &done.moves, left);
+                left = left.saturating_sub(used);
+            }
             self.links.unqueue(&note.path);
-            if self.links.replace(Arc::clone(&note.path), resolved) {
-                changed.push(note.path);
+            let (path, change) = (Arc::clone(&note.path), done.change);
+            self.entry_changed(&path, change, &mut changed);
+            job.next += 1;
+            if left == 0 && job.next < job.notes.len() {
+                out = LinkSlice::More;
+                break;
             }
         }
         self.links.record(changed);
-        LinkSlice::Done
+        out
+    }
+
+    /// Note an entry change for edits (backlinks) and the history (pages).
+    fn entry_changed(&mut self, path: &Arc<str>, replaced: Replaced, changed: &mut Vec<Arc<str>>) {
+        if replaced != Replaced::Same {
+            self.edits.note(Edit::Entry(Arc::clone(path)));
+        }
+        if replaced == Replaced::Entry {
+            changed.push(Arc::clone(path));
+        }
+    }
+}
+
+/// The same shared entry (or none either way).
+fn same(a: Option<&Arc<Resolved>>, b: Option<&Arc<Resolved>>) -> bool {
+    match (a, b) {
+        (Some(a), Some(b)) => Arc::ptr_eq(a, b),
+        (None, None) => true,
+        _ => false,
     }
 }
 
@@ -199,26 +290,34 @@ impl LinkJob {
         }
     }
 
-    /// Resolve each note from its answers (step 4, no lock).
+    /// Resolve each note from its answers, and how its memberships move (step 4, no lock).
     pub(crate) fn finish(&mut self) {
         for note in &mut self.notes {
-            let Some(node) = &note.node else {
-                continue;
+            let new = match &note.node {
+                None => None,
+                Some(node) => {
+                    let answers = Answers {
+                        map: std::mem::take(&mut note.asked).into_iter().zip(std::mem::take(&mut note.answers)).collect(),
+                        missing: Default::default(),
+                    };
+                    let (resolved, _) = resolve_through(Src::Answers(&answers), &note.path, &node.note.links);
+                    if answers.missing.get() {
+                        continue;
+                    }
+                    Some(resolved)
+                }
             };
-            let answers = Answers {
-                map: std::mem::take(&mut note.asked).into_iter().zip(std::mem::take(&mut note.answers)).collect(),
-                missing: Default::default(),
-            };
-            let (resolved, _) = resolve_through(Src::Answers(&answers), &note.path, &node.note.links);
-            if !answers.missing.get() {
-                note.resolved = Some(resolved);
-            }
+            let before = note.before.as_deref();
+            let change = Replaced::between(before, new.as_ref());
+            let moves = if change == Replaced::Same { Moves::default() } else { Moves::between(before, new.as_ref()) };
+            note.done = Some(Finished { new: new.map(Arc::new), change, moves });
         }
     }
 }
 
 /// A note linking to a target, shared out of the index for a `backlinks` reply built off the
 /// lock.
+#[derive(Clone)]
 pub(crate) struct BacklinkSource {
     from: Arc<str>,
     node: Arc<Node>,
@@ -226,29 +325,36 @@ pub(crate) struct BacklinkSource {
 }
 
 impl Index {
-    /// Up to `n` notes linking to `target` after `after`, in path order, and whether that was
-    /// the last of them.
-    pub(crate) fn backlink_sources(&self, target: &str, after: Option<&str>, n: usize) -> (Vec<BacklinkSource>, bool) {
-        debug_assert!(!self.links.has_pending(), "link table read before it settled");
+    /// The notes linking to `target` after `after`, in path order, from the next `n` paths
+    /// listed for it, and those paths: how many (fewer than `n` when they were the last) and
+    /// the last (where the next call goes on). A path listed for a target it no longer links to
+    /// (a stale membership, cleared later) is read but not returned.
+    pub(crate) fn backlink_sources(&self, target: &str, after: Option<&str>, n: usize) -> (Vec<BacklinkSource>, usize, Option<Arc<str>>) {
+        // Unsettled is fine: a reply patches every note edited since it began, once settled.
         let paths: Vec<&Arc<str>> = self.links.sources_after(target, after).take(n).collect();
-        let end = paths.len() < n;
-        let sources = paths
-            .into_iter()
-            .filter_map(|from| {
-                Some(BacklinkSource {
-                    from: Arc::clone(from),
-                    node: Arc::clone(self.files.get_shared(from)?),
-                    resolved: Arc::clone(self.links.shared(from)?),
-                })
-            })
-            .collect();
-        (sources, end)
+        let (read, last) = (paths.len(), paths.last().map(|p| Arc::clone(p)));
+        let sources = paths.into_iter().filter_map(|from| self.backlink_source(from)).filter(|s| s.links_to(target)).collect();
+        (sources, read, last)
+    }
+
+    /// `path` as a backlink source now: its node and entry, if it is a note with links.
+    pub(crate) fn backlink_source(&self, path: &Arc<str>) -> Option<BacklinkSource> {
+        Some(BacklinkSource {
+            from: Arc::clone(path),
+            node: Arc::clone(self.files.get_shared(path)?),
+            resolved: Arc::clone(self.links.shared(path)?),
+        })
     }
 }
 
 impl BacklinkSource {
     pub(crate) fn path(&self) -> &Arc<str> {
         &self.from
+    }
+
+    /// Whether a link here resolves to `target`.
+    pub(crate) fn links_to(&self, target: &str) -> bool {
+        self.resolved.has_target(target)
     }
 
     /// This note's links to `target`, in note order.

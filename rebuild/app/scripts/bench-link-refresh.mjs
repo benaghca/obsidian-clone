@@ -15,7 +15,9 @@
 // - long: main-thread tasks over 50 ms from the save on;
 // - blockedMs (review 3): the longest the main thread was busy after the "links" refresh, as
 //   a message posted to it waited (a probe that keeps one message in flight): the longest
-//   task the refresh's work (graph, Base, link copy) left, rendering included.
+//   task the refresh's work (graph, Base, link copy) left, rendering included;
+// - frameMs (review 4): the graph's longest frame of work after the refresh (layout and
+//   drawing; a tick too long for one frame is spread over several), and how many it drew.
 // GROVE_BENCH_CHECK=1 also asserts this branch's behavior: a prose save rebuilds
 // neither view on the refresh, and the added link is in the graph.
 import assert from 'node:assert/strict';
@@ -25,8 +27,8 @@ const sizes = (process.argv[2] ?? '5000,20000,50000').split(',').map(Number);
 const check = process.env.GROVE_BENCH_CHECK === '1';
 // A Base that reads links (its rows don't change here, but it must rebuild on a real link change).
 const linksBase = process.env.GROVE_BENCH_BASE === 'links';
-// GROVE_BENCH_GRAPH=0: no graph, so `blockedMs` is not the graph's layout frames (at 50k each
-// takes ~95 ms after a reheat; the force simulation, outside this piece).
+// GROVE_BENCH_GRAPH=0: no graph, so `blockedMs` is not the graph's layout frames (before
+// review 4 each took ~95 ms at 50k after a reheat; now a tick is spread over frames).
 const withGraph = process.env.GROVE_BENCH_GRAPH !== '0';
 const filter = linksBase ? `'file.inFolder("LR") && !file.hasLink("Nowhere")'` : `'file.inFolder("LR")'`;
 const note = 'LR/00000.md';
@@ -55,11 +57,12 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
     await run(() => {
       const base = document.querySelector('.bases-view');
       window.__mockLinkMs = [];
-      window.lr = { long: [], saved: null, links: null, builds: (window.__graphBuilds ?? []).length, base: base.reconcile.full, baseAtLinks: null, lastWork: 0, edges: window.__graphProbe?.().links ?? 0 };
+      window.lr = { long: [], saved: null, links: null, builds: (window.__graphBuilds ?? []).length, base: base.reconcile.full, baseAtLinks: null, lastWork: 0, edges: window.__graphProbe?.().links ?? 0, frames: null };
       const frame = () => {
         if (!window.lr) return;
         const full = base.reconcile.full;
         if (lr.links && lr.baseAtLinks === null) lr.baseAtLinks = full;
+        if (lr.links && lr.frames === null) lr.frames = (window.__graphWork ?? []).length;
         if (full !== lr.seenFull || (window.__graphBuilds ?? []).length !== lr.seenBuilds) {
           lr.seenFull = full; lr.seenBuilds = (window.__graphBuilds ?? []).length; lr.lastWork = performance.now();
         }
@@ -103,6 +106,8 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
         edgesAdded: (window.__graphProbe?.().links ?? 0) - lr.edges,
         long: lr.long,
         blockedMs: +lr.blocked.toFixed(1),
+        frameMs: +Math.max(0, ...(window.__graphWork ?? []).slice(lr.frames ?? Infinity)).toFixed(1),
+        frames: (window.__graphWork ?? []).slice(lr.frames ?? Infinity).length,
       };
       window.lr = null;
       return out;

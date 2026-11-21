@@ -14,6 +14,13 @@
 // below `ALPHA_MIN` it is settled and the view stops ticking it altogether.
 // Dragging a node holds alpha up (`alphaTarget`); a change to the graph
 // reheats it a little. Free of the DOM, so it is tested on its own.
+//
+// Review 4: a tick can be taken in steps (`advance`), so one tick of a 50,000
+// node graph (about 95 ms) is spread over several frames instead of holding
+// one. The steps do the same arithmetic in the same order as `tick`, and
+// positions change only in a tick's last step, so the layout is the same
+// tick for tick; only a new graph must wait for the tick to end
+// (`ticking`).
 
 export interface Forces {
   /** Obsidian's "Center force", 0 to 1. */
@@ -74,6 +81,13 @@ export class Simulation {
   private strength = new Float64Array(0);
   private tree = new QuadTree();
   private random = lcg(1);
+  /** The tick under way in steps (`advance`), if any. */
+  private work: Generator<void, void> | null = null;
+
+  /** Whether a tick is under way: positions move when it ends, and a new graph must wait for that. */
+  get ticking() {
+    return this.work !== null;
+  }
 
   /** Whether it has cooled down: nothing moves any more, so nothing needs to tick. */
   get settled() {
@@ -165,6 +179,8 @@ export class Simulation {
 
   /** Put a prepared graph in place (`prepareGraph`): one pass over its nodes, and the new ones placed. */
   installGraph(g: SimGraph) {
+    // Between ticks only (the view waits for `ticking` to end); a tick under way ends first.
+    while (this.work && !this.advance(Infinity));
     const { n, from, given } = g;
     const [ox, oy, ovx, ovy] = [this.x, this.y, this.vx, this.vy];
     this.n = n;
@@ -209,17 +225,44 @@ export class Simulation {
     this.alpha = Math.max(this.alpha, alpha);
   }
 
+  /** One whole tick (the rest of one under way, if `advance` began it). */
   tick() {
+    while (!this.advance(Infinity));
+  }
+
+  /**
+   * Work on the tick under way, or begin the next one, until `performance.now()`
+   * reaches `until`. True when a tick ended (the nodes moved); a new tick is
+   * begun only by the next call.
+   */
+  advance(until: number): boolean {
+    this.work ??= this.steps();
+    for (;;) {
+      if (this.work.next().done) {
+        this.work = null;
+        return true;
+      }
+      if (performance.now() >= until) return false;
+    }
+  }
+
+  /**
+   * A tick, pausing (yielding) every few thousand links or tree inserts and every
+   * few hundred nodes. Alpha and the forces are read when it begins; a node being
+   * dragged is moved by the view in between, as between two ticks.
+   */
+  private *steps(): Generator<void, void> {
     this.alpha += (this.alphaTarget - this.alpha) * ALPHA_DECAY;
     const alpha = this.alpha;
     const { x, y, vx, vy, n } = this;
-    const f = this.forces;
+    const f = { ...this.forces };
 
     // Link force: each link pulls (or pushes) towards its distance, more on
     // the end with fewer links, as in d3.
     if (f.link > 0) {
       const { ls, lt, bias, strength } = this;
       for (let i = 0; i < ls.length; i++) {
+        if ((i & 4095) === 4095) yield;
         const s = ls[i];
         const t = lt[i];
         let dx = x[t] + vx[t] - x[s] - vx[s] || this.jiggle();
@@ -239,8 +282,11 @@ export class Simulation {
     // Repel force, Barnes-Hut.
     if (f.repel > 0 && n > 1) {
       const strength = -f.repel * REPEL_SCALE;
-      this.tree.build(x, y, n);
-      for (let i = 0; i < n; i++) this.tree.apply(i, x, y, vx, vy, strength * alpha, () => this.jiggle());
+      yield* this.tree.build(x, y, n);
+      for (let i = 0; i < n; i++) {
+        if ((i & 511) === 511) yield;
+        this.tree.apply(i, x, y, vx, vy, strength * alpha, () => this.jiggle());
+      }
     }
 
     // Centre force: towards (0, 0), proportional to the distance.
@@ -252,6 +298,7 @@ export class Simulation {
       }
     }
 
+    // In one step, so a frame never draws a half-moved layout.
     for (let i = 0; i < n; i++) {
       if (this.fixed[i]) {
         vx[i] = vy[i] = 0;
@@ -334,7 +381,8 @@ class QuadTree {
     return c;
   }
 
-  build(x: Float64Array, y: Float64Array, n: number) {
+  /** Rebuilt over the nodes, pausing (yielding) every few thousand inserts. */
+  *build(x: Float64Array, y: Float64Array, n: number): Generator<void, void> {
     if (this.next.length < n) this.next = new Int32Array(n);
     this.next.fill(-1, 0, n);
     let minX = Infinity;
@@ -351,7 +399,10 @@ class QuadTree {
     this.count = 0;
     this.grow(2 * n + 1);
     const root = this.cell(minX, minY, size);
-    for (let i = 0; i < n; i++) this.insert(root, i, x, y);
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 4095) yield;
+      this.insert(root, i, x, y);
+    }
   }
 
   private insert(root: number, i: number, x: Float64Array, y: Float64Array) {

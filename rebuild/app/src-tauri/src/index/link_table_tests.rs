@@ -519,7 +519,12 @@ fn run_job(mut job: link_jobs::LinkJob, idx: &mut Index) -> LinkSlice {
         }
     }
     job.finish();
-    idx.publish(job)
+    loop {
+        match idx.publish(&mut job) {
+            LinkSlice::More => {}
+            got => return got,
+        }
+    }
 }
 
 /// Settle the way the app does: off-lock jobs until none is left.
@@ -534,7 +539,8 @@ fn settle_by_jobs(idx: &mut Index) {
 /// coalesces and later changes land on a half-settled table. Review 3: settling is also done
 /// by off-lock jobs in small steps, and some jobs are started before a change and published
 /// after it (they must come back stale, leaving their notes queued).
-fn random_links_sequence(seed: u64, steps: usize, deferred: bool) {
+/// Returns how many notes publishes left queued (they had changed meanwhile).
+fn random_links_sequence(seed: u64, steps: usize, deferred: bool) -> usize {
     let tmp = tmp_dir("link-deltas-seq");
     let root = tmp.path.as_path();
     let mut rng = Rng(seed);
@@ -589,11 +595,11 @@ fn random_links_sequence(seed: u64, steps: usize, deferred: bool) {
     pages.check(&idx, &format!("seed {seed}: the end"));
     link_jobs::small_steps(false);
     assert_eq!(pages.eager.fulls, 1, "seed {seed}: the eager page never needed a full reply");
+    let skipped = link_jobs::take_skipped();
     if deferred {
-        let skipped = link_jobs::take_skipped();
         println!("seed {seed}: {stale} jobs stale (a rebuild between), {skipped} notes left queued by a publish");
-        assert!(skipped > 0, "seed {seed}: some published jobs held notes that changed meanwhile");
     }
+    skipped
 }
 
 /// Review 3: replies built in steps (`link_replies`) with changes and settling between the
@@ -716,9 +722,10 @@ fn random_link_edits_match_a_full_walk_and_pages_patch_to_it() {
 /// Review 2: the same edits with every link update queued and settled later, in pieces.
 #[test]
 fn deferred_link_updates_settle_to_a_full_walk() {
-    for seed in [7, 0xFEED, 0x5EED_1234, 42] {
-        random_links_sequence(seed, 250, true);
-    }
+    // Which notes a job takes follows hash order, so how often one changed under its publish
+    // varies from run to run (one seed sees 0 or 1); across the seeds it is several.
+    let skipped: usize = [7, 0xFEED, 0x5EED_1234, 42].into_iter().map(|seed| random_links_sequence(seed, 250, true)).sum();
+    assert!(skipped >= 4, "some published jobs held notes that changed meanwhile ({skipped})");
 }
 
 /// Review 3: a name with many files keeps its `pick` up to date (`NamePicks`). After every
@@ -921,5 +928,143 @@ fn a_note_with_many_distinct_links_resolves_like_a_walk() {
     assert_eq!(entry.unresolved.len(), 60 + 60 + 60 + 60);
     assert_eq!(entry.unresolved[0], "Gone0");
     assert_eq!(entry.unresolved[1], "Lost0");
+    idx.assert_maps_match_rebuild();
+}
+
+/// Drive a `backlinks` reply on `idx` to its end, settling by jobs when it asks.
+fn finish_backlinks(mut reply: BacklinkReply, idx: &mut Index) -> BTreeMap<String, Vec<Backlink>> {
+    loop {
+        match reply.step(idx) {
+            ReplyStep::More => {}
+            ReplyStep::Settle => settle_by_jobs(idx),
+            ReplyStep::Done => return reply.finish(),
+        }
+    }
+}
+
+/// Review 4: an alias moving between two targets a note links to anyway leaves the note's
+/// entry (`[A, B]`) and the table's version alone, but moves one line from A to B. A reply
+/// that copied the note for A before the move and for B after it lists that line once, under
+/// B, as a full walk does. A note copied before it stopped linking is dropped.
+#[test]
+fn a_backlink_reply_across_an_alias_move_lists_each_line_once() {
+    let tmp = tmp_dir("backlinks-alias-move");
+    let root = tmp.path.as_path();
+    link_jobs::small_steps(true);
+    let mut idx = Index::from_notes(&[
+        ("A.md", "---\naliases: [X]\n---\na\n"),
+        ("B.md", "b\n"),
+        ("P.md", "[[A]]\n"),
+        ("S.md", "[[A]]\n[[B]]\n[[X]]\n"),
+    ]);
+    let targets: Vec<String> = vec!["A.md".into(), "B.md".into()];
+    let before = idx.backlinks(&targets);
+    let lines = |found: &BTreeMap<String, Vec<Backlink>>, t: &str| -> Vec<(String, u32)> {
+        found.get(t).map(|hits| hits.iter().map(|b| (b.from.clone(), b.line)).collect()).unwrap_or_default()
+    };
+    assert_eq!(lines(&before, "A.md").len(), 3, "P, and S twice (its alias line too)");
+    let mut reply = BacklinkReply::new(&targets);
+    assert_eq!(reply.step(&idx), ReplyStep::More, "the start");
+    assert_eq!(reply.step(&idx), ReplyStep::More, "P and S, for A");
+    let version = idx.links.version();
+    // B takes the alias too (X stays with A, or goes to B: S links to both either way), then A
+    // gives it up.
+    save(&mut idx, root, "B.md", "---\naliases: [X]\n---\nb\n");
+    save(&mut idx, root, "A.md", "a\n");
+    assert_eq!(idx.links.version(), version, "no entry changed: S still links to A and B");
+    // And P, copied for A, stops linking anywhere.
+    save(&mut idx, root, "P.md", "no links now\n");
+    let got = finish_backlinks(reply, &mut idx);
+    link_jobs::small_steps(false);
+    assert_eq!(got, walked_backlinks(&idx, &targets));
+    let s_lines = |t: &str| lines(&got, t).into_iter().filter(|(from, _)| from == "S.md").map(|(_, line)| line).collect::<Vec<_>>();
+    let (a, b) = (s_lines("A.md"), s_lines("B.md"));
+    assert_eq!(a.len() + b.len(), 3, "each of S's lines once: {a:?} {b:?}");
+    assert_eq!((a.len(), b.len()), (1, 2), "the alias line moved to B");
+    assert!(lines(&got, "A.md").iter().all(|(from, _)| from == "S.md"), "P is gone");
+}
+
+/// Review 4: a reply in steps across a rescan's swap (a fresh index, whose edits it cannot
+/// read) starts over, in steps, and ends equal to the new index.
+#[test]
+fn a_backlink_reply_across_a_rescan_swap_starts_over() {
+    link_jobs::small_steps(true);
+    let old = Index::from_notes(&[("t.md", "t\n"), ("s.md", "[[t]]\n"), ("u.md", "[[t]]\n"), ("w.md", "[[t]]\n")]);
+    let targets: Vec<String> = vec!["t.md".into()];
+    let mut reply = BacklinkReply::new(&targets);
+    assert_eq!(reply.step(&old), ReplyStep::More);
+    assert_eq!(reply.step(&old), ReplyStep::More, "s and u copied");
+    let mut fresh = Index::from_notes(&[("t.md", "t\n"), ("s.md", "moved down\n[[t]]\n"), ("v.md", "[[t]]\n")]);
+    let got = finish_backlinks(reply, &mut fresh);
+    link_jobs::small_steps(false);
+    assert_eq!(got, walked_backlinks(&fresh, &targets));
+    assert_eq!(got["t.md"].iter().map(|b| b.from.as_str()).collect::<Vec<_>>(), ["s.md", "v.md"]);
+}
+
+/// Review 4: a note with many links goes in over several write-lock holds (its new reverse-map
+/// memberships first, then its entry), and its old memberships come out in steps after.
+/// Saves elsewhere between holds leave the publish valid; an edit to the note itself drops
+/// what it had added. After each stage the table equals a full walk.
+#[test]
+fn a_long_note_goes_in_over_several_holds_and_comes_out_in_steps() {
+    let tmp = tmp_dir("link-long-note");
+    let root = tmp.path.as_path();
+    let mut notes: Vec<(String, String)> = (0..240).map(|j| (format!("t/{j}.md"), "x\n".to_string())).collect();
+    notes.push(("hub.md".into(), "---\naliases: [alpha]\n---\n".into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut idx = Index::from_notes(&refs);
+    idx.defer_links_over(0);
+    link_jobs::small_steps(true);
+    let long = |shift: usize| -> String { (0..120).map(|j| format!("[[t/{}]] [m](t/{}.md) [[alpha]] [[gone{}]]\n", j + shift, (j * 7 + shift) % 240, j + shift)).collect() };
+    let publish = |idx: &mut Index, root: &Path, between: &mut dyn FnMut(&mut Index, &Path, usize)| -> (LinkSlice, usize) {
+        let mut job = idx.link_job().expect("the note is queued");
+        job.ask();
+        while idx.answer(&mut job) == LinkSlice::More {}
+        job.finish();
+        let mut calls = 0;
+        loop {
+            calls += 1;
+            match idx.publish(&mut job) {
+                LinkSlice::More => between(idx, root, calls),
+                got => return (got, calls),
+            }
+        }
+    };
+
+    // A new long note: many holds, with typing elsewhere between them.
+    save(&mut idx, root, "long.md", &long(0));
+    let (got, calls) = publish(&mut idx, root, &mut |idx, root, i| save(idx, root, "other.md", &format!("typing {i}\n")));
+    assert_eq!(got, LinkSlice::Done);
+    assert!(calls > 100, "{calls} holds");
+    assert!(!idx.links_pending());
+    idx.assert_maps_match_rebuild();
+
+    // Half its targets change; an edit to the note midway drops the job's additions.
+    save(&mut idx, root, "long.md", &long(60));
+    let (got, _) = publish(&mut idx, root, &mut |idx, root, i| {
+        if i == 3 {
+            save(idx, root, "long.md", &long(30));
+        }
+    });
+    assert_eq!(got, LinkSlice::Done);
+    assert!(idx.links_pending(), "the edited note stays queued");
+    assert!(idx.links.has_cleanup(), "what it added is left to clear");
+    settle_by_jobs(&mut idx);
+    assert!(!idx.links.has_cleanup());
+    idx.assert_maps_match_rebuild();
+
+    // Deleted while settling inline: its memberships are left to clear, in steps.
+    idx.defer_links = None;
+    idx.remove_tree("long.md");
+    assert!(!idx.links_pending() && idx.links.has_cleanup(), "the entry is gone, its memberships queued");
+    idx.assert_maps_match_rebuild();
+    let mut jobs = 0;
+    while let Some(job) = idx.link_job() {
+        jobs += 1;
+        assert_eq!(run_job(job, &mut idx), LinkSlice::Done);
+    }
+    link_jobs::small_steps(false);
+    assert!(jobs > 100, "{jobs} cleanup steps");
+    assert!(!idx.links.has_cleanup());
     idx.assert_maps_match_rebuild();
 }

@@ -592,6 +592,32 @@ fn bench_link_deltas() {
     );
     let (reply_ms, reply_hold) = reply_by_steps(&fan);
     println!("GROVE_BENCH whole link_index of {n} notes in steps: total_ms={reply_ms:.1} longest_hold_ms={reply_hold:.3}");
+    // Review 4: `backlinks` of the hub (every note links to it) in steps, with eight of its
+    // sources edited between steps; the reply patches them instead of starting over.
+    settle_by_jobs(&mut fan);
+    let all = Instant::now();
+    let mut reply = super::BacklinkReply::new(&["hub.md".to_string()]);
+    let (mut hold, mut edits) = (0f64, 0);
+    loop {
+        let started = Instant::now();
+        let step = reply.step(&fan);
+        hold = hold.max(elapsed_ms(started));
+        reply.absorb();
+        match step {
+            super::ReplyStep::Done => break,
+            super::ReplyStep::Settle => {
+                hold = hold.max(settle_by_jobs(&mut fan));
+            }
+            super::ReplyStep::More if edits < 8 => {
+                let body = format!("moved down\nsee [[alpha]] edited {edits}\n");
+                fan.upsert_note(root, &format!("l/{:06}.md", edits * (n / 8) + 3), &body, Stamp::sized(body.len()));
+                edits += 1;
+            }
+            super::ReplyStep::More => {}
+        }
+    }
+    let sources = reply.finish()["hub.md"].len();
+    println!("GROVE_BENCH backlinks of hub.md ({sources} lines) in steps, {edits} sources edited between: total_ms={:.1} longest_hold_ms={hold:.3}", elapsed_ms(all));
 
     // Review 3: a name with many owners, and link-heavy notes.
     let m = n / 2;
@@ -621,6 +647,31 @@ fn bench_link_deltas() {
     let started = Instant::now();
     let hold = settle_by_jobs(&mut heavy);
     println!("GROVE_BENCH 100 notes of 5,000 links reading an alias: save_ms={save:.3} settle_ms={:.1} longest_hold_ms={hold:.2}", elapsed_ms(started));
+
+    // Review 4: one new note of 40,000 links of both kinds (10,000 targets written both ways,
+    // 10,000 missing notes, 10,000 Markdown links to no file): its memberships go in over
+    // several holds. Then it is deleted: its entry goes at once, its memberships in steps.
+    let mut notes: Vec<(String, String)> = (0..10_000).map(|j| (format!("t/{j:05}.md"), "x\n".into())).collect();
+    notes.push(("hub.md".into(), aliased.into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut long = Index::from_notes(&refs);
+    long.set_defer_links(true);
+    let body: String = (0..10_000).map(|j| format!("[[t/{j:05}]] [m](t/{:05}.md) [x](u/{j}.md) [[gone {j}]]\n", (j * 7) % 10_000)).collect();
+    let started = Instant::now();
+    long.upsert_note(root, "long.md", &body, Stamp::sized(body.len()));
+    let save = elapsed_ms(started);
+    let started = Instant::now();
+    let hold = settle_by_jobs(&mut long);
+    let settle = elapsed_ms(started);
+    let started = Instant::now();
+    long.remove_tree("long.md");
+    let delete = elapsed_ms(started);
+    let started = Instant::now();
+    let clear_hold = settle_by_jobs(&mut long);
+    println!(
+        "GROVE_BENCH one new note of 40,000 mixed links: save_ms={save:.2} settle_ms={settle:.1} longest_hold_ms={hold:.2}; deleted: delete_ms={delete:.3} clear_ms={:.2} longest_hold_ms={clear_hold:.3}",
+        elapsed_ms(started)
+    );
 }
 
 /// Settle as `link_reads::settle` does; the longest step that holds the lock (ms).
@@ -644,9 +695,14 @@ fn settle_by_jobs(idx: &mut Index) -> f64 {
             }
         }
         job.finish();
-        let started = Instant::now();
-        idx.publish(job);
-        hold = hold.max(elapsed_ms(started));
+        loop {
+            let started = Instant::now();
+            let got = idx.publish(&mut job);
+            hold = hold.max(elapsed_ms(started));
+            if got != LinkSlice::More {
+                break;
+            }
+        }
     }
 }
 

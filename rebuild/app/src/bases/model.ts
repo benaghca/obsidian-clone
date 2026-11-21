@@ -55,6 +55,30 @@ function compareKeys(a: SortKey, b: SortKey): number {
   if (a.dateLike && b.dateLike) return a.time !== undefined && b.time !== undefined ? a.time - b.time : x! < y! ? -1 : x! > y! ? 1 : 0;
   return compareNames(a.text, b.text);
 }
+/**
+ * Whether `compareKeys` orders sort column `i` of these rows as a total preorder, checked in
+ * steps. Then every stable sort gives one order, the one `Array.prototype.sort` gives, and the
+ * stepped merge sort may run. A column that mixes kinds compares some pairs as numbers or
+ * times and others as text, which can go round in a cycle (-2 < "-3" < -10 < -2): there only
+ * the engine's own sort gives the order the table always had (review 4).
+ */
+function* orderedWork(keyed: readonly { keys: SortKey[] }[], i: number): Generator<void, boolean> {
+  let numbers = 0, nan = false, dates = 0, timed = 0, other = 0;
+  for (let at = 0; at < keyed.length; at++) {
+    if ((at & 4095) === 4095) yield;
+    const key = keyed[at].keys[i];
+    if (key.missing) continue;
+    if (typeof key.value === "number") { numbers++; nan ||= Number.isNaN(key.value); }
+    else if (key.dateLike) { dates++; if (key.time !== undefined && Number.isFinite(key.time)) timed++; }
+    else other++;
+  }
+  // Only numbers: by value (NaN equals everything, so it is out).
+  if (!dates && !other) return !nan;
+  // Only dates: all by time, or all as written.
+  if (!numbers && !other) return timed === 0 || timed === dates;
+  // Otherwise every pair must compare as text: no two numbers and no two dates.
+  return numbers <= 1 && dates <= 1;
+}
 /** Cinder's board is the same layout Grove stores as `kanban`. Any other unknown name draws as a table. */
 export function layoutOf(type: unknown): "table" | "cards" | "list" | "kanban" {
   if (type === "cards" || type === "list" || type === "kanban") return type;
@@ -168,7 +192,9 @@ export function baseModel(source: string, viewIndex = 0) {
   /**
    * `select` in steps: it pauses (yields) every few hundred rows and through the sort, a
    * stable merge sort (`sortWork`) that orders as `Array.prototype.sort` does (review 3: a
-   * Base reading links re-selected every row in one task after a link change).
+   * Base reading links re-selected every row in one task after a link change). That holds
+   * when the sort columns order consistently (`orderedWork`); a column mixing kinds is sorted
+   * by `Array.prototype.sort` itself, in one task, as it always was (review 4).
    */
   function* selectWork(rows: readonly Row[], unlimited = false) {
     const found: { row: Row; context: Context }[] = [];
@@ -184,7 +210,9 @@ export function baseModel(source: string, viewIndex = 0) {
       keyed.push({ r, keys: sorts.map(sort => sortKey(r.context.get(sort.property))), name: noteName(r.row.file.path) });
       if ((i & 255) === 255) yield;
     }
-    const sorted = (yield* sortWork(keyed, byKeys)).map(k => k.r);
+    let consistent = true;
+    for (let i = 0; i < sorts.length && consistent; i++) consistent = yield* orderedWork(keyed, i);
+    const sorted = (consistent ? yield* sortWork(keyed, byKeys) : keyed.sort(byKeys)).map(k => k.r);
     return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
   }
   function select(rows: Row[], unlimited = false) {

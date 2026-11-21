@@ -695,3 +695,209 @@ Each mutation was applied alone and the named tests run (`mutate3.py` in the ses
   - `test-link-refresh-guards.mjs` passed inside the chain.
 - **Browser bench:** `GROVE_BENCH_CHECK=1` passed at 5k, 20k and 50k, and at 50k without the graph.
 - The test runs rewrote the `rebuild/round*-shots` files; they were restored before committing.
+
+## Review round 4
+
+Codex review 4 of `39040a4` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review4.md`): four P2 and one P3 finding. All five are fixed here. Limits as before.
+
+### P2: a stepped backlink reply could mix two resolutions of one link
+
+**The problem.** Take a note S with `[[A]]`, `[[B]]` and `[[X]]`, where X is an alias of A. A `backlinks` reply for A and B copies S for A, then X moves from A to B, then the reply copies S for B. S's entry stays `[A, B]`, so the table's version doesn't move, and S's text doesn't change. Round 3's reply checked only those two, so it listed the `[[X]]` line under both targets, which no full rebuild gives.
+
+**The fix** (`index.rs`, `index/link_replies.rs`, `index/link_jobs.rs`):
+
+- **A new edit kind.** Every replacement that changes a note's resolved links logs `Edit::Entry(path)`, the slots alone included (`Replaced::{Same, Slots, Entry}`). Node edits were logged already.
+- **The reply patches instead of restarting.**
+  - It copies sources in steps as before, from a mark taken once the table is settled.
+  - At a settled check it reads the node and entry edits since the mark (`Index::edited_paths`, in steps) and copies each of those notes again, now. For every target it drops that note's old copy and adds the new one if it still links there.
+  - It repeats until a settled check finds no newer edit. Every note then is either one no edit touched since the mark, copied once in path order, or one copied again after its last edit, so the reply equals the settled table at that check.
+- **Starting over.** The reply starts over only when the edits since its mark are unknown. That happens after a full map rebuild (a new edit epoch), when a rescan's fresh index takes over (a new epoch, so this covers rescans), or after more edits than the log keeps (raised to 65,536). The new copy is still taken in bounded steps.
+- **Copying without settling.** Copy steps no longer require a settled table: an unsettled note is edited after the mark, so it is patched later. A copy step now advances past listed paths that turn out not to link (see the next finding) by the paths it read, not the sources it kept.
+
+**Tests:**
+
+- `a_backlink_reply_across_an_alias_move_lists_each_line_once` is the reviewer's case. B takes the alias, then A gives it up, between two copy steps; the table's version is checked unchanged. The reply lists S's three lines once each, the alias line under B, and equals the walk.
+- `a_backlink_reply_across_a_rescan_swap_starts_over`: a reply begun on one index finishes on a fresh one, as after a rescan, and equals the fresh one.
+- `stepped_replies_equal_replies_made_at_once` still passes: random backlink replies with edits and settling between steps, each against the walk at the moment it finishes.
+
+### P2: four backlink restarts brought back an unbounded read-lock hold
+
+**The problem.** After four restarts the round-3 reply took everything left in one step. Four edits to sources of a popular target between steps were enough to make it copy every source under one read lock, and a queued save waited for all of it.
+
+**The fix.** With patching (above), an edit no longer restarts the reply, and the "take the rest" fallback is gone. Every step reads at most `CHUNK` (2,048) listed sources, edited paths or notes to copy again.
+
+**Test:** `a_save_behind_a_large_reply_stays_quick` now edits eight sources of `hub.md` between the steps of its 20,000-source reply: text and lines move, and one source drops its link. Saves keep coming meanwhile. It requires:
+
+- the longest step that held the lock under an eighth of the reply;
+- no save waits a quarter of it;
+- the reply equals a fresh scan after the edits.
+
+Debug results: reply 50 ms, longest hold 2.3 ms, worst save 1.7 ms. Round 3 would have restarted at each of the first four edits, then copied the rest in one hold.
+
+### P2: one link-heavy note could hold the write lock for quadratic work at publish
+
+**The problem.** A job admits a whole note even when it holds far more links than the job's budget. Its resolution ran off the lock, but `publish` then rebuilt the old and new target sets under the write lock. That scanned `outgoing` for every Markdown target (`Resolved::targets`), which is quadratic. It then applied every membership change in one hold.
+
+**The fix** (`index/link_table.rs`, `index/link_jobs.rs`):
+
+- **Sorted targets, kept per entry.** Each entry keeps its targets once each, sorted (`Resolved::members`, places in `outgoing` then `markdown`). They are sorted when the note is resolved, which for a job is off the lock. The quadratic scan is gone, including from the full rebuild's `link`.
+- **The membership diff is worked out off the lock.** `LinkJob::finish` takes the entry captured at `link_job` and computes `Moves`, a merge of the two sorted target lists and the two sorted read lists, along with whether anything changed at all.
+- **Checked before it is applied.** `publish` stores a note only if, since the mark, its node and the keys it asked about are unchanged (as before), and its current entry is the very one the diff started from (`Arc::ptr_eq`). Otherwise the note stays queued.
+- **At most `MEMBER_STEP` (2,048) membership changes per hold.**
+  - A note with more is put in over several holds: its new memberships first, then its entry, then its old memberships. `publish` returns `More`, and `link_reads::settle` lets waiting writers in before each call.
+  - Between holds the reverse maps can list a note for a target or key its entry lacks, never the other way round. A reader of a key is resolved again for nothing, and a backlink source that doesn't link there has no lines (`backlink_sources` filters it out).
+  - Each hold re-checks the note. If it changed meanwhile, what was added goes on the cleanup queue (`LinkTable::forget`), and the note stays queued.
+- **Old memberships are cleared in steps.**
+  - **When cleared.** A long old entry's memberships are queued (`Stale`) rather than removed at once, after a job's publish or an inline replacement, for instance deleting the note. `link_job` clears up to 4,096 of them per job.
+  - **The check.** Each is checked against the note's entry at that moment and removed only if the entry lacks it, a binary search in its sorted lists. A note being staged is left alone until its entry is in.
+  - **Inline saves.** So a save that deletes a 40,000-link note queues its memberships and returns.
+- **Tests account for staging.** `reverse_maps_match` compares the table with the live maps after clearing the queue on a copy. A full map rebuild empties the queue.
+
+**Tests:**
+
+- `a_long_note_goes_in_over_several_holds_and_comes_out_in_steps`, at the test budget of 2 per step:
+  - a new long note goes in over more than 100 holds, with saves elsewhere between them;
+  - an edit to the note midway through staging drops the job's additions and leaves the note queued;
+  - deleting it inline queues its memberships, which come out in more than 100 steps.
+
+  The maps equal a rebuild after each stage, including while memberships are still queued.
+- `a_save_behind_a_long_mixed_note_stays_quick` is one new note with 16,000 links of both kinds:
+  - 4,000 targets written both ways;
+  - 4,000 missing notes;
+  - 4,000 Markdown links to no file.
+
+  It goes through the queued-save latency harness, which now also requires the longest lock step to be under a quarter of the settle. Then the note is deleted and its memberships cleared while saves keep coming. Debug results: settle 191 ms, longest hold 1.8 ms, worst save 1.7 ms. Delete 0.6 ms, then clearing 15 ms with a 2.9 ms longest hold.
+- The random sequences (`deferred_link_updates_settle_to_a_full_walk` and the reply sequence) run with every budget at 2, so they stage and clear constantly against the walk.
+
+### P2: Bases could reorder rows, first paint included, for a mixed-kind sort column
+
+**The problem.** In round 3 every `select` used the stepped merge sort. That equals `Array.prototype.sort` only when the comparison is consistent. A column mixing kinds compares number pairs as numbers and other pairs as text, which can go round in a cycle (-2 < "-3" < -10 < -2), and there the two sorts differ. With a limit, they can also show different rows.
+
+**The fix** (`bases/model.ts`). `orderedWork` checks each sort column, in steps, for a comparison that is a total preorder over these rows:
+
+- only numbers, none NaN;
+- only dates, all parsed or none parsed;
+- or no two numbers and no two dates, so every pair compares as text.
+
+Then every stable sort gives the same order, the native one, and the stepped merge sort runs. Otherwise the rows are sorted by `Array.prototype.sort` itself with the same comparator, on the same input order, in one task, as before round 3. Empties and the name/path tie-break are consistent either way. This is exact on any engine, the app's WebKit included, since it never guesses the engine's algorithm.
+
+**Tests:**
+
+- `model.test.ts` "keeps the native order for a sort column that mixes numbers and text":
+  - the reviewer's three values, with a limit of 2, through `select` (first paint) and `selectWork` (the sliced refresh);
+  - 60 random columns mixing numbers, numeric text, words, dates that parse and ones that don't, NaN and empties, each against the round-2 one-task select (a native sort of the same keys), with and without a limit.
+- `scripts/test-link-refresh-guards.mjs` (in `npm test`) part 3: a real Base with values -2, "-3" and -10, a limit of 2, reading links. Its first paint, and its refresh after a real link change, both show the rows the browser's own sort picks.
+
+### P3: a graph shape change still ran ~100 ms layout frames at 50k notes
+
+**The problem.** After a link change at 50k notes the graph reheats, and each simulation tick took about 95 ms of one frame.
+
+**The fix** (`graph/sim.ts`, `graph/view.ts`):
+
+- **A tick in steps.** `Simulation.advance(until)` runs the tick under way, or begins the next, until a deadline. The tick (`steps`) does the same arithmetic in the same order as before, the same random draws included. It pauses every 4,096 links, every 4,096 quadtree inserts and every 512 nodes of the repulsion pass.
+- **The layout is unchanged, tick for tick.**
+  - Alpha and the forces are read when a tick begins.
+  - Velocities change during it, but positions change only in its last step (centre and integration together), so a frame never draws a half-moved layout.
+  - `tick()` is `advance(Infinity)`.
+- **The frame.** The view gives the layout up to 12 ms per frame (`TICK_MS`). A tick that fits still takes one frame, as before, so graphs up to a few thousand notes animate exactly as they did. A longer one goes on over the next frames, which are drawn and stay responsive meanwhile.
+- **A new layout graph waits for the tick.**
+  - When a tick is under way, a rebuild's install (one that changes the layout graph) waits for it to end, and the next frame puts it in. A newer rebuild supersedes a waiting one, since it starts from what is shown.
+  - `installGraph` finishes a tick under way itself, as a fallback.
+  - A dragged node is still moved by the pointer at once, as between two ticks; reheats and settings changes apply from the next tick, as before.
+  - While someone types, a graph with a new model waiting is still drawn, as a new model was before (the typing pause skips only a graph already on screen).
+
+**Tests:** `graph.test.ts` "a tick in steps lays out exactly as whole ticks". 3,000 nodes, 4,500 links, 12 ticks, one step per call, against whole ticks:
+
+- positions and velocities are identical after every tick;
+- no node moves before a tick's last step;
+- a graph installed mid-tick finishes that tick first, then matches.
+
+**Measured** (`bench-link-refresh.mjs`, new `frameMs`: the graph's longest frame of work after the refresh). At 50k notes, one link added, with the graph and a link-reading Base open:
+
+- the worst graph frame is **17.7 ms** over 127 frames, against layout frames of 93–100 ms in round 3;
+- the longest block after the refresh is 26.5 ms, against 104 ms.
+
+The only task over 50 ms left is the mock's own `link_changes` walk (128 ms), which in the app is the Rust reply off this thread.
+
+### Other test changes (review 4)
+
+- The queued-save harness (`queued_saves_stay_quick`) now also measures the longest step that held the lock (`link_reads::take_longest_hold`, test builds only) and requires it under a quarter of the settle.
+- `link_reads::backlinks_stepping` is `backlinks` with a callback between steps, lock released; tests edit there.
+- `deferred_link_updates_settle_to_a_full_walk` asked each seed to have a publish skip a changed note. Which notes a job takes follows hash order, so one seed saw 0 or 1 from run to run; the full suite caught a 0 once. The check is now across its four seeds (at least 4; four runs saw 20–23). Jobs that only clean up, which are new, made such skips a little rarer.
+
+### Measurements (review 4)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-50000`, 50,125 notes). Two rows are new. "Before" is `39040a4` with the same two bench rows copied in (a scratch worktree, since removed), run in the same session. "Longest hold" is the longest single step holding the vault lock: what a queued save waits for at most.
+
+| Case | Before: settle / longest hold | After: settle / longest hold |
+|---|---|---|
+| One new note of 40,000 mixed links (10,000 targets both ways, 10,000 missing, 10,000 Markdown to no file) | 151 ms / **92.7 ms** | 76 ms / **1.4 ms** |
+| Deleting it (the save itself; then clearing) | **95.7 ms** inline | **1.0 ms**; then 8.4 ms of clearing, longest hold 1.1 ms |
+| `backlinks` of a hub with 50,125 sources, sources edited between steps | 33 ms / **12.8 ms** (it took the rest at once after the 4th edit) | 50 ms with 8 edits / **1.1 ms** |
+| Shared alias, 50,125 linkers, off-lock jobs | 103 ms / 0.80 ms | 124 ms / 0.87 ms |
+| A new README among 25,062, with 25,062 readers | 38 ms / 0.45 ms | 45 ms / 0.51 ms |
+| 100 notes of 5,000 links reading an alias | 1.01 s / 0.36 ms | 1.04 s / **0.07 ms** |
+| Whole `link_index`, in steps | 20.8 ms / 0.039 ms | 22.6 ms / 0.039 ms |
+
+The new costs:
+
+- **Sorting targets at resolve time.** Sorting each entry's targets and taking membership diffs by merge adds a little to every resolution. The full link rebuild went from 105 to 114 ms; the inline shared-alias removal (tests and tools) from 47 to 54 ms; off-lock settling of the alias from 103 to 124 ms. None of it is under the lock in the app.
+- **Memory.** The sorted target list adds 4 bytes a target: RSS after the first scan went from 623 to 626 MB.
+- **Backlink edits.** The edit log keeps up to 65,536 edits (16,384 before), about 2 MB at most.
+
+**Browser** (`GROVE_BENCH_CHECK=1 GROVE_BENCH_BASE=links`; every check passed):
+
+- `frameMs` is the graph's longest frame of work after the refresh, layout and drawing.
+- `blockedMs` is the longest any task kept a posted message waiting after the refresh.
+- Graph is work / start to installed / longest slice / install.
+
+| Notes | Case | Graph rebuild | Base longest slice | Worst graph frame (frames) | Longest block after refresh |
+|---|---|---|---|---|---|
+| 5k | prose | none | no pass | – | 5.7 ms |
+| 5k | one link | 9.7 / 10.7 / 6.1 / 0.4 ms | 5.0 ms | 15.5 ms (139) | 16.6 ms |
+| 20k | prose | none | no pass | – | 20.9 ms |
+| 20k | one link | 28.5 / 30.9 / 12.0 / 1.2 ms | 14.8 ms | 16.9 ms (136) | 20.0 ms |
+| 50k | prose | none | no pass | – | 20.8 ms |
+| 50k | one link | 87 / 157 / 9.3 / 1.5 ms | 12.0 ms | **17.7 ms** (127) | **26.5 ms** |
+
+- In round 3, 50k with one link had 23 layout frames of 93–100 ms after the refresh, and a longest block of 104 ms.
+- The only long task now is the mock's own `link_changes` walk (107–128 ms) before the refresh. The app does that in Rust, off this thread.
+- At 50k a tick still costs about 95 ms of work. Spread over frames, the layout reaches rest in about the same work, and the frames in between are drawn.
+
+### Mutation checks (review 4)
+
+Each mutation was applied alone and its tests were run (`mutate4.py` in the session scratchpad). 14 of 15 were caught; one is equivalent.
+
+- **Caught:**
+  - a reply finishes without patching the edits;
+  - a note copied again keeps its old copy for a target it no longer links to (missed at first; the alias test now also has a copied source stop linking);
+  - the edit list leaves out entry edits;
+  - `publish` ignores its membership budget;
+  - cleanup removes memberships the entry still has;
+  - a long old entry is never queued for cleanup;
+  - a dropped staged publish leaves its additions;
+  - `install` skips small drops;
+  - `Moves` reads old and new the wrong way round;
+  - a mixed column uses the merge sort;
+  - a column of numbers with NaN counts as ordered;
+  - a tick moves nodes before its last step;
+  - a new graph goes in mid-tick without the tick ending.
+- **Equivalent:** dropping the reply's early restart check, which restarts at the top of a step when the edits since its mark are unknown. The check phase restarts anyway (`edited_paths` returns `None` for another epoch), so the early check only saves the steps in between.
+
+### Still open after review 4
+
+- A rescan's finish still diffs the two indexes once under the lock (11 ms in debug at 10k notes), as in round 3.
+- A sort column that mixes kinds is sorted in one task, by the engine's own sort, so its order stays the one the table always had. At 50k rows that task is the old one-task sort.
+- At 50k notes a graph tick still costs about 95 ms of work, now in steps of at most 12 ms a frame. Ticks that fit in a frame (a few thousand notes) still take one frame each.
+
+### Suites (review 4)
+
+- **`cargo test --offline --all-targets`:** **233 passed**, 0 failed, 7 ignored. That is 229 at `39040a4` plus four new tests: the alias move, the rescan swap, the long note in steps, and the long mixed note's latency. The first full run failed `deferred_link_updates_settle_to_a_full_walk` on its per-seed exercise check (see Other test changes); after the change it passed.
+- **`cargo clippy --all-targets`:** nothing new. The only warning left in the touched files is an old one: the `?` suggestion in `index.rs` `norm_logical`, which predates P2b.
+- **`npm run build`:** clean.
+- **`vitest`:** **1713 / 1713**, with two new tests.
+- **`npm test`:** the full run passed `test-link-refresh-guards.mjs` (with its new part 3) and vitest, then stopped in `test-canvas-cards.mjs`, at "Six on-screen link cards load a frame". That check waits for web-link card iframes and reads no note links. It then passed 3 of 3 standalone.
+  - I ran each of the 70 later steps of the chain and the `posttest` steps one by one, and 68 passed.
+  - `test-r27e.mjs` ("settings opens with the search field focused") and `test-drawing-editor.mjs` (its 50 ms task budget while editing 2,000 shapes) failed once each. Neither reads links. Both then passed 3 of 3 standalone.
+- **Browser bench:** `GROVE_BENCH_CHECK=1` passed at 5k, 20k and 50k.
+- The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.

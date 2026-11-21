@@ -11,6 +11,9 @@
 // When all of that has settled no frame is requested at all, and a hidden
 // graph (a background tab, a closed sidebar) does nothing until shown.
 //
+// A tick too long for one frame is spread over several (`Simulation.advance`,
+// review 4): the same layout, tick for tick, with frames drawn in between.
+//
 // The webview's canvas is drawn on the CPU in WebKitGTK. While the graph
 // moves, a canvas far too slow to draw at full resolution is drawn at one
 // pixel per CSS pixel, then once more at full resolution when it comes to
@@ -61,6 +64,11 @@ export type GraphView = ReturnType<typeof createGraphView>;
 const REFRESH_DELAY = 200;
 /** Longest stretch of an update's rebuild in one task (ms). */
 const SLICE_MS = 6;
+/**
+ * Most of a frame the layout may take (ms). A tick that takes longer (about 95 ms at 50,000
+ * nodes) goes on in the next frames (review 4); one that fits still takes one frame, as before.
+ */
+const TICK_MS = 12;
 /** A canvas slower than this (ms) to draw is drawn every other frame while it settles on its own. */
 const SLOW_FRAME = 10;
 /**
@@ -160,6 +168,8 @@ export function createGraphView(host: GraphHost) {
   let stale = true;
   /** A sliced rebuild is under way, from the links as they were when it started. */
   let building = false;
+  /** A rebuild's new layout graph, waiting for the tick under way to end (`step`). */
+  let waiting: Prepared | null = null;
 
   /**
    * Rebuild the model from the vault and options. Runs synchronously when
@@ -169,6 +179,8 @@ export function createGraphView(host: GraphHost) {
   async function rebuild() {
     const mine = ++seq;
     stale = false;
+    // This rebuild starts from what is shown, so one still waiting is superseded.
+    waiting = null;
     let facts: Facts | null = null;
     const asked = source.facts(cfg);
     if (asked) {
@@ -205,7 +217,12 @@ export function createGraphView(host: GraphHost) {
     }
     building = false;
     const installing = performance.now();
-    install(step.value);
+    // A new layout graph goes in between ticks: the next frame puts it in once the tick under
+    // way ends (review 4). Anything else goes in now.
+    if (step.value.graph && sim.ticking) {
+      waiting = step.value;
+      invalidate();
+    } else install(step.value);
     devBuilt?.(work + performance.now() - slice, performance.now() - started, Math.max(longest, performance.now() - slice), performance.now() - installing);
   }
 
@@ -326,8 +343,9 @@ export function createGraphView(host: GraphHost) {
     frame = 0;
     // Nobody is touching the graph and someone is typing: let the editor have
     // the frames, and carry on settling once the typing pauses. (A graph
-    // whose nodes aren't on screen yet is drawn first.)
-    if (!input.drag && !input.panning && cam.zoomAt === null && drawnModel === model && started - lastKey < TYPING_PAUSE) {
+    // whose nodes aren't on screen yet is drawn first, one waiting for the
+    // tick under way included.)
+    if (!input.drag && !input.panning && cam.zoomAt === null && drawnModel === model && !waiting && started - lastKey < TYPING_PAUSE) {
       lastFrame = 0;
       clearTimeout(typingWait);
       typingWait = window.setTimeout(invalidate, TYPING_PAUSE - (started - lastKey) + 10);
@@ -337,10 +355,16 @@ export function createGraphView(host: GraphHost) {
     lastFrame = now;
     let more = false;
     if (reveal) more = advanceTimelapse() || more;
-    if (!sim.settled) {
-      sim.tick();
+    if (!sim.settled || sim.ticking) {
+      if (sim.advance(started + TICK_MS) && sim.settled) rememberLayout();
       more = true;
-      if (sim.settled) rememberLayout();
+    }
+    // A new graph waits for the tick under way (its nodes move when it ends).
+    if (waiting && !sim.ticking) {
+      const p = waiting;
+      waiting = null;
+      install(p);
+      more = true;
     }
     // Zoom eases to its target around the point it was aimed at.
     if (cam.scale !== cam.target) {

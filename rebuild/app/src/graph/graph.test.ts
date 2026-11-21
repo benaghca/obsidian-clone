@@ -332,3 +332,45 @@ test("whenever the guard skips a refresh, a fresh local graph equals the one sho
   }
   expect(skipped).toBeGreaterThan(100);
 });
+
+// Review 4: a tick taken in steps (`advance`, as the view does at 50k nodes) moves every node
+// exactly as a whole tick does, tick for tick, and nothing moves until its last step. A new
+// graph put in while a tick is under way waits for it to end.
+test("a tick in steps lays out exactly as whole ticks", () => {
+  const ids = Array.from({ length: 3000 }, (_, i) => `n${i}`);
+  const links = Array.from({ length: 4500 }, (_, i) => ({ source: i % 3000, target: (i * 7 + 3) % 3000 }));
+  const whole = new Simulation();
+  const stepped = new Simulation();
+  for (const sim of [whole, stepped]) sim.setGraph(ids, links, () => undefined);
+  let steps = 0;
+  for (let t = 0; t < 12; t++) {
+    whole.tick();
+    const x = Array.from(stepped.x);
+    // A deadline already passed: one step a call.
+    while (!stepped.advance(0)) {
+      steps++;
+      expect(stepped.ticking).toBe(true);
+      if (steps % 7 === 0) expect(Array.from(stepped.x)).toEqual(x);
+    }
+    expect(stepped.ticking).toBe(false);
+    expect(Array.from(stepped.x)).toEqual(Array.from(whole.x));
+    expect(Array.from(stepped.vy)).toEqual(Array.from(whole.vy));
+  }
+  expect(steps).toBeGreaterThan(12 * 5);
+  // Half a tick, then a new graph (one more node): the tick ends first, as it would have.
+  stepped.advance(0);
+  expect(stepped.ticking).toBe(true);
+  whole.tick();
+  const more = [...ids, "late"];
+  const known = (id: string) => (id === "late" ? undefined : ids.indexOf(id));
+  for (const sim of [whole, stepped]) {
+    const steps = sim.prepareGraph(more, links, known);
+    let step = steps.next();
+    while (!step.done) step = steps.next();
+    sim.installGraph(step.value);
+  }
+  expect(stepped.ticking).toBe(false);
+  whole.tick();
+  stepped.tick();
+  expect(Array.from(stepped.x)).toEqual(Array.from(whole.x));
+});

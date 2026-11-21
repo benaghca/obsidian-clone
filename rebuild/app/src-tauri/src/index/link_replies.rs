@@ -7,13 +7,17 @@
 //! Between steps the table may change. A link reply records the version it started from and,
 //! once the table is settled, patches every path logged since (`LinkTable::logged`), again in
 //! steps, until a settled check finds no newer version: the reply then equals `changes` at that
-//! version. A `backlinks` reply depends on note text too, so it starts over when the table's
-//! version moves or a note it copied is edited (after a few tries it takes the rest in one
-//! step).
+//! version. A `backlinks` reply depends on note text and on where each link points, which
+//! can change with the entry the same (review 4: an alias moving between two targets a note
+//! links to anyway). So it patches from the index's edits instead: once settled, every note
+//! whose node or resolved links changed since the reply began is copied again, in steps, until
+//! a settled check finds no newer edit. It starts over only when the edits are not known any
+//! more (a full rebuild, a rescan's new index, or more edits than the log keeps), still in
+//! bounded steps.
 
 use super::link_jobs::{budget, BacklinkSource};
 use super::link_table::Resolved;
-use super::{Edit, EditMark, Index};
+use super::{EditMark, Index};
 use crate::model::{Backlink, LinkChanges, LinkEntry, LinkIndex};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -217,84 +221,167 @@ fn full_index(out: &BTreeMap<Arc<str>, Option<Arc<Resolved>>>) -> LinkIndex {
     index
 }
 
-/// Tries before a `backlinks` reply takes what is left in one step.
-const BACKLINK_TRIES: usize = 4;
-
 /// A `backlinks` reply.
 pub(crate) struct BacklinkReply {
     targets: Vec<String>,
-    /// Which target, and the last source copied for it.
-    at: usize,
-    after: Option<Arc<str>>,
-    /// The edits as of the last step, and the table's (id, version) since the first source
-    /// was copied.
-    stamp: Option<(EditMark, u64, u64)>,
-    got: Vec<Vec<BacklinkSource>>,
-    tries: usize,
-    /// Sources dropped by a restart, freed off the lock (`absorb`).
-    trash: Vec<Vec<BacklinkSource>>,
+    phase: Back,
+    /// Every edit after this is still to patch (set when copying starts).
+    mark: Option<EditMark>,
+    /// Per target: its sources, by path.
+    got: Vec<BTreeMap<Arc<str>, BacklinkSource>>,
+    /// What the last step copied, merged into `got` by `absorb`, off the lock: sources of one
+    /// target, or notes edited since the mark (`None`: no note with links there now).
+    copied: Vec<(usize, Vec<BacklinkSource>)>,
+    fetched: Vec<(Arc<str>, Option<BacklinkSource>)>,
+    logged: Vec<Arc<str>>,
+    /// Sources dropped by a restart, freed off the lock too.
+    trash: Vec<BTreeMap<Arc<str>, BacklinkSource>>,
+}
+
+enum Back {
+    Start,
+    /// Sources of `targets[at]` after `after`.
+    Copy { at: usize, after: Option<Arc<str>> },
+    /// Paths edited after `since` up to `until`, `skip` edits read; `end` once all are.
+    Log { since: EditMark, until: EditMark, skip: usize, paths: BTreeSet<Arc<str>>, end: bool },
+    /// Those notes, from `at`.
+    Fetch { paths: Vec<Arc<str>>, at: usize },
+    /// Settled and no edit since the mark: done. Otherwise patch from it.
+    Check,
 }
 
 impl BacklinkReply {
     pub(crate) fn new(paths: &[String]) -> Self {
         let targets: Vec<String> = paths.iter().cloned().collect::<BTreeSet<_>>().into_iter().collect();
-        let got = targets.iter().map(|_| Vec::new()).collect();
-        BacklinkReply { targets, at: 0, after: None, stamp: None, got, tries: 0, trash: Vec::new() }
+        let got = targets.iter().map(|_| BTreeMap::new()).collect();
+        BacklinkReply {
+            targets,
+            phase: Back::Start,
+            mark: None,
+            got,
+            copied: Vec::new(),
+            fetched: Vec::new(),
+            logged: Vec::new(),
+            trash: Vec::new(),
+        }
     }
 
-    /// Free what a restart dropped (off the lock).
+    /// Merge what the last step copied (off the lock; `step` does it too if it was not done).
     pub(crate) fn absorb(&mut self) {
         self.trash = Vec::new();
+        for (at, sources) in self.copied.drain(..) {
+            let target = &self.targets[at];
+            for source in sources.into_iter().filter(|s| s.links_to(target)) {
+                self.got[at].insert(Arc::clone(source.path()), source);
+            }
+        }
+        for (path, source) in self.fetched.drain(..) {
+            for (target, got) in self.targets.iter().zip(&mut self.got) {
+                got.remove(&path);
+                if let Some(source) = source.as_ref().filter(|s| s.links_to(target)) {
+                    got.insert(Arc::clone(&path), source.clone());
+                }
+            }
+        }
+        if let Back::Log { paths, end, .. } = &mut self.phase {
+            paths.extend(self.logged.drain(..));
+            if *end {
+                let paths = std::mem::take(paths).into_iter().collect();
+                self.phase = Back::Fetch { paths, at: 0 };
+            }
+        }
+    }
+
+    fn restart(&mut self) {
+        let empty = self.targets.iter().map(|_| BTreeMap::new()).collect();
+        self.trash = std::mem::replace(&mut self.got, empty);
+        self.phase = Back::Start;
+        self.mark = None;
     }
 
     /// One bounded step, under the read lock.
     pub(crate) fn step(&mut self, index: &Index) -> ReplyStep {
-        if index.links_pending() {
-            return ReplyStep::Settle;
+        self.absorb();
+        // The edits since the mark are what the patch needs: when they are not known any more,
+        // start over.
+        if self.mark.is_some_and(|mark| index.edits_since(mark).is_none()) {
+            self.restart();
         }
-        let (id, version, _) = index.links.stamp();
-        // Any entry change can move a source in or out. Otherwise only an edit to a note that
-        // links to a target copied so far can change what was copied (its line text): such a
-        // note is a source of that target now, or its entry changed.
-        let done = &self.targets[..(self.at + 1).min(self.targets.len())];
-        let moved = self.stamp.is_some_and(|(mark, then_id, then_version)| {
-            (then_id, then_version) != (id, version)
-                || index.edits_since(mark).is_none_or(|mut edits| {
-                    edits.any(|edit| matches!(edit, Edit::Node(path) if done.iter().any(|t| index.links.is_source(t, path))))
-                })
-        });
-        if moved {
-            self.at = 0;
-            self.after = None;
-            let empty = self.targets.iter().map(|_| Vec::new()).collect();
-            self.trash = std::mem::replace(&mut self.got, empty);
-            self.tries += 1;
-            self.stamp = None;
-        }
-        self.stamp = Some((index.edit_mark(), id, version));
-        let mut left = if self.tries >= BACKLINK_TRIES { usize::MAX } else { budget(CHUNK) };
-        while let Some(target) = self.targets.get(self.at) {
-            let (sources, end) = index.backlink_sources(target, self.after.as_deref(), left);
-            left = left.saturating_sub(sources.len().max(1));
-            if let Some(last) = sources.last() {
-                self.after = Some(Arc::clone(last.path()));
+        match &mut self.phase {
+            Back::Start => {
+                if index.links_pending() {
+                    return ReplyStep::Settle;
+                }
+                self.mark = Some(index.edit_mark());
+                self.phase = Back::Copy { at: 0, after: None };
+                ReplyStep::More
             }
-            self.got[self.at].extend(sources);
-            if !end {
-                return ReplyStep::More;
+            Back::Copy { at, after } => {
+                let mut left = budget(CHUNK);
+                while let Some(target) = self.targets.get(*at) {
+                    let (sources, read, last) = index.backlink_sources(target, after.as_deref(), left);
+                    let end = read < left;
+                    left = left.saturating_sub(read.max(1));
+                    if last.is_some() {
+                        *after = last;
+                    }
+                    self.copied.push((*at, sources));
+                    if !end {
+                        return ReplyStep::More;
+                    }
+                    *at += 1;
+                    *after = None;
+                    if left == 0 {
+                        return ReplyStep::More;
+                    }
+                }
+                self.phase = Back::Check;
+                ReplyStep::More
             }
-            self.at += 1;
-            self.after = None;
+            Back::Log { since, until, skip, end, .. } => {
+                let Some((paths, read, last)) = index.edited_paths(*since, *until, *skip, budget(CHUNK)) else {
+                    self.restart();
+                    return ReplyStep::More;
+                };
+                *skip += read;
+                *end = last;
+                self.logged = paths;
+                ReplyStep::More
+            }
+            Back::Fetch { paths, at } => {
+                let upto = (*at + budget(CHUNK)).min(paths.len());
+                for path in &paths[*at..upto] {
+                    self.fetched.push((Arc::clone(path), index.backlink_source(path)));
+                }
+                *at = upto;
+                if upto == paths.len() {
+                    self.phase = Back::Check;
+                }
+                ReplyStep::More
+            }
+            Back::Check => {
+                if index.links_pending() {
+                    return ReplyStep::Settle;
+                }
+                let since = self.mark.expect("a mark is set before copying");
+                let now = index.edit_mark();
+                if now == since {
+                    return ReplyStep::Done;
+                }
+                self.phase = Back::Log { since, until: now, skip: 0, paths: BTreeSet::new(), end: false };
+                self.mark = Some(now);
+                ReplyStep::More
+            }
         }
-        ReplyStep::Done
     }
 
     /// The reply, built off the lock.
-    pub(crate) fn finish(self) -> BTreeMap<String, Vec<Backlink>> {
+    pub(crate) fn finish(mut self) -> BTreeMap<String, Vec<Backlink>> {
+        self.absorb();
         let mut found = BTreeMap::new();
         for (target, sources) in self.targets.into_iter().zip(self.got) {
             let mut hits = Vec::new();
-            for source in &sources {
+            for source in sources.values() {
                 source.hits(&target, &mut hits);
             }
             if !hits.is_empty() {

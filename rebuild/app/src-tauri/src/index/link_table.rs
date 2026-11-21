@@ -12,7 +12,11 @@
 //! Both hold their notes in a `PathSet`: a short sorted list, or a B-tree once it is long, so
 //! adding or removing one note stays cheap when thousands link to one target or read one key
 //! (review 1: an alias with 20,000 linkers). Re-resolving a note moves only the memberships
-//! that changed (`relink`); its unchanged targets and keys stay where they are.
+//! that changed (`Moves`, from each entry's sorted targets); its unchanged targets and keys
+//! stay where they are. Review 4: a long note's changes go in a bounded number at a time. Its
+//! new memberships go in before its entry does (a job's publish, `add_moves`, `install`), and
+//! old ones are cleared after it (`clean`), so between steps the maps can hold a stale note,
+//! never miss one.
 //!
 //! A note is resolved again when its own node changes, or when a key it read changes. The
 //! index queues those paths (`touch`) and keys (`wake`) and resolves them once, when the change
@@ -122,13 +126,6 @@ impl PathSet {
         self.len() == 0
     }
 
-    fn contains(&self, path: &str) -> bool {
-        match self {
-            PathSet::Few(list) => list.binary_search_by(|p| (**p).cmp(path)).is_ok(),
-            PathSet::Many(set) => set.contains(path),
-        }
-    }
-
     fn insert(&mut self, path: &Arc<str>) {
         self.add(path);
         self.seal();
@@ -192,9 +189,22 @@ pub(super) struct Resolved {
     /// Every key the resolution read, sorted, without repeats.
     pub(super) reads: Vec<KeyHash>,
     pub(super) entry: LinkEntry,
+    /// Each target once, in byte order, as places in `outgoing` then `markdown` (one list):
+    /// the note's `by_target` memberships, sorted when it is resolved (review 4: worked out
+    /// off the lock for a job, so the write lock never sorts or scans a long note's targets).
+    members: Vec<u32>,
 }
 
 impl Resolved {
+    pub(super) fn new(slots: Vec<Option<u32>>, reads: Vec<KeyHash>, entry: LinkEntry) -> Self {
+        let mut r = Resolved { slots, reads, entry, members: Vec::new() };
+        let mut members: Vec<u32> = (0..(r.entry.outgoing.len() + r.entry.markdown.len()) as u32).collect();
+        members.sort_by(|a, b| r.member(*a).cmp(r.member(*b)));
+        members.dedup_by(|a, b| r.member(*a) == r.member(*b));
+        r.members = members;
+        r
+    }
+
     /// Where link `i` (a markdown link or not) points.
     pub(super) fn target(&self, i: usize, markdown: bool) -> Option<&String> {
         let list = if markdown {
@@ -202,16 +212,135 @@ impl Resolved {
         } else {
             &self.entry.outgoing
         };
-        self.slots.get(i).copied().flatten().map(|at| &list[at as usize])
+        self.slots.get(i).copied().flatten().and_then(|at| list.get(at as usize))
     }
 
-    /// Each target once (a path can be in both `outgoing` and `markdown`).
-    fn targets(&self) -> impl Iterator<Item = &String> {
+    /// Place `k` of `outgoing` then `markdown`.
+    fn member(&self, k: u32) -> &str {
+        let k = k as usize;
         let out = &self.entry.outgoing;
-        out.iter()
-            .chain(self.entry.markdown.iter().filter(move |t| !out.contains(t)))
+        if k < out.len() {
+            &out[k]
+        } else {
+            &self.entry.markdown[k - out.len()]
+        }
+    }
+
+    /// Each target once, in byte order.
+    pub(super) fn targets(&self) -> impl Iterator<Item = &str> {
+        self.members.iter().map(|k| self.member(*k))
+    }
+
+    /// Whether a link here resolves to `target` (a binary search).
+    pub(super) fn has_target(&self, target: &str) -> bool {
+        self.members.binary_search_by(|k| self.member(*k).cmp(target)).is_ok()
+    }
+
+    fn has_read(&self, key: KeyHash) -> bool {
+        self.reads.binary_search(&key).is_ok()
+    }
+
+    /// Reverse-map memberships: targets, then keys read.
+    fn size(&self) -> usize {
+        self.members.len() + self.reads.len()
     }
 }
+
+/// What a replacement changed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Replaced {
+    /// Nothing.
+    Same,
+    /// Where links point (a backlink can move), not the entry pages hold.
+    Slots,
+    /// The entry too.
+    Entry,
+}
+
+impl Replaced {
+    pub(super) fn between(old: Option<&Resolved>, new: Option<&Resolved>) -> Replaced {
+        if old == new {
+            Replaced::Same
+        } else if old.map(|r| &r.entry) == new.map(|r| &r.entry) {
+            Replaced::Slots
+        } else {
+            Replaced::Entry
+        }
+    }
+}
+
+/// A note's reverse-map memberships that changed between two resolutions, worked out off the
+/// lock (`moves`) and applied under it in bounded steps (`LinkTable::add_moves`, `install`).
+#[derive(Debug, Default)]
+pub(super) struct Moves {
+    /// Targets (as places in the new entry's `members`) and keys only the new one has.
+    add_targets: Vec<u32>,
+    add_reads: Vec<KeyHash>,
+    /// Targets (places in the old entry's `members`) and keys only the old one has.
+    drop_targets: Vec<u32>,
+    drop_reads: Vec<KeyHash>,
+}
+
+impl Moves {
+    /// Both sorted, so one merge of each pair of lists.
+    pub(super) fn between(old: Option<&Resolved>, new: Option<&Resolved>) -> Moves {
+        let mut m = Moves::default();
+        let none = Resolved::new(Vec::new(), Vec::new(), LinkEntry::default());
+        let (o, n) = (old.unwrap_or(&none), new.unwrap_or(&none));
+        let (mut a, mut b) = (0, 0);
+        while a < o.members.len() || b < n.members.len() {
+            let order = match (o.members.get(a), n.members.get(b)) {
+                (Some(x), Some(y)) => o.member(*x).cmp(n.member(*y)),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                _ => std::cmp::Ordering::Greater,
+            };
+            match order {
+                std::cmp::Ordering::Less => {
+                    m.drop_targets.push(o.members[a]);
+                    a += 1;
+                }
+                std::cmp::Ordering::Greater => {
+                    m.add_targets.push(n.members[b]);
+                    b += 1;
+                }
+                std::cmp::Ordering::Equal => {
+                    a += 1;
+                    b += 1;
+                }
+            }
+        }
+        for (key, added) in sorted_diff(&o.reads, &n.reads) {
+            if added {
+                m.add_reads.push(*key);
+            } else {
+                m.drop_reads.push(*key);
+            }
+        }
+        m
+    }
+
+    pub(super) fn adds(&self) -> usize {
+        self.add_targets.len() + self.add_reads.len()
+    }
+
+    fn drops(&self) -> usize {
+        self.drop_targets.len() + self.drop_reads.len()
+    }
+}
+
+/// An old resolution whose memberships may still be in the reverse maps: each is removed
+/// unless the note's entry now has it (`LinkTable::clean`).
+#[derive(Debug)]
+struct Stale {
+    path: Arc<str>,
+    old: Arc<Resolved>,
+    /// Memberships checked so far: targets, then keys.
+    at: usize,
+}
+
+/// Reverse-map membership changes per write-lock hold: a replacement with more is staged
+/// (`Moves`, `Stale`).
+pub(super) const MEMBER_STEP: usize = 2_048;
 
 #[derive(Clone, Debug)]
 struct History {
@@ -246,6 +375,14 @@ pub(super) struct LinkTable {
     history: History,
     /// `LOG_PATHS`; tests set a smaller cap.
     log_paths: usize,
+    /// Old resolutions to clear out of the reverse maps, a step at a time (review 4). Until
+    /// then the maps hold too many notes for some targets and keys, never too few: a reader
+    /// of a key resolves again for nothing, and a backlink source with no link to the target
+    /// has no lines.
+    stale: VecDeque<Stale>,
+    /// The note a job is adding memberships for, before its entry goes in: `clean` leaves its
+    /// memberships alone meanwhile.
+    staging: Option<Arc<str>>,
 }
 
 impl Default for LinkTable {
@@ -258,6 +395,8 @@ impl Default for LinkTable {
             woken: Woken::default(),
             history: History::fresh(),
             log_paths: LOG_PATHS,
+            stale: VecDeque::new(),
+            staging: None,
         }
     }
 }
@@ -270,11 +409,6 @@ impl LinkTable {
 
     pub(super) fn contains(&self, path: &str) -> bool {
         self.notes.contains_key(path)
-    }
-
-    /// Whether `path` has a link resolving to `target`.
-    pub(super) fn is_source(&self, target: &str, path: &str) -> bool {
-        self.by_target.get(target).is_some_and(|set| set.contains(path))
     }
 
     /// The notes linking to `target`, after `after`, in path order.
@@ -362,20 +496,81 @@ impl LinkTable {
     }
 
     /// Put `new` (or nothing, for a path that is no note with links any more) at `path`.
-    /// True when its entry changed.
-    pub(super) fn replace(&mut self, path: Arc<str>, new: Option<Resolved>) -> bool {
-        let old = match new {
-            Some(new) => {
-                if self.notes.get(&path).is_some_and(|old| **old == new) {
-                    return false;
-                }
-                self.notes.insert(Arc::clone(&path), Arc::new(new))
-            }
+    pub(super) fn replace(&mut self, path: Arc<str>, new: Option<Resolved>) -> Replaced {
+        let old = self.notes.get(&path).cloned();
+        let changed = Replaced::between(old.as_deref(), new.as_ref());
+        if changed == Replaced::Same {
+            return changed;
+        }
+        let new = new.map(Arc::new);
+        match &new {
+            Some(new) => self.notes.insert(Arc::clone(&path), Arc::clone(new)),
             None => self.notes.remove(&path),
         };
-        let new = self.notes.get(&path).map(|r| &**r);
-        relink(&mut self.by_target, &mut self.readers, &path, old.as_deref(), new);
-        old.as_ref().map(|r| &r.entry) != new.map(|r| &r.entry)
+        let (by_target, readers) = (&mut self.by_target, &mut self.readers);
+        match old {
+            // A long old entry: its memberships are cleared later, in steps. Only the new
+            // entry's own go in now (an inline settle's new entries are short).
+            Some(old) if old.size() > super::link_jobs::budget(MEMBER_STEP) => {
+                if let Some(new) = &new {
+                    for target in new.targets().filter(|t| !old.has_target(t)) {
+                        add_target(by_target, target, &path);
+                    }
+                    for key in new.reads.iter().filter(|k| !old.has_read(**k)) {
+                        readers.entry(*key).or_default().insert(&path);
+                    }
+                }
+                self.stale.push_back(Stale { path, old, at: 0 });
+            }
+            old => {
+                let moves = Moves::between(old.as_deref(), new.as_deref());
+                apply_adds(by_target, readers, &path, new.as_deref(), &moves, 0, usize::MAX);
+                apply_drops(by_target, readers, &path, old.as_deref(), &moves);
+            }
+        }
+        changed
+    }
+
+    /// Add up to `n` of `moves`' new memberships for `path`, from the `from`-th (a job's
+    /// staged publish: its new entry goes in once all are in).
+    pub(super) fn add_moves(&mut self, path: &Arc<str>, new: &Resolved, moves: &Moves, from: usize, n: usize) {
+        self.staging = Some(Arc::clone(path));
+        apply_adds(&mut self.by_target, &mut self.readers, path, Some(new), moves, from, n);
+    }
+
+    /// Put a job's entry in once its new memberships are (`add_moves`): the old ones go now
+    /// if there are at most `room` of them, or are cleared later. Returns the changes made.
+    pub(super) fn install(&mut self, path: Arc<str>, new: Option<Arc<Resolved>>, old: Option<Arc<Resolved>>, moves: &Moves, room: usize) -> usize {
+        self.staging = None;
+        match &new {
+            Some(new) => self.notes.insert(Arc::clone(&path), Arc::clone(new)),
+            None => self.notes.remove(&path),
+        };
+        match old {
+            Some(old) if moves.drops() > room => {
+                self.stale.push_back(Stale { path, old, at: 0 });
+                1
+            }
+            old => {
+                apply_drops(&mut self.by_target, &mut self.readers, &path, old.as_deref(), moves);
+                moves.drops()
+            }
+        }
+    }
+
+    /// A staged publish given up: what it added is cleared later, unless the entry has it.
+    pub(super) fn forget(&mut self, path: &Arc<str>, partial: Arc<Resolved>) {
+        self.staging = None;
+        self.stale.push_back(Stale { path: Arc::clone(path), old: partial, at: 0 });
+    }
+
+    pub(super) fn has_cleanup(&self) -> bool {
+        !self.stale.is_empty()
+    }
+
+    /// Check up to `budget` stale memberships, removing each the note's entry lacks.
+    pub(super) fn clean(&mut self, budget: usize) {
+        clean(&self.notes, &mut self.by_target, &mut self.readers, &mut self.stale, self.staging.as_deref(), budget);
     }
 
     /// Replace every note at once (a full name-map rebuild). `fresh` must come in path order.
@@ -404,6 +599,8 @@ impl LinkTable {
         self.readers = readers;
         self.pending.clear();
         self.woken.clear();
+        self.stale.clear();
+        self.staging = None;
         self.record(changed);
     }
 
@@ -549,9 +746,13 @@ impl LinkTable {
         &self.notes
     }
 
-    /// The two reverse maps, rebuilt from `notes`, against the live ones.
+    /// The two reverse maps, rebuilt from `notes`, against the live ones once their stale
+    /// memberships are cleared (on a copy).
     #[cfg(test)]
     pub(super) fn reverse_maps_match(&self) -> bool {
+        let (mut live_targets, mut live_readers) = (self.by_target.clone(), self.readers.clone());
+        let mut stale: VecDeque<Stale> = self.stale.iter().map(|s| Stale { path: Arc::clone(&s.path), old: Arc::clone(&s.old), at: s.at }).collect();
+        clean(&self.notes, &mut live_targets, &mut live_readers, &mut stale, None, usize::MAX);
         let mut by_target = ByTarget::default();
         let mut readers = Readers::default();
         for (path, resolved) in &self.notes {
@@ -562,11 +763,11 @@ impl LinkTable {
         let plain = |map: &Readers| -> HashMap<KeyHash, Vec<Arc<str>>> {
             map.iter().map(|(k, v)| (*k, v.iter().cloned().collect())).collect()
         };
-        let in_order = self.by_target.values().chain(self.readers.values()).all(|set| {
+        let in_order = live_targets.values().chain(live_readers.values()).all(|set| {
             let paths: Vec<_> = set.iter().collect();
             !paths.is_empty() && paths.windows(2).all(|w| w[0] < w[1])
         });
-        in_order && by_target == self.by_target && plain(&readers) == plain(&self.readers)
+        in_order && by_target == live_targets && plain(&readers) == plain(&live_readers)
     }
 }
 
@@ -574,9 +775,9 @@ impl LinkTable {
 /// the last note.
 fn link(by_target: &mut ByTarget, readers: &mut Readers, path: &Arc<str>, resolved: &Resolved) {
     for target in resolved.targets() {
-        match by_target.get_mut(target.as_str()) {
+        match by_target.get_mut(target) {
             Some(set) => set.add(path),
-            None => by_target.entry(Arc::from(target.as_str())).or_default().add(path),
+            None => by_target.entry(Arc::from(target)).or_default().add(path),
         }
     }
     for key in &resolved.reads {
@@ -588,39 +789,85 @@ fn seal_all(by_target: &mut ByTarget, readers: &mut Readers) {
     by_target.values_mut().chain(readers.values_mut()).for_each(PathSet::seal);
 }
 
-/// Move `path`'s memberships from `old` to `new`: only targets and keys that are in one and
-/// not the other are touched.
-fn relink(by_target: &mut ByTarget, readers: &mut Readers, path: &Arc<str>, old: Option<&Resolved>, new: Option<&Resolved>) {
-    fn targets(r: Option<&Resolved>) -> Vec<&str> {
-        let mut out: Vec<&str> = r.into_iter().flat_map(Resolved::targets).map(String::as_str).collect();
-        out.sort_unstable();
-        out.dedup();
-        out
+fn add_target(by_target: &mut ByTarget, target: &str, path: &Arc<str>) {
+    match by_target.get_mut(target) {
+        Some(set) => set.insert(path),
+        None => by_target.entry(Arc::from(target)).or_default().insert(path),
     }
-    fn reads(r: Option<&Resolved>) -> &[KeyHash] {
-        r.map_or(&[], |r| r.reads.as_slice())
-    }
-    for (target, added) in sorted_diff(&targets(old), &targets(new)) {
-        if added {
-            match by_target.get_mut(*target) {
-                Some(set) => set.insert(path),
-                None => by_target.entry(Arc::from(*target)).or_default().insert(path),
-            }
-        } else if let Some(set) = by_target.get_mut(*target) {
-            set.remove(path);
-            if set.is_empty() {
-                by_target.remove(*target);
-            }
+}
+
+fn drop_target(by_target: &mut ByTarget, target: &str, path: &str) {
+    if let Some(set) = by_target.get_mut(target) {
+        set.remove(path);
+        if set.is_empty() {
+            by_target.remove(target);
         }
     }
-    for (key, added) in sorted_diff(reads(old), reads(new)) {
-        if added {
-            readers.entry(*key).or_default().insert(path);
-        } else if let Some(set) = readers.get_mut(key) {
-            set.remove(path);
-            if set.is_empty() {
-                readers.remove(key);
+}
+
+fn drop_read(readers: &mut Readers, key: KeyHash, path: &str) {
+    if let Some(set) = readers.get_mut(&key) {
+        set.remove(path);
+        if set.is_empty() {
+            readers.remove(&key);
+        }
+    }
+}
+
+/// `moves`' additions `from..from + n` (targets, then keys) for `path`.
+fn apply_adds(by_target: &mut ByTarget, readers: &mut Readers, path: &Arc<str>, new: Option<&Resolved>, moves: &Moves, from: usize, n: usize) {
+    let t = moves.add_targets.len();
+    let end = from.saturating_add(n).min(moves.adds());
+    for i in from..end {
+        if i < t {
+            let new = new.expect("added targets come from a new entry");
+            add_target(by_target, new.member(moves.add_targets[i]), path);
+        } else {
+            readers.entry(moves.add_reads[i - t]).or_default().insert(path);
+        }
+    }
+}
+
+fn apply_drops(by_target: &mut ByTarget, readers: &mut Readers, path: &str, old: Option<&Resolved>, moves: &Moves) {
+    if let Some(old) = old {
+        for k in &moves.drop_targets {
+            drop_target(by_target, old.member(*k), path);
+        }
+    }
+    for key in &moves.drop_reads {
+        drop_read(readers, *key, path);
+    }
+}
+
+/// Up to `budget` checks of stale memberships (front first): each is removed unless the
+/// note's entry has it. A note being staged waits.
+fn clean(notes: &BTreeMap<Arc<str>, Arc<Resolved>>, by_target: &mut ByTarget, readers: &mut Readers, stale: &mut VecDeque<Stale>, staging: Option<&str>, mut budget: usize) {
+    while budget > 0 {
+        let Some(s) = stale.front_mut() else {
+            return;
+        };
+        if staging == Some(&*s.path) {
+            return;
+        }
+        let now = notes.get(&s.path);
+        let targets = s.old.members.len();
+        while s.at < s.old.size() && budget > 0 {
+            if s.at < targets {
+                let target = s.old.member(s.old.members[s.at]);
+                if !now.is_some_and(|r| r.has_target(target)) {
+                    drop_target(by_target, target, &s.path);
+                }
+            } else {
+                let key = s.old.reads[s.at - targets];
+                if !now.is_some_and(|r| r.has_read(key)) {
+                    drop_read(readers, key, &s.path);
+                }
             }
+            s.at += 1;
+            budget -= 1;
+        }
+        if s.at == s.old.size() {
+            stale.pop_front();
         }
     }
 }
