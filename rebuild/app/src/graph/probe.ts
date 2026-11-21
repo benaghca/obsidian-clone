@@ -5,7 +5,7 @@
 import { type Camera, toScreen } from "./camera";
 import type { GraphModel } from "./data";
 
-type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown };
+type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown; __graphHold?: boolean };
 const dev = window as unknown as DevWindow;
 
 /** Each frame's work (ms). */
@@ -48,3 +48,9 @@ export function setProbe(canvas: HTMLCanvasElement, cam: Camera, view: () => { m
     return { node: best >= 0 ? at(best) : null, empty, scale: cam.scale, nodes: model.nodes.length, links: model.links.length };
   };
 }
+
+/**
+ * Tests only (review 5): while `window.__graphHold` is set, a rebuilt layout graph waits as if
+ * a tick were under way, so a test can deliver a link change between preparing and installing.
+ */
+export const devHold = import.meta.env.DEV ? () => !!dev.__graphHold : null;

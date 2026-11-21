@@ -484,14 +484,21 @@ impl Vault {
 
     /// Reconcile only paths changed by the app during the scan, then diff and swap.
     /// Both replay and swap hold the state lock: a completed write can never be lost.
+    #[cfg(test)]
     pub fn finish_rescan(&mut self, token: &Arc<()>, fresh: Result<Index, String>) -> Vec<VaultChanged> {
+        self.finish_rescan_retiring(token, fresh).0
+    }
+
+    /// `finish_rescan`, handing back the index it replaced, for the caller to drop once it has
+    /// let go of the state lock (review 5: freeing a large vault's index is not lock work).
+    pub(crate) fn finish_rescan_retiring(&mut self, token: &Arc<()>, fresh: Result<Index, String>) -> (Vec<VaultChanged>, Option<Index>) {
         if !self.rescan.as_ref().is_some_and(|current| Arc::ptr_eq(current, token)) {
-            return Vec::new();
+            return (Vec::new(), None);
         }
         self.rescan = None;
         let paths = self.index.take_rescan_changes();
         let Ok(mut fresh) = fresh else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         // Review 3: replay with the live index's deferral, so a high-fanout key the replay
         // touches is queued (and resolved later, off the lock), not resolved here.
@@ -505,7 +512,7 @@ impl Vault {
         // the entries the fresh index holds now, and its queued work (from the replay) stays
         // queued, so settling it later logs the rest.
         fresh.continue_link_history(&self.index);
-        self.index = fresh;
+        let retired = std::mem::replace(&mut self.index, fresh);
         let created_set: HashSet<&str> = created.iter().map(String::as_str).collect();
         self.formats
             .lock()
@@ -515,7 +522,7 @@ impl Vault {
         push_change(&mut out, ChangeKind::Remove, removed);
         push_change(&mut out, ChangeKind::Create, created);
         push_change(&mut out, ChangeKind::Modify, modified);
-        out
+        (out, Some(retired))
     }
 
     /// Remember a successful atomic write. `md` is the receipt from before

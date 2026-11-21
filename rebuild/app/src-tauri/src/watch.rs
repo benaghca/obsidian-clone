@@ -132,11 +132,29 @@ pub(crate) fn flush_changes(
     // The expensive full-vault disk read must not hold AppState.inner.
     let fresh = scan(&root);
     let mut inner = write_lock(inner);
+    #[cfg(test)]
+    let held = std::time::Instant::now();
     let Some(vault) = inner.vault.as_mut() else {
         return Vec::new();
     };
-    let changes = vault.finish_rescan(&token, fresh);
+    let (changes, retired) = vault.finish_rescan_retiring(&token, fresh);
+    // The old index is freed after the lock is let go (review 5).
+    drop(inner);
+    #[cfg(test)]
+    FINISH_HOLD.with(|h| h.set(held.elapsed()));
+    drop(retired);
     changes
+}
+
+#[cfg(test)]
+thread_local! {
+    static FINISH_HOLD: std::cell::Cell<std::time::Duration> = const { std::cell::Cell::new(std::time::Duration::ZERO) };
+}
+
+/// Tests: how long the last rescan finish on this thread held the state lock.
+#[cfg(test)]
+pub(crate) fn last_finish_hold() -> std::time::Duration {
+    FINISH_HOLD.with(std::cell::Cell::get)
 }
 
 /// What the events of one rename (one tracker) said: its two halves, or both ends at once.

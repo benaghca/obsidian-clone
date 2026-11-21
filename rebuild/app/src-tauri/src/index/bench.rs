@@ -672,10 +672,36 @@ fn bench_link_deltas() {
         "GROVE_BENCH one new note of 40,000 mixed links: save_ms={save:.2} settle_ms={settle:.1} longest_hold_ms={hold:.2}; deleted: delete_ms={delete:.3} clear_ms={:.2} longest_hold_ms={clear_hold:.3}",
         elapsed_ms(started)
     );
+
+    // Review 5: the same with more distinct queries (lines past the 10,000 targets add a missing
+    // note and a Markdown link to no file each), and a save adding a note between the publish's
+    // holds, so each hold has new key edits to check.
+    for lines in [10_000, 40_000] {
+        let mut long = Index::from_notes(&refs);
+        long.set_defer_links(true);
+        let body: String = (0..lines).map(|j| format!("[[t/{:05}]] [m](t/{:05}.md) [x](u/{j}.md) [[gone {j}]]\n", j % 10_000, (j * 7) % 10_000)).collect();
+        long.upsert_note(root, "long.md", &body, Stamp::sized(body.len()));
+        let mut added = 0;
+        let started = Instant::now();
+        let hold = settle_by_jobs_with(&mut long, &mut |idx| {
+            added += 1;
+            idx.upsert_note(root, &format!("w/{added}.md"), "new\n", Stamp::sized(4));
+        });
+        println!(
+            "GROVE_BENCH one new note of {} mixed links, a note added between holds: settle_ms={:.1} longest_hold_ms={hold:.2} ({added} notes added)",
+            lines * 4,
+            elapsed_ms(started)
+        );
+    }
 }
 
 /// Settle as `link_reads::settle` does; the longest step that holds the lock (ms).
 fn settle_by_jobs(idx: &mut Index) -> f64 {
+    settle_by_jobs_with(idx, &mut |_| {})
+}
+
+/// `settle_by_jobs`, with `between` run (as a save would be) between a publish's holds.
+fn settle_by_jobs_with(idx: &mut Index, between: &mut dyn FnMut(&mut Index)) -> f64 {
     use super::LinkSlice;
     let mut hold = 0f64;
     loop {
@@ -702,6 +728,7 @@ fn settle_by_jobs(idx: &mut Index) -> f64 {
             if got != LinkSlice::More {
                 break;
             }
+            between(idx);
         }
     }
 }

@@ -901,3 +901,174 @@ Each mutation was applied alone and its tests were run (`mutate4.py` in the sess
   - `test-r27e.mjs` ("settings opens with the search field focused") and `test-drawing-editor.mjs` (its 50 ms task budget while editing 2,000 shapes) failed once each. Neither reads links. Both then passed 3 of 3 standalone.
 - **Browser bench:** `GROVE_BENCH_CHECK=1` passed at 5k, 20k and 50k.
 - The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.
+
+## Review round 5
+
+Codex review 5 of `7285d33` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review5.md`): two P2 and three P3 findings.
+
+- Both P2s are fixed.
+- Of the P3s:
+  - the pointer one is fixed;
+  - the rescan one is fixed in its cheap part, freeing the old index after the lock is released;
+  - the Bases one is skipped, since the change would be risky (see below).
+
+Limits as before.
+
+### P2: a queued local graph could miss a later link change
+
+**The problem.** Since round 4 a rebuilt graph whose layout changed waits for the tick under way to end before it goes in (`waiting`).
+
+1. A local graph of A shows A and some notes. A gains `[[B]]`, where B is outside the graph. The rebuild for it finishes preparing and waits.
+2. Before it goes in, B gains `[[C]]`, which is still outside the shown graph.
+3. The link guard (`linksMatter`) saw no rebuild in flight (`building` was false). It judged the change against the shown model, which has neither B nor C, and dropped it.
+4. The waiting model then went in with B and without C, and nothing rebuilt it.
+
+**The fix** (`graph/view.ts`):
+
+- **The guard.** A waiting model counts as in flight, like a rebuild still running. It was built from links older than the change, and the shown model says nothing about the notes it adds. So any link change while a model waits asks for a rebuild.
+- **Dropping the waiting model.** `scheduleRebuild` drops the waiting model, which `rebuild` already did when it started. The shown graph stays up until the new rebuild is done, so the outdated model never goes in.
+- **A frame keeps coming while a model waits.** This was already true when a tick was under way.
+
+**Test:** `scripts/test-link-refresh-guards.mjs` part 4, in `npm test`, uses real saves on the browser mock with link deltas.
+
+- **Setup:** a local graph of P.md (P → Zed, T; depth 2). Each note already has a resolved and a missing link, so each save gives a delta.
+- **The dev-only hold.** A rebuilt layout graph waits while `window.__graphHold` is set, as if a tick were under way (`probe.ts` `devHold`, compiled out of release builds). This puts the interleaving under the test's control.
+- **The steps:**
+  1. P gains `[[Q]]`. The test waits for that rebuild to be prepared and checks the shown graph is still the old one.
+  2. Q gains `[[R]]`. The test waits for that delta to arrive.
+  3. The hold is released.
+- **The check:** the graph must show R. Its node and link counts must equal a fresh build of the same graph (centred on Q, then back on P): 7 nodes, 6 links.
+- **Without the fix,** the graph stays at 6 nodes. I ran the test against the unfixed guard, and it timed out on "the graph shows R".
+
+### P2: oversized deferred notes rechecked every queried key in each publish hold
+
+**The problem.**
+
+- **The key scan.** Round 4's staged publish validated a note in every hold by walking all of the note's queried keys against the set of key edits since the job's mark. That is O(K) per hold and about O(K² / MEMBER_STEP) across the publish, for a note with K distinct queries.
+- **The edit read.** The first hold also took in every edit logged since the mark at once, up to 65,536.
+
+**The fix** (`index/link_jobs.rs`, `index.rs`):
+
+- **Lookup maps built off the lock.** A job now builds its own maps from key and path to note. `ask` builds the key map off the lock, and `link_job` builds the path map from its at most 128 notes.
+- **Bounded edit reads.** `publish` reads the edits since the last mark it checked at most `EDIT_STEP` (4,096) per hold, using a new `Index::edits_after(mark, n)`.
+  - Each edit is looked up in the maps. It marks the notes it names `changed` and leaves the maps, so a key is marked once at most.
+  - While unread edits remain, `publish` returns `More` without storing anything. A note is only stored once every edit up to that hold has been checked.
+  - The entry identity check (`Arc::ptr_eq` against the entry taken at the start) stays as it was.
+  - If edits come faster than one step a hold for long enough, the log overflows. The job is then dropped as before (`Stale`), and its notes stay queued.
+- **The readers map in 64 parts** (`index/link_table.rs`, `Readers`). Measuring the fix showed one more cost proportional to the vault in a hold: a note bringing tens of thousands of new keys made the reverse readers map double, rehashing every key in one hold.
+  - Debug, 96,000 links: 3.4 → 6.7 → 7.9 ms holds at the doublings to 57k, 115k and 229k slots.
+  - The map is now split by key-hash bits 32–37. Those bits are unused by the maps' own bucket index (low bits) and tag (top 7 bits), so each growth rehashes a 64th of the keys.
+- **Cleanup changes.**
+  - The cleanup step is now `MEMBER_STEP` (2,048), down from 4,096, so a cleanup hold does no more than a publish hold.
+  - Old entries the cleanup is done with are handed to the job and dropped with it, off the lock.
+
+**Tests:**
+
+- **`a_long_note_reads_new_edits_in_steps_and_still_sees_a_key_it_asked_about`** (unit test, small steps: two edits a hold).
+  - A 360-link note's publish runs with dozens of saves between its holds: new notes and edits to another note.
+  - It is never skipped, and no hold reads more than its two edits (a new test counter, `take_most_edits`).
+  - Then the note is published again. Midway through its additions, 300 unrelated saves are made, followed by a new note `gone7.md`, a key the note asked about. The publish has fewer holds left than it needs to read those edits, so it has to read them all before installing.
+  - The note is skipped and stays queued, and settling then gives the full rebuild, with `long.md → gone7.md`.
+- **`a_save_behind_a_long_mixed_note_stays_quick`** (latency test) now also runs notes of 8,000, 32,000 and 96,000 links, with 4,000, 16,000 and 48,000 of them to distinct missing notes. The saver adds a new note each time, so every hold has new key edits to check. It asserts what `queued_saves_stay_quick` asserts for each size, plus that the longest hold doesn't grow with the note: the 96k hold must be under 4× the 8k hold plus 2 ms.
+  - Timing check margin: this is loose. It catches the readers rehash; it would not catch the old per-hold key scan on its own. The unit test above covers that deterministically.
+
+### P3: a pointer move during a stepped tick changed its inputs
+
+**The problem.** A drag wrote the dragged node's position straight into the simulation's arrays, possibly between a tick's steps. A tick whose quadtree already held the old position then read the new one in its repulsion pass. That gives forces neither whole tick would.
+
+**The fix** (`graph/sim.ts`, `graph/view.ts`):
+
+- **`Simulation.place(i, x, y)`.** Between ticks it moves the node at once. During a tick it records the place, and the tick's last step puts the node there after integrating.
+- **The tick's inputs stay fixed.** Every position the tick reads is the one it began with. The result is a whole tick with the move at its end boundary.
+  - Fixing the node mid-tick only matters at integration, where it acts as if it was set at the start.
+  - Dropping a node mid-tick likewise acts as if it was dropped before the tick, since forces don't read `fixed`.
+- **What's drawn.** `draw` and `nodeAt` run inside `sim.showing(...)`. It swaps the placed positions in and back out, between the tick's steps (never during one, since JavaScript runs one thing at a time). The dragged node is therefore drawn and hit where the pointer put it, with no lag.
+
+**Test:** `a drag during a tick in steps lands at the tick's end, as between whole ticks` (`graph.test.ts`), with 5,000 nodes and 4,500 links.
+
+- **The steps:**
+  1. Two steps into a tick, the tree has taken node 10 in mid-build. Node 10 is fixed and placed.
+  2. One step later, during repulsion, it is placed again.
+- **The checks:**
+  - The arrays keep the old position until the tick ends, while `showing` sees the new one.
+  - After the tick every position and velocity equals a whole tick with the node fixed and then moved, and so do the next three ticks.
+  - With `place` writing at once (the old behaviour), the test fails.
+
+### P3: rescan finalization lock hold
+
+**Done:** the old index is freed after the lock is released. `Vault::finish_rescan_retiring` returns the replaced index, and the watcher's `flush_changes` drops it after the guard. `finish_rescan` is now only used by tests and is marked so.
+
+**Measured** in `a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick` (10,000 notes, debug, two runs each). The test now records the finish's own lock hold (`watch::last_finish_hold`) and asserts it is under half the finish.
+
+| | Lock hold | Worst save meanwhile |
+|---|---|---|
+| Old index freed under the lock | 11.5 and 13.0 ms | 10.9 and 12.3 ms |
+| Old index freed after release | 3.0 ms (both runs) | 2.6 and 2.9 ms |
+
+**Not done:** the remaining 3 ms (the file diff, the replay and the format-cache walk) still runs under the lock. Preparing those comparisons against a versioned snapshot outside it and reconciling in steps would change how a write during the finish is ordered against the swap. That ordering is what guarantees no lost writes, so I left it.
+
+### P3 skipped: a mixed-kind Bases sort column still sorts in one task
+
+Not changed. The reviewer's suggestion is to move the native-sort fallback to a worker. That makes the mixed-kind sort asynchronous:
+
+- the first paint would no longer come from a single pass (round 4's guard test checks first paint as one pass);
+- the Bases pass would need cancellation for a reply that arrives late;
+- the worker's sort must be the engine's own, on cloned keys, to keep the order.
+
+That is too much risk for a P3 under "no visible change". The fallback only runs for a sort column that mixes kinds (numbers and text, or dates and others), and it costs what every pass cost before round 3.
+
+### Measurements (review 5)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-50000`, 50,125 notes). "Before" is `7285d33` with this round's bench row copied in, from a scratch worktree (since removed), run in the same session.
+
+| Case | Before: settle / longest hold | After: settle / longest hold |
+|---|---|---|
+| One new note of 40,000 mixed links (round 4's row) | 68.5 ms / 1.24 ms | 84.2 ms / **0.34 ms** |
+| The same, a note added between publish holds | 118 ms / 1.80 ms | 78.5 ms / **0.32 ms** |
+| One new note of 160,000 mixed links, a note added between holds | 716 ms / **5.76 ms** | 377 ms / **0.57 ms** |
+| Deleting the 40k note, then clearing | 0.96 ms; 5.8 ms, hold 0.87 ms | 0.96 ms; 8.2 ms, hold 0.53 ms |
+| Shared alias, 50,125 linkers, off-lock jobs | 120 ms / 1.10 ms | 120 ms / 1.11 ms |
+| `backlinks` of a hub, 8 sources edited between steps | 50.9 ms / 1.09 ms | 47.0 ms / 0.90 ms |
+| 100 notes of 5,000 links reading an alias | 1.06 s / 0.06 ms | 1.16 s / 0.13 ms |
+
+Scan, full rebuild and RSS are unchanged: 1.03 s median scan, 108.7 ms link rebuild, 627 MB (626 before).
+
+**Debug latency test** (`a_save_behind_a_long_mixed_note_stays_quick`, saves adding notes):
+
+| Note | Longest hold before the readers split | After |
+|---|---|---|
+| 8,000 links | 1.9 ms | 1.8 ms |
+| 32,000 links | 1.4 ms | 1.4 ms |
+| 96,000 links | 6.9 ms | 1.1 ms |
+
+Worst save at 96,000 links: 6.6 ms before, 0.6 ms after.
+
+### Mutation checks (review 5)
+
+Each mutation was applied alone and its tests run. All 6 were caught.
+
+- **Graph guard ignores a waiting model:** caught by `test-link-refresh-guards.mjs` part 4 (timed out on "the graph shows R").
+- **`publish` stores notes before reading every edit:** caught by `a_long_note_reads_new_edits_in_steps_and_still_sees_a_key_it_asked_about` ("the note read gone7": 0 skipped).
+- **Key edits not looked up:** caught by the same test.
+- **Node edits not looked up:** caught by `a_long_note_goes_in_over_several_holds_and_comes_out_in_steps` and `deferred_link_updates_settle_to_a_full_walk`.
+- **`place` writes at once:** caught by the new drag test.
+- **The old index freed under the lock:** with the drop moved back inside, the measured hold equals the finish (11.5 of 11.5 ms, 13.0 of 13.0 ms), so the new `hold * 2 < finish` assertion fails.
+
+### Still open after review 5
+
+- A rescan's finish still diffs the indexes, replays and walks the format cache under the lock: 3 ms in debug at 10k notes.
+- A mixed-kind sort column is still sorted in one task (see above).
+- At 50k notes a graph tick still costs about 95 ms of work, spread over frames of at most 12 ms.
+- Other maps in the index (files, name maps, `by_target`) still grow by rehashing in one hold when the vault itself grows. That is proportional to the vault, happens once per doubling, and predates P2b.
+
+### Suites (review 5)
+
+- **`cargo test --offline --all-targets`:** **234 passed**, 0 failed, 7 ignored. That is 233 at `7285d33` plus `a_long_note_reads_new_edits_in_steps_and_still_sees_a_key_it_asked_about`; the long-note latency and rescan-finish tests gained checks.
+- **`cargo clippy --all-targets`:** nothing new in the touched files. Clippy flagged `finish_rescan` as unused outside tests once the watcher moved to `finish_rescan_retiring`, so it is now `#[cfg(test)]`.
+- **`npm run build`** (`tsc` and `vite build`): clean.
+- **`vitest`:** **1714 / 1714**, with one new test.
+- **`npm test`:** the full run passed its first 79 steps, including vitest and `test-link-refresh-guards.mjs` with its new part 4. It then stopped in `test-drawing-editor.mjs`, on its 50 ms task budget while editing 2,000 shapes (one 52 ms task), the same check as in round 4. This round changes no drawing code. Standalone it passed 4 of 5; the fifth failure was the same budget.
+  - I ran the 17 later steps of the chain one by one, and 16 passed.
+  - `test-bases-edge.mjs` failed on "10k scroll p95 16.7–16.8 ms, max 33.3 ms", one dropped frame. This round changes no Bases code. The same script at `7285d33`, from a scratch worktree (since removed), failed 2 of 4 runs the same way under the same load (load average about 5–6); this tree failed 3 of 4. It is load-dependent and not from this round, so I didn't chase it.
+- **Browser bench:** not rerun this round. The graph's frame path changed only by the `showing` wrapper, which returns at once when nothing is placed.
+- The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.

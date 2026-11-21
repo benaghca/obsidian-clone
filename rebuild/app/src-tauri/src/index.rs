@@ -361,6 +361,19 @@ impl Index {
         Some(e.log.range(from..).map(|(_, edit)| edit))
     }
 
+    /// At most `n` of the edits after `mark`, the mark after them, and whether they were the
+    /// last (review 5: a publish reads the log in bounded steps). `None` as for `edits_since`.
+    pub(crate) fn edits_after(&self, mark: EditMark, n: usize) -> Option<(impl Iterator<Item = &Edit>, EditMark, bool)> {
+        let e = &self.edits;
+        if e.epoch != mark.epoch || mark.seq < e.floor {
+            return None;
+        }
+        let from = e.log.partition_point(|(seq, _)| *seq <= mark.seq);
+        let end = from.saturating_add(n).min(e.log.len());
+        let seq = if end > from { e.log[end - 1].0 } else { mark.seq };
+        Some((e.log.range(from..end).map(|(_, edit)| edit), EditMark { epoch: mark.epoch, seq }, end == e.log.len()))
+    }
+
     /// The paths of node and entry edits after `since` up to `until`, skipping the first `skip`
     /// edits there and reading at most `n`: (paths, edits read, whether that was the last).
     /// `None` when they are not known any more.

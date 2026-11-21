@@ -208,6 +208,11 @@ fn outside_changes_reach_the_page_as_deltas_equal_to_a_fresh_scan() {
 /// Saves to `other.md` on another thread for as long as `work` runs (at least one), each timed
 /// from asking for the lock to its return: how long a save queued behind `work` waits.
 fn saves_during<T: Send>(inner: &RwLock<Inner>, work: impl FnOnce() -> T + Send) -> (std::time::Duration, Vec<std::time::Duration>, T) {
+    saves_of(inner, |vault, i| vault.write_note("other.md", &format!("typing here {i}\n")).unwrap(), work)
+}
+
+/// `saves_during`, each save made by `save` (with its number).
+fn saves_of<T: Send>(inner: &RwLock<Inner>, save: impl Fn(&mut crate::vault::Vault, usize) + Send + Sync, work: impl FnOnce() -> T + Send) -> (std::time::Duration, Vec<std::time::Duration>, T) {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::{Duration, Instant};
     let busy = AtomicBool::new(true);
@@ -223,7 +228,7 @@ fn saves_during<T: Send>(inner: &RwLock<Inner>, work: impl FnOnce() -> T + Send)
             let mut i = 0;
             while busy.load(Ordering::SeqCst) || waits.is_empty() {
                 let started = Instant::now();
-                crate::write_lock(inner).vault.as_mut().unwrap().write_note("other.md", &format!("typing here {i}\n")).unwrap();
+                save(crate::write_lock(inner).vault.as_mut().unwrap(), i);
                 waits.push(started.elapsed());
                 i += 1;
                 std::thread::sleep(Duration::from_millis(1));
@@ -254,12 +259,17 @@ fn open_deferred(name: &str, files: impl IntoIterator<Item = (String, String)>) 
 /// keep coming. The write returns with the work queued; no save waits for more than a small
 /// part of it; the read equals a fresh scan, and nothing is left queued.
 fn queued_saves_stay_quick(what: &str, inner: &RwLock<Inner>, write: impl FnOnce(&mut crate::vault::Vault)) {
+    queued_saves_of(what, inner, write, |vault, i| vault.write_note("other.md", &format!("typing here {i}\n")).unwrap());
+}
+
+/// `queued_saves_stay_quick` with the saves made by `save`; the longest hold.
+fn queued_saves_of(what: &str, inner: &RwLock<Inner>, write: impl FnOnce(&mut crate::vault::Vault), save: impl Fn(&mut crate::vault::Vault, usize) + Send + Sync) -> std::time::Duration {
     use std::time::Instant;
     let started = Instant::now();
     write(crate::write_lock(inner).vault.as_mut().unwrap());
     let edit = started.elapsed();
     assert!(lock(inner).vault.as_ref().unwrap().index.links_pending(), "{what}: the work is queued");
-    let (settle, saves, (reply, hold)) = saves_during(inner, || {
+    let (settle, saves, (reply, hold)) = saves_of(inner, save, || {
         crate::link_reads::take_longest_hold();
         (crate::link_reads::link_changes(inner, None).unwrap(), crate::link_reads::take_longest_hold())
     });
@@ -274,6 +284,7 @@ fn queued_saves_stay_quick(what: &str, inner: &RwLock<Inner>, write: impl FnOnce
     assert_eq!(reply.full.unwrap(), Index::scan(&vault.root).unwrap().link_index(), "{what}: the read saw a settled table");
     assert!(!vault.index.links_pending());
     vault.index.assert_maps_match_rebuild();
+    hold
 }
 
 /// Review 2: a save queued behind a high-fanout alias edit is not held up by its link work.
@@ -383,8 +394,18 @@ fn a_save_behind_a_long_mixed_note_stays_quick() {
     use std::time::Instant;
     let files = (0..4_000).map(|j| (format!("t/{j:04}.md"), "x\n".to_string()));
     let (_dir, inner) = open_deferred("link-long-note-latency", files);
-    let body: String = (0..4_000).map(|j| format!("[[t/{j:04}]] [m](t/{:04}.md) [x](u/{j}.md) [[gone {j}]]\n", (j * 7) % 4_000)).collect();
-    queued_saves_stay_quick("one note of 16,000 mixed links", &inner, |v| v.write_note("long.md", &body).unwrap());
+    let body = |n: usize| -> String { (0..n).map(|j| format!("[[t/{:04}]] [m](t/{:04}.md) [x](u/{j}.md) [[gone {j}]]\n", j % 4_000, (j * 7) % 4_000)).collect() };
+    queued_saves_stay_quick("one note of 16,000 mixed links", &inner, |v| v.write_note("long.md", &body(4_000)).unwrap());
+    // Review 5: growing numbers of distinct queries (two per line beyond the 4,000 targets),
+    // with saves that each add a note, so every hold has new key edits to check against them.
+    // The longest hold stays about the same; it used to grow with the note's queries.
+    let mut holds = Vec::new();
+    for (k, n) in [2_000, 8_000, 24_000].into_iter().enumerate() {
+        let what = format!("one note of {} mixed links ({} to distinct missing notes), saves adding notes", 4 * n, 2 * n);
+        let hold = queued_saves_of(&what, &inner, |v| v.write_note("long.md", &body(n)).unwrap(), move |v, i| v.write_note(&format!("w{k}/{i}.md"), "new\n").unwrap());
+        holds.push(hold);
+    }
+    assert!(holds[2] < holds[0] * 4 + std::time::Duration::from_millis(2), "the longest hold grew with the note's queries: {holds:?}");
     let started = Instant::now();
     crate::write_lock(&inner).vault.as_mut().unwrap().delete_path("long.md", true).unwrap();
     let delete = started.elapsed();
@@ -416,7 +437,7 @@ fn a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick() {
     let (_dir, inner) = open_deferred("link-rescan-latency", files);
     let before = crate::link_reads::link_changes(&inner, None).unwrap();
     let finish = std::sync::Mutex::new(Duration::ZERO);
-    let (flushed, saves, ()) = saves_during(&inner, || {
+    let (flushed, saves, hold) = saves_during(&inner, || {
         let scanned = std::sync::Mutex::new(None);
         flush_changes(&inner, &[Event::new(EventKind::Other).set_flag(notify::event::Flag::Rescan)], |root| {
             // An app save while the watcher scans without the lock, after the scan read the
@@ -427,6 +448,7 @@ fn a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick() {
             fresh
         });
         *finish.lock().unwrap() = scanned.lock().unwrap().unwrap().elapsed();
+        crate::watch::last_finish_hold()
     });
     let finish = *finish.lock().unwrap();
     assert!(lock(&inner).vault.as_ref().unwrap().index.links_pending(), "the replay queued the readers");
@@ -434,7 +456,10 @@ fn a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick() {
     let after = crate::link_reads::link_changes(&inner, Some((before.id, before.version))).unwrap();
     let settle = started.elapsed();
     let worst = *saves.iter().max().unwrap();
-    println!("rescan with a 10,000-reader alias edit (debug): flush {flushed:?}, finish {finish:?}, settle {settle:?}, {} saves meanwhile, worst {worst:?}", saves.len());
+    println!("rescan with a 10,000-reader alias edit (debug): flush {flushed:?}, finish {finish:?} (the lock held {hold:?}), settle {settle:?}, {} saves meanwhile, worst {worst:?}", saves.len());
+    assert!(hold <= finish, "the hold is part of the finish");
+    // Review 5: the old index is freed after the lock is let go (it was most of the hold).
+    assert!(hold * 2 < finish, "the finish held the lock {hold:?} of {finish:?}");
     assert!(finish * 4 < settle, "the finish ({finish:?}) left the re-resolve ({settle:?}) to the read");
     assert!(worst * 4 < settle, "a save waited {worst:?}; the re-resolve took {settle:?}");
     assert!(after.full.is_none(), "the page holding the old version gets a delta");

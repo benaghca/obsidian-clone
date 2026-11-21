@@ -83,6 +83,8 @@ export class Simulation {
   private random = lcg(1);
   /** The tick under way in steps (`advance`), if any. */
   private work: Generator<void, void> | null = null;
+  /** Nodes put somewhere by `place` while a tick was under way: they go there when it ends. */
+  private placed = new Map<number, [number, number]>();
 
   /** Whether a tick is under way: positions move when it ends, and a new graph must wait for that. */
   get ticking() {
@@ -175,6 +177,35 @@ export class Simulation {
       if (!placed[i]) spiral.push(i);
     }
     return { n, from, given, ls, lt, bias, strength, plan, spiral };
+  }
+
+  /**
+   * Put node `i` at (`px`, `py`) (a drag). Between ticks it goes there now. During a tick it
+   * goes there when the tick ends (review 5): the tick under way reads every position as it
+   * was when it began, as a whole tick does, so the layout is the same as with the move made
+   * at that boundary. `showing` shows it there meanwhile.
+   */
+  place(i: number, px: number, py: number) {
+    if (this.work) this.placed.set(i, [px, py]);
+    else [this.x[i], this.y[i]] = [px, py];
+  }
+
+  /**
+   * `fn` with the nodes `place` holds back shown where they were put (for drawing and hit
+   * tests, which run between a tick's steps, never during one).
+   */
+  showing<T>(fn: () => T): T {
+    if (!this.placed.size) return fn();
+    const kept: [number, number, number][] = [];
+    for (const [i, [px, py]] of this.placed) {
+      kept.push([i, this.x[i], this.y[i]]);
+      [this.x[i], this.y[i]] = [px, py];
+    }
+    try {
+      return fn();
+    } finally {
+      for (const [i, ox, oy] of kept) [this.x[i], this.y[i]] = [ox, oy];
+    }
   }
 
   /** Put a prepared graph in place (`prepareGraph`): one pass over its nodes, and the new ones placed. */
@@ -307,6 +338,9 @@ export class Simulation {
       x[i] += vx[i] *= VELOCITY_KEEP;
       y[i] += vy[i] *= VELOCITY_KEEP;
     }
+    // Moves made during the tick, at its end.
+    for (const [i, [px, py]] of this.placed) [x[i], y[i]] = [px, py];
+    this.placed.clear();
   }
 
   /** Two nodes in exactly the same place push apart in a random direction. */

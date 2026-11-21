@@ -101,4 +101,58 @@ await withBrowser(async ({ run, send, click, chord }) => {
   await until(run, 'the mixed base refreshed on the link change', f => __mixed().reconcile.full > f, full);
   assert.deepEqual(await shown(), native, 'after the link refresh: the native order');
   console.log('PASS base: a sort column mixing numbers and text keeps the native order, limit included');
+
+  // 4. Review 5: a link change that lands while a rebuilt local graph waits to go in. The local
+  // graph for P.md (P → Zed, T; depth 2). With installs held (dev only, as if a tick were under
+  // way), P gains [[Q]]: that rebuild (adding Q, Yon, U) is prepared and waits. Then Q, outside
+  // the shown graph, gains [[R]]. Released, the graph must show what a fresh build shows (R
+  // included), not the waiting model without R.
+  const nodes = () => run(() => window.__graphProbe?.().nodes ?? -1);
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    // Each has a resolved and a missing link already, so the mock answers its edit with a delta.
+    await api.createNote('P.md', 'p [[Zed]] [[T]]\n');
+    await api.createNote('Q.md', 'q [[Yon]] [[U]]\n');
+    await api.createNote('R.md', 'r\n');
+    await api.createNote('T.md', 't\n');
+    await api.createNote('U.md', 'u\n');
+    await ws.vault.refreshFiles();
+    await ws.vault.refreshLinks();
+    await ws.open('P.md');
+    // The earlier parts opened notes over the first local graph's tab: open one for P.
+    ws.openView('localgraph', 'right', 'P.md');
+  });
+  await until(run, 'the local graph shows P, Zed and T', () => window.__graphProbe?.().nodes === 3);
+  const builds = await run(async () => {
+    window.__graphHold = true;
+    window.__linkTouch = null;
+    const { api } = await import('/src/api.ts');
+    const before = window.__graphBuilds.length;
+    await api.writeNote('P.md', 'p [[Zed]] [[T]] [[Q]]\n');
+    ws.vault.written('P.md');
+    return before;
+  });
+  await until(run, 'the rebuild for P → Q is prepared and waiting', n => window.__graphBuilds.length > n, builds);
+  assert.equal(await nodes(), 3, 'held: the shown graph is the old one');
+  assert.deepEqual(await run(() => window.__linkTouch), ['P.md']);
+  await run(async () => {
+    window.__linkTouch = null;
+    const { api } = await import('/src/api.ts');
+    await api.writeNote('Q.md', 'q [[Yon]] [[U]] [[R]]\n');
+    ws.vault.written('Q.md');
+  });
+  await until(run, 'the Q → R link change arrived', () => window.__linkTouch?.[0] === 'Q.md');
+  // Room for the refresh it asks for to be prepared too (and wait, still held).
+  await sleep(1500);
+  await run(() => { window.__graphHold = false; });
+  await until(run, 'the graph shows R once installs go ahead', n => window.__graphProbe?.().nodes === n, 7, 5000);
+  await sleep(800);
+  const held = await run(() => { const p = window.__graphProbe(); return [p.nodes, p.links]; });
+  // A fresh build of the same graph: centre it on Q, then back on P.
+  await run(async () => { await ws.open('Q.md'); await ws.open('P.md'); });
+  await sleep(1500);
+  const fresh = await run(() => { const p = window.__graphProbe(); return [p.nodes, p.links]; });
+  assert.deepEqual(held, fresh, 'the shown neighbourhood is a fresh build\'s');
+  assert.deepEqual(fresh, [7, 6]);
+  console.log('PASS local graph: a link change while a rebuilt graph waits to go in is not lost');
 });

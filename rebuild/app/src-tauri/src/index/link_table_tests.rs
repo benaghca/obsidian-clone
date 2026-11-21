@@ -1005,6 +1005,80 @@ fn a_backlink_reply_across_a_rescan_swap_starts_over() {
 /// memberships first, then its entry), and its old memberships come out in steps after.
 /// Saves elsewhere between holds leave the publish valid; an edit to the note itself drops
 /// what it had added. After each stage the table equals a full walk.
+/// Review 5: a long note's publish reads the edits made since its job began a few at a time
+/// (small steps: two a hold) and looks each up in the job's own maps, so a hold never walks the
+/// note's keys. Saves that touch nothing it read leave it valid however many there are; a key
+/// it asked about gaining an owner midway, after its additions began, keeps it queued.
+#[test]
+fn a_long_note_reads_new_edits_in_steps_and_still_sees_a_key_it_asked_about() {
+    let tmp = tmp_dir("link-long-note-edits");
+    let root = tmp.path.as_path();
+    let mut notes: Vec<(String, String)> = (0..240).map(|j| (format!("t/{j}.md"), "x\n".to_string())).collect();
+    notes.push(("other.md".into(), "o\n".into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut idx = Index::from_notes(&refs);
+    idx.defer_links_over(0);
+    link_jobs::small_steps(true);
+    let long: String = (0..120).map(|j| format!("[[t/{j}]] [m](t/{}.md) [[gone{j}]]\n", (j * 7) % 240)).collect();
+    let publish = |idx: &mut Index, between: &mut dyn FnMut(&mut Index, usize)| -> (LinkSlice, usize) {
+        let mut job = idx.link_job().expect("the note is queued");
+        job.ask();
+        while idx.answer(&mut job) == LinkSlice::More {}
+        job.finish();
+        let mut calls = 0;
+        loop {
+            calls += 1;
+            match idx.publish(&mut job) {
+                LinkSlice::More => between(idx, calls),
+                got => return (got, calls),
+            }
+        }
+    };
+
+    // Ten unrelated saves between some holds (new notes too: key edits nobody here asked about).
+    save(&mut idx, root, "long.md", &long);
+    link_jobs::take_most_edits();
+    let (got, _) = publish(&mut idx, &mut |idx, i| {
+        if i % 10 == 0 && i <= 50 {
+            for k in 0..10 {
+                save(idx, root, &format!("new/{i}-{k}.md"), "n\n");
+                save(idx, root, "other.md", &format!("o {i} {k}\n"));
+            }
+        }
+    });
+    assert_eq!(got, LinkSlice::Done);
+    assert_eq!(link_jobs::take_skipped(), 0, "nothing the note read changed");
+    assert_eq!(link_jobs::take_most_edits(), 2, "each hold read at most its two edits");
+    assert!(!idx.links_pending());
+    idx.assert_maps_match_rebuild();
+
+    // Midway through its additions, `gone7` (a key it asked about) gains an owner, behind 300
+    // other saves.
+    let moved: String = long.replace("[[t/", "[[t/1");
+    save(&mut idx, root, "long.md", &moved);
+    let (got, _) = publish(&mut idx, &mut |idx, i| {
+        if i == 40 {
+            // More edits ahead of it than the rest of the publish has holds: it must read them
+            // all (two a hold) before it puts the entry in.
+            for k in 0..300 {
+                save(idx, root, "other.md", &format!("before {k}\n"));
+            }
+            save(idx, root, "gone7.md", "now here\n");
+            for k in 0..9 {
+                save(idx, root, "other.md", &format!("after {k}\n"));
+            }
+        }
+    });
+    assert_eq!(got, LinkSlice::Done);
+    assert_eq!(link_jobs::take_skipped(), 1, "the note read gone7");
+    assert!(idx.links_pending(), "it stays queued");
+    settle_by_jobs(&mut idx);
+    link_jobs::small_steps(false);
+    assert!(!idx.links.has_cleanup());
+    idx.assert_maps_match_rebuild();
+    assert!(idx.link_index().outgoing["long.md"].iter().any(|t| t == "gone7.md"));
+}
+
 #[test]
 fn a_long_note_goes_in_over_several_holds_and_comes_out_in_steps() {
     let tmp = tmp_dir("link-long-note");

@@ -62,7 +62,54 @@ impl Hasher for Identity {
     }
 }
 
-type Readers = HashMap<KeyHash, PathSet, BuildHasherDefault<Identity>>;
+type ReaderPart = HashMap<KeyHash, PathSet, BuildHasherDefault<Identity>>;
+
+/// The readers of each map key, in `READER_PARTS` maps by key hash (review 5): growing one
+/// rehashes a part of the keys, so a note bringing tens of thousands of new keys never doubles
+/// the whole map in one hold. A part is picked by bits the maps themselves leave alone (their
+/// buckets take the low bits, their tags the top seven).
+#[derive(Clone, Debug)]
+struct Readers(Vec<ReaderPart>);
+
+const READER_PARTS: usize = 64;
+
+impl Default for Readers {
+    fn default() -> Self {
+        Readers((0..READER_PARTS).map(|_| ReaderPart::default()).collect())
+    }
+}
+
+impl Readers {
+    fn part(key: KeyHash) -> usize {
+        (key >> 32) as usize % READER_PARTS
+    }
+    fn contains_key(&self, key: &KeyHash) -> bool {
+        self.0[Self::part(*key)].contains_key(key)
+    }
+    fn get(&self, key: &KeyHash) -> Option<&PathSet> {
+        self.0[Self::part(*key)].get(key)
+    }
+    fn get_mut(&mut self, key: &KeyHash) -> Option<&mut PathSet> {
+        self.0[Self::part(*key)].get_mut(key)
+    }
+    fn entry(&mut self, key: KeyHash) -> std::collections::hash_map::Entry<'_, KeyHash, PathSet> {
+        self.0[Self::part(key)].entry(key)
+    }
+    fn remove(&mut self, key: &KeyHash) -> Option<PathSet> {
+        self.0[Self::part(*key)].remove(key)
+    }
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut PathSet> {
+        self.0.iter_mut().flat_map(HashMap::values_mut)
+    }
+    #[cfg(test)]
+    fn values(&self) -> impl Iterator<Item = &PathSet> {
+        self.0.iter().flat_map(HashMap::values)
+    }
+    #[cfg(test)]
+    fn iter(&self) -> impl Iterator<Item = (&KeyHash, &PathSet)> {
+        self.0.iter().flat_map(HashMap::iter)
+    }
+}
 /// Woken keys, each with the last reader queued from it so far (`None`: none yet).
 type Woken = HashMap<KeyHash, Option<Arc<str>>, BuildHasherDefault<Identity>>;
 /// Linking notes per target.
@@ -568,9 +615,13 @@ impl LinkTable {
         !self.stale.is_empty()
     }
 
-    /// Check up to `budget` stale memberships, removing each the note's entry lacks.
-    pub(super) fn clean(&mut self, budget: usize) {
-        clean(&self.notes, &mut self.by_target, &mut self.readers, &mut self.stale, self.staging.as_deref(), budget);
+    /// Check up to `budget` stale memberships, removing each the note's entry lacks. The old
+    /// entries done with come back, for the caller to drop off the lock (review 5: a long
+    /// note's entry is tens of thousands of strings).
+    pub(super) fn clean(&mut self, budget: usize) -> Vec<Arc<Resolved>> {
+        let mut done = Vec::new();
+        clean(&self.notes, &mut self.by_target, &mut self.readers, &mut self.stale, self.staging.as_deref(), budget, &mut done);
+        done
     }
 
     /// Replace every note at once (a full name-map rebuild). `fresh` must come in path order.
@@ -752,7 +803,7 @@ impl LinkTable {
     pub(super) fn reverse_maps_match(&self) -> bool {
         let (mut live_targets, mut live_readers) = (self.by_target.clone(), self.readers.clone());
         let mut stale: VecDeque<Stale> = self.stale.iter().map(|s| Stale { path: Arc::clone(&s.path), old: Arc::clone(&s.old), at: s.at }).collect();
-        clean(&self.notes, &mut live_targets, &mut live_readers, &mut stale, None, usize::MAX);
+        clean(&self.notes, &mut live_targets, &mut live_readers, &mut stale, None, usize::MAX, &mut Vec::new());
         let mut by_target = ByTarget::default();
         let mut readers = Readers::default();
         for (path, resolved) in &self.notes {
@@ -841,7 +892,7 @@ fn apply_drops(by_target: &mut ByTarget, readers: &mut Readers, path: &str, old:
 
 /// Up to `budget` checks of stale memberships (front first): each is removed unless the
 /// note's entry has it. A note being staged waits.
-fn clean(notes: &BTreeMap<Arc<str>, Arc<Resolved>>, by_target: &mut ByTarget, readers: &mut Readers, stale: &mut VecDeque<Stale>, staging: Option<&str>, mut budget: usize) {
+fn clean(notes: &BTreeMap<Arc<str>, Arc<Resolved>>, by_target: &mut ByTarget, readers: &mut Readers, stale: &mut VecDeque<Stale>, staging: Option<&str>, mut budget: usize, done: &mut Vec<Arc<Resolved>>) {
     while budget > 0 {
         let Some(s) = stale.front_mut() else {
             return;
@@ -867,7 +918,7 @@ fn clean(notes: &BTreeMap<Arc<str>, Arc<Resolved>>, by_target: &mut ByTarget, re
             budget -= 1;
         }
         if s.at == s.old.size() {
-            stale.pop_front();
+            done.extend(stale.pop_front().map(|s| s.old));
         }
     }
 }

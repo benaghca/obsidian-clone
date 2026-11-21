@@ -333,6 +333,47 @@ test("whenever the guard skips a refresh, a fresh local graph equals the one sho
   expect(skipped).toBeGreaterThan(100);
 });
 
+// Review 5: a drag during a tick in steps. Node 10 is fixed and moved after the quadtree has
+// taken it in (mid-build) and again during the repulsion pass. The tick goes on from positions
+// as they were when it began, and the node goes to the last place when it ends: the same as a
+// whole tick with the node held, then the move. Meanwhile drawing (`showing`) sees it there.
+test("a drag during a tick in steps lands at the tick's end, as between whole ticks", () => {
+  const ids = Array.from({ length: 5000 }, (_, i) => `n${i}`);
+  const links = Array.from({ length: 4500 }, (_, i) => ({ source: i % 5000, target: (i * 7 + 3) % 5000 }));
+  const whole = new Simulation();
+  const stepped = new Simulation();
+  for (const sim of [whole, stepped]) sim.setGraph(ids, links, () => undefined);
+  for (let t = 0; t < 3; t++) {
+    whole.tick();
+    while (!stepped.advance(0));
+  }
+  // Steps: the links to 4096, the rest and the tree's first 4096 inserts, the rest of the tree
+  // and 512 nodes' repulsion, ...
+  stepped.advance(0);
+  stepped.advance(0);
+  const before = [stepped.x[10], stepped.y[10]];
+  stepped.fixed[10] = 1;
+  stepped.place(10, 500, -400);
+  expect([stepped.x[10], stepped.y[10]]).toEqual(before);
+  expect(stepped.showing(() => [stepped.x[10], stepped.y[10]])).toEqual([500, -400]);
+  stepped.advance(0);
+  stepped.place(10, 520, -380);
+  expect(stepped.ticking).toBe(true);
+  while (!stepped.advance(0));
+  whole.fixed[10] = 1;
+  whole.tick();
+  whole.place(10, 520, -380);
+  expect([stepped.x[10], stepped.y[10]]).toEqual([520, -380]);
+  expect(Array.from(stepped.x)).toEqual(Array.from(whole.x));
+  expect(Array.from(stepped.vy)).toEqual(Array.from(whole.vy));
+  // And the ticks after it.
+  for (let t = 0; t < 3; t++) {
+    whole.tick();
+    while (!stepped.advance(0));
+  }
+  expect(Array.from(stepped.y)).toEqual(Array.from(whole.y));
+});
+
 // Review 4: a tick taken in steps (`advance`, as the view does at 50k nodes) moves every node
 // exactly as a whole tick does, tick for tick, and nothing moves until its last step. A new
 // graph put in while a tick is under way waits for it to end.

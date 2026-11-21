@@ -14,7 +14,9 @@
 //!    reverse-map memberships move from the entry taken in step 1 (`Moves`, review 4);
 //! 5. `Index::publish` (write lock, `MEMBER_STEP` membership changes a hold): store each note's
 //!    result unless, since the mark, its node changed, a key it asked about gained or lost an
-//!    owner (`Index::edits_since`), or its entry is not the one taken. Such a note stays
+//!    owner, or its entry is not the one taken. Review 5: the edits since the mark are read
+//!    `EDIT_STEP` a hold (`Index::edits_after`) and looked up in the job's own maps from key
+//!    and path to note, built in step 2, so a hold's checks never scale with a note's keys. Such a note stays
 //!    queued for the next job. A note with more changes than one hold allows is put in over
 //!    several holds: its new memberships first, then its entry, then the old memberships are
 //!    cleared (`LinkTable::install`, `clean`). After a full map rebuild the job is dropped.
@@ -32,7 +34,7 @@ use super::link_table::{Moves, Replaced, Resolved, MEMBER_STEP};
 use super::name_maps::{key_hash, Answers, KeyHash, Query, Src};
 use super::{has_links, resolve_note, resolve_through, Edit, EditMark, Index, Node};
 use crate::model::Backlink;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 /// Notes, and links, one job takes: its publish (under the write lock) re-links at most these.
@@ -43,13 +45,22 @@ const JOB_LINKS: usize = 1_024;
 const EXPAND_STEP: usize = 4_096;
 /// Map keys looked up per read-lock hold.
 const ANSWER_STEP: usize = 2_048;
-/// Stale memberships checked per job.
-const CLEAN_STEP: usize = 4_096;
+/// Stale memberships checked per job (review 5: as many as a publish changes per hold).
+const CLEAN_STEP: usize = MEMBER_STEP;
+/// Edits a publish reads per write-lock hold.
+const EDIT_STEP: usize = 4_096;
 
 #[cfg(test)]
 thread_local! {
     static SMALL: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static SKIPPED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static MOST_EDITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests: the most edits one `publish` call read (resets).
+#[cfg(test)]
+pub(crate) fn take_most_edits() -> usize {
+    MOST_EDITS.with(|n| n.replace(0))
 }
 
 /// Tests: notes `publish` left queued because something they read changed (resets).
@@ -80,9 +91,13 @@ pub(crate) struct LinkJob {
     at: (usize, usize),
     /// `publish`: the edits read so far (up to `seen`), and the next note to store.
     seen: EditMark,
-    nodes: HashSet<Arc<str>>,
-    keys: HashSet<KeyHash>,
     next: usize,
+    /// The notes that asked about each key (built by `ask`, off the lock), and each note's
+    /// place. An edit marks the notes it names (`changed`) and leaves the maps: once is enough.
+    by_key: HashMap<KeyHash, Vec<u32>>,
+    by_path: HashMap<Arc<str>, u32>,
+    /// Old entries the cleanup is done with: dropped with the job, off the lock.
+    _trash: Vec<Arc<Resolved>>,
 }
 
 struct NoteJob {
@@ -92,9 +107,9 @@ struct NoteJob {
     /// Its entry when the job was taken: what `moves` start from.
     before: Option<Arc<Resolved>>,
     asked: Vec<Query>,
-    /// The asked keys, as edits name them.
-    keys: Vec<KeyHash>,
     answers: Vec<Option<String>>,
+    /// Since the mark, its node changed or a key it asked about did (`publish`).
+    changed: bool,
     /// Set by `finish` (unless an answer was missing: then `publish` resolves it).
     done: Option<Finished>,
     /// New memberships put in so far by a staged publish.
@@ -125,7 +140,7 @@ impl Index {
             return None;
         }
         debug_assert!(self.defer_depth == 0 && !self.maps_dirty, "a link job inside a change");
-        self.links.clean(budget(CLEAN_STEP));
+        let trash = self.links.clean(budget(CLEAN_STEP));
         self.links.expand(budget(EXPAND_STEP));
         let mut notes = Vec::new();
         let mut links = 0;
@@ -140,14 +155,15 @@ impl Index {
                 node,
                 before: self.links.shared(path).cloned(),
                 asked: Vec::new(),
-                keys: Vec::new(),
                 answers: Vec::new(),
+                changed: false,
                 done: None,
                 added: 0,
             });
         }
         let mark = self.edit_mark();
-        Some(LinkJob { mark, notes, at: (0, 0), seen: mark, nodes: HashSet::new(), keys: HashSet::new(), next: 0 })
+        let by_path = notes.iter().enumerate().map(|(i, note)| (Arc::clone(&note.path), u32::try_from(i).expect("a job holds few notes"))).collect();
+        Some(LinkJob { mark, notes, at: (0, 0), seen: mark, next: 0, by_key: HashMap::new(), by_path, _trash: trash })
     }
 
     /// Answer up to `ANSWER_STEP` of a job's questions (step 3, under the read lock).
@@ -176,7 +192,7 @@ impl Index {
     /// most `MEMBER_STEP` membership changes per call. `More`: call again (after letting
     /// writers in).
     pub(crate) fn publish(&mut self, job: &mut LinkJob) -> LinkSlice {
-        let Some(edits) = self.edits_since(job.seen) else {
+        let Some((edits, reached, all)) = self.edits_after(job.seen, budget(EDIT_STEP)) else {
             // A rebuild (the reverse maps start over) or more edits than the log keeps.
             if let Some(note) = job.notes.get(job.next) {
                 if let (true, Some(Finished { new: Some(new), .. })) = (note.added > 0, &note.done) {
@@ -187,25 +203,35 @@ impl Index {
             }
             return LinkSlice::Stale;
         };
+        #[cfg(test)]
+        let mut read = 0;
         for edit in edits {
-            match edit {
-                Edit::Node(path) => {
-                    job.nodes.insert(Arc::clone(path));
-                }
-                Edit::Key(key) => {
-                    job.keys.insert(*key);
-                }
-                Edit::Entry(_) => {}
+            #[cfg(test)]
+            {
+                read += 1;
+            }
+            let hit = match edit {
+                Edit::Node(path) => job.by_path.remove(path).map(|i| vec![i]),
+                Edit::Key(key) => job.by_key.remove(key),
+                Edit::Entry(_) => None,
+            };
+            for i in hit.into_iter().flatten() {
+                job.notes[i as usize].changed = true;
             }
         }
-        job.seen = self.edit_mark();
+        #[cfg(test)]
+        MOST_EDITS.with(|n| n.set(n.get().max(read)));
+        job.seen = reached;
+        if !all {
+            // More edits to read first: the next hold goes on with them.
+            return LinkSlice::More;
+        }
         let mut left = budget(MEMBER_STEP);
         let mut changed = Vec::new();
         let mut out = LinkSlice::Done;
         while let Some(note) = job.notes.get_mut(job.next) {
-            let read_changed = job.nodes.contains(&note.path) || note.keys.iter().any(|k| job.keys.contains(k));
             let moved = !same(self.links.shared(&note.path), note.before.as_ref());
-            if read_changed || moved {
+            if note.changed || moved {
                 // Read something that changed: it stays queued for another job.
                 if let (true, Some(Finished { new: Some(new), .. })) = (note.added > 0, &note.done) {
                     self.links.forget(&note.path, Arc::clone(new));
@@ -275,7 +301,8 @@ fn same(a: Option<&Arc<Resolved>>, b: Option<&Arc<Resolved>>) -> bool {
 impl LinkJob {
     /// List every map key each note's resolution could read (step 2, no lock).
     pub(crate) fn ask(&mut self) {
-        for note in &mut self.notes {
+        for (i, note) in self.notes.iter_mut().enumerate() {
+            let i = u32::try_from(i).expect("a job holds few notes");
             let Some(node) = &note.node else {
                 continue;
             };
@@ -285,7 +312,13 @@ impl LinkJob {
             };
             asked.sort_unstable();
             asked.dedup();
-            note.keys = asked.iter().map(|(kind, key)| key_hash(*kind, key)).collect();
+            for (kind, key) in &asked {
+                let notes = self.by_key.entry(key_hash(*kind, key)).or_default();
+                // Two keys of one note may share a hash: list the note once.
+                if notes.last() != Some(&i) {
+                    notes.push(i);
+                }
+            }
             note.asked = asked;
         }
     }

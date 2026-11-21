@@ -34,7 +34,7 @@ import { drawOrder, type GraphModel, type GraphNode, localLinksMatter, neighbour
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
-import { devBuilt, devStats, setProbe } from "./probe";
+import { devBuilt, devHold, devStats, setProbe } from "./probe";
 import { changedIn, DATA_KEYS, FORCE_KEYS, graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
 import { type SimGraph, Simulation } from "./sim";
 import { type ColorRule, createGraphSource, type Facts } from "./source";
@@ -219,7 +219,7 @@ export function createGraphView(host: GraphHost) {
     const installing = performance.now();
     // A new layout graph goes in between ticks: the next frame puts it in once the tick under
     // way ends (review 4). Anything else goes in now.
-    if (step.value.graph && sim.ticking) {
+    if (step.value.graph && (sim.ticking || devHold?.())) {
       waiting = step.value;
       invalidate();
     } else install(step.value);
@@ -326,6 +326,9 @@ export function createGraphView(host: GraphHost) {
 
   function scheduleRebuild(delay = REFRESH_DELAY) {
     stale = true;
+    // A model still waiting to go in is older than what asked for this rebuild: drop it, and
+    // the shown one stays up until the rebuild is done (review 5).
+    waiting = null;
     clearTimeout(refreshTimer);
     if (active) refreshTimer = window.setTimeout(() => void rebuild(), delay);
   }
@@ -360,12 +363,12 @@ export function createGraphView(host: GraphHost) {
       more = true;
     }
     // A new graph waits for the tick under way (its nodes move when it ends).
-    if (waiting && !sim.ticking) {
+    if (waiting && !sim.ticking && !devHold?.()) {
       const p = waiting;
       waiting = null;
       install(p);
       more = true;
-    }
+    } else if (waiting) more = true;
     // Zoom eases to its target around the point it was aimed at.
     if (cam.scale !== cam.target) {
       easeZoom(cam, dt, duration("fast") <= 0);
@@ -424,6 +427,11 @@ export function createGraphView(host: GraphHost) {
 
   function draw() {
     if (!cam.width || !cam.height) return;
+    // A node dragged during a tick in steps is drawn where it was put (`Simulation.place`).
+    sim.showing(drawNow);
+  }
+
+  function drawNow() {
     const c = colors ?? readColors();
     drawnModel = model;
     drawGraph(ctx, {
@@ -458,7 +466,7 @@ export function createGraphView(host: GraphHost) {
   // ----- hit testing and hover -----
 
   /** The node under a point (canvas pixels), or -1. */
-  const nodeAt = (px: number, py: number) => hitTest(cam, px, py, sim.x, sim.y, radius, cfg.nodeSizeMultiplier);
+  const nodeAt = (px: number, py: number) => sim.showing(() => hitTest(cam, px, py, sim.x, sim.y, radius, cfg.nodeSizeMultiplier));
 
   function setHover(i: number) {
     if (i === hovered) return;
@@ -484,7 +492,8 @@ export function createGraphView(host: GraphHost) {
         sim.alphaTarget = 0.3;
         sim.reheat(0.3);
       }
-      [sim.x[i], sim.y[i]] = toWorld(cam, x, y);
+      const [wx, wy] = toWorld(cam, x, y);
+      sim.place(i, wx, wy);
       invalidate();
     },
     dropNode(i) {
@@ -636,7 +645,9 @@ export function createGraphView(host: GraphHost) {
   /** Whether a link refresh that changed `touched` notes' entries can change this graph (`localLinksMatter`). */
   function linksMatter(touched: ReadonlySet<string> | null): boolean {
     // A rebuild in flight read older links than these: judge nothing against the old model.
-    if (building) return true;
+    // Nor while a rebuilt model waits to go in (review 5): it was built from links before these,
+    // and the shown model says nothing about the notes it adds.
+    if (building || waiting) return true;
     const { links, linkPrev } = ws.vault;
     return localLinksMatter(
       touched,
