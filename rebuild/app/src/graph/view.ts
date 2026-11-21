@@ -27,13 +27,13 @@ import { h } from "../shell/dom";
 import type { OpenWhere } from "../tabs";
 import type { Workspace } from "../workspace";
 import { camera, easeZoom, fitAround, hitTest, panBy, toWorld, wheelZoom } from "./camera";
-import { type GraphModel, type GraphNode, localLinksMatter, neighbours, nodeColor, nodeRadius } from "./data";
+import { drawOrder, type GraphModel, type GraphNode, localLinksMatter, neighbourSteps, nodeColor, nodeRadius, sameShape } from "./data";
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
 import { devBuilt, devStats, setProbe } from "./probe";
 import { changedIn, DATA_KEYS, FORCE_KEYS, graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
-import { Simulation } from "./sim";
+import { type SimGraph, Simulation } from "./sim";
 import { type ColorRule, createGraphSource, type Facts } from "./source";
 import type { GraphSettings } from "../settings/schema";
 import { settings } from "../settings/store";
@@ -120,7 +120,8 @@ export function createGraphView(host: GraphHost) {
   let palette: string[] = [];
   let paletteAlpha: number[] = [];
   let order = new Int32Array(0);
-  let signature = "";
+  /** The next install lays the graph out again even when its shape is the same (a timelapse). */
+  let relayout = true;
   let built = false;
 
   const cam = camera(cfg.scale);
@@ -180,13 +181,21 @@ export function createGraphView(host: GraphHost) {
     // A first build runs to the end now, so a new graph's first frame has its nodes. An
     // update of a graph already on screen runs in slices of at most SLICE_MS, a frame apart,
     // while the old one stays up (review 2): a 50k-note rebuild no longer takes one long task.
-    const steps = source.buildSteps(cfg, facts, center, shown);
+    // Review 3: so does preparing it for the screen (`prepare`); only `install` is left for
+    // the last slice.
+    const built_ = source.buildSteps(cfg, facts, center, shown);
+    const steps = (function* () {
+      const { model: next, groups } = yield* built_;
+      return yield* prepare(next, groups);
+    })();
     building = true;
     let step = steps.next();
     let slice = performance.now();
     let work = 0;
+    let longest = 0;
     while (!step.done) {
       if (built && !reveal && performance.now() - slice > SLICE_MS) {
+        longest = Math.max(longest, performance.now() - slice);
         work += performance.now() - slice;
         await new Promise((resolve) => setTimeout(resolve, 0));
         if (mine !== seq || disposed) return;
@@ -195,47 +204,86 @@ export function createGraphView(host: GraphHost) {
       step = steps.next();
     }
     building = false;
-    const { model: next, groups } = step.value;
-    setModel(next, groups);
-    devBuilt?.(work + performance.now() - slice, performance.now() - started);
+    const installing = performance.now();
+    install(step.value);
+    devBuilt?.(work + performance.now() - slice, performance.now() - started, Math.max(longest, performance.now() - slice), performance.now() - installing);
   }
 
-  function setModel(next: GraphModel, groups: ColorRule[]) {
-    const sig = next.nodes.map((n) => n.id).join("\n") + "\n" + next.links.map((l) => `${l.source},${l.target}`).join(" ");
-    const changed = sig !== signature;
+  /** A model made ready for the screen by `prepare`, for `install`. */
+  interface Prepared {
+    next: GraphModel;
+    groups: ColorRule[];
+    radius: Float64Array<ArrayBuffer>;
+    adjStart: Int32Array<ArrayBuffer>;
+    adj: Int32Array<ArrayBuffer>;
+    colorOf: Int16Array<ArrayBuffer>;
+    order: Int32Array<ArrayBuffer>;
+    /** The layout's new graph, when the nodes or links differ from the shown ones. */
+    graph: SimGraph | null;
+    known: number;
+  }
+
+  /**
+   * Everything a new model needs on screen that does not depend on where the shown
+   * nodes are now, in steps, without touching what is shown (review 3).
+   */
+  function* prepare(next: GraphModel, groups: ColorRule[]): Generator<void, Prepared> {
     const prev = model;
-    model = next;
+    const changed = relayout || !(yield* sameShape(prev, next));
     const n = next.nodes.length;
-    radius = new Float64Array(n);
-    for (let i = 0; i < n; i++) radius[i] = nodeRadius(next.nodes[i].weight);
-    ({ start: adjStart, adj } = neighbours(n, next.links)); // for hover
-    highlighted = new Uint8Array(n);
-    applyColors(groups);
+    const radius = new Float64Array(n);
+    const colorOf = new Int16Array(n);
+    // Each node's colour: its group's (the first that matches), else by kind (nodeColor).
+    for (let i = 0; i < n; i++) {
+      if ((i & 1023) === 1023) yield;
+      radius[i] = nodeRadius(next.nodes[i].weight);
+      colorOf[i] = nodeColor(next.nodes[i], groups);
+    }
+    const { start, adj } = yield* neighbourSteps(n, next.links); // for hover
+    // Draw order: by colour, so each colour is one path (each colour's nodes in index order,
+    // as the stable sort by colour this replaces gave).
+    const order = drawOrder(colorOf);
+    let graph: SimGraph | null = null;
+    let known = 0;
     if (changed) {
-      signature = sig;
-      const ox = sim.x;
-      const oy = sim.y;
-      const ovx = sim.vx;
-      const ovy = sim.vy;
       const saved = !local ? layouts.get(ws.vault.path) : undefined;
-      let known = 0;
-      sim.setGraph(
+      const shown = sim.x.length;
+      graph = yield* sim.prepareGraph(
         next.nodes.map((node) => node.id),
         next.links,
         (id) => {
           const i = prev.index.get(id);
-          if (i !== undefined && i < ox.length) {
+          if (i !== undefined && i < shown) {
             known++;
-            return [ox[i], oy[i], ovx[i], ovy[i]];
+            return i;
           }
           const p = saved?.get(id);
           if (p) known++;
           return p ? [p[0], p[1], 0, 0] : undefined;
         },
       );
+    }
+    return { next, groups, radius, adjStart: start, adj, colorOf, order, graph, known };
+  }
+
+  /** Show a prepared model. The layout's nodes keep their current places. */
+  function install(p: Prepared) {
+    const { next, groups, graph } = p;
+    model = next;
+    const n = next.nodes.length;
+    radius = p.radius;
+    adjStart = p.adjStart;
+    adj = p.adj;
+    highlighted = new Uint8Array(n);
+    applyPalette(groups);
+    colorOf = p.colorOf;
+    order = p.order;
+    if (graph) {
+      relayout = false;
+      sim.installGraph(graph);
       // A first build from scratch starts hot; one that mostly knows where
       // things are (a reopened graph, an edit) only warms up a little.
-      if (!built) sim.alpha = n && known / n > 0.9 ? 0.3 : 1;
+      if (!built) sim.alpha = n && p.known / n > 0.9 ? 0.3 : 1;
       else sim.reheat(reveal ? 0.5 : 0.3);
       hovered = shownHover = -1;
     }
@@ -243,17 +291,12 @@ export function createGraphView(host: GraphHost) {
     invalidate();
   }
 
-  /** Each node's colour: its group's (the first that matches), else by kind (nodeColor). */
-  function applyColors(groups: ColorRule[]) {
+  function applyPalette(groups: ColorRule[]) {
     const c = colors ?? readColors();
     palette = [c.node, c.unresolved, c.tag, c.attachment, ...groups.map((g) => `#${g.rgb.toString(16).padStart(6, "0")}`)];
     paletteAlpha = [1, 0.5, 1, 1, ...groups.map(() => 1)];
-    const n = model.nodes.length;
-    colorOf = new Int16Array(n);
-    model.nodes.forEach((node, i) => (colorOf[i] = nodeColor(node, groups)));
-    // Draw order: by colour, so each colour is one path.
-    order = Int32Array.from({ length: n }, (_, i) => i).sort((a, b) => colorOf[a] - colorOf[b]);
   }
+
 
   function readColors(): Colors {
     const read = readGraphColors(el);
@@ -470,7 +513,7 @@ export function createGraphView(host: GraphHost) {
     const paths = ws.vault.files.filter((f) => !f.is_dir).map((f) => f.path);
     paths.sort((a, b) => (mtime.get(a) ?? 0) - (mtime.get(b) ?? 0) || a.localeCompare(b));
     reveal = { order: paths, shown: 0, perFrame: Math.max(1, Math.ceil(paths.length / 240)) };
-    signature = "";
+    relayout = true;
     sim.alpha = 1;
     invalidate();
   }
@@ -570,7 +613,15 @@ export function createGraphView(host: GraphHost) {
   function linksMatter(touched: ReadonlySet<string> | null): boolean {
     // A rebuild in flight read older links than these: judge nothing against the old model.
     if (building) return true;
-    return localLinksMatter(touched, local ? model.index : null, source.readsText(cfg), cfg.hideUnresolved, (path) => linkEntryOf(ws.vault.links, path));
+    const { links, linkPrev } = ws.vault;
+    return localLinksMatter(
+      touched,
+      local ? model.index : null,
+      source.readsText(cfg),
+      cfg.hideUnresolved,
+      (path) => linkEntryOf(links, path),
+      (path) => linkEntryOf(linkPrev, path),
+    );
   }
 
   // The vault changed (a moment after a save, never on a keystroke): update in place.

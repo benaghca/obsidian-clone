@@ -99,11 +99,11 @@ impl Index {
     /// Panics unless the link table, `link_index`, and `backlinks` equal a full walk.
     pub(crate) fn assert_links_match_walk(&self) {
         assert!(!self.links.has_pending(), "link table left unsettled");
-        let fresh: BTreeMap<Arc<str>, Resolved> = self
+        let fresh: BTreeMap<Arc<str>, Arc<Resolved>> = self
             .files
             .iter()
             .filter(|(path, node)| has_links(path, node))
-            .map(|(path, node)| (Arc::from(path.as_str()), resolve_note(&self.maps, path, &node.note.links, None)))
+            .map(|(path, node)| (Arc::from(path.as_str()), Arc::new(resolve_note(&self.maps, path, &node.note.links))))
             .collect();
         if self.links.notes() != &fresh {
             for (path, r) in self.links.notes() {
@@ -464,14 +464,83 @@ fn random_content(rng: &mut Rng) -> String {
     text
 }
 
+/// One random change: a save, a text-only save, a rename or move, a delete, or a batch of them.
+fn random_change(rng: &mut Rng, idx: &mut Index, root: &Path) {
+    match rng.below(16) {
+        0..=6 => {
+            let path = random_path(rng);
+            let body = random_content(rng);
+            save(idx, root, &path, &body);
+        }
+        7 => {
+            // Same links, new text: only line text changes.
+            let path = some_path(rng, idx);
+            if idx.contains(&path) && !idx.is_dir(&path) {
+                let body = idx.files.get(&path).unwrap().note.lines.iter().map(|l| format!("{} more\n", l.text)).collect::<String>();
+                save(idx, root, &path, &body);
+            }
+        }
+        8..=10 => {
+            let from = some_path(rng, idx);
+            let to = if rng.below(2) == 0 { random_path(rng) } else { some_path(rng, idx) };
+            idx.relocate(&from, &to);
+        }
+        11..=12 => {
+            let path = some_path(rng, idx);
+            idx.remove_tree(&path);
+        }
+        _ => {
+            let mut batch = idx.map_batch();
+            for _ in 0..1 + rng.below(4) {
+                let from = some_path(rng, batch.index);
+                match rng.below(3) {
+                    0 => batch.relocate(&from, &random_path(rng)),
+                    1 => batch.remove_tree(&from),
+                    _ => {
+                        let body = random_content(rng);
+                        let path = random_path(rng);
+                        batch.index.upsert_note(root, &path, &body, Stamp::sized(body.len()));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// One off-lock job (`link_jobs`) taken through its steps at once. Stale when a change
+/// landed between its start and its publish.
+fn run_job(mut job: link_jobs::LinkJob, idx: &mut Index) -> LinkSlice {
+    job.ask();
+    loop {
+        match idx.answer(&mut job) {
+            LinkSlice::More => {}
+            LinkSlice::Done => break,
+            LinkSlice::Stale => return LinkSlice::Stale,
+        }
+    }
+    job.finish();
+    idx.publish(job)
+}
+
+/// Settle the way the app does: off-lock jobs until none is left.
+fn settle_by_jobs(idx: &mut Index) {
+    while let Some(job) = idx.link_job() {
+        assert_eq!(run_job(job, idx), LinkSlice::Done, "nothing changed meanwhile");
+    }
+}
+
 /// `deferred`: every link update stays queued (as the app's large ones do) and is settled only
 /// now and then, sometimes one partial step at a time, so queued work from several changes
-/// coalesces and later changes land on a half-settled table.
+/// coalesces and later changes land on a half-settled table. Review 3: settling is also done
+/// by off-lock jobs in small steps, and some jobs are started before a change and published
+/// after it (they must come back stale, leaving their notes queued).
 fn random_links_sequence(seed: u64, steps: usize, deferred: bool) {
     let tmp = tmp_dir("link-deltas-seq");
     let root = tmp.path.as_path();
     let mut rng = Rng(seed);
     let mut idx = Index::default();
+    link_jobs::small_steps(deferred);
+    link_jobs::take_skipped();
     if deferred {
         idx.defer_links_over(0);
     }
@@ -482,55 +551,34 @@ fn random_links_sequence(seed: u64, steps: usize, deferred: bool) {
     }
     idx.settle_links_now();
     let mut pages = Pages::new(&idx);
+    let mut stale = 0;
     for step in 0..steps {
         let ctx = format!("seed {seed} step {step}{}", if deferred { " (deferred)" } else { "" });
-        match rng.below(16) {
-            0..=6 => {
-                let path = random_path(&mut rng);
-                let body = random_content(&mut rng);
-                save(&mut idx, root, &path, &body);
-            }
-            7 => {
-                // Same links, new text: only line text changes.
-                let path = some_path(&mut rng, &idx);
-                if idx.contains(&path) && !idx.is_dir(&path) {
-                    let body = idx.files.get(&path).unwrap().note.lines.iter().map(|l| format!("{} more\n", l.text)).collect::<String>();
-                    save(&mut idx, root, &path, &body);
-                }
-            }
-            8..=10 => {
-                let from = some_path(&mut rng, &idx);
-                let to = if rng.below(2) == 0 { random_path(&mut rng) } else { some_path(&mut rng, &idx) };
-                idx.relocate(&from, &to);
-            }
-            11..=12 => {
-                let path = some_path(&mut rng, &idx);
-                idx.remove_tree(&path);
-            }
-            _ => {
-                let mut batch = idx.map_batch();
-                for _ in 0..1 + rng.below(4) {
-                    let from = some_path(&mut rng, batch.index);
-                    match rng.below(3) {
-                        0 => batch.relocate(&from, &random_path(&mut rng)),
-                        1 => batch.remove_tree(&from),
-                        _ => {
-                            let body = random_content(&mut rng);
-                            let path = random_path(&mut rng);
-                            batch.index.upsert_note(root, &path, &body, Stamp::sized(body.len()));
-                        }
-                    }
-                }
-            }
+        // A job started before this change, published after it.
+        let early = if deferred && rng.below(3) == 0 { idx.link_job() } else { None };
+        let mark = idx.edit_mark();
+        random_change(&mut rng, &mut idx, root);
+        if let Some(job) = early {
+            let moved = idx.edit_mark() != mark;
+            let got = run_job(job, &mut idx);
+            assert!(got == LinkSlice::Done || moved, "{ctx}: a job goes stale only after a change");
+            stale += usize::from(got == LinkSlice::Stale);
         }
         if deferred {
-            match rng.below(4) {
+            match rng.below(6) {
                 0 => {
                     // One step of queued work, then more changes on top.
                     idx.settle_links_until(Instant::now());
                     continue;
                 }
-                1 => continue,
+                1 => {
+                    if let Some(job) = idx.link_job() {
+                        run_job(job, &mut idx);
+                    }
+                    continue;
+                }
+                2 => continue,
+                3 | 4 => settle_by_jobs(&mut idx),
                 _ => idx.settle_links_now(),
             }
         }
@@ -539,7 +587,123 @@ fn random_links_sequence(seed: u64, steps: usize, deferred: bool) {
     }
     idx.settle_links_now();
     pages.check(&idx, &format!("seed {seed}: the end"));
+    link_jobs::small_steps(false);
     assert_eq!(pages.eager.fulls, 1, "seed {seed}: the eager page never needed a full reply");
+    if deferred {
+        let skipped = link_jobs::take_skipped();
+        println!("seed {seed}: {stale} jobs stale (a rebuild between), {skipped} notes left queued by a publish");
+        assert!(skipped > 0, "seed {seed}: some published jobs held notes that changed meanwhile");
+    }
+}
+
+/// Review 3: replies built in steps (`link_replies`) with changes and settling between the
+/// steps equal the replies made at once, at the moment they finish.
+fn random_reply_sequence(seed: u64, steps: usize) {
+    let tmp = tmp_dir("link-replies-seq");
+    let root = tmp.path.as_path();
+    let mut rng = Rng(seed);
+    let mut idx = Index::default();
+    link_jobs::small_steps(true);
+    idx.defer_links_over(0);
+    idx.links.set_log_paths(96);
+    for _ in 0..24 {
+        let path = random_path(&mut rng);
+        let body = random_content(&mut rng);
+        save(&mut idx, root, &path, &body);
+    }
+    settle_by_jobs(&mut idx);
+    let mut held: Vec<(u64, u64)> = Vec::new();
+    let mut snapshots: BTreeMap<(u64, u64), LinkIndex> = BTreeMap::new();
+    let mut links: Vec<(LinkReply, Option<(u64, u64)>)> = Vec::new();
+    let mut backs: Vec<(BacklinkReply, Vec<String>)> = Vec::new();
+    let (mut done_links, mut done_backs, mut deltas) = (0, 0, 0);
+    for step in 0..steps {
+        let ctx = format!("seed {seed} step {step}");
+        match rng.below(5) {
+            0 => random_change(&mut rng, &mut idx, root),
+            1 | 2 => {
+                if let Some(job) = idx.link_job() {
+                    run_job(job, &mut idx);
+                }
+            }
+            _ => {}
+        }
+        // Start replies: for the whole index, from a version a page holds, or for some targets.
+        if rng.below(3) == 0 {
+            let asked = match rng.below(4) {
+                0 => None,
+                1 => Some((999, 1)),
+                _ => held.iter().rev().nth(rng.below(3)).copied(),
+            };
+            links.push((LinkReply::new(asked), asked));
+        }
+        if rng.below(4) == 0 {
+            let mut targets: Vec<String> = (0..1 + rng.below(3)).map(|_| some_path(&mut rng, &idx)).collect();
+            targets.push("missing.md".into());
+            backs.push((BacklinkReply::new(&targets), targets));
+        }
+        // Step each reply once; settle when one asks.
+        let mut i = 0;
+        while i < links.len() {
+            match links[i].0.step(&idx) {
+                ReplyStep::More => i += 1,
+                ReplyStep::Settle => {
+                    settle_by_jobs(&mut idx);
+                    i += 1;
+                }
+                ReplyStep::Done => {
+                    let (reply, asked) = links.remove(i);
+                    let got = reply.into_changes();
+                    let now = idx.links.changes(asked);
+                    let fresh = idx.link_index();
+                    match (&got.full, &now.full) {
+                        // A reply that began while the log still reached the page's version
+                        // stays a delta after the log moves on: it already holds those paths.
+                        (None, Some(_)) => {
+                            let mut page = snapshots[&asked.unwrap()].clone();
+                            for (path, entry) in &got.changed {
+                                set(&mut page.outgoing, path, entry.outgoing.clone());
+                                set(&mut page.markdown, path, entry.markdown.clone());
+                                set(&mut page.unresolved, path, entry.unresolved.clone());
+                            }
+                            assert_eq!((got.id, got.version), (now.id, now.version), "{ctx}");
+                            assert_eq!(page, fresh, "{ctx}: a stepped delta from {asked:?} patches to the table");
+                        }
+                        _ => assert_eq!(got, now, "{ctx}: a stepped reply from {asked:?}"),
+                    }
+                    deltas += usize::from(got.since.is_some());
+                    held.push((got.id, got.version));
+                    snapshots.insert((got.id, got.version), fresh);
+                    done_links += 1;
+                }
+            }
+        }
+        let mut i = 0;
+        while i < backs.len() {
+            match backs[i].0.step(&idx) {
+                ReplyStep::More => i += 1,
+                ReplyStep::Settle => {
+                    settle_by_jobs(&mut idx);
+                    i += 1;
+                }
+                ReplyStep::Done => {
+                    let (reply, targets) = backs.remove(i);
+                    assert_eq!(reply.finish(), walked_backlinks(&idx, &targets), "{ctx}: stepped backlinks of {targets:?}");
+                    done_backs += 1;
+                }
+            }
+        }
+    }
+    link_jobs::small_steps(false);
+    println!("seed {seed}: {done_links} link replies ({deltas} deltas), {done_backs} backlink replies");
+    assert!(done_links > 20 && deltas > 10 && done_backs > 10, "seed {seed}: replies finished");
+}
+
+#[test]
+fn stepped_replies_equal_replies_made_at_once() {
+    for seed in [5, 0xBEEF, 0x1234_5678, 77] {
+        random_reply_sequence(seed, 400);
+    }
 }
 
 #[test]
@@ -557,47 +721,61 @@ fn deferred_link_updates_settle_to_a_full_walk() {
     }
 }
 
-/// Review 2: `pick` through a batch's `PickIndex` equals the plain scan, for any source folder.
+/// Review 3: a name with many files keeps its `pick` up to date (`NamePicks`). After every
+/// add or remove it equals the plain scan from any folder, and the maps equal a rebuild.
 #[test]
-fn indexed_pick_equals_the_scan() {
+fn kept_name_picks_equal_the_scan() {
+    let tmp = tmp_dir("name-picks");
+    let root = tmp.path.as_path();
     let mut rng = Rng(0xA11CE);
-    let dirs = ["", "a", "a/b", "b", "c/d"];
-    let names = ["README.md", "README.png", "readme.md", ".md", "README.MD", "x/README.md"];
-    for round in 0..300 {
-        let mut cands: Vec<String> = (0..super::PICK_INDEX_MIN + rng.below(40))
-            .map(|_| {
-                let dir = rng.pick(&dirs);
-                let name = rng.pick(&names);
-                if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") }
-            })
-            .collect();
-        cands.sort();
-        cands.dedup();
-        let mut cache = super::PickCache::default();
-        for dir in dirs.iter().chain(["z", "a/b/c"].iter()) {
-            let from = if dir.is_empty() { "src.md".to_string() } else { format!("{dir}/src.md") };
-            assert_eq!(cache.pick(&cands, &from), super::pick(&cands, &from), "round {round} from {from}: {cands:?}");
+    let dirs = ["", "a", "a/b", "b", "c/d", "e", "f", "g"];
+    let names = ["README.md", "README.png", "readme.md", ".md", "README.MD", "x/README.md", "readme"];
+    let mut idx = Index::default();
+    let mut live: Vec<String> = Vec::new();
+    for round in 0..600 {
+        let dir = rng.pick(&dirs);
+        let name = rng.pick(&names);
+        let path = if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") };
+        // Mostly adds until the name is long, then a mix, so the picks are made, kept, and dropped.
+        if live.contains(&path) && (live.len() > 24 || rng.below(3) == 0) {
+            idx.remove_tree(&path);
+            live.retain(|p| *p != path);
+        } else {
+            save(&mut idx, root, &path, "text\n");
+            live.push(path);
         }
+        for from_dir in dirs.iter().chain(["z", "a/b/c"].iter()) {
+            let from = if from_dir.is_empty() { "src.md".to_string() } else { format!("{from_dir}/src.md") };
+            for key in ["readme", ".md"] {
+                let scan = idx.maps.names(key).and_then(|cands| super::pick(cands, &from));
+                assert_eq!(idx.maps.name_pick(key, &from), scan, "round {round} key {key} from {from}");
+            }
+        }
+        assert_eq!(idx.maps, super::name_maps::NameMaps::build(&idx.files), "round {round}: maps vs a rebuild");
     }
 }
 
-/// Review 2: many readers of a key with many owners (`[[README]]`). A batch builds one
-/// `PickIndex` per candidate list, so a full rebuild is linear, far under the per-link scan.
+/// Review 2: many readers of a key with many owners (`[[README]]`). The name keeps its picks
+/// (review 3), so a full rebuild is linear, far under the per-link scan.
 #[test]
 fn many_readers_of_an_ambiguous_name_resolve_without_a_scan_each() {
     let mut notes: Vec<(String, String)> = (0..1500).map(|i| (format!("r{i:04}/README.md"), "readme\n".to_string())).collect();
     notes.extend((0..3000).map(|i| (format!("s{:04}/note{i}.md", i % 1500), "see [[README]]\n".to_string())));
     let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
     let mut idx = Index::from_notes(&refs);
+    // What each link cost before: a scan of every README.
     let started = Instant::now();
-    let walked = walked_link_index(&idx);
+    let cands = idx.maps.names("readme").unwrap();
+    let scanned = notes.iter().filter(|(_, c)| c.contains("[[README]]")).filter(|(p, _)| super::pick(cands, p).is_some()).count();
     let walk = started.elapsed();
+    assert_eq!(scanned, 3000);
+    let walked = walked_link_index(&idx);
     let started = Instant::now();
     idx.rebuild_links();
     let rebuild = started.elapsed();
     assert_eq!(idx.link_index(), walked);
-    println!("3000 [[README]] links over 1500 READMEs (debug): walk {walk:?}, rebuild {rebuild:?}");
-    assert!(rebuild * 5 < walk, "rebuild {rebuild:?} vs a walk with a scan per link {walk:?}");
+    println!("3000 [[README]] links over 1500 READMEs (debug): a scan per link {walk:?}, rebuild {rebuild:?}");
+    assert!(rebuild * 5 < walk, "rebuild {rebuild:?} vs a scan per link {walk:?}");
 }
 
 /// A rescan replaces the index; the page keeps patching, with only the notes that differ.
@@ -715,4 +893,33 @@ fn a_shared_alias_with_many_linkers_updates_in_linear_time() {
         idx.assert_links_match_walk();
     }
     assert_eq!(page.fulls, 1, "every step was a delta");
+}
+
+/// Review 3: a note with many distinct links (past `Firsts::LONG`, where repeats are found
+/// through a map instead of a scan) resolves as the walk does: first-seen order, no repeats,
+/// and unresolved names folded by ASCII case only.
+#[test]
+fn a_note_with_many_distinct_links_resolves_like_a_walk() {
+    let mut body = String::new();
+    for i in 0..60 {
+        body.push_str(&format!("[[t{i}]] [[Gone{i}]] [m](t{i}.md) [x](Lost{i}.md)\n"));
+    }
+    // Repeats after the lists are long: the same targets, and the missing names in other ASCII
+    // cases (repeats), and in a non-ASCII case (not repeats).
+    for i in (0..60).rev() {
+        body.push_str(&format!("[[T{i}]] [[gone{i}]] [[GONE{i}]] [m](t{i}.md) [x](lost{i}.md) [[İ{i}]] [[i̇{i}]]\n"));
+    }
+    let mut notes: Vec<(String, String)> = (0..60).map(|i| (format!("t{i}.md"), "x\n".to_string())).collect();
+    notes.push(("many.md".into(), body));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let idx = Index::from_notes(&refs);
+    assert_eq!(idx.link_index(), walked_link_index(&idx));
+    let entry = &idx.links.notes()["many.md"].entry;
+    assert_eq!(entry.outgoing.len(), 60);
+    assert_eq!(entry.markdown.len(), 60);
+    // Gone0..59 and Lost0..59, then İ59..İ0 and i̇59..i̇0 (case folding is ASCII only).
+    assert_eq!(entry.unresolved.len(), 60 + 60 + 60 + 60);
+    assert_eq!(entry.unresolved[0], "Gone0");
+    assert_eq!(entry.unresolved[1], "Lost0");
+    idx.assert_maps_match_rebuild();
 }

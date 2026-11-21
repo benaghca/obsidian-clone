@@ -39,6 +39,23 @@ const CENTER_SCALE = 0.09;
 const THETA2 = 0.81; // Barnes-Hut accuracy (theta 0.9, squared)
 const DISTANCE_MIN2 = 1;
 
+/** A graph prepared for `Simulation.installGraph`. */
+export interface SimGraph {
+  n: number;
+  /** Per node: the current node whose place and speed it keeps, or -1. */
+  from: Int32Array<ArrayBuffer>;
+  /** Nodes given a place and speed of their own. */
+  given: Map<number, [number, number, number, number]>;
+  ls: Int32Array<ArrayBuffer>;
+  lt: Int32Array<ArrayBuffer>;
+  bias: Float64Array<ArrayBuffer>;
+  strength: Float64Array<ArrayBuffer>;
+  /** (new node, placed neighbour) pairs, in placing order. */
+  plan: number[];
+  /** Nodes left for the spiral, in order. */
+  spiral: number[];
+}
+
 export class Simulation {
   n = 0;
   x = new Float64Array(0);
@@ -70,57 +87,115 @@ export class Simulation {
    * for the same graph, so it opens the same way each time).
    */
   setGraph(ids: readonly string[], links: readonly { source: number; target: number }[], known: (id: string) => [number, number, number, number] | undefined) {
+    const steps = this.prepareGraph(ids, links, known);
+    for (;;) {
+      const step = steps.next();
+      if (step.done) return this.installGraph(step.value);
+    }
+  }
+
+  /**
+   * `setGraph` in two parts (review 3): this works out everything that does not
+   * depend on where the current nodes are, in steps (it yields), without
+   * touching the simulation, and `installGraph` then puts it in place. `known`
+   * gives a node's place and speed, or the index of the current node whose
+   * place and speed it keeps (read when it is installed, so the layout keeps
+   * moving meanwhile).
+   */
+  *prepareGraph(
+    ids: readonly string[],
+    links: readonly { source: number; target: number }[],
+    known: (id: string) => number | [number, number, number, number] | undefined,
+  ): Generator<void, SimGraph> {
     const n = ids.length;
+    const from = new Int32Array(n).fill(-1);
+    const given = new Map<number, [number, number, number, number]>();
+    const placed = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 4095) yield;
+      const k = known(ids[i]);
+      if (k === undefined) continue;
+      if (typeof k === "number") from[i] = k;
+      else given.set(i, k);
+      placed[i] = 1;
+    }
+    const m = links.length;
+    const ls = new Int32Array(m);
+    const lt = new Int32Array(m);
+    const bias = new Float64Array(m);
+    const strength = new Float64Array(m);
+    const degree = new Int32Array(n);
+    for (let i = 0; i < m; i++) {
+      if ((i & 4095) === 4095) yield;
+      const l = links[i];
+      ls[i] = l.source;
+      lt[i] = l.target;
+      degree[l.source]++;
+      degree[l.target]++;
+    }
+    for (let i = 0; i < m; i++) {
+      if ((i & 4095) === 4095) yield;
+      const s = degree[ls[i]];
+      const t = degree[lt[i]];
+      bias[i] = s / (s + t);
+      strength[i] = 1 / Math.min(s, t);
+    }
+    // New nodes beside an already placed neighbour, in the order `installGraph`
+    // places them: (new node, its neighbour) pairs.
+    const plan: number[] = [];
+    for (let pass = 0; pass < 2; pass++) {
+      for (let i = 0; i < m; i++) {
+        if ((i & 4095) === 4095) yield;
+        const a = ls[i];
+        const b = lt[i];
+        if (placed[a] === placed[b]) continue;
+        const [anchor, to] = placed[a] ? [a, b] : [b, a];
+        plan.push(to, anchor);
+        placed[to] = 1;
+      }
+      if (pass === 0 && placed.every((p) => !p)) break;
+    }
+    const spiral: number[] = [];
+    for (let i = 0; i < n; i++) {
+      if ((i & 4095) === 4095) yield;
+      if (!placed[i]) spiral.push(i);
+    }
+    return { n, from, given, ls, lt, bias, strength, plan, spiral };
+  }
+
+  /** Put a prepared graph in place (`prepareGraph`): one pass over its nodes, and the new ones placed. */
+  installGraph(g: SimGraph) {
+    const { n, from, given } = g;
+    const [ox, oy, ovx, ovy] = [this.x, this.y, this.vx, this.vy];
     this.n = n;
     this.x = new Float64Array(n);
     this.y = new Float64Array(n);
     this.vx = new Float64Array(n);
     this.vy = new Float64Array(n);
     this.fixed = new Uint8Array(n);
-    const placed = new Uint8Array(n);
     for (let i = 0; i < n; i++) {
-      const k = known(ids[i]);
-      if (!k) continue;
-      [this.x[i], this.y[i], this.vx[i], this.vy[i]] = k;
-      placed[i] = 1;
+      const j = from[i];
+      if (j < 0) continue;
+      this.x[i] = ox[j];
+      this.y[i] = oy[j];
+      this.vx[i] = ovx[j];
+      this.vy[i] = ovy[j];
     }
-    const m = links.length;
-    this.ls = new Int32Array(m);
-    this.lt = new Int32Array(m);
-    this.bias = new Float64Array(m);
-    this.strength = new Float64Array(m);
-    const degree = new Int32Array(n);
-    links.forEach((l, i) => {
-      this.ls[i] = l.source;
-      this.lt[i] = l.target;
-      degree[l.source]++;
-      degree[l.target]++;
-    });
-    for (let i = 0; i < m; i++) {
-      const s = degree[this.ls[i]];
-      const t = degree[this.lt[i]];
-      this.bias[i] = s / (s + t);
-      this.strength[i] = 1 / Math.min(s, t);
-    }
-    // New nodes: beside an already placed neighbour (a note just linked
-    // appears by its note), else on the spiral.
+    for (const [i, k] of given) [this.x[i], this.y[i], this.vx[i], this.vy[i]] = k;
+    this.ls = g.ls;
+    this.lt = g.lt;
+    this.bias = g.bias;
+    this.strength = g.strength;
     const spacing = Math.max(20, this.forces.distance / 6);
-    for (let pass = 0; pass < 2; pass++) {
-      for (let i = 0; i < m; i++) {
-        const a = this.ls[i];
-        const b = this.lt[i];
-        if (placed[a] === placed[b]) continue;
-        const [from, to] = placed[a] ? [a, b] : [b, a];
-        const angle = this.random() * Math.PI * 2;
-        this.x[to] = this.x[from] + Math.cos(angle) * spacing;
-        this.y[to] = this.y[from] + Math.sin(angle) * spacing;
-        placed[to] = 1;
-      }
-      if (pass === 0 && placed.every((p) => !p)) break;
+    for (let p = 0; p < g.plan.length; p += 2) {
+      const to = g.plan[p];
+      const anchor = g.plan[p + 1];
+      const angle = this.random() * Math.PI * 2;
+      this.x[to] = this.x[anchor] + Math.cos(angle) * spacing;
+      this.y[to] = this.y[anchor] + Math.sin(angle) * spacing;
     }
     let k = 0;
-    for (let i = 0; i < n; i++) {
-      if (placed[i]) continue;
+    for (const i of g.spiral) {
       const r = spacing * Math.sqrt(0.5 + k);
       const angle = k * Math.PI * (3 - Math.sqrt(5));
       this.x[i] = r * Math.cos(angle);

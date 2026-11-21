@@ -491,3 +491,207 @@ For the graph, "after" shows its work summed over slices / start to installed:
   - Neither flow reads the link index.
 - **Result:** no clean full `npm test` run yet, as in round 1. The budgets that fail are the same ones, on the base commit too.
 - The test runs rewrote the `rebuild/round*-shots` files; they were restored before committing.
+
+## Review round 3
+
+Codex review 3 of `a3fc766` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review3.md`): three P2 and one P3 finding. All four are fixed here. Limits as before.
+
+### P2: a stale missing-note label after removing a link from outside a local graph
+
+**The problem.** A missing note's node takes its label from the first note that links to it, in path order, whether or not that note is in the local graph. Take Z.md (the centre, depth 1) linking `[[missing]]`, and A.md (outside) linking `[[Missing]]`; the node reads "Missing". If A.md is saved without the link, a fresh build labels it "missing". The guard saw neither a shown note nor a shown target in A.md's new entry, so it skipped the rebuild. The stale label and click target stayed.
+
+**The fix** (`graph/data.ts`, `graph/view.ts`, `vault.ts`):
+
+- `vault.linkPrev` is the link index before the last refresh, the one `linkTouch` is relative to.
+- `localLinksMatter` takes both lookups. A changed note matters if it is shown, or if its entry before or after the refresh links a shown node, resolved or missing.
+
+**Tests** (`graph.test.ts`):
+
+- the reviewer's case, removing the first spelling from an existing, undisplayed note. The new guard rebuilds; judged on new entries alone it would have skipped.
+- The 2,000-round soundness test now compares labels and kinds as well as ids, weights and links, and passes the previous snapshot. With labels compared, the old guard fails it.
+
+### P2: link settling and reply construction could still hold up queued saves
+
+**The problem.** Round 2 resolved queued notes under the write lock in 2 ms slices. The deadline was checked only every 32 notes, so a slice of link-heavy notes ran long. The first lookup of a large ambiguous key built its whole candidate index inside the lock, again in every slice. Waking a key copied all of its readers into the queue inside the save. Replies cloned and collected every entry under the read lock, which blocks a writer as surely as the write lock.
+
+**The fix.** Nothing vault-sized runs under the lock any more: not in a save, not while settling, not while building a reply.
+
+- **A save queues keys, not readers** (`link_table.rs`).
+  - `wake` records the changed key. `expand` later queues its readers in bounded steps, in path order from a cursor.
+  - A reader that leaves the key, or joins it, meanwhile was itself resolved against the new owners, so a moving reader set misses nobody. Waking a key again restarts its cursor.
+- **Inline work is bounded in links too** (`index.rs`). The app settles a change before the write returns only when it wakes at most `INLINE_LINKS` (256) notes holding at most `INLINE_LINK_WORK` (2,048) links. Forty notes of 3,000 links are now deferred; round 2 resolved them inside the save.
+- **A name with many files keeps its picks** (`name_maps.rs` `NamePicks`). For a name with 16 or more files, the maps keep:
+  - the best note and the best other file, by (length, path);
+  - each folder's files with that name.
+
+  They are updated with the name's list on every add and remove, so `[[README]]` among 25,000 READMEs is a few lookups, under the lock or not, and nothing is built per batch. This replaces round 2's `PickIndex`/`PickCache`.
+- **Resolution runs off the lock** (`index/link_jobs.rs`, driven by `link_reads::settle`). Each job has five steps, and only two hold a lock briefly:
+  1. Under the write lock, `link_job` takes up to 128 queued notes or 1,024 links as shared `Arc` nodes, with an `EditMark`.
+  2. Off the lock, `ask` resolves each note against nothing. A resolution that misses every lookup takes every branch, so this lists every map key the note could read.
+  3. Under the read lock, `answer` looks those keys up, 2,048 per hold.
+  4. Off the lock, `finish` resolves each note from the answers.
+  5. Under the write lock, `publish` stores each note, unless its node changed since the mark or a key it asked about gained or lost an owner (the new per-index edit log: `Edit::Node`, `Edit::Key`). Such a note stays queued. A full map rebuild (a new epoch) drops the whole job.
+
+  A key's answer depends only on that key's owners and the asking note's folder. A stored note therefore equals the note resolved against the maps at publish: what an inline settle would have stored. Typing in another note touches neither, so jobs finish while saves keep coming. A first version checked a single generation number; with a save every millisecond in the latency test, no job ever published.
+- **Replies are built off the lock** (`index/link_replies.rs`, `link_reads.rs`).
+  - Entries are shared (`Arc<Resolved>`). Each reply step copies at most 2,048 pointers under the read lock, merges them off it (`absorb`), and builds the JSON-shaped reply off it too.
+  - A link reply records the version it started from. Once the table is settled, it patches every path logged since, in steps, until a settled check finds no newer version. The reply then equals `link_changes` at that version.
+  - A delta that began while the log still reached the page's version stays a delta after the log moves on, since it already holds those paths. The page patches to the same table.
+  - `backlinks` also depends on note text. It starts over when the table's version moves, or when an edit lands on a note linking to a target it has copied (checked through the reverse index). After four tries it takes the rest in one step.
+- **One settler at a time** (`SETTLER`). Before every hold, settling and replies wait for queued writers (`WRITERS_WAITING`, as in round 2).
+- `resolve_note` was quadratic in a note's distinct targets, since it scanned each list for repeats. Lists past 32 entries now use a map (`Firsts`), with the same first-seen order and the same ASCII-case folding for unresolved names.
+
+**Tests:**
+
+- New queued-save latency tests in `link_page_tests` (shared helpers `saves_during`, `queued_saves_stay_quick`). Each uses a `/tmp` vault with the app's deferral; another thread saves continuously through `write_lock`. Each requires that the write returns with the work queued in under a quarter of the settle time, that every save waits under a quarter of the settle or reply time, and that the read equals a fresh scan with maps and table equal to a rebuild. Debug numbers:
+
+  | Case | Write | Read incl. settling | Saves meanwhile | Worst save |
+  |---|---|---|---|---|
+  | Shared alias, 10,000 readers (round 2's test) | 0.12 ms | 139 ms | 118 | 1.6 ms |
+  | Many owners: 6,000 READMEs, a new one at the top wakes 6,000 readers | 0.14 ms | 66 ms | 55 | 2.2 ms |
+  | Link-heavy: 40 notes of 3,000 links read an alias | 0.20 ms | 1.98 s | 1,802 | 0.40 ms |
+  | Large reply: whole `link_index` of 20,000 notes | – | 82 ms | 74 | 0.46 ms |
+  | Large reply: `backlinks` with 40,000 hits | – | 33 ms | 22 | 1.2 ms |
+
+- `stepped_replies_equal_replies_made_at_once`: 4 seeds × 400 steps with a log cap of 96. Changes, partial settles and off-lock jobs interleave with `LinkReply` and `BacklinkReply` steps (all budgets 2, so a small vault takes many steps). Every finished reply equals the one made at once at that moment, or, for a delta that outlived the log, patches the page's snapshot to the table. About 130 link replies (about half deltas) and 100 backlink replies per seed.
+- `deferred_link_updates_settle_to_a_full_walk` now also settles by off-lock jobs in small steps. Some jobs start before a change and publish after it. Every seed has notes held back by a publish (they had read something that changed), and every settled point equals the full walk with the pages patching to it.
+- `kept_name_picks_equal_the_scan` replaces `indexed_pick_equals_the_scan`: 600 random adds and removes of same-named files (notes, other files, nameless `.md`) across 8 folders. After each, `name_pick` equals the scan from 10 source folders, and the maps (picks included) equal a rebuild.
+- `many_readers_of_an_ambiguous_name_resolve_without_a_scan_each` now compares against an explicit scan per link, since the oracle walk got the kept picks too.
+- `a_note_with_many_distinct_links_resolves_like_a_walk`: one note with 60 distinct targets of each kind, repeated later in other cases (ASCII repeats, and `İ`/`i̇`, which are not ASCII repeats), past the length where `Firsts` switches to a map; it equals the walk.
+
+### P2: a watcher rescan's replay could reintroduce the high-fanout stall
+
+**The problem.** `finish_rescan` replays every path the app changed during the scan into the fresh index, under the lock. The fresh index got the app's deferral only after the replay, at the swap. So an alias edit during the scan resolved every linker inline, twice: once for the removal and once for the refresh.
+
+**The fix** (`vault.rs`):
+
+- `defer_links_like` installs the live index's deferral before the replay. The replay queues the readers.
+- The fresh index keeps that queued work across the swap.
+- `continue_link_history` diffs against the entries the fresh index actually holds. Settling later logs the rest, so a page holding the old version gets one delta covering the whole change.
+- The finish's file diff (removed, created, modified) was four map lookups per path. It is now one merge walk of the two sorted file lists (`Index::file_diff`), with the same results and order.
+
+**Test:** `a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick`. 10,000 notes read `alpha`. The scan runs through the watcher's own `flush_changes`; after it has read the hub, an app save removes the alias. Saves keep coming throughout. It requires that:
+
+- the finish leaves the readers queued and takes under a quarter of the settle;
+- no save waits a quarter of it;
+- a page holding the pre-rescan version gets a delta naming all 10,000 readers and patches to a fresh scan;
+- the maps and table equal a rebuild.
+
+Debug: finish 11 ms (27 ms before the merge walk), settle 94 ms, worst save 10.6 ms (the one queued behind the finish).
+
+### P3: a real link delta still caused vault-sized UI-thread work
+
+**The fix.** The phases the review named are now budgeted:
+
+- **Base rows and select** (`bases/model.ts` `selectWork`, `bases/view.ts`).
+  - The row build (types, rows, host) and `select` (filter, sort keys, sort) form one generator that pauses every 128 rows.
+  - The sort is the existing stable merge sort in steps (`sortWork`, already used for groups). It orders as the native stable sort does for any consistent comparison.
+  - A Base already on screen runs the pass through `runSliced` (5 ms slices, a frame apart), cancelled by a newer pass. The first pass still runs at once.
+  - The pass reads one links snapshot throughout, and `types` and `host` are replaced only when it finishes, so the shown table stays consistent meanwhile.
+  - Every `select` now uses this sort, so a refresh can never order rows differently from the first paint. That includes the one-task `select` used by kanban. For a column mixing numbers and text, where the comparison is inconsistent, the old engine sort's order could differ from this one. That order was engine-defined before.
+- **Graph remap and install** (`graph/data.ts`, `graph/view.ts`, `graph/sim.ts`).
+  - `buildGraphSteps` now pauses through the note listing, the local graph's walk, the kept-node pass, the link remap and the id index too. `STEP` is now 1,024.
+  - Installing is split. `prepare`, sliced with the build, does:
+    - the shape comparison (element by element; it replaces the joined id/link signature string);
+    - radii and colours;
+    - hover neighbours;
+    - the draw order, a stable counting sort by colour (equal to the stable sort it replaces);
+    - `Simulation.prepareGraph`: the link arrays, degrees and bias, the plan for placing new nodes, and the spiral list.
+
+    `install` then swaps them in. It copies kept nodes' current places and speeds from the live layout, and places new nodes from that plan with the same random draws in the same order. The result equals `setGraph` called at install time.
+- **Overlay compaction** (`links/linkDelta.ts`). Every phase now runs about 4,096 steps per task:
+  - listing the root's keys (a resumable `for…in`, so no `Object.keys` copy of the whole map);
+  - finding and sorting the new paths (a merge sort in steps);
+  - the merge, including the new paths past the last key;
+  - re-rooting the newest layer. A patch landing mid-re-root restarts it on the newer layer.
+
+**Measured longest tasks:**
+
+- **Vitest (node):**
+  - Compaction of 24,000 changes (12,000 of them new paths, half sorting past every old one) over 50,000 paths: 86 tasks, each at most 4,096 steps; the longest took 4.4 ms. The test asserts the step bound and the result.
+  - Graph build of 30,000 notes with a missing note each, global and local (depth 5): 144+ pauses. The longest step was 6–9 ms when steps were 2,048 (map growth and GC); STEP is now 1,024.
+- **Browser bench** (`bench-link-refresh.mjs`, mock backend, Base reading links): see the table below.
+  - The new `slice`, `install` and `baseSlice` fields are the longest slices of the graph rebuild and the Base pass after the refresh.
+  - The new `blockedMs` field is the longest time a message posted to the page waited after the refresh: the longest task of any kind.
+
+**Still open after review 3:**
+
+- At 50k notes the graph's layout frames after a reheat (~95 ms each, the force simulation), as in round 2.
+- A rescan's finish still diffs the two indexes once under the lock: the file lists in one merge walk, and the link entries. That is 11 ms in debug at 10k notes; it holds no link resolution.
+
+### Measurements (review 3)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-50000`; the vault has 50,125 notes). The "longest hold" columns are the longest single step that holds the vault lock. A save queued behind the work waits for at most that.
+
+| Case | Save | Settle / reply | Longest hold |
+|---|---|---|---|
+| Shared alias, 50,125 linkers, inline (tests and tools) | 46.6 ms | – | 46.6 ms |
+| The same, off-lock jobs (the app) | 0.023 ms | 105 ms | **1.1 ms** |
+| A new README among 25,062, with 25,062 readers | 0.035 ms | 39 ms | **0.47 ms** |
+| 100 notes of 5,000 links reading an alias | 0.035 ms | 1.0 s | **0.37 ms** |
+| Whole `link_index` of 50,125 notes, in steps | – | 22.6 ms | **0.066 ms** |
+
+Round 2's slices held the lock for 2 ms plus up to 32 notes. Its whole reply (`link_changes_full_ms`, 19.6 ms here) was one read-lock hold. Off-lock settling costs more in total than inline (105 against 47 ms for the alias, since each note is resolved twice: once to list its questions, once from the answers), but none of it holds the lock.
+
+**Browser** (`GROVE_BENCH_CHECK=1 GROVE_BENCH_BASE=links`; every check passed). Graph columns are work (sum of slices) / start to installed / longest slice / install. Base columns are the longest slice of its pass on the refresh.
+
+| Notes | Case | Graph | Base pass, longest slice | Longest block after refresh |
+|---|---|---|---|---|
+| 5k | prose | none | no pass | 5.6 ms |
+| 5k | one link | 9.5 / 10.2 / 6.1 / 0.4 ms | 5.1 ms | 18 ms |
+| 20k | prose | none | no pass | 20.5 ms |
+| 20k | one link | 21.8 / 23.3 / 6.2 / 1.1 ms | 12.7 ms | 38 ms |
+| 50k | prose | none | no pass | 20.9 ms |
+| 50k | one link | 71 / 118 / 10.6 / 1.4 ms | 7.5 ms | 104 ms (layout frames) |
+| 50k, no graph | one link | – | 8.6 ms | 17 ms |
+
+- **50k with the graph:** the longest block after the refresh is the graph's layout frames once it reheats (~93–100 ms each, the force simulation; unchanged and still open, see round 2). Without the graph, nothing after the refresh blocks for more than 17 ms.
+- **In round 2, at 50k:**
+  - the link-reading Base's refresh was one 76–78 ms task;
+  - the graph's install (signature join, neighbours, colour sort, `setGraph`) ran in its last task.
+
+  The install alone is now 1.4 ms.
+- The remaining blocks of ~17–38 ms are not this work. The `slice` numbers bound the graph and Base work. The probe cannot attribute those blocks, which may include the page's other refresh consumers, or the mock's other in-page walks that the app does in Rust.
+
+### Mutation checks (review 3)
+
+Each mutation was applied alone and the named tests run (`mutate3.py` in the session scratchpad); 17 of 18 caught:
+
+- **Caught:**
+  - `wake` queues nothing;
+  - `expand` skips a reader at each step;
+  - `publish` ignores key edits;
+  - `publish` ignores node edits;
+  - kept picks ignore the folder;
+  - kept picks not updated on remove;
+  - long unresolved lists stop folding case (caught after adding `a_note_with_many_distinct_links_resolves_like_a_walk`; missed at first);
+  - a reply finishes without patching;
+  - backlinks never start over;
+  - a delta reply drops log paths;
+  - the rescan replays without deferral;
+  - no link budget inline;
+  - the graph guard reads new entries only;
+  - compaction drops trailing additions;
+  - re-rooting drops changes laid since;
+  - draw order by index;
+  - install reads places at prepare.
+- **Missed:** the stepped sort made unstable (`<=` to `<`). This is an equivalent mutation for these callers: `select` breaks every tie by path, and compaction sorts distinct paths, so no two items ever compare equal.
+
+### Suites (review 3)
+
+- **`cargo test --offline --all-targets`:** **229 passed**, 0 failed, 7 ignored. That is 223 at `a3fc766`, plus six new tests:
+  - four latency tests;
+  - stepped replies;
+  - many distinct links.
+
+  `kept_name_picks_equal_the_scan` replaces `indexed_pick_equals_the_scan`.
+- **`cargo clippy --all-targets`:** nothing new. The warnings left in touched files are on older lines: `ValueWalk`, `len`/`values` unused, the `snap` type, and `norm_logical`.
+- **`npm run build`:** clean.
+- **`vitest`:** **1711 / 1711**.
+- **`npm test`:** the full run stopped in `test-r27f.mjs` ("a reload opens the same folders", the file tree; it reads no links). That script then passed 3 of 3 standalone. I ran every later script of the chain and the `posttest` scripts one by one: 54 of 57 passed.
+  - `test-bases-edge.mjs` ("10k sort work 57.7 ms") was caused by this change. `reconcile.lastMs`, documented as the update's work and not its scheduling delay, now included the sliced pass's waits between frames. Those waits are subtracted now, and it passes (21.7 ms).
+  - `test-bases.mjs` ("sample ready", a 2 s wait for the first render) passed 3 of 3 standalone afterwards.
+  - `test-drawing-editor.mjs` (a 50 ms long-task budget while editing 2,000 shapes; it reads no links) passed 2 of 2 standalone.
+  - `test-link-refresh-guards.mjs` passed inside the chain.
+- **Browser bench:** `GROVE_BENCH_CHECK=1` passed at 5k, 20k and 50k, and at 50k without the graph.
+- The test runs rewrote the `rebuild/round*-shots` files; they were restored before committing.

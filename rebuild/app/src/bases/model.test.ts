@@ -182,3 +182,38 @@ it("reads a moved property's preserved key spelling consistently with CAS",()=>{
  const row:Row={file:{path:'A.md',name:'A.md',is_dir:false,size:0,mtime_ms:0,ctime_ms:0},props:[{key:'Status',type:'text',value:'doing',line:0,count:1}],tags:[],hasLink:()=>false};
  expect(model.context(row).get('status')).toBe('doing');expect(model.select([row])[0].context.get('note.STATUS')).toBe('doing');
 });
+
+// Review 3: `select` runs in steps (`selectWork`), its sort a stable merge sort in steps.
+it("selects in steps, in the order the one-task sort gave", async () => {
+  const { compareNames, noteName } = await import("../paths");
+  let x = 7;
+  const r = (n: number) => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
+  const statuses = ["open", "Open", "done", "later", "", "b10", "b9"];
+  const rows: Row[] = Array.from({ length: 3000 }, (_, i) => {
+    const props: Row["props"] = [];
+    if (r(5)) props.push({ key: "priority", type: "number", value: String(r(9) - 4), line: 0, count: 1 });
+    const status = statuses[r(statuses.length)]!;
+    if (status) props.push({ key: "status", type: "text", value: status, line: 0, count: 1 });
+    const name = `n${r(400)}`;
+    return { file: { path: `S/${i % 7}/${name}.md`, name, is_dir: false, mtime_ms: 1, ctime_ms: 1, size: 1 }, props, tags: [], hasLink: () => false };
+  });
+  const model = baseModel(`filters: '!(priority == 0)'\nviews:\n  - sort:\n      - property: priority\n        direction: DESC\n      - property: status\n`);
+  const work = model.selectWork(rows, true);
+  let pauses = 0, step = work.next();
+  for (; !step.done; step = work.next()) pauses++;
+  expect(pauses).toBeGreaterThan(3000 / 256 + 30);
+  // The one-task select, as it was: the filter, then a native sort of the same keys.
+  const value = (row: Row, key: string) => { const v = row.props.find((p) => p.key === key)?.value; return v === undefined ? undefined : String(v); };
+  const oracle = rows.filter((row) => Number(value(row, "priority") ?? NaN) !== 0).sort((a, b) => {
+    const pa = value(a, "priority"), pb = value(b, "priority");
+    if ((pa === undefined) !== (pb === undefined)) return pa === undefined ? 1 : -1;
+    if (pa !== undefined && pb !== undefined && Number(pa) !== Number(pb)) return (Number(pa) - Number(pb)) * -1;
+    const sa = value(a, "status"), sb = value(b, "status");
+    if ((sa === undefined) !== (sb === undefined)) return sa === undefined ? 1 : -1;
+    const diff = sa !== undefined && sb !== undefined ? compareNames(sa, sb) : 0;
+    if (diff) return diff;
+    return compareNames(noteName(a.file.path), noteName(b.file.path)) || compareNames(a.file.path, b.file.path);
+  });
+  expect(step.value.map((e) => e.row.file.path)).toEqual(oracle.map((row) => row.file.path));
+  expect(model.select(rows, true).map((e) => e.row.file.path)).toEqual(oracle.map((row) => row.file.path));
+});

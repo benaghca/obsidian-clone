@@ -12,7 +12,10 @@
 //   updates across frames, the time from its start to installed (span);
 // - base: full Base rebuilds before and after the refresh, and the last one's ms;
 // - renderMs: from the refresh to the frame where the last of that work is on screen;
-// - long: main-thread tasks over 50 ms from the save on.
+// - long: main-thread tasks over 50 ms from the save on;
+// - blockedMs (review 3): the longest the main thread was busy after the "links" refresh, as
+//   a message posted to it waited (a probe that keeps one message in flight): the longest
+//   task the refresh's work (graph, Base, link copy) left, rendering included.
 // GROVE_BENCH_CHECK=1 also asserts this branch's behavior: a prose save rebuilds
 // neither view on the refresh, and the added link is in the graph.
 import assert from 'node:assert/strict';
@@ -22,6 +25,9 @@ const sizes = (process.argv[2] ?? '5000,20000,50000').split(',').map(Number);
 const check = process.env.GROVE_BENCH_CHECK === '1';
 // A Base that reads links (its rows don't change here, but it must rebuild on a real link change).
 const linksBase = process.env.GROVE_BENCH_BASE === 'links';
+// GROVE_BENCH_GRAPH=0: no graph, so `blockedMs` is not the graph's layout frames (at 50k each
+// takes ~95 ms after a reheat; the force simulation, outside this piece).
+const withGraph = process.env.GROVE_BENCH_GRAPH !== '0';
 const filter = linksBase ? `'file.inFolder("LR") && !file.hasLink("Nowhere")'` : `'file.inFolder("LR")'`;
 const note = 'LR/00000.md';
 
@@ -38,8 +44,8 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
     ws.on(change => { if (change === 'links' && window.lr && lr.saved) lr.links ??= performance.now(); });
     new PerformanceObserver(list => { for (const e of list.getEntries()) if (window.lr?.saved) lr.long.push(Math.round(e.duration)); }).observe({ type: 'longtask' });
   }, n, filter);
-  await run(async note => { await ws.open(note); await ws.open('LR.base', { where: 'right' }); ws.openView('graph', 'down'); }, note);
-  const ready = () => run(n => (window.__graphProbe?.().nodes ?? 0) >= n && (document.querySelector('.bases-view')?.reconcile?.full ?? 0) >= 1, n);
+  await run(async (note, withGraph) => { await ws.open(note); await ws.open('LR.base', { where: 'right' }); if (withGraph) ws.openView('graph', 'down'); }, note, withGraph);
+  const ready = () => run((n, withGraph) => (!withGraph || (window.__graphProbe?.().nodes ?? 0) >= n) && (document.querySelector('.bases-view')?.reconcile?.full ?? 0) >= 1, n, withGraph);
   for (let i = 0; i < 2400 && !(await ready()); i++) await sleep(50);
   assert.ok(await ready(), `${n}: graph and base did not paint`);
   // Let the layout settle, so its frames don't count against the save.
@@ -49,7 +55,7 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
     await run(() => {
       const base = document.querySelector('.bases-view');
       window.__mockLinkMs = [];
-      window.lr = { long: [], saved: null, links: null, builds: (window.__graphBuilds ?? []).length, base: base.reconcile.full, baseAtLinks: null, lastWork: 0, edges: window.__graphProbe().links };
+      window.lr = { long: [], saved: null, links: null, builds: (window.__graphBuilds ?? []).length, base: base.reconcile.full, baseAtLinks: null, lastWork: 0, edges: window.__graphProbe?.().links ?? 0 };
       const frame = () => {
         if (!window.lr) return;
         const full = base.reconcile.full;
@@ -61,6 +67,20 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
       };
       lr.seenFull = base.reconcile.full; lr.seenBuilds = lr.builds;
       requestAnimationFrame(frame);
+      // The longest wait of a message posted to this thread, once the links refresh is in.
+      const probe = new MessageChannel(), me = window.lr;
+      let sent = performance.now();
+      me.blocked = 0;
+      probe.port1.onmessage = () => {
+        const now = performance.now();
+        // Only waits that began after the refresh: the mock's own walk (Rust, off this
+        // thread in the app) runs before it.
+        if (me.links && sent >= me.links) me.blocked = Math.max(me.blocked, now - sent);
+        if (window.lr !== me) return probe.port1.close();
+        sent = now;
+        probe.port2.postMessage(0);
+      };
+      probe.port2.postMessage(0);
     });
     await click('.workspace-leaf .cm-content');
     await chord('End');
@@ -69,7 +89,7 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
     await sleep(2500);
     const row = await run((label, n, linksBase) => {
       const base = document.querySelector('.bases-view');
-      const builds = (window.__graphBuilds ?? []).slice(lr.builds).filter(b => b.at >= lr.links).map(b => b.span === undefined ? +b.ms.toFixed(1) : { ms: +b.ms.toFixed(1), span: +b.span.toFixed(1) });
+      const builds = (window.__graphBuilds ?? []).slice(lr.builds).filter(b => b.at >= lr.links).map(b => b.span === undefined ? +b.ms.toFixed(1) : { ms: +b.ms.toFixed(1), span: +b.span.toFixed(1), slice: +b.slice.toFixed(1), install: +b.install.toFixed(1) });
       const out = {
         notes: n, case: label, base: linksBase ? 'reads links' : 'no links',
         linksMs: lr.links ? Math.round(lr.links - lr.saved) : null,
@@ -78,9 +98,11 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
         baseBefore: (lr.baseAtLinks ?? base.reconcile.full) - lr.base,
         baseAfter: base.reconcile.full - (lr.baseAtLinks ?? base.reconcile.full),
         baseLastMs: +base.reconcile.lastMs.toFixed(1),
+        baseSlice: +(base.reconcile.slice ?? 0).toFixed(1),
         renderMs: lr.lastWork > lr.links ? Math.round(lr.lastWork - lr.links) : 0,
-        edgesAdded: window.__graphProbe().links - lr.edges,
+        edgesAdded: (window.__graphProbe?.().links ?? 0) - lr.edges,
         long: lr.long,
+        blockedMs: +lr.blocked.toFixed(1),
       };
       window.lr = null;
       return out;
@@ -94,8 +116,10 @@ for (const n of sizes) await withBrowser(async ({ run, send, click, chord }) => 
     assert.ok(prose.linksMs !== null && edge.linksMs !== null, 'both saves refreshed the links');
     assert.deepEqual(prose.graph, [], 'a prose save does not rebuild the graph');
     assert.equal(prose.baseAfter, 0, 'a prose save does not rebuild the base on the link refresh');
-    assert.equal(edge.graph.length, 1, 'the added link rebuilds the graph once');
-    assert.equal(edge.edgesAdded, 1, 'the added link is in the graph');
+    if (withGraph) {
+      assert.equal(edge.graph.length, 1, 'the added link rebuilds the graph once');
+      assert.equal(edge.edgesAdded, 1, 'the added link is in the graph');
+    }
     if (linksBase) assert.equal(edge.baseAfter, 1, 'a base that reads links rebuilds once on a real link change');
     else assert.equal(edge.baseAfter, 0, 'a base that reads no links skips the link refresh');
   }

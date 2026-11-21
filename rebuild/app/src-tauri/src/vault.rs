@@ -493,26 +493,17 @@ impl Vault {
         let Ok(mut fresh) = fresh else {
             return Vec::new();
         };
+        // Review 3: replay with the live index's deferral, so a high-fanout key the replay
+        // touches is queued (and resolved later, off the lock), not resolved here.
+        fresh.defer_links_like(&self.index);
         for path in paths {
             fresh.remove_tree(&path);
             fresh.refresh_path(&self.root, &path);
         }
-        let mut removed = Vec::new();
-        let mut created = Vec::new();
-        let mut modified = Vec::new();
-        for path in self.index.paths() {
-            if !fresh.contains(path) {
-                removed.push(path.clone());
-            } else if !fresh.is_dir(path) && self.index.stamp(path) != fresh.stamp(path) {
-                modified.push(path.clone());
-            }
-        }
-        for path in fresh.paths() {
-            if !self.index.contains(path) {
-                created.push(path.clone());
-            }
-        }
-        // The page keeps patching its link index across the swap.
+        let (removed, created, modified) = self.index.file_diff(&fresh);
+        // The page keeps patching its link index across the swap: the history continues from
+        // the entries the fresh index holds now, and its queued work (from the replay) stays
+        // queued, so settling it later logs the rest.
         fresh.continue_link_history(&self.index);
         self.index = fresh;
         let created_set: HashSet<&str> = created.iter().map(String::as_str).collect();

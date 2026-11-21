@@ -144,61 +144,126 @@ const plainLayer = (map: PathMap | undefined): Layer => {
 
 let compactions = 0;
 let compacted: (() => void)[] = [];
+/** Per compaction task: the keys and comparisons it handled (tests: none exceeds a step). */
+let taskSizes: number[] = [];
+
+/** Work a compaction generator does between pauses (a key copied, a comparison, a check). */
+const PAUSE_EVERY = 64;
+/** That work, counted as it is done. */
+let ops = 0;
+const tick = () => ++ops % PAUSE_EVERY === 0;
 
 /**
- * Fold a line's pile of changes into a new root in the background, `COMPACT_STEP`
- * keys per task (review 2: no read, and no patch, pays for a whole map at once).
- * The fold is of the newest layer as it was when this started. When it is done the
- * then-newest layer is re-rooted on it, keeping only the changes made since. That
- * layer stands for the same map before and after, and maps already handed out are
- * not touched. Patches meanwhile keep laying their changes on the old root.
+ * Fold a line's pile of changes into a new root in the background, about
+ * `COMPACT_STEP` keys per task (review 2: no read, and no patch, pays for a whole
+ * map at once). Review 3: every phase is in those steps: listing the root's keys,
+ * finding and sorting the new paths, the merge with the ones past the last key,
+ * and the re-rooting. The fold is of the newest layer as it was when this started.
+ * When it is done the then-newest layer is re-rooted on it, keeping only the
+ * changes made since. That layer stands for the same map before and after, and
+ * maps already handed out are not touched. Patches meanwhile keep laying their
+ * changes on the old root.
  */
 function compact(line: Line) {
   const start = line.latest;
   if (line.compacting || !start?.over) return;
   line.compacting = true;
   compactions += 1;
-  const { root, over } = start;
-  const keys = Object.keys(root);
-  const added = [...over.keys()].filter((path) => over.get(path) !== null && own(root, path) === undefined).sort(byCodePoint);
-  const next: PathMap = {};
-  let i = 0, at = 0;
+  const work = compaction(line, start.root, start.over);
   const step = () => {
-    for (const end = Math.min(keys.length, i + COMPACT_STEP); i < end; i++) {
-      const path = keys[i]!;
-      while (at < added.length && byCodePoint(added[at]!, path) < 0) {
-        next[added[at]!] = over.get(added[at]!)!;
-        at += 1;
-      }
-      const value = over.has(path) ? over.get(path) : root[path];
-      if (value) next[path] = value;
-    }
-    if (i < keys.length) {
-      setTimeout(step, 0);
+    const before = ops;
+    for (let i = 0; i < COMPACT_STEP / PAUSE_EVERY; i++) {
+      if (!work.next().done) continue;
+      taskSizes.push(ops - before);
+      line.compacting = false;
+      compactions -= 1;
+      if (!compactions) for (const done of compacted.splice(0)) done();
+      if (line.latest?.over && line.latest.over.size > threshold(line.latest.size)) compact(line);
       return;
     }
-    for (; at < added.length; at++) next[added[at]!] = over.get(added[at]!)!;
-    line.compacting = false;
-    rebase(line.latest, root, over, next);
-    compactions -= 1;
-    if (!compactions) for (const done of compacted.splice(0)) done();
-    if (line.latest?.over && line.latest.over.size > threshold(line.latest.size)) compact(line);
+    taskSizes.push(ops - before);
+    setTimeout(step, 0);
   };
   setTimeout(step, 0);
 }
 
-/** Put `layer` on `next` (`root` with `over` folded in) when it was laid on `root` and still holds every change in `over`. */
-function rebase(layer: Layer | null, root: PathMap, over: ReadonlyMap<string, string[] | null>, next: PathMap) {
-  // Built or re-rooted meanwhile, or laid on another base: leave it.
-  if (!layer?.over || layer.root !== root) return;
-  for (const path of over.keys()) if (!layer.over.has(path)) return;
-  const rest = new Map<string, string[] | null>();
-  for (const [path, value] of layer.over) if (!(over.has(path) && over.get(path) === value)) rest.set(path, value);
-  layer.root = next;
-  layer.over = rest.size ? rest : null;
+/** A compaction's steps: it pauses (yields) every `PAUSE_EVERY` keys or comparisons. */
+function* compaction(line: Line, root: PathMap, over: ReadonlyMap<string, string[] | null>): Generator<void, void> {
+  const keys: string[] = [];
+  for (const path in root) {
+    keys.push(path);
+    if (tick()) yield;
+  }
+  const fresh: string[] = [];
+  for (const [path, value] of over) {
+    if (value !== null && own(root, path) === undefined) fresh.push(path);
+    if (tick()) yield;
+  }
+  const added = yield* sortSteps(fresh, byCodePoint);
+  const next: PathMap = {};
+  let at = 0;
+  for (const path of keys) {
+    while (at < added.length && byCodePoint(added[at]!, path) < 0) {
+      next[added[at]!] = over.get(added[at]!)!;
+      at += 1;
+      if (tick()) yield;
+    }
+    const value = over.has(path) ? over.get(path) : root[path];
+    if (value) next[path] = value;
+    if (tick()) yield;
+  }
+  for (; at < added.length; at++) {
+    next[added[at]!] = over.get(added[at]!)!;
+    if (tick()) yield;
+  }
+  // Re-root the newest layer, in steps too. A patch meanwhile makes a newer layer (laid on
+  // the same root, holding these changes and more): start that one over.
+  for (let tries = 0; tries < 8; tries++) {
+    const layer = line.latest;
+    // Built or re-rooted meanwhile, or laid on another base: leave it.
+    if (!layer?.over || layer.root !== root) return;
+    const lay = layer.over;
+    let holds = true;
+    for (const path of over.keys()) {
+      if (!lay.has(path)) { holds = false; break; }
+      if (tick()) yield;
+    }
+    if (!holds) return;
+    const rest = new Map<string, string[] | null>();
+    for (const [path, value] of lay) {
+      if (!(over.has(path) && over.get(path) === value)) rest.set(path, value);
+      if (tick()) yield;
+    }
+    if (line.latest !== layer || layer.over !== lay || layer.root !== root) continue;
+    layer.root = next;
+    layer.over = rest.size ? rest : null;
+    return;
+  }
+}
+
+/** A stable merge sort in steps (it yields every `PAUSE_EVERY` comparisons or moves). */
+function* sortSteps<T>(values: T[], compare: (a: T, b: T) => number): Generator<void, T[]> {
+  let from = values.slice(), to = new Array<T>(values.length);
+  for (let width = 1; width < values.length; width *= 2) {
+    for (let start = 0; start < values.length; start += width * 2) {
+      let left = start, right = Math.min(start + width, values.length);
+      const mid = right, end = Math.min(start + width * 2, values.length);
+      for (let at = start; at < end; at++) {
+        to[at] = left < mid && (right >= end || compare(from[left]!, from[right]!) <= 0) ? from[left++]! : from[right++]!;
+        if (tick()) yield;
+      }
+    }
+    [from, to] = [to, from];
+  }
+  return from;
 }
 
 const threshold = (size: number) => Math.max(MIN_OVER, size / OVER_SHARE);
+
+/** The work of each compaction task since the last call (tests). */
+export function compactionTasks(): number[] {
+  return taskSizes.splice(0);
+}
 
 /** Resolves once no compaction is running (tests). */
 export function linkCompactions(): Promise<void> {

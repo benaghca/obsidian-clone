@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LinkIndex } from "../api";
-import { byCodePoint, type LinkChanges, type LinkEntry, linkChanges, linkCompactions, linkEntryOf, linkReader, overlaySize, patchLinks } from "./linkDelta";
+import { byCodePoint, compactionTasks, type LinkChanges, type LinkEntry, linkChanges, linkCompactions, linkEntryOf, linkReader, overlaySize, patchLinks } from "./linkDelta";
 
 type Field = "outgoing" | "markdown" | "unresolved";
 const FIELDS: Field[] = ["outgoing", "markdown", "unresolved"];
@@ -169,6 +169,45 @@ describe("patchLinks", () => {
         expect(linkEntryOf(read, path), `read ${i} ${path}`).toEqual(want);
       }
       expect(JSON.stringify(read), `read ${i}`).toBe(full);
+    }
+  });
+
+  it("compacts a large overlay in bounded tasks: no task lists, sorts, or copies the whole map", async () => {
+    // Review 3: 50,000 notes, then one delta that adds 12,000 notes (sorted in among them)
+    // and changes 12,000 more. Every phase of the compaction runs a few thousand keys or
+    // comparisons per task: listing the root, finding and sorting the new paths, the merge
+    // (the new paths past the last old one too), and the re-rooting.
+    const pad = (i: number) => String(i).padStart(6, "0");
+    const outgoing: Record<string, string[]> = {};
+    for (let i = 0; i < 50_000; i++) outgoing[`n/${pad(i * 2)}.md`] = [`t${i}.md`];
+    const changed: Record<string, LinkEntry> = {};
+    // Half of the new paths sort past every old one.
+    for (let i = 0; i < 6_000; i++) changed[`n/${pad(i * 2 + 1)}.md`] = { outgoing: [`new${i}.md`] };
+    for (let i = 0; i < 6_000; i++) changed[`z/${pad(i)}.md`] = { outgoing: [`late${i}.md`] };
+    for (let i = 0; i < 12_000; i++) changed[`n/${pad(i * 8)}.md`] = { outgoing: [`moved${i}.md`] };
+    const real = globalThis.setTimeout;
+    let longest = 0;
+    globalThis.setTimeout = ((run: () => void, ms?: number) => real(() => {
+      const started = performance.now();
+      run();
+      longest = Math.max(longest, performance.now() - started);
+    }, ms)) as typeof setTimeout;
+    try {
+      compactionTasks();
+      const links = patchLinks({ outgoing, markdown: {}, unresolved: {} }, changed);
+      expect(overlaySize(links, "outgoing")).toBe(24_000);
+      await linkCompactions();
+      const tasks = compactionTasks();
+      console.log(`compaction of 24,000 changes over 50,000 paths: ${tasks.length} tasks, largest ${Math.max(...tasks)} steps, longest ${longest.toFixed(1)} ms`);
+      expect(tasks.length).toBeGreaterThan(20);
+      expect(Math.max(...tasks)).toBeLessThanOrEqual(4096 + 128);
+      expect(overlaySize(links, "outgoing")).toBe(0);
+      const want = Object.keys({ ...outgoing, ...changed }).sort(byCodePoint);
+      expect(Object.keys(links.outgoing)).toEqual(want);
+      expect(links.outgoing["z/005999.md"]).toEqual(["late5999.md"]);
+      expect(links.outgoing["n/000008.md"]).toEqual(["moved1.md"]);
+    } finally {
+      globalThis.setTimeout = real;
     }
   });
 

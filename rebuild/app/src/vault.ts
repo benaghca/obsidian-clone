@@ -167,6 +167,8 @@ export class Vault {
    * (a whole index was read): treat every note as changed.
    */
   linkTouch: ReadonlySet<string> | null = null;
+  /** The link index before the last "links" refresh (what `linkTouch` is relative to). */
+  linkPrev: LinkIndex = { outgoing: {} };
   /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
   isExcluded: (path: string) => boolean = () => false;
 
@@ -372,6 +374,7 @@ export class Vault {
     const links = await api.linkIndex();
     if (mine !== this.linksRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
     this.linkTouch = linkChanges(this.links, links);
+    this.linkPrev = this.links;
     this.links = links;
     this.changed("links");
   }

@@ -30,6 +30,7 @@ mod fsutil;
 #[cfg(target_os = "linux")]
 mod frame_pacing;
 mod index;
+mod link_reads;
 mod lockdown;
 mod model;
 mod queue;
@@ -68,8 +69,8 @@ pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwr
 pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|e| e.into_inner()) }
 
 /// Writers (saves and other mutations, watcher batches) waiting for the vault lock. Link
-/// settling (`settled`) steps aside while any are.
-static WRITERS_WAITING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// settling and link replies (`link_reads`) step aside while any are.
+pub(crate) static WRITERS_WAITING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 /// `lock` for a mutation: counted in `WRITERS_WAITING` until it holds the lock.
 pub(crate) fn write_lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
@@ -78,40 +79,6 @@ pub(crate) fn write_lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
     let guard = lock(rw);
     WRITERS_WAITING.fetch_sub(1, Ordering::SeqCst);
     guard
-}
-
-/// Longest the link table holds the vault lock at a time while settling for a read.
-const LINK_SLICE: std::time::Duration = std::time::Duration::from_millis(2);
-
-/// Run a link read (`link_index`, `link_changes`, `backlinks`) on the open vault once its link
-/// table has settled (review 2). A large change (an alias many notes read, a hub renamed) leaves
-/// its notes queued instead of resolving them before the write returns; this resolves the queue
-/// in `LINK_SLICE` steps under the lock and lets any waiting writer go first between steps, so
-/// a save queued behind such a change waits at most one step. The read itself runs under the
-/// read lock with nothing queued, so it always sees a table equal to a full resolution of the
-/// files it reads with.
-pub(crate) fn settled<T>(inner: &RwLock<Inner>, f: impl Fn(&vault::Vault) -> T) -> Result<T, String> {
-    use std::sync::atomic::Ordering;
-    loop {
-        {
-            let guard = read(inner);
-            let vault = guard.vault.as_ref().ok_or("no vault open")?;
-            if !vault.index.links_pending() {
-                return Ok(f(vault));
-            }
-        }
-        // Writers first: wait (briefly, up to 50 ms) while any is queued for the lock.
-        for _ in 0..500 {
-            if WRITERS_WAITING.load(Ordering::SeqCst) == 0 {
-                break;
-            }
-            std::thread::sleep(std::time::Duration::from_micros(100));
-        }
-        if let Some(vault) = lock(inner).vault.as_mut() {
-            vault.index.settle_links_until(std::time::Instant::now() + LINK_SLICE);
-        }
-        std::thread::yield_now();
-    }
 }
 
 fn wrap_handler<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool) -> impl Fn(tauri::ipc::Invoke<R>) -> bool {
@@ -497,7 +464,7 @@ fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<S
 
 #[tauri::command(async)]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
-    settled(&state.inner, |v| v.index.link_index())
+    link_reads::link_index(&state.inner)
 }
 
 /// The link index since an earlier reply (`id` and `version` from it), or all of it when
@@ -505,13 +472,13 @@ fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
 /// behind). See `index::link_table`.
 #[tauri::command(async)]
 fn link_changes(state: State<'_, AppState>, id: Option<u64>, version: Option<u64>) -> Result<LinkChanges, String> {
-    settled(&state.inner, |v| v.index.link_changes(id.zip(version)))
+    link_reads::link_changes(&state.inner, id.zip(version))
 }
 
 /// Linked mentions for the requested target paths only; empty targets are omitted.
 #[tauri::command(async)]
 fn backlinks(state: State<'_, AppState>, paths: Vec<String>) -> Result<BTreeMap<String, Vec<Backlink>>, String> {
-    settled(&state.inner, |v| v.index.backlinks(&paths))
+    link_reads::backlinks(&state.inner, &paths)
 }
 
 /// Notes that might link to `paths`, for a rename. Fetched before `rename_path`.

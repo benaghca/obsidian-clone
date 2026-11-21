@@ -10,10 +10,16 @@
 //!
 //! `build` (a full walk) and `add` / `remove` (one path) share `keys_of`, which says what a
 //! node contributes. Tests check that any sequence of `add` / `remove` equals `build`.
+//!
+//! A name with many files (`README` in every folder) also keeps a `NamePicks`, updated with its
+//! list, so `pick` among thousands of candidates is a few lookups (review 3: it used to be a
+//! scan, or an index built inside the vault lock by each batch that asked).
 
-use super::{display_name, is_note_path, nameless_md, Node};
+use super::{display_name, is_note_path, nameless_md, parent_path, Node};
 use std::cmp::Ordering;
+use std::cell::Cell;
 use std::collections::hash_map::{Entry, HashMap};
+use std::collections::BTreeSet;
 
 type Map = HashMap<String, Owners>;
 
@@ -24,6 +30,77 @@ pub(super) struct NameMaps {
     by_path_lower: Map,
     // A key is a slash-aligned tail (`/note.md`), not the whole path.
     by_suffix: Map,
+    // For each name with `PICK_MIN` files or more: its `pick`, kept up to date.
+    picks: HashMap<String, NamePicks>,
+}
+
+/// A name with this many files or more keeps a `NamePicks`.
+pub(super) const PICK_MIN: usize = 16;
+
+/// `pick` for one name with many files. `pick` ranks by (is a note, is in the source's
+/// folder), then length, then path, so the answer is the best note in the source's folder,
+/// else the best note, else the best other file in the folder, else the best other file.
+/// Files named exactly `.md` are never picked, so they are left out.
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
+struct NamePicks {
+    /// (length, path) of the notes, and of the other files: the first of each is the best.
+    ranked: [BTreeSet<(usize, String)>; 2],
+    /// Folder → its files with this name, in path order (a folder holds a few at most).
+    by_dir: HashMap<String, Vec<String>>,
+}
+
+fn pick_kind(path: &str) -> usize {
+    usize::from(!is_note_path(path))
+}
+
+impl NamePicks {
+    fn of(list: &[String]) -> Self {
+        let mut picks = NamePicks::default();
+        for path in list {
+            picks.add(path);
+        }
+        picks
+    }
+
+    fn add(&mut self, path: &str) {
+        if nameless_md(path) {
+            return;
+        }
+        self.ranked[pick_kind(path)].insert((path.len(), path.to_string()));
+        let here = self.by_dir.entry(parent_path(path).to_string()).or_default();
+        if let Err(at) = here.binary_search_by(|p| p.as_str().cmp(path)) {
+            here.insert(at, path.to_string());
+        }
+    }
+
+    fn remove(&mut self, path: &str) {
+        if nameless_md(path) {
+            return;
+        }
+        self.ranked[pick_kind(path)].remove(&(path.len(), path.to_string()));
+        let dir = parent_path(path);
+        if let Some(here) = self.by_dir.get_mut(dir) {
+            if let Ok(at) = here.binary_search_by(|p| p.as_str().cmp(path)) {
+                here.remove(at);
+            }
+            if here.is_empty() {
+                self.by_dir.remove(dir);
+            }
+        }
+    }
+
+    fn pick(&self, from: &str) -> Option<&str> {
+        let near = self.by_dir.get(parent_path(from));
+        let near_best = |kind: usize| {
+            near.and_then(|here| {
+                here.iter()
+                    .filter(|p| pick_kind(p) == kind)
+                    .min_by(|a, b| (a.len(), a.as_str()).cmp(&(b.len(), b.as_str())))
+            })
+        };
+        let best = |kind: usize| self.ranked[kind].first().map(|(_, p)| p);
+        near_best(0).or_else(|| best(0)).or_else(|| near_best(1)).or_else(|| best(1)).map(String::as_str)
+    }
 }
 
 /// The files claiming one key, in winner order. Nearly every key has one file, kept inline
@@ -35,6 +112,10 @@ enum Owners {
 }
 
 impl Owners {
+    fn len(&self) -> usize {
+        self.as_slice().len()
+    }
+
     fn as_slice(&self) -> &[String] {
         match self {
             Owners::One(path) => std::slice::from_ref(path),
@@ -124,6 +205,7 @@ impl NameMaps {
         for kind in KINDS {
             self.map_mut(kind).clear();
         }
+        self.picks.clear();
         #[cfg(debug_assertions)]
         let mut last: Option<&String> = None;
         for (path, node) in files {
@@ -148,14 +230,25 @@ impl NameMaps {
                 owners.tidy(kind);
             }
         }
+        self.picks = self
+            .by_name
+            .iter()
+            .filter(|(_, owners)| owners.len() >= PICK_MIN)
+            .map(|(key, owners)| (key.clone(), NamePicks::of(owners.as_slice())))
+            .collect();
     }
 
     /// Record what `node` at `path` contributes. `path` must not be recorded already.
     pub(super) fn add(&mut self, path: &str, node: &Node) {
-        keys_of(path, node, |kind, key| match self.map_mut(kind).entry(key) {
-            Entry::Occupied(mut owners) => owners.get_mut().insert(kind, path),
-            Entry::Vacant(slot) => {
-                slot.insert(Owners::One(path.to_string()));
+        keys_of(path, node, |kind, key| {
+            if kind == Kind::Name {
+                return self.add_name(key, path);
+            }
+            match self.map_mut(kind).entry(key) {
+                Entry::Occupied(mut owners) => owners.get_mut().insert(kind, path),
+                Entry::Vacant(slot) => {
+                    slot.insert(Owners::One(path.to_string()));
+                }
             }
         });
     }
@@ -163,11 +256,57 @@ impl NameMaps {
     /// Forget what `node` at `path` contributed, promoting the next file for each key.
     pub(super) fn remove(&mut self, path: &str, node: &Node) {
         keys_of(path, node, |kind, key| {
+            if kind == Kind::Name {
+                return self.remove_name(&key, path);
+            }
             let map = self.map_mut(kind);
             if map.get_mut(&key).is_some_and(|owners| !owners.remove(kind, path)) {
                 map.remove(&key);
             }
         });
+    }
+
+    fn add_name(&mut self, key: String, path: &str) {
+        let Some(owners) = self.by_name.get_mut(&key) else {
+            self.by_name.insert(key, Owners::One(path.to_string()));
+            return;
+        };
+        let before = owners.len();
+        owners.insert(Kind::Name, path);
+        match owners.len() {
+            n if n == before => {}
+            PICK_MIN => {
+                self.picks.insert(key, NamePicks::of(owners.as_slice()));
+            }
+            n if n > PICK_MIN => self.picks.get_mut(&key).expect("a long name keeps its picks").add(path),
+            _ => {}
+        }
+    }
+
+    fn remove_name(&mut self, key: &str, path: &str) {
+        let Some(owners) = self.by_name.get_mut(key) else {
+            return;
+        };
+        let before = owners.len();
+        if !owners.remove(Kind::Name, path) {
+            self.by_name.remove(key);
+            return;
+        }
+        match owners.len() {
+            n if n == before => {}
+            n if n < PICK_MIN => {
+                self.picks.remove(key);
+            }
+            _ => self.picks.get_mut(key).expect("a long name keeps its picks").remove(path),
+        }
+    }
+
+    /// The file `[[key]]` from `from` resolves to among the files named `key` (see `pick`).
+    pub(super) fn name_pick(&self, key: &str, from: &str) -> Option<&str> {
+        match self.picks.get(key) {
+            Some(picks) => picks.pick(from),
+            None => self.names(key).and_then(|cands| super::pick(cands, from)),
+        }
     }
 
     /// Every file whose lower-case note name is `key`, in path order.
@@ -245,60 +384,103 @@ pub(super) fn key_hash(kind: Kind, key: &str) -> KeyHash {
     hash
 }
 
+/// One question a resolution asks the maps: a key of one map. A name's question is answered
+/// for the asking note (its folder ranks the candidates).
+pub(super) type Query = (Kind, String);
+
+/// Answers to one note's questions, gathered from the maps under the lock, so the note can be
+/// resolved off it (review 3). `missing` notes a question nobody asked for in advance (the
+/// note is then resolved again against the maps when it is published).
+#[derive(Default)]
+pub(super) struct Answers {
+    pub(super) map: HashMap<Query, Option<String>>,
+    pub(super) missing: Cell<bool>,
+}
+
+/// Where a resolution's lookups go.
+pub(super) enum Src<'m> {
+    /// The live maps.
+    Maps(&'m NameMaps),
+    /// Nowhere: every lookup misses and is noted. A resolution that misses everything takes
+    /// every branch, so it asks every question the real one could.
+    Ask(Vec<Query>),
+    /// Gathered answers.
+    Answers(&'m Answers),
+}
+
 /// The lookups `resolve` makes. `watching` also notes every key read, hit or miss: a
 /// resolution can change only when one of those keys changes owners.
 pub(super) struct Lookups<'m, 'r> {
-    maps: &'m NameMaps,
+    src: Src<'m>,
     reads: Option<&'r mut Vec<KeyHash>>,
-    /// Shared by a batch of resolutions against the same maps.
-    picks: Option<&'r mut super::PickCache<'m>>,
 }
 
 impl<'m, 'r> Lookups<'m, 'r> {
     pub(super) fn new(maps: &'m NameMaps) -> Self {
-        Lookups { maps, reads: None, picks: None }
+        Lookups { src: Src::Maps(maps), reads: None }
     }
 
-    pub(super) fn watching(maps: &'m NameMaps, reads: &'r mut Vec<KeyHash>, picks: Option<&'r mut super::PickCache<'m>>) -> Self {
-        Lookups {
-            maps,
-            reads: Some(reads),
-            picks,
-        }
+    pub(super) fn watching(src: Src<'m>, reads: &'r mut Vec<KeyHash>) -> Self {
+        Lookups { src, reads: Some(reads) }
     }
 
-    /// `pick` among a name's candidates, through the batch's cache when there is one.
-    pub(super) fn pick(&mut self, cands: &'m [String], from: &str) -> Option<&'m str> {
-        match &mut self.picks {
-            Some(cache) => cache.pick(cands, from),
-            None => super::pick(cands, from),
-        }
+    pub(super) fn into_src(self) -> Src<'m> {
+        self.src
     }
 
-    fn note(&mut self, kind: Kind, key: &str) {
+    fn ask(&mut self, kind: Kind, key: &str, from: &str) -> Option<&'m str> {
         if let Some(reads) = &mut self.reads {
             reads.push(key_hash(kind, key));
         }
+        match &mut self.src {
+            Src::Maps(maps) => {
+                let maps: &'m NameMaps = maps;
+                maps.answer(kind, key, from)
+            }
+            Src::Ask(asked) => {
+                asked.push((kind, key.to_string()));
+                None
+            }
+            Src::Answers(answers) => {
+                let answers: &'m Answers = answers;
+                match answers.map.get(&(kind, key.to_string())) {
+                    Some(found) => found.as_deref(),
+                    None => {
+                        answers.missing.set(true);
+                        None
+                    }
+                }
+            }
+        }
     }
 
-    pub(super) fn names(&mut self, key: &str) -> Option<&'m [String]> {
-        self.note(Kind::Name, key);
-        self.maps.names(key)
+    /// The file `[[key]]` from `from` names (see `NameMaps::name_pick`).
+    pub(super) fn name_pick(&mut self, key: &str, from: &str) -> Option<&'m str> {
+        self.ask(Kind::Name, key, from)
     }
 
-    pub(super) fn alias(&mut self, key: &str) -> Option<&'m String> {
-        self.note(Kind::Alias, key);
-        self.maps.alias(key)
+    pub(super) fn alias(&mut self, key: &str) -> Option<&'m str> {
+        self.ask(Kind::Alias, key, "")
     }
 
-    pub(super) fn path_lower(&mut self, key: &str) -> Option<&'m String> {
-        self.note(Kind::Path, key);
-        self.maps.path_lower(key)
+    pub(super) fn path_lower(&mut self, key: &str) -> Option<&'m str> {
+        self.ask(Kind::Path, key, "")
     }
 
-    pub(super) fn suffix(&mut self, key: &str) -> Option<&'m String> {
-        self.note(Kind::Suffix, key);
-        self.maps.suffix(key)
+    pub(super) fn suffix(&mut self, key: &str) -> Option<&'m str> {
+        self.ask(Kind::Suffix, key, "")
+    }
+}
+
+impl NameMaps {
+    /// One question's answer, for a note at `from`.
+    pub(super) fn answer(&self, kind: Kind, key: &str, from: &str) -> Option<&str> {
+        match kind {
+            Kind::Name => self.name_pick(key, from),
+            Kind::Alias => self.alias(key).map(String::as_str),
+            Kind::Path => self.path_lower(key).map(String::as_str),
+            Kind::Suffix => self.suffix(key).map(String::as_str),
+        }
     }
 }
 

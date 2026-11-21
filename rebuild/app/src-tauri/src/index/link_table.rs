@@ -15,8 +15,14 @@
 //! that changed (`relink`); its unchanged targets and keys stay where they are.
 //!
 //! A note is resolved again when its own node changes, or when a key it read changes. The
-//! index queues those paths (`touch`, `wake`) and resolves them once, when the change is done
-//! (`Index::settle_links`). A full name-map rebuild resolves every note instead (`refill`).
+//! index queues those paths (`touch`) and keys (`wake`) and resolves them once, when the change
+//! is done (`Index::settle_links`), or later, off the lock (`link_jobs`). A woken key is queued
+//! as the key alone: its readers are queued from it in bounded steps (`expand`, review 3), so a
+//! save that changes a key ten thousand notes read does not copy them. A full name-map rebuild
+//! resolves every note instead (`refill`).
+//!
+//! Entries are shared (`Arc`), so a reply copies pointers under the lock and builds its JSON
+//! off it (`link_reads`).
 //!
 //! Each change that alters an entry bumps `version` and logs the paths, so `changes` can
 //! answer "what changed since version N" with only those notes. A page that is too far behind
@@ -25,9 +31,12 @@
 //! full walk after each step.
 
 use super::name_maps::{key_hash, Kind, KeyHash};
-use crate::model::{LinkChanges, LinkEntry, LinkIndex};
+use crate::model::LinkEntry;
+#[cfg(test)]
+use crate::model::{LinkChanges, LinkIndex};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::hash::{BuildHasherDefault, Hasher};
+use std::ops::Bound;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
@@ -50,6 +59,8 @@ impl Hasher for Identity {
 }
 
 type Readers = HashMap<KeyHash, PathSet, BuildHasherDefault<Identity>>;
+/// Woken keys, each with the last reader queued from it so far (`None`: none yet).
+type Woken = HashMap<KeyHash, Option<Arc<str>>, BuildHasherDefault<Identity>>;
 /// Linking notes per target.
 type ByTarget = HashMap<Arc<str>, PathSet>;
 
@@ -94,8 +105,28 @@ impl PathSet {
         }
     }
 
+    /// The paths after `after` (all of them for `None`), in order.
+    fn after<'s>(&'s self, after: Option<&str>) -> Box<dyn Iterator<Item = &'s Arc<str>> + 's> {
+        match (self, after) {
+            (PathSet::Few(list), None) => Box::new(list.iter()),
+            (PathSet::Few(list), Some(cut)) => {
+                let from = list.partition_point(|p| **p <= *cut);
+                Box::new(list[from..].iter())
+            }
+            (PathSet::Many(set), None) => Box::new(set.iter()),
+            (PathSet::Many(set), Some(cut)) => Box::new(set.range::<str, _>((Bound::Excluded(cut), Bound::Unbounded))),
+        }
+    }
+
     fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    fn contains(&self, path: &str) -> bool {
+        match self {
+            PathSet::Few(list) => list.binary_search_by(|p| (**p).cmp(path)).is_ok(),
+            PathSet::Many(set) => set.contains(path),
+        }
     }
 
     fn insert(&mut self, path: &Arc<str>) {
@@ -205,11 +236,13 @@ impl History {
 
 #[derive(Debug)]
 pub(super) struct LinkTable {
-    notes: BTreeMap<Arc<str>, Resolved>,
+    notes: BTreeMap<Arc<str>, Arc<Resolved>>,
     by_target: ByTarget,
     readers: Readers,
     /// Notes to resolve again when the current change is done.
     pending: HashSet<Arc<str>>,
+    /// Keys whose owners changed: their readers are still to be queued in `pending`.
+    woken: Woken,
     history: History,
     /// `LOG_PATHS`; tests set a smaller cap.
     log_paths: usize,
@@ -222,6 +255,7 @@ impl Default for LinkTable {
             by_target: ByTarget::default(),
             readers: Readers::default(),
             pending: HashSet::new(),
+            woken: Woken::default(),
             history: History::fresh(),
             log_paths: LOG_PATHS,
         }
@@ -229,7 +263,8 @@ impl Default for LinkTable {
 }
 
 impl LinkTable {
-    pub(super) fn get(&self, path: &str) -> Option<&Resolved> {
+    /// The shared entry, for a reply built off the lock.
+    pub(super) fn shared(&self, path: &str) -> Option<&Arc<Resolved>> {
         self.notes.get(path)
     }
 
@@ -237,9 +272,14 @@ impl LinkTable {
         self.notes.contains_key(path)
     }
 
-    /// Notes with a link resolving to `target`, in path order.
-    pub(super) fn sources_of(&self, target: &str) -> impl Iterator<Item = &Arc<str>> {
-        self.by_target.get(target).into_iter().flat_map(PathSet::iter)
+    /// Whether `path` has a link resolving to `target`.
+    pub(super) fn is_source(&self, target: &str, path: &str) -> bool {
+        self.by_target.get(target).is_some_and(|set| set.contains(path))
+    }
+
+    /// The notes linking to `target`, after `after`, in path order.
+    pub(super) fn sources_after<'s>(&'s self, target: &str, after: Option<&'s str>) -> impl Iterator<Item = &'s Arc<str>> + 's {
+        self.by_target.get(target).into_iter().flat_map(move |set| set.after(after))
     }
 
     /// Resolve `path` again once the change is done (its node changed or went away).
@@ -252,19 +292,64 @@ impl LinkTable {
         self.pending.insert(key);
     }
 
-    /// The owners of one key changed: every note that read it resolves again.
+    /// The owners of one key changed: every note that read it resolves again. Only the key is
+    /// queued here; `expand` queues its readers. Waking it again starts them over, since a
+    /// reader queued and resolved already may have read the old owners.
     pub(super) fn wake(&mut self, kind: Kind, key: String) {
-        if let Some(notes) = self.readers.get(&key_hash(kind, &key)) {
-            self.pending.extend(notes.iter().cloned());
+        let hash = key_hash(kind, &key);
+        if self.readers.contains_key(&hash) {
+            self.woken.insert(hash, None);
+        }
+    }
+
+    /// Queue up to `budget` readers of woken keys. Readers are taken in path order from where
+    /// the last step stopped. One that stops reading the key meanwhile was resolved against
+    /// the new owners; one that starts reading it was too; so a moving set misses nobody.
+    pub(super) fn expand(&mut self, mut budget: usize) {
+        while budget > 0 {
+            let Some((&key, last)) = self.woken.iter().next() else {
+                return;
+            };
+            let last = last.clone();
+            let mut queued = 0;
+            let mut stop = None;
+            if let Some(set) = self.readers.get(&key) {
+                for path in set.after(last.as_deref()) {
+                    if queued == budget {
+                        break;
+                    }
+                    self.pending.insert(Arc::clone(path));
+                    stop = Some(Arc::clone(path));
+                    queued += 1;
+                }
+                let more = set.after(stop.as_deref()).next().is_some();
+                if queued == budget && more {
+                    self.woken.insert(key, stop);
+                    return;
+                }
+            }
+            self.woken.remove(&key);
+            budget -= queued;
         }
     }
 
     pub(super) fn has_pending(&self) -> bool {
-        !self.pending.is_empty()
+        !self.pending.is_empty() || !self.woken.is_empty()
     }
 
-    pub(super) fn pending_len(&self) -> usize {
-        self.pending.len()
+    /// Notes queued, counting every reader of a woken key (a bound: some are queued already).
+    pub(super) fn queued_work(&self) -> usize {
+        let woken: usize = self.woken.keys().map(|k| self.readers.get(k).map_or(0, PathSet::len)).sum();
+        self.pending.len() + woken
+    }
+
+    /// The queued notes (after `expand`).
+    pub(super) fn pending(&self) -> impl Iterator<Item = &Arc<str>> {
+        self.pending.iter()
+    }
+
+    pub(super) fn unqueue(&mut self, path: &str) {
+        self.pending.remove(path);
     }
 
     /// Up to `n` queued notes, taken off the queue.
@@ -281,22 +366,22 @@ impl LinkTable {
     pub(super) fn replace(&mut self, path: Arc<str>, new: Option<Resolved>) -> bool {
         let old = match new {
             Some(new) => {
-                if self.notes.get(&path) == Some(&new) {
+                if self.notes.get(&path).is_some_and(|old| **old == new) {
                     return false;
                 }
-                self.notes.insert(Arc::clone(&path), new)
+                self.notes.insert(Arc::clone(&path), Arc::new(new))
             }
             None => self.notes.remove(&path),
         };
-        let new = self.notes.get(&path);
-        relink(&mut self.by_target, &mut self.readers, &path, old.as_ref(), new);
+        let new = self.notes.get(&path).map(|r| &**r);
+        relink(&mut self.by_target, &mut self.readers, &path, old.as_deref(), new);
         old.as_ref().map(|r| &r.entry) != new.map(|r| &r.entry)
     }
 
     /// Replace every note at once (a full name-map rebuild). `fresh` must come in path order.
     /// Only notes whose entries differ are logged.
     pub(super) fn refill(&mut self, fresh: impl IntoIterator<Item = (Arc<str>, Resolved)>) {
-        let notes: BTreeMap<Arc<str>, Resolved> = fresh.into_iter().collect();
+        let notes: BTreeMap<Arc<str>, Arc<Resolved>> = fresh.into_iter().map(|(p, r)| (p, Arc::new(r))).collect();
         let mut by_target = ByTarget::default();
         let mut readers = Readers::default();
         // In path order, so each list is pushed sorted.
@@ -318,6 +403,7 @@ impl LinkTable {
         self.by_target = by_target;
         self.readers = readers;
         self.pending.clear();
+        self.woken.clear();
         self.record(changed);
     }
 
@@ -350,7 +436,42 @@ impl LinkTable {
         self.record(changed);
     }
 
+    /// `(id, version, floor)`: `changes` answers versions from `floor` to `version`.
+    pub(super) fn stamp(&self) -> (u64, u64, u64) {
+        (self.history.id, self.history.version, self.history.floor)
+    }
+
+    /// Up to `n` notes after `after`, in path order, shared.
+    pub(super) fn chunk(&self, after: Option<&str>, n: usize) -> Vec<(Arc<str>, Arc<Resolved>)> {
+        let range = match after {
+            Some(cut) => self.notes.range::<str, _>((Bound::Excluded(cut), Bound::Unbounded)),
+            None => self.notes.range::<str, _>(..),
+        };
+        range.take(n).map(|(p, r)| (Arc::clone(p), Arc::clone(r))).collect()
+    }
+
+    /// Paths logged after version `since` and up to `until`, skipping the first `skip` of them,
+    /// at most `n`. Needs `since >= floor`: the log then holds every change after `since`, in
+    /// version order, so a reader can walk it in steps. True when none remain after these.
+    pub(super) fn logged(&self, since: u64, until: u64, skip: usize, n: usize) -> (Vec<Arc<str>>, bool) {
+        debug_assert!(since >= self.history.floor);
+        let log = &self.history.log;
+        let from = log.partition_point(|(v, _)| *v <= since) + skip;
+        let mut out = Vec::new();
+        for (v, path) in log.range(from.min(log.len())..) {
+            if *v > until {
+                return (out, true);
+            }
+            if out.len() == n {
+                return (out, false);
+            }
+            out.push(Arc::clone(path));
+        }
+        (out, true)
+    }
+
     /// Every note's entry, as `link_index` sends it.
+    #[cfg(test)]
     pub(super) fn link_index(&self) -> LinkIndex {
         let mut out = LinkIndex {
             outgoing: BTreeMap::new(),
@@ -373,7 +494,9 @@ impl LinkTable {
     }
 
     /// The entries changed since `since` (an id and a version this table sent), or the whole
-    /// index when that is not something this table can answer.
+    /// index when that is not something this table can answer. `link_replies` builds the same
+    /// reply in steps.
+    #[cfg(test)]
     pub(super) fn changes(&self, since: Option<(u64, u64)>) -> LinkChanges {
         let h = &self.history;
         let from = since.and_then(|(id, version)| {
@@ -422,7 +545,7 @@ impl LinkTable {
     }
 
     #[cfg(test)]
-    pub(super) fn notes(&self) -> &BTreeMap<Arc<str>, Resolved> {
+    pub(super) fn notes(&self) -> &BTreeMap<Arc<str>, Arc<Resolved>> {
         &self.notes
     }
 
@@ -537,7 +660,7 @@ fn sorted_diff<'a, T: Ord>(old: &'a [T], new: &'a [T]) -> Vec<(&'a T, bool)> {
 }
 
 /// Paths whose entries differ between `old` and `new` (added, removed, or changed).
-fn diff(old: &BTreeMap<Arc<str>, Resolved>, new: &BTreeMap<Arc<str>, Resolved>) -> Vec<Arc<str>> {
+fn diff(old: &BTreeMap<Arc<str>, Arc<Resolved>>, new: &BTreeMap<Arc<str>, Arc<Resolved>>) -> Vec<Arc<str>> {
     let mut out = Vec::new();
     let mut a = old.iter().peekable();
     let mut b = new.iter().peekable();

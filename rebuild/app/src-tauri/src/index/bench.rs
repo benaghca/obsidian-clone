@@ -572,25 +572,100 @@ fn bench_link_deltas() {
         median(&remove_ms),
         median(&add_ms)
     );
-    // Review 2, as the app runs it: the save returns with the linkers queued; a link read
-    // settles them in 2 ms slices, between writes.
+    // Review 3, as the app runs it: the save queues the key; off-lock jobs resolve the linkers
+    // (`link_reads::settle`), and a reply is copied in steps. `hold` is the longest step that
+    // holds the lock (a save queued behind them waits for at most that).
     fan.set_defer_links(true);
-    let (mut save_ms, mut settle_ms, mut slices) = (Vec::new(), Vec::new(), 0);
+    let (mut save_ms, mut settle_ms, mut hold) = (Vec::new(), Vec::new(), 0f64);
     for body in ["hub\n", aliased].iter().cycle().take(2 * runs) {
         let started = Instant::now();
         fan.upsert_note(root, "hub.md", body, Stamp::sized(body.len()));
         save_ms.push(elapsed_ms(started));
         let started = Instant::now();
-        slices = 0;
-        while !fan.settle_links_until(Instant::now() + std::time::Duration::from_millis(2)) {
-            slices += 1;
-        }
+        hold = hold.max(settle_by_jobs(&mut fan));
         settle_ms.push(elapsed_ms(started));
     }
     println!(
-        "GROVE_BENCH shared alias, {n} linkers, deferred: save_ms={:.3} settle_ms={:.1} in {} slices of 2 ms",
+        "GROVE_BENCH shared alias, {n} linkers, off-lock jobs: save_ms={:.3} settle_ms={:.1} longest_hold_ms={hold:.2}",
         median(&save_ms),
-        median(&settle_ms),
-        slices + 1
+        median(&settle_ms)
     );
+    let (reply_ms, reply_hold) = reply_by_steps(&fan);
+    println!("GROVE_BENCH whole link_index of {n} notes in steps: total_ms={reply_ms:.1} longest_hold_ms={reply_hold:.3}");
+
+    // Review 3: a name with many owners, and link-heavy notes.
+    let m = n / 2;
+    let mut notes: Vec<(String, String)> = Vec::new();
+    for i in 0..m {
+        notes.push((format!("r{i:06}/README.md"), "readme\n".into()));
+        notes.push((format!("r{i:06}/n.md"), "see [[README]]\n".into()));
+    }
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut owners = Index::from_notes(&refs);
+    owners.set_defer_links(true);
+    let started = Instant::now();
+    owners.upsert_note(root, "README.md", "top\n", Stamp::sized(4));
+    let save = elapsed_ms(started);
+    let started = Instant::now();
+    let hold = settle_by_jobs(&mut owners);
+    println!("GROVE_BENCH a new README among {m} with {m} readers: save_ms={save:.3} settle_ms={:.1} longest_hold_ms={hold:.2}", elapsed_ms(started));
+    let heavy: String = (0..5_000).map(|j| format!("[[alpha]] [[t{j}]] [x](m{j}.md)\n")).collect();
+    let mut notes: Vec<(String, String)> = (0..100).map(|i| (format!("h/{i:03}.md"), heavy.clone())).collect();
+    notes.push(("hub.md".into(), aliased.into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut heavy = Index::from_notes(&refs);
+    heavy.set_defer_links(true);
+    let started = Instant::now();
+    heavy.upsert_note(root, "hub.md", "hub\n", Stamp::sized(4));
+    let save = elapsed_ms(started);
+    let started = Instant::now();
+    let hold = settle_by_jobs(&mut heavy);
+    println!("GROVE_BENCH 100 notes of 5,000 links reading an alias: save_ms={save:.3} settle_ms={:.1} longest_hold_ms={hold:.2}", elapsed_ms(started));
+}
+
+/// Settle as `link_reads::settle` does; the longest step that holds the lock (ms).
+fn settle_by_jobs(idx: &mut Index) -> f64 {
+    use super::LinkSlice;
+    let mut hold = 0f64;
+    loop {
+        let started = Instant::now();
+        let job = idx.link_job();
+        hold = hold.max(elapsed_ms(started));
+        let Some(mut job) = job else {
+            return hold;
+        };
+        job.ask();
+        loop {
+            let started = Instant::now();
+            let got = idx.answer(&mut job);
+            hold = hold.max(elapsed_ms(started));
+            if got != LinkSlice::More {
+                break;
+            }
+        }
+        job.finish();
+        let started = Instant::now();
+        idx.publish(job);
+        hold = hold.max(elapsed_ms(started));
+    }
+}
+
+/// A whole `link_index` reply built as `link_reads` builds it: (total ms, longest step ms).
+fn reply_by_steps(idx: &Index) -> (f64, f64) {
+    use super::{LinkReply, ReplyStep};
+    let all = Instant::now();
+    let mut reply = LinkReply::new(None);
+    let mut hold = 0f64;
+    loop {
+        let started = Instant::now();
+        let step = reply.step(idx);
+        hold = hold.max(elapsed_ms(started));
+        reply.absorb();
+        if step == ReplyStep::Done {
+            break;
+        }
+    }
+    let index = reply.into_index();
+    assert!(!index.outgoing.is_empty());
+    (elapsed_ms(all), hold)
 }

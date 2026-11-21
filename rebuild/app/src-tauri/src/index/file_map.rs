@@ -85,6 +85,11 @@ impl Files {
         self.map.get(key).map(Arc::as_ref)
     }
 
+    /// The node itself, shared, for work done off the vault lock.
+    pub(super) fn get_shared(&self, key: &str) -> Option<&Arc<Node>> {
+        self.map.get(key)
+    }
+
     pub(super) fn contains_key(&self, key: &str) -> bool {
         self.map.contains_key(key)
     }

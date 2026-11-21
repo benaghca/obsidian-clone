@@ -14,6 +14,8 @@ mod search;
 mod tags;
 mod backlinks;
 mod link_sources;
+mod link_jobs;
+mod link_replies;
 mod link_table;
 mod name_maps;
 #[cfg(test)]
@@ -30,9 +32,13 @@ mod tests;
 mod search_props_edge;
 
 use crate::fsutil::{self, is_ignored_rel};
-use crate::model::{FileEntry, LinkChanges, LinkEntry, LinkIndex, SearchHit};
+use crate::model::{FileEntry, LinkEntry, SearchHit};
+#[cfg(test)]
+use crate::model::{LinkChanges, LinkIndex};
+pub(crate) use link_jobs::LinkSlice;
+pub(crate) use link_replies::{BacklinkReply, LinkReply, ReplyStep};
 use link_table::{LinkTable, Resolved};
-use name_maps::{Lookups, NameMaps};
+use name_maps::{Lookups, NameMaps, Src};
 use parse::{clean_target, parse_note, Note, RawLink};
 #[cfg(test)]
 use std::cell::Cell;
@@ -155,16 +161,71 @@ pub struct Index {
     // `put_node` / `take_node` queue the notes to resolve again; `settle_links` resolves
     // them when the change is done. A full map rebuild resolves every note.
     links: LinkTable,
-    // Review 2: a change that wakes more than `INLINE_LINKS` notes leaves them queued instead of
-    // resolving them before the write returns. The app reads links through `lib::settled`,
-    // which resolves the queue in short slices under the lock, between writes. Off by default
-    // (tests and tools see every change settled when it returns). `Some(n)`: defer past n notes.
+    // Review 2: a change that wakes more than `INLINE_LINKS` notes (or more than
+    // `INLINE_LINK_WORK` links) leaves them queued instead of resolving them before the write
+    // returns. The app reads links through `link_reads`, which resolves the queue off the lock
+    // (`link_jobs`). Off by default (tests and tools see every change settled when it returns).
+    // `Some(n)`: defer past n notes.
     defer_links: Option<usize>,
+    // Every node and map-key change, for work done off the lock (`link_jobs`, `link_replies`):
+    // it stores what it gathered only if nothing it read changed meanwhile.
+    edits: Edits,
+}
+
+/// One file or map change, as work off the lock checks for it.
+#[derive(Debug)]
+pub(crate) enum Edit {
+    /// A map key gained or lost an owner.
+    Key(name_maps::KeyHash),
+    /// A path's node was replaced, added, or removed.
+    Node(Arc<str>),
+}
+
+/// The last `EDIT_LOG` edits. A full map rebuild starts a new `epoch` (from one counter for
+/// every index, so a fresh index never repeats one): work begun before it is dropped.
+#[derive(Debug, Default)]
+struct Edits {
+    epoch: u64,
+    seq: u64,
+    /// The log holds every edit after `floor`.
+    floor: u64,
+    log: std::collections::VecDeque<(u64, Edit)>,
+}
+
+/// Where the edits stood when work began.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct EditMark {
+    epoch: u64,
+    seq: u64,
+}
+
+const EDIT_LOG: usize = 16_384;
+
+impl Edits {
+    fn note(&mut self, edit: Edit) {
+        self.seq += 1;
+        self.log.push_back((self.seq, edit));
+        if self.log.len() > EDIT_LOG {
+            let (gone, _) = self.log.pop_front().expect("log is not empty");
+            self.floor = gone;
+        }
+    }
+
+    fn restart(&mut self) {
+        self.epoch = NEXT_EPOCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.log.clear();
+        self.floor = self.seq;
+    }
 }
 
 /// Notes a change may re-resolve before it returns when `defer_links` is on. A save, a rename,
 /// or an alias edit with this many linkers or fewer settles at once, as before.
 pub(crate) const INLINE_LINKS: usize = 256;
+
+/// Links those notes may hold in all (review 3: one note with thousands of links waits too).
+pub(crate) const INLINE_LINK_WORK: usize = 2_048;
+
+static NEXT_EPOCH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Holds name-map rebuilds, then rebuilds once on drop if anything asked.
 /// Nested guards rebuild on the outermost drop.
@@ -238,6 +299,7 @@ impl Index {
         self.files.get(rel).map(|n| n.stamp)
     }
 
+    #[cfg(test)]
     pub fn paths(&self) -> impl Iterator<Item = &String> {
         self.files.keys()
     }
@@ -246,7 +308,9 @@ impl Index {
         resolve_in(&mut Lookups::new(&self.maps), from, target)
     }
 
-    /// Every note's resolved links, read from the link table (no resolving here).
+    /// Every note's resolved links, read from the link table (no resolving here). The app reads
+    /// through `link_reads` instead, which settles first and copies in steps.
+    #[cfg(test)]
     pub fn link_index(&self) -> LinkIndex {
         debug_assert!(!self.links.has_pending(), "link table read before it settled");
         self.links.link_index()
@@ -254,6 +318,7 @@ impl Index {
 
     /// What changed in `link_index` since `since` (an id and version an earlier reply gave),
     /// or the whole index when the page holds none, another id, or is too far behind.
+    #[cfg(test)]
     pub fn link_changes(&self, since: Option<(u64, u64)>) -> LinkChanges {
         debug_assert!(!self.links.has_pending(), "link table read before it settled");
         self.links.changes(since)
@@ -261,14 +326,36 @@ impl Index {
 
     /// Keep the page's link history across a rescan: this (fresh) index continues `older`'s
     /// versions, logging only the notes whose links differ.
+    /// Its queued link work stays queued (the fresh index's own: what the replay touched).
     pub(crate) fn continue_link_history(&mut self, older: &Index) {
         self.links.continue_from(&older.links);
         self.defer_links = older.defer_links;
     }
 
-    /// Leave large link updates queued for `settle_links_until` (the app; see `defer_links`).
+    /// Leave large link updates queued for `link_reads` (the app; see `defer_links`).
     pub(crate) fn set_defer_links(&mut self, on: bool) {
         self.defer_links = on.then_some(INLINE_LINKS);
+    }
+
+    /// Another index's deferral (a rescan's fresh index takes the live one's before replaying).
+    pub(crate) fn defer_links_like(&mut self, other: &Index) {
+        self.defer_links = other.defer_links;
+    }
+
+    /// Where the edits stand now.
+    pub(crate) fn edit_mark(&self) -> EditMark {
+        EditMark { epoch: self.edits.epoch, seq: self.edits.seq }
+    }
+
+    /// The edits since `mark`, or `None` when they are not known (a full rebuild since, or
+    /// more edits than the log keeps): treat everything as changed.
+    pub(crate) fn edits_since(&self, mark: EditMark) -> Option<impl Iterator<Item = &Edit>> {
+        let e = &self.edits;
+        if e.epoch != mark.epoch || mark.seq < e.floor {
+            return None;
+        }
+        let from = e.log.partition_point(|(seq, _)| *seq <= mark.seq);
+        Some(e.log.range(from..).map(|(_, edit)| edit))
     }
 
     /// Defer every link update past `n` queued notes (tests: 0 defers them all).
@@ -290,14 +377,14 @@ impl Index {
             return !self.links.has_pending();
         }
         let mut changed = Vec::new();
-        let mut picks = PickCache::default();
         while self.links.has_pending() {
+            self.links.expand(SETTLE_STEP);
             for path in self.links.take_some(SETTLE_STEP) {
                 let resolved = self
                     .files
                     .get(&path)
                     .filter(|node| has_links(&path, node))
-                    .map(|node| resolve_note(&self.maps, &path, &node.note.links, Some(&mut picks)));
+                    .map(|node| resolve_note(&self.maps, &path, &node.note.links));
                 if self.links.replace(Arc::clone(&path), resolved) {
                     changed.push(path);
                 }
@@ -415,6 +502,46 @@ impl Index {
             Some(paths) => paths.iter().filter_map(tags).collect(),
             None => self.files.keys().filter_map(tags).collect(),
         }
+    }
+
+    /// Paths `fresh` lacks, paths only `fresh` has, and files whose stamp differs, each in
+    /// path order: one walk of both sorted lists, no lookups (review 3: a rescan's finish holds
+    /// the lock for this).
+    pub(crate) fn file_diff(&self, fresh: &Index) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let (mut removed, mut created, mut modified) = (Vec::new(), Vec::new(), Vec::new());
+        let mut old = self.files.iter().peekable();
+        let mut new = fresh.files.iter().peekable();
+        loop {
+            match (old.peek(), new.peek()) {
+                (None, None) => break,
+                (Some((path, _)), None) => {
+                    removed.push((*path).clone());
+                    old.next();
+                }
+                (None, Some((path, _))) => {
+                    created.push((*path).clone());
+                    new.next();
+                }
+                (Some((a, an)), Some((b, bn))) => match a.cmp(b) {
+                    std::cmp::Ordering::Less => {
+                        removed.push((*a).clone());
+                        old.next();
+                    }
+                    std::cmp::Ordering::Greater => {
+                        created.push((*b).clone());
+                        new.next();
+                    }
+                    std::cmp::Ordering::Equal => {
+                        if !bn.is_dir && an.stamp != bn.stamp {
+                            modified.push((*a).clone());
+                        }
+                        old.next();
+                        new.next();
+                    }
+                },
+            }
+        }
+        (removed, created, modified)
     }
 
     pub fn begin_rescan(&mut self) {
@@ -546,6 +673,7 @@ impl Index {
             return;
         }
         let old = self.files.insert(key.clone(), Arc::clone(&node));
+        self.edits.note(Edit::Node(Arc::from(key.as_str())));
         if has_links(&key, &node) || self.links.contains(&key) {
             self.links.touch(&key);
         }
@@ -567,6 +695,7 @@ impl Index {
         if self.maps_dirty {
             return Some(old);
         }
+        self.edits.note(Edit::Node(Arc::from(key)));
         if self.links.contains(key) {
             self.links.touch(key);
         }
@@ -580,8 +709,11 @@ impl Index {
     /// `node` at `path` is joining or leaving the maps: every note whose links read one of
     /// its keys resolves again.
     fn wake_readers(&mut self, path: &str, node: &Node) {
-        let links = &mut self.links;
-        name_maps::keys_of(path, node, |kind, key| links.wake(kind, key));
+        let (links, edits) = (&mut self.links, &mut self.edits);
+        name_maps::keys_of(path, node, |kind, key| {
+            edits.note(Edit::Key(name_maps::key_hash(kind, &key)));
+            links.wake(kind, key);
+        });
     }
 
     /// Resolve again the notes queued since the last settle, and log the entries that changed.
@@ -590,8 +722,15 @@ impl Index {
         if self.defer_depth > 0 || self.maps_dirty || !self.links.has_pending() {
             return;
         }
-        if self.defer_links.is_some_and(|n| self.links.pending_len() > n) {
-            return;
+        if let Some(n) = self.defer_links {
+            if self.links.queued_work() > n {
+                return;
+            }
+            self.links.expand(usize::MAX);
+            let links: usize = self.links.pending().filter_map(|p| self.files.get(p)).map(|node| node.note.links.len()).sum();
+            if links > INLINE_LINK_WORK {
+                return;
+            }
         }
         let far = std::time::Instant::now() + std::time::Duration::from_secs(3600);
         self.settle_links_until(far);
@@ -600,12 +739,11 @@ impl Index {
     /// Every note's links from scratch, after a full map rebuild.
     fn rebuild_links(&mut self) {
         let maps = &self.maps;
-        let mut picks = PickCache::default();
         let fresh = self
             .files
             .iter()
             .filter(|(path, node)| has_links(path, node))
-            .map(|(path, node)| (Arc::<str>::from(path.as_str()), resolve_note(maps, path, &node.note.links, Some(&mut picks))));
+            .map(|(path, node)| (Arc::<str>::from(path.as_str()), resolve_note(maps, path, &node.note.links)));
         self.links.refill(fresh);
     }
 
@@ -727,6 +865,7 @@ impl Index {
             return;
         }
         self.maps_dirty = false;
+        self.edits.restart();
         #[cfg(test)]
         count_rebuild_maps();
         self.maps.refill(&self.files);
@@ -767,12 +906,10 @@ fn resolve_in(look: &mut Lookups, from: &str, target: &str) -> Option<String> {
     if let Some(stripped) = key.strip_suffix(".md") {
         key = stripped.to_string();
     }
-    if let Some(cands) = look.names(&key) {
-        if let Some(found) = look.pick(cands, from) {
-            return Some(found.to_string());
-        }
+    if let Some(found) = look.name_pick(&key, from) {
+        return Some(found.to_string());
     }
-    look.alias(&raw.to_lowercase()).cloned()
+    look.alias(&raw.to_lowercase()).map(str::to_string)
 }
 
 fn resolve_path_in(look: &mut Lookups, from: &str, raw: &str) -> Option<String> {
@@ -790,7 +927,7 @@ fn resolve_path_in(look: &mut Lookups, from: &str, raw: &str) -> Option<String> 
             if nameless_md(found) {
                 continue;
             }
-            return Some(found.clone());
+            return Some(found.to_string());
         }
     }
     // A partial path: the shortest file path that ends with it, then the smaller original path.
@@ -799,18 +936,24 @@ fn resolve_path_in(look: &mut Lookups, from: &str, raw: &str) -> Option<String> 
     let suf_md = format!("/{low}.md");
     let a = look.suffix(&suf);
     let b = look.suffix(&suf_md);
-    better_suffix(a, b).cloned()
+    better_suffix(a, b).map(str::to_string)
 }
 
 /// One note's links resolved against `maps`, with every key that took. The entry follows the
 /// `link_index` rules: targets in first-seen order without repeats, wikilinks in `outgoing`,
 /// markdown links in `markdown`, and the targets that match no file in `unresolved` (as
 /// written, a markdown link without its `.md`, repeats dropped ignoring ASCII case).
-fn resolve_note<'m>(maps: &'m NameMaps, path: &str, links: &[RawLink], picks: Option<&mut PickCache<'m>>) -> Resolved {
+fn resolve_note(maps: &NameMaps, path: &str, links: &[RawLink]) -> Resolved {
+    resolve_through(Src::Maps(maps), path, links).0
+}
+
+/// `resolve_note` with its lookups going to `src`, which is handed back (see `Src`).
+fn resolve_through<'m>(src: Src<'m>, path: &str, links: &[RawLink]) -> (Resolved, Src<'m>) {
     let mut reads = Vec::new();
-    let mut look = Lookups::watching(maps, &mut reads, picks);
+    let mut look = Lookups::watching(src, &mut reads);
     let mut entry = LinkEntry::default();
     let mut slots = Vec::with_capacity(links.len());
+    let (mut out_at, mut md_at, mut missing_at) = (Firsts::default(), Firsts::default(), Firsts::default());
     for link in links {
         let Some(dest) = resolve_in(&mut look, path, &link.target) else {
             let name = if link.markdown {
@@ -818,29 +961,55 @@ fn resolve_note<'m>(maps: &'m NameMaps, path: &str, links: &[RawLink], picks: Op
             } else {
                 link.target.as_str()
             };
-            if !entry.unresolved.iter().any(|m| m.eq_ignore_ascii_case(name)) {
-                entry.unresolved.push(name.to_string());
-            }
+            missing_at.place(&mut entry.unresolved, name, true);
             slots.push(None);
             continue;
         };
-        let list = if link.markdown {
-            &mut entry.markdown
+        let at = if link.markdown {
+            md_at.place(&mut entry.markdown, &dest, false)
         } else {
-            &mut entry.outgoing
+            out_at.place(&mut entry.outgoing, &dest, false)
         };
-        let at = match list.iter().position(|d| *d == dest) {
-            Some(at) => at,
-            None => {
-                list.push(dest);
-                list.len() - 1
-            }
-        };
-        slots.push(Some(at as u32));
+        slots.push(Some(at));
     }
+    let src = look.into_src();
     reads.sort();
     reads.dedup();
-    Resolved { slots, reads, entry }
+    (Resolved { slots, reads, entry }, src)
+}
+
+/// Where each item of a first-seen, repeat-free list sits: a scan while the list is short, a
+/// map once it is long (review 3: a note with thousands of distinct links was quadratic).
+#[derive(Default)]
+struct Firsts {
+    at: HashMap<String, u32>,
+}
+
+impl Firsts {
+    const LONG: usize = 32;
+
+    /// `item`'s place in `list`, pushing it when new. `fold`: repeats ignore ASCII case.
+    fn place(&mut self, list: &mut Vec<String>, item: &str, fold: bool) -> u32 {
+        let same = |a: &str| if fold { a.eq_ignore_ascii_case(item) } else { a == item };
+        let key = |s: &str| if fold { s.to_ascii_lowercase() } else { s.to_string() };
+        if list.len() < Self::LONG {
+            if let Some(at) = list.iter().position(|d| same(d)) {
+                return at as u32;
+            }
+            list.push(item.to_string());
+            if list.len() == Self::LONG {
+                self.at = list.iter().enumerate().map(|(i, d)| (key(d), i as u32)).collect();
+            }
+            return (list.len() - 1) as u32;
+        }
+        match self.at.entry(key(item)) {
+            std::collections::hash_map::Entry::Occupied(found) => *found.get(),
+            std::collections::hash_map::Entry::Vacant(slot) => {
+                list.push(item.to_string());
+                *slot.insert((list.len() - 1) as u32)
+            }
+        }
+    }
 }
 
 /// The folders above a path ("a" and "a/b" for "a/b/c.md").
@@ -886,9 +1055,9 @@ fn parent_path(path: &str) -> &str {
     }
 }
 
-fn better_suffix<'a>(a: Option<&'a String>, b: Option<&'a String>) -> Option<&'a String> {
+fn better_suffix<'a>(a: Option<&'a str>, b: Option<&'a str>) -> Option<&'a str> {
     match (a, b) {
-        (Some(a), Some(b)) if a.len() < b.len() || (a.len() == b.len() && a.as_str() <= b.as_str()) => {
+        (Some(a), Some(b)) if a.len() < b.len() || (a.len() == b.len() && a <= b) => {
             Some(a)
         }
         (Some(_), Some(b)) => Some(b),
@@ -899,66 +1068,6 @@ fn better_suffix<'a>(a: Option<&'a String>, b: Option<&'a String>) -> Option<&'a
 
 /// Queued notes resolved between deadline checks in `settle_links_until`.
 const SETTLE_STEP: usize = 32;
-
-/// A candidate list longer than this gets a `PickIndex` inside a batch of resolutions.
-const PICK_INDEX_MIN: usize = 16;
-
-/// `pick` for one long candidate list, answered per source folder without a scan (review 2:
-/// many readers of a key with many owners, such as `[[README]]`, cost readers × owners).
-/// `pick` ranks by (is a note, is in the source's folder), then length, then path, so the
-/// answer is the best note in the source's folder, else the best note, else the best other
-/// file in the folder, else the best other file.
-struct PickIndex<'m> {
-    /// Best note, best other file (index into the list).
-    best: [Option<usize>; 2],
-    by_dir: HashMap<&'m str, [Option<usize>; 2]>,
-}
-
-impl<'m> PickIndex<'m> {
-    fn new(cands: &'m [String]) -> Self {
-        let better = |slot: &mut Option<usize>, i: usize| {
-            let a = &cands[i];
-            if slot.is_none_or(|j| {
-                let b = &cands[j];
-                (a.len(), a.as_str()) < (b.len(), b.as_str())
-            }) {
-                *slot = Some(i);
-            }
-        };
-        let mut best = [None, None];
-        let mut by_dir: HashMap<&'m str, [Option<usize>; 2]> = HashMap::new();
-        for (i, path) in cands.iter().enumerate() {
-            if nameless_md(path) {
-                continue;
-            }
-            let kind = usize::from(!is_note_path(path));
-            better(&mut best[kind], i);
-            better(&mut by_dir.entry(parent_path(path)).or_default()[kind], i);
-        }
-        PickIndex { best, by_dir }
-    }
-
-    fn pick(&self, cands: &'m [String], from: &str) -> Option<&'m str> {
-        let near = self.by_dir.get(parent_path(from));
-        let at = near.and_then(|n| n[0]).or(self.best[0]).or(near.and_then(|n| n[1])).or(self.best[1]);
-        at.map(|i| cands[i].as_str())
-    }
-}
-
-/// `PickIndex`es for one batch of resolutions against unchanged maps, by candidate list.
-#[derive(Default)]
-pub(super) struct PickCache<'m> {
-    lists: HashMap<*const String, PickIndex<'m>>,
-}
-
-impl<'m> PickCache<'m> {
-    fn pick(&mut self, cands: &'m [String], from: &str) -> Option<&'m str> {
-        if cands.len() < PICK_INDEX_MIN {
-            return pick(cands, from);
-        }
-        self.lists.entry(cands.as_ptr()).or_insert_with(|| PickIndex::new(cands)).pick(cands, from)
-    }
-}
 
 fn pick<'a>(cands: &'a [String], from: &str) -> Option<&'a str> {
     let dir = parent_path(from);
