@@ -525,7 +525,9 @@ impl Vault {
         }
     }
 
-    /// Turn a create of a path we already know about into a modify (an editor's atomic save).
+    /// Turn a create of a file we already know about into a modify (an editor's atomic save).
+    /// A create of a directory we already know about stays a create. That folder was
+    /// replaced, and a modify would not refresh the files inside it.
     pub fn normalize(&self, changes: Vec<VaultChanged>) -> Vec<VaultChanged> {
         let mut out = Vec::new();
         for change in changes {
@@ -533,10 +535,9 @@ impl Vault {
                 out.push(change);
                 continue;
             }
-            let (modified, created) = change
-                .paths
-                .into_iter()
-                .partition(|path| self.index.contains(path));
+            let (modified, created) = change.paths.into_iter().partition(|path| {
+                self.index.contains(path) && !self.index.is_dir(path)
+            });
             push_change(&mut out, ChangeKind::Create, created);
             push_change(&mut out, ChangeKind::Modify, modified);
         }

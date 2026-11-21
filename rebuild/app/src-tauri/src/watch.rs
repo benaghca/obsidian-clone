@@ -224,11 +224,20 @@ pub fn coalesce(
         removes.remove(path);
         modifies.remove(path);
     }
+    // A file removed and created again is one modify (an atomic save). A directory
+    // that left and came back is a replacement: a child can keep its size and
+    // mtime, so the event has to stay a remove and a create.
     let overlap: Vec<String> = creates.intersection(&removes).cloned().collect();
     for path in overlap {
         creates.remove(&path);
         removes.remove(&path);
-        modifies.insert(path);
+        let directory = std::fs::symlink_metadata(root.join(&path)).is_ok_and(|meta| meta.is_dir());
+        if directory {
+            removes.insert(path.clone());
+            creates.insert(path);
+        } else {
+            modifies.insert(path);
+        }
     }
     for path in creates.iter().chain(removes.iter()) {
         modifies.remove(path);
@@ -506,6 +515,73 @@ mod tests {
             vec![sub],
         );
         assert!(coalesce(&dir.path, &[noise], |_| false).is_empty());
+    }
+
+    /// Moving a folder out and a replacement in can report only the directory.
+    /// The child keeps its size and mtime, so this must not collapse to a modify.
+    /// A create of a directory the index already has stays a create too.
+    /// A write of a file inside the folder stays a modify.
+    #[test]
+    fn directory_swap_stays_structural_when_the_child_stamp_matches() {
+        let dir = tmp_dir("dir-swap");
+        let folder = dir.path.join("Dir");
+        fs::create_dir(&folder).unwrap();
+        let clip = folder.join("clip.mp3");
+        fs::write(&clip, b"OLD-BYTES").unwrap();
+        let before = fs::symlink_metadata(&clip).unwrap();
+        let size = before.len();
+        let mtime = before.modified().unwrap();
+        let vault = crate::vault::Vault::open(dir.path.clone()).unwrap();
+
+        let parked = dir.path.with_extension("out");
+        let _ = fs::remove_dir_all(&parked);
+        fs::rename(&folder, &parked).unwrap();
+        fs::create_dir(&folder).unwrap();
+        fs::write(&clip, b"NEW-BYTES").unwrap();
+        fs::File::open(&clip).unwrap().set_modified(mtime).unwrap();
+        let after = fs::symlink_metadata(&clip).unwrap();
+        assert_eq!(after.len(), size);
+        assert_eq!(after.modified().unwrap(), mtime);
+        assert_ne!(fs::read(&clip).unwrap(), b"OLD-BYTES");
+
+        let from = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::From)),
+            vec![folder.clone()],
+        )
+        .set_tracker(1);
+        let to = kind(
+            EventKind::Modify(ModifyKind::Name(RenameMode::To)),
+            vec![folder.clone()],
+        )
+        .set_tracker(2);
+        let events = [from, to];
+        assert!(events.iter().all(|event| {
+            event.paths.iter().all(|path| path == &folder)
+        }));
+        let out = vault.normalize(coalesce(&dir.path, &events, |_| false));
+        assert_eq!(
+            out,
+            vec![
+                VaultChanged { kind: ChangeKind::Remove, paths: vec!["Dir".into()] },
+                VaultChanged { kind: ChangeKind::Create, paths: vec!["Dir".into()] },
+            ]
+        );
+
+        let created = vault.normalize(vec![VaultChanged {
+            kind: ChangeKind::Create,
+            paths: vec!["Dir".into()],
+        }]);
+        assert_eq!(
+            created,
+            vec![VaultChanged { kind: ChangeKind::Create, paths: vec!["Dir".into()] }]
+        );
+
+        let child = kind(
+            EventKind::Modify(ModifyKind::Data(DataChange::Any)),
+            vec![clip],
+        );
+        assert_eq!(coalesce(&dir.path, &[child], |_| false), one(ChangeKind::Modify, &["Dir/clip.mp3"]));
+        let _ = fs::remove_dir_all(&parked);
     }
 
     #[test]

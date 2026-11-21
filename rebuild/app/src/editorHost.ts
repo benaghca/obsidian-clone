@@ -282,7 +282,8 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       seenMedia.set(path, next);
       // A replaced ancestor can keep the file's mtime and size. That is still
       // a new file. A batch that also names the file reloads once: the direct
-      // signal is that reload, including when it fired before this list installed.
+      // signal is that reload, including a modify delivered while the list
+      // read was still pending, and including when it fired before this list installed.
       if (structural.has(path)) {
         loadedAhead.delete(path);
         if (already.has(path)) continue;

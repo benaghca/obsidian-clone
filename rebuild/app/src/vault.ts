@@ -639,14 +639,19 @@ export class Vault {
       const touched = new Set(touch);
       for (const path of touch) this.touch(path);
       // The list read may have been discarded. The id still names this batch when
-      // the confirmation installs, so a path signaled here is not reloaded again.
+      // the confirmation installs, so a path delivered here is not reloaded again.
+      // A modify reloads through touch. When this batch also replaces an ancestor,
+      // that delivery belongs to the same id.
       const waiting = structureId !== 0 && this.pendingStructure.some((item) => item.id === structureId);
+      const remember = (path: string) => {
+        if (!waiting || !mediaKind(path)) return;
+        let done = this.refreshedByStructure.get(structureId);
+        if (!done) this.refreshedByStructure.set(structureId, done = new Set());
+        done.add(path);
+      };
+      for (const path of touch) remember(path);
       for (const path of media) if (!touched.has(path)) {
-        if (waiting) {
-          let done = this.refreshedByStructure.get(structureId);
-          if (!done) this.refreshedByStructure.set(structureId, done = new Set());
-          done.add(path);
-        }
+        remember(path);
         this.mediaPaths.emit(path, structureId);
       }
       for (const path of reload) {

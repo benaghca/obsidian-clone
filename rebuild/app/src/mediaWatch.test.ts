@@ -266,6 +266,37 @@ it("reloads once when a discarded read's batch also names the watched recording"
   expect(hits).toBe(2);
 });
 
+it("reloads once when a discarded read's ancestor rename also modifies the recording", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { vault, host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  const hung: Array<(listed: FileEntry[]) => void> = [];
+  vi.mocked(api.listFiles).mockImplementation(
+    () => new Promise((resolve) => hung.push((listed) => resolve(listed))),
+  );
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 9, 20)];
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hung).toHaveLength(1);
+  expect(vault.adoptAdded(file("Local.md", 3, 3))).toBe(true);
+
+  const listed = () => files.map((entry) => ({ ...entry }));
+  hung.shift()!(listed());
+  await new Promise((resolve) => realTimeout(resolve, 0));
+  expect(hung).toHaveLength(1);
+  expect(hits).toBe(2);
+  hung.shift()!(listed());
+  await settle();
+  expect(hits).toBe(2);
+});
+
 it("matches a watched recording to its folder, not a sibling or a shared prefix", async () => {
   files = [
     dir("Dir", 10),
