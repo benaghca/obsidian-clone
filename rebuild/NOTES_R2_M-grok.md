@@ -72,3 +72,19 @@ Grove was not launched. When this window's viewer hook is off, the page is writt
 - `<audio>` and `<video>` decoding the MIME types used here, including `.mov` as `video/mp4`.
 - The Linux response policy ignoring a blob or viewer response that arrives as a main-frame document, and `with_webview` actually running the hook that arms the PDF exception.
 - Closing a split leaving no blob URL, and an outside replace of an open recording or PDF showing the new bytes.
+
+## Review round 8
+
+Codex review 8 (PASS-WITH-FIXES) on `a131a76`. Four fixes. Rendering and playback behavior are otherwise unchanged. No new crates or packages.
+
+**One reload across a discarded read.** A batch that names both a replaced folder and its recording keeps one batch id. The direct signal reloads the recording when the discarded file-list read returns. The confirmation installs that same id, and a path that batch already refreshed is not read again. An ancestor-only batch still reloads once, on the confirmation. A sibling note still does not. A modify still reloads on its own signal, and a later list that only catches that version up still does not.
+
+**Structural match.** Each file-list install puts that batch's event paths in a set, then checks a watched recording and its parent folders against the set. Comparing every watched path with every event path, and building a prefix string for each pair, is gone. A sibling does not match. A folder whose name is only a prefix (`Dir` against `Directory/clip.mp3`) does not match. Replacing the folder still does, including when the recording's mtime and size stay the same, and so does a nested folder.
+
+**Saved history.** A layout from before these views stored a raw media path on the back stack and the forward stack. Restore turns `clip.mp3`, `movie.mp4`, or `Lease.PDF` into a typed view entry before it drops entries that are not notes. Both directions keep those entries. A path that is not a note and not audio, video, or PDF is still dropped. The tab's own path was already migrated.
+
+**PDF allowlist.** A blob registration belongs to the window that created it. Destroying the window drops that window's frame flag and its registrations. Close and insert share one lock, so an allow that races the close does not remain. Another window's registration of the same URL stays, and a frame in the closed window can no longer navigate to it. The main frame still cannot. Audio and video blobs are still not registered.
+
+`cargo test --offline` in `rebuild/app/src-tauri` after these edits: 208 passed, 0 failed, 5 ignored (lib), plus main 0 and doc 0. That includes the window-scoped allowlist and the registration that races close.
+
+`heavy npm test` did not finish clean. The runs that reached Vitest reported 113 files and 1710 tests passed, including the new batch and history cases. The chain stopped on a different timing check each time: friction `enter_list_item` at 17 ms against a 16 ms budget, palette matching at 2.39 ms against 2 ms, drawing `DRAWING_EDIT_LONG` at 53 ms against 50 ms, feel graph long tasks (12, max 123 ms) while the load average was 12, feel switcher input at 32 ms against 16 ms, and the settings search focus check after its 80 ms wait. A quieter pass got through feel, Vitest, and the geometry scripts before that settings check missed. Those scripts sit outside this piece.

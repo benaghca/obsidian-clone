@@ -89,7 +89,16 @@ describe("tabs", () => {
     // A layout saved before these views stored the file as the tab path.
     expect(loadTab({ path: "clip.mp3", mode: "live", pinned: false, back: [], forward: [] }, blank, isNote)).toMatchObject({ type: "audio", path: null, viewFile: "clip.mp3" });
     expect(loadTab({ path: "Docs/Lease.PDF", mode: "live", pinned: false, back: [], forward: [] }, blank, isNote)).toMatchObject({ type: "pdf", path: null, viewFile: "Docs/Lease.PDF" });
-    expect(loadTab({ path: "A.md", mode: "live", pinned: false, back: ["clip.mp3", "\0audio\0clip.mp3"], forward: [] }, blank, isNote)!.back).toEqual(["\0audio\0clip.mp3"]);
+    expect(loadTab({
+      path: "A.md",
+      mode: "live",
+      pinned: false,
+      back: ["clip.mp3", "\0audio\0clip.mp3", "Gone.md"],
+      forward: ["movie.mp4", "Docs/Lease.PDF", "pic.png", "Folder/B.md"],
+    }, blank, isNote)).toMatchObject({
+      back: ["\0audio\0clip.mp3", "\0audio\0clip.mp3"],
+      forward: ["\0video\0movie.mp4", "\0pdf\0Docs/Lease.PDF", "Folder/B.md"],
+    });
   });
 
   it("links tabs (Link with tab...): linked tabs follow the note one opens, views stay, a lone link goes", () => {

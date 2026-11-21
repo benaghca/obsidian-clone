@@ -110,6 +110,13 @@ function watchList(list: { push: (...args: never[]) => unknown; pop: () => unkno
   return flag;
 }
 
+/** One disk batch's structural paths, and the media paths its direct signal already delivered. */
+export interface MediaStructureBatch {
+  id: number;
+  paths: readonly string[];
+  refreshed: readonly string[];
+}
+
 function reduceBatch(batch: { kind: string; paths: string[] }[]) {
   batchVisits = 0;
   let refresh = false;
@@ -237,18 +244,28 @@ export class Vault {
   private modified = listeners<[string]>();
   /** Listen for a file being modified (on disk, or saved here); returns a function that stops. */
   readonly onModified = this.modified.on;
-  private mediaPaths = listeners<[string]>();
+  private mediaPaths = listeners<[string, number]>();
   /**
    * An audio, video, or PDF path was created, removed, or renamed in one disk batch.
-   * Fired once per path after that batch's file list is installed. A modify uses `onModified`.
+   * Fired once per path after that batch's file list is installed, or when that read is
+   * discarded. The number is the batch. A modify uses `onModified`.
    */
   readonly onMediaPath = this.mediaPaths.on;
-  /** Ancestor replacements waiting for the list read that actually installs. */
-  private pendingStructure: string[] = [];
-  private structural = listeners<[readonly string[]]>();
+  /** Ancestor replacements waiting for the list read that actually installs, with their batch. */
+  private pendingStructure: { id: number; paths: readonly string[] }[] = [];
+  /** Next id for a batch that removes, renames, or creates. Zero is not a batch. */
+  private nextStructure = 0;
+  /**
+   * Media paths a batch already signaled. Kept when its list read is discarded, then
+   * delivered with the structure of the read that installs, and dropped after that.
+   */
+  private refreshedByStructure = new Map<number, Set<string>>();
+  private structural = listeners<[readonly string[], readonly MediaStructureBatch[]]>();
   /**
    * Remove, rename, and create paths for the file list about to be installed.
    * Fired just before that list's `files` signal. A modify is not included.
+   * A batch keeps its id across a discarded read. `refreshed` is the media paths
+   * that batch's direct signal already delivered.
    */
   readonly onStructure = this.structural.on;
   private included: { notes: NoteRef[]; test: (path: string) => boolean; out: NoteRef[] } | null = null;
@@ -309,16 +326,16 @@ export class Vault {
     this.stopChanges = stop;
   }
 
-  async refreshFiles(structure?: readonly string[]) {
-    if (structure) for (const path of structure) this.pendingStructure.push(path);
+  async refreshFiles(structure?: readonly string[], structureId = 0) {
+    if (structure?.length && structureId) this.pendingStructure.push({ id: structureId, paths: structure });
     const mine = ++this.filesRequest;
     const vault = backendRoot();
     const listed = await api.listFiles();
     // The reply is the vault that was current when the read ran. Install it
     // only if that vault is still this page's backend. A discarded reply keeps
-    // the ancestor paths for the read that does install.
+    // the ancestor paths, and their batch id, for the read that does install.
     if (backendRoot() !== vault || !pageOwnsDisk()) {
-      this.pendingStructure = [];
+      this.clearStructure();
       return;
     }
     if (mine !== this.filesRequest) return;
@@ -336,7 +353,12 @@ export class Vault {
     this.listEpoch += 1;
     const pending = this.pendingStructure;
     this.pendingStructure = [];
-    this.show(listed, pending);
+    const notes: MediaStructureBatch[] = pending.map((item) => {
+      const refreshed = this.refreshedByStructure.get(item.id);
+      this.refreshedByStructure.delete(item.id);
+      return { id: item.id, paths: item.paths, refreshed: refreshed ? [...refreshed] : [] };
+    });
+    this.show(listed, notes);
   }
 
   /** Keep reading until a snapshot that started after the latest edit can install. */
@@ -402,14 +424,24 @@ export class Vault {
     return true;
   }
 
-  private show(files: FileEntry[], structure?: readonly string[]) {
+  private show(files: FileEntry[], structure?: readonly MediaStructureBatch[]) {
     this.pieces = listTokens(this.fileList, files);
     this.files = files;
     this.notes = this.files
       .filter((f) => !f.is_dir && isNoteFile(f.path))
       .map((f) => ({ name: noteName(f.path), path: f.path }));
-    if (structure?.length) this.structural.emit(structure);
+    if (structure?.length) {
+      const paths: string[] = [];
+      for (const batch of structure) for (const path of batch.paths) paths.push(path);
+      this.structural.emit(paths, structure);
+    }
     this.changed("files");
+  }
+
+  /** Drop structural batches that will never install. */
+  private clearStructure() {
+    this.pendingStructure = [];
+    this.refreshedByStructure.clear();
   }
 
   async refreshLinks() {
@@ -582,7 +614,7 @@ export class Vault {
     this.linksRequest += 1;
     this.deltas = [];
     this.confirmAgain = false;
-    this.pendingStructure = [];
+    this.clearStructure();
     this.listEpoch += 1;
   }
 
@@ -601,11 +633,22 @@ export class Vault {
     this.running = mine;
     try {
       const { refresh, touch, reload, media, structure } = reduceBatch(batch);
-      if (refresh) await this.refreshFiles(structure);
+      const structureId = structure.length ? ++this.nextStructure : 0;
+      if (refresh) await this.refreshFiles(structure, structureId);
       if (wave !== this.wave || !pageOwnsDisk()) return;
       const touched = new Set(touch);
       for (const path of touch) this.touch(path);
-      for (const path of media) if (!touched.has(path)) this.mediaPaths.emit(path);
+      // The list read may have been discarded. The id still names this batch when
+      // the confirmation installs, so a path signaled here is not reloaded again.
+      const waiting = structureId !== 0 && this.pendingStructure.some((item) => item.id === structureId);
+      for (const path of media) if (!touched.has(path)) {
+        if (waiting) {
+          let done = this.refreshedByStructure.get(structureId);
+          if (!done) this.refreshedByStructure.set(structureId, done = new Set());
+          done.add(path);
+        }
+        this.mediaPaths.emit(path, structureId);
+      }
       for (const path of reload) {
         if (wave !== this.wave || !pageOwnsDisk()) return;
         await this.reload(path);

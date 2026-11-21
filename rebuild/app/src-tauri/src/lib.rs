@@ -416,10 +416,14 @@ fn allow_pdf_blob<R: tauri::Runtime>(
     frames.allow_blob(window.label(), &pdf, &url)
 }
 
-/// Drop one reference from [`allow_pdf_blob`]. The last one removes the URL.
+/// Drop one reference this window holds from [`allow_pdf_blob`]. The last one removes the URL.
 #[tauri::command(async)]
-fn release_pdf_blob(pdf: State<'_, lockdown::PdfBlobs>, url: String) -> Result<(), String> {
-    pdf.release(&url);
+fn release_pdf_blob<R: tauri::Runtime>(
+    window: tauri::Window<R>,
+    pdf: State<'_, lockdown::PdfBlobs>,
+    url: String,
+) -> Result<(), String> {
+    pdf.release(window.label(), &url);
     Ok(())
 }
 

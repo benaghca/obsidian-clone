@@ -234,6 +234,76 @@ it("reloads once when a local edit discards the list read for a replaced folder"
   expect(hits).toBe(2);
 });
 
+it("reloads once when a discarded read's batch also names the watched recording", async () => {
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 1, 4)];
+  const { vault, host } = await openHost();
+  let hits = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { hits += 1; });
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 2, 8)];
+  emit({ kind: "modify", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hits).toBe(1);
+
+  const hung: Array<(listed: FileEntry[]) => void> = [];
+  vi.mocked(api.listFiles).mockImplementation(
+    () => new Promise((resolve) => hung.push((listed) => resolve(listed))),
+  );
+  files = [dir("Dir", 10), file("Dir/clip.mp3", 9, 20)];
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  emit({ kind: "create", paths: ["Dir/clip.mp3"] });
+  await settle();
+  expect(hung).toHaveLength(1);
+  expect(vault.adoptAdded(file("Local.md", 3, 3))).toBe(true);
+
+  const listed = () => files.map((entry) => ({ ...entry }));
+  hung.shift()!(listed());
+  await new Promise((resolve) => realTimeout(resolve, 0));
+  expect(hung).toHaveLength(1);
+  expect(hits).toBe(2);
+  hung.shift()!(listed());
+  await settle();
+  expect(hits).toBe(2);
+});
+
+it("matches a watched recording to its folder, not a sibling or a shared prefix", async () => {
+  files = [
+    dir("Dir", 10),
+    dir("Directory", 10),
+    dir("Dir/sub", 10),
+    file("Dir/clip.mp3", 1, 4),
+    file("Directory/clip.mp3", 1, 4),
+    file("Dir/sub/clip.mp3", 1, 4),
+  ];
+  const { host } = await openHost();
+  let dirHits = 0;
+  let nested = 0;
+  let lookalike = 0;
+  host.embeds.watch("Dir/clip.mp3", () => { dirHits += 1; });
+  host.embeds.watch("Dir/sub/clip.mp3", () => { nested += 1; });
+  host.embeds.watch("Directory/clip.mp3", () => { lookalike += 1; });
+
+  files = [...files, file("Dir/Note.md", 1, 1)];
+  emit({ kind: "create", paths: ["Dir/Note.md"] });
+  await settle();
+  expect(dirHits).toBe(0);
+  expect(nested).toBe(0);
+  expect(lookalike).toBe(0);
+
+  emit({ kind: "remove", paths: ["Dir"] });
+  emit({ kind: "rename", paths: ["Other", "Dir"] });
+  await settle();
+  expect(dirHits).toBe(1);
+  expect(nested).toBe(1);
+  expect(lookalike).toBe(0);
+
+  emit({ kind: "remove", paths: ["Dir/sub"] });
+  await settle();
+  expect(dirHits).toBe(1);
+  expect(nested).toBe(2);
+  expect(lookalike).toBe(0);
+});
+
 it("does not remember a modify for a recording nobody is watching", async () => {
   files = [file("clip.mp3", 1, 4)];
   const { host } = await openHost();

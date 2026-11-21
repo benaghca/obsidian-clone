@@ -12,6 +12,7 @@
 
 import { api, type FileEntry } from "./api";
 import { mediaKind } from "./media";
+import type { MediaStructureBatch } from "./vault";
 import { isolateHistory } from "@codemirror/commands";
 import type { EditorView } from "@codemirror/view";
 import { embedFor } from "./editor/attachments";
@@ -177,6 +178,20 @@ async function saveAttachments(ws: Workspace, view: EditorView, files: File[], a
   return true;
 }
 
+/**
+ * `watched` is the event path, or a file inside it. A sibling is not, and neither is a
+ * name that only shares a prefix (`Dir` does not cover `Directory/clip.mp3`).
+ */
+function mediaCovered(watched: string, events: ReadonlySet<string>): boolean {
+  if (events.has(watched)) return true;
+  let slash = watched.lastIndexOf("/");
+  while (slash > 0) {
+    if (events.has(watched.slice(0, slash))) return true;
+    slash = watched.lastIndexOf("/", slash - 1);
+  }
+  return false;
+}
+
 function createEmbedHost(ws: Workspace): EmbedHost {
   const notes = new Map<string, Promise<string>>();
   const images = new Map<string, { url: Promise<string>; holders: number; pdf: boolean }>();
@@ -202,6 +217,8 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   const signaled = new Set<string>();
   const loadedAhead = new Set<string>();
   const structural = new Set<string>();
+  /** Paths this structure install must not reload: that batch's direct signal already did. */
+  const already = new Set<string>();
   let scheduled = false;
   const reconcile = () => {
     scheduled = false;
@@ -226,17 +243,28 @@ function createEmbedHost(ws: Workspace): EmbedHost {
   };
   ws.vault.onModified(invalidate);
   ws.vault.onMediaPath(invalidate);
-  ws.vault.onStructure((paths) => {
+  ws.vault.onStructure((paths, batches) => {
     structural.clear();
-    for (const watched of watchers.keys()) {
-      if (!mediaKind(watched)) continue;
-      for (const eventPath of paths) {
-        if (eventPath && (watched === eventPath || watched.startsWith(`${eventPath}/`))) {
-          structural.add(watched);
-          break;
-        }
+    already.clear();
+    const groups: readonly MediaStructureBatch[] = batches.length
+      ? batches
+      : [{ id: 0, paths, refreshed: [] }];
+    const needs = new Set<string>();
+    const doneOnly = new Set<string>();
+    for (const batch of groups) {
+      const events = new Set<string>();
+      for (const eventPath of batch.paths) if (eventPath) events.add(eventPath);
+      const done = new Set(batch.refreshed);
+      for (const watched of watchers.keys()) {
+        if (!mediaKind(watched) || !mediaCovered(watched, events)) continue;
+        structural.add(watched);
+        if (done.has(watched)) doneOnly.add(watched);
+        else needs.add(watched);
       }
     }
+    // A later batch that did not refresh the file still reloads it once.
+    for (const path of needs) doneOnly.delete(path);
+    for (const path of doneOnly) already.add(path);
   });
   // A folder remove or rename changes the list without naming the file. Compare the
   // paths a player or PDF is actually watching, once per file-list install.
@@ -253,10 +281,11 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       const prev = seenMedia.get(path);
       seenMedia.set(path, next);
       // A replaced ancestor can keep the file's mtime and size. That is still
-      // a new file. A batch that also names the file reloads once: this queues
-      // the reconcile, and the direct signal is the one reload.
+      // a new file. A batch that also names the file reloads once: the direct
+      // signal is that reload, including when it fired before this list installed.
       if (structural.has(path)) {
         loadedAhead.delete(path);
+        if (already.has(path)) continue;
         changedByList.add(path);
         scheduleReconcile();
         continue;
@@ -269,6 +298,7 @@ function createEmbedHost(ws: Workspace): EmbedHost {
       scheduleReconcile();
     }
     structural.clear();
+    already.clear();
   });
 
   const holdBlob = (path: string, type: string) => {
