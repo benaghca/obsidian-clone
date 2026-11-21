@@ -34,7 +34,7 @@ import { drawOrder, type GraphModel, type GraphNode, localLinksMatter, neighbour
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
-import { devBuilt, devHold, devStats, setProbe } from "./probe";
+import { devBuildHold, devBuildHolding, devBuilt, devHold, devStats, setProbe } from "./probe";
 import { changedIn, DATA_KEYS, FORCE_KEYS, graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
 import { type SimGraph, Simulation } from "./sim";
 import { type ColorRule, createGraphSource, type Facts } from "./source";
@@ -202,6 +202,10 @@ export function createGraphView(host: GraphHost) {
     })();
     building = true;
     let step = steps.next();
+    if (built && devBuildHold && devBuildHolding?.()) {
+      await devBuildHold();
+      if (mine !== seq || disposed) return;
+    }
     let slice = performance.now();
     let work = 0;
     let longest = 0;
@@ -327,8 +331,11 @@ export function createGraphView(host: GraphHost) {
   function scheduleRebuild(delay = REFRESH_DELAY) {
     stale = true;
     // A model still waiting to go in is older than what asked for this rebuild: drop it, and
-    // the shown one stays up until the rebuild is done (review 5).
+    // the shown one stays up until the rebuild is done (review 5). So is one still being built
+    // (review 6): it stops at its next slice instead of going in. A first build still finishes,
+    // so a new graph is never left empty.
     waiting = null;
+    if (built) seq++;
     clearTimeout(refreshTimer);
     if (active) refreshTimer = window.setTimeout(() => void rebuild(), delay);
   }

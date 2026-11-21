@@ -20,7 +20,7 @@
 //! reads the vault. `vault_tags` is the five searches the Tags view made
 //! before step 1; `tags` is the one command it makes now.
 
-use super::{display_name, is_note_path, parents, Index, Stamp};
+use super::{display_name, has_links, is_note_path, parents, Index, Stamp};
 use std::path::Path;
 use std::time::Instant;
 
@@ -542,6 +542,39 @@ fn bench_link_deltas() {
         idx.relocate("Bench moved", &folder);
     }
     println!("GROVE_BENCH folder rename ({folder}): relocate_plus_changes_ms={:.1} json_bytes={bytes} changed_notes={changed}", median(&ms));
+
+    // Review 6: the same rename with the app's deferral. The write (one lock hold) rebuilds the
+    // name maps and queues every note; jobs resolve them, a save between their holds.
+    idx.set_defer_links(true);
+    let (mut writes, mut settles, mut holds) = (Vec::new(), Vec::new(), Vec::new());
+    for _ in 0..runs {
+        for (from, to) in [(folder.as_str(), "Bench moved"), ("Bench moved", folder.as_str())] {
+            let started = Instant::now();
+            idx.relocate(from, to);
+            writes.push(elapsed_ms(started));
+            let mut saves = 0;
+            let started = Instant::now();
+            holds.push(settle_by_jobs_with(&mut idx, &mut |idx| {
+                saves += 1;
+                idx.upsert_note(root, "bench-typing.md", &format!("typing {saves}\n"), Stamp::sized(10));
+            }));
+            settles.push(elapsed_ms(started));
+        }
+    }
+    idx.remove_tree("bench-typing.md");
+    // The queueing part of the write alone.
+    let started = Instant::now();
+    let files = &idx.files;
+    idx.links.requeue(files.iter().filter(|(path, node)| has_links(path, node)).map(|(path, _)| path.as_str()));
+    let requeue = elapsed_ms(started);
+    settle_by_jobs(&mut idx);
+    idx.set_defer_links(false);
+    println!(
+        "GROVE_BENCH folder rename ({folder}), deferred: write_ms={} (of which queueing every note {requeue:.1}) settle_ms={} longest_hold_ms={}",
+        ms_list(&writes),
+        ms_list(&settles),
+        ms_list(&holds)
+    );
 
     // Review 1: one alias read by as many notes as the vault has. Removing it re-resolves
     // every linker; before the fix each one shifted and scanned lists as long as the vault.

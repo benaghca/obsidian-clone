@@ -159,7 +159,8 @@ pub struct Index {
     batch_updates: usize,
     // Every note's resolved links, kept in step with `files` and `maps` (see `link_table`).
     // `put_node` / `take_node` queue the notes to resolve again; `settle_links` resolves
-    // them when the change is done. A full map rebuild resolves every note.
+    // them when the change is done. A full map rebuild resolves every note (with `defer_links`
+    // on, review 6: queues every note, for `link_jobs` to resolve off the lock).
     links: LinkTable,
     // Review 2: a change that wakes more than `INLINE_LINKS` notes (or more than
     // `INLINE_LINK_WORK` links) leaves them queued instead of resolving them before the write
@@ -768,7 +769,7 @@ impl Index {
             return;
         }
         if let Some(n) = self.defer_links {
-            if self.links.queued_work() > n {
+            if self.links.queued_over(n) {
                 return;
             }
             self.links.expand(usize::MAX);
@@ -914,7 +915,15 @@ impl Index {
         #[cfg(test)]
         count_rebuild_maps();
         self.maps.refill(&self.files);
-        self.rebuild_links();
+        if self.defer_links.is_some() && self.links.is_built() {
+            // Review 6: a bulk change (a large folder deleted, moved or added) re-resolves no
+            // note under the lock. Every note is queued instead, and jobs resolve them off it
+            // against the maps as they then stand, checking the edits since (`link_jobs`).
+            let files = &self.files;
+            self.links.requeue(files.iter().filter(|(path, node)| has_links(path, node)).map(|(path, _)| path.as_str()));
+        } else {
+            self.rebuild_links();
+        }
     }
 
     #[cfg(test)]

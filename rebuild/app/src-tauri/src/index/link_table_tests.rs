@@ -1142,3 +1142,135 @@ fn a_long_note_goes_in_over_several_holds_and_comes_out_in_steps() {
     assert!(!idx.links.has_cleanup());
     idx.assert_maps_match_rebuild();
 }
+
+/// One job, with `between` run after each of its holds (answer and publish steps).
+fn run_job_with(mut job: link_jobs::LinkJob, idx: &mut Index, between: &mut dyn FnMut(&mut Index)) -> LinkSlice {
+    job.ask();
+    loop {
+        let got = idx.answer(&mut job);
+        between(idx);
+        match got {
+            LinkSlice::More => {}
+            LinkSlice::Done => break,
+            LinkSlice::Stale => return LinkSlice::Stale,
+        }
+    }
+    job.finish();
+    loop {
+        let got = idx.publish(&mut job);
+        between(idx);
+        if got != LinkSlice::More {
+            return got;
+        }
+    }
+}
+
+/// Review 6: with link work deferred (as in the app), a bulk change (a folder of more than
+/// `BULK_PATHS` paths moved or deleted) rebuilds the name maps but re-resolves no note under
+/// the lock: every note is queued, and jobs settle the table to a full walk, with saves (one
+/// giving a key many notes read a new owner) between their holds. A long note's staged publish
+/// cut off by the rebuild takes back what it had added.
+#[test]
+fn a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk() {
+    let tmp = tmp_dir("link-bulk-deferred");
+    let root = tmp.path.as_path();
+    let mut notes: Vec<(String, String)> = (0..300).map(|j| (format!("f/n{j}.md"), format!("[[n{}]] [[f/n{}]]\n", (j + 1) % 300, (j + 7) % 300))).collect();
+    notes.extend((0..200).map(|j| (format!("l/{j}.md"), format!("[[n{j}]] [p](f/n{j}.md) [[g/n{j}]] [[l/{}]]\n", (j + 1) % 200))));
+    notes.push(("other.md".into(), "o\n".into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut idx = Index::from_notes(&refs);
+    idx.defer_links_over(0);
+    link_jobs::small_steps(true);
+
+    // A long note's publish, staged: some of its new memberships are in when the rebuild comes.
+    let long: String = (0..60).map(|j| format!("[[n{j}]] [[gone{j}]]\n")).collect();
+    save(&mut idx, root, "long.md", &long);
+    let mut job = idx.link_job().expect("the note is queued");
+    job.ask();
+    while idx.answer(&mut job) == LinkSlice::More {}
+    job.finish();
+    assert_eq!(idx.publish(&mut job), LinkSlice::More);
+    assert!(idx.links.is_staging("long.md"), "the publish is staged");
+
+    take_rebuild_maps_calls();
+    idx.relocate("f", "g");
+    assert_eq!(take_rebuild_maps_calls(), 1, "a folder move rebuilds the maps");
+    assert!(idx.links_pending(), "every note is queued");
+    assert!(idx.links.shared("l/0.md").unwrap().has_target("f/n0.md"), "no note was resolved again under the lock");
+    assert_eq!(idx.publish(&mut job), LinkSlice::Stale, "the rebuild drops the job");
+    assert!(!idx.links.is_staging("long.md"), "what it had added is to be cleared");
+
+    let (mut jobs, mut saves) = (0, 0);
+    while let Some(job) = idx.link_job() {
+        jobs += 1;
+        run_job_with(job, &mut idx, &mut |idx| {
+            saves += 1;
+            if saves % 7 == 0 {
+                save(idx, root, "other.md", &format!("o {saves}\n"));
+            }
+            if saves == 300 {
+                // A root note now owns `n3`, which three notes read, mid-settle.
+                save(idx, root, "n3.md", "root\n");
+            }
+        });
+        if jobs == 40 {
+            // A second bulk change while the first is settling.
+            take_rebuild_maps_calls();
+            idx.remove_tree("g");
+            assert_eq!(take_rebuild_maps_calls(), 1, "a folder delete past `BULK_PATHS` rebuilds the maps");
+        }
+    }
+    assert!(jobs > 40, "the settle took many jobs ({jobs})");
+    assert!(!idx.links_pending());
+    idx.assert_maps_match_rebuild();
+    assert!(!idx.links.has_cleanup());
+    link_jobs::small_steps(false);
+}
+
+/// Review 6: a save behind many woken keys neither sums nor walks all of them. A frontmatter
+/// edit wakes 6,000 aliases, one long note reading each. Each later save looks at no more of
+/// them than twice the inline threshold. Then the note is deleted: one settle step resolves it
+/// and the first job's cleanup clears some of its memberships, so that job's expansion meets
+/// keys with no reader left; it still looks at no more keys than its budget.
+#[test]
+fn saves_and_jobs_behind_many_woken_keys_look_at_a_bounded_number_of_them() {
+    let tmp = tmp_dir("link-many-woken");
+    let root = tmp.path.as_path();
+    let aliases: Vec<String> = (0..6_000).map(|j| format!("a{j}")).collect();
+    let hub = format!("---\naliases: [{}]\n---\nhub\n", aliases.join(", "));
+    let long: String = aliases.iter().map(|a| format!("[[{a}]]\n")).collect();
+    let mut idx = Index::from_notes(&[("hub.md", hub.as_str()), ("long.md", long.as_str()), ("few.md", "[[a1]] [[a2]]\n"), ("other.md", "o\n")]);
+    idx.set_defer_links(true);
+
+    save(&mut idx, root, "hub.md", "hub\n");
+    assert!(idx.links_pending(), "6,000 readers' worth of keys is left queued");
+    // The estimate stops past the threshold; when it does not, the expansion it allows looks
+    // at those keys once more.
+    let bound = 2 * (INLINE_LINKS + 1);
+    link_table::take_keys_seen();
+    for i in 0..5 {
+        save(&mut idx, root, "other.md", &format!("o {i}\n"));
+        let seen = link_table::take_keys_seen();
+        assert!(seen <= bound, "a save looked at {seen} woken keys");
+    }
+
+    idx.remove_tree("long.md");
+    idx.settle_links_until(Instant::now());
+    assert!(!idx.links.contains("long.md"), "one settle step resolved the deleted note");
+    assert!(idx.links.has_cleanup(), "its memberships are cleared in steps");
+    let (mut jobs, mut most) = (0, 0);
+    loop {
+        link_table::take_keys_seen();
+        let Some(job) = idx.link_job() else { break };
+        most = most.max(link_table::take_keys_seen());
+        jobs += 1;
+        run_job_with(job, &mut idx, &mut |_| {});
+        save(&mut idx, root, "other.md", &format!("o j{jobs}\n"));
+        let seen = link_table::take_keys_seen();
+        assert!(seen <= bound, "a save between jobs looked at {seen} woken keys");
+    }
+    println!("{jobs} jobs; the most keys one expansion looked at: {most}");
+    assert!(most <= 4_096, "a job's expansion (`EXPAND_STEP`) looked at {most} keys");
+    assert!(!idx.links_pending());
+    idx.assert_maps_match_rebuild();
+}

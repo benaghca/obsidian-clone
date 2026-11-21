@@ -5,7 +5,7 @@
 import { type Camera, toScreen } from "./camera";
 import type { GraphModel } from "./data";
 
-type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown; __graphHold?: boolean };
+type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number; slice: number; install: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown; __graphHold?: boolean; __graphBuildHold?: boolean; __graphBuildHeld?: number };
 const dev = window as unknown as DevWindow;
 
 /** Each frame's work (ms). */
@@ -54,3 +54,16 @@ export function setProbe(canvas: HTMLCanvasElement, cam: Camera, view: () => { m
  * a tick were under way, so a test can deliver a link change between preparing and installing.
  */
 export const devHold = import.meta.env.DEV ? () => !!dev.__graphHold : null;
+
+/**
+ * Tests only (review 6): while `window.__graphBuildHold` is set, a rebuild of a graph already on
+ * screen stops after its first step (`window.__graphBuildHeld` counts the rebuilds held), so a
+ * test can deliver a link change while one is under way.
+ */
+export const devBuildHold = import.meta.env.DEV
+  ? async (): Promise<void> => {
+      dev.__graphBuildHeld = (dev.__graphBuildHeld ?? 0) + 1;
+      while (dev.__graphBuildHold) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  : null;
+export const devBuildHolding = import.meta.env.DEV ? () => !!dev.__graphBuildHold : null;

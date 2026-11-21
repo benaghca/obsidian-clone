@@ -489,11 +489,13 @@ impl Vault {
         self.finish_rescan_retiring(token, fresh).0
     }
 
-    /// `finish_rescan`, handing back the index it replaced, for the caller to drop once it has
-    /// let go of the state lock (review 5: freeing a large vault's index is not lock work).
+    /// `finish_rescan`, handing back the index it replaced (or the fresh one, when the scan is
+    /// stale), for the caller to drop once it has let go of the state lock (review 5: freeing a
+    /// large vault's index is not lock work).
     pub(crate) fn finish_rescan_retiring(&mut self, token: &Arc<()>, fresh: Result<Index, String>) -> (Vec<VaultChanged>, Option<Index>) {
         if !self.rescan.as_ref().is_some_and(|current| Arc::ptr_eq(current, token)) {
-            return (Vec::new(), None);
+            // A stale scan: its index goes back too, to be freed off the lock (review 6).
+            return (Vec::new(), fresh.ok());
         }
         self.rescan = None;
         let paths = self.index.take_rescan_changes();

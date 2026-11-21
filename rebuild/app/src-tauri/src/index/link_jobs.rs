@@ -196,7 +196,8 @@ impl Index {
             // A rebuild (the reverse maps start over) or more edits than the log keeps.
             if let Some(note) = job.notes.get(job.next) {
                 if let (true, Some(Finished { new: Some(new), .. })) = (note.added > 0, &note.done) {
-                    if self.edit_mark().epoch == job.mark.epoch {
+                    // Review 6: a deferred rebuild keeps the reverse maps, and what it added.
+                    if self.links.is_staging(&note.path) {
                         self.links.forget(&note.path, Arc::clone(new));
                     }
                 }

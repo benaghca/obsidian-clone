@@ -12,6 +12,8 @@
 //    compare in a cycle), with a limit of 2, reading links. Its first paint (one pass) and
 //    the refresh after a real link change (sliced, as every pass after the first) both show
 //    the rows the browser's own sort picks.
+// 4. Review 5: a link change while a rebuilt local graph waits to go in (see below).
+// 5. Review 6: a link change while a local graph rebuild is still being built (see below).
 import assert from 'node:assert/strict';
 import { withBrowser, sleep } from './browser.mjs';
 
@@ -155,4 +157,50 @@ await withBrowser(async ({ run, send, click, chord }) => {
   assert.deepEqual(held, fresh, 'the shown neighbourhood is a fresh build\'s');
   assert.deepEqual(fresh, [7, 6]);
   console.log('PASS local graph: a link change while a rebuilt graph waits to go in is not lost');
+
+  // 5. Review 6: the same, with the second link change landing while the first rebuild is still
+  // being built (held after its first step, dev only). That build must not go in, either at once
+  // or later: only the rebuild the second change asked for does, and it shows R2.
+  await run(async () => {
+    const { api } = await import('/src/api.ts');
+    await api.createNote('P2.md', 'p [[Zed2]] [[T2]]\n');
+    await api.createNote('Q2.md', 'q [[Yon2]] [[U2]]\n');
+    await api.createNote('R2.md', 'r\n');
+    await api.createNote('T2.md', 't\n');
+    await api.createNote('U2.md', 'u\n');
+    await ws.vault.refreshFiles();
+    await ws.vault.refreshLinks();
+    await ws.open('P2.md');
+    ws.openView('localgraph', 'right', 'P2.md');
+  });
+  await until(run, 'the local graph shows P2, Zed2 and T2', () => window.__graphProbe?.().nodes === 3);
+  await sleep(800);
+  const at = await run(async () => {
+    window.__graphBuildHold = true;
+    window.__linkTouch = null;
+    const before = { builds: window.__graphBuilds.length, held: window.__graphBuildHeld ?? 0 };
+    const { api } = await import('/src/api.ts');
+    await api.writeNote('P2.md', 'p [[Zed2]] [[T2]] [[Q2]]\n');
+    ws.vault.written('P2.md');
+    return before;
+  });
+  await until(run, 'the rebuild for P2 → Q2 is under way, held', n => (window.__graphBuildHeld ?? 0) > n, at.held);
+  assert.equal(await nodes(), 3, 'held: the shown graph is the old one');
+  await run(async () => {
+    window.__linkTouch = null;
+    const { api } = await import('/src/api.ts');
+    await api.writeNote('Q2.md', 'q [[Yon2]] [[U2]] [[R2]]\n');
+    ws.vault.written('Q2.md');
+  });
+  await until(run, 'the Q2 → R2 link change arrived', () => window.__linkTouch?.[0] === 'Q2.md');
+  await run(() => { window.__graphBuildHold = false; });
+  await until(run, 'the graph shows R2', n => window.__graphProbe?.().nodes === n, 7, 5000);
+  await sleep(1000);
+  const after = await run(() => { const p = window.__graphProbe(); return [p.nodes, p.links, window.__graphBuilds.length]; });
+  assert.equal(after[2] - at.builds, 1, 'only the rebuild asked for by the second change went in');
+  await run(async () => { await ws.open('Q2.md'); await ws.open('P2.md'); });
+  await sleep(1500);
+  const fresh2 = await run(() => { const p = window.__graphProbe(); return [p.nodes, p.links]; });
+  assert.deepEqual(after.slice(0, 2), fresh2, 'the shown neighbourhood is a fresh build\'s');
+  console.log('PASS local graph: a build under way when a link change lands does not go in');
 });

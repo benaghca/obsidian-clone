@@ -110,10 +110,65 @@ impl Readers {
         self.0.iter().flat_map(HashMap::iter)
     }
 }
-/// Woken keys, each with the last reader queued from it so far (`None`: none yet).
-type Woken = HashMap<KeyHash, Option<Arc<str>>, BuildHasherDefault<Identity>>;
-/// Linking notes per target.
-type ByTarget = HashMap<Arc<str>, PathSet>;
+/// Woken keys, each with the last reader queued from it so far (`None`: none yet). Ordered
+/// (review 6): `expand` takes the first key each time, which a hash map finds by scanning past
+/// every bucket emptied before it.
+type Woken = BTreeMap<KeyHash, Option<Arc<str>>>;
+#[cfg(test)]
+thread_local! {
+    static KEYS_SEEN: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests: woken keys looked at by `queued_over` and `expand` on this thread (resets).
+#[cfg(test)]
+pub(crate) fn take_keys_seen() -> usize {
+    KEYS_SEEN.with(|n| n.replace(0))
+}
+
+/// Linking notes per target, in `TARGET_PARTS` maps by a hash of the target (review 6, as
+/// `Readers`): a long note linking to tens of thousands of notes that had no backlinks grows a
+/// part at a time, never the whole map in one hold.
+#[derive(Clone, Debug, PartialEq)]
+struct ByTarget(Vec<HashMap<Arc<str>, PathSet>>);
+
+const TARGET_PARTS: usize = 64;
+
+impl Default for ByTarget {
+    fn default() -> Self {
+        ByTarget((0..TARGET_PARTS).map(|_| HashMap::new()).collect())
+    }
+}
+
+impl ByTarget {
+    /// FNV-1a's top bits: unrelated to the parts' own (randomly keyed) hashing.
+    fn part(target: &str) -> usize {
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        for b in target.bytes() {
+            h ^= u64::from(b);
+            h = h.wrapping_mul(0x0100_0000_01b3);
+        }
+        (h >> 58) as usize % TARGET_PARTS
+    }
+    fn get(&self, target: &str) -> Option<&PathSet> {
+        self.0[Self::part(target)].get(target)
+    }
+    fn get_mut(&mut self, target: &str) -> Option<&mut PathSet> {
+        self.0[Self::part(target)].get_mut(target)
+    }
+    fn entry(&mut self, target: Arc<str>) -> std::collections::hash_map::Entry<'_, Arc<str>, PathSet> {
+        self.0[Self::part(&target)].entry(target)
+    }
+    fn remove(&mut self, target: &str) -> Option<PathSet> {
+        self.0[Self::part(target)].remove(target)
+    }
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut PathSet> {
+        self.0.iter_mut().flat_map(HashMap::values_mut)
+    }
+    #[cfg(test)]
+    fn values(&self) -> impl Iterator<Item = &PathSet> {
+        self.0.iter().flat_map(HashMap::values)
+    }
+}
 
 /// Up to this many paths a `PathSet` is a sorted `Vec`: one small allocation, and an insert or
 /// removal shifts at most this many pointers. Past it, a `BTreeSet`.
@@ -488,7 +543,7 @@ impl LinkTable {
     /// the new owners; one that starts reading it was too; so a moving set misses nobody.
     pub(super) fn expand(&mut self, mut budget: usize) {
         while budget > 0 {
-            let Some((&key, last)) = self.woken.iter().next() else {
+            let Some((&key, last)) = self.woken.first_key_value() else {
                 return;
             };
             let last = last.clone();
@@ -510,7 +565,10 @@ impl LinkTable {
                 }
             }
             self.woken.remove(&key);
-            budget -= queued;
+            // Review 6: a key costs its look-up even when no reader is left to queue.
+            budget = budget.saturating_sub(queued.max(1));
+            #[cfg(test)]
+            KEYS_SEEN.with(|n| n.set(n.get() + 1));
         }
     }
 
@@ -518,10 +576,47 @@ impl LinkTable {
         !self.pending.is_empty() || !self.woken.is_empty()
     }
 
-    /// Notes queued, counting every reader of a woken key (a bound: some are queued already).
-    pub(super) fn queued_work(&self) -> usize {
-        let woken: usize = self.woken.keys().map(|k| self.readers.get(k).map_or(0, PathSet::len)).sum();
-        self.pending.len() + woken
+    /// Whether more than `n` notes are queued, counting every reader of a woken key (a bound:
+    /// some are queued already) and each woken key as one at least. Review 6: it stops at `n`,
+    /// so a save behind tens of thousands of woken keys looks at `n` of them, not all.
+    pub(super) fn queued_over(&self, n: usize) -> bool {
+        let mut work = self.pending.len();
+        if work > n {
+            return true;
+        }
+        for key in self.woken.keys() {
+            #[cfg(test)]
+            KEYS_SEEN.with(|n| n.set(n.get() + 1));
+            work += self.readers.get(key).map_or(0, PathSet::len).max(1);
+            if work > n {
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Queue every note in the table and every path of `with_links` (review 6: a full name-map
+    /// rebuild with link work deferred). Jobs resolve them off the lock; the reverse maps stay
+    /// as they are, matching the entries, and move with each note as it is stored.
+    pub(super) fn requeue<'p>(&mut self, with_links: impl Iterator<Item = &'p str>) {
+        self.pending.reserve(self.notes.len());
+        self.pending.extend(self.notes.keys().cloned());
+        for path in with_links {
+            if !self.notes.contains_key(path) {
+                self.pending.insert(Arc::from(path));
+            }
+        }
+    }
+
+    /// Whether the table was ever filled (a fresh index's is not until its first rebuild).
+    pub(super) fn is_built(&self) -> bool {
+        self.history.version > 0
+    }
+
+    /// Whether a job's staged publish of `path` has memberships in the maps it has not
+    /// installed (a full refill drops them with the maps).
+    pub(super) fn is_staging(&self, path: &str) -> bool {
+        self.staging.as_deref() == Some(path)
     }
 
     /// The queued notes (after `expand`).

@@ -481,3 +481,54 @@ fn a_save_behind_a_rescan_finish_with_a_high_fanout_edit_stays_quick() {
     assert!(!vault.index.links_pending());
     vault.index.assert_maps_match_rebuild();
 }
+
+/// Review 6: a save queued behind a bulk change. A 400-note folder moved, then deleted, by the
+/// app, and 300 notes added outside it in one watcher batch: each crosses `BULK_PATHS`, so the
+/// name maps are rebuilt once under the lock. The link table is not: every note is queued and
+/// the next read resolves them off the lock while saves keep coming. The settled table and
+/// backlinks equal a fresh scan's.
+#[test]
+fn a_save_behind_a_bulk_folder_change_stays_quick() {
+    let files = (0..10_000)
+        .map(|i| (format!("l/{i:05}.md"), format!("see [[n{}]] and [p](f/n{}.md) [[h/n{}]] {i}\n", i % 400, i % 400, i % 300)))
+        .chain((0..400).map(|j| (format!("f/n{j}.md"), format!("[[n{}]]\n", (j + 1) % 400))));
+    let (_dir, inner) = open_deferred("link-bulk-latency", files);
+    crate::link_reads::link_changes(&inner, None).unwrap();
+    queued_saves_stay_quick("a 400-note folder moved", &inner, |vault| vault.rename_path("f", "g").unwrap());
+    queued_saves_stay_quick("a 400-note folder deleted", &inner, |vault| vault.delete_path("g", true).unwrap());
+    let root = lock(&inner).vault.as_ref().unwrap().root.clone();
+    fs::create_dir_all(root.join("h")).unwrap();
+    let added: Vec<PathBuf> = (0..300)
+        .map(|j| {
+            let at = root.join(format!("h/n{j}.md"));
+            fs::write(&at, format!("[[n{}]]\n", (j + 1) % 300)).unwrap();
+            at
+        })
+        .collect();
+    queued_saves_stay_quick("300 notes added outside the app", &inner, |vault| {
+        let events = [event(EventKind::Create(CreateKind::File), &added)];
+        let raw = crate::watch::coalesce(&vault.root.clone(), &events, |path| vault.is_own_write(path));
+        let changes = vault.normalize(raw);
+        vault.apply(&changes);
+    });
+    let paths: Vec<String> = ["h/n0.md", "h/n299.md", "n5", "g/n5.md", "l/00001.md"].map(String::from).to_vec();
+    let got = crate::link_reads::backlinks(&inner, &paths).unwrap();
+    let guard = lock(&inner);
+    assert_eq!(got, Index::scan(&guard.vault.as_ref().unwrap().root).unwrap().backlinks(&paths), "backlinks equal a fresh scan's");
+    // 34 notes in l/ link `[[h/n0]]`, 25 link `[[n0]]` (its only owner once g/ is gone), and h/n299.
+    assert_eq!(got["h/n0.md"].len(), 60, "a new note's backlinks");
+}
+
+/// Review 6: a long note linking to tens of thousands of existing notes that had no backlinks
+/// grows the reverse target map by as many keys. Saves (each adding a note) keep coming while
+/// its publish puts them in; the longest hold stays small.
+#[test]
+fn a_save_behind_a_note_linking_to_many_new_targets_stays_quick() {
+    let n = 32_000;
+    let files = (0..n).map(|j| (format!("t/{j:05}.md"), "x\n".to_string()));
+    let (_dir, inner) = open_deferred("link-many-targets-latency", files);
+    let body: String = (0..n).map(|j| format!("[[t/{j:05}]]\n")).collect();
+    let hold = queued_saves_of("one note linking to 32,000 notes with no backlinks, saves adding notes", &inner, |v| v.write_note("long.md", &body).unwrap(), |v, i| v.write_note(&format!("w/{i}.md"), "new\n").unwrap());
+    // Debug: about 3 ms with the target map in parts, 6 ms with it in one (its doubling).
+    assert!(hold < std::time::Duration::from_millis(5), "a publish hold took {hold:?}");
+}

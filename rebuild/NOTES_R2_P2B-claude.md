@@ -1072,3 +1072,175 @@ Each mutation was applied alone and its tests run. All 6 were caught.
   - `test-bases-edge.mjs` failed on "10k scroll p95 16.7–16.8 ms, max 33.3 ms", one dropped frame. This round changes no Bases code. The same script at `7285d33`, from a scratch worktree (since removed), failed 2 of 4 runs the same way under the same load (load average about 5–6); this tree failed 3 of 4. It is load-dependent and not from this round, so I didn't chase it.
 - **Browser bench:** not rerun this round. The graph's frame path changed only by the `showing` wrapper, which returns at once when nothing is placed.
 - The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.
+
+## Review round 6
+
+Codex review 6 of `b421a13` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review6.md`): two P2 and four P3 findings.
+
+- Both P2s are fixed.
+- Of the P3s:
+  - the graph-generation one is fixed;
+  - the target-map one is fixed;
+  - the rescan one is fixed only in its cheap part, freeing a rejected scan's index after the lock is released;
+  - the Bases one is skipped again, for the reasons given in round 5.
+
+Fixes are kept to what each finding names. Limits as before.
+
+### P2: bulk changes rebuilt the whole link table under the write lock
+
+**The problem.** Some changes make the name maps rebuild in full (`rebuild_maps`), under the lock:
+
+- a watcher batch past the 256-path budget;
+- a folder moved, or a folder deleted with more than 256 paths;
+- a folder appearing.
+
+Since P2b that rebuild also re-resolved every note and rebuilt both reverse maps in the same hold (`rebuild_links`), whatever the link deferral. A save behind it waited for all of it.
+
+**The fix** (`index.rs`, `index/link_table.rs`).
+
+- **What the hold still does.** With the app's deferral on and a table already built, `rebuild_maps` still rebuilds the name maps in the hold, so they are current when the write returns, as the review asks. It re-resolves no note.
+- **What it queues.** It queues every note in the table and every note with links in the file list (`LinkTable::requeue`). Notes that went away resolve to nothing and leave the table.
+- **The jobs.** The queue is the existing job pipeline's (`link_jobs`). Each job takes nodes and entries as shared snapshots at an edit mark, then resolves them off the lock. It reads the edits since that mark in bounded steps and stores only notes nothing they read has changed under. The rebuild starts a new edit epoch, so jobs taken before it come back `Stale` and their notes stay queued.
+- **The reverse maps** are no longer refilled. They stay matched to the entries as they are, and move with each note as a job stores it, as for any other queued change.
+- **Where the full rebuild still runs.** Tests and tools (deferral off) and a fresh index's first build keep it in one pass, as before.
+
+**One correction this needed** (`index/link_jobs.rs`). A long note's publish can be staged: some of its new memberships go in before its entry. A rebuild cutting it off used to rely on the refill wiping the reverse maps. Now the maps survive, so a staged publish that goes stale takes back what it added (`LinkTable::forget`). The test for this is "the job's note is the one being staged" (`is_staging`), no longer "the epoch is unchanged". Without it the reverse maps keep extra memberships: the new unit test fails on "reverse maps vs the table".
+
+**Tests.**
+
+- **`a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk`** (unit test, small steps). It uses 300 notes in `f/`, 200 linking into them by name, path and Markdown link, plus a long note whose publish is staged when the change comes. Then:
+  1. `f/` is moved. The maps are rebuilt once, every note is queued, and an `l/` entry still points into `f/`, so nothing was re-resolved under the lock.
+  2. The staged job comes back `Stale`, with its additions to be cleared.
+  3. Jobs settle with saves between their holds. One save gives `n3`, a key three notes read, a new owner. After 40 jobs `g/` (301 paths) is deleted, a second bulk change mid-settle.
+  4. The end state equals a full walk: the table, the reverse maps, `link_index` and backlinks (`assert_maps_match_rebuild`), with no cleanup left.
+- **`a_save_behind_a_bulk_folder_change_stays_quick`** (latency test, debug, 10,400 notes). Three changes go through `queued_saves_stay_quick`: a 400-note folder moved by the app, then deleted by the app, then 300 notes added outside the app in one watcher batch.
+  - Each must leave the work queued, and the write must be under a quarter of the settle, as must every save meanwhile.
+  - The settled read must equal a fresh scan, and the maps a rebuild.
+  - Then backlinks for five targets, including a note of the batch with 60 linkers, are compared with a fresh scan's.
+
+| Change (debug, 10,400 notes) | The write | Settle | Longest hold | Worst save |
+|---|---|---|---|---|
+| Folder moved | 27–29 ms | 488–500 ms | 1.4–3.2 ms | 3.2–3.3 ms |
+| Folder deleted | 27 ms | 455–458 ms | 1.1–2.8 ms | 2.9–3.0 ms |
+| 300 notes added outside the app | 29 ms | 466 ms | 2.1 ms | 4.0 ms |
+
+**Release, 50k vault** (`bench_link_deltas`, new row). `Folder 01` is renamed and back, ten times, with the app's deferral; 8,794 notes' entries change. "Before" is the same row with the queueing switched off, so the old full re-resolve runs in the write.
+
+| | The write (one lock hold) | Settle off the lock | Longest hold while settling |
+|---|---|---|---|
+| Before | 181–188 ms | none | none |
+| After | 67–83 ms | 258–298 ms, a save between holds | 0.1–0.7 ms |
+
+- **What the write still costs:** about 45–50 ms is the name-map rebuild, which the review keeps in the hold, and 14.6 ms is queueing every note. The rest is the move itself.
+- **The trade:** link reads after a bulk change now wait for the settle (about 270 ms at 50k) instead of the write doing the work, so at 50k a backlinks or graph refresh after a folder rename comes about 0.1 s later. A save no longer waits 180 ms behind it.
+
+### P2: a pending set of woken keys made unrelated saves walk all of them
+
+**The problem.** A frontmatter edit can wake tens of thousands of aliases that one long note reads.
+
+- **The estimate.** Until the woken keys drained, every later save, even typing elsewhere, ran `queued_work`. That summed the readers of every woken key, even when the threshold was crossed at the first one.
+- **The expansion.** `expand` charged its budget only for readers it queued, so a woken key with no readers left cost nothing, and one expansion could walk any number of them.
+- **Finding the next key.** The woken keys were a hash map, and `expand` took the first key each time. In a hash map that means scanning past every bucket emptied before it.
+
+**The fix** (`index/link_table.rs`, `index.rs`).
+
+- **The estimate stops at the threshold.** `queued_work` became `queued_over(n)`, which returns once more than `n` notes are counted. Each woken key counts as at least one.
+- **The expansion charges every key it looks at.** A key costs at least one against the budget, so a key with no readers left uses budget too, and any key left over waits for the next step.
+- **The woken keys are ordered** (a `BTreeMap`), so taking the first one costs nothing extra.
+- **What a save still does when the estimate passes.** It still expands what remains inline, as before; that is at most `n` keys and `n` readers. So a save looks at no more than about twice the threshold.
+
+**Test: `saves_and_jobs_behind_many_woken_keys_look_at_a_bounded_number_of_them`** (unit test, with a new counter of woken keys looked at, `take_keys_seen`).
+
+- **The setup.** A hub's 6,000 aliases are read by one long note; the hub's frontmatter edit wakes all of them.
+- **Saves.** Five saves elsewhere each look at no more than `2 × (INLINE_LINKS + 1)` keys.
+- **Jobs.** The long note is then deleted. One settle step resolves it, and its 6,000 memberships go to staged cleanup, so the first job's cleanup leaves keys ahead of the expansion with no reader.
+  - No job's expansion may look at more than `EXPAND_STEP` (4,096) keys; the most was 4,096. With the old charge it was 4,962, and the test fails.
+  - A save between every job is bounded as before.
+  - The end state equals a full walk.
+
+### P3: an invalidated graph build could still go in during the debounce
+
+**The problem.** Round 5 covered a model already waiting. If a second link change arrived during the first build's last yield, `scheduleRebuild` cleared the waiting slot but left that build's sequence number valid for the 200 ms debounce. The outdated build could then resume and go in, or wait in the slot again; the later rebuild corrected it.
+
+**The fix** (`graph/view.ts`).
+
+- **`scheduleRebuild` now invalidates the build in flight** (`seq++`) once the graph has been built, so that build stops at its next slice and neither goes in nor waits.
+- **A first build still finishes**, so a new graph is never left empty. The shown graph stays up until the rebuild that was asked for is done, as with a dropped waiting model.
+
+**Test: `test-link-refresh-guards.mjs` part 5.** It is a copy of part 4 on new notes (P2, Q2, R2, T2, U2), with a new dev-only hold (`window.__graphBuildHold`, `probe.ts` `devBuildHold`, compiled out of release builds: the bundle has no trace of it).
+
+1. The hold stops a rebuild of a graph already on screen after its first step, with preparation under way.
+2. P2 gains `[[Q2]]`, and the test waits until that rebuild is held.
+3. Q2 gains `[[R2]]`, and the test waits for that delta.
+4. The hold is released.
+
+- **The checks:** the graph shows R2 (7 nodes), and its nodes and links equal a fresh build's. Exactly one rebuild went in (`__graphBuilds`).
+- **Without the fix,** the held build went in too ("actual: 2, expected: 1").
+
+### P3: the reverse target map grew as one hash map under the lock
+
+**The problem.** Round 5 split the reverse readers map. The reverse target map was still one hash map. A long note linking to tens of thousands of notes that had no backlinks could make it double during a publish hold, rehashing every target.
+
+**The fix** (`index/link_table.rs`). `ByTarget` is now 64 maps, as `Readers` is. A target's part comes from the top bits of its FNV-1a hash, which are unrelated to the parts' own randomly keyed hashing. So a growth rehashes a 64th of the targets.
+
+**Test: `a_save_behind_a_note_linking_to_many_new_targets_stays_quick`** (latency test, debug).
+
+- **The setup:** 32,000 notes with no backlinks, and a new note linking to each of them. Saves each add a note while the publish puts the 32,000 targets in.
+- **The measurement:** the longest hold was 5.9–6.0 ms with the map in one part, and 3.0 ms (both runs) with 64.
+- **The check:** the hold must stay under 5 ms. That is a measurement rather than a deterministic guard, but it separates the two by about 1 ms on either side.
+
+### P3: rescan finalization, in part
+
+**Done** (`vault.rs`). A scan whose token is stale used to drop its fresh index inside the lock. Now `finish_rescan_retiring` hands that index back as well, and the watcher frees it after the lock is released, as it does the replaced index.
+
+**Not done:** the file diff, the replay and the format-cache walk still run under the lock (3 ms in debug at 10k notes, as measured in round 5). Preparing them from a versioned snapshot outside the lock would change how a write during the finish is ordered against the swap. That ordering is what guarantees no lost writes, so as in round 5 I left it.
+
+- **What does change:** a replayed folder no longer re-resolves the fresh index's whole table under the lock. It queues it, through the bulk-change fix above.
+
+### P3 skipped: a mixed-kind Bases sort column still sorts in one task
+
+Not changed, for the reasons in round 5. A worker makes the mixed-kind sort asynchronous: the first paint is no longer one pass, a late reply needs cancelling, and the order must stay the engine's. That is too much risk for a P3 under "no visible change", and round 6 is to stay tight.
+
+### Measurements (review 6)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-50000`, 50,125 notes, after the fixes):
+
+- **The new deferred folder-rename row** is in the table above.
+- **Every other row** is within noise of round 5:
+  - shared alias, 50,125 linkers, off-lock jobs: 139 ms, hold 0.93 ms;
+  - 160,000-link note with a note added between holds: 371 ms, hold 0.60 ms;
+  - 40,000-link note: 81 ms, hold 0.38 ms;
+  - 100 notes of 5,000 links: 1.21 s, hold 0.13 ms.
+- **Scan, full rebuild and RSS:** 1.07 s median scan, a maps rebuild of 44.5 ms and a link rebuild of 114.9 ms, and 627 MB.
+
+### Mutation checks (review 6)
+
+Each mutation was applied alone and its tests run. All 6 were caught.
+
+- **Bulk change resolves the whole table under the lock** (queueing off): caught by both new bulk tests ("every note is queued"; "a 400-note folder moved: the work is queued").
+- **A stale staged publish takes back nothing after a rebuild** (the old epoch check), with the test's direct `is_staging` assertion also removed: caught by `a_bulk_change_queues_every_note_for_jobs_and_settles_to_a_full_walk` on "reverse maps vs the table".
+- **The estimate sums every woken key:** caught by `saves_and_jobs_behind_many_woken_keys_look_at_a_bounded_number_of_them` ("a save looked at 600 woken keys" in its first version; 6,000 now).
+- **A key with no readers costs the expansion nothing:** caught by the same test, at 4,962 keys against a budget of 4,096. My first version of the test used small steps, and there cleanup and expansion walk keys in the same hash order at the same rate, so the expansion never met an empty key and the mutation survived. The test now uses real budgets and lets cleanup run ahead.
+- **No generation bump in `scheduleRebuild`:** caught by part 5 ("only the rebuild asked for by the second change went in": 2, expected 1).
+- **The target map in one part:** the hold went back to 5.9–6.0 ms, over the new test's 5 ms bound.
+
+### Still open after review 6
+
+- After a bulk change the write still rebuilds the name maps and queues every note under the lock: about 70 ms in release at 50k, down from 180 ms.
+- A rescan's finish still diffs, replays and walks the format cache under the lock.
+- A mixed-kind sort column is still sorted in one task.
+- At 50k notes a graph tick still costs about 95 ms of work, spread over frames of at most 12 ms.
+- The other index maps (files and name maps) still grow by rehashing in one hold when the vault itself grows.
+
+### Suites (review 6)
+
+- **`cargo test --offline`:** **238 passed**, 0 failed, 7 ignored. That is 234 at `b421a13` plus four new tests: the two unit tests and the two latency tests above.
+- **`cargo clippy --all-targets`:** nothing new. The one hit in a touched file (`index.rs`, `norm_logical`) was already there.
+- **`npm run build`** (`tsc` and `vite build`): clean. The bundle has no trace of `__graphHold` or `__graphBuildHold`.
+- **`vitest`:** **1714 / 1714**.
+- **`npm test`:** the whole `test` chain passed, including `test-link-refresh-guards.mjs` with its new part 5, and so did the first 11 of the 12 `posttest` steps.
+  - The last step, `test-bases-edge.mjs`, failed on "10k scroll p95 16.7 max 33.4", one dropped frame, under a load average of about 5. That is the same load-dependent check as in round 5, which also failed at `7285d33`. This round changes no Bases code.
+  - Run standalone right after, it passed 3 of 3 (p95 16.7–16.8 ms, max 16.8 ms), so I didn't chase it.
+  - This time `test-drawing-editor.mjs` passed inside the chain.
+- **Browser bench:** not rerun. The graph's frame path is unchanged; `scheduleRebuild` only bumps a counter.
+- The test runs rewrote 62 `rebuild/round*-shots` files; they were restored before committing.
