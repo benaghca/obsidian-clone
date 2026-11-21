@@ -18,8 +18,10 @@
 // drawn every other frame, leaving the rest of each frame to the editor.
 // The graph follows the vault through the workspace's "links" and "files"
 // changes (which come a moment after a save, never on a keystroke), and an
-// update keeps every node that is still there where it is.
+// update keeps every node that is still there where it is. A "links" change
+// that changed no note this graph can show is skipped (`linksMatter`).
 
+import { linkEntryOf } from "../links/linkDelta";
 import { duration } from "../motion";
 import { h } from "../shell/dom";
 import type { OpenWhere } from "../tabs";
@@ -29,7 +31,7 @@ import { type GraphModel, type GraphNode, neighbours, nodeColor, nodeRadius } fr
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
-import { devStats, setProbe } from "./probe";
+import { devBuilt, devStats, setProbe } from "./probe";
 import { changedIn, DATA_KEYS, FORCE_KEYS, graphSettings, resetGraphSettings, setGraphSetting } from "./settings";
 import { Simulation } from "./sim";
 import { type ColorRule, createGraphSource, type Facts } from "./source";
@@ -168,10 +170,12 @@ export function createGraphView(host: GraphHost) {
       facts = await asked;
       if (mine !== seq || disposed) return;
     }
+    const started = performance.now();
     const center = local ? (host.file?.() ?? null) : null;
     const shown = reveal ? new Set(reveal.order.slice(0, reveal.shown)) : null;
     const { model: next, groups } = source.build(cfg, facts, center, shown);
     setModel(next, groups);
+    devBuilt?.(performance.now() - started);
   }
 
   function setModel(next: GraphModel, groups: ColorRule[]) {
@@ -540,9 +544,30 @@ export function createGraphView(host: GraphHost) {
   }
   applyForces();
 
+  /**
+   * Whether a link refresh that changed `touched` notes' entries can change this
+   * graph. Without tags or a text query the graph is its files and links, so a
+   * refresh that changed no entry (a save of prose) changes nothing here. A
+   * local graph also stays when no changed note is in it and none links into it
+   * now: such a note was out of reach before and still is. Tags and text queries
+   * read note text, which the refresh after a save is the moment to re-read.
+   */
+  function linksMatter(touched: ReadonlySet<string> | null): boolean {
+    if (!touched || source.readsText(cfg)) return true;
+    if (!touched.size) return false;
+    if (!local) return true;
+    for (const path of touched) {
+      if (model.index.has(path)) return true;
+      const entry = linkEntryOf(ws.vault.links, path);
+      for (const target of [...entry.outgoing ?? [], ...entry.markdown ?? []]) if (model.index.has(target)) return true;
+    }
+    return false;
+  }
+
   // The vault changed (a moment after a save, never on a keystroke): update in place.
   const onChange = (change: string) => {
     if (disposed) return;
+    if (change === "links" && !linksMatter(ws.vault.linkTouch)) return;
     if (change === "links" || change === "files") {
       source.forget();
       scheduleRebuild();

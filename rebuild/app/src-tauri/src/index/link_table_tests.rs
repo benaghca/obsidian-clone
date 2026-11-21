@@ -600,3 +600,47 @@ fn synthetic(n: usize) -> Vec<(String, String)> {
         })
         .collect()
 }
+
+/// Review 1: many notes reading one key (`[[alpha]]`, an alias of one hub). Removing,
+/// re-adding, or moving that alias re-resolves every linker. The work must stay linear in
+/// their number: each linker's unchanged memberships stay put, and a changed one is a set
+/// removal, not a scan or shift of a list as long as the vault. Checked as a ratio against a
+/// full link rebuild of the same index in the same run, plus parity with a full walk.
+#[test]
+fn a_shared_alias_with_many_linkers_updates_in_linear_time() {
+    let tmp = tmp_dir("link-deltas-fanout");
+    let root = tmp.path.as_path();
+    let n = 20_000;
+    let mut notes: Vec<(String, String)> = (0..n)
+        .map(|i| (format!("l/{i:05}.md"), format!("see [[alpha]] and [[alpha#Part]] here {i}\n")))
+        .collect();
+    notes.push(("hub.md".into(), "---\naliases: [alpha]\n---\n# Part\n".into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut idx = Index::from_notes(&refs);
+    let started = Instant::now();
+    idx.rebuild_links();
+    let rebuild = started.elapsed();
+    let mut page = Page::default();
+    page.refresh(&idx);
+    assert_eq!(idx.backlinks(&["hub.md".into()])["hub.md"].len(), 2 * n);
+
+    type Step<'a> = (&'a str, Box<dyn Fn(&mut Index) + 'a>);
+    let steps: [Step; 4] = [
+        ("remove the alias", Box::new(|idx| save(idx, root, "hub.md", "# Part\n"))),
+        ("add it back", Box::new(|idx| save(idx, root, "hub.md", "---\naliases: [alpha]\n---\n# Part\n"))),
+        ("rename the hub", Box::new(|idx| idx.relocate("hub.md", "moved/hub2.md"))),
+        ("delete the hub", Box::new(|idx| idx.remove_tree("moved/hub2.md"))),
+    ];
+    for (what, step) in steps {
+        let started = Instant::now();
+        step(&mut idx);
+        let took = started.elapsed();
+        println!("fanout {n}: {what} {took:?} (full link rebuild {rebuild:?})");
+        assert!(took < rebuild * 3, "{what}: {took:?} vs a full link rebuild {rebuild:?}");
+        page.refresh(&idx);
+        assert_eq!(page.last.len(), n, "{what}: every linker's entry changed");
+        page.holds(&idx, what);
+        idx.assert_links_match_walk();
+    }
+    assert_eq!(page.fulls, 1, "every step was a delta");
+}

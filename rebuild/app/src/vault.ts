@@ -9,6 +9,7 @@ import { api, type FileEntry, isTauri, type LinkIndex } from "./api";
 import type { NoteRef } from "./editor/host";
 import { backendRoot, onBackendRootChange, pageOwnsDisk } from "./vaultRoot";
 import { linkTargets } from "./links/internal";
+import { linkChanges } from "./links/linkDelta";
 import { listeners } from "./listeners";
 import { addEntry, dropEntries, listTokens, mapEntries } from "./listPatch";
 import { isNoteFile, noteName } from "./paths";
@@ -160,6 +161,12 @@ export class Vault {
     this.reindexNotes();
   }
   links: LinkIndex = { outgoing: {} };
+  /**
+   * The notes whose link entries the last "links" refresh changed: empty when it
+   * changed none (a save that changed only prose). Null when that is not known
+   * (a whole index was read): treat every note as changed.
+   */
+  linkTouch: ReadonlySet<string> | null = null;
   /** Excluded files (Settings → Files and links): left out of the switcher, search, suggestions. */
   isExcluded: (path: string) => boolean = () => false;
 
@@ -364,6 +371,7 @@ export class Vault {
     this.linksOwed = false;
     const links = await api.linkIndex();
     if (mine !== this.linksRequest || backendRoot() !== vault || !pageOwnsDisk()) return;
+    this.linkTouch = linkChanges(this.links, links);
     this.links = links;
     this.changed("links");
   }

@@ -34,6 +34,8 @@ export function createGraphSource(ws: Workspace, local: boolean) {
   const tags = vaultTags(ws);
   return {
     forget() { last = null; tags.forget(); },
+    /** Whether a build reads note text (tags, or a query the backend matches), not only files and links. */
+    readsText(cfg: GraphSettings): boolean { return cfg.showTags || queriesOf(cfg).backend.length > 0; },
     facts(cfg: GraphSettings): Promise<Facts> | null {
       const { backend } = queriesOf(cfg);
       if (!backend.length && !cfg.showTags) return null;

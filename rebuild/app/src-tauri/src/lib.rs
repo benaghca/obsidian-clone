@@ -22,6 +22,8 @@ mod edit;
 #[cfg(test)]
 mod edit_fuzz;
 #[cfg(test)]
+mod link_page_tests;
+#[cfg(test)]
 mod smoke;
 mod fsutil;
 /// Fix B (piece HZ, prototype): `GROVE_FRAME_PACING=compositor`.

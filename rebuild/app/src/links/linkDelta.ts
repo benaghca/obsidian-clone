@@ -3,19 +3,32 @@
 // The backend keeps every note's resolved links and a version that moves each
 // time a note's entry changes. `link_changes` with the id and version of an
 // earlier reply returns only the notes whose entries changed since; this module
-// patches its copy of that reply with them. Without a usable base (first read,
+// lays them on its copy of that reply. Without a usable base (first read,
 // another vault, a reopen, or a page too far behind) the backend sends the
 // whole index instead, the same `LinkIndex` `link_index` returns.
 //
 // Each read returns a new top-level object, as a full read did, so consumers
-// that compare `vault.links` by identity still see every refresh. A map no
-// changed note touches is shared with the previous reply; one that is touched
-// is copied. Nothing here edits an object it has handed out.
+// that compare `vault.links` by identity still see every refresh. A read is a
+// snapshot: nothing here edits an object it has handed out, so a reply a
+// consumer holds keeps the values it had.
+//
+// A read costs only the changed notes (review 1). Each of the three maps is a
+// layer: the last whole map plus the changed paths laid over it. The whole map
+// is built (one copy, with the new paths at their sorted places) only when
+// something reads that map, and then kept, so a save that nobody reads the map
+// after, or that changes nothing, copies nothing. A map no changed note touches
+// is the previous reply's own object. The changes are folded in early once
+// they reach an eighth of the map, so copying the pile of changes from one read
+// to the next stays a small share of what building the map costs.
 //
 // Key order matches a full reply: the backend's maps are sorted by path (UTF-8
 // byte order, which is code point order), and a path new to a map is inserted
-// at its sorted place, so iterating a patched map visits paths in the same
-// order as iterating a full read.
+// at its sorted place, so iterating a built map visits paths in the same order
+// as iterating a full read.
+//
+// `linkChanges(older, newer)` names the notes whose entries may differ between
+// two reads (the union of the changes in between), so consumers can update only
+// those, or nothing when it is empty (a save that changed only prose).
 
 import type { LinkIndex } from "../api";
 
@@ -40,6 +53,7 @@ export interface LinkChanges {
 
 type Field = "outgoing" | "markdown" | "unresolved";
 const FIELDS: readonly Field[] = ["outgoing", "markdown", "unresolved"];
+type PathMap = Record<string, string[]>;
 
 /** Code point order (UTF-16 order differs for astral characters against U+E000–U+FFFF). */
 export function byCodePoint(a: string, b: string): number {
@@ -60,38 +74,165 @@ export function byCodePoint(a: string, b: string): number {
 const sameList = (a: readonly string[] | undefined, b: readonly string[]) =>
   a !== undefined && a.length === b.length && a.every((value, i) => value === b[i]);
 
+const own = (map: PathMap, path: string): string[] | undefined =>
+  Object.prototype.hasOwnProperty.call(map, path) ? map[path] : undefined;
+
+/**
+ * One map of one read: `root` with `over` laid on it (null removes a path).
+ * Building it folds `over` into a new `root` in place; the map it stands for
+ * never changes, and no map it handed out is edited.
+ */
+interface Layer {
+  root: PathMap;
+  over: ReadonlyMap<string, string[] | null> | null;
+  /** Paths in the map this layer stands for. */
+  readonly size: number;
+}
+
+/** Fold the layer in once it holds this share of the map (and at least `MIN_OVER` paths). */
+const OVER_SHARE = 8;
+const MIN_OVER = 64;
+
+function lookup(layer: Layer, path: string): string[] | undefined {
+  if (layer.over?.has(path)) return layer.over.get(path) ?? undefined;
+  return own(layer.root, path);
+}
+
+/** `root` with `over` applied: removed paths left out, changed ones replaced, new ones at their sorted places. */
+function fold(root: PathMap, over: ReadonlyMap<string, string[] | null>): PathMap {
+  const added = [...over.keys()].filter((path) => over.get(path) !== null && own(root, path) === undefined).sort(byCodePoint);
+  const next: PathMap = {};
+  let at = 0;
+  for (const path of Object.keys(root)) {
+    while (at < added.length && byCodePoint(added[at]!, path) < 0) {
+      next[added[at]!] = over.get(added[at]!)!;
+      at += 1;
+    }
+    const value = over.has(path) ? over.get(path) : root[path];
+    if (value) next[path] = value;
+  }
+  for (; at < added.length; at++) next[added[at]!] = over.get(added[at]!)!;
+  return next;
+}
+
+function built(layer: Layer): PathMap {
+  if (layer.over) {
+    layer.root = fold(layer.root, layer.over);
+    layer.over = null;
+  }
+  return layer.root;
+}
+
+const plainLayer = (map: PathMap | undefined): Layer => {
+  const root = map ?? {};
+  return { root, over: null, size: Object.keys(root).length };
+};
+
+type Layers = Record<Field, Layer>;
+const layersOf = new WeakMap<LinkIndex, Layers>();
+/** How a read came from an earlier one: the earlier read (weakly; an old read can go) and the notes that changed. */
+const parentOf = new WeakMap<LinkIndex, { from: WeakRef<LinkIndex>; paths: ReadonlySet<string> }>();
+
+/** A read over `layers`: each map is built when first read. Assigning a map replaces it. */
+function snapshot(layers: Layers): LinkIndex {
+  const out = {} as LinkIndex;
+  for (const field of FIELDS) {
+    Object.defineProperty(out, field, {
+      enumerable: true,
+      configurable: true,
+      get: () => built(layers[field]),
+      set: (map: PathMap) => {
+        layers[field] = plainLayer(map);
+      },
+    });
+  }
+  layersOf.set(out, layers);
+  return out;
+}
+
+function layersFrom(links: LinkIndex): Layers {
+  return layersOf.get(links) ?? { outgoing: plainLayer(links.outgoing), markdown: plainLayer(links.markdown), unresolved: plainLayer(links.unresolved) };
+}
+
+/** A full reply as a read: its maps are used as they are. */
+function whole(full: LinkIndex): LinkIndex {
+  return snapshot(layersFrom(full));
+}
+
+/** `base` with each changed note's entry put in, and the notes whose entries actually changed. `base` is left as it was. */
+function laid(base: LinkIndex, changed: Record<string, LinkEntry>): LinkIndex {
+  const prev = layersFrom(base);
+  const paths = new Set<string>();
+  const changedPaths = Object.keys(changed);
+  const layers = {} as Layers;
+  for (const field of FIELDS) {
+    const layer = prev[field];
+    let over: Map<string, string[] | null> | null = null;
+    let size = layer.size;
+    for (const path of changedPaths) {
+      const want = changed[path]![field] ?? [];
+      const had = lookup(layer, path);
+      if (!want.length) {
+        if (had === undefined) continue;
+        (over ??= new Map()).set(path, null);
+        size -= 1;
+      } else if (sameList(had, want)) continue;
+      else {
+        (over ??= new Map()).set(path, want);
+        if (had === undefined) size += 1;
+      }
+      paths.add(path);
+    }
+    if (!over) {
+      // Untouched: the same layer, so the same built map.
+      layers[field] = layer;
+      continue;
+    }
+    // Lay the changes on the last built map, or on top of the changes not built yet.
+    const next: Layer = { root: layer.root, over: layer.over ? new Map([...layer.over, ...over]) : over, size };
+    if (next.over!.size > Math.max(MIN_OVER, size / OVER_SHARE)) built(next);
+    layers[field] = next;
+  }
+  const out = snapshot(layers);
+  parentOf.set(out, { from: new WeakRef(base), paths });
+  return out;
+}
+
 /** `base` with each changed note's entry put in. `base` is left as it was. */
 export function patchLinks(base: LinkIndex, changed: Record<string, LinkEntry>): LinkIndex {
-  const out: LinkIndex = { ...base };
-  const paths = Object.keys(changed);
+  return laid(base, changed);
+}
+
+/** One note's entry in a read, without building any map. */
+export function linkEntryOf(links: LinkIndex, path: string): LinkEntry {
+  const layers = layersOf.get(links);
+  const get = (field: Field) => (layers ? lookup(layers[field], path) : own(links[field] ?? {}, path));
+  const entry: LinkEntry = {};
   for (const field of FIELDS) {
-    const old: Record<string, string[]> = base[field] ?? {};
-    const set = new Map<string, string[]>();
-    const drop = new Set<string>();
-    for (const path of paths) {
-      const next = changed[path]![field] ?? [];
-      const prev = Object.prototype.hasOwnProperty.call(old, path) ? old[path] : undefined;
-      if (!next.length) {
-        if (prev !== undefined) drop.add(path);
-      } else if (!sameList(prev, next)) set.set(path, next);
-    }
-    // Untouched: `out` already shares it.
-    if (!set.size && !drop.size) continue;
-    const added = [...set.keys()].filter((path) => !Object.prototype.hasOwnProperty.call(old, path)).sort(byCodePoint);
-    const next: Record<string, string[]> = {};
-    let at = 0;
-    for (const path of Object.keys(old)) {
-      while (at < added.length && byCodePoint(added[at]!, path) < 0) {
-        next[added[at]!] = set.get(added[at]!)!;
-        at += 1;
-      }
-      if (drop.has(path)) continue;
-      next[path] = set.get(path) ?? old[path]!;
-    }
-    for (; at < added.length; at++) next[added[at]!] = set.get(added[at]!)!;
-    out[field] = next;
+    const list = get(field);
+    if (list?.length) entry[field] = list;
   }
-  return out;
+  return entry;
+}
+
+/**
+ * The notes whose entries may differ between two reads from one reader, `newer`
+ * patched (in one or more steps) from `older`: empty when no entry changed. Null
+ * when that is not known (a full reply in between, reads from elsewhere): treat
+ * every note as changed.
+ */
+export function linkChanges(older: LinkIndex, newer: LinkIndex): ReadonlySet<string> | null {
+  if (older === newer) return new Set();
+  const out = new Set<string>();
+  let at: LinkIndex | undefined = newer;
+  for (let hops = 0; at && hops < 64; hops++) {
+    const step = parentOf.get(at);
+    if (!step) return null;
+    for (const path of step.paths) out.add(path);
+    at = step.from.deref();
+    if (at === older) return out;
+  }
+  return null;
 }
 
 type Ask = (id: number | null, version: number | null) => Promise<LinkChanges>;
@@ -110,14 +251,14 @@ export function linkReader(ask: Ask): () => Promise<LinkIndex> {
     const base = kept;
     const reply = await ask(base?.id ?? null, base?.version ?? null);
     let links: LinkIndex;
-    if (reply.full) links = reply.full;
-    else if (base && reply.id === base.id && reply.since === base.version) links = patchLinks(base.links, reply.changed);
+    if (reply.full) links = whole(reply.full);
+    else if (base && reply.id === base.id && reply.since === base.version) links = laid(base.links, reply.changed);
     else {
       // Not a reply to what was asked (it can't happen with the real backend): start over.
       kept = null;
       const again = await ask(null, null);
       if (!again.full) throw new Error("link_changes sent changes without a base");
-      links = again.full;
+      links = whole(again.full);
       kept = { id: again.id, version: again.version, links, call };
       return links;
     }

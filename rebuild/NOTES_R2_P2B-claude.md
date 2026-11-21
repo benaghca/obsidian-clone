@@ -45,7 +45,7 @@ Built on `rebuild/r2-p2b-claude` from `b9fb338` (brief: `R2_P2B_TASK.md`), on to
 - `patchLinks` builds a new top-level object. A map no changed note touches is shared; a touched map is copied. It never edits an object it has handed out, so nothing a consumer holds changes under it.
 - Paths new to a map are inserted at their sorted place in code point order, which is the backend's UTF-8 byte order. A patched map iterates in exactly the order a full reply does. `editorHost`'s unresolved-link suggestions iterate `unresolved`, so this order is visible.
 - Overlapping calls: each patches the base it asked from. The kept base moves only forward, to a higher version of the same id, or to another id from a later call.
-- The browser mock (`mock/backend.ts`) answers `link_changes` with the whole index every time. Its maps are in file order, not path order, so patching them would not match its own full reply. Mock behavior is unchanged.
+- The browser mock (`mock/backend.ts`) answered `link_changes` with the whole index every time. Its maps are in file order, not path order, so patching them would not match its own full reply. Since review 1 it sends a delta when only lists changed (see "Review round 1").
 
 ## Tests
 
@@ -184,6 +184,162 @@ All of them stay in microseconds, because a change of owners wakes only the note
 ## Open items
 
 - **`npm test` has no clean run yet.** It failed twice, both times in `scripts/test-friction.mjs`, on a machine shared with heavy builds. A run of that script alone, on this branch and on `b9fb338` back to back, was still going at the time of writing. Rerun `flock /tmp/grove-npm-test.lock npm test` on a quiet machine before merging.
-- Consumers still rebuild on every `links` event (graph 112 ms, a base 163 ms at 50k). The data now says which notes changed, so the next piece can patch only those (RUST_PERF_PLAN §4.2 TS side, §4.4).
+- Consumers still rebuild on every `links` event (graph 112 ms, a base 163 ms at 50k). The data now says which notes changed, so the next piece can patch only those (RUST_PERF_PLAN §4.2 TS side, §4.4). Review 1 made the graph and Bases skip refreshes that changed nothing they show; a real link change still rebuilds a visible global graph (see "Review round 1").
 - `link_sources` (before a rename) still resolves every link plus a text scan. It could read `by_target` for the linked part.
 - `pick` scans every same-named candidate per lookup. In a vault with thousands of `README.md` files this dominates a full rebuild and re-resolving their linkers. That was true before P2b too.
+
+## Review round 1
+
+Codex review 1 of `494b26b` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review1.md`): one P2 and two P3 findings. All three are fixed here. Limits as before: nothing visible changes, no new crates or packages, test vaults under `/tmp` only, not pushed.
+
+### P2: a popular key re-resolved in quadratic time
+
+**The problem.** Removing an alias that N notes link to re-resolves all N. Each one detached and re-attached every membership, including unchanged ones. A removal scanned the key's reader list (N long) and shifted the target's source list. That is O(N²) under the vault write lock. The new test measured 4.9 s for 20,000 linkers in debug, against 75 ms for a full link rebuild of the same index.
+
+**The fix** (`index/link_table.rs`):
+
+- **`PathSet`.** Each reverse-map entry (`by_target`: target → linking notes; `readers`: key → notes that read it) is a sorted `Vec` up to 32 paths and a `BTreeSet` beyond. Adding or removing one note is a binary search plus a shift of at most 32, or a B-tree step. Both forms iterate in path order, so `backlinks` output order is unchanged. A refill pushes in path order into lists and converts the long ones once at the end (`seal_all`), so the open-time table build does not pay per-insert tree costs.
+- **`relink`.** Re-resolving a note diffs its old and new targets and its old and new read keys (both sorted) and touches only the memberships that changed. A note re-resolved to the same targets moves nothing.
+
+**The test.** `a_shared_alias_with_many_linkers_updates_in_linear_time` uses 20,000 notes, each with `[[alpha]]` and `[[alpha#Part]]`, plus a hub that has alias `alpha`. It runs four steps: remove the alias, add it back, rename the hub, delete it. Each step must:
+
+- take under 3× a full link rebuild of the same index in the same run;
+- send all 20,000 entries as a delta;
+- leave a simulated page equal to a full walk;
+- pass `assert_links_match_walk`.
+
+Debug run: each step takes 117–144 ms against an 81 ms full rebuild (it was 4.9 s). `bench_link_deltas` gained the same case in release at vault size (see Measurements below).
+
+### P3: the page did vault-sized work after a save
+
+**No map copy per save** (`links/linkDelta.ts`). Each of the three maps in a read is now a layer: the last whole map plus the changed paths laid over it.
+
+- The whole map is built only when something reads it: one copy, with new paths at their sorted places, the same merge as before. It is then folded into the layer. A save nobody reads the map after copies nothing.
+- `linkEntryOf(links, path)` reads one note's entry without building anything.
+- A pile of unread changes is folded in early once it passes an eighth of the map (and 64 paths). Carrying the pile from one read to the next therefore stays a small share of one build.
+- Reads stay snapshots. A read is never changed after it is handed out; old reads keep their values whatever comes later, and each read is still a new top-level object. Its maps are enumerable getters, so `JSON.stringify`, spreads, `structuredClone`, and `toEqual` see plain data.
+- Key order equals a full reply, as before.
+
+**Which notes changed, for consumers.**
+
+- `linkChanges(older, newer)` returns the notes whose entries may differ between two reads from one reader. It returns an empty set when nothing changed (a prose save: the backend lists the re-resolved note, but its entry is the same, so the page drops it). It returns null when that is unknown: a whole reply in between, or reads from elsewhere such as a test stub.
+- `vault.linkTouch` holds that set for the last `links` refresh.
+- The `links` event itself still fires at the same moments. The backlinks pane and count (excerpts), outgoing links, properties, tags, and `vaultTags` still refresh on it, so document-dependent views still update after a save that changed no link.
+
+**Graph** (`graph/view.ts` `linksMatter`, `graph/source.ts` `readsText`). A `links` refresh is skipped when it cannot change the graph:
+
+- **Tags shown, or a search or colour group the backend matches:** the graph reads note text, so it rebuilds as before.
+- **Otherwise the graph is its files and links:** it skips a refresh that changed no entry.
+- **A local graph** also skips when no changed note is in it and none of their new targets is. Such a note was out of reach before and still is.
+- **A global graph** rebuilds when any entry changed.
+
+**Base** (`bases/view.ts` `linkRefreshMatters`). A Base reads the link index only through `hasLink`; `readsOtherFiles` also lists `file.links`, `file.backlinks` and `file.embeds`. It skips a `links` refresh when no entry changed, or when it reads no links at all, unless it reads tags (re-read on each link refresh). Row data comes from the property index, which follows file mtimes and open editors, not this event, and the save's own document notice still rebuilds the Base as before.
+
+**What still rebuilds.** A save that really changes a link still rebuilds a visible global graph (12–110 ms from 5k to 50k notes), then reheats its layout. A Base that reads links still does a full select. Patching the graph model in place, so it stays identical to a fresh `buildGraph` (node order, pair order), is its own piece. Its output order depends on every earlier note, so it needs a different model structure.
+
+**Browser mock** (`mock/backend.ts`). `link_changes` now answers with a delta from any of the last 8 versions it served, whenever every map kept its keys in the same order (only lists changed). The patch then equals its full reply exactly, because the mock's maps are in file order, not path order. Otherwise it sends the whole index as before. The browser suites now run the delta path for ordinary saves.
+
+### P3: the disk-event-to-page path, end to end
+
+`link_page_tests::outside_changes_reach_the_page_as_deltas_equal_to_a_fresh_scan` (new `src/link_page_tests.rs`) works on a vault under the temp directory.
+
+**How it runs.** Outside changes go through the watcher's own `flush_changes`. The page side is the real `linkReader` from `src/links/linkDelta.ts`, run by node through `scripts/link-page.mjs` (no new packages; node strips the types). The test answers each of the page's requests with `link_changes` serialized by `serde_json`, as Tauri does.
+
+**The steps:**
+
+- an app save (`write_note`) adding a link;
+- an outside alias change in frontmatter;
+- an outside embed edit (`![[pic.png]]` → `![[hub#Part]]`, plus `![[dir/c]]`);
+- an outside prose-only edit;
+- an outside rename into a new folder (one map rebuild);
+- an outside replacement (a new file renamed over an existing one);
+- an outside delete;
+- a watcher rescan while the page holds the previous version, adding `é/日記.md` and `Zed.md` to test byte order.
+
+**After each settled step it checks:**
+
+- the page's maps as JSON text equal a fresh `Index::scan`'s `link_index`, key order included;
+- the notes the page reports to consumers (`linkChanges`) are exactly those whose entries differ between this scan and the last (empty for the prose edit);
+- every read after the first was a delta, 8 of 8;
+- `backlinks` for every path equals the fresh scan's, order and excerpts included;
+- `assert_maps_match_rebuild`.
+
+### Other new tests
+
+- **Page (`linkDelta.test.ts`):**
+  - random changes with maps read only every ninth step or so, 400 non-ASCII paths, 3 seeds × 300 steps: `linkEntryOf` equals the full reply for random paths at each step, and every earlier read still equals the full reply of its own step at the end;
+  - a long pile of unread changes that crosses the early fold;
+  - 60 unread one-note patches of a 50,000-key map cost less than building that map once;
+  - `linkChanges`: empty for a prose save, the changed notes, a union across reads, null for unrelated reads.
+- **`readOrdering.test.ts`:** `vault.linkTouch` after a first read (null), a prose save (empty), an edit (the changed notes), and a stubbed whole index (null).
+- **`bases/view.test.ts`:** `linkRefreshMatters` for plain, `hasLink`, `file.backlinks`, and tag-reading bases.
+
+**Mutation checks** (by hand, each reverted; script in the session scratchpad). 10 of 11 caught.
+
+- **Rust:**
+  - caught: `by_target` removal skipped; `readers` removal skipped; tree removal a no-op;
+  - not caught: lists never becoming trees. This is a performance-only change. At 20,000 readers a sorted `Vec` with binary search and one memmove per removal still passes the 3× budget in debug; the quadratic cost the review found was the old linear scan of reader lists.
+- **TS, all caught:**
+  - the early fold dropping changes (missed at first; the fold test above was added for it);
+  - older changes winning a merge;
+  - `linkChanges` reporting nothing;
+  - the vault reporting nothing changed;
+  - a Base ignoring changed links;
+  - unchanged entries counted as changed;
+  - a lookup ignoring the layer.
+
+### Measurements (review 1)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-20000` and `-50000`, regenerated with `gen-vault.mjs`). Base is `494b26b`, from a scratch worktree with the new bench section copied in; both binaries ran in the same session.
+
+| | 20k at `494b26b` | 20k now | 50k at `494b26b` | 50k now |
+|---|---|---|---|---|
+| Remove an alias all notes link to (20,125 / 50,125 linkers) | 807 ms | **19 ms** | 5,274 ms | **71 ms** |
+| Add it back | 810 ms | **20 ms** | 5,300 ms | **71 ms** |
+| Full link rebuild, same index | 8.6 ms | 9.4 ms | 23 ms | 25 ms |
+| `scan` median | 400 ms | 402 ms | 994 ms | 999 ms |
+| Full link rebuild, bench vault | 33 ms | 34 ms | 99 ms | 99 ms |
+| RSS after scan | 262 MB | 262 MB | 620 MB | 621 MB |
+
+- Every linker really does re-resolve (the delta lists all of them), so about 2–3× one rebuild is the floor here.
+- Open time and memory did not move.
+
+**Save to render, graph and Base visible** (`scripts/bench-link-refresh.mjs`, headless Chromium on the browser mock).
+
+- **Setup:**
+  - `n` notes, each with two wikilinks and a property;
+  - layout: the note's editor, a table Base over all of them (reads no links) to the right, the global graph below it, laid out and at rest;
+  - each case types into the note and lets it autosave; the link refresh follows 1 s later, as designed.
+- **Columns:**
+  - "Graph" and "Base" are the rebuilds the link refresh started;
+  - "Render" is the time from the refresh to the frame where the last of that work is on screen; it includes the graph's 200 ms refresh delay;
+  - "Base on save" is the rebuild the save itself starts (the document notice), unchanged.
+
+Two rounds each, before and after, alternating. The values were within a few ms of each other; round 2 is shown.
+
+| Notes | Case | Graph before | Graph after | Base on refresh before | after | Render before | after |
+|---|---|---|---|---|---|---|---|
+| 5k | prose | 10 ms | **none** | 7.5 ms | **none** | 210 ms | **0** |
+| 5k | one link | 12.6 ms | 11.4 ms | 8.1 ms | **none** | 213 ms | 212 ms |
+| 20k | prose | 39.6 ms | **none** | 21.5 ms | **none** | 240 ms | **0** |
+| 20k | one link | 41.5 ms | 45.7 ms | 22.7 ms | **none** | 242 ms | 246 ms |
+| 50k | prose | 104 ms | **none** | 57 ms | **none** | 305 ms | **0** |
+| 50k | one link | 118 ms | 113 ms | 62 ms | **none** | 319 ms | 314 ms |
+
+- **Prose save, after:** the only main-thread tasks over 50 ms at 50k are the Base's rebuild from the save itself (51–63 ms, before and after alike) and the mock's own link walk (~103 ms). The second is an artifact of the mock, which walks every note in the page; in the app that is Rust, off this thread.
+- **Prose save, before:** a 104 ms graph rebuild and a 57 ms Base rebuild followed on top.
+- **One-link save:** the edge appears (`edgesAdded` 1 in every run). The Base that reads no links no longer rebuilds. The graph still rebuilds once and reheats its layout; at 50k each layout frame then takes ~95 ms for about 2.5 s, as before. That is the open item above.
+- The page's own link handling (patch plus `linkChanges`) doesn't show up at this resolution. The cost test in `linkDelta.test.ts` covers it.
+- `GROVE_BENCH_CHECK=1` asserts the "after" behavior; all six "after" runs passed it.
+
+### Suites (review 1)
+
+- **`cargo test --offline --all-targets`:** **219 passed**, 0 failed, 7 ignored. That is 217 at `494b26b` plus the fanout test and the end-to-end page test.
+- **`cargo clippy --all-targets`:** nothing in the changed files.
+- **`npm run build`:** clean.
+- **`vitest`:** **1703 / 1703** (1697 at `494b26b`, plus 6).
+- **`npm test`**, run twice on this tree:
+  - **Run 1:** stopped in `test-friction.mjs`, with `open_ctrl_click_tree` / `open_middle_click_tree` taking 360 / 468 ms. That script alone then passed 6 of 6 runs: twice each on `b9fb338` (before P2b), `494b26b`, and this tree.
+  - **Run 2:** the whole `test` chain passed, `test-friction.mjs` included. The last `posttest` script, `test-bases-edge.mjs`, stopped on one 33 ms frame in a 10k-row Base scroll (budget: max 25 ms).
+  - Alone, `test-bases-edge.mjs` failed both runs on `494b26b` (a 33 ms scroll frame, then 545 ms sort work), and failed once and passed once on this tree.
+  - Both are timing budgets that fail on the base commits too, and neither flow (opening a note from the tree, scrolling a Base) reads the link index. So no fully clean `npm test` run yet; the open item above still stands.

@@ -154,6 +154,19 @@ export const readsChanged = (source: string, host: string | null, changed: reado
  */
 export const readsOtherFiles = (source: string) => /\bfile\.(?:backlinks|links|embeds)\b|\.hasLink\s*\(/.test(source);
 
+/** True when a formula, filter, sort or column reads tags (`vaultTags`, re-read on each link refresh). */
+export const readsTags = (source: string) => /file\.(?:tags|hasTag)/.test(source);
+
+/**
+ * Whether a link refresh that changed `touched` notes' entries (null: unknown)
+ * can change a base with this YAML. Rows read the link index only through
+ * `hasLink` (and the names `readsOtherFiles` lists), so a refresh that changed
+ * no entry, or a base that reads no links, has nothing to redo. Tags are re-read
+ * on a link refresh (`vaultTags`), so a base that reads them rebuilds, as before.
+ */
+export const linkRefreshMatters = (touched: ReadonlySet<string> | null, source: string) =>
+  !touched || readsTags(source) || (touched.size > 0 && readsOtherFiles(source));
+
 /** Frontmatter the board painted versus the property index's re-read of that note. */
 export function sameProperties(a: readonly Property[] | undefined, b: readonly Property[] | undefined): boolean {
   if (a === b) return true;
@@ -488,7 +501,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
           viewIndex = model.viewIndex; o.remember?.(viewIndex);
         }
         const properties = await index.notes();
-        const needsTags = /file\.(?:tags|hasTag)/.test(source);
+        const needsTags = readsTags(source);
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
         if (gone || dirty) continue;
         if (editing()) { dirty = false; break; }
@@ -647,6 +660,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const outside = (changed: string[], before: (note: string) => string | null) => !readsChanged(source, hostPath(), changed) && docsOutsideFilter(changed, source, viewIndex,
     note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null,
     note => selected.some(entry => entry.row.file.path === note), before);
+  const linksMatter = (touched: ReadonlySet<string> | null) => reload || !model || linkRefreshMatters(touched, source);
   const unwatch = ws.vault.onModified(changed => {
     const before = changedFrom.get(changed) ?? null;
     changedFrom.delete(changed);
@@ -656,6 +670,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
     schedule();
   });
   const off = ws.on(change => {
+    if (change === "links" && !linksMatter(ws.vault.linkTouch)) return;
     const changed = change === "doc" && shown() ? changedNotes() : null;
     const next = baseChange({
       change,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LinkIndex } from "../api";
-import { byCodePoint, type LinkChanges, type LinkEntry, linkReader, patchLinks } from "./linkDelta";
+import { byCodePoint, type LinkChanges, type LinkEntry, linkChanges, linkEntryOf, linkReader, patchLinks } from "./linkDelta";
 
 type Field = "outgoing" | "markdown" | "unresolved";
 const FIELDS: Field[] = ["outgoing", "markdown", "unresolved"];
@@ -24,7 +24,7 @@ function byBytes(a: string, b: string): number {
   return x.length - y.length;
 }
 const PIECES = ["a", "B", "z", "é", "日", "\u{e000}", "\u{ffff}", "😀", "\u{10400}", " ", "/", "-", "Ä"];
-const PATHS = Array.from({ length: 40 }, (_, i) => {
+const PATHS = Array.from({ length: 400 }, (_, i) => {
   const r = rng(i + 1);
   let s = "";
   for (let j = 0; j < 1 + r(4); j++) s += PIECES[r(PIECES.length)];
@@ -109,6 +109,84 @@ describe("patchLinks", () => {
         links = patched;
       }
     }
+  });
+
+  it("equals the full reply when maps are read only now and then, and older reads keep their values", () => {
+    for (const seed of [5, 6, 77]) {
+      const r = rng(seed);
+      let entries = new Map<string, Required<LinkEntry>>();
+      let links = snapshot(entries);
+      const older: { links: LinkIndex; json: string | null; full: string }[] = [];
+      for (let step = 0; step < 300; step++) {
+        const next = randomEntries(r, entries);
+        const patched = patchLinks(links, delta(entries, next));
+        const full = snapshot(next);
+        // Every note's entry, without building a map.
+        for (const path of PATHS.slice(0, 1 + r(40))) {
+          const want: LinkEntry = {};
+          for (const field of FIELDS) if (next.get(path)?.[field].length) want[field] = next.get(path)![field];
+          expect(linkEntryOf(patched, path), `seed ${seed} step ${step} ${path}`).toEqual(want);
+        }
+        // Read the maps only sometimes, so changes pile up over several reads (and get folded in early).
+        const read = r(9) === 0;
+        if (read) expect(JSON.stringify(patched), `seed ${seed} step ${step}`).toBe(JSON.stringify(full));
+        older.push({ links: patched, json: read ? JSON.stringify(patched) : null, full: JSON.stringify(full) });
+        entries = next;
+        links = patched;
+      }
+      // A read taken earlier still shows what it showed (or would have), whatever came after.
+      for (const [i, old] of older.entries()) {
+        expect(JSON.stringify(old.links), `seed ${seed} read ${i}`).toBe(old.full);
+        if (old.json) expect(JSON.stringify(old.links)).toBe(old.json);
+      }
+    }
+  });
+
+  it("folds a long pile of unread changes in early and still equals the full reply", () => {
+    // 400 paths: past 64 changed paths a layer folds in before anything reads it.
+    const r = rng(2024);
+    let entries = new Map<string, Required<LinkEntry>>();
+    for (const path of PATHS) entries.set(path, { outgoing: [PATHS[r(PATHS.length)]!], markdown: [], unresolved: [] });
+    let links = snapshot(entries);
+    const older: [LinkIndex, string][] = [];
+    for (let step = 0; step < 120; step++) {
+      const next = randomEntries(r, entries);
+      links = patchLinks(links, delta(entries, next));
+      older.push([links, JSON.stringify(snapshot(next))]);
+      entries = next;
+    }
+    for (const [i, [read, full]] of older.entries()) expect(JSON.stringify(read), `read ${i}`).toBe(full);
+  });
+
+  it("costs the changed notes, not the map, until a map is read", () => {
+    const outgoing: Record<string, string[]> = {};
+    for (let i = 0; i < 50_000; i++) outgoing[`n${String(i).padStart(5, "0")}.md`] = [`t${i}.md`];
+    let links: LinkIndex = { outgoing, markdown: {}, unresolved: {} };
+    let started = performance.now();
+    void JSON.stringify(Object.keys(patchLinks(links, { "n00007.md": { outgoing: ["x.md"] } }).outgoing).length);
+    const oneCopy = performance.now() - started;
+    started = performance.now();
+    for (let i = 0; i < 60; i++) links = patchLinks(links, { [`n${String(i * 811).padStart(5, "0")}.md`]: { outgoing: [`x${i}.md`] } });
+    const sixtySaves = performance.now() - started;
+    expect(sixtySaves, `60 unread patches ${sixtySaves} ms vs one built map ${oneCopy} ms`).toBeLessThan(oneCopy);
+    expect(links.outgoing["n00811.md"]).toEqual(["x1.md"]);
+    expect(Object.keys(links.outgoing).length).toBe(50_000);
+  });
+
+  it("names the notes whose entries changed between two reads", () => {
+    const base: LinkIndex = { outgoing: { "a.md": ["b.md"] }, markdown: {}, unresolved: { "c.md": ["x"] } };
+    const prose = patchLinks(base, { "a.md": { outgoing: ["b.md"] } });
+    expect(linkChanges(base, prose)).toEqual(new Set());
+    expect(linkChanges(prose, prose)).toEqual(new Set());
+    const edge = patchLinks(prose, { "a.md": { outgoing: ["b.md", "c.md"] }, "c.md": { unresolved: ["x"] } });
+    expect(linkChanges(prose, edge)).toEqual(new Set(["a.md"]));
+    const gone = patchLinks(edge, { "c.md": {} });
+    expect(linkChanges(edge, gone)).toEqual(new Set(["c.md"]));
+    // Across several reads: the union.
+    expect(linkChanges(base, gone)).toEqual(new Set(["a.md", "c.md"]));
+    // Not one read from the other: unknown.
+    expect(linkChanges(gone, base)).toBeNull();
+    expect(linkChanges({ outgoing: {} }, gone)).toBeNull();
   });
 
   it("shares maps no changed note touches, and always returns a new object", () => {

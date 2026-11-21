@@ -5,7 +5,7 @@ vi.hoisted(() => {
 });
 
 import type { Property } from "../editor/frontmatter";
-import { baseChange, baseNeeds, docsOutsideFilter, missesPrefilter, readsChanged, readsOtherFiles, sameProperties, skipsFullRebuild, type BaseChange, type OwnWriteQuery } from "./view";
+import { baseChange, baseNeeds, docsOutsideFilter, linkRefreshMatters, missesPrefilter, readsChanged, readsOtherFiles, sameProperties, skipsFullRebuild, type BaseChange, type OwnWriteQuery } from "./view";
 
 const tasks = `filters:
   and:
@@ -193,4 +193,23 @@ it("skips a kanban rebuild only for one own write, or a link refresh that reads 
   expect(skipsFullRebuild(ownQuery({ readsThis: true }))).toBe(false);
   expect(skipsFullRebuild(ownQuery({ own: false, echo: false }))).toBe(false);
   expect(skipsFullRebuild(ownQuery({ paths: ["A.md"], links: true }))).toBe("own");
+});
+
+it("skips a link refresh that changed no entry, or that a base reading no links or tags cannot see", () => {
+  const plain = `filters: 'file.inFolder("A")'\nviews:\n  - type: table\n`;
+  const links = `filters: 'file.hasLink("Hub")'\nviews:\n  - type: table\n`;
+  const backlinks = `formulas:\n  n: file.backlinks.length\nviews:\n  - type: table\n`;
+  const tags = `filters: 'file.hasTag("x")'\nviews:\n  - type: table\n`;
+  const none = new Set<string>(), one = new Set(["a.md"]);
+  // Unknown changes: always rebuild.
+  for (const source of [plain, links, tags]) expect(linkRefreshMatters(null, source)).toBe(true);
+  // A save of prose changed no entry.
+  expect(linkRefreshMatters(none, plain)).toBe(false);
+  expect(linkRefreshMatters(none, links)).toBe(false);
+  // A changed entry matters only to a base that reads links.
+  expect(linkRefreshMatters(one, plain)).toBe(false);
+  expect(linkRefreshMatters(one, links)).toBe(true);
+  expect(linkRefreshMatters(one, backlinks)).toBe(true);
+  // Tags are re-read on every link refresh.
+  expect(linkRefreshMatters(none, tags)).toBe(true);
 });

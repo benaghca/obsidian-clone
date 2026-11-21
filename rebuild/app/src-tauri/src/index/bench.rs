@@ -542,4 +542,34 @@ fn bench_link_deltas() {
         idx.relocate("Bench moved", &folder);
     }
     println!("GROVE_BENCH folder rename ({folder}): relocate_plus_changes_ms={:.1} json_bytes={bytes} changed_notes={changed}", median(&ms));
+
+    // Review 1: one alias read by as many notes as the vault has. Removing it re-resolves
+    // every linker; before the fix each one shifted and scanned lists as long as the vault.
+    let n = idx.files.len();
+    let mut notes: Vec<(String, String)> = (0..n).map(|i| (format!("l/{i:06}.md"), format!("see [[alpha]] here {i}\n"))).collect();
+    let aliased = "---\naliases: [alpha]\n---\nhub\n";
+    notes.push(("hub.md".into(), aliased.into()));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut fan = Index::from_notes(&refs);
+    let (rebuild_ms, _) = timed(&mut || {
+        fan.rebuild_links();
+        0
+    });
+    let mut remove_ms = Vec::new();
+    let mut add_ms = Vec::new();
+    for _ in 0..runs {
+        let base = idx_since(&fan);
+        let started = Instant::now();
+        fan.upsert_note(root, "hub.md", "hub\n", Stamp::sized(4));
+        remove_ms.push(elapsed_ms(started));
+        changed = fan.link_changes(Some(base)).changed.len();
+        let started = Instant::now();
+        fan.upsert_note(root, "hub.md", aliased, Stamp::sized(aliased.len()));
+        add_ms.push(elapsed_ms(started));
+    }
+    println!(
+        "GROVE_BENCH shared alias, {n} linkers: remove_ms={:.1} add_back_ms={:.1} full_link_rebuild_ms={rebuild_ms:.1} changed_notes={changed}",
+        median(&remove_ms),
+        median(&add_ms)
+    );
 }
