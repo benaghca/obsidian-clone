@@ -67,6 +67,53 @@ pub struct Inner {
 pub(crate) fn read<T>(rw: &RwLock<T>) -> RwLockReadGuard<'_, T> { rw.read().unwrap_or_else(|e| e.into_inner()) }
 pub(crate) fn lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> { rw.write().unwrap_or_else(|e| e.into_inner()) }
 
+/// Writers (saves and other mutations, watcher batches) waiting for the vault lock. Link
+/// settling (`settled`) steps aside while any are.
+static WRITERS_WAITING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// `lock` for a mutation: counted in `WRITERS_WAITING` until it holds the lock.
+pub(crate) fn write_lock<T>(rw: &RwLock<T>) -> RwLockWriteGuard<'_, T> {
+    use std::sync::atomic::Ordering;
+    WRITERS_WAITING.fetch_add(1, Ordering::SeqCst);
+    let guard = lock(rw);
+    WRITERS_WAITING.fetch_sub(1, Ordering::SeqCst);
+    guard
+}
+
+/// Longest the link table holds the vault lock at a time while settling for a read.
+const LINK_SLICE: std::time::Duration = std::time::Duration::from_millis(2);
+
+/// Run a link read (`link_index`, `link_changes`, `backlinks`) on the open vault once its link
+/// table has settled (review 2). A large change (an alias many notes read, a hub renamed) leaves
+/// its notes queued instead of resolving them before the write returns; this resolves the queue
+/// in `LINK_SLICE` steps under the lock and lets any waiting writer go first between steps, so
+/// a save queued behind such a change waits at most one step. The read itself runs under the
+/// read lock with nothing queued, so it always sees a table equal to a full resolution of the
+/// files it reads with.
+pub(crate) fn settled<T>(inner: &RwLock<Inner>, f: impl Fn(&vault::Vault) -> T) -> Result<T, String> {
+    use std::sync::atomic::Ordering;
+    loop {
+        {
+            let guard = read(inner);
+            let vault = guard.vault.as_ref().ok_or("no vault open")?;
+            if !vault.index.links_pending() {
+                return Ok(f(vault));
+            }
+        }
+        // Writers first: wait (briefly, up to 50 ms) while any is queued for the lock.
+        for _ in 0..500 {
+            if WRITERS_WAITING.load(Ordering::SeqCst) == 0 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_micros(100));
+        }
+        if let Some(vault) = lock(inner).vault.as_mut() {
+            vault.index.settle_links_until(std::time::Instant::now() + LINK_SLICE);
+        }
+        std::thread::yield_now();
+    }
+}
+
 fn wrap_handler<R: tauri::Runtime>(handler: impl Fn(tauri::ipc::Invoke<R>) -> bool) -> impl Fn(tauri::ipc::Invoke<R>) -> bool {
     move |invoke| {
         let is_write = WriteQueue::is_write_command(invoke.message.command());
@@ -195,18 +242,19 @@ fn read_vault<T>(state: &AppState, f: impl FnOnce(&vault::Vault) -> Result<T, St
 /// Run a mutating `f` on the open vault on the dedicated writer in FIFO ingress order.
 fn write_vault<T: Send + 'static>(state: &AppState, ticket: WriteTicket, f: impl FnOnce(&mut vault::Vault) -> Result<T, String> + Send + 'static) -> Reply<Result<T, String>> {
     let inner = Arc::clone(&state.inner);
-    ticket.submit(move || f(lock(&inner).vault.as_mut().ok_or("no vault open")?))
+    ticket.submit(move || f(write_lock(&inner).vault.as_mut().ok_or("no vault open")?))
 }
 
 /// Remember `raw`, watch it, and hand back its name. Shared by open and create.
 fn install_vault(state: &AppState, ticket: WriteTicket, prepare: impl FnOnce() -> Result<std::path::PathBuf, String> + Send + 'static) -> Reply<Result<VaultInfo, String>> {
     let (inner, watch_tx) = (Arc::clone(&state.inner), state.watch_tx.clone());
     ticket.submit(move || {
-        let opened = vault::Vault::open(prepare()?)?;
+        let mut opened = vault::Vault::open(prepare()?)?;
+        opened.index.set_defer_links(true);
         let (info, root) = (VaultInfo::from_path(&opened.root), opened.root.clone());
         let config_dir = read(&inner).config_dir.clone();
         config::remember(&config_dir, &root)?;
-        lock(&inner).vault = Some(opened);
+        write_lock(&inner).vault = Some(opened);
         let _ = watch_tx.send(WatchMsg::Watch(root));
         Ok(info)
     })
@@ -449,7 +497,7 @@ fn search(state: State<'_, AppState>, query: String, limit: u32) -> Result<Vec<S
 
 #[tauri::command(async)]
 fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
-    read_vault(&state, |v| Ok(v.index.link_index()))
+    settled(&state.inner, |v| v.index.link_index())
 }
 
 /// The link index since an earlier reply (`id` and `version` from it), or all of it when
@@ -457,13 +505,13 @@ fn link_index(state: State<'_, AppState>) -> Result<LinkIndex, String> {
 /// behind). See `index::link_table`.
 #[tauri::command(async)]
 fn link_changes(state: State<'_, AppState>, id: Option<u64>, version: Option<u64>) -> Result<LinkChanges, String> {
-    read_vault(&state, |v| Ok(v.index.link_changes(id.zip(version))))
+    settled(&state.inner, |v| v.index.link_changes(id.zip(version)))
 }
 
 /// Linked mentions for the requested target paths only; empty targets are omitted.
 #[tauri::command(async)]
 fn backlinks(state: State<'_, AppState>, paths: Vec<String>) -> Result<BTreeMap<String, Vec<Backlink>>, String> {
-    read_vault(&state, |v| Ok(v.index.backlinks(&paths)))
+    settled(&state.inner, |v| v.index.backlinks(&paths))
 }
 
 /// Notes that might link to `paths`, for a rename. Fetched before `rename_path`.

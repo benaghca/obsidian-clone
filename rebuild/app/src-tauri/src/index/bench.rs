@@ -568,8 +568,29 @@ fn bench_link_deltas() {
         add_ms.push(elapsed_ms(started));
     }
     println!(
-        "GROVE_BENCH shared alias, {n} linkers: remove_ms={:.1} add_back_ms={:.1} full_link_rebuild_ms={rebuild_ms:.1} changed_notes={changed}",
+        "GROVE_BENCH shared alias, {n} linkers, settled inline: remove_ms={:.1} add_back_ms={:.1} full_link_rebuild_ms={rebuild_ms:.1} changed_notes={changed}",
         median(&remove_ms),
         median(&add_ms)
+    );
+    // Review 2, as the app runs it: the save returns with the linkers queued; a link read
+    // settles them in 2 ms slices, between writes.
+    fan.set_defer_links(true);
+    let (mut save_ms, mut settle_ms, mut slices) = (Vec::new(), Vec::new(), 0);
+    for body in ["hub\n", aliased].iter().cycle().take(2 * runs) {
+        let started = Instant::now();
+        fan.upsert_note(root, "hub.md", body, Stamp::sized(body.len()));
+        save_ms.push(elapsed_ms(started));
+        let started = Instant::now();
+        slices = 0;
+        while !fan.settle_links_until(Instant::now() + std::time::Duration::from_millis(2)) {
+            slices += 1;
+        }
+        settle_ms.push(elapsed_ms(started));
+    }
+    println!(
+        "GROVE_BENCH shared alias, {n} linkers, deferred: save_ms={:.3} settle_ms={:.1} in {} slices of 2 ms",
+        median(&save_ms),
+        median(&settle_ms),
+        slices + 1
     );
 }

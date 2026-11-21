@@ -22,7 +22,8 @@ import { createList } from "./list";
 import { columnControls } from "./columns";
 import { cellEditor } from "./cells";
 import { baseModel, baseNoteFiles, noteKey, propertyId, viewGlyph, type Row } from "./model";
-import type { Value } from "./expression";
+import type { Reads, Value } from "./expression";
+import { linkEntryOf } from "../links/linkDelta";
 import { mapping, readYaml, type Yaml } from "./yaml";
 import { createGroupedView, runSliced, type Entry } from "./groups";
 import { searchWork, rowText } from "./search";
@@ -159,13 +160,19 @@ export const readsTags = (source: string) => /file\.(?:tags|hasTag)/.test(source
 
 /**
  * Whether a link refresh that changed `touched` notes' entries (null: unknown)
- * can change a base with this YAML. Rows read the link index only through
- * `hasLink` (and the names `readsOtherFiles` lists), so a refresh that changed
- * no entry, or a base that reads no links, has nothing to redo. Tags are re-read
- * on a link refresh (`vaultTags`), so a base that reads them rebuilds, as before.
+ * can change a base that reads `reads` (null: unknown). Rows read the link index
+ * only through `hasLink` (and `file.links` and kin), so a refresh that changed no
+ * entry, or a base that reads no links, has nothing to redo. Tags are re-read on
+ * a link refresh (`vaultTags`), so a base that reads them rebuilds, as before.
+ * `reads` comes from the compiled filters, formulas and keys (`baseReads`), not
+ * from the YAML's spelling (review 2: `file. hasLink("Hub")` is a valid filter).
  */
-export const linkRefreshMatters = (touched: ReadonlySet<string> | null, source: string) =>
-  !touched || readsTags(source) || (touched.size > 0 && readsOtherFiles(source));
+export const linkRefreshMatters = (touched: ReadonlySet<string> | null, reads: Readonly<Reads> | null) =>
+  !touched || !reads || reads.tags || (touched.size > 0 && reads.links);
+
+/** A base's reads: its compiled model's, widened by the YAML text checks used before (either is enough). */
+export const baseReads = (model: { reads: Readonly<Reads> }, source: string): Reads =>
+  ({ links: model.reads.links || readsOtherFiles(source), tags: model.reads.tags || readsTags(source) });
 
 /** Frontmatter the board painted versus the property index's re-read of that note. */
 export function sameProperties(a: readonly Property[] | undefined, b: readonly Property[] | undefined): boolean {
@@ -453,7 +460,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
       own: own !== undefined,
       echo,
       readsThis: notice.paths.length === 1 && readsChanged(source, hostPath(), notice.paths),
-      readsOther: readsOtherFiles(source),
+      readsOther: model ? baseReads(model, source).links : readsOtherFiles(source),
     });
     if (decision === "links") { reconcile.skip++; reconcile.lastMs = 0; return true; }
     if (decision !== "own" || !path) { echoed.clear(); return false; }
@@ -501,7 +508,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
           viewIndex = model.viewIndex; o.remember?.(viewIndex);
         }
         const properties = await index.notes();
-        const needsTags = readsTags(source);
+        const needsTags = baseReads(model!, source).tags;
         const tags = needsTags ? await vaultTags(ws).read() : new Map<string, string[]>();
         if (gone || dirty) continue;
         if (editing()) { dirty = false; break; }
@@ -518,8 +525,9 @@ export function createBase(ws: Workspace, o: BaseOptions) {
           return { file, props, tags: allTags, hasLink: link => {
             const cacheKey = `${parentDir(file.path)}\0${link}`;
             if (!linkCache.has(cacheKey)) linkCache.set(cacheKey, ws.resolve(link.replace(/^\[\[|\]\]$/g, ""), file.path));
-            const target = linkCache.get(cacheKey), links = ws.vault.links;
-            return !!target && [...links.outgoing[file.path] ?? [], ...links.markdown?.[file.path] ?? []].includes(target);
+            // One note's entry, without building the whole maps (review 2).
+            const target = linkCache.get(cacheKey), entry = linkEntryOf(ws.vault.links, file.path);
+            return !!target && [...entry.outgoing ?? [], ...entry.markdown ?? []].includes(target);
           } };
         };
         const rows = baseNoteFiles(ws.vault.files, (path) => ws.vault.isExcluded(path)).map(row);
@@ -660,7 +668,7 @@ export function createBase(ws: Workspace, o: BaseOptions) {
   const outside = (changed: string[], before: (note: string) => string | null) => !readsChanged(source, hostPath(), changed) && docsOutsideFilter(changed, source, viewIndex,
     note => ws.editors.isLoaded(note) ? ws.editors.doc(note)?.toString() ?? null : null,
     note => selected.some(entry => entry.row.file.path === note), before);
-  const linksMatter = (touched: ReadonlySet<string> | null) => reload || !model || linkRefreshMatters(touched, source);
+  const linksMatter = (touched: ReadonlySet<string> | null) => reload || !model || linkRefreshMatters(touched, baseReads(model, source));
   const unwatch = ws.vault.onModified(changed => {
     const before = changedFrom.get(changed) ?? null;
     changedFrom.delete(changed);

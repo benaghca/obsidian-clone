@@ -36,7 +36,7 @@ use name_maps::{Lookups, NameMaps};
 use parse::{clean_target, parse_note, Note, RawLink};
 #[cfg(test)]
 use std::cell::Cell;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -155,7 +155,16 @@ pub struct Index {
     // `put_node` / `take_node` queue the notes to resolve again; `settle_links` resolves
     // them when the change is done. A full map rebuild resolves every note.
     links: LinkTable,
+    // Review 2: a change that wakes more than `INLINE_LINKS` notes leaves them queued instead of
+    // resolving them before the write returns. The app reads links through `lib::settled`,
+    // which resolves the queue in short slices under the lock, between writes. Off by default
+    // (tests and tools see every change settled when it returns). `Some(n)`: defer past n notes.
+    defer_links: Option<usize>,
 }
+
+/// Notes a change may re-resolve before it returns when `defer_links` is on. A save, a rename,
+/// or an alias edit with this many linkers or fewer settles at once, as before.
+pub(crate) const INLINE_LINKS: usize = 256;
 
 /// Holds name-map rebuilds, then rebuilds once on drop if anything asked.
 /// Nested guards rebuild on the outermost drop.
@@ -254,6 +263,58 @@ impl Index {
     /// versions, logging only the notes whose links differ.
     pub(crate) fn continue_link_history(&mut self, older: &Index) {
         self.links.continue_from(&older.links);
+        self.defer_links = older.defer_links;
+    }
+
+    /// Leave large link updates queued for `settle_links_until` (the app; see `defer_links`).
+    pub(crate) fn set_defer_links(&mut self, on: bool) {
+        self.defer_links = on.then_some(INLINE_LINKS);
+    }
+
+    /// Defer every link update past `n` queued notes (tests: 0 defers them all).
+    #[cfg(test)]
+    pub(crate) fn defer_links_over(&mut self, n: usize) {
+        self.defer_links = Some(n);
+    }
+
+    /// Notes queued to resolve again. Link reads (`link_index`, `link_changes`, `backlinks`)
+    /// need none queued.
+    pub(crate) fn links_pending(&self) -> bool {
+        self.links.has_pending()
+    }
+
+    /// Resolve queued notes until none remain or `deadline` passes (checked every few notes).
+    /// True when none remain. Each call logs its changes as one version.
+    pub(crate) fn settle_links_until(&mut self, deadline: std::time::Instant) -> bool {
+        if self.defer_depth > 0 || self.maps_dirty {
+            return !self.links.has_pending();
+        }
+        let mut changed = Vec::new();
+        let mut picks = PickCache::default();
+        while self.links.has_pending() {
+            for path in self.links.take_some(SETTLE_STEP) {
+                let resolved = self
+                    .files
+                    .get(&path)
+                    .filter(|node| has_links(&path, node))
+                    .map(|node| resolve_note(&self.maps, &path, &node.note.links, Some(&mut picks)));
+                if self.links.replace(Arc::clone(&path), resolved) {
+                    changed.push(path);
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                break;
+            }
+        }
+        self.links.record(changed);
+        !self.links.has_pending()
+    }
+
+    /// Resolve every queued note now.
+    #[cfg(test)]
+    pub(crate) fn settle_links_now(&mut self) {
+        let far = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        while !self.settle_links_until(far) {}
     }
 
     /// Case-insensitive substring search. Whitespace-separated terms must all occur on the same
@@ -529,28 +590,22 @@ impl Index {
         if self.defer_depth > 0 || self.maps_dirty || !self.links.has_pending() {
             return;
         }
-        let mut changed = Vec::new();
-        for path in self.links.take_pending() {
-            let resolved = self
-                .files
-                .get(&path)
-                .filter(|node| has_links(&path, node))
-                .map(|node| resolve_note(&self.maps, &path, &node.note.links));
-            if self.links.replace(Arc::clone(&path), resolved) {
-                changed.push(path);
-            }
+        if self.defer_links.is_some_and(|n| self.links.pending_len() > n) {
+            return;
         }
-        self.links.record(changed);
+        let far = std::time::Instant::now() + std::time::Duration::from_secs(3600);
+        self.settle_links_until(far);
     }
 
     /// Every note's links from scratch, after a full map rebuild.
     fn rebuild_links(&mut self) {
         let maps = &self.maps;
+        let mut picks = PickCache::default();
         let fresh = self
             .files
             .iter()
             .filter(|(path, node)| has_links(path, node))
-            .map(|(path, node)| (Arc::<str>::from(path.as_str()), resolve_note(maps, path, &node.note.links)));
+            .map(|(path, node)| (Arc::<str>::from(path.as_str()), resolve_note(maps, path, &node.note.links, Some(&mut picks))));
         self.links.refill(fresh);
     }
 
@@ -713,7 +768,7 @@ fn resolve_in(look: &mut Lookups, from: &str, target: &str) -> Option<String> {
         key = stripped.to_string();
     }
     if let Some(cands) = look.names(&key) {
-        if let Some(found) = pick(cands, from) {
+        if let Some(found) = look.pick(cands, from) {
             return Some(found.to_string());
         }
     }
@@ -751,9 +806,9 @@ fn resolve_path_in(look: &mut Lookups, from: &str, raw: &str) -> Option<String> 
 /// `link_index` rules: targets in first-seen order without repeats, wikilinks in `outgoing`,
 /// markdown links in `markdown`, and the targets that match no file in `unresolved` (as
 /// written, a markdown link without its `.md`, repeats dropped ignoring ASCII case).
-fn resolve_note(maps: &NameMaps, path: &str, links: &[RawLink]) -> Resolved {
+fn resolve_note<'m>(maps: &'m NameMaps, path: &str, links: &[RawLink], picks: Option<&mut PickCache<'m>>) -> Resolved {
     let mut reads = Vec::new();
-    let mut look = Lookups::watching(maps, &mut reads);
+    let mut look = Lookups::watching(maps, &mut reads, picks);
     let mut entry = LinkEntry::default();
     let mut slots = Vec::with_capacity(links.len());
     for link in links {
@@ -839,6 +894,69 @@ fn better_suffix<'a>(a: Option<&'a String>, b: Option<&'a String>) -> Option<&'a
         (Some(_), Some(b)) => Some(b),
         (Some(a), None) => Some(a),
         (None, b) => b,
+    }
+}
+
+/// Queued notes resolved between deadline checks in `settle_links_until`.
+const SETTLE_STEP: usize = 32;
+
+/// A candidate list longer than this gets a `PickIndex` inside a batch of resolutions.
+const PICK_INDEX_MIN: usize = 16;
+
+/// `pick` for one long candidate list, answered per source folder without a scan (review 2:
+/// many readers of a key with many owners, such as `[[README]]`, cost readers × owners).
+/// `pick` ranks by (is a note, is in the source's folder), then length, then path, so the
+/// answer is the best note in the source's folder, else the best note, else the best other
+/// file in the folder, else the best other file.
+struct PickIndex<'m> {
+    /// Best note, best other file (index into the list).
+    best: [Option<usize>; 2],
+    by_dir: HashMap<&'m str, [Option<usize>; 2]>,
+}
+
+impl<'m> PickIndex<'m> {
+    fn new(cands: &'m [String]) -> Self {
+        let better = |slot: &mut Option<usize>, i: usize| {
+            let a = &cands[i];
+            if slot.is_none_or(|j| {
+                let b = &cands[j];
+                (a.len(), a.as_str()) < (b.len(), b.as_str())
+            }) {
+                *slot = Some(i);
+            }
+        };
+        let mut best = [None, None];
+        let mut by_dir: HashMap<&'m str, [Option<usize>; 2]> = HashMap::new();
+        for (i, path) in cands.iter().enumerate() {
+            if nameless_md(path) {
+                continue;
+            }
+            let kind = usize::from(!is_note_path(path));
+            better(&mut best[kind], i);
+            better(&mut by_dir.entry(parent_path(path)).or_default()[kind], i);
+        }
+        PickIndex { best, by_dir }
+    }
+
+    fn pick(&self, cands: &'m [String], from: &str) -> Option<&'m str> {
+        let near = self.by_dir.get(parent_path(from));
+        let at = near.and_then(|n| n[0]).or(self.best[0]).or(near.and_then(|n| n[1])).or(self.best[1]);
+        at.map(|i| cands[i].as_str())
+    }
+}
+
+/// `PickIndex`es for one batch of resolutions against unchanged maps, by candidate list.
+#[derive(Default)]
+pub(super) struct PickCache<'m> {
+    lists: HashMap<*const String, PickIndex<'m>>,
+}
+
+impl<'m> PickCache<'m> {
+    fn pick(&mut self, cands: &'m [String], from: &str) -> Option<&'m str> {
+        if cands.len() < PICK_INDEX_MIN {
+            return pick(cands, from);
+        }
+        self.lists.entry(cands.as_ptr()).or_insert_with(|| PickIndex::new(cands)).pick(cands, from)
     }
 }
 

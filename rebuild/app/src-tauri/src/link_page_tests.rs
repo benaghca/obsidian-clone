@@ -204,3 +204,72 @@ fn outside_changes_reach_the_page_as_deltas_equal_to_a_fresh_scan() {
     settled(&mut page, "rescan");
     assert_eq!(page.deltas, 8, "every read after the first was a delta");
 }
+
+/// Review 2: a save queued behind a high-fanout alias edit is not held up by its link work.
+///
+/// 10,000 notes read the alias `alpha` of `hub.md`. With the app's deferral on, the save that
+/// removes the alias returns without re-resolving them. A link read (`settled`) then resolves
+/// them in short slices under the lock while another thread keeps saving: each of those saves
+/// waits at most about one slice, never the whole re-resolve. The read sees a table equal to a
+/// fresh scan.
+#[test]
+fn a_save_behind_a_high_fanout_alias_edit_waits_one_slice_at_most() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+    let dir = tmp_dir("link-fanout-latency");
+    let root = dir.path.clone();
+    let n = 10_000;
+    fs::create_dir_all(root.join("l")).unwrap();
+    for i in 0..n {
+        fs::write(root.join(format!("l/{i:05}.md")), format!("see [[alpha]] and [[alpha#Part]] {i}\n")).unwrap();
+    }
+    fs::write(root.join("hub.md"), "---\naliases: [alpha]\n---\n# Part\n").unwrap();
+    fs::write(root.join("other.md"), "typing here\n").unwrap();
+    let mut vault = crate::vault::Vault::open(root.clone()).unwrap();
+    vault.index.set_defer_links(true);
+    let inner = RwLock::new(Inner { config_dir: root.join(".grove"), vault: Some(vault) });
+
+    // The edit that wakes every linker: it returns with their work queued.
+    let started = Instant::now();
+    crate::write_lock(&inner).vault.as_mut().unwrap().write_note("hub.md", "# Part\n").unwrap();
+    let edit = started.elapsed();
+    assert!(lock(&inner).vault.as_ref().unwrap().index.links_pending(), "the linkers are queued");
+
+    // A link read settles the queue while saves keep coming.
+    let reading = AtomicBool::new(true);
+    let (read, saves) = std::thread::scope(|s| {
+        let reader = s.spawn(|| {
+            let started = Instant::now();
+            let reply = crate::settled(&inner, |v| v.index.link_changes(None)).unwrap();
+            reading.store(false, Ordering::SeqCst);
+            (started.elapsed(), reply)
+        });
+        let writer = s.spawn(|| {
+            let mut waits = Vec::new();
+            let mut i = 0;
+            while reading.load(Ordering::SeqCst) || waits.is_empty() {
+                let started = Instant::now();
+                crate::write_lock(&inner).vault.as_mut().unwrap().write_note("other.md", &format!("typing here {i}\n")).unwrap();
+                waits.push(started.elapsed());
+                i += 1;
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            waits
+        });
+        (reader.join().unwrap(), writer.join().unwrap())
+    });
+    let (settle, reply) = read;
+    let worst = *saves.iter().max().unwrap();
+    println!(
+        "fanout {n} (debug): alias edit {edit:?}, read incl. settling {settle:?}, {} saves meanwhile, worst {worst:?}",
+        saves.len()
+    );
+    assert!(edit * 4 < settle, "the alias edit ({edit:?}) left the re-resolve ({settle:?}) to the read");
+    assert!(saves.len() >= 3, "saves ran while the read settled");
+    assert!(worst * 4 < settle, "a save waited {worst:?} while the queue took {settle:?}");
+    let fresh = Index::scan(&root).unwrap();
+    assert_eq!(reply.full.unwrap(), fresh.link_index(), "the read saw a settled table");
+    let guard = lock(&inner);
+    assert!(!guard.vault.as_ref().unwrap().index.links_pending());
+    guard.vault.as_ref().unwrap().index.assert_maps_match_rebuild();
+}

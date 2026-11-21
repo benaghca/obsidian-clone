@@ -7,7 +7,7 @@
 //! a move into `.trash` is reported as `remove`.
 
 use crate::model::{push_change, ChangeKind, VaultChanged};
-use crate::{lock, AppState, Inner};
+use crate::{write_lock, AppState, Inner};
 use crate::index::Index;
 use notify::event::{AccessKind, AccessMode, EventKind, ModifyKind, RenameMode};
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
@@ -117,7 +117,7 @@ pub(crate) fn flush_changes(
     scan: impl FnOnce(&Path) -> Result<Index, String>,
 ) -> Vec<VaultChanged> {
     let (root, token) = {
-        let mut inner = lock(inner);
+        let mut inner = write_lock(inner);
         let Some(vault) = inner.vault.as_mut() else {
             return Vec::new();
         };
@@ -131,7 +131,7 @@ pub(crate) fn flush_changes(
     };
     // The expensive full-vault disk read must not hold AppState.inner.
     let fresh = scan(&root);
-    let mut inner = lock(inner);
+    let mut inner = write_lock(inner);
     let Some(vault) = inner.vault.as_mut() else {
         return Vec::new();
     };
@@ -297,6 +297,7 @@ fn rename_ends(root: &Path, event: &Event) -> (Option<String>, Option<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lock;
     use crate::fsutil::{tmp_dir, TEMP_MARK};
     use notify::event::{CreateKind, DataChange, RemoveKind};
     use std::fs;

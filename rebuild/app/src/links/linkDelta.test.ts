@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LinkIndex } from "../api";
-import { byCodePoint, type LinkChanges, type LinkEntry, linkChanges, linkEntryOf, linkReader, patchLinks } from "./linkDelta";
+import { byCodePoint, type LinkChanges, type LinkEntry, linkChanges, linkCompactions, linkEntryOf, linkReader, overlaySize, patchLinks } from "./linkDelta";
 
 type Field = "outgoing" | "markdown" | "unresolved";
 const FIELDS: Field[] = ["outgoing", "markdown", "unresolved"];
@@ -142,20 +142,34 @@ describe("patchLinks", () => {
     }
   });
 
-  it("folds a long pile of unread changes in early and still equals the full reply", () => {
-    // 400 paths: past 64 changed paths a layer folds in before anything reads it.
+  it("compacts a long pile of unread changes in the background, and every read stays what it was", async () => {
+    // 400 paths: past 64 changed paths a layer is compacted, a few thousand keys per task.
     const r = rng(2024);
     let entries = new Map<string, Required<LinkEntry>>();
     for (const path of PATHS) entries.set(path, { outgoing: [PATHS[r(PATHS.length)]!], markdown: [], unresolved: [] });
     let links = snapshot(entries);
-    const older: [LinkIndex, string][] = [];
-    for (let step = 0; step < 120; step++) {
+    const older: [LinkIndex, string, Map<string, Required<LinkEntry>>][] = [];
+    for (let step = 0; step < 160; step++) {
       const next = randomEntries(r, entries);
       links = patchLinks(links, delta(entries, next));
-      older.push([links, JSON.stringify(snapshot(next))]);
+      older.push([links, JSON.stringify(snapshot(next)), next]);
       entries = next;
+      // Let compactions run now and then, with patches landing while they do.
+      if (step % 9 === 4) await new Promise((done) => setTimeout(done, 0));
+      if (step % 40 === 39) await linkCompactions();
     }
-    for (const [i, [read, full]] of older.entries()) expect(JSON.stringify(read), `read ${i}`).toBe(full);
+    await linkCompactions();
+    // The newest read was re-rooted: what is left over its root is small.
+    for (const field of FIELDS) expect(overlaySize(links, field), field).toBeLessThanOrEqual(64);
+    // Every read, before, during or after a compaction, still shows its own step, entry by entry and whole.
+    for (const [i, [read, full, state]] of older.entries()) {
+      for (const path of PATHS.slice(0, 50)) {
+        const want: LinkEntry = {};
+        for (const field of FIELDS) if (state.get(path)?.[field].length) want[field] = state.get(path)![field];
+        expect(linkEntryOf(read, path), `read ${i} ${path}`).toEqual(want);
+      }
+      expect(JSON.stringify(read), `read ${i}`).toBe(full);
+    }
   });
 
   it("costs the changed notes, not the map, until a map is read", () => {

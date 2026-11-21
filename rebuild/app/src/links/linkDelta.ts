@@ -17,9 +17,10 @@
 // is built (one copy, with the new paths at their sorted places) only when
 // something reads that map, and then kept, so a save that nobody reads the map
 // after, or that changes nothing, copies nothing. A map no changed note touches
-// is the previous reply's own object. The changes are folded in early once
-// they reach an eighth of the map, so copying the pile of changes from one read
-// to the next stays a small share of what building the map costs.
+// is the previous reply's own object. Once the changes reach an eighth of the
+// map they are folded into a new root in the background, a few thousand keys per
+// task (`compact`), so carrying them from one read to the next stays a small
+// share of what building the map costs, and no single task pays for the map.
 //
 // Key order matches a full reply: the backend's maps are sorted by path (UTF-8
 // byte order, which is code point order), and a path new to a map is inserted
@@ -51,7 +52,7 @@ export interface LinkChanges {
   changed: Record<string, LinkEntry>;
 }
 
-type Field = "outgoing" | "markdown" | "unresolved";
+export type Field = "outgoing" | "markdown" | "unresolved";
 const FIELDS: readonly Field[] = ["outgoing", "markdown", "unresolved"];
 type PathMap = Record<string, string[]>;
 
@@ -87,11 +88,21 @@ interface Layer {
   over: ReadonlyMap<string, string[] | null> | null;
   /** Paths in the map this layer stands for. */
   readonly size: number;
+  /** The reads patched one from another: each patch lays its changes on the line's newest layer. */
+  readonly line: Line;
 }
 
-/** Fold the layer in once it holds this share of the map (and at least `MIN_OVER` paths). */
+/** One map's run of layers, for compaction (`compact`). */
+interface Line {
+  latest: Layer | null;
+  compacting: boolean;
+}
+
+/** Compact a line once its newest layer holds this share of the map (and at least `MIN_OVER` paths). */
 const OVER_SHARE = 8;
 const MIN_OVER = 64;
+/** Keys a compaction copies per task. */
+const COMPACT_STEP = 4096;
 
 function lookup(layer: Layer, path: string): string[] | undefined {
   if (layer.over?.has(path)) return layer.over.get(path) ?? undefined;
@@ -125,8 +136,79 @@ function built(layer: Layer): PathMap {
 
 const plainLayer = (map: PathMap | undefined): Layer => {
   const root = map ?? {};
-  return { root, over: null, size: Object.keys(root).length };
+  const line: Line = { latest: null, compacting: false };
+  const layer: Layer = { root, over: null, size: Object.keys(root).length, line };
+  line.latest = layer;
+  return layer;
 };
+
+let compactions = 0;
+let compacted: (() => void)[] = [];
+
+/**
+ * Fold a line's pile of changes into a new root in the background, `COMPACT_STEP`
+ * keys per task (review 2: no read, and no patch, pays for a whole map at once).
+ * The fold is of the newest layer as it was when this started. When it is done the
+ * then-newest layer is re-rooted on it, keeping only the changes made since. That
+ * layer stands for the same map before and after, and maps already handed out are
+ * not touched. Patches meanwhile keep laying their changes on the old root.
+ */
+function compact(line: Line) {
+  const start = line.latest;
+  if (line.compacting || !start?.over) return;
+  line.compacting = true;
+  compactions += 1;
+  const { root, over } = start;
+  const keys = Object.keys(root);
+  const added = [...over.keys()].filter((path) => over.get(path) !== null && own(root, path) === undefined).sort(byCodePoint);
+  const next: PathMap = {};
+  let i = 0, at = 0;
+  const step = () => {
+    for (const end = Math.min(keys.length, i + COMPACT_STEP); i < end; i++) {
+      const path = keys[i]!;
+      while (at < added.length && byCodePoint(added[at]!, path) < 0) {
+        next[added[at]!] = over.get(added[at]!)!;
+        at += 1;
+      }
+      const value = over.has(path) ? over.get(path) : root[path];
+      if (value) next[path] = value;
+    }
+    if (i < keys.length) {
+      setTimeout(step, 0);
+      return;
+    }
+    for (; at < added.length; at++) next[added[at]!] = over.get(added[at]!)!;
+    line.compacting = false;
+    rebase(line.latest, root, over, next);
+    compactions -= 1;
+    if (!compactions) for (const done of compacted.splice(0)) done();
+    if (line.latest?.over && line.latest.over.size > threshold(line.latest.size)) compact(line);
+  };
+  setTimeout(step, 0);
+}
+
+/** Put `layer` on `next` (`root` with `over` folded in) when it was laid on `root` and still holds every change in `over`. */
+function rebase(layer: Layer | null, root: PathMap, over: ReadonlyMap<string, string[] | null>, next: PathMap) {
+  // Built or re-rooted meanwhile, or laid on another base: leave it.
+  if (!layer?.over || layer.root !== root) return;
+  for (const path of over.keys()) if (!layer.over.has(path)) return;
+  const rest = new Map<string, string[] | null>();
+  for (const [path, value] of layer.over) if (!(over.has(path) && over.get(path) === value)) rest.set(path, value);
+  layer.root = next;
+  layer.over = rest.size ? rest : null;
+}
+
+const threshold = (size: number) => Math.max(MIN_OVER, size / OVER_SHARE);
+
+/** Resolves once no compaction is running (tests). */
+export function linkCompactions(): Promise<void> {
+  return compactions ? new Promise((done) => compacted.push(done)) : Promise.resolve();
+}
+
+/** Changes laid over a read's map, not folded into its root yet (tests). */
+export function overlaySize(links: LinkIndex, field: Field): number {
+  return layersOf.get(links)?.[field].over?.size ?? 0;
+}
 
 type Layers = Record<Field, Layer>;
 const layersOf = new WeakMap<LinkIndex, Layers>();
@@ -189,8 +271,9 @@ function laid(base: LinkIndex, changed: Record<string, LinkEntry>): LinkIndex {
       continue;
     }
     // Lay the changes on the last built map, or on top of the changes not built yet.
-    const next: Layer = { root: layer.root, over: layer.over ? new Map([...layer.over, ...over]) : over, size };
-    if (next.over!.size > Math.max(MIN_OVER, size / OVER_SHARE)) built(next);
+    const next: Layer = { root: layer.root, over: layer.over ? new Map([...layer.over, ...over]) : over, size, line: layer.line };
+    layer.line.latest = next;
+    if (next.over!.size > threshold(size)) compact(layer.line);
     layers[field] = next;
   }
   const out = snapshot(layers);

@@ -103,7 +103,7 @@ impl Index {
             .files
             .iter()
             .filter(|(path, node)| has_links(path, node))
-            .map(|(path, node)| (Arc::from(path.as_str()), resolve_note(&self.maps, path, &node.note.links)))
+            .map(|(path, node)| (Arc::from(path.as_str()), resolve_note(&self.maps, path, &node.note.links, None)))
             .collect();
         if self.links.notes() != &fresh {
             for (path, r) in self.links.notes() {
@@ -464,19 +464,26 @@ fn random_content(rng: &mut Rng) -> String {
     text
 }
 
-fn random_links_sequence(seed: u64, steps: usize) {
+/// `deferred`: every link update stays queued (as the app's large ones do) and is settled only
+/// now and then, sometimes one partial step at a time, so queued work from several changes
+/// coalesces and later changes land on a half-settled table.
+fn random_links_sequence(seed: u64, steps: usize, deferred: bool) {
     let tmp = tmp_dir("link-deltas-seq");
     let root = tmp.path.as_path();
     let mut rng = Rng(seed);
     let mut idx = Index::default();
+    if deferred {
+        idx.defer_links_over(0);
+    }
     for _ in 0..16 {
         let path = random_path(&mut rng);
         let body = random_content(&mut rng);
         save(&mut idx, root, &path, &body);
     }
+    idx.settle_links_now();
     let mut pages = Pages::new(&idx);
     for step in 0..steps {
-        let ctx = format!("seed {seed} step {step}");
+        let ctx = format!("seed {seed} step {step}{}", if deferred { " (deferred)" } else { "" });
         match rng.below(16) {
             0..=6 => {
                 let path = random_path(&mut rng);
@@ -516,16 +523,81 @@ fn random_links_sequence(seed: u64, steps: usize) {
                 }
             }
         }
+        if deferred {
+            match rng.below(4) {
+                0 => {
+                    // One step of queued work, then more changes on top.
+                    idx.settle_links_until(Instant::now());
+                    continue;
+                }
+                1 => continue,
+                _ => idx.settle_links_now(),
+            }
+        }
+        assert!(!idx.links_pending(), "{ctx}: settled");
         pages.check(&idx, &ctx);
     }
+    idx.settle_links_now();
+    pages.check(&idx, &format!("seed {seed}: the end"));
     assert_eq!(pages.eager.fulls, 1, "seed {seed}: the eager page never needed a full reply");
 }
 
 #[test]
 fn random_link_edits_match_a_full_walk_and_pages_patch_to_it() {
     for seed in [0x9E37_79B9_7F4A_7C15, 3, 0xC0FF_EE11, 99, 0x00DD_BA11] {
-        random_links_sequence(seed, 250);
+        random_links_sequence(seed, 250, false);
     }
+}
+
+/// Review 2: the same edits with every link update queued and settled later, in pieces.
+#[test]
+fn deferred_link_updates_settle_to_a_full_walk() {
+    for seed in [7, 0xFEED, 0x5EED_1234, 42] {
+        random_links_sequence(seed, 250, true);
+    }
+}
+
+/// Review 2: `pick` through a batch's `PickIndex` equals the plain scan, for any source folder.
+#[test]
+fn indexed_pick_equals_the_scan() {
+    let mut rng = Rng(0xA11CE);
+    let dirs = ["", "a", "a/b", "b", "c/d"];
+    let names = ["README.md", "README.png", "readme.md", ".md", "README.MD", "x/README.md"];
+    for round in 0..300 {
+        let mut cands: Vec<String> = (0..super::PICK_INDEX_MIN + rng.below(40))
+            .map(|_| {
+                let dir = rng.pick(&dirs);
+                let name = rng.pick(&names);
+                if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") }
+            })
+            .collect();
+        cands.sort();
+        cands.dedup();
+        let mut cache = super::PickCache::default();
+        for dir in dirs.iter().chain(["z", "a/b/c"].iter()) {
+            let from = if dir.is_empty() { "src.md".to_string() } else { format!("{dir}/src.md") };
+            assert_eq!(cache.pick(&cands, &from), super::pick(&cands, &from), "round {round} from {from}: {cands:?}");
+        }
+    }
+}
+
+/// Review 2: many readers of a key with many owners (`[[README]]`). A batch builds one
+/// `PickIndex` per candidate list, so a full rebuild is linear, far under the per-link scan.
+#[test]
+fn many_readers_of_an_ambiguous_name_resolve_without_a_scan_each() {
+    let mut notes: Vec<(String, String)> = (0..1500).map(|i| (format!("r{i:04}/README.md"), "readme\n".to_string())).collect();
+    notes.extend((0..3000).map(|i| (format!("s{:04}/note{i}.md", i % 1500), "see [[README]]\n".to_string())));
+    let refs: Vec<(&str, &str)> = notes.iter().map(|(p, c)| (p.as_str(), c.as_str())).collect();
+    let mut idx = Index::from_notes(&refs);
+    let started = Instant::now();
+    let walked = walked_link_index(&idx);
+    let walk = started.elapsed();
+    let started = Instant::now();
+    idx.rebuild_links();
+    let rebuild = started.elapsed();
+    assert_eq!(idx.link_index(), walked);
+    println!("3000 [[README]] links over 1500 READMEs (debug): walk {walk:?}, rebuild {rebuild:?}");
+    assert!(rebuild * 5 < walk, "rebuild {rebuild:?} vs a walk with a scan per link {walk:?}");
 }
 
 /// A rescan replaces the index; the page keeps patching, with only the notes that differ.

@@ -5,7 +5,7 @@
 import { type Camera, toScreen } from "./camera";
 import type { GraphModel } from "./data";
 
-type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown };
+type DevWindow = { __graphWork?: number[]; __graphBuilds?: { at: number; ms: number; span: number }[]; __graphNodes?: number; __graphRunning?: boolean; __graphProbe?: () => unknown };
 const dev = window as unknown as DevWindow;
 
 /** Each frame's work (ms). */
@@ -17,10 +17,10 @@ export const devStats = import.meta.env.DEV
     }
   : null;
 
-/** Each model rebuild: when it ended (performance.now) and how long building and installing it took (ms). */
+/** Each model rebuild: when it ended (performance.now), its work (ms, summed over its slices), and the time from start to installed (ms). */
 export const devBuilt = import.meta.env.DEV
-  ? (ms: number) => {
-      (dev.__graphBuilds ??= []).push({ at: performance.now(), ms });
+  ? (ms: number, span: number) => {
+      (dev.__graphBuilds ??= []).push({ at: performance.now(), ms, span });
     }
   : null;
 

@@ -343,3 +343,151 @@ Two rounds each, before and after, alternating. The values were within a few ms 
   - **Run 2:** the whole `test` chain passed, `test-friction.mjs` included. The last `posttest` script, `test-bases-edge.mjs`, stopped on one 33 ms frame in a 10k-row Base scroll (budget: max 25 ms).
   - Alone, `test-bases-edge.mjs` failed both runs on `494b26b` (a 33 ms scroll frame, then 545 ms sort work), and failed once and passed once on this tree.
   - Both are timing budgets that fail on the base commits too, and neither flow (opening a note from the tree, scrolling a Base) reads the link index. So no fully clean `npm test` run yet; the open item above still stands.
+
+## Review round 2
+
+Codex review 2 of `8e581f8` (PASS-WITH-FIXES, `/tmp/r2-p2b-codex-review2.md`): three P2 and one P3 finding. All four are fixed here. Limits as before.
+
+### P2: a local graph missed a backlink through a shared missing note
+
+**The problem.** The local graph's refresh guard (round 1) skipped a changed note that was outside the graph and linked to none of its notes. It checked only resolved targets. Take a local graph for A (depth 2, missing notes shown) with A → `?missing`. If B is saved with `[[missing]]`, a fresh build reaches B through that node, but the guard skipped it.
+
+**The fix** (`graph/data.ts`):
+
+- `linkedIds(entry, hideUnresolved)` gives the node ids a note's links point at, exactly as `buildGraph` makes them: resolved paths, plus `missingId(name)` unless missing notes are hidden.
+- The guard is now a pure function, `localLinksMatter`, checking the changed note and its `linkedIds` against the shown model.
+- While a sliced rebuild is in flight (see P3 below), every links refresh rebuilds again. The rebuild read the links at its start, so the model on screen can't judge a newer change.
+
+**Tests:**
+
+- `graph.test.ts`:
+  - the reviewer's case;
+  - the same with missing notes hidden (correctly skipped);
+  - 2,000 random local graphs (depth 1–3, any directions, missing notes shown or hidden): whenever the guard skips, a fresh build equals the shown model exactly (nodes, weights, links). Over 100 rounds skip.
+- `scripts/test-link-refresh-guards.mjs` (new, in `npm test`) checks part 1 in the browser. An existing B.md, outside the local graph and with no file-list change, is saved with `[[missing]]` through the real save path. The mock sends a real delta naming B.md, and the graph must grow to 3 nodes. It fails on `8e581f8` and passes now.
+
+### P2: a Base's link guard didn't match its formula parser
+
+**The problem.** The round 1 guard used regexes over the YAML text, while the parser accepts `file. hasLink("Hub")`. Such a Base skipped a link refresh it needed.
+
+**The fix** (`bases/expression.ts`, `bases/model.ts`, `bases/view.ts`):
+
+- Every compiled expression now carries `reads: { links, tags }`, found by walking its syntax tree. Links come from `hasLink` anywhere, `file.links`, `file.backlinks` and `file.embeds`; tags come from `hasTag` and `file.tags`. Spelling and spacing don't matter.
+- `baseModel` unions the reads of every compiled filter (trees included), formula, and custom summary, plus any `file.*` link or tag key used as a column, sort, or group. An expression without `reads` counts as reading both.
+- `linkRefreshMatters(touched, reads)` uses those reads, widened by the old text checks (`baseReads`), and unknown reads count as reading everything. The same reads decide whether the Base loads tags and whether a kanban own-write skip is allowed. Both were regex-based before, with the same blind spot.
+- `hasLink` now reads one note's entry (`linkEntryOf`) instead of the whole `outgoing` map.
+
+**Tests:**
+
+- `view.test.ts`: reads for plain, `hasLink`, `file. hasLink`, a nested `and`/`or` tree with `file . tags`, a formula `file . hasLink(...)`, a `file.backlinks` column, and `hasTag`.
+- `scripts/test-link-refresh-guards.mjs`, part 2: a Base filtered by `'file. hasLink("Hub")'` is open beside C.md, and `[[Hub]]` is typed into C.md's editor. The C.md row must appear after the debounced link delta, which names C.md. It fails on `8e581f8` and passes now.
+
+### P2: a high-fanout link change delayed queued saves
+
+**The problem.** Round 1 made re-resolving N linkers linear, but a save that woke them still resolved all of them before returning, under the vault's write lock. At 50k linkers that is 71 ms in release, so the next queued save waited behind it.
+
+**What I did instead of a snapshot.** The review suggested resolving against an immutable, generation-stamped snapshot off the writer. A snapshot of the name maps would be a copy of the maps per save, or a copy-on-write that copies on the writer's next change: O(vault) work on the writer either way. Instead the queued work is resolved in short slices against the live maps, between writes:
+
+- **Deferral** (`Index::defer_links`, on in the app via `install_vault`, carried across rescans). A change that wakes more than `INLINE_LINKS` (256) notes leaves them in the link table's queue and returns.
+  - A typing save, or an alias with a few linkers, still settles before it returns, as before.
+  - Queued work from several changes coalesces into one set. A note woken twice is resolved once.
+- **Settling** (`lib::settled`). The three commands that read the link table (`link_index`, `link_changes`, `backlinks`) go through it. With nothing queued they read under the read lock, as before. Otherwise they resolve the queue in 2 ms slices under the write lock (`Index::settle_links_until`), and before each slice they wait while any writer is queued for the lock (`write_lock`, counted in `WRITERS_WAITING`; used by the FIFO writer, vault installs, and watcher flushes). A queued save therefore waits for at most one slice.
+- **Consistency.** Each slice resolves against the maps as they are at that moment. Any later change that alters a key a note read queues that note again (the same `readers` rule as before). So when the queue is empty, the table equals a fresh resolution of every note against the current maps, with no generation check needed. Reads only run with the queue empty, so they always see a settled table. The version log gets one entry per slice; a page only asks once the queue is empty, so the delta it gets covers the whole change.
+- **The ambiguous-name scan** (`index.rs` `pick`) scanned every same-named candidate per link: 3,000 `[[README]]` links over 1,500 `README.md` files cost readers × owners. `pick` ranks by (is a note, is in the source's folder), then length, then path. A `PickIndex` per candidate list, built once per batch of resolutions (a settle slice or a full rebuild; `PickCache`, for lists of 16 or more), answers each lookup by the source's folder in O(1): the best note in the folder, else the best note, else the best other file in the folder, else the best other file. Single `Index::resolve` calls, and the test oracles, still use the plain scan.
+
+**Tests:**
+
+- `link_page_tests::a_save_behind_a_high_fanout_alias_edit_waits_one_slice_at_most`: a `/tmp` vault with 10,000 notes reading the alias `alpha`, and deferral on. With saves this thread makes going through `write_lock` meanwhile, it requires that:
+  - the alias edit returns with the linkers queued, in under a quarter of the settle time;
+  - a `settled` link read resolves the queue;
+  - every one of the saves waits under a quarter of the settle time;
+  - the read's reply equals a fresh scan, and the maps and table equal a rebuild.
+- `deferred_link_updates_settle_to_a_full_walk`: the 14-shape random sequence (4 seeds × 250 steps) with every link update deferred. It settles only sometimes, sometimes one partial step at a time with further changes landing on a half-settled table. Each settled point must equal the full walk, with the simulated pages patching to it.
+- `indexed_pick_equals_the_scan`: 300 random candidate lists (notes, other files, nameless `.md`, nested folders) × 7 source folders; `PickCache` equals `pick`.
+- `many_readers_of_an_ambiguous_name_resolve_without_a_scan_each`: 3,000 `[[README]]` over 1,500 READMEs. The rebuild equals the walk and takes under a fifth of its time: 10 ms against 1.4 s in debug.
+- `bench_link_deltas` reports the deferred save and its settle separately (see Measurements below).
+
+### P3: graph and Base still did vault-sized work on real link changes
+
+- **Point reads.** `buildGraph` and the Base's `hasLink` read each note's entry with `linkEntryOf`. They never build a whole map, so a real link change folds nothing. Only `editorHost`'s missing-note suggestions still read a whole map (`unresolved`), when the suggester opens.
+- **Background compaction** (`links/linkDelta.ts` `compact`). Once a map's changes pass an eighth of it, they are no longer folded in one synchronous step. A background fold builds the new root, 4,096 keys per task, and then re-roots the line's newest layer on it, keeping only the changes made since. That layer stands for the same map before and after, maps already handed out are untouched, and patches made meanwhile keep laying their changes on the old root.
+- **Bounded graph rebuild.**
+  - `buildGraph` is now `buildGraphSteps`, a generator that pauses every 2,048 notes and links; `buildGraph` runs it to the end. The graph runs an update of an already-built graph in slices of at most 6 ms, a task apart, while the old model stays up. Its first build still runs at once, so a newly opened graph has its nodes in its first frame.
+  - The output is the same function's output. Its directed-edge and pair sets also use numeric keys instead of a string per edge (identical order: `Map` keeps insertion order), which was most of a 50k build's time.
+- **Tests:**
+  - `linkDelta.test.ts`: 160 patches over 400 paths, with compactions running between and under them. The newest read ends with at most 64 changes over its root, and every earlier read (taken before, during, or after a compaction) still equals its own step, entry by entry and whole.
+  - The graph tests above run the stepped builder through `buildGraph`.
+
+**Mutation checks** (by hand, each reverted). 13 of 14 caught.
+
+- **Rust, all caught:**
+  - large changes settled inline;
+  - link reads skipping the settle;
+  - a slice logging no versions;
+  - `PickIndex` ignoring the folder;
+  - `PickIndex` preferring a near non-note over a note;
+  - settling not stepping aside for waiting writers (the latency test).
+- **TS, caught:**
+  - missing-note ids left out of `linkedIds`;
+  - the local guard checking only the note;
+  - `hasLink` not counted as a link read;
+  - the model ignoring compiled filters;
+  - compaction never re-rooting;
+  - re-rooting dropping later changes;
+  - compaction folding the old value.
+- **TS, not caught:** the graph guard ignoring an in-flight sliced rebuild. That race needs a links refresh to land between two slices of a running rebuild in the browser, and no unit test drives it. The guard is one line, documented at `linksMatter`.
+
+### Measurements (review 2)
+
+**Rust, release** (`bench_link_deltas`, `/tmp/grove-bench-20000` and `-50000`, regenerated). The shared alias case:
+
+| | 20k (20,125 linkers) | 50k (50,125 linkers) |
+|---|---|---|
+| Alias save, settled inline (round 1) | 22.7 ms | 74.9 ms |
+| **Alias save, deferred (now, in the app)** | **0.49 ms** | **1.77 ms** |
+| Settling it on the next link read | 21.4 ms, in 10 slices of 2 ms | 72.0 ms, in 35 slices of 2 ms |
+| `scan` median, RSS | 400 ms, 262 MB | 1,016 ms, 621 MB |
+
+- A save queued behind such a change waits for one 2 ms slice, not the whole 72 ms.
+- Open time and memory are unchanged from round 1.
+
+**Save to render, graph and Base visible** (`scripts/bench-link-refresh.mjs`, now also run with `GROVE_BENCH_BASE=links`, a Base whose filter reads links: `'file.inFolder("LR") && !file.hasLink("Nowhere")'`). Before is `8e581f8`, after is this tree; one round each, same session.
+
+For the graph, "after" shows its work summed over slices / start to installed:
+
+| Notes | Case | Graph before | Graph after | Link-reading Base on refresh, before / after |
+|---|---|---|---|---|
+| 5k | prose | none | none | none / none |
+| 5k | one link | 12.6 ms | 8.6 ms / 11.4 ms | 10.8 ms / 20.3 ms |
+| 20k | prose | none | none | none / none |
+| 20k | one link | 41.7 ms | 25.9 ms / 30.9 ms | 25.6 ms / 38.2 ms |
+| 50k | prose | none | none | none / none |
+| 50k | one link | 109–174 ms in one task | **59–62 ms in ≤6 ms slices** / 80 ms | 76 ms / 78 ms |
+
+- **The 50k one-link save, after:** the graph's rebuild no longer appears among the long tasks. The ones left are:
+  - the Base's rebuild from the save itself (52–83 ms, before and after);
+  - the mock's own in-page link walk (~97 ms; Rust in the app);
+  - the graph's layout frames after it reheats (~93–97 ms each, before and after).
+- **A Base that reads links** still rebuilds once on a real link change. That is its full select over all rows, now with point reads, so no map is built. It skips a prose save.
+- `GROVE_BENCH_CHECK=1` passed on every "after" run (prose: neither view rebuilds; one link: the graph rebuilds once with the new edge; the Base rebuilds exactly when it reads links).
+
+**Still open after review 2:**
+
+- At 50k notes the graph's layout reheats after a real link change, and each layout frame then takes ~95 ms for a couple of seconds. That is the force simulation itself (the known graph gap in `test-feel.mjs`), unchanged by this piece.
+- A Base that reads links still re-selects every row on a real link change.
+
+### Suites (review 2)
+
+- **`cargo test --offline --all-targets`:** **223 passed**, 0 failed, 7 ignored (219 at `8e581f8`, plus the latency, deferred-sequence, pick-index, and ambiguous-name tests).
+- **`cargo clippy --all-targets`:** nothing on changed lines. The four warnings in touched files are on older lines.
+- **`npm run build`:** clean.
+- **`vitest`:** **1705 / 1705**.
+- **`npm test`:** the full run stopped in `test-friction.mjs` (`switcher_last_key` at 24 ms). I then ran every later script of the chain and the `posttest` scripts one by one:
+  - all passed, including the new `test-link-refresh-guards.mjs`, except `test-canvas-lazy.mjs` (one task over 50 ms while a canvas settled);
+  - `vitest run`, launched outside npm and so without `node_modules/.bin` on the path, failed to start; it passed on its own above.
+- **Standalone reruns of the two timing scripts, this tree against `8e581f8`:**
+  - `test-friction.mjs`: this tree 2 of 4 passed, `8e581f8` 3 of 4. Every failure on either tree was one input or key budget step; the same `enter_list_item` step failed on both, with identical numbers (slowest input 24 ms, budget 16).
+  - `test-canvas-lazy.mjs`: this tree 2 of 2, `8e581f8` 2 of 2.
+  - Neither flow reads the link index.
+- **Result:** no clean full `npm test` run yet, as in round 1. The budgets that fail are the same ones, on the base commit too.
+- The test runs rewrote the `rebuild/round*-shots` files; they were restored before committing.

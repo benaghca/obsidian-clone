@@ -11,7 +11,13 @@ export interface Expression {
   /** Getter keys, prefixed with this. for host-note dependencies. */
   readonly dependencies?: readonly string[];
   readonly usesThis?: boolean;
+  /** Whether evaluating it can read the link index (`hasLink`, `file.links` and kin) or tags (`hasTag`, `file.tags`). Absent: unknown. */
+  readonly reads?: Readonly<Reads>;
 }
+
+/** What outside a row's own text and properties an expression can read. */
+export interface Reads { links: boolean; tags: boolean }
+const LINK_FACTS = new Set(["links", "backlinks", "embeds"]);
 
 type Scope = "row" | "this";
 type Node =
@@ -215,6 +221,30 @@ function dependencies(node: Node, keys = new Set<string>()): Set<string> {
   }
   return keys;
 }
+/** Link and tag reads anywhere in the tree, however it is spelled (`file. hasLink`, `file["tags"]`, `this.file.hasLink`). */
+function reads(node: Node, out: Reads = { links: false, tags: false }): Reads {
+  switch (node.type) {
+    case "method":
+      if (node.name === "hasLink") out.links = true;
+      if (node.name === "hasTag") out.tags = true;
+      reads(node.base, out); node.args.forEach(n => reads(n, out)); break;
+    case "member":
+      if (node.base.type === "file") {
+        if (LINK_FACTS.has(node.key)) out.links = true;
+        if (node.key === "tags") out.tags = true;
+      }
+      reads(node.base, out); break;
+    case "read":
+      if (/^file\.(?:links|backlinks|embeds)$/.test(node.key)) out.links = true;
+      if (node.key === "file.tags") out.tags = true;
+      break;
+    case "unary": reads(node.value, out); break;
+    case "binary": reads(node.left, out); reads(node.right, out); break;
+    case "call": node.args.forEach(n => reads(n, out)); break;
+    case "file": case "literal": break;
+  }
+  return out;
+}
 function failure(error: unknown, phase: "parse" | "evaluate"): FormulaError { return error instanceof FormulaError ? error : new FormulaError(error instanceof Error ? error.message : String(error), phase); }
 
 /** Strict compiler for editors/filter validation. Parse errors throw; evaluation errors are values. */
@@ -227,12 +257,12 @@ export function expression(source: string): Expression {
     catch (error) { return failure(error, "evaluate"); }
   };
   const keys = Object.freeze([...dependencies(node)]);
-  return Object.assign(read, { dependencies: keys, usesThis: keys.some(key => key.startsWith("this.")) });
+  return Object.assign(read, { dependencies: keys, usesThis: keys.some(key => key.startsWith("this.")), reads: Object.freeze(reads(node)) });
 }
 /** Formula-column compiler: keeps the parse error visible, including when the base has no rows. */
 export function compileFormula(source: string): Expression {
   try { return expression(source); }
-  catch (error) { const value = failure(error, "parse"); return Object.assign(() => value, { error: value, dependencies: Object.freeze([]), usesThis: false }); }
+  catch (error) { const value = failure(error, "parse"); return Object.assign(() => value, { error: value, dependencies: Object.freeze([]), usesThis: false, reads: Object.freeze({ links: false, tags: false }) }); }
 }
 /** Filters must exclude error-valued rows instead of treating the error object as truthy. */
 export function testExpression(compiled: Expression, context: Context): boolean {

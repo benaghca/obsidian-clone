@@ -88,9 +88,11 @@ export function baseModel(source: string, viewIndex = 0) {
   const view = mapping(first);
   if (view.type != null && view.type !== "table" && view.type !== "cards" && view.type !== "kanban" && view.type !== "list" && view.type !== "board") notices.add("This layout isn't supported yet");
   const groupBy = parseGroupBy(view.groupBy, notices), summaryPlan = parseSummaryPlan(root.summaries, view.summaries, notices);
+  // Every compiled filter and formula, for `reads`.
+  const compiled: Expression[] = [];
   const compile = (source: Yaml | undefined): Expression => {
     if (typeof source !== "string") { notices.add(`Unsupported expression: ${String(source)}`); return () => null; }
-    try { return expression(source); } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
+    try { const e = expression(source); compiled.push(e); return e; } catch { notices.add(`Unsupported expression: ${source}`); return () => null; }
   };
   const tree = (filter: Yaml | undefined): Expression => {
     if (filter == null) return () => true;
@@ -169,6 +171,18 @@ export function baseModel(source: string, viewIndex = 0) {
     const sorted = keyed.map(k => k.r);
     return !unlimited && typeof view.limit === "number" ? sorted.slice(0, view.limit) : sorted;
   }
+  // What rows can read beyond their own text and properties (review 2): from the compiled
+  // filters, formulas and custom summaries, and from the keys shown, sorted, or grouped by.
+  // An expression without `reads` counts as reading both.
+  const reads = { links: false, tags: false };
+  for (const e of [...compiled, ...summaryPlan.custom.values()]) {
+    reads.links ||= e.reads?.links ?? true;
+    reads.tags ||= e.reads?.tags ?? true;
+  }
+  for (const key of [...columns, ...sorts.map(s => s.property), ...(groupBy ? [groupBy.property] : [])].map(canonical)) {
+    if (/^file\.(?:links|backlinks|embeds)$/.test(key)) reads.links = true;
+    if (key === "file.tags") reads.tags = true;
+  }
   const type = layoutOf(view.type);
   const listMarkers = type === "list" ? parseListMarkers(view.markers ?? view.marker ?? view.listMarkers, notices) : "bullets";
   // The public List page: the separator defaults to a comma. A space follows it, matching the inline line that page describes.
@@ -178,5 +192,5 @@ export function baseModel(source: string, viewIndex = 0) {
   const rawImage = view.image ?? view.cover ?? view.imageProperty, image = typeof rawImage === "string" && rawImage.trim() ? rawImage.trim() : null;
   const imageFit: "cover" | "contain" = (view.imageFit ?? view.coverFit) === "contain" ? "contain" : "cover";
   const rawRatio = view.imageAspectRatio ?? view.aspectRatio ?? view.coverAspectRatio, imageAspectRatio = typeof rawRatio === "number" && Number.isFinite(rawRatio) && rawRatio > 0 ? Math.max(0.2, Math.min(3, rawRatio)) : 0.5;
-  return { context, groupBy, summaryPlan, type, listMarkers, listSeparator, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext };
+  return { context, groupBy, summaryPlan, type, listMarkers, listSeparator, cardSize, image, imageFit, imageAspectRatio, rowHeight:ROW_HEIGHTS[String(view.rowHeight??"")]??30, sizes: mapping(view.columnSize), root, view, views, viewIndex, results: 0, total: 0, filtered: root.filters != null || view.filters != null, formulaNames: [...formulas.keys()].map(k => `formula.${k}`), name: typeof view.name === "string" ? view.name : "View", columns, sorts, label, select, notices, hostContext, reads: Object.freeze(reads) };
 }

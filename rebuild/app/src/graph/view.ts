@@ -27,7 +27,7 @@ import { h } from "../shell/dom";
 import type { OpenWhere } from "../tabs";
 import type { Workspace } from "../workspace";
 import { camera, easeZoom, fitAround, hitTest, panBy, toWorld, wheelZoom } from "./camera";
-import { type GraphModel, type GraphNode, neighbours, nodeColor, nodeRadius } from "./data";
+import { type GraphModel, type GraphNode, localLinksMatter, neighbours, nodeColor, nodeRadius } from "./data";
 import { type Colors, drawGraph, readGraphColors } from "./draw";
 import { graphInput } from "./input";
 import { createGraphPanel } from "./panel";
@@ -59,6 +59,8 @@ interface GraphHost {
 export type GraphView = ReturnType<typeof createGraphView>;
 
 const REFRESH_DELAY = 200;
+/** Longest stretch of an update's rebuild in one task (ms). */
+const SLICE_MS = 6;
 /** A canvas slower than this (ms) to draw is drawn every other frame while it settles on its own. */
 const SLOW_FRAME = 10;
 /**
@@ -155,6 +157,8 @@ export function createGraphView(host: GraphHost) {
   let refreshTimer = 0;
   let seq = 0;
   let stale = true;
+  /** A sliced rebuild is under way, from the links as they were when it started. */
+  let building = false;
 
   /**
    * Rebuild the model from the vault and options. Runs synchronously when
@@ -173,9 +177,27 @@ export function createGraphView(host: GraphHost) {
     const started = performance.now();
     const center = local ? (host.file?.() ?? null) : null;
     const shown = reveal ? new Set(reveal.order.slice(0, reveal.shown)) : null;
-    const { model: next, groups } = source.build(cfg, facts, center, shown);
+    // A first build runs to the end now, so a new graph's first frame has its nodes. An
+    // update of a graph already on screen runs in slices of at most SLICE_MS, a frame apart,
+    // while the old one stays up (review 2): a 50k-note rebuild no longer takes one long task.
+    const steps = source.buildSteps(cfg, facts, center, shown);
+    building = true;
+    let step = steps.next();
+    let slice = performance.now();
+    let work = 0;
+    while (!step.done) {
+      if (built && !reveal && performance.now() - slice > SLICE_MS) {
+        work += performance.now() - slice;
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        if (mine !== seq || disposed) return;
+        slice = performance.now();
+      }
+      step = steps.next();
+    }
+    building = false;
+    const { model: next, groups } = step.value;
     setModel(next, groups);
-    devBuilt?.(performance.now() - started);
+    devBuilt?.(work + performance.now() - slice, performance.now() - started);
   }
 
   function setModel(next: GraphModel, groups: ColorRule[]) {
@@ -544,24 +566,11 @@ export function createGraphView(host: GraphHost) {
   }
   applyForces();
 
-  /**
-   * Whether a link refresh that changed `touched` notes' entries can change this
-   * graph. Without tags or a text query the graph is its files and links, so a
-   * refresh that changed no entry (a save of prose) changes nothing here. A
-   * local graph also stays when no changed note is in it and none links into it
-   * now: such a note was out of reach before and still is. Tags and text queries
-   * read note text, which the refresh after a save is the moment to re-read.
-   */
+  /** Whether a link refresh that changed `touched` notes' entries can change this graph (`localLinksMatter`). */
   function linksMatter(touched: ReadonlySet<string> | null): boolean {
-    if (!touched || source.readsText(cfg)) return true;
-    if (!touched.size) return false;
-    if (!local) return true;
-    for (const path of touched) {
-      if (model.index.has(path)) return true;
-      const entry = linkEntryOf(ws.vault.links, path);
-      for (const target of [...entry.outgoing ?? [], ...entry.markdown ?? []]) if (model.index.has(target)) return true;
-    }
-    return false;
+    // A rebuild in flight read older links than these: judge nothing against the old model.
+    if (building) return true;
+    return localLinksMatter(touched, local ? model.index : null, source.readsText(cfg), cfg.hideUnresolved, (path) => linkEntryOf(ws.vault.links, path));
   }
 
   // The vault changed (a moment after a save, never on a keystroke): update in place.

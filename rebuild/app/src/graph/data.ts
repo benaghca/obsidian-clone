@@ -7,6 +7,7 @@
 // Pure and free of the DOM, so it is tested on its own.
 
 import type { LinkIndex } from "../api";
+import { type LinkEntry, linkEntryOf } from "../links/linkDelta";
 import { isNoteFile, noteName } from "../paths";
 
 export type NodeKind = "note" | "attachment" | "tag" | "unresolved";
@@ -83,8 +84,47 @@ interface GraphOptions {
 }
 
 const nameOf = noteName;
+/** One number per ordered pair of node indexes (exact below 2^26 nodes, far past any vault). */
+const edgeKey = (a: number, b: number) => a * 67_108_864 + b;
 const tagId = (tag: string) => `#${tag.toLowerCase()}`;
 const missingId = (name: string) => `?${name.toLowerCase()}`;
+
+/**
+ * The node ids a note's links point at, as `buildGraph` makes them: resolved targets
+ * (notes and attachments, by path) and, unless unresolved links are hidden, the missing
+ * notes' ids. Tags are not links (a graph that shows them rebuilds on every refresh).
+ */
+export function linkedIds(entry: LinkEntry, hideUnresolved: boolean): string[] {
+  const out = [...entry.outgoing ?? [], ...entry.markdown ?? []];
+  if (!hideUnresolved) for (const name of entry.unresolved ?? []) out.push(missingId(name));
+  return out;
+}
+
+/**
+ * Whether a link refresh that changed `touched` notes' entries (null: unknown) can
+ * change a graph. Without tags or a text query (`readsText`) a graph is its files
+ * and links, so a refresh that changed no entry (a save of prose) changes nothing.
+ * A local graph (`shown`: the ids of the nodes it has) also stays when no changed
+ * note is in it and none of them now links to a node in it, resolved or missing
+ * (`linkedIds`): such a note was out of reach before and still is. Any other
+ * change rebuilds a global graph.
+ */
+export function localLinksMatter(
+  touched: ReadonlySet<string> | null,
+  shown: ReadonlyMap<string, number> | null,
+  readsText: boolean,
+  hideUnresolved: boolean,
+  entryOf: (path: string) => LinkEntry,
+): boolean {
+  if (!touched || readsText) return true;
+  if (!touched.size) return false;
+  if (!shown) return true;
+  for (const path of touched) {
+    if (shown.has(path)) return true;
+    for (const id of linkedIds(entryOf(path), hideUnresolved)) if (shown.has(id)) return true;
+  }
+  return false;
+}
 
 /** Obsidian's node radius for a number of links: 8, growing with the square root past about 6 links. */
 export const nodeRadius = (weight: number) => Math.max(8, 3 * Math.sqrt(weight + 1));
@@ -121,6 +161,22 @@ export function neighbours(n: number, links: readonly GraphLink[]) {
 }
 
 export function buildGraph(src: GraphSource, opts: GraphOptions): GraphModel {
+  const steps = buildGraphSteps(src, opts);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+/** Notes (or links) handled between the pauses of `buildGraphSteps`. */
+const STEP = 2048;
+
+/**
+ * `buildGraph` in steps: it pauses (yields) every `STEP` notes and links, so a
+ * caller can spread a large rebuild over several frames (review 2). Running it to
+ * the end gives exactly what `buildGraph` returns. `src` must not change meanwhile.
+ */
+export function* buildGraphSteps(src: GraphSource, opts: GraphOptions): Generator<void, GraphModel> {
   const nodes: GraphNode[] = [];
   const index = new Map<string, number>();
   const add = (id: string, label: string, kind: NodeKind, path?: string) => {
@@ -136,29 +192,33 @@ export function buildGraph(src: GraphSource, opts: GraphOptions): GraphModel {
   for (const path of src.notes) if (include(path)) add(path, nameOf(path), "note", path);
   if (opts.showAttachments) for (const path of src.attachments) if (include(path)) add(path, nameOf(path), "attachment", path);
 
-  // Directed edges, deduplicated: "a\0b" for a links to b.
-  const directed = new Set<string>();
+  // Directed edges, deduplicated: `edgeKey(a, b)` for a links to b (a number: hashing a
+  // string per edge was most of a 50k-note build).
+  const directed = new Set<number>();
   const edges: [number, number][] = [];
   const link = (from: number, to: number) => {
     if (from === to) return;
-    const key = `${from}\0${to}`;
+    const key = edgeKey(from, to);
     if (directed.has(key)) return;
     directed.add(key);
     edges.push([from, to]);
   };
   const noteCount = nodes.length;
   for (let from = 0; from < noteCount; from++) {
+    if (from % STEP === STEP - 1) yield;
     const node = nodes[from];
     if (node.kind !== "note") continue;
     const path = node.path!;
-    for (const list of [src.links.outgoing[path], src.links.markdown?.[path]]) {
+    // One note's entry, without building the whole maps (review 2).
+    const entry = linkEntryOf(src.links, path);
+    for (const list of [entry.outgoing, entry.markdown]) {
       for (const target of list ?? []) {
         const to = index.get(target);
         if (to !== undefined) link(from, to);
       }
     }
     if (!opts.hideUnresolved) {
-      for (const name of src.links.unresolved?.[path] ?? []) link(from, add(missingId(name), name, "unresolved"));
+      for (const name of entry.unresolved ?? []) link(from, add(missingId(name), name, "unresolved"));
     }
     if (opts.showTags) {
       for (const tag of src.tags?.get(path) ?? []) link(from, add(tagId(tag), `#${tag}`, "tag"));
@@ -166,16 +226,18 @@ export function buildGraph(src: GraphSource, opts: GraphOptions): GraphModel {
   }
 
   let keep: Uint8Array | null = null;
-  let traversed: Set<string> | null = null;
+  let traversed: Set<number> | null = null;
   if (opts.local) ({ keep, traversed } = neighbourhood(nodes.length, edges, index.get(opts.local.center), opts.local));
 
   // One undirected link per pair; `both` when it points both ways.
-  const pairs = new Map<string, GraphLink>();
+  const pairs = new Map<number, GraphLink>();
+  let counted = 0;
   for (const [a, b] of edges) {
+    if (++counted % STEP === 0) yield;
     if (keep && (!keep[a] || !keep[b])) continue;
     const lo = Math.min(a, b);
     const hi = Math.max(a, b);
-    const key = `${lo}\0${hi}`;
+    const key = edgeKey(lo, hi);
     if (traversed && !opts.local!.neighbors && !traversed.has(key)) continue;
     const seen = pairs.get(key);
     if (seen) {
@@ -214,7 +276,7 @@ export function buildGraph(src: GraphSource, opts: GraphOptions): GraphModel {
  */
 function neighbourhood(count: number, edges: [number, number][], center: number | undefined, o: LocalOptions) {
   const keep = new Uint8Array(count);
-  const traversed = new Set<string>();
+  const traversed = new Set<number>();
   if (center === undefined) return { keep, traversed };
   const out: number[][] = Array.from({ length: count }, () => []);
   const into: number[][] = Array.from({ length: count }, () => []);
@@ -226,7 +288,7 @@ function neighbourhood(count: number, edges: [number, number][], center: number 
   depth[center] = 0;
   keep[center] = 1;
   let frontier = [center];
-  const pair = (a: number, b: number) => `${Math.min(a, b)}\0${Math.max(a, b)}`;
+  const pair = (a: number, b: number) => edgeKey(Math.min(a, b), Math.max(a, b));
   for (let d = 1; d <= Math.max(1, Math.min(5, o.depth)) && frontier.length; d++) {
     const next: number[] = [];
     for (const n of frontier) {

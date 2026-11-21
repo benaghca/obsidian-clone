@@ -250,17 +250,28 @@ pub(super) fn key_hash(kind: Kind, key: &str) -> KeyHash {
 pub(super) struct Lookups<'m, 'r> {
     maps: &'m NameMaps,
     reads: Option<&'r mut Vec<KeyHash>>,
+    /// Shared by a batch of resolutions against the same maps.
+    picks: Option<&'r mut super::PickCache<'m>>,
 }
 
 impl<'m, 'r> Lookups<'m, 'r> {
     pub(super) fn new(maps: &'m NameMaps) -> Self {
-        Lookups { maps, reads: None }
+        Lookups { maps, reads: None, picks: None }
     }
 
-    pub(super) fn watching(maps: &'m NameMaps, reads: &'r mut Vec<KeyHash>) -> Self {
+    pub(super) fn watching(maps: &'m NameMaps, reads: &'r mut Vec<KeyHash>, picks: Option<&'r mut super::PickCache<'m>>) -> Self {
         Lookups {
             maps,
             reads: Some(reads),
+            picks,
+        }
+    }
+
+    /// `pick` among a name's candidates, through the batch's cache when there is one.
+    pub(super) fn pick(&mut self, cands: &'m [String], from: &str) -> Option<&'m str> {
+        match &mut self.picks {
+            Some(cache) => cache.pick(cands, from),
+            None => super::pick(cands, from),
         }
     }
 

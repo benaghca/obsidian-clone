@@ -263,8 +263,17 @@ impl LinkTable {
         !self.pending.is_empty()
     }
 
-    pub(super) fn take_pending(&mut self) -> Vec<Arc<str>> {
-        self.pending.drain().collect()
+    pub(super) fn pending_len(&self) -> usize {
+        self.pending.len()
+    }
+
+    /// Up to `n` queued notes, taken off the queue.
+    pub(super) fn take_some(&mut self, n: usize) -> Vec<Arc<str>> {
+        let some: Vec<Arc<str>> = self.pending.iter().take(n).cloned().collect();
+        for path in &some {
+            self.pending.remove(path);
+        }
+        some
     }
 
     /// Put `new` (or nothing, for a path that is no note with links any more) at `path`.

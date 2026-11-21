@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import type { LinkIndex } from "../api";
 import { GRAPH, LOCAL_GRAPH, sanitize, serialize, defaults } from "../settings/schema";
-import { buildGraph, graphFileLists, type GraphModel, neighbours, nodeColor, nodeRadius } from "./data";
+import { buildGraph, graphFileLists, type GraphModel, localLinksMatter, neighbours, nodeColor, nodeRadius } from "./data";
+import { linkEntryOf } from "../links/linkDelta";
 import { matches, parseQuery } from "../shell/searchQuery";
 import { ALPHA_MIN, Simulation } from "./sim";
 
@@ -185,4 +186,56 @@ test("neighbour lists hold each link at both ends", () => {
   ]);
   const of = (i: number) => [...adj.slice(start[i], start[i + 1])].sort();
   expect([of(0), of(1), of(2), of(3)]).toEqual([[1, 2], [0], [0], []]);
+});
+
+// Review 2: the refresh guard for a local graph.
+const shape = (m: GraphModel) => JSON.stringify([m.nodes.map((n) => [n.id, n.weight]), m.links.map((l) => [l.source, l.target, l.both])]);
+
+test("a local graph rebuilds when a note outside it links to a missing note it shows", () => {
+  const notes = ["A.md", "B.md", "C.md"];
+  const before = links({}, { unresolved: { "A.md": ["Missing"] } });
+  const opts = { ...base, local: { center: "A.md", depth: 2, incoming: true, outgoing: true, neighbors: false } };
+  const shown = buildGraph({ notes, attachments: [], links: before }, opts);
+  expect(labels(shown)).toEqual(["A", "Missing"]);
+  // B (already a note, no file-list change) now links to [[missing]].
+  const after = links({}, { unresolved: { "A.md": ["Missing"], "B.md": ["missing"] } });
+  const touched = new Set(["B.md"]);
+  expect(localLinksMatter(touched, shown.index, false, false, (p) => linkEntryOf(after, p))).toBe(true);
+  expect(labels(buildGraph({ notes, attachments: [], links: after }, opts))).toEqual(["A", "B", "Missing"]);
+  // With missing notes hidden the graph has no such node, and nothing changes.
+  const hidden = { ...opts, hideUnresolved: true };
+  const plain = buildGraph({ notes, attachments: [], links: before }, hidden);
+  expect(localLinksMatter(touched, plain.index, false, true, (p) => linkEntryOf(after, p))).toBe(false);
+  expect(shape(buildGraph({ notes, attachments: [], links: after }, hidden))).toBe(shape(plain));
+});
+
+test("whenever the guard skips a refresh, a fresh local graph equals the one shown", () => {
+  let x = 12345;
+  const r = (n: number) => { x ^= x << 13; x ^= x >>> 17; x ^= x << 5; return (x >>> 0) % n; };
+  const notes = ["A.md", "B.md", "C.md", "D.md", "E.md", "F.md", "G.md", "H.md"];
+  const missing = ["Missing", "missing", "Other"];
+  const entry = () => ({
+    outgoing: Array.from({ length: r(3) }, () => notes[r(notes.length)]!),
+    markdown: r(4) ? [] : [notes[r(notes.length)]!],
+    unresolved: Array.from({ length: r(2) }, () => missing[r(missing.length)]!),
+  });
+  const toIndex = (all: Map<string, ReturnType<typeof entry>>): LinkIndex => {
+    const out: LinkIndex = { outgoing: {}, markdown: {}, unresolved: {} };
+    for (const [path, e] of all) for (const f of ["outgoing", "markdown", "unresolved"] as const) if (e[f].length) out[f]![path] = [...new Set(e[f])];
+    return out;
+  };
+  let skipped = 0;
+  for (let round = 0; round < 2000; round++) {
+    const all = new Map(notes.filter(() => r(3)).map((p) => [p, entry()]));
+    const opts = { ...base, hideUnresolved: r(2) === 0, local: { center: notes[r(notes.length)]!, depth: 1 + r(3), incoming: r(3) > 0, outgoing: r(3) > 0, neighbors: r(2) === 0 } };
+    const before = toIndex(all);
+    const shown = buildGraph({ notes, attachments: [], links: before }, opts);
+    const changed = notes[r(notes.length)]!;
+    if (r(4)) all.set(changed, entry()); else all.delete(changed);
+    const after = toIndex(all);
+    if (localLinksMatter(new Set([changed]), shown.index, false, opts.hideUnresolved, (p) => linkEntryOf(after, p))) continue;
+    skipped++;
+    expect(shape(buildGraph({ notes, attachments: [], links: after }, opts)), `round ${round}`).toBe(shape(shown));
+  }
+  expect(skipped).toBeGreaterThan(100);
 });
